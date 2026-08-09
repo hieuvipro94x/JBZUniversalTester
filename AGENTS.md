@@ -244,5 +244,172 @@ Sau khi tạo xong:
 
 \* không review lại project.
 
+# Git / GitHub Workflow
+
+## At Task Start
+
+Trước mỗi coding task:
+
+1. Đọc `AGENTS.md`.
+2. Chạy `git status`.
+3. Xác định current branch.
+4. Chạy `git fetch origin`.
+5. Kiểm tra local branch so với remote:
+
+   * synchronized;
+   * ahead;
+   * behind;
+   * diverged.
+
+Nếu working tree sạch và remote có commit mới:
+
+* đồng bộ an toàn bằng `git pull --rebase`.
+
+Không pull/rebase mù quáng nếu working tree có local modifications.
+
+Không tự stash, reset hoặc discard thay đổi của user.
+
+## During Task
+
+* Chỉ sửa file thuộc phạm vi task.
+* Không trộn unrelated changes.
+* Tuân theo Bug Fix / Feature Workflow trong `AGENTS.md`.
+
+## Before Commit
+
+Sau khi sửa:
+
+1. Build/test phù hợp.
+2. Chạy `git diff`.
+3. Kiểm tra diff chỉ chứa task hiện tại.
+4. Kiểm tra secret/credential.
+5. Không stage build output/temp file.
+6. Chỉ stage file thuộc task.
+
+## Auto Commit
+
+Nếu task coding đã hoàn thành và verification phù hợp PASS:
+
+Codex được phép tự tạo commit mà không cần hỏi lại.
+
+Dùng Conventional Commits:
+
+* `fix: ...`
+* `feat: ...`
+* `docs: ...`
+* `refactor: ...`
+* `test: ...`
+* `chore: ...`
+
+Không dùng `git add .` mù quáng khi working tree chứa unrelated changes.
+
+## Before Push
+
+Ngay trước push:
+
+1. `git fetch origin`
+2. Kiểm tra remote branch có commit mới hay không.
+
+Nếu remote thay đổi:
+
+* integrate an toàn;
+* không force push;
+* nếu resolve conflict thì build/test lại.
+
+## Auto Push
+
+Nếu:
+
+* commit thành công;
+* verification phù hợp PASS;
+* remote an toàn;
+* không có conflict;
+* không có secret;
+
+Codex được phép tự `git push` branch hiện tại lên `origin` mà không cần hỏi lại.
+
+Nếu branch chưa có upstream:
+
+`git push -u origin <branch>`
+
+## Branch Policy
+
+Thay đổi nhỏ, an toàn:
+
+* có thể làm trên branch hiện tại nếu phù hợp.
+
+Thay đổi lớn liên quan:
+
+* architecture;
+* D2XX/UART protocol;
+* hardware transport;
+* PASS/FAIL lifecycle;
+* firmware interaction;
+* database/schema;
+* refactor nhiều module;
+
+ưu tiên branch:
+
+* `feature/<name>`
+* `fix/<name>`
+* `refactor/<name>`
+
+Không tự merge branch lớn vào `main` nếu task không yêu cầu.
+
+## Forbidden Git Actions
+
+Codex tuyệt đối không tự động:
+
+* `git push --force`
+* `git push -f`
+* `git push --force-with-lease`
+* `git reset --hard`
+* `git clean -fd`
+* rewrite shared history
+* delete repository
+* delete remote branch
+* delete tag
+* delete release
+* đổi PRIVATE thành PUBLIC
+* discard unrelated user changes
+* commit secrets.
+
+## Exceptions
+
+Không auto commit/push nếu:
+
+* tôi nói không commit;
+* tôi nói không push;
+* task chỉ review/phân tích;
+* verification fail;
+* conflict chưa giải quyết;
+* có unrelated changes chưa rõ;
+* phát hiện secret;
+* remote/repository không đúng như dự kiến.
+
+## Task Completion
+
+Coding task bình thường:
+
+`status`
+→ `fetch/sync`
+→ `edit`
+→ `build/test`
+→ `diff review`
+→ `commit`
+→ `fetch`
+→ `push`
+→ `status`
+
+Cuối task phải báo:
+
+* branch;
+* files changed;
+* verification;
+* commit hash ngắn;
+* commit message;
+* push status;
+* local/remote synchronized hay không.
+
 
 
