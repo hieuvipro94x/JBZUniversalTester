@@ -3,11 +3,13 @@ using System.Threading.Tasks;
 using System.Windows;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Views;
+using Microsoft.Win32;
 
 namespace JBZUniversalTester.ViewModels;
 
 public sealed class HomeViewModel : ObservableObject
 {
+    private const string ProductFileFilter = "Mã hàng JBZ (*.tht;*.model)|*.tht;*.model";
     private readonly MainViewModel _main;
 
     // Cho HomeView mở màn hình kiểm tra chân pin và cài đặt.
@@ -45,16 +47,46 @@ public sealed class HomeViewModel : ObservableObject
 
     private async Task LoadModelAsync()
     {
-        string? initialDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
-        var dialog = new ProductFilePickerWindow(initialDirectory);
-        Window? owner = Application.Current?.MainWindow;
-        if (owner is not null)
-            dialog.Owner = owner;
-        else
-            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
-
-        if (dialog.ShowDialog() == true && dialog.SelectedFilePath is string selectedFilePath)
+        var dialog = new OpenFileDialog
         {
+            Title = "Chọn mã hàng",
+            Filter = ProductFileFilter,
+            CheckFileExists = true,
+            CheckPathExists = true,
+            Multiselect = false,
+            ValidateNames = true
+        };
+
+        string? initialDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
+        if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
+            dialog.InitialDirectory = initialDirectory;
+
+        Window? owner = Application.Current?.MainWindow;
+        bool? accepted;
+        if (owner is not null)
+        {
+            using var positionGuard = new StandardFileDialogPositionGuard(owner);
+            accepted = dialog.ShowDialog(owner);
+        }
+        else
+        {
+            accepted = dialog.ShowDialog();
+        }
+
+        if (accepted == true)
+        {
+            string selectedFilePath = dialog.FileName;
+            if (!IsSupportedProductFile(selectedFilePath))
+            {
+                MessageBox.Show(
+                    owner ?? Application.Current?.MainWindow,
+                    "Chỉ có thể chọn file mã hàng .tht hoặc .model.",
+                    "File không được hỗ trợ",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
             try
             {
                 await _main.LoadModelAsync(selectedFilePath);
@@ -89,6 +121,13 @@ public sealed class HomeViewModel : ObservableObject
                     MessageBoxImage.Error);
             }
         }
+    }
+
+    private static bool IsSupportedProductFile(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".tht", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".model", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Refresh()

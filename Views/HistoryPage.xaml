@@ -229,20 +229,20 @@
                 </DataGrid.RowStyle>
 
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Ngày giờ"
+                    <DataGridTextColumn Header="Timestamp"
                                         Binding="{Binding Finished, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
                                         Width="145"/>
-                    <DataGridTextColumn Header="파트명" Binding="{Binding PartName}" Width="115"/>
-                    <DataGridTextColumn Header="파트번호" Binding="{Binding PartNumber}" Width="130"/>
-                    <DataGridTextColumn Header="Eco" Binding="{Binding Eco}" Width="95"/>
-                    <DataGridTextColumn Header="Nco" Binding="{Binding Nco}" Width="90"/>
-                    <DataGridTextColumn Header="Alc" Binding="{Binding Alc}" Width="100"/>
-                    <DataGridTextColumn Header="LOT" Binding="{Binding LotNo}" Width="75" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Part Name" Binding="{Binding PartName}" Width="115"/>
+                    <DataGridTextColumn Header="Part Number" Binding="{Binding PartNumber}" Width="130"/>
+                    <DataGridTextColumn Header="ECO" Binding="{Binding Eco}" Width="95"/>
+                    <DataGridTextColumn Header="NCO" Binding="{Binding Nco}" Width="90"/>
+                    <DataGridTextColumn Header="ALC" Binding="{Binding Alc}" Width="100"/>
+                    <DataGridTextColumn Header="Lot Number" Binding="{Binding LotNo}" Width="85" ElementStyle="{StaticResource CenterCellText}"/>
 
-                    <DataGridTemplateColumn Header="Kết quả" Width="155">
+                    <DataGridTemplateColumn Header="Test Result" Width="105">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding Result}"
+                                <TextBlock Text="{Binding PassedText}"
                                            VerticalAlignment="Center"
                                            HorizontalAlignment="Center"
                                            FontWeight="SemiBold">
@@ -261,15 +261,18 @@
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
 
-                    <DataGridTextColumn Header="Loại lỗi" Binding="{Binding FaultType}" Width="170"/>
-                    <DataGridTextColumn Header="Mong đợi" Binding="{Binding ExpectedConnectionText}" Width="145"/>
-                    <DataGridTextColumn Header="Thực tế" Binding="{Binding ActualConnectionText}" Width="145"/>
-                    <DataGridTextColumn Header="Chi tiết lỗi" Binding="{Binding FaultSummary}" Width="320"/>
-                    <DataGridTextColumn Header="HtdrvName" Binding="{Binding HtdrvName}" Width="260"/>
-                    <DataGridTextColumn Header="Chưa nối" Binding="{Binding OpenCount}" Width="72" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Đấu sai" Binding="{Binding WrongCount}" Width="68" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Chập" Binding="{Binding ShortCount}" Width="58" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Điện trở" Binding="{Binding Resistance}" Width="180"/>
+                    <DataGridTextColumn Header="Fault Type" Binding="{Binding CustomerFault.FaultType}" Width="205"/>
+                    <DataGridTextColumn Header="Fault Location" Binding="{Binding CustomerFault.FaultLocation}" Width="210"/>
+                    <DataGridTextColumn Header="Standard" Binding="{Binding CustomerFault.Standard}" Width="280"/>
+                    <DataGridTextColumn Header="Actual" Binding="{Binding CustomerFault.Actual}" Width="210"/>
+                    <DataGridTextColumn Header="Deviation" Binding="{Binding CustomerFault.Deviation}" Width="120"/>
+                    <DataGridTextColumn Header="Assessment" Binding="{Binding CustomerFault.Assessment}" Width="190"/>
+                    <DataGridTextColumn Header="Software Version" Binding="{Binding HtdrvName}" Width="260"/>
+                    <DataGridTextColumn Header="Open Count" Binding="{Binding OpenCount}" Width="82" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Incorrect Connection Count" Binding="{Binding WrongCount}" Width="165" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Short Circuit Count" Binding="{Binding ShortCount}" Width="120" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Resistance" Binding="{Binding Resistance}" Width="180"/>
+                    <DataGridTextColumn Header="Test Station" Binding="{Binding DeviceName}" Width="130"/>
                     <DataGridTextColumn Header="Model" Binding="{Binding ModelName}" Width="125"/>
                 </DataGrid.Columns>
             </DataGrid>

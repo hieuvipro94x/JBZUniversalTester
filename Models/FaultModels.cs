@@ -24,15 +24,11 @@ public static class FaultTypeCatalog
         _ => "NONE"
     };
 
-    public static string DisplayName(ProductFaultType type) => type switch
-    {
-        ProductFaultType.OpenCircuit => "DÂY CHƯA KẾT NỐI",
-        ProductFaultType.WrongWiring => "ĐẤU SAI",
-        ProductFaultType.ShortCircuit => "CHẬP MẠCH",
-        ProductFaultType.ResistanceOutOfRange => "ĐIỆN TRỞ KHÔNG ĐẠT",
-        ProductFaultType.SystemDeviceError => "LỖI THIẾT BỊ / HỆ THỐNG",
-        _ => string.Empty
-    };
+    public static string DisplayName(ProductFaultType type) =>
+        type == ProductFaultType.None ? string.Empty : FaultDisplayFormatter.OperatorFaultType(type);
+
+    public static string CustomerDisplayName(ProductFaultType type) =>
+        type == ProductFaultType.None ? string.Empty : FaultDisplayFormatter.CustomerFaultType(type);
 
     public static int Priority(ProductFaultType type) => type switch
     {
@@ -58,7 +54,7 @@ public sealed class FaultDetail
     public string PinFrom { get; set; } = string.Empty;
     public string ConnectorTo { get; set; } = string.Empty;
     public string PinTo { get; set; } = string.Empty;
-    // Với Wrong Wiring, ConnectorTo/PinTo là đích MONG ĐỢI; các trường
+    // Với Wrong Wiring, ConnectorTo/PinTo là đích TIÊU CHUẨN; các trường
     // Actual* giữ metadata của đích THỰC TẾ để ErrorLog/FaultDetailsJson
     // vẫn đọc lại được chính xác ngay cả khi THT sau này thay đổi.
     public string ActualConnectorFrom { get; set; } = string.Empty;
@@ -89,7 +85,7 @@ public sealed class FaultDetail
             if (!string.IsNullOrWhiteSpace(Message))
                 return Message;
             if (!string.IsNullOrWhiteSpace(ExpectedText) && !string.IsNullOrWhiteSpace(ActualText))
-                return $"Mong đợi: {ExpectedText} | Thực tế: {ActualText}";
+                return $"Tiêu chuẩn: {ExpectedText} | Thực tế: {ActualText}";
             if (!string.IsNullOrWhiteSpace(ExpectedText))
                 return ExpectedText;
             return ActualText;

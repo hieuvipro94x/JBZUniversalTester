@@ -359,7 +359,7 @@ public sealed class TestViewModel : ObservableObject
             FaultDetail? fault = GetVisiblePrimaryFault();
             if (fault?.ExpectedSourceIo is not int source || fault.ExpectedTargetIo is not int target)
                 return string.Empty;
-            return $"Mong đợi: {DescribeIoCompact(source)}  →  {DescribeIoCompact(target)}";
+            return $"Tiêu chuẩn: {DescribeIoCompact(source)}  →  {DescribeIoCompact(target)}";
         }
     }
 
@@ -1424,7 +1424,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 Kind = FaultKind.Open,
                 ProductFaultType = ProductFaultType.OpenCircuit,
-                FaultType = "HỞ MẠCH",
+                FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.OpenCircuit),
                 Io = io,
                 RelatedIos = pins,
                 Connector = pin?.Connector ?? string.Empty,
@@ -1433,7 +1433,7 @@ public sealed class TestViewModel : ObservableObject
                 Splice = pin?.SpliceName ?? string.Empty,
                 Section = pin?.Section ?? string.Empty,
                 Color = pin?.Color ?? string.Empty,
-                Status = $"OPEN network {network}: " + string.Join(", ", pins.Select(x => $"IO({x})"))
+                Status = "Không có kết nối: " + string.Join(" ↔ ", pins.Select(DescribeIoCompact))
             });
         }
 
@@ -1444,7 +1444,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 Kind = FaultKind.WrongWiring,
                 ProductFaultType = ProductFaultType.WrongWiring,
-                FaultType = "ĐẤU SAI",
+                FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.WrongWiring),
                 Io = a,
                 ActualSourceIo = a,
                 ActualTargetIo = b,
@@ -1455,7 +1455,7 @@ public sealed class TestViewModel : ObservableObject
                 Splice = pin?.SpliceName ?? string.Empty,
                 Section = pin?.Section ?? string.Empty,
                 Color = pin?.Color ?? string.Empty,
-                Status = $"ĐẤU SAI: {DescribeIoCompact(a)} ↔ {DescribeIoCompact(b)}"
+                Status = $"SAI KẾT NỐI: {DescribeIoCompact(a)} ↔ {DescribeIoCompact(b)}"
             });
         }
     }
@@ -1486,14 +1486,12 @@ public sealed class TestViewModel : ObservableObject
             {
                 InvokeUi(() => State = "KHÔNG ĐẠT");
                 _sound.SetWiringFaultAlarm(true);
-                string details = BuildUartFaultDetails();
+                IReadOnlyList<FaultDetail> faults = CaptureFaultDetails();
                 await InvokeUiAsync(() =>
                 {
                     var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-                        "KIỂM TRA MẠCH KHÔNG ĐẠT",
-                        $"Hở mạch: {_uartOpenSnapshots.Count}   •   Đấu sai: {_uartWrongPairs.Count}",
-                        details + Environment.NewLine + Environment.NewLine +
-                        "Sau XÁC NHẬN, bo UART sẽ nhận :UNCONNECT để tự đưa JIG sang bước tháo hàng.");
+                        faults,
+                        "Sau XÁC NHẬN, hệ thống sẽ đưa JIG sang bước tháo hàng an toàn.");
                     dialog.Owner = Application.Current?.MainWindow;
                     dialog.ShowDialog();
                 });
@@ -1562,16 +1560,39 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    private string BuildUartFaultDetails()
+    private IReadOnlyList<FaultDetail> BuildUartSnapshotFaultDetails()
     {
-        var lines = new List<string>();
-        foreach ((int network, int[] pins) in _uartOpenSnapshots.OrderBy(x => x.Key).Take(12))
-            lines.Add($"• HỞ network {network}: {string.Join(", ", pins.Select(DescribeIoCompact))}");
-        foreach ((int a, int b) in _uartWrongPairs.OrderBy(x => x.A).ThenBy(x => x.B).Take(12))
-            lines.Add($"• ĐẤU SAI: {DescribeIoCompact(a)} ↔ {DescribeIoCompact(b)}");
-        return lines.Count == 0
-            ? "Firmware kết luận :CIRCUIT,1. Không có snapshot OPEN/OTHER tại thời điểm chốt."
-            : string.Join(Environment.NewLine, lines);
+        var details = new List<FaultDetail>();
+        foreach ((int _, int[] pins) in _uartOpenSnapshots.OrderBy(x => x.Key))
+        {
+            details.Add(EnrichFaultDetail(new FaultDetail
+            {
+                Type = ProductFaultType.OpenCircuit,
+                RelatedIos = pins
+            }));
+        }
+
+        foreach ((int a, int b) in _uartWrongPairs.OrderBy(x => x.A).ThenBy(x => x.B))
+        {
+            details.Add(EnrichFaultDetail(new FaultDetail
+            {
+                Type = ProductFaultType.WrongWiring,
+                ActualSourceIo = a,
+                ActualTargetIo = b,
+                RelatedIos = [a, b]
+            }));
+        }
+
+        if (details.Count == 0)
+        {
+            details.Add(new FaultDetail
+            {
+                Type = ProductFaultType.SystemDeviceError,
+                Message = "Bo kết luận mạch không đạt nhưng chưa cung cấp chi tiết vị trí."
+            });
+        }
+
+        return details;
     }
 
     private int UartPinCount() => Math.Max(1, _model?.Pins.Select(p => p.IoNumber).Where(io => io > 0).Distinct().Count() ?? 1);
@@ -2542,41 +2563,26 @@ public sealed class TestViewModel : ObservableObject
         string primaryName = FaultTypeCatalog.DisplayName(primaryType);
         State = primaryName;
 
-        FaultRow[] wrongRows = _engine.BuildRows()
-            .Where(row => row.Kind is FaultKind.WrongWiring or FaultKind.Short)
+        FaultDetail[] dialogFaults = CaptureFaultDetails()
+            .Where(fault => fault.Type is
+                ProductFaultType.OpenCircuit or
+                ProductFaultType.WrongWiring or
+                ProductFaultType.ShortCircuit)
             .ToArray();
 
-        string details;
-
-        if (wiringPairs.Length > 0)
+        if (dialogFaults.Length == 0)
         {
-            details = string.Join(
-                Environment.NewLine,
-                wiringPairs.Take(10).Select(pair =>
+            dialogFaults = wiringPairs
+                .Select(pair => EnrichFaultDetail(new FaultDetail
                 {
-                    string label = FaultTypeCatalog.DisplayName(pair.FaultType);
-                    if (pair.ExpectedSourceIo is int expectedSource && pair.ExpectedTargetIo is int expectedTarget)
-                    {
-                        return $"• {label}\n  Mong đợi: {DescribeIoForPopup(expectedSource)} -> {DescribeIoForPopup(expectedTarget)}\n  Thực tế: {DescribeIoForPopup(pair.SourceIo)} -> {DescribeIoForPopup(pair.TargetIo)}";
-                    }
-
-                    return $"• {label}: {DescribeIoForPopup(pair.SourceIo)}  ↔  {DescribeIoForPopup(pair.TargetIo)}";
-                }));
-
-            if (wiringPairs.Length > 10)
-                details += $"{Environment.NewLine}• ... và {wiringPairs.Length - 10} cặp lỗi khác";
-        }
-        else if (wrongRows.Length > 0)
-        {
-            details = string.Join(
-                Environment.NewLine,
-                wrongRows.Take(12).Select(row =>
-                    $"• I/O {row.Io} | Giắc {EmptyAsDash(row.Connector)} | " +
-                    $"Chân {EmptyAsDash(row.Pin)} | Dây {EmptyAsDash(row.WireName)}"));
-        }
-        else
-        {
-            details = "Bo phát hiện trạng thái I/O không đúng với cấu hình THT.";
+                    Type = pair.FaultType,
+                    ExpectedSourceIo = pair.ExpectedSourceIo,
+                    ExpectedTargetIo = pair.ExpectedTargetIo,
+                    ActualSourceIo = pair.SourceIo,
+                    ActualTargetIo = pair.TargetIo,
+                    RelatedIos = [pair.SourceIo, pair.TargetIo]
+                }))
+                .ToArray();
         }
 
         AddLog(
@@ -2592,10 +2598,8 @@ public sealed class TestViewModel : ObservableObject
         }
 
         var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-            primaryName,
-            $"Hở/đấu sai đã được chốt • {wiringPairs.Length} cặp lỗi",
-            details + Environment.NewLine + Environment.NewLine +
-            "Sau khi XÁC NHẬN: Relay 1 sẽ tự mở/đẩy JIG; Relay 2 MARKING luôn OFF khi FAIL.");
+            dialogFaults,
+            "Sau khi XÁC NHẬN: JIG sẽ được đưa về trạng thái tháo hàng an toàn; MARKING luôn OFF khi FAIL.");
         faultDialog.Owner = Application.Current?.MainWindow;
         faultDialog.ShowDialog();
 
@@ -2660,10 +2664,14 @@ public sealed class TestViewModel : ObservableObject
     {
         if (_board is IFirmwareProtocolBoard firmware && firmware.UsesFirmwareCycleResult)
         {
-            return Faults
+            FaultDetail[] firmwareDetails = Faults
                 .Where(row => row.Kind is FaultKind.Open or FaultKind.WrongWiring or FaultKind.Short)
-                .Select(row => row.ToFaultDetail())
+                .Select(row => EnrichFaultDetail(row.ToFaultDetail()))
                 .ToArray();
+
+            return firmwareDetails.Length > 0
+                ? firmwareDetails
+                : BuildUartSnapshotFaultDetails();
         }
 
         var details = _engine.WiringFaults
@@ -2720,71 +2728,10 @@ public sealed class TestViewModel : ObservableObject
         details.AddRange(liveFaultRows
             .Where(row => row.ProductFaultType != ProductFaultType.None &&
                           row.ProductFaultType != ProductFaultType.SystemDeviceError)
-            .Select(row =>
-            {
-                FaultDetail detail = row.ToFaultDetail();
-                int? fromIo = detail.ExpectedSourceIo ?? detail.ActualSourceIo;
-                int? toIo = detail.ExpectedTargetIo ?? detail.ActualTargetIo;
-
-                if (fromIo is int source)
-                {
-                    PinRecord? fromPin = FindPinByIo(source);
-                    if (fromPin is not null)
-                    {
-                        detail.ConnectorFrom = fromPin.Connector;
-                        detail.PinFrom = fromPin.PinNumber;
-                        if (string.IsNullOrWhiteSpace(detail.WireName))
-                            detail.WireName = fromPin.WireName;
-                        if (string.IsNullOrWhiteSpace(detail.WireColor))
-                            detail.WireColor = fromPin.Color;
-                    }
-                }
-
-                if (toIo is int target)
-                {
-                    PinRecord? toPin = FindPinByIo(target);
-                    if (toPin is not null)
-                    {
-                        detail.ConnectorTo = toPin.Connector;
-                        detail.PinTo = toPin.PinNumber;
-                    }
-                }
-
-                if (detail.ActualSourceIo is int actualSource)
-                {
-                    PinRecord? actualFromPin = FindPinByIo(actualSource);
-                    if (actualFromPin is not null)
-                    {
-                        detail.ActualConnectorFrom = actualFromPin.Connector;
-                        detail.ActualPinFrom = actualFromPin.PinNumber;
-                    }
-                }
-
-                if (detail.ActualTargetIo is int actualTarget)
-                {
-                    PinRecord? actualToPin = FindPinByIo(actualTarget);
-                    if (actualToPin is not null)
-                    {
-                        detail.ActualConnectorTo = actualToPin.Connector;
-                        detail.ActualPinTo = actualToPin.PinNumber;
-                    }
-                }
-
-                return detail;
-            }));
+            .Select(row => EnrichFaultDetail(row.ToFaultDetail())));
 
         foreach (ResistanceResult resistance in Resistance.Where(item => !item.Passed))
-        {
-            details.Add(new FaultDetail
-            {
-                Type = ProductFaultType.ResistanceOutOfRange,
-                MeasuredResistance = resistance.ValueOhm,
-                ResistanceMin = resistance.MinOhm,
-                ResistanceMax = resistance.MaxOhm,
-                WireName = resistance.Name,
-                Message = $"{resistance.Name}: {resistance.Display}; giới hạn {resistance.MinOhm:0.###}–{resistance.MaxOhm:0.###} Ω"
-            });
-        }
+            details.Add(CreateResistanceFaultDetail(resistance));
 
         return details
             .GroupBy(fault => new
@@ -2802,12 +2749,80 @@ public sealed class TestViewModel : ObservableObject
             .ToArray();
     }
 
+    private FaultDetail EnrichFaultDetail(FaultDetail detail)
+    {
+        int? fromIo = detail.ExpectedSourceIo
+            ?? detail.ActualSourceIo
+            ?? detail.RelatedIos.ElementAtOrDefault(0);
+        int? toIo = detail.ExpectedTargetIo
+            ?? detail.ActualTargetIo
+            ?? detail.RelatedIos.ElementAtOrDefault(1);
+
+        if (fromIo is int source && source > 0)
+        {
+            PinRecord? fromPin = FindPinByIo(source);
+            if (fromPin is not null)
+            {
+                detail.ConnectorFrom = fromPin.Connector;
+                detail.PinFrom = fromPin.PinNumber;
+                if (string.IsNullOrWhiteSpace(detail.WireName))
+                    detail.WireName = fromPin.WireName;
+                if (string.IsNullOrWhiteSpace(detail.WireColor))
+                    detail.WireColor = fromPin.Color;
+            }
+        }
+
+        if (toIo is int target && target > 0)
+        {
+            PinRecord? toPin = FindPinByIo(target);
+            if (toPin is not null)
+            {
+                detail.ConnectorTo = toPin.Connector;
+                detail.PinTo = toPin.PinNumber;
+            }
+        }
+
+        if (detail.ActualSourceIo is int actualSource)
+        {
+            PinRecord? actualFromPin = FindPinByIo(actualSource);
+            if (actualFromPin is not null)
+            {
+                detail.ActualConnectorFrom = actualFromPin.Connector;
+                detail.ActualPinFrom = actualFromPin.PinNumber;
+            }
+        }
+
+        if (detail.ActualTargetIo is int actualTarget)
+        {
+            PinRecord? actualToPin = FindPinByIo(actualTarget);
+            if (actualToPin is not null)
+            {
+                detail.ActualConnectorTo = actualToPin.Connector;
+                detail.ActualPinTo = actualToPin.PinNumber;
+            }
+        }
+
+        return detail;
+    }
+
+    private static FaultDetail CreateResistanceFaultDetail(ResistanceResult resistance) => new()
+    {
+        Type = ProductFaultType.ResistanceOutOfRange,
+        MeasuredResistance = resistance.ValueOhm,
+        ResistanceMin = resistance.MinOhm,
+        ResistanceMax = resistance.MaxOhm,
+        WireName = resistance.Name,
+        Message = $"{resistance.Name}: {resistance.Display}; giới hạn {resistance.MinOhm:0.###}–{resistance.MaxOhm:0.###} Ω"
+    };
+
     private FaultDetail? GetVisiblePrimaryFault()
     {
         bool stateIsFault =
             State.Contains("LỖI", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("CHẬP", StringComparison.OrdinalIgnoreCase) ||
+            State.Contains("SAI KẾT NỐI", StringComparison.OrdinalIgnoreCase) ||
+            State.Contains("HỞ MẠCH", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("ĐẤU SAI", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("DÂY CHƯA", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("ĐIỆN TRỞ KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase);
@@ -3140,7 +3155,7 @@ public sealed class TestViewModel : ObservableObject
         string status = fault.Type switch
         {
             ProductFaultType.WrongWiring =>
-                $"Mong đợi: {DescribePair(fault.ExpectedSourceIo, fault.ExpectedTargetIo, "→")} | " +
+                $"Tiêu chuẩn: {DescribePair(fault.ExpectedSourceIo, fault.ExpectedTargetIo, "→")} | " +
                 $"Thực tế: {DescribePair(fault.ActualSourceIo, fault.ActualTargetIo, "→")}",
             ProductFaultType.ShortCircuit =>
                 $"Chập mạch: {DescribeFaultIos(fault, "↔")}",
@@ -3215,7 +3230,7 @@ public sealed class TestViewModel : ObservableObject
         if (fault.Type == ProductFaultType.WrongWiring)
         {
             if (fault.ExpectedSourceIo is int es && fault.ExpectedTargetIo is int et)
-                expected = $"Mong đợi: {DescribeIoCompact(es)}  →  {DescribeIoCompact(et)}";
+                expected = $"Tiêu chuẩn: {DescribeIoCompact(es)}  →  {DescribeIoCompact(et)}";
             if (fault.ActualSourceIo is int actualSource && fault.ActualTargetIo is int actualTarget)
                 actual = $"Thực tế: {DescribeIoCompact(actualSource)}  →  {DescribeIoCompact(actualTarget)}";
         }
@@ -3507,6 +3522,16 @@ public sealed class TestViewModel : ObservableObject
                     State = FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange);
                     RaiseTestStatistics();
                     AddLog("Điện trở không đạt. Không chạy relay PASS.");
+
+                    FaultDetail[] resistanceFaults = Resistance
+                        .Where(item => !item.Passed)
+                        .Select(CreateResistanceFaultDetail)
+                        .ToArray();
+                    var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
+                        resistanceFaults,
+                        "Không chạy relay PASS. Hãy xử lý sản phẩm không đạt theo quy trình vận hành.");
+                    faultDialog.Owner = Application.Current?.MainWindow;
+                    faultDialog.ShowDialog();
                     return;
                 }
 
@@ -3887,6 +3912,9 @@ public sealed class TestViewModel : ObservableObject
             Resistance.Select(x => $"{x.Name}={x.Display}({x.ResultText})"));
 
         ResistanceResult? failedResistance = Resistance.FirstOrDefault(item => !item.Passed);
+        CustomerFaultDisplay? customerFault = primaryFault is null
+            ? null
+            : FaultDisplayFormatter.FormatCustomer(primaryFault);
 
         var history = new TestHistoryRecord
         {
@@ -3911,14 +3939,16 @@ public sealed class TestViewModel : ObservableObject
             DeviceNumber = _productionSettings.DeviceNumber,
             OperatorCompany = _productionSettings.OperatorCompany,
             ProductionLine = _productionSettings.ProductionLine,
-            FaultType = primaryFault?.Name ?? string.Empty,
+            FaultType = customerFault?.FaultType ?? string.Empty,
             FaultCode = primaryFault?.Code ?? string.Empty,
             ExpectedSourceIo = primaryFault?.ExpectedSourceIo,
             ExpectedTargetIo = primaryFault?.ExpectedTargetIo,
             ActualSourceIo = primaryFault?.ActualSourceIo,
             ActualTargetIo = primaryFault?.ActualTargetIo,
             FaultDetailsJson = completed.FaultDetailsJson,
-            FaultSummary = primaryFault?.Summary ?? string.Empty,
+            FaultSummary = customerFault is null
+                ? string.Empty
+                : FaultDisplayFormatter.CustomerSummary(customerFault),
             MeasuredResistance = failedResistance?.ValueOhm,
             ResistanceMin = failedResistance?.MinOhm,
             ResistanceMax = failedResistance?.MaxOhm

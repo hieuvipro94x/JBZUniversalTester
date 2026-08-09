@@ -2,6 +2,8 @@
 
 public sealed class TestHistoryRecord
 {
+    private CustomerFaultDisplay? _customerFault;
+
     public long Id { get; set; }
     public DateTime Started { get; set; }
     public DateTime Finished { get; set; }
@@ -45,6 +47,9 @@ public sealed class TestHistoryRecord
     public string ActualConnectionText => ActualSourceIo is int source && ActualTargetIo is int target
         ? $"IO {source} → IO {target}"
         : string.Empty;
+
+    public CustomerFaultDisplay CustomerFault =>
+        _customerFault ??= FaultDisplayFormatter.FormatCustomer(this);
 }
 
 public sealed record HistorySearchCriteria(

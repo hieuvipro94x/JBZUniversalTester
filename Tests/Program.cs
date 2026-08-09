@@ -1,9 +1,10 @@
 using System.IO.Compression;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
-using JBZUniversalTester.Views;
+using JBZUniversalTester.ViewModels;
 using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.SelfTests;
@@ -21,7 +22,8 @@ internal static class Program
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("ALL6 label data order", TestLabel),
             ("Pi legacy golden compiler", TestPiCompiler),
-            ("Product picker extension filter", TestProductPickerFilter)
+            ("Standard product picker filter", TestProductPickerFilter),
+            ("Fault display localization and detail", TestFaultDisplayFormatter)
         ];
 
         int failed = 0;
@@ -45,10 +47,13 @@ internal static class Program
 
     private static void TestProductPickerFilter()
     {
-        MethodInfo filter = typeof(ProductFilePickerWindow).GetMethod(
+        const BindingFlags flags = BindingFlags.NonPublic | BindingFlags.Static;
+        MethodInfo filter = typeof(HomeViewModel).GetMethod(
             "IsSupportedProductFile",
-            BindingFlags.NonPublic | BindingFlags.Static)
+            flags)
             ?? throw new InvalidOperationException("Product picker filter method not found.");
+        FieldInfo filterText = typeof(HomeViewModel).GetField("ProductFileFilter", flags)
+            ?? throw new InvalidOperationException("Product picker filter text not found.");
 
         bool Accepts(string fileName) =>
             (bool)(filter.Invoke(null, [fileName]) ?? false);
@@ -60,6 +65,94 @@ internal static class Program
         Assert(!Accepts("sample.json"), ".json must be hidden");
         Assert(!Accepts("sample.jbzproduct.json"), ".jbzproduct.json must be hidden");
         Assert(!Accepts("sample.setup"), ".setup must be hidden");
+        Assert(
+            string.Equals(
+                filterText.GetRawConstantValue()?.ToString(),
+                "Mã hàng JBZ (*.tht;*.model)|*.tht;*.model",
+                StringComparison.Ordinal),
+            "Standard dialog filter must contain only .tht and .model");
+    }
+
+    private static void TestFaultDisplayFormatter()
+    {
+        var open = new FaultDetail
+        {
+            Type = ProductFaultType.OpenCircuit,
+            ConnectorFrom = "CN1",
+            PinFrom = "4",
+            ConnectorTo = "CN3",
+            PinTo = "6",
+            WireColor = "WH"
+        };
+        OperatorFaultDisplay openOperator = FaultDisplayFormatter.FormatOperator(open);
+        CustomerFaultDisplay openCustomer = FaultDisplayFormatter.FormatCustomer(open);
+        Assert(openOperator.Title == "HỞ MẠCH", "Open operator title");
+        Assert(openOperator.Lines.Any(line => line.Value.Contains("CN1 - Chân 4 ↔ CN3 - Chân 6", StringComparison.Ordinal)), "Open standard connection");
+        Assert(openOperator.Lines.Any(line => line.Label == "Màu dây tiêu chuẩn" && line.Value == "TRẮNG"), "Open standard color");
+        Assert(openOperator.Lines.Any(line => line.Value == "KHÔNG CÓ KẾT NỐI"), "Open actual condition");
+        Assert(openCustomer.FaultType == "OPEN CIRCUIT" && openCustomer.Actual == "NO CONTINUITY", "Open customer mapping");
+
+        var wrong = new FaultDetail
+        {
+            Type = ProductFaultType.WrongWiring,
+            WireName = "W12",
+            WireColor = "RED",
+            ConnectorFrom = "CN1",
+            PinFrom = "3",
+            ConnectorTo = "CN2",
+            PinTo = "8",
+            ActualConnectorFrom = "CN1",
+            ActualPinFrom = "3",
+            ActualConnectorTo = "CN1",
+            ActualPinTo = "5"
+        };
+        OperatorFaultDisplay wrongOperator = FaultDisplayFormatter.FormatOperator(wrong);
+        Assert(wrongOperator.Title == "SAI KẾT NỐI", "Wrong connection operator title");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí tiêu chuẩn"), "Wrong standard position");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí thực tế"), "Wrong actual position");
+        Assert(FaultDisplayFormatter.FormatCustomer(wrong).FaultType == "INCORRECT CONNECTION", "Wrong customer mapping");
+
+        var shortFault = new FaultDetail
+        {
+            Type = ProductFaultType.ShortCircuit,
+            ActualConnectorFrom = "CN4",
+            ActualPinFrom = "2",
+            ActualConnectorTo = "CN6",
+            ActualPinTo = "9"
+        };
+        OperatorFaultDisplay shortOperator = FaultDisplayFormatter.FormatOperator(shortFault);
+        Assert(shortOperator.Title == "CHẬP MẠCH", "Short operator title");
+        Assert(shortOperator.Lines.Any(line => line.Value.Contains("CN4 - Chân 2 ↔ CN6 - Chân 9", StringComparison.Ordinal)), "Short actual connection");
+        Assert(FaultDisplayFormatter.FormatCustomer(shortFault).FaultType == "SHORT CIRCUIT", "Short customer mapping");
+
+        var resistanceHigh = new FaultDetail
+        {
+            Type = ProductFaultType.ResistanceOutOfRange,
+            WireName = "CN3 Pin 4 ↔ CN5 Pin 2",
+            ResistanceMin = 950,
+            ResistanceMax = 1050,
+            MeasuredResistance = 1370
+        };
+        OperatorFaultDisplay resistanceHighOperator = FaultDisplayFormatter.FormatOperator(resistanceHigh);
+        CustomerFaultDisplay resistanceHighCustomer = FaultDisplayFormatter.FormatCustomer(resistanceHigh);
+        Assert(resistanceHighOperator.Lines.Any(line => line.Value == "CAO HƠN GIỚI HẠN"), "Resistance high assessment");
+        Assert(resistanceHighCustomer.Assessment == "ABOVE UPPER LIMIT", "Resistance high customer assessment");
+        Assert(resistanceHighCustomer.Deviation == "+0.32 kΩ", "Resistance high deviation");
+
+        var resistanceLow = new FaultDetail
+        {
+            Type = ProductFaultType.ResistanceOutOfRange,
+            ResistanceMin = 950,
+            ResistanceMax = 1050,
+            MeasuredResistance = 900
+        };
+        Assert(FaultDisplayFormatter.FormatCustomer(resistanceLow).Assessment == "BELOW LOWER LIMIT", "Resistance low assessment");
+        Assert(FaultDisplayFormatter.FormatCustomer(resistanceLow).Deviation == "-0.05 kΩ", "Resistance low deviation");
+
+        Assert(FaultDisplayFormatter.OperatorFaultType("WRONG_WIRE_COLOR") == "SAI MÀU DÂY", "Wire color operator mapping");
+        Assert(FaultDisplayFormatter.CustomerFaultType("TERMINAL_MISPOSITION") == "TERMINAL MISPOSITION", "Terminal customer mapping");
+        Assert(FaultDisplayFormatter.CustomerFaultType("CROSSED_TERMINALS") == "CROSSED TERMINALS", "Crossed terminal mapping");
+        Assert(FaultDisplayFormatter.FormatOperator(new FaultDetail()).Lines.Count > 0, "Missing fault fields remain displayable");
     }
 
     private static void TestBoardCapacity()
@@ -187,7 +280,11 @@ internal static class Program
             byte[] csvBytes = File.ReadAllBytes(csv);
             Assert(csvBytes.Length >= 3 && csvBytes[0] == 0xEF && csvBytes[1] == 0xBB && csvBytes[2] == 0xBF, "CSV UTF-8 BOM");
             string[] csvLines = File.ReadAllLines(csv, Encoding.UTF8);
-            Assert(csvLines[0].Split(',').Length == 30 && csvLines[1].Contains("2026/08/09 14:07:08"), "CSV columns/date");
+            Assert(csvLines[0].Split(',').Length == 34 && csvLines[1].Contains("2026/08/09 14:07:08"), "CSV columns/date");
+            Assert(csvLines[0].Contains("Fault Type", StringComparison.Ordinal) &&
+                   csvLines[0].Contains("Standard", StringComparison.Ordinal) &&
+                   csvLines[0].Contains("Actual", StringComparison.Ordinal) &&
+                   !csvLines[0].Contains("Mong đợi", StringComparison.OrdinalIgnoreCase), "CSV English customer headers");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -196,8 +293,35 @@ internal static class Program
             string styles = ReadEntry(archive, "xl/styles.xml");
             Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal), "XLSX DateTime native numeric");
             Assert(sheet.Contains("<c r=\"G2\"><v>2001</v></c>", StringComparison.Ordinal), "XLSX LOT native number");
-            Assert(sheet.Contains("<c r=\"X2\"><v>101.5</v></c>", StringComparison.Ordinal), "XLSX resistance native number");
+            Assert(sheet.Contains("<c r=\"AB2\"><v>101.5</v></c>", StringComparison.Ordinal), "XLSX resistance native number");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal), "XLSX DateTime number format");
+
+            var failed = new TestHistoryRecord
+            {
+                Finished = finished,
+                Passed = false,
+                Result = "FAIL",
+                FaultCode = "OPEN_CIRCUIT",
+                FaultType = "DÂY CHƯA KẾT NỐI",
+                FaultDetailsJson = JsonSerializer.Serialize(new[]
+                {
+                    new FaultDetail
+                    {
+                        Type = ProductFaultType.OpenCircuit,
+                        ConnectorFrom = "CN1",
+                        PinFrom = "4",
+                        ConnectorTo = "CN3",
+                        PinTo = "6",
+                        WireColor = "WHITE"
+                    }
+                })
+            };
+            string customerCsv = Path.Combine(root, "customer-fault.csv");
+            HistoryExportService.ExportCsv(customerCsv, [failed]);
+            string customerText = File.ReadAllText(customerCsv, Encoding.UTF8);
+            Assert(customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal), "Customer export technical fault name");
+            Assert(customerText.Contains("NO CONTINUITY", StringComparison.Ordinal), "Customer export actual condition");
+            Assert(!customerText.Contains("DÂY CHƯA KẾT NỐI", StringComparison.Ordinal), "Customer export does not use operator fault name");
         }
         finally
         {
