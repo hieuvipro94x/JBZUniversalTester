@@ -21,6 +21,7 @@ internal static class Program
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("ALL6 label data order", TestLabel),
+            ("PASS label snapshot/idempotency/traceability", TestLabelPrintingSafety),
             ("Pi legacy golden compiler", TestPiCompiler),
             ("Standard product picker filter", TestProductPickerFilter),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
@@ -510,6 +511,89 @@ internal static class Program
         int serial = epl.IndexOf("2407152001WH", name + 1, StringComparison.Ordinal);
         int barcode = epl.IndexOf("NI375C10002407152001", serial + 1, StringComparison.Ordinal);
         Assert(part >= 0 && part < eco && eco < name && name < serial && serial < barcode, "ALL6 EPL value order");
+    }
+
+    private static void TestLabelPrintingSafety()
+    {
+        DateTime finished = new(2026, 8, 10, 9, 8, 7, DateTimeKind.Local);
+        var history = new TestHistoryRecord
+        {
+            Started = finished.AddSeconds(-1),
+            Finished = finished,
+            PartName = "PRODUCT-A",
+            PartNumber = "PART-A",
+            Eco = "ECO-A",
+            LotNo = 31415,
+            Result = "PASS",
+            Passed = true,
+            ModelName = "MODEL-A",
+            ModelFile = @"D:\models\A.tht",
+            CycleId = "cycle-a",
+            PrintStatus = LabelPrintStatus.NotRequested.ToString()
+        };
+        var settings = new LabelSettings
+        {
+            PrinterName = "ZEBRA-A",
+            WidthMm = 90,
+            HeightMm = 15,
+            FormatName = "KS91-A",
+            Copies = 1
+        };
+
+        LabelPrintRequest request = LabelPrintRequest.Capture(history, settings);
+        LabelIdentity identity = EplLabelService.BuildIdentity(request.Data);
+        history.LabelSerial = identity.SerialText;
+        history.BarcodeValue = identity.BarcodeValue;
+        history.LabelProfile = request.FormatName;
+        history.Printer = request.Printer;
+        history.LabelCopies = request.Copies;
+
+        // UI/current model changes after PASS must not mutate the queued label.
+        history.PartNumber = "PART-B";
+        history.ModelName = "MODEL-B";
+        settings.PrinterName = "ZEBRA-B";
+        settings.Copies = 2;
+        string epl = EplLabelService.BuildPassLabel(request);
+        Assert(epl.Contains("PART-A", StringComparison.Ordinal) &&
+               !epl.Contains("PART-B", StringComparison.Ordinal), "PASS cycle keeps model A snapshot");
+        Assert(request.ModelName == "MODEL-A" && request.PrinterName == "ZEBRA-A" && request.Copies == 1,
+            "Printer/model/copies snapshot is immutable");
+        Assert(identity.BarcodeValue == "PART-A26081031415", "Barcode is deterministic from PASS snapshot");
+
+        string root = Path.Combine(Path.GetTempPath(), "JBZLabelTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            // Persist the original PASS identity, not the later mutable UI values.
+            history.PartNumber = request.Data.PartNumber;
+            history.ModelName = request.ModelName;
+            var store = new TestHistoryStore(Path.Combine(root, "history.db"));
+            long id = store.Add(history);
+            Assert(store.TryBeginFirstPrint(id, request.CycleId), "First PASS callback claims print transaction");
+            Assert(!store.TryBeginFirstPrint(id, request.CycleId), "Duplicate PASS callback is blocked");
+            store.UpdateLabelPrintOutcome(
+                id,
+                request.CycleId,
+                LabelPrintStatus.Printed,
+                finished.AddMilliseconds(250),
+                "software-test");
+
+            TestHistoryRecord saved = store.Search(new HistorySearchCriteria(
+                null, null, 31415, "PART-A", "PASS", 10)).Single();
+            Assert(saved.CycleId == "cycle-a" && saved.PrintStatus == "Printed", "Cycle/print status traceability");
+            Assert(saved.BarcodeValue == identity.BarcodeValue &&
+                   saved.LabelSerial == identity.SerialText &&
+                   saved.LabelProfile == "KS91-A" &&
+                   saved.Printer == "ZEBRA-A" &&
+                   saved.LabelCopies == 1 &&
+                   saved.ReprintCount == 0, "Persisted label identity matches PASS cycle");
+            Assert(saved.PrintTimestamp.HasValue, "Printed transaction records timestamp");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void TestPiCompiler()

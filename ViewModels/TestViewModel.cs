@@ -35,6 +35,7 @@ public sealed class TestViewModel : ObservableObject
     private readonly ThtModelParser _modelParser = new();
     private readonly object _initializationGate = new();
     private readonly object _cycleTokenGate = new();
+    private readonly object _lotReservationGate = new();
     private readonly CancellationTokenSource _lifetimeCts = new();
     private CancellationTokenSource? _cycleCts;
 
@@ -1537,8 +1538,13 @@ public sealed class TestViewModel : ObservableObject
         if (_board is not IFirmwareProtocolBoard firmware || !firmware.UsesFirmwareCycleResult || _model is null)
             return;
 
+        ProductModel cycleModel = _model;
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        CancellationToken cycleToken = CurrentCycleToken();
+
         try
         {
+            cycleToken.ThrowIfCancellationRequested();
             if (circuit == 0)
             {
                 _uartOpenSnapshots.Clear();
@@ -1548,11 +1554,11 @@ public sealed class TestViewModel : ObservableObject
                     RefreshUartFaultRows();
                     State = "PASS";
                 });
-                RecordCompletedProduct(true, "PASS");
+                RecordCompletedProduct(true, "PASS", cycleModel, generation, cycleToken);
                 _uartWaitingRemovalReason = "PASS";
                 AddLog("UART :CIRCUIT,0 => PASS. Chờ 300 ms rồi gửi PASSPEN giống Pi/V11.");
-                await Task.Delay(300, CurrentCycleToken());
-                await firmware.SendPassPenAsync(500, UartPinCount(), CurrentCycleToken());
+                await Task.Delay(300, cycleToken);
+                await firmware.SendPassPenAsync(500, UartPinCount(), cycleToken);
             }
             else
             {
@@ -1568,7 +1574,7 @@ public sealed class TestViewModel : ObservableObject
                     dialog.ShowDialog();
                 });
                 _sound.SetWiringFaultAlarm(false);
-                RecordCompletedProduct(false, "FAIL");
+                RecordCompletedProduct(false, "FAIL", cycleModel, generation, cycleToken);
                 await RequestUartRemovalAsync("FAIL");
             }
         }
@@ -2596,6 +2602,9 @@ public sealed class TestViewModel : ObservableObject
         if (_model is null)
             return;
 
+        ProductModel cycleModel = _model;
+        CancellationToken cycleToken = CurrentCycleToken();
+
         _cycleActive = false;
         State = "ĐANG XỬ LÝ LỖI DÂY";
         SelectedOperationTabIndex = 0;
@@ -2690,7 +2699,7 @@ public sealed class TestViewModel : ObservableObject
         // Người vận hành đã xác nhận popup: sản phẩm được tính là FAIL một lần.
         if (!_productDetectedThisCycle)
             _cycleStartedAt = DateTime.Now;
-        RecordCompletedProduct(false, primaryName);
+        RecordCompletedProduct(false, primaryName, cycleModel, generation, cycleToken);
 
         // V13.0: sau xác nhận FAIL chỉ Relay 1 JIG được pulse. Relay 2 MARKING
         // luôn OFF; Probe không bao giờ được phép đi vào handler này.
@@ -3567,6 +3576,8 @@ public sealed class TestViewModel : ObservableObject
         if (!_cycleActive || _model is null)
             return;
 
+        ProductModel cycleModel = _model;
+        long generation = Volatile.Read(ref _runtimeGeneration);
         CancellationToken ct = CurrentCycleToken();
         if (ct.IsCancellationRequested)
             return;
@@ -3603,7 +3614,12 @@ public sealed class TestViewModel : ObservableObject
                     Resistance.Any(x => !x.Passed))
                 {
                     _cycleActive = false;
-                    RecordCompletedProduct(false, FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange));
+                    RecordCompletedProduct(
+                        false,
+                        FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange),
+                        cycleModel,
+                        generation,
+                        ct);
                     State = FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange);
                     RaiseTestStatistics();
                     AddLog("Điện trở không đạt. Không chạy relay PASS.");
@@ -3661,14 +3677,14 @@ public sealed class TestViewModel : ObservableObject
             if (!ok)
             {
                 _cycleActive = false;
-                RecordCompletedProduct(false, "CHƯA ĐẠT");
+                RecordCompletedProduct(false, "CHƯA ĐẠT", cycleModel, generation, ct);
                 State = "CHƯA ĐẠT";
                 AddLog("Sản phẩm chưa đạt điều kiện PASS cuối cùng.");
                 RaiseTestStatistics();
                 return;
             }
 
-            RecordCompletedProduct(true, "PASS");
+            RecordCompletedProduct(true, "PASS", cycleModel, generation, ct);
             AddLog("Chuỗi PASS hoàn tất: Relay 2 MARKING -> Relay 1 mở JIG -> tất cả relay OFF.");
             RaiseTestStatistics();
 
@@ -3947,16 +3963,29 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    private void RecordCompletedProduct(bool passed, string resultText)
+    private void RecordCompletedProduct(
+        bool passed,
+        string resultText,
+        ProductModel cycleModel,
+        long runtimeGeneration,
+        CancellationToken cycleToken)
     {
-        ProductModel? model = _model;
-        if (model is null ||
+        if (cycleToken.IsCancellationRequested ||
+            !ReferenceEquals(_model, cycleModel) ||
+            !IsRuntimeContext(RuntimeMode.Production, runtimeGeneration) ||
+            Volatile.Read(ref _probeSessionActive) != 0 ||
+            Volatile.Read(ref _inlineProbeContactIo) != 0 ||
+            !MasterApproved ||
             Interlocked.CompareExchange(ref _resultRecordedThisCycle, 1, 0) != 0)
             return;
 
+        ProductModel model = cycleModel;
+
         long completedLot = Math.Max(0, _productionSettings.LotNo);
+        bool lotSequencePersisted = TryReserveNextLot(completedLot, out string lotSequenceError);
         DateTime finished = DateTime.Now;
         DateTime started = _cycleStartedAt <= finished ? _cycleStartedAt : finished;
+        string cycleId = Guid.NewGuid().ToString("N");
 
         IReadOnlyList<FaultDetail> faultDetails = passed
             ? Array.Empty<FaultDetail>()
@@ -4043,14 +4072,37 @@ public sealed class TestViewModel : ObservableObject
                 : FaultDisplayFormatter.CustomerSummary(customerFault),
             MeasuredResistance = failedResistance?.ValueOhm,
             ResistanceMin = failedResistance?.MinOhm,
-            ResistanceMax = failedResistance?.MaxOhm
+            ResistanceMax = failedResistance?.MaxOhm,
+            CycleId = cycleId,
+            PrintStatus = LabelPrintStatus.NotRequested.ToString()
         };
 
+        LabelPrintRequest? printRequest = null;
+        if (passed)
+        {
+            printRequest = LabelPrintRequest.Capture(history, _productionSettings.Label);
+            LabelIdentity identity = EplLabelService.BuildIdentity(printRequest.Data);
+            history.LabelSerial = identity.SerialText;
+            history.BarcodeValue = identity.BarcodeValue;
+            history.LabelProfile = printRequest.FormatName;
+            history.Printer = printRequest.Printer;
+            history.LabelCopies = printRequest.Copies;
+
+            if (_productionSettings.AutoPrintLabelOnPass && !lotSequencePersisted)
+            {
+                history.PrintStatus = LabelPrintStatus.Failed.ToString();
+                history.PrintMessage = lotSequenceError;
+            }
+        }
+
+        TestHistoryStore historyStore = _historyStore;
+        bool historySaved = false;
         try
         {
-            _historyStore.Add(history);
+            historyStore.Add(history);
+            historySaved = true;
             string historyFault = passed ? string.Empty : $" - {failureName}";
-            AddLog($"History: LOT {completedLot} {resultStatus}{historyFault} đã lưu vào {_historyStore.DatabasePath}.");
+            AddLog($"History: cycle {cycleId}, LOT {completedLot} {resultStatus}{historyFault} đã lưu vào {historyStore.DatabasePath}.");
         }
         catch (Exception ex)
         {
@@ -4070,22 +4122,25 @@ public sealed class TestViewModel : ObservableObject
             }
         }
 
-        if (passed && _productionSettings.AutoPrintLabelOnPass)
-            _ = PrintPassLabelSafeAsync(history);
-
-        try
+        if (passed && _productionSettings.AutoPrintLabelOnPass && printRequest is not null)
         {
-            checked { _productionSettings.LotNo = completedLot + 1; }
-            ProductionConfigService.Save(_productionSettings);
-            Lot = _productionSettings.LotNo.ToString();
-        }
-        catch (OverflowException)
-        {
-            AddLog("LOTNO đã đạt giới hạn số nguyên; không thể tự tăng thêm.");
-        }
-        catch (Exception ex)
-        {
-            AddLog($"Không thể lưu LOTNO tiếp theo: {ex.Message}");
+            if (!lotSequencePersisted)
+            {
+                AddLog($"LABEL BLOCKED: {lotSequenceError}");
+                ShowLabelWarning(
+                    "Sản phẩm đã PASS nhưng không in tem vì không thể lưu sequence/LOT an toàn.\n\n" +
+                    lotSequenceError);
+            }
+            else if (!historySaved)
+            {
+                const string message = "Không thể lưu giao dịch in vào lịch sử; first-print đã bị chặn để tránh mất traceability.";
+                AddLog($"LABEL BLOCKED: {message}");
+                ShowLabelWarning($"Sản phẩm đã PASS nhưng không in tem.\n\n{message}");
+            }
+            else
+            {
+                _ = PrintPassLabelSafeAsync(printRequest, historyStore, history.Id);
+            }
         }
 
         RaiseTestStatistics();
@@ -4216,31 +4271,102 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    private async Task PrintPassLabelSafeAsync(TestHistoryRecord history)
+    private bool TryReserveNextLot(long completedLot, out string error)
+    {
+        lock (_lotReservationGate)
+        {
+            try
+            {
+                long nextLot = checked(completedLot + 1);
+                _productionSettings.LotNo = nextLot;
+                ProductionConfigService.Save(_productionSettings);
+                Lot = nextLot.ToString();
+                error = string.Empty;
+                return true;
+            }
+            catch (OverflowException)
+            {
+                error = "LOTNO đã đạt giới hạn số nguyên; không thể giữ sequence duy nhất sau restart.";
+                AddLog(error);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                error = $"Không thể lưu LOTNO kế tiếp: {ex.Message}";
+                AddLog(error);
+                return false;
+            }
+        }
+    }
+
+    private async Task PrintPassLabelSafeAsync(
+        LabelPrintRequest request,
+        TestHistoryStore historyStore,
+        long historyId)
     {
         try
         {
-            var data = new LabelPrintData(
-                history.PartName, history.PartNumber, history.Eco, history.Nco, history.Alc,
-                history.LotNo, history.Finished);
+            if (!historyStore.TryBeginFirstPrint(historyId, request.CycleId))
+            {
+                AddLog($"LABEL DUPLICATE BLOCKED: cycle {request.CycleId} đã có first-print transaction.");
+                return;
+            }
 
-            string message = await _labelPrintService.PrintPassLabelAsync(
-                data, _productionSettings.Label, _lifetimeCts.Token);
-            AddLog($"LABEL: {message}");
+            LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
+                request, _lifetimeCts.Token);
+            LabelPrintStatus status = result.Printed
+                ? LabelPrintStatus.Printed
+                : LabelPrintStatus.Failed;
+            DateTime? printedAt = result.Printed ? DateTime.Now : null;
+            UpdateLabelPrintOutcomeSafe(
+                historyStore, historyId, request.CycleId, status, printedAt, result.Message);
+            AddLog($"LABEL {status.ToString().ToUpperInvariant()}: cycle {request.CycleId}; {result.Message}");
+
+            if (!result.Printed)
+                ShowLabelWarning($"Sản phẩm đã PASS nhưng chưa in được tem.\n\n{result.Message}");
         }
         catch (OperationCanceledException)
         {
+            const string message = "Giao dịch in bị hủy; trạng thái tem vật lý chưa thể xác định. Không tự retry.";
+            UpdateLabelPrintOutcomeSafe(
+                historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
+            AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
         }
         catch (Exception ex)
         {
-            AddLog($"LABEL PRINT ERROR: {ex.Message}");
-            InvokeUi(() => MessageBox.Show(
-                $"Sản phẩm đã PASS nhưng không in được tem.\n\n{ex.Message}",
-                "Lỗi in tem",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning));
+            string message = $"Printer/driver/transport error: {ex.Message}. Trạng thái tem vật lý chưa xác định; không tự retry.";
+            UpdateLabelPrintOutcomeSafe(
+                historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
+            AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
+            ShowLabelWarning($"Sản phẩm vẫn giữ kết quả PASS nhưng trạng thái in tem chưa xác định.\n\n{message}");
         }
     }
+
+    private void UpdateLabelPrintOutcomeSafe(
+        TestHistoryStore historyStore,
+        long historyId,
+        string cycleId,
+        LabelPrintStatus status,
+        DateTime? printTimestamp,
+        string message)
+    {
+        try
+        {
+            historyStore.UpdateLabelPrintOutcome(
+                historyId, cycleId, status, printTimestamp, message);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"LABEL HISTORY ERROR: cycle {cycleId}; không thể lưu {status}: {ex.Message}");
+        }
+    }
+
+    private void ShowLabelWarning(string message) =>
+        InvokeUi(() => MessageBox.Show(
+            message,
+            "Lỗi in tem",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning));
 
     private void RefreshFaults()
     {

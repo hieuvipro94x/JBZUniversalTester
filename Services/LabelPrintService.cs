@@ -8,55 +8,63 @@ namespace JBZUniversalTester.Services;
 
 public sealed class LabelPrintService
 {
-    public async Task<string> PrintPassLabelAsync(
-        LabelPrintData data,
-        LabelSettings settings,
+    public async Task<LabelPrintTransportResult> PrintPassLabelAsync(
+        LabelPrintRequest request,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(request);
 
-        string epl = EplLabelService.BuildPassLabel(data, settings);
+        string epl = EplLabelService.BuildPassLabel(request);
         string previewDirectory = Path.Combine(AppContext.BaseDirectory, "Data", "Labels");
         Directory.CreateDirectory(previewDirectory);
-        string previewPath = Path.Combine(previewDirectory, "last-pass.epl");
-        EplLabelService.SavePreview(previewPath, epl);
+        string previewPath = Path.Combine(
+            previewDirectory,
+            $"{request.Data.TestedAt:yyyyMMdd_HHmmssfff}_{SafeFilePart(request.Data.PartNumber)}_{request.CycleId}.epl");
+        await File.WriteAllTextAsync(previewPath, epl, Encoding.ASCII, ct);
 
-        int copies = Math.Clamp(settings.Copies, 1, 20);
-        if (!string.IsNullOrWhiteSpace(settings.PrinterCom))
+        if (!string.IsNullOrWhiteSpace(request.PrinterCom))
         {
-            await PrintToComAsync(epl, settings, copies, ct);
-            return $"Printed {copies} label(s) via {settings.PrinterCom}.";
+            await PrintToComAsync(epl, request, ct);
+            return new LabelPrintTransportResult(
+                true,
+                $"Printed {request.Copies} label(s) via {request.PrinterCom}. Preview: {previewPath}");
         }
 
-        if (!string.IsNullOrWhiteSpace(settings.PrinterName))
+        if (!string.IsNullOrWhiteSpace(request.PrinterName))
         {
-            for (int i = 0; i < copies; i++)
+            await Task.Run(() =>
             {
-                ct.ThrowIfCancellationRequested();
-                RawPrinter.Send(settings.PrinterName.Trim(), epl);
-            }
-            return $"Printed {copies} label(s) via Windows printer '{settings.PrinterName}'.";
+                for (int i = 0; i < request.Copies; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    RawPrinter.Send(request.PrinterName.Trim(), epl);
+                }
+            }, ct);
+            return new LabelPrintTransportResult(
+                true,
+                $"Printed {request.Copies} label(s) via Windows printer '{request.PrinterName}'. Preview: {previewPath}");
         }
 
-        return $"No printer configured. EPL preview saved: {previewPath}";
+        return new LabelPrintTransportResult(
+            false,
+            $"No printer configured. EPL preview saved: {previewPath}");
     }
 
     private static async Task PrintToComAsync(
         string epl,
-        LabelSettings settings,
-        int copies,
+        LabelPrintRequest request,
         CancellationToken ct)
     {
         using var port = new SerialPort(
-            settings.PrinterCom.Trim(),
-            Math.Clamp(settings.BaudRate, 1200, 921600),
+            request.PrinterCom.Trim(),
+            request.BaudRate,
             Parity.None,
             8,
             StopBits.One)
         {
             Handshake = Handshake.None,
             Encoding = Encoding.ASCII,
-            WriteTimeout = Math.Clamp(settings.WriteTimeoutMs, 500, 30_000),
+            WriteTimeout = request.WriteTimeoutMs,
             DtrEnable = false,
             RtsEnable = false
         };
@@ -64,12 +72,22 @@ public sealed class LabelPrintService
         await Task.Run(() => port.Open(), ct);
         byte[] bytes = Encoding.ASCII.GetBytes(epl);
 
-        for (int i = 0; i < copies; i++)
+        for (int i = 0; i < request.Copies; i++)
         {
             ct.ThrowIfCancellationRequested();
             await port.BaseStream.WriteAsync(bytes, ct);
             await port.BaseStream.FlushAsync(ct);
         }
+    }
+
+    private static string SafeFilePart(string? value)
+    {
+        HashSet<char> invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        string safe = new((value ?? string.Empty)
+            .Where(character => !invalid.Contains(character))
+            .Take(60)
+            .ToArray());
+        return string.IsNullOrWhiteSpace(safe) ? "NO_PART_NUMBER" : safe;
     }
 
     private static class RawPrinter

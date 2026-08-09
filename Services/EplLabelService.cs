@@ -13,19 +13,41 @@ public static class EplLabelService
     /// </summary>
     public static string BuildPassLabel(LabelPrintData data, LabelSettings settings)
     {
-        string date = data.TestedAt.ToString("yyMMdd");
-        string serialText = $"{date}{data.LotNo}WH";
-        string barcodeText = $"{data.PartNumber}{date}{data.LotNo}";
+        LabelIdentity identity = BuildIdentity(data);
 
         return Build(
             data.PartNumber,
             data.Eco,
             data.PartName,
-            serialText,
-            barcodeText,
+            identity.SerialText,
+            identity.BarcodeValue,
             settings.FormatName,
             settings.WidthMm,
             settings.HeightMm);
+    }
+
+    public static string BuildPassLabel(LabelPrintRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        LabelIdentity identity = BuildIdentity(request.Data);
+
+        return Build(
+            request.Data.PartNumber,
+            request.Data.Eco,
+            request.Data.PartName,
+            identity.SerialText,
+            identity.BarcodeValue,
+            request.FormatName,
+            request.WidthMm,
+            request.HeightMm);
+    }
+
+    public static LabelIdentity BuildIdentity(LabelPrintData data)
+    {
+        string date = data.TestedAt.ToString("yyMMdd");
+        return new LabelIdentity(
+            $"{date}{data.LotNo}WH",
+            $"{data.PartNumber}{date}{data.LotNo}");
     }
 
     public static string Build90x15(

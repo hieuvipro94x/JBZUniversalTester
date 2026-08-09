@@ -68,7 +68,17 @@ public sealed class TestHistoryStore
                     FaultSummary TEXT NOT NULL DEFAULT '',
                     MeasuredResistance REAL NULL,
                     ResistanceMin REAL NULL,
-                    ResistanceMax REAL NULL
+                    ResistanceMax REAL NULL,
+                    CycleId TEXT NOT NULL DEFAULT '',
+                    LabelSerial TEXT NOT NULL DEFAULT '',
+                    BarcodeValue TEXT NOT NULL DEFAULT '',
+                    LabelProfile TEXT NOT NULL DEFAULT '',
+                    PrintStatus TEXT NOT NULL DEFAULT 'NotRequested',
+                    PrintTimestamp TEXT NULL,
+                    Printer TEXT NOT NULL DEFAULT '',
+                    LabelCopies INTEGER NOT NULL DEFAULT 0,
+                    ReprintCount INTEGER NOT NULL DEFAULT 0,
+                    PrintMessage TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE INDEX IF NOT EXISTS IX_TestHistory_Finished
@@ -95,6 +105,24 @@ public sealed class TestHistoryStore
         EnsureColumn(connection, "MeasuredResistance", "REAL NULL");
         EnsureColumn(connection, "ResistanceMin", "REAL NULL");
         EnsureColumn(connection, "ResistanceMax", "REAL NULL");
+        EnsureColumn(connection, "CycleId", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "LabelSerial", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "BarcodeValue", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "LabelProfile", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "PrintStatus", "TEXT NOT NULL DEFAULT 'NotRequested'");
+        EnsureColumn(connection, "PrintTimestamp", "TEXT NULL");
+        EnsureColumn(connection, "Printer", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "LabelCopies", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(connection, "ReprintCount", "INTEGER NOT NULL DEFAULT 0");
+        EnsureColumn(connection, "PrintMessage", "TEXT NOT NULL DEFAULT ''");
+
+        using SqliteCommand cycleIndex = connection.CreateCommand();
+        cycleIndex.CommandText = """
+            CREATE UNIQUE INDEX IF NOT EXISTS UX_TestHistory_CycleId
+                ON TestHistory(CycleId)
+                WHERE CycleId <> '';
+            """;
+        cycleIndex.ExecuteNonQuery();
     }
 
     private static void EnsureColumn(SqliteConnection connection, string columnName, string definition)
@@ -138,7 +166,9 @@ public sealed class TestHistoryStore
                 DeviceName, DeviceNumber, OperatorCompany, ProductionLine,
                 FaultType, FaultCode, ExpectedSourceIo, ExpectedTargetIo,
                 ActualSourceIo, ActualTargetIo, FaultDetailsJson, FaultSummary,
-                MeasuredResistance, ResistanceMin, ResistanceMax
+                MeasuredResistance, ResistanceMin, ResistanceMax,
+                CycleId, LabelSerial, BarcodeValue, LabelProfile, PrintStatus,
+                PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage
             )
             VALUES
             (
@@ -148,7 +178,9 @@ public sealed class TestHistoryStore
                 $DeviceName, $DeviceNumber, $OperatorCompany, $ProductionLine,
                 $FaultType, $FaultCode, $ExpectedSourceIo, $ExpectedTargetIo,
                 $ActualSourceIo, $ActualTargetIo, $FaultDetailsJson, $FaultSummary,
-                $MeasuredResistance, $ResistanceMin, $ResistanceMax
+                $MeasuredResistance, $ResistanceMin, $ResistanceMax,
+                $CycleId, $LabelSerial, $BarcodeValue, $LabelProfile, $PrintStatus,
+                $PrintTimestamp, $Printer, $LabelCopies, $ReprintCount, $PrintMessage
             );
             SELECT last_insert_rowid();
             """;
@@ -210,7 +242,9 @@ public sealed class TestHistoryStore
                 DeviceName, DeviceNumber, OperatorCompany, ProductionLine,
                 FaultType, FaultCode, ExpectedSourceIo, ExpectedTargetIo,
                 ActualSourceIo, ActualTargetIo, FaultDetailsJson, FaultSummary,
-                MeasuredResistance, ResistanceMin, ResistanceMax
+                MeasuredResistance, ResistanceMin, ResistanceMax,
+                CycleId, LabelSerial, BarcodeValue, LabelProfile, PrintStatus,
+                PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage
             FROM TestHistory
             {(clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses))}
             ORDER BY Finished DESC, Id DESC
@@ -260,6 +294,16 @@ public sealed class TestHistoryStore
         AddNullable(command, "$MeasuredResistance", record.MeasuredResistance);
         AddNullable(command, "$ResistanceMin", record.ResistanceMin);
         AddNullable(command, "$ResistanceMax", record.ResistanceMax);
+        command.Parameters.AddWithValue("$CycleId", record.CycleId ?? string.Empty);
+        command.Parameters.AddWithValue("$LabelSerial", record.LabelSerial ?? string.Empty);
+        command.Parameters.AddWithValue("$BarcodeValue", record.BarcodeValue ?? string.Empty);
+        command.Parameters.AddWithValue("$LabelProfile", record.LabelProfile ?? string.Empty);
+        command.Parameters.AddWithValue("$PrintStatus", record.PrintStatus ?? LabelPrintStatus.NotRequested.ToString());
+        AddNullable(command, "$PrintTimestamp", record.PrintTimestamp?.ToString("O"));
+        command.Parameters.AddWithValue("$Printer", record.Printer ?? string.Empty);
+        command.Parameters.AddWithValue("$LabelCopies", record.LabelCopies);
+        command.Parameters.AddWithValue("$ReprintCount", record.ReprintCount);
+        command.Parameters.AddWithValue("$PrintMessage", record.PrintMessage ?? string.Empty);
     }
 
     private static void AddNullable(SqliteCommand command, string name, object? value) =>
@@ -301,8 +345,74 @@ public sealed class TestHistoryStore
             FaultSummary = reader.GetString(29),
             MeasuredResistance = GetNullableDouble(reader, 30),
             ResistanceMin = GetNullableDouble(reader, 31),
-            ResistanceMax = GetNullableDouble(reader, 32)
+            ResistanceMax = GetNullableDouble(reader, 32),
+            CycleId = reader.GetString(33),
+            LabelSerial = reader.GetString(34),
+            BarcodeValue = reader.GetString(35),
+            LabelProfile = reader.GetString(36),
+            PrintStatus = reader.GetString(37),
+            PrintTimestamp = reader.IsDBNull(38) ? null : ParseDate(reader.GetString(38)),
+            Printer = reader.GetString(39),
+            LabelCopies = reader.GetInt32(40),
+            ReprintCount = reader.GetInt32(41),
+            PrintMessage = reader.GetString(42)
         };
+    }
+
+    /// <summary>
+    /// Atomically claims the only allowed first-print transaction for a cycle.
+    /// A Pending/Printed/Failed/Unknown transaction is never started again.
+    /// </summary>
+    public bool TryBeginFirstPrint(long historyId, string cycleId)
+    {
+        if (historyId <= 0 || string.IsNullOrWhiteSpace(cycleId))
+            return false;
+
+        using SqliteConnection connection = Open();
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE TestHistory
+            SET PrintStatus = $Pending,
+                PrintMessage = ''
+            WHERE Id = $Id
+              AND CycleId = $CycleId
+              AND PrintStatus = $NotRequested;
+            """;
+        command.Parameters.AddWithValue("$Pending", LabelPrintStatus.Pending.ToString());
+        command.Parameters.AddWithValue("$NotRequested", LabelPrintStatus.NotRequested.ToString());
+        command.Parameters.AddWithValue("$Id", historyId);
+        command.Parameters.AddWithValue("$CycleId", cycleId);
+        return command.ExecuteNonQuery() == 1;
+    }
+
+    public void UpdateLabelPrintOutcome(
+        long historyId,
+        string cycleId,
+        LabelPrintStatus status,
+        DateTime? printTimestamp,
+        string message)
+    {
+        if (historyId <= 0 || string.IsNullOrWhiteSpace(cycleId))
+            return;
+
+        using SqliteConnection connection = Open();
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE TestHistory
+            SET PrintStatus = $Status,
+                PrintTimestamp = $PrintTimestamp,
+                PrintMessage = $PrintMessage
+            WHERE Id = $Id
+              AND CycleId = $CycleId;
+            """;
+        command.Parameters.AddWithValue("$Status", status.ToString());
+        AddNullable(command, "$PrintTimestamp", printTimestamp?.ToString("O"));
+        command.Parameters.AddWithValue("$PrintMessage", message ?? string.Empty);
+        command.Parameters.AddWithValue("$Id", historyId);
+        command.Parameters.AddWithValue("$CycleId", cycleId);
+        command.ExecuteNonQuery();
     }
 
     private static int? GetNullableInt(SqliteDataReader reader, int ordinal) =>
