@@ -3,7 +3,6 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using JBZUniversalTester.ViewModels;
 using JBZUniversalTester.Versioning;
@@ -113,26 +112,8 @@ public partial class TestWindow : Window
         _isMouseOverBottomToolbar = false;
         _bottomToolbarVisible = false;
 
-        BottomButtonPanel.BeginAnimation(OpacityProperty, null);
-        BottomToolbarTranslate.BeginAnimation(System.Windows.Media.TranslateTransform.YProperty, null);
-
-        double hiddenY = GetBottomToolbarHiddenY();
-        BottomToolbarTranslate.Y = hiddenY;
-        BottomButtonPanel.Opacity = 0;
-        BottomButtonPanel.IsHitTestVisible = false;
-        BottomToolbarOverlay.IsHitTestVisible = false;
-    }
-
-    private double GetBottomToolbarHiddenY()
-    {
-        double height = BottomButtonPanel.ActualHeight;
-        if (height <= 0)
-        {
-            BottomButtonPanel.Measure(new Size(ActualWidth > 0 ? ActualWidth : 1200, double.PositiveInfinity));
-            height = BottomButtonPanel.DesiredSize.Height;
-        }
-
-        return Math.Max(1, height) + 8;
+        BottomButtonPanel.Visibility = Visibility.Collapsed;
+        BottomToolbarHotZone.Visibility = Visibility.Visible;
     }
 
     private void BottomToolbarHotZone_MouseEnter(object sender, MouseEventArgs e)
@@ -180,69 +161,22 @@ public partial class TestWindow : Window
     private void ShowBottomToolbar()
     {
         _bottomToolbarHideTimer.Stop();
-        _bottomToolbarVisible = true;
-        BottomToolbarOverlay.IsHitTestVisible = true;
-        BottomButtonPanel.IsHitTestVisible = true;
+        if (_bottomToolbarVisible)
+            return;
 
-        AnimateBottomToolbar(0, 1, TimeSpan.FromMilliseconds(200), EasingMode.EaseOut, hideAfter: false);
+        _bottomToolbarVisible = true;
+        BottomToolbarHotZone.Visibility = Visibility.Collapsed;
+        BottomButtonPanel.Visibility = Visibility.Visible;
     }
 
     private void HideBottomToolbar()
     {
-        if (!_bottomToolbarVisible && BottomButtonPanel.Opacity <= 0.001)
+        if (!_bottomToolbarVisible)
             return;
 
         _bottomToolbarVisible = false;
-        BottomButtonPanel.IsHitTestVisible = false;
-        AnimateBottomToolbar(GetBottomToolbarHiddenY(), 0, TimeSpan.FromMilliseconds(180), EasingMode.EaseIn, hideAfter: true);
-    }
-
-    private void AnimateBottomToolbar(
-        double targetY,
-        double targetOpacity,
-        TimeSpan duration,
-        EasingMode easingMode,
-        bool hideAfter)
-    {
-        // Lấy giá trị đang render để đảo chiều animation giữa chừng không bị giật.
-        double currentY = BottomToolbarTranslate.Y;
-        double currentOpacity = BottomButtonPanel.Opacity;
-
-        var easing = new QuadraticEase { EasingMode = easingMode };
-        var move = new DoubleAnimation
-        {
-            From = currentY,
-            To = targetY,
-            Duration = duration,
-            EasingFunction = easing,
-            FillBehavior = FillBehavior.HoldEnd
-        };
-        var fade = new DoubleAnimation
-        {
-            From = currentOpacity,
-            To = targetOpacity,
-            Duration = duration,
-            EasingFunction = easing,
-            FillBehavior = FillBehavior.HoldEnd
-        };
-
-        move.Completed += (_, _) =>
-        {
-            if (!hideAfter || _bottomToolbarVisible)
-                return;
-
-            BottomToolbarOverlay.IsHitTestVisible = false;
-            BottomButtonPanel.IsHitTestVisible = false;
-        };
-
-        BottomToolbarTranslate.BeginAnimation(
-            System.Windows.Media.TranslateTransform.YProperty,
-            move,
-            HandoffBehavior.SnapshotAndReplace);
-        BottomButtonPanel.BeginAnimation(
-            OpacityProperty,
-            fade,
-            HandoffBehavior.SnapshotAndReplace);
+        BottomButtonPanel.Visibility = Visibility.Collapsed;
+        BottomToolbarHotZone.Visibility = Visibility.Visible;
     }
 
     private async void BackToMain_Click(object sender, RoutedEventArgs e)

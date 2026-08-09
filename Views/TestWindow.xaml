@@ -170,6 +170,7 @@
             <RowDefinition Height="Auto" MinHeight="44"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*" MinHeight="300"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- ========================================================= -->
@@ -591,23 +592,16 @@
         </TabControl>
 
         <!-- ========================================================= -->
-        <!-- BOTTOM TOOLBAR OVERLAY: không chiếm chiều cao khi ẩn       -->
+        <!-- BOTTOM TOOLBAR: row riêng làm vùng nội dung resize thật    -->
         <!-- ========================================================= -->
-        <Border x:Name="BottomToolbarHotZone"
-                Grid.RowSpan="4"
-                Height="24"
-                VerticalAlignment="Bottom"
-                Background="Transparent"
-                Panel.ZIndex="290"
-                MouseEnter="BottomToolbarHotZone_MouseEnter"
-                MouseLeave="BottomToolbarHotZone_MouseLeave"/>
+        <Grid Grid.Row="4">
+            <Border x:Name="BottomToolbarHotZone"
+                    Height="8"
+                    VerticalAlignment="Bottom"
+                    Background="Transparent"
+                    MouseEnter="BottomToolbarHotZone_MouseEnter"
+                    MouseLeave="BottomToolbarHotZone_MouseLeave"/>
 
-        <Grid x:Name="BottomToolbarOverlay"
-              Grid.RowSpan="4"
-              VerticalAlignment="Bottom"
-              Panel.ZIndex="300"
-              ClipToBounds="True"
-              IsHitTestVisible="False">
             <Border x:Name="BottomButtonPanel"
                     Height="62"
                     Margin="0"
@@ -615,12 +609,9 @@
                     BorderBrush="#777"
                     BorderThickness="1"
                     CornerRadius="5,5,0,0"
-                    Opacity="0"
-                    IsHitTestVisible="False"
+                    Visibility="Collapsed"
                     MouseEnter="BottomButtonPanel_MouseEnter"
                     MouseLeave="BottomButtonPanel_MouseLeave">
-                <Border.RenderTransform><TranslateTransform x:Name="BottomToolbarTranslate"/></Border.RenderTransform>
-
                 <Grid Margin="4">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="1.1*"/>
