@@ -17,6 +17,7 @@ public sealed class TestEngine : IDisposable
     readonly KeysightVisaService _visa;
     readonly AppSettings _settings;
     readonly ProductionSettings _production;
+    readonly ProductionFaultConfirmationGate _faultConfirmation;
     readonly object _gate = new();
     readonly SemaphoreSlim _relayPulseGate = new(1, 1);
 
@@ -27,11 +28,17 @@ public sealed class TestEngine : IDisposable
     readonly Dictionary<int, HashSet<int>> _currentConnections = [];
     readonly HashSet<int> _unexpectedIo = [];
     readonly HashSet<WiringFaultPair> _wiringFaults = [];
-    readonly Dictionary<(int Source, int Target), DateTime> _unexpectedPairSince = [];
+    readonly HashSet<string> _confirmedOpenKeys = new(StringComparer.Ordinal);
     Dictionary<int, int> _componentByIo = [];
     Dictionary<PinRecord, WireNet[]> _netsByPin = new(ReferenceEqualityComparer.Instance);
+    Dictionary<WireNet, string> _confirmationKeyByNet = new(ReferenceEqualityComparer.Instance);
+    Dictionary<ClipBranch, string> _confirmationKeyByClip = new(ReferenceEqualityComparer.Instance);
+    readonly Dictionary<string, bool> _expectedConnectionScratch = new(StringComparer.Ordinal);
     volatile bool _frameProcessingEnabled = true;
     bool _forceNextFrameChanged = true;
+    bool _contactUnstable;
+    bool _contactLossTimedOut;
+    bool _productStable;
     bool _disposed;
 
     public event EventHandler? Changed;
@@ -60,6 +67,21 @@ public sealed class TestEngine : IDisposable
             lock (_gate)
                 return _wiringFaults.Count > 0;
         }
+    }
+
+    public bool HasConfirmedOpenCircuit
+    {
+        get { lock (_gate) return _confirmedOpenKeys.Count > 0; }
+    }
+
+    public bool HasContactInstability
+    {
+        get { lock (_gate) return _contactUnstable; }
+    }
+
+    public bool ContactLossTimedOut
+    {
+        get { lock (_gate) return _contactLossTimedOut; }
     }
 
     /// <summary>
@@ -178,6 +200,7 @@ public sealed class TestEngine : IDisposable
                 return _model is not null &&
                        expected > 0 &&
                        _passedNets.Count == expected &&
+                       _productStable &&
                        _wiringFaults.Count == 0;
             }
         }
@@ -187,12 +210,14 @@ public sealed class TestEngine : IDisposable
         IBoardTransport board,
         KeysightVisaService visa,
         AppSettings settings,
-        ProductionSettings? production = null)
+        ProductionSettings? production = null,
+        TimeProvider? timeProvider = null)
     {
         _board = board;
         _visa = visa;
         _settings = settings;
         _production = production ?? new ProductionSettings();
+        _faultConfirmation = new ProductionFaultConfirmationGate(_production, timeProvider);
         // V11.8: TestEngine KHÔNG subscribe trực tiếp board nữa.
         // TestViewModel là router duy nhất quyết định Production/Probe, tránh
         // tuyệt đối snapshot đầu dò lọt vào logic đấu sai/chập.
@@ -203,6 +228,13 @@ public sealed class TestEngine : IDisposable
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _componentByIo = BuildExpectedComponents(model);
         _netsByPin = BuildNetsByPin(model);
+        _confirmationKeyByNet = new Dictionary<WireNet, string>(ReferenceEqualityComparer.Instance);
+        foreach (WireNet net in model.Nets)
+            _confirmationKeyByNet[net] = NetConfirmationKey(net.Name);
+
+        _confirmationKeyByClip = new Dictionary<ClipBranch, string>(ReferenceEqualityComparer.Instance);
+        foreach (ClipBranch branch in model.Clip?.Branches ?? [])
+            _confirmationKeyByClip[branch] = ClipConfirmationKey(branch.NetName);
         Reset();
     }
 
@@ -260,7 +292,11 @@ public sealed class TestEngine : IDisposable
             _currentConnections.Clear();
             _unexpectedIo.Clear();
             _wiringFaults.Clear();
-            _unexpectedPairSince.Clear();
+            _confirmedOpenKeys.Clear();
+            _faultConfirmation.Reset();
+            _contactUnstable = false;
+            _contactLossTimedOut = false;
+            _productStable = false;
             // Frame production hoàn chỉnh đầu tiên sau Reset luôn phải phát
             // Changed, kể cả nó rỗng. Sau PASS relay có thể đã nhả toàn bộ
             // harness trước frame đầu tiên; nếu bỏ event rỗng thì UI sẽ mắc
@@ -298,6 +334,10 @@ public sealed class TestEngine : IDisposable
             string previousConnectionSignature = BuildConnectionSignature(_currentConnections);
             var previousPassed = _passedNets.ToHashSet(StringComparer.OrdinalIgnoreCase);
             var previousFaults = _wiringFaults.ToHashSet();
+            var previousConfirmedOpen = _confirmedOpenKeys.ToHashSet(StringComparer.Ordinal);
+            bool previousContactUnstable = _contactUnstable;
+            bool previousContactLossTimedOut = _contactLossTimedOut;
+            bool previousProductStable = _productStable;
 
             _currentActive.Clear();
             foreach (int io in frame.ActiveIo)
@@ -309,6 +349,7 @@ public sealed class TestEngine : IDisposable
 
             // Đúng protocol Htdrv: kiểm tra từng network bằng quan hệ SOURCE -> TARGET.
             // Vì vậy một target đúng nhưng xuất hiện dưới source khác sẽ KHÔNG PASS.
+            _expectedConnectionScratch.Clear();
             foreach (WireNet net in model.Nets)
             {
                 HashSet<int> actualTargets =
@@ -316,6 +357,7 @@ public sealed class TestEngine : IDisposable
 
                 bool connected = net.ExpectedActiveIo.Count > 0 &&
                                  net.ExpectedActiveIo.All(actualTargets.Contains);
+                _expectedConnectionScratch[_confirmationKeyByNet[net]] = connected;
 
                 if (!connected)
                 {
@@ -351,6 +393,7 @@ public sealed class TestEngine : IDisposable
                         model.Clip,
                         branch,
                         _currentConnections);
+                    _expectedConnectionScratch[_confirmationKeyByClip[branch]] = connected;
 
                     if (!connected)
                     {
@@ -372,7 +415,10 @@ public sealed class TestEngine : IDisposable
                 }
             }
 
-            UpdateWiringFaults(model, frame.Timestamp);
+            UpdateWiringFaults(
+                model,
+                _expectedConnectionScratch,
+                HasProductActivityUnsafe(model));
 
             changed =
                 _forceNextFrameChanged ||
@@ -381,7 +427,11 @@ public sealed class TestEngine : IDisposable
                     BuildConnectionSignature(_currentConnections),
                     StringComparison.Ordinal) ||
                 !previousPassed.SetEquals(_passedNets) ||
-                !previousFaults.SetEquals(_wiringFaults);
+                !previousFaults.SetEquals(_wiringFaults) ||
+                !previousConfirmedOpen.SetEquals(_confirmedOpenKeys) ||
+                previousContactUnstable != _contactUnstable ||
+                previousContactLossTimedOut != _contactLossTimedOut ||
+                previousProductStable != _productStable;
 
             _forceNextFrameChanged = false;
         }
@@ -391,7 +441,10 @@ public sealed class TestEngine : IDisposable
             Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    void UpdateWiringFaults(ProductModel model, DateTime timestamp)
+    void UpdateWiringFaults(
+        ProductModel model,
+        IReadOnlyDictionary<string, bool> expectedConnections,
+        bool hasProductActivity)
     {
         // Đấu sai phải xét theo COMPONENT điện thật, không chỉ theo một chiều
         // source->target. Trace cho thấy một component nhiều nhánh có thể sinh
@@ -423,26 +476,32 @@ public sealed class TestEngine : IDisposable
             }
         }
 
-        foreach (var pair in _unexpectedPairSince.Keys.ToArray())
-        {
-            if (!unexpectedNow.Contains(pair))
-                _unexpectedPairSince.Remove(pair);
-        }
+        WiringFaultPair[] classified = unexpectedNow
+            .Select(pair => ClassifyUnexpectedPair(model, pair.Source, pair.Target))
+            .ToArray();
 
-        // V11.6: quan hệ sai trong Production phải báo NGAY ở frame đầu tiên.
-        // Không chờ trạng thái "ĐANG KIỂM TRA" và không chờ ShortConfirmMs.
-        // Đây chỉ chạy trong TestEngine Production; Probe không bao giờ vào hàm này.
-        var confirmed = new HashSet<WiringFaultPair>();
+        ProductionFaultConfirmationSnapshot snapshot = _faultConfirmation.Observe(
+            expectedConnections,
+            classified.Select(fault => new UnexpectedFaultObservation(
+                    fault.SourceIo,
+                    fault.TargetIo,
+                    fault.FaultType))
+                .ToArray(),
+            hasProductActivity);
 
-        foreach (var pair in unexpectedNow)
-        {
-            _unexpectedPairSince[pair] = timestamp;
-            confirmed.Add(ClassifyUnexpectedPair(model, pair.Source, pair.Target));
-        }
+        _confirmedOpenKeys.Clear();
+        foreach (string key in snapshot.ConfirmedOpenKeys)
+            _confirmedOpenKeys.Add(key);
+        _contactUnstable = snapshot.ContactUnstable;
+        _contactLossTimedOut = snapshot.ContactLossTimedOut;
+        _productStable = snapshot.ProductStable;
 
         _wiringFaults.Clear();
-        foreach (WiringFaultPair fault in confirmed)
-            _wiringFaults.Add(fault);
+        foreach (WiringFaultPair fault in classified)
+        {
+            if (snapshot.ConfirmedUnexpectedPairs.Contains((fault.SourceIo, fault.TargetIo)))
+                _wiringFaults.Add(fault);
+        }
 
         _unexpectedIo.Clear();
         foreach (WiringFaultPair fault in _wiringFaults)
@@ -516,15 +575,85 @@ public sealed class TestEngine : IDisposable
         bool changed = false;
         lock (_gate)
         {
-            changed = _wiringFaults.Count > 0 || _unexpectedIo.Count > 0 || _unexpectedPairSince.Count > 0;
+            changed = _wiringFaults.Count > 0 || _unexpectedIo.Count > 0;
             _wiringFaults.Clear();
             _unexpectedIo.Clear();
-            _unexpectedPairSince.Clear();
+            _faultConfirmation.ClearUnexpected();
+            _productStable = false;
         }
 
         if (changed)
             Changed?.Invoke(this, EventArgs.Empty);
     }
+
+    public IReadOnlyList<FaultDetail> BuildConfirmedOpenFaults()
+    {
+        lock (_gate)
+        {
+            ProductModel? model = _model;
+            if (model is null || _confirmedOpenKeys.Count == 0)
+                return [];
+
+            var details = new List<FaultDetail>();
+            foreach (WireNet net in model.Nets)
+            {
+                if (!_confirmedOpenKeys.Contains(_confirmationKeyByNet[net]))
+                    continue;
+
+                PinRecord? sourcePin = net.Pins.FirstOrDefault(pin => pin.IoNumber == net.SourceIo);
+                HashSet<int> actualTargets = _currentConnections.GetValueOrDefault(net.SourceIo) ?? [];
+                foreach (int target in net.ExpectedActiveIo.Where(io => !actualTargets.Contains(io)))
+                {
+                    PinRecord? targetPin = net.Pins.FirstOrDefault(pin => pin.IoNumber == target);
+                    details.Add(new FaultDetail
+                    {
+                        Type = ProductFaultType.OpenCircuit,
+                        ExpectedSourceIo = net.SourceIo,
+                        ExpectedTargetIo = target,
+                        RelatedIos = net.IoNumbers.Distinct().ToArray(),
+                        ConnectorFrom = sourcePin?.Connector ?? string.Empty,
+                        PinFrom = sourcePin?.PinNumber ?? string.Empty,
+                        ConnectorTo = targetPin?.Connector ?? string.Empty,
+                        PinTo = targetPin?.PinNumber ?? string.Empty,
+                        WireName = net.Name,
+                        WireColor = sourcePin?.Color ?? targetPin?.Color ?? string.Empty
+                    });
+                }
+            }
+
+            if (model.Clip is not null)
+            {
+                foreach (ClipBranch branch in model.Clip.Branches)
+                {
+                    if (!_confirmedOpenKeys.Contains(_confirmationKeyByClip[branch]))
+                        continue;
+
+                    details.Add(new FaultDetail
+                    {
+                        Type = ProductFaultType.OpenCircuit,
+                        ExpectedSourceIo = model.Clip.CommonIo,
+                        ExpectedTargetIo = branch.TargetIo,
+                        RelatedIos = [model.Clip.CommonIo, branch.TargetIo],
+                        ConnectorFrom = branch.ClipPin.Connector,
+                        PinFrom = branch.ClipPin.PinNumber,
+                        ConnectorTo = branch.TargetPin?.Connector ?? string.Empty,
+                        PinTo = branch.TargetPin?.PinNumber ?? string.Empty,
+                        WireName = branch.NetName,
+                        WireColor = branch.TargetPin?.Color ?? branch.ClipPin.Color
+                    });
+                }
+            }
+
+            return details;
+        }
+    }
+
+    private bool HasProductActivityUnsafe(ProductModel model) =>
+        _currentConnections.Any(pair =>
+            pair.Value.Any(target => IsProductActivityEdge(model, pair.Key, target)));
+
+    private static string NetConfirmationKey(string name) => $"NET:{name}";
+    private static string ClipConfirmationKey(string name) => $"CLIP:{name}";
 
 
     private static bool IsProductActivityEdge(

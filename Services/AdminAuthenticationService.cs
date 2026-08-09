@@ -1,0 +1,26 @@
+using System.Security.Cryptography;
+using System.Text;
+
+namespace JBZUniversalTester.Services;
+
+public static class AdminAuthenticationService
+{
+    public static bool Verify(string? configuredPassword, string? suppliedPassword)
+    {
+        if (string.IsNullOrEmpty(configuredPassword))
+            return false;
+
+        byte[] expected = Encoding.UTF8.GetBytes(configuredPassword);
+        byte[] supplied = Encoding.UTF8.GetBytes(suppliedPassword ?? string.Empty);
+        try
+        {
+            return expected.Length == supplied.Length &&
+                   CryptographicOperations.FixedTimeEquals(expected, supplied);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(expected);
+            CryptographicOperations.ZeroMemory(supplied);
+        }
+    }
+}

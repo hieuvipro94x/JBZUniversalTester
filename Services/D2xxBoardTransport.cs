@@ -718,7 +718,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
     {
         try { Thread.CurrentThread.Priority = ThreadPriority.AboveNormal; } catch { }
 
-        int idleDelayMs = Math.Clamp(_production.UsbDelay, 0, 10);
+        int idleDelayMs = Math.Clamp(_production.IoScanIntervalMs, 1, 50);
         int emptyPolls = 0;
         var buffer = new byte[65536];
 

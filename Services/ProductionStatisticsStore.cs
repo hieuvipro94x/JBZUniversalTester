@@ -16,18 +16,30 @@ public sealed class ProductionStatisticsStore
 {
     private readonly object _gate = new();
     private readonly string _path;
+    private readonly TimeProvider _timeProvider;
     private Dictionary<string, ModelProductionStatistics> _items;
+    private List<ProbeMaintenanceRecord> _maintenanceRecords;
 
-    public ProductionStatisticsStore(string? path = null)
+    public ProductionStatisticsStore(string? path = null, TimeProvider? timeProvider = null)
     {
         _path = string.IsNullOrWhiteSpace(path)
             ? Path.Combine(AppContext.BaseDirectory, "production.statistics.json")
             : path;
+        _timeProvider = timeProvider ?? TimeProvider.System;
 
-        _items = LoadFile();
+        StatisticsFile file = LoadFile();
+        _items = (file.Models ?? [])
+            .Where(x => !string.IsNullOrWhiteSpace(x.ModelKey))
+            .GroupBy(x => x.ModelKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => Migrate(group.Last()),
+                StringComparer.OrdinalIgnoreCase);
+        _maintenanceRecords = file.MaintenanceRecords ?? [];
     }
 
     public string StoragePath => _path;
+    public string RecoveryNotice { get; private set; } = string.Empty;
 
     public ModelProductionStatistics Get(ProductModel model)
     {
@@ -37,7 +49,11 @@ public sealed class ProductionStatisticsStore
         {
             string key = BuildModelKey(model);
             if (_items.TryGetValue(key, out ModelProductionStatistics? saved))
-                return saved.Clone();
+            {
+                ModelProductionStatistics result = saved.Clone();
+                RollPeriods(result, LocalNow());
+                return result;
+            }
 
             return new ModelProductionStatistics
             {
@@ -60,7 +76,9 @@ public sealed class ProductionStatisticsStore
         lock (_gate)
         {
             string key = BuildModelKey(model);
-            if (!_items.TryGetValue(key, out ModelProductionStatistics? item))
+            bool existed = _items.TryGetValue(key, out ModelProductionStatistics? item);
+            ModelProductionStatistics? original = item?.Clone();
+            if (!existed || item is null)
             {
                 item = new ModelProductionStatistics
                 {
@@ -69,21 +87,126 @@ public sealed class ProductionStatisticsStore
                 _items[key] = item;
             }
 
-            item.ModelName = model.ModelName ?? string.Empty;
-            item.PartNumber = model.PartNumber ?? string.Empty;
-            item.SourceFile = model.SourcePath ?? string.Empty;
-            item.Total++;
-            if (passed)
-                item.Pass++;
-            else
-                item.Fail++;
+            try
+            {
+                item.ModelName = model.ModelName ?? string.Empty;
+                item.PartNumber = model.PartNumber ?? string.Empty;
+                item.SourceFile = model.SourcePath ?? string.Empty;
+                DateTime now = LocalNow();
+                RollPeriods(item, now);
+                checked
+                {
+                    item.Total++;
+                    item.LifetimeTestCount++;
+                    item.DailyTestCount++;
+                    item.MonthlyTestCount++;
+                    if (passed)
+                        item.Pass++;
+                    else
+                        item.Fail++;
+                }
 
-            item.LastLotNo = lotNo;
-            item.LastResult = resultText ?? (passed ? "PASS" : "FAIL");
-            item.LastTestedAt = DateTime.Now;
+                item.LastLotNo = lotNo;
+                item.LastResult = resultText ?? (passed ? "PASS" : "FAIL");
+                item.LastTestedAt = now;
+                SaveFile();
+                return item.Clone();
+            }
+            catch
+            {
+                RestoreItem(key, existed, original);
+                throw;
+            }
+        }
+    }
 
-            SaveFile();
-            return item.Clone();
+    public ModelProductionStatistics RecordProbeCycle(
+        ProductModel model,
+        long replacementThreshold)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        lock (_gate)
+        {
+            string key = BuildModelKey(model);
+            bool existed = _items.TryGetValue(key, out ModelProductionStatistics? saved);
+            ModelProductionStatistics? original = saved?.Clone();
+            ModelProductionStatistics item = GetOrCreate(model);
+            try
+            {
+                checked { item.ProbeCycleCount++; }
+                item.ProbeReplacementThreshold = replacementThreshold;
+                SaveFile();
+                return item.Clone();
+            }
+            catch
+            {
+                RestoreItem(key, existed, original);
+                throw;
+            }
+        }
+    }
+
+    public ProbeMaintenanceRecord ResetProbeCycle(
+        ProductModel model,
+        long replacementThreshold,
+        string adminIdentity,
+        string station)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+
+        lock (_gate)
+        {
+            string key = BuildModelKey(model);
+            bool existed = _items.TryGetValue(key, out ModelProductionStatistics? saved);
+            ModelProductionStatistics? original = saved?.Clone();
+            ModelProductionStatistics item = GetOrCreate(model);
+            long previous = item.ProbeCycleCount;
+            var record = new ProbeMaintenanceRecord
+            {
+                Timestamp = LocalNow(),
+                ModelKey = item.ModelKey,
+                ModelName = item.ModelName,
+                PartNumber = item.PartNumber,
+                PreviousProbeCycleCount = previous,
+                NewProbeCycleCount = 0,
+                ReplacementThreshold = replacementThreshold,
+                AdminIdentity = adminIdentity ?? string.Empty,
+                Station = station ?? string.Empty,
+                Action = "PROBE PIN REPLACED"
+            };
+
+            item.ProbeCycleCount = 0;
+            item.ProbeReplacementThreshold = replacementThreshold;
+            item.LastProbeResetAt = record.Timestamp;
+            _maintenanceRecords.Add(record);
+
+            try
+            {
+                SaveFile();
+            }
+            catch
+            {
+                RestoreItem(key, existed, original);
+                _maintenanceRecords.Remove(record);
+                throw;
+            }
+
+            return record;
+        }
+    }
+
+    public IReadOnlyList<ProbeMaintenanceRecord> GetMaintenanceRecords(ProductModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        string key = BuildModelKey(model);
+        lock (_gate)
+        {
+            return _maintenanceRecords
+                .Where(record => string.Equals(record.ModelKey, key, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(record => record.Timestamp)
+                .Select(record => record.Clone())
+                .ToArray();
         }
     }
 
@@ -106,30 +229,80 @@ public sealed class ProductionStatisticsStore
         return $"FILE:{file}";
     }
 
-    private Dictionary<string, ModelProductionStatistics> LoadFile()
+    private ModelProductionStatistics GetOrCreate(ProductModel model)
+    {
+        string key = BuildModelKey(model);
+        if (!_items.TryGetValue(key, out ModelProductionStatistics? item))
+        {
+            item = new ModelProductionStatistics { ModelKey = key };
+            _items[key] = item;
+        }
+
+        item.ModelName = model.ModelName ?? string.Empty;
+        item.PartNumber = model.PartNumber ?? string.Empty;
+        item.SourceFile = model.SourcePath ?? string.Empty;
+        RollPeriods(item, LocalNow());
+        return item;
+    }
+
+    private void RestoreItem(
+        string key,
+        bool existed,
+        ModelProductionStatistics? original)
+    {
+        if (existed && original is not null)
+            _items[key] = original;
+        else
+            _items.Remove(key);
+    }
+
+    private StatisticsFile LoadFile()
     {
         try
         {
             if (!File.Exists(_path))
-                return new Dictionary<string, ModelProductionStatistics>(StringComparer.OrdinalIgnoreCase);
+                return new StatisticsFile();
 
-            StatisticsFile? file = JsonSerializer.Deserialize<StatisticsFile>(
-                File.ReadAllText(_path, Encoding.UTF8));
-
-            return (file?.Models ?? new List<ModelProductionStatistics>())
-                .Where(x => !string.IsNullOrWhiteSpace(x.ModelKey))
-                .GroupBy(x => x.ModelKey, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(
-                    g => g.Key,
-                    g => g.Last(),
-                    StringComparer.OrdinalIgnoreCase);
+            return DeserializeFile(_path);
         }
         catch
         {
-            // File thống kê hỏng không được phép làm app production crash.
-            return new Dictionary<string, ModelProductionStatistics>(StringComparer.OrdinalIgnoreCase);
+            string backup = _path + ".bak";
+            try
+            {
+                if (File.Exists(backup))
+                {
+                    StatisticsFile recovered = DeserializeFile(backup);
+                    File.Copy(backup, _path, overwrite: true);
+                    RecoveryNotice = "production.statistics.json hỏng; đã khôi phục từ bản .bak.";
+                    return recovered;
+                }
+            }
+            catch
+            {
+            }
+
+            // Không ghi đè bằng chứng: giữ bản corrupt để kỹ thuật có thể khôi phục.
+            try
+            {
+                if (File.Exists(_path))
+                {
+                    string corrupt = _path + $".corrupt.{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+                    File.Copy(_path, corrupt, overwrite: false);
+                }
+            }
+            catch
+            {
+            }
+
+            RecoveryNotice = "production.statistics.json không đọc được; đã giữ bản .corrupt và khởi tạo store mới.";
+            return new StatisticsFile();
         }
     }
+
+    private static StatisticsFile DeserializeFile(string path) =>
+        JsonSerializer.Deserialize<StatisticsFile>(File.ReadAllText(path, Encoding.UTF8))
+        ?? new StatisticsFile();
 
     private void SaveFile()
     {
@@ -139,11 +312,15 @@ public sealed class ProductionStatisticsStore
 
         var payload = new StatisticsFile
         {
-            Version = 1,
+            Version = 2,
             Models = _items.Values
                 .OrderBy(x => x.PartNumber, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(x => x.ModelName, StringComparer.OrdinalIgnoreCase)
                 .Select(x => x.Clone())
+                .ToList(),
+            MaintenanceRecords = _maintenanceRecords
+                .OrderBy(record => record.Timestamp)
+                .Select(record => record.Clone())
                 .ToList()
         };
 
@@ -152,8 +329,12 @@ public sealed class ProductionStatisticsStore
             new JsonSerializerOptions { WriteIndented = true });
 
         string temp = _path + ".tmp";
+        string backup = _path + ".bak";
         File.WriteAllText(temp, json, new UTF8Encoding(false));
-        File.Move(temp, _path, overwrite: true);
+        if (File.Exists(_path))
+            File.Replace(temp, _path, backup, ignoreMetadataErrors: true);
+        else
+            File.Move(temp, _path);
     }
 
     private static string Normalize(string? value) =>
@@ -161,10 +342,35 @@ public sealed class ProductionStatisticsStore
             ? string.Empty
             : value.Trim().ToUpperInvariant();
 
+    private DateTime LocalNow() => _timeProvider.GetLocalNow().LocalDateTime;
+
+    private static void RollPeriods(ModelProductionStatistics item, DateTime now)
+    {
+        string day = now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        string month = now.ToString("yyyy-MM", System.Globalization.CultureInfo.InvariantCulture);
+        if (!string.Equals(item.DailyPeriod, day, StringComparison.Ordinal))
+        {
+            item.DailyPeriod = day;
+            item.DailyTestCount = 0;
+        }
+        if (!string.Equals(item.MonthlyPeriod, month, StringComparison.Ordinal))
+        {
+            item.MonthlyPeriod = month;
+            item.MonthlyTestCount = 0;
+        }
+    }
+
+    private static ModelProductionStatistics Migrate(ModelProductionStatistics item)
+    {
+        item.LifetimeTestCount = Math.Max(item.LifetimeTestCount, item.Total);
+        return item;
+    }
+
     private sealed class StatisticsFile
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
         public List<ModelProductionStatistics> Models { get; set; } = new();
+        public List<ProbeMaintenanceRecord> MaintenanceRecords { get; set; } = new();
     }
 }
 
@@ -180,6 +386,14 @@ public sealed class ModelProductionStatistics
     public long LastLotNo { get; set; }
     public string LastResult { get; set; } = string.Empty;
     public DateTime? LastTestedAt { get; set; }
+    public string DailyPeriod { get; set; } = string.Empty;
+    public long DailyTestCount { get; set; }
+    public string MonthlyPeriod { get; set; } = string.Empty;
+    public long MonthlyTestCount { get; set; }
+    public long LifetimeTestCount { get; set; }
+    public long ProbeCycleCount { get; set; }
+    public long ProbeReplacementThreshold { get; set; } = 200_000;
+    public DateTime? LastProbeResetAt { get; set; }
 
     public double Rate => Total <= 0 ? 0 : 100.0 * Pass / Total;
 
@@ -194,6 +408,30 @@ public sealed class ModelProductionStatistics
         Fail = Fail,
         LastLotNo = LastLotNo,
         LastResult = LastResult,
-        LastTestedAt = LastTestedAt
+        LastTestedAt = LastTestedAt,
+        DailyPeriod = DailyPeriod,
+        DailyTestCount = DailyTestCount,
+        MonthlyPeriod = MonthlyPeriod,
+        MonthlyTestCount = MonthlyTestCount,
+        LifetimeTestCount = LifetimeTestCount,
+        ProbeCycleCount = ProbeCycleCount,
+        ProbeReplacementThreshold = ProbeReplacementThreshold,
+        LastProbeResetAt = LastProbeResetAt
     };
+}
+
+public sealed class ProbeMaintenanceRecord
+{
+    public DateTime Timestamp { get; set; }
+    public string ModelKey { get; set; } = string.Empty;
+    public string ModelName { get; set; } = string.Empty;
+    public string PartNumber { get; set; } = string.Empty;
+    public long PreviousProbeCycleCount { get; set; }
+    public long NewProbeCycleCount { get; set; }
+    public long ReplacementThreshold { get; set; }
+    public string AdminIdentity { get; set; } = string.Empty;
+    public string Station { get; set; } = string.Empty;
+    public string Action { get; set; } = string.Empty;
+
+    public ProbeMaintenanceRecord Clone() => (ProbeMaintenanceRecord)MemberwiseClone();
 }

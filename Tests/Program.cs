@@ -23,7 +23,9 @@ internal static class Program
             ("ALL6 label data order", TestLabel),
             ("Pi legacy golden compiler", TestPiCompiler),
             ("Standard product picker filter", TestProductPickerFilter),
-            ("Fault display localization and detail", TestFaultDisplayFormatter)
+            ("Fault display localization and detail", TestFaultDisplayFormatter),
+            ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
+            ("Per-model production/probe maintenance counters", TestProductionCounters)
         ];
 
         int failed = 0;
@@ -220,8 +222,16 @@ internal static class Program
         engine.SetModel(pair);
         engine.ProcessFrame(Frame());
         Assert(engine.BuildRows().Any(row => row.Kind == FaultKind.Open), "Missing IO1-IO18 is open");
+        Assert(!engine.HasConfirmedOpenCircuit, "Empty fixture is not inferred as confirmed product OPEN");
 
         ProductModel splice = Model(("SPLICE", new[] { 5, 20, 33 }));
+        engine.SetModel(splice);
+        engine.ProcessFrame(Frame((5, new[] { 20 })));
+        IReadOnlyList<FaultDetail> confirmedSpliceOpen = engine.BuildConfirmedOpenFaults();
+        Assert(confirmedSpliceOpen.Count == 1 &&
+               confirmedSpliceOpen[0].ExpectedTargetIo == 33,
+            "Confirmed splice OPEN identifies the actually missing target");
+
         engine.SetModel(splice);
         engine.ProcessFrame(Frame((5, new[] { 20, 33 })));
         Assert(engine.ContinuityPassed && !engine.HasWiringFault, "Splice component passes");
@@ -232,6 +242,165 @@ internal static class Program
             new Dictionary<int, IReadOnlySet<int>> { [1] = new HashSet<int> { 40 } },
             new Dictionary<int, int> { [40] = 1 }, BoardScanMode.Probe));
         Assert(!engine.HasWiringFault && !engine.ContinuityPassed, "Probe frame never enters production evaluation");
+    }
+
+    private static void TestProductionFaultConfirmation()
+    {
+        var settings = new ProductionSettings
+        {
+            OpenCircuitConfirmMs = 100,
+            ShortCircuitConfirmMs = 80,
+            WrongConnectionConfirmMs = 90,
+            ProductSettleTimeMs = 50,
+            JigContactUnstableWindowMs = 500
+        };
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 9, 0, 0, 0, TimeSpan.Zero));
+        var gate = new ProductionFaultConfirmationGate(settings, clock);
+        var clean = new Dictionary<string, bool> { ["A"] = true, ["B"] = true };
+        var openA = new Dictionary<string, bool> { ["A"] = false, ["B"] = true };
+
+        gate.Observe(clean, [], hasProductActivity: true);
+        clock.Advance(TimeSpan.FromMilliseconds(51));
+        Assert(gate.Observe(clean, [], true).ProductStable, "Clean product settles before PASS");
+
+        gate.Observe(openA, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Count == 0, "OPEN shorter than threshold is candidate only");
+        Assert(gate.Observe(clean, [], true).ConfirmedOpenKeys.Count == 0, "OPEN recovery resets candidate timer");
+        clock.Advance(TimeSpan.FromMilliseconds(10));
+        gate.Observe(openA, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(50));
+        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Count == 0, "Separated OPEN intervals do not accumulate");
+        gate.Observe(clean, [], true);
+
+        clock.Advance(TimeSpan.FromMilliseconds(10));
+        gate.Observe(openA, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(101));
+        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Contains("A"), "Continuous OPEN reaches confirmed product fault");
+
+        gate.Reset();
+        gate.Observe(clean, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(51));
+        gate.Observe(clean, [], true);
+        gate.Observe(openA, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(20));
+        gate.Observe(clean, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(20));
+        gate.Observe(openA, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(20));
+        ProductionFaultConfirmationSnapshot bounce = gate.Observe(clean, [], true);
+        Assert(bounce.ContactUnstable && bounce.ConfirmedOpenKeys.Count == 0, "Repeated contact bounce becomes jig warning, not product FAIL");
+        clock.Advance(TimeSpan.FromMilliseconds(51));
+        ProductionFaultConfirmationSnapshot recovered = gate.Observe(clean, [], true);
+        Assert(!recovered.ContactUnstable && recovered.ProductStable, "Clean re-evaluation clears jig warning");
+
+        ProductionFaultConfirmationSnapshot fullLoss = gate.Observe(
+            new Dictionary<string, bool> { ["A"] = false, ["B"] = false },
+            [],
+            hasProductActivity: false);
+        Assert(fullLoss.ContactUnstable && fullLoss.ConfirmedOpenKeys.Count == 0, "Full contact loss is not inferred as product OPEN");
+
+        gate.Reset();
+        var shortFault = new[] { new UnexpectedFaultObservation(1, 2, ProductFaultType.ShortCircuit) };
+        gate.Observe(clean, shortFault, true);
+        clock.Advance(TimeSpan.FromMilliseconds(79));
+        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient SHORT not confirmed");
+        clock.Advance(TimeSpan.FromMilliseconds(2));
+        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Contains((1, 2)), "Stable SHORT confirmed");
+        Assert(gate.Observe(clean, [], true).ConfirmedUnexpectedPairs.Count == 0, "SHORT recovery resets candidate");
+
+        var wrongFault = new[] { new UnexpectedFaultObservation(3, 4, ProductFaultType.WrongWiring) };
+        gate.Observe(clean, wrongFault, true);
+        clock.Advance(TimeSpan.FromMilliseconds(89));
+        Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient wrong connection not confirmed");
+        clock.Advance(TimeSpan.FromMilliseconds(2));
+        Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Contains((3, 4)), "Stable wrong connection confirmed");
+
+        var invalid = new ProductionSettings
+        {
+            IoScanIntervalMs = -1,
+            OpenCircuitConfirmMs = -1,
+            ShortCircuitConfirmMs = -1,
+            WrongConnectionConfirmMs = int.MaxValue,
+            ProductSettleTimeMs = -1,
+            JigContactUnstableWindowMs = -1,
+            ProbeReplacementThreshold = -1
+        };
+        ProductionTimingPolicy.Normalize(invalid);
+        Assert(invalid.IoScanIntervalMs >= 1 &&
+               invalid.OpenCircuitConfirmMs >= 20 &&
+               invalid.ShortCircuitConfirmMs >= 20 &&
+               invalid.WrongConnectionConfirmMs <= 10_000 &&
+               invalid.ProductSettleTimeMs >= 20 &&
+               invalid.JigContactUnstableWindowMs >= 100 &&
+               invalid.ProbeReplacementThreshold >= 1_000,
+            "Timing/maintenance settings validation bounds");
+
+        string settingsJson = JsonSerializer.Serialize(settings);
+        ProductionSettings reloaded = JsonSerializer.Deserialize<ProductionSettings>(settingsJson)
+            ?? throw new InvalidOperationException("Timing settings JSON reload");
+        Assert(reloaded.OpenCircuitConfirmMs == 100 &&
+               reloaded.ShortCircuitConfirmMs == 80 &&
+               reloaded.WrongConnectionConfirmMs == 90 &&
+               reloaded.ProductSettleTimeMs == 50 &&
+               reloaded.JigContactUnstableWindowMs == 500,
+            "Timing settings persist/reload");
+    }
+
+    private static void TestProductionCounters()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZSelfTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "production.statistics.json");
+            var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 9, 8, 0, 0, TimeSpan.Zero));
+            var store = new ProductionStatisticsStore(path, clock);
+            ProductModel modelA = Model(("A", new[] { 1, 2 }));
+            modelA.ModelName = "MODEL-A";
+            modelA.PartNumber = "ABC123";
+            ProductModel modelB = Model(("B", new[] { 3, 4 }));
+            modelB.ModelName = "MODEL-B";
+            modelB.PartNumber = "XYZ456";
+
+            store.RecordProbeCycle(modelA, 2);
+            store.Record(modelA, true, 1, "PASS");
+            store.Record(modelA, false, 2, "FAIL");
+            store.Record(modelB, true, 3, "PASS");
+
+            ModelProductionStatistics a = store.Get(modelA);
+            ModelProductionStatistics b = store.Get(modelB);
+            Assert(a.DailyTestCount == 2 && a.MonthlyTestCount == 2 && a.LifetimeTestCount == 2, "Model A production periods/lifetime");
+            Assert(a.ProbeCycleCount == 1 && b.ProbeCycleCount == 0 && b.LifetimeTestCount == 1, "Per-model counter isolation");
+
+            var restarted = new ProductionStatisticsStore(path, clock);
+            Assert(restarted.Get(modelA).ProbeCycleCount == 1 && restarted.Get(modelA).LifetimeTestCount == 2, "Counters persist after restart");
+
+            clock.Advance(TimeSpan.FromDays(1));
+            Assert(restarted.Get(modelA).DailyTestCount == 0 && restarted.Get(modelA).MonthlyTestCount == 2, "Daily period rolls without resetting month/probe");
+            restarted.Record(modelA, true, 4, "PASS");
+            Assert(restarted.Get(modelA).DailyTestCount == 1 && restarted.Get(modelA).MonthlyTestCount == 3, "New day increments correct logical period");
+
+            clock.Advance(TimeSpan.FromDays(24));
+            Assert(restarted.Get(modelA).MonthlyTestCount == 0 && restarted.Get(modelA).ProbeCycleCount == 1, "Monthly period rolls without resetting probe");
+
+            ModelProductionStatistics due = restarted.RecordProbeCycle(modelA, 2);
+            Assert(due.ProbeCycleCount == 2 && due.ProbeCycleCount >= due.ProbeReplacementThreshold, "Probe replacement threshold transition");
+            long lifetimeBeforeReset = due.LifetimeTestCount;
+            ProbeMaintenanceRecord maintenance = restarted.ResetProbeCycle(modelA, 2, "ADMIN", "STATION-1");
+            ModelProductionStatistics reset = restarted.Get(modelA);
+            Assert(reset.ProbeCycleCount == 0 && reset.LifetimeTestCount == lifetimeBeforeReset, "Probe reset does not reset production counters");
+            Assert(maintenance.PreviousProbeCycleCount == 2 && maintenance.Action == "PROBE PIN REPLACED", "Maintenance record values");
+            Assert(restarted.GetMaintenanceRecords(modelA).Count == 1 && restarted.GetMaintenanceRecords(modelB).Count == 0, "Maintenance history separated per model");
+
+            Assert(!AdminAuthenticationService.Verify(string.Empty, string.Empty), "Empty admin password cannot authorize reset");
+            Assert(!AdminAuthenticationService.Verify("admin-secret", "wrong"), "Wrong admin password rejected");
+            Assert(AdminAuthenticationService.Verify("admin-secret", "admin-secret"), "Configured admin password accepted");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void TestRelayOrdering()
@@ -381,7 +550,12 @@ internal static class Program
             IoConfirmN = 1,
             Relay1JigPulseMs = 50,
             Relay2MarkingPulseMs = 50,
-            PassMarkingToJigDelayMs = 0
+            PassMarkingToJigDelayMs = 0,
+            OpenCircuitConfirmMs = 0,
+            ShortCircuitConfirmMs = 0,
+            WrongConnectionConfirmMs = 0,
+            ProductSettleTimeMs = 0,
+            JigContactUnstableWindowMs = 0
         };
         return new TestEngine(board, new KeysightVisaService(), app, production);
     }
@@ -442,5 +616,24 @@ internal static class Program
         public Task SetRelayAsync(int relay, CancellationToken ct = default) { Commands.Add($"SET:{relay}"); return Task.CompletedTask; }
         public Task AllRelaysOffAsync(CancellationToken ct = default) { Commands.Add("OFF"); return Task.CompletedTask; }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _utcNow;
+        private long _timestamp;
+
+        public ManualTimeProvider(DateTimeOffset utcNow) => _utcNow = utcNow;
+
+        public override long TimestampFrequency => 1_000;
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+        public override long GetTimestamp() => _timestamp;
+
+        public void Advance(TimeSpan value)
+        {
+            _utcNow = _utcNow.Add(value);
+            _timestamp += checked((long)Math.Round(value.TotalMilliseconds));
+        }
     }
 }

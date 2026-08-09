@@ -1,0 +1,49 @@
+<Window x:Class="JBZUniversalTester.Views.ProbeMaintenanceResetWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Xác nhận thay Probe Pin"
+        Width="520" Height="360"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="#F3F4F6">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="58"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="XÁC NHẬN ĐÃ THAY PROBE PIN"
+                   FontSize="22" FontWeight="Bold" Foreground="#991B1B"
+                   HorizontalAlignment="Center"/>
+        <TextBlock x:Name="ModelText" Grid.Row="1" Margin="0,18,0,0"
+                   FontSize="16" FontWeight="SemiBold"/>
+        <TextBlock x:Name="CounterText" Grid.Row="2" Margin="0,8,0,0"
+                   FontSize="15" TextWrapping="Wrap"/>
+
+        <StackPanel Grid.Row="3" Margin="0,18,0,0">
+            <TextBlock Text="Mật khẩu quản trị" FontWeight="SemiBold"/>
+            <PasswordBox x:Name="AdminPasswordBox" Height="38" Margin="0,6,0,0"
+                         FontSize="17" KeyDown="AdminPasswordBox_KeyDown"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="4" Margin="0,12,0,0" Foreground="#B91C1C"
+                   Text="Chỉ xác nhận sau khi Probe Pin đã được thay thế thực tế. Thao tác này chỉ reset counter bảo trì; không xóa sản lượng/lịch sử test."
+                   TextWrapping="Wrap"/>
+
+        <Grid Grid.Row="5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="150"/>
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="1" Margin="4" Content="HỦY" IsCancel="True"/>
+            <Button Grid.Column="2" Margin="4" Content="XÁC NHẬN" IsDefault="True"
+                    Background="#F59E0B" FontWeight="Bold" Click="Confirm_Click"/>
+        </Grid>
+    </Grid>
+</Window>

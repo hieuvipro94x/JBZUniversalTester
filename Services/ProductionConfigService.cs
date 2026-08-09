@@ -132,6 +132,13 @@ public static class ProductionConfigService
             $"[MinimumErrorLogValue]{settings.MinimumErrorLogValue}",
             $"[AutoSaveErrors]{Bool(settings.AutoSaveErrors)}",
 
+            $"[IoScanIntervalMs]{settings.IoScanIntervalMs}",
+            $"[OpenCircuitConfirmMs]{settings.OpenCircuitConfirmMs}",
+            $"[ShortCircuitConfirmMs]{settings.ShortCircuitConfirmMs}",
+            $"[WrongConnectionConfirmMs]{settings.WrongConnectionConfirmMs}",
+            $"[ProductSettleTimeMs]{settings.ProductSettleTimeMs}",
+            $"[JigContactUnstableWindowMs]{settings.JigContactUnstableWindowMs}",
+            $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
             $"[ShortConfirmMs]{settings.ShortConfirmMs}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
             $"[Relay2MarkingPulseMs]{settings.Relay2MarkingPulseMs}",
@@ -311,7 +318,14 @@ public static class ProductionConfigService
         settings.MinimumErrorLogValue = I(map, "MinimumErrorLogValue", settings.MinimumErrorLogValue);
         settings.AutoSaveErrors = B(map, "AutoSaveErrors", settings.AutoSaveErrors);
 
+        settings.IoScanIntervalMs = I(map, "IoScanIntervalMs", settings.IoScanIntervalMs);
+        settings.OpenCircuitConfirmMs = I(map, "OpenCircuitConfirmMs", settings.OpenCircuitConfirmMs);
         settings.ShortConfirmMs = I(map, "ShortConfirmMs", settings.ShortConfirmMs);
+        settings.ShortCircuitConfirmMs = I(map, "ShortCircuitConfirmMs", settings.ShortCircuitConfirmMs);
+        settings.WrongConnectionConfirmMs = I(map, "WrongConnectionConfirmMs", settings.WrongConnectionConfirmMs);
+        settings.ProductSettleTimeMs = I(map, "ProductSettleTimeMs", settings.ProductSettleTimeMs);
+        settings.JigContactUnstableWindowMs = I(map, "JigContactUnstableWindowMs", settings.JigContactUnstableWindowMs);
+        settings.ProbeReplacementThreshold = L(map, "ProbeReplacementThreshold", settings.ProbeReplacementThreshold);
         settings.StampDelay = SAny(map, settings.StampDelay, "StampDelayMs", "스탬프 지연(msec)");
         bool hasSplitRelay = map.ContainsKey("Relay1JigPulseMs") || map.ContainsKey("Relay2MarkingPulseMs");
         if (hasSplitRelay)
@@ -399,7 +413,7 @@ public static class ProductionConfigService
         }
 
         if (settings.LotNo < 0) settings.LotNo = 0;
-        settings.ShortConfirmMs = 0;
+        ProductionTimingPolicy.Normalize(settings);
         settings.UsbDelay = Math.Clamp(settings.UsbDelay, 1, 16);
         settings.IoConfirm1 = Math.Clamp(settings.IoConfirm1, 0, 127);
         settings.IoConfirmN = Math.Clamp(settings.IoConfirmN, 0, 31);

@@ -166,7 +166,7 @@
     <Grid Background="{StaticResource PageBackground}" Margin="10,8,10,0" ClipToBounds="True">
         <Grid.RowDefinitions>
             <!-- V12.10.1: Header/Probe/Status đều Auto; chỉ TabControl/FaultGrid nhận chiều cao *. -->
-            <RowDefinition Height="128"/>
+            <RowDefinition Height="166"/>
             <RowDefinition Height="Auto" MinHeight="44"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*" MinHeight="300"/>
@@ -279,6 +279,7 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -320,6 +321,36 @@
                         <TextBlock Text="MẠNG / MASTER" FontSize="10.5" FontWeight="Bold" Foreground="#777" HorizontalAlignment="Center"/>
                         <TextBlock Text="{Binding NetworkProgress}" FontSize="17" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
                     </StackPanel>
+
+                    <StackPanel Grid.Row="2" Grid.Column="0" HorizontalAlignment="Center">
+                        <TextBlock Text="HÔM NAY" FontSize="10" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding DailyTestCount, StringFormat={}{0:N0}}" FontSize="16" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="1" HorizontalAlignment="Center">
+                        <TextBlock Text="THÁNG NÀY" FontSize="10" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding MonthlyTestCount, StringFormat={}{0:N0}}" FontSize="16" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="2" Grid.Column="2" HorizontalAlignment="Center">
+                        <TextBlock Text="LIFETIME" FontSize="10" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding LifetimeTestCount, StringFormat={}{0:N0}}" FontSize="16" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <Border Grid.Row="2" Grid.Column="3" Padding="4,1" CornerRadius="3">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#E8F5E9"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ProbeMaintenanceDue}" Value="True">
+                                        <Setter Property="Background" Value="#F8B4B4"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="PROBE PIN" FontSize="10" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding ProbeCycleText}" FontSize="14" FontWeight="Bold" Foreground="#991B1B" HorizontalAlignment="Center"/>
+                            <TextBlock Text="{Binding ProbeMaintenanceStatus}" FontSize="7.5" FontWeight="Bold" Foreground="#991B1B" HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
                 </Grid>
             </Border>
         </Grid>
@@ -617,6 +648,7 @@
                         <ColumnDefinition Width="1.1*"/>
                         <ColumnDefinition Width="1.1*"/>
                         <ColumnDefinition Width="1.1*"/>
+                        <ColumnDefinition Width="1.1*"/>
                     </Grid.ColumnDefinitions>
 
                     <Button Grid.Column="0" Content="ĐO ĐIỆN TRỞ" Margin="4,0" Command="{Binding MeasureCommand}" FontSize="15" FontWeight="Bold">
@@ -636,7 +668,10 @@
                     <Button Grid.Column="1" Content="DỪNG AN TOÀN" Margin="4,0" Command="{Binding StopCommand}"
                             Style="{StaticResource ProductionButtonStyle}" Background="#F1B8B8" FontSize="15" FontWeight="Bold"/>
 
-                    <Button Grid.Column="2" Content="VỀ TRANG CHÍNH" Margin="4,0" Click="BackToMain_Click"
+                    <Button Grid.Column="2" Content="XÁC NHẬN THAY PROBE PIN" Margin="4,0" Click="ResetProbeMaintenance_Click"
+                            Style="{StaticResource ProductionButtonStyle}" Background="#F6D38B" FontSize="13" FontWeight="Bold"/>
+
+                    <Button Grid.Column="3" Content="VỀ TRANG CHÍNH" Margin="4,0" Click="BackToMain_Click"
                             Style="{StaticResource ProductionButtonStyle}" Background="#E7E7E7" FontSize="15" FontWeight="Bold"/>
                 </Grid>
             </Border>

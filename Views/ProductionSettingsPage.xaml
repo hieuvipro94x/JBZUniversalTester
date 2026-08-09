@@ -359,45 +359,54 @@
 
                 <Border Grid.Column="2" Style="{StaticResource SettingsPanelStyle}">
                     <StackPanel>
-                        <TextBlock Text="THỜI GIAN / GIAO DIỆN" Style="{StaticResource SectionTitleStyle}"/>
+                        <TextBlock Text="THỜI GIAN QUÉT / XÁC NHẬN LỖI / BẢO TRÌ" Style="{StaticResource SectionTitleStyle}"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="205"/>
+                                <ColumnDefinition Width="175"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="175"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
-                                <RowDefinition Height="39"/>
+                                <RowDefinition Height="36"/><RowDefinition Height="36"/><RowDefinition Height="36"/>
+                                <RowDefinition Height="36"/><RowDefinition Height="36"/><RowDefinition Height="36"/>
+                                <RowDefinition Height="36"/><RowDefinition Height="36"/><RowDefinition Height="36"/>
                             </Grid.RowDefinitions>
 
-                            <TextBlock Text="Đấu sai/chập" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Column="1" Text="BÁO NGAY" IsReadOnly="True"/>
-                            <TextBlock Grid.Row="1" Text="R1 JIG - thời gian bật (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="2" Text="R2 MARKING - thời gian bật (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Settings.Relay2MarkingPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="3" Text="PASS: chờ R2 → R1 (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="4" Text="Trễ đo điện trở (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="5" Text="Chiều cao mục" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="6" Text="Độ trễ cuộn" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="7" Text="Độ trễ trang" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="8" Text="Hiển thị tiêu đề" Style="{StaticResource FieldLabelStyle}"/>
-                            <CheckBox Grid.Row="8" Grid.Column="1" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
-                            <TextBlock Grid.Row="9" Text="Hiển thị connector" Style="{StaticResource FieldLabelStyle}"/>
-                            <CheckBox Grid.Row="9" Grid.Column="1" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
+                            <TextBlock Text="Chu kỳ quét IO (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Column="1" Text="{Binding Settings.IoScanIntervalMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="1" Text="Xác nhận hở mạch (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Settings.OpenCircuitConfirmMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="2" Text="Xác nhận chập mạch (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Settings.ShortCircuitConfirmMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="3" Text="Xác nhận sai kết nối (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Settings.WrongConnectionConfirmMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="4" Text="Ổn định sau khi lắp (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Settings.ProductSettleTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="5" Text="Đánh giá tiếp xúc JIG (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.JigContactUnstableWindowMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="6" Text="Chu kỳ thay Probe Pin" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.ProbeReplacementThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                            <TextBlock Grid.Column="2" Text="R1 JIG - pulse (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBox Grid.Column="3" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="R2 MARKING - pulse (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding Settings.Relay2MarkingPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2" Text="PASS: chờ R2 → R1 (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBox Grid.Row="2" Grid.Column="3" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="3" Grid.Column="2" Text="Trễ đo điện trở (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBox Grid.Row="3" Grid.Column="3" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="4" Grid.Column="2" Text="Chiều cao mục" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBox Grid.Row="4" Grid.Column="3" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Grid.Row="5" Grid.Column="2" Text="Độ trễ cuộn / trang" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <StackPanel Grid.Row="5" Grid.Column="3" Orientation="Horizontal">
+                                <TextBox Width="70" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBox Width="70" Margin="5,0,0,0" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="6" Grid.Column="2" Text="Hiển thị tiêu đề" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <CheckBox Grid.Row="6" Grid.Column="3" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
+                            <TextBlock Grid.Row="7" Grid.Column="2" Text="Hiển thị connector" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <CheckBox Grid.Row="7" Grid.Column="3" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
                         </Grid>
                     </StackPanel>
                 </Border>

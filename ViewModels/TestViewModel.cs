@@ -71,7 +71,12 @@ public sealed class TestViewModel : ObservableObject
     // Gate liên luồng: callback D2XX chạy qua Dispatcher, còn UART protocol
     // chạy từ reader task. Mỗi chu kỳ chỉ một caller được chốt side effects.
     private int _resultRecordedThisCycle;
+    private int _probeCycleRecordedThisCycle;
     private DateTime _cycleStartedAt = DateTime.Now;
+    private long _dailyTestCount;
+    private long _monthlyTestCount;
+    private long _lifetimeTestCount;
+    private long _probeCycleCount;
 
     // V13.0 DUAL BOARD: UART firmware emits high-level TESTPIN/OPEN/OTHER/CIRCUIT
     // events directly. D2XX continues to use ScanFrame + TestEngine unchanged.
@@ -503,6 +508,49 @@ public sealed class TestViewModel : ObservableObject
     public double Rate =>
         Total == 0 ? 0 : 100.0 * Pass / Total;
 
+    public long DailyTestCount
+    {
+        get => _dailyTestCount;
+        private set => Set(ref _dailyTestCount, value);
+    }
+
+    public long MonthlyTestCount
+    {
+        get => _monthlyTestCount;
+        private set => Set(ref _monthlyTestCount, value);
+    }
+
+    public long LifetimeTestCount
+    {
+        get => _lifetimeTestCount;
+        private set => Set(ref _lifetimeTestCount, value);
+    }
+
+    public long ProbeCycleCount
+    {
+        get => _probeCycleCount;
+        private set
+        {
+            if (Set(ref _probeCycleCount, value))
+            {
+                Raise(nameof(ProbeCycleText));
+                Raise(nameof(ProbeMaintenanceDue));
+                Raise(nameof(ProbeMaintenanceStatus));
+                Raise(nameof(ProbeMaintenanceBackground));
+            }
+        }
+    }
+
+    public long ProbeReplacementThreshold =>
+        Math.Max(1, _productionSettings.ProbeReplacementThreshold);
+
+    public string ProbeCycleText => $"{ProbeCycleCount:N0} / {ProbeReplacementThreshold:N0}";
+    public bool ProbeMaintenanceDue => ProbeCycleCount >= ProbeReplacementThreshold;
+    public string ProbeMaintenanceStatus => ProbeMaintenanceDue
+        ? "ĐẾN CHU KỲ THAY PROBE PIN"
+        : "PROBE PIN ĐANG TRONG CHU KỲ SỬ DỤNG";
+    public string ProbeMaintenanceBackground => ProbeMaintenanceDue ? "#D32F2F" : "#E8F5E9";
+
     public MasterSequenceState MasterState
     {
         get => _masterSequenceState;
@@ -593,6 +641,8 @@ public sealed class TestViewModel : ObservableObject
         _historyStore = new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
         Lot = _productionSettings.LotNo.ToString();
         _sound.Initialize();
+        if (!string.IsNullOrWhiteSpace(_statisticsStore.RecoveryNotice))
+            AddLog($"COUNTER RECOVERY: {_statisticsStore.RecoveryNotice}");
 
         _keysightResource =
             settings.Keysight.Resource ?? string.Empty;
@@ -1196,6 +1246,7 @@ public sealed class TestViewModel : ObservableObject
                     _cycleActive = true;
                     _productDetectedThisCycle = false;
                     Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+                    Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
                     Lot = _productionSettings.LotNo.ToString();
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog("Đã tháo sản phẩm lỗi - chờ lắp sản phẩm lại.");
@@ -1219,6 +1270,7 @@ public sealed class TestViewModel : ObservableObject
                     _cycleActive = true;
                     _productDetectedThisCycle = false;
                     Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+                    Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
                     Lot = _productionSettings.LotNo.ToString();
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog("PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
@@ -1227,14 +1279,37 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            // QUAN TRỌNG V11.6: lỗi đấu sai/chập được xét TRƯỚC việc đổi trạng
-            // thái sang ĐANG KIỂM TRA. Không cần chờ sản phẩm được nhận diện và
-            // không còn thời gian xác nhận 1000 ms. Frame sai đầu tiên -> báo ngay.
+            // Chỉ product fault đã qua monotonic confirmation gate mới được
+            // dừng scan/popup/ghi FAIL. Candidate raw không đi vào lifecycle FAIL.
             if (_cycleActive &&
-                _engine.HasWiringFault &&
+                (_engine.HasWiringFault || _engine.HasConfirmedOpenCircuit) &&
                 Interlocked.CompareExchange(ref _wiringFaultHandlingStarted, 1, 0) == 0)
             {
                 _ = HandleWiringFaultAsync(generation);
+                return;
+            }
+
+            if (_cycleActive && _engine.HasContactInstability)
+            {
+                _sound.SetWiringFaultAlarm(false);
+                Interlocked.Exchange(ref _postContinuityStarted, 0);
+                State = "TIẾP XÚC JIG/PROBE KHÔNG ỔN ĐỊNH — KIỂM TRA PROBE PIN/JIG";
+
+                if (_engine.ContactLossTimedOut && _productDetectedThisCycle)
+                {
+                    // Mất contact kéo dài được xem là ranh giới cơ khí bị hủy,
+                    // không phải FAIL. Lần lắp/contact tiếp theo là một Probe cycle mới.
+                    _productDetectedThisCycle = false;
+                    Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+                    AddLog("JIG CONTACT WARNING: mất toàn bộ contact quá cửa sổ; không ghi product FAIL.");
+                }
+                else if (_engine.HasProductActivity && !_productDetectedThisCycle)
+                {
+                    _cycleStartedAt = DateTime.Now;
+                    _productDetectedThisCycle = true;
+                    RecordProbeCycleStarted();
+                }
+
                 return;
             }
 
@@ -1246,27 +1321,19 @@ public sealed class TestViewModel : ObservableObject
                 if (hasActivity)
                 {
                     if (!_productDetectedThisCycle)
+                    {
                         _cycleStartedAt = DateTime.Now;
+                        RecordProbeCycleStarted();
+                    }
                     _productDetectedThisCycle = true;
                     if (!State.Equals("PASS", StringComparison.OrdinalIgnoreCase))
                         State = "ĐANG KIỂM TRA...";
                 }
                 else if (_productDetectedThisCycle)
                 {
-                    // Sản phẩm đã có hoạt động nhưng bị tháo trước PASS: chốt
-                    // đúng lỗi OPEN còn lại thay vì âm thầm bỏ chu kỳ. Đây là
-                    // đường tạo History "DÂY CHƯA KẾT NỐI".
-                    if (Volatile.Read(ref _resultRecordedThisCycle) == 0 &&
-                        Faults.Any(row => row.Kind == FaultKind.Open))
-                    {
-                        RecordCompletedProduct(false, FaultTypeCatalog.DisplayName(ProductFaultType.OpenCircuit));
-                        AddLog("Sản phẩm bị tháo trước PASS: đã ghi DÂY CHƯA KẾT NỐI vào History.");
-                    }
-
-                    _productDetectedThisCycle = false;
-                    Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
-                    Lot = _productionSettings.LotNo.ToString();
-                    State = "CHỜ LẮP SẢN PHẨM";
+                    // Không suy diễn "mất hết activity" thành OPEN product.
+                    // Confirmation gate sẽ phân nhánh contact warning/re-evaluation.
+                    State = "TIẾP XÚC JIG/PROBE KHÔNG ỔN ĐỊNH — KIỂM TRA PROBE PIN/JIG";
                 }
             }
 
@@ -1327,7 +1394,12 @@ public sealed class TestViewModel : ObservableObject
                 if (evt.Values.Count > 0 && int.TryParse(evt.Values[0], out int circuit))
                 {
                     if (Interlocked.CompareExchange(ref _uartResultHandlingStarted, 1, 0) == 0)
+                    {
+                        // UART firmware chỉ cung cấp kết quả cycle cấp cao; CIRCUIT là
+                        // bằng chứng fixture đã thực sự thực hiện một test, không đếm theo :START/frame.
+                        RecordProbeCycleStarted();
                         _ = HandleUartCircuitResultAsync(circuit);
+                    }
                 }
                 break;
 
@@ -1547,6 +1619,7 @@ public sealed class TestViewModel : ObservableObject
             await Task.Delay(50, CurrentCycleToken());
             _cycleStartedAt = DateTime.Now;
             Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+            Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
             _productDetectedThisCycle = false;
             InvokeUi(() => Lot = _productionSettings.LotNo.ToString());
             AddLog("UART :UNCONNECT => ranh giới sản phẩm sạch; bắt đầu chu kỳ mới bằng :START.");
@@ -2423,6 +2496,7 @@ public sealed class TestViewModel : ObservableObject
         _engine.Reset();
         _productDetectedThisCycle = false;
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+        Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
         _cycleStartedAt = DateTime.Now;
         Lot = _productionSettings.LotNo.ToString();
 
@@ -2556,38 +2630,48 @@ public sealed class TestViewModel : ObservableObject
             .ThenBy(x => x.TargetIo)
             .ToArray();
 
-        ProductFaultType primaryType = wiringPairs
-            .Select(pair => pair.FaultType)
-            .OrderBy(FaultTypeCatalog.Priority)
-            .FirstOrDefault(ProductFaultType.WrongWiring);
-        string primaryName = FaultTypeCatalog.DisplayName(primaryType);
-        State = primaryName;
-
-        FaultDetail[] dialogFaults = CaptureFaultDetails()
-            .Where(fault => fault.Type is
-                ProductFaultType.OpenCircuit or
-                ProductFaultType.WrongWiring or
-                ProductFaultType.ShortCircuit)
+        FaultDetail[] dialogFaults = _engine.BuildConfirmedOpenFaults()
+            .Select(EnrichFaultDetail)
+            .Concat(wiringPairs.Select(pair => EnrichFaultDetail(new FaultDetail
+            {
+                Type = pair.FaultType,
+                ExpectedSourceIo = pair.ExpectedSourceIo,
+                ExpectedTargetIo = pair.ExpectedTargetIo,
+                ActualSourceIo = pair.SourceIo,
+                ActualTargetIo = pair.TargetIo,
+                RelatedIos = [pair.SourceIo, pair.TargetIo],
+                Message = pair.Reason
+            })))
+            .GroupBy(fault => new
+            {
+                fault.Type,
+                fault.ExpectedSourceIo,
+                fault.ExpectedTargetIo,
+                fault.ActualSourceIo,
+                fault.ActualTargetIo,
+                fault.WireName
+            })
+            .Select(group => group.First())
             .ToArray();
 
         if (dialogFaults.Length == 0)
         {
-            dialogFaults = wiringPairs
-                .Select(pair => EnrichFaultDetail(new FaultDetail
-                {
-                    Type = pair.FaultType,
-                    ExpectedSourceIo = pair.ExpectedSourceIo,
-                    ExpectedTargetIo = pair.ExpectedTargetIo,
-                    ActualSourceIo = pair.SourceIo,
-                    ActualTargetIo = pair.TargetIo,
-                    RelatedIos = [pair.SourceIo, pair.TargetIo]
-                }))
-                .ToArray();
+            AbortProductionFaultForProbe();
+            State = "ĐANG KIỂM TRA...";
+            return;
         }
+
+        ProductFaultType primaryType = dialogFaults
+            .Select(fault => fault.Type)
+            .OrderBy(FaultTypeCatalog.Priority)
+            .First();
+        string primaryName = FaultTypeCatalog.DisplayName(primaryType);
+        State = primaryName;
 
         AddLog(
             $"DỪNG TEST do {primaryName}: " +
-            string.Join(", ", wiringPairs.Select(x => $"{FaultTypeCatalog.Code(x.FaultType)} IO{x.SourceIo}<->IO{x.TargetIo}")));
+            string.Join(", ", dialogFaults.Select(fault =>
+                $"{fault.Code} {fault.ExpectedText} {fault.ActualText}".Trim())));
 
         // Chốt cuối ngay trước UI modal. Từ thời điểm Probe bật, tuyệt đối
         // không được phép hiện popup production.
@@ -2718,17 +2802,18 @@ public sealed class TestViewModel : ObservableObject
             })
             .ToList();
 
-        // V12.10.1: trong MasterBad, Faults là snapshot UNIQUE để hiển thị.
-        // Nguồn xác nhận live (đặc biệt OpenCircuit) phải lấy trực tiếp từ engine
-        // để fault mới không bị mất chỉ vì DataGrid đang giữ snapshot đã xác nhận.
-        IReadOnlyList<FaultRow> liveFaultRows = !MasterApproved && IsMasterBadPhase
-            ? _engine.BuildRows()
-            : Faults.ToArray();
-
-        details.AddRange(liveFaultRows
-            .Where(row => row.ProductFaultType != ProductFaultType.None &&
-                          row.ProductFaultType != ProductFaultType.SystemDeviceError)
-            .Select(row => EnrichFaultDetail(row.ToFaultDetail())));
+        if (!MasterApproved && IsMasterBadPhase)
+        {
+            // Master BAD giữ semantics evidence riêng, không phải product FAIL.
+            details.AddRange(_engine.BuildRows()
+                .Where(row => row.ProductFaultType != ProductFaultType.None &&
+                              row.ProductFaultType != ProductFaultType.SystemDeviceError)
+                .Select(row => EnrichFaultDetail(row.ToFaultDetail())));
+        }
+        else
+        {
+            details.AddRange(_engine.BuildConfirmedOpenFaults().Select(EnrichFaultDetail));
+        }
 
         foreach (ResistanceResult resistance in Resistance.Where(item => !item.Passed))
             details.Add(CreateResistanceFaultDetail(resistance));
@@ -3769,6 +3854,7 @@ public sealed class TestViewModel : ObservableObject
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+        Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
 
         _model = model ??
             throw new ArgumentNullException(nameof(model));
@@ -3840,6 +3926,7 @@ public sealed class TestViewModel : ObservableObject
             Total = stats.Total;
             Pass = stats.Pass;
             Fail = stats.Fail;
+            ApplyExtendedStatistics(stats);
             RaiseTestStatistics();
 
             AddLog(
@@ -3851,6 +3938,10 @@ public sealed class TestViewModel : ObservableObject
             Total = 0;
             Pass = 0;
             Fail = 0;
+            DailyTestCount = 0;
+            MonthlyTestCount = 0;
+            LifetimeTestCount = 0;
+            ProbeCycleCount = 0;
             RaiseTestStatistics();
             AddLog($"Không thể nạp lịch sử sản lượng: {ex.Message}");
         }
@@ -3896,6 +3987,7 @@ public sealed class TestViewModel : ObservableObject
             Total = stats.Total;
             Pass = stats.Pass;
             Fail = stats.Fail;
+            ApplyExtendedStatistics(stats);
         }
         catch (Exception ex)
         {
@@ -4002,6 +4094,126 @@ public sealed class TestViewModel : ObservableObject
             (passed ? ", " : $" - {failureName}, ") +
             $"Tổng {Total}, PASS {Pass}, FAIL {Fail}, tỷ lệ {Rate:0.00}%. " +
             $"LOTNO kế tiếp: {_productionSettings.LotNo}.");
+    }
+
+    private void ApplyExtendedStatistics(ModelProductionStatistics stats)
+    {
+        DailyTestCount = stats.DailyTestCount;
+        MonthlyTestCount = stats.MonthlyTestCount;
+        LifetimeTestCount = stats.LifetimeTestCount;
+        ProbeCycleCount = stats.ProbeCycleCount;
+        Raise(nameof(ProbeReplacementThreshold));
+        Raise(nameof(ProbeCycleText));
+        Raise(nameof(ProbeMaintenanceDue));
+        Raise(nameof(ProbeMaintenanceStatus));
+        Raise(nameof(ProbeMaintenanceBackground));
+    }
+
+    private void RecordProbeCycleStarted()
+    {
+        ProductModel? model = _model;
+        if (model is null ||
+            !MasterApproved ||
+            IsProbeSessionActive ||
+            Interlocked.CompareExchange(ref _probeCycleRecordedThisCycle, 1, 0) != 0)
+        {
+            return;
+        }
+
+        bool wasDue = ProbeCycleCount >= ProbeReplacementThreshold;
+        try
+        {
+            ModelProductionStatistics stats = _statisticsStore.RecordProbeCycle(
+                model,
+                ProbeReplacementThreshold);
+            AddLog($"Probe cycle: {stats.ProbeCycleCount:N0}/{ProbeReplacementThreshold:N0} cho {stats.ModelKey}.");
+
+            bool reachedDue = stats.ProbeCycleCount >= ProbeReplacementThreshold;
+            InvokeUi(() =>
+            {
+                ApplyExtendedStatistics(stats);
+                if (!wasDue && reachedDue)
+                {
+                    MessageBox.Show(
+                        Application.Current?.MainWindow,
+                        $"ĐẾN CHU KỲ THAY PROBE PIN\n\n" +
+                        $"Mã hàng: {PartNumber}\n" +
+                        $"Chu kỳ hiện tại: {ProbeCycleCount:N0}\n" +
+                        $"Chu kỳ thay thế: {ProbeReplacementThreshold:N0}\n\n" +
+                        "Trạng thái: CẦN THAY PROBE PIN",
+                        "Cảnh báo bảo trì Probe Pin",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+            AddLog($"Không thể lưu ProbeCycleCount: {ex.Message}");
+        }
+    }
+
+    public bool TryResetProbeCycle(string password, out string message)
+    {
+        ProductModel? model = _model;
+        if (model is null)
+        {
+            message = "Chưa chọn mã hàng.";
+            return false;
+        }
+
+        if (_productDetectedThisCycle || _waitForProductRelease || _waitForFaultProductRemoval)
+        {
+            message = "Không thể reset trong khi sản phẩm/JIG đang ở trong chu kỳ test.";
+            return false;
+        }
+
+        if (!MasterApproved)
+        {
+            message = "Không thể reset counter trong chu trình xác nhận MASTER.";
+            return false;
+        }
+
+        if (_board is IFirmwareProtocolBoard firmware &&
+            firmware.UsesFirmwareCycleResult &&
+            _cycleActive)
+        {
+            message = "Hãy DỪNG AN TOÀN chu kỳ UART trước khi xác nhận thay Probe Pin.";
+            return false;
+        }
+
+        string expected = _productionSettings.Password ?? string.Empty;
+        if (string.IsNullOrEmpty(expected))
+        {
+            message = "Chưa cấu hình mật khẩu quản trị. Reset Probe Pin bị từ chối.";
+            return false;
+        }
+
+        if (!AdminAuthenticationService.Verify(expected, password))
+        {
+            message = "Xác thực quản trị không đúng.";
+            return false;
+        }
+
+        try
+        {
+            ProbeMaintenanceRecord record = _statisticsStore.ResetProbeCycle(
+                model,
+                ProbeReplacementThreshold,
+                "SETTINGS_ADMIN",
+                _productionSettings.DeviceName);
+            ApplyExtendedStatistics(_statisticsStore.Get(model));
+            Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+            message = $"PROBE PIN REPLACED đã được lưu. Counter {record.PreviousProbeCycleCount:N0} → 0.";
+            AddLog($"MAINTENANCE: {record.Action}; model={record.ModelKey}; previous={record.PreviousProbeCycleCount}; admin={record.AdminIdentity}.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            message = $"Không thể lưu reset Probe Pin: {ex.Message}";
+            return false;
+        }
     }
 
     private async Task PrintPassLabelSafeAsync(TestHistoryRecord history)
