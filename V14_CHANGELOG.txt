@@ -1,0 +1,11 @@
+JBZUniversalTester V14.0.0 - DUAL BOARD / BOARD-SPECIFIC MODEL & CAPACITY
+
+1. Card mở rộng chỉ còn là cấu hình D2XX. Khi ép UART TTL, nhóm Card/I/O D2XX bị disable trong Settings.
+2. AUTO vẫn ưu tiên D2XX; khi active UART, kiểm tra card D2XX không được chặn mã hàng.
+3. Thêm LastUartModelPath để lưu profile firmware riêng, tách khỏi LastThtPath.
+4. Thêm UartModelProfile parser cho .profile.json / .uart.txt / .protocol.txt với ACK đã xác nhận.
+5. UART model sync: hỏi :MODELNAME?; nếu đúng model thì không upload lại; nếu khác thì upload profile theo :MODEL/:PINCOUNT/:PINDATA/:ARRAYCOUNT/:ARRAY/:CONCOUNT/:CON/:CONNECTORCOUNT/:CONNECTOR/:FINISH.
+6. Không convert THT D2XX sang UART protocol bằng suy đoán. UART bắt buộc có profile riêng/golden profile.
+7. D2XX tiếp tục dùng THT/TestEngine/BoardCapacity hiện tại.
+8. TESTPIN/Fault/Pass/Fail dual-board từ V13 được giữ nguyên.
+9. Version tăng thẳng 14.0.0.

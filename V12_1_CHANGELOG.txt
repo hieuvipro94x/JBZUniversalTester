@@ -1,0 +1,18 @@
+JBZUniversalTester V12.1 BUILD FIX
+
+1. Added explicit using System.IO to all V12 files that use Path/File/Directory:
+   - LabelPrintService.cs
+   - ProductionConfigService.cs
+   - TestHistoryStore.cs
+   - HistoryExportService.cs
+   - ErrorLogService.cs
+   - HistoryWindow.xaml.cs
+   - ProductionSettingsWindow.xaml.cs
+
+2. Fixed nullable CS8602 in ProductionConfigService when parsing Resistance.* values.
+
+3. Fixed intentional Dispatcher.BeginInvoke CS4014 warning in MainWindow.xaml.cs by explicitly discarding DispatcherOperation.
+
+4. XAML local-type errors for WireColorToBrushConverter and FaultKind were cascade errors caused by the C# project not compiling. The converter and enum both exist in the correct namespaces and XAML references are retained.
+
+5. Version bumped to 12.1.0.

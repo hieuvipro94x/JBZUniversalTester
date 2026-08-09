@@ -1,0 +1,19 @@
+JBZUniversalTester V11.2 - GND TESTPIN + LIVE PRODUCT STATE
+
+1. TestPin đúng nghĩa đầu dò GND:
+   - không chạm: không hiện I/O;
+   - chạm IO(n): chỉ hiện IO(n);
+   - nếu IO có map THT: hiện tên dây, giắc, chân, màu, tiết diện;
+   - hiện thêm các I/O cùng network/tên dây: “Đang nối với: IO(...)”;
+   - tuyệt đối không tham gia logic short/wrong/PASS/relay.
+
+2. Trạng thái production động theo sản phẩm:
+   CHỜ LẮP SẢN PHẨM -> ĐANG KIỂM TRA... -> PASS.
+   Nếu đang lắp dở rồi rút hết: quay lại CHỜ LẮP.
+
+3. Sau PASS + relay:
+   Chỉ cần cặp continuity bắt buộc đầu tiên bị ngắt là đổi PASS ->
+   CHỜ LẮP SẢN PHẨM ngay, không chờ toàn bộ chân nhả.
+   Sản phẩm tiếp theo vừa xuất hiện quan hệ đầu tiên -> ĐANG KIỂM TRA... ngay.
+
+4. PASS xanh + DINGDONG + relay vẫn dùng cùng trigger như V11.0.

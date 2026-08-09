@@ -1,0 +1,30 @@
+JBZUniversalTester V12.9.1 - STATIC VALIDATION
+======================================================
+Date: 2026-08-08
+
+[PASS] All XAML/csproj/Version.props parse as XML
+[PASS] No merge conflict markers
+[PASS] C# bracket/string structural scan
+[PASS] Version synchronized at 12.9.1 — Version=12.9.1
+[PASS] Old UI label removed from live source
+[PASS] Central Vietnamese fault names present
+[PASS] Probe path does not clear Production Faults
+[PASS] TestEngine rejects non-Production frames
+[PASS] ShortCircuit has live creation path
+[PASS] Direct board FrameReceived subscription remains single-router — ViewModels/TestViewModel.cs
+[PASS] History export column/header/value/width counts match — h=30 v=30 w=30
+[PASS] SQLite V12.9 -> V12.9.1 migration definitions execute — 11 new columns
+[PASS] BoardCapacity vectors remain 64/128/256/640 IO — [(1, 2, 1, 64), (2, 4, 2, 128), (4, 8, 4, 256), (10, 20, 10, 640)]
+[PASS] Physical card boundary arithmetic IO32/33 and IO64/65 — {1: (1, 1), 32: (1, 32), 33: (2, 1), 64: (2, 32), 65: (3, 1), 128: (4, 32)}
+[BLOCKED] dotnet SDK available for real WPF build — dotnet not installed in this environment
+
+Build limitation:
+- dotnet/MSBuild is not installed in this sandbox, so WPF compile/publish and real DPI/hardware tests cannot be executed here.
+- BUILD_ONE_FILE.cmd + Scripts/Publish-OneFile.ps1 remain included for Windows .NET 8 SDK build.
+
+Hardware/runtime tests still required on the real tester:
+- DPI/display: 100%, 125%, 150% on the target monitor.
+- Open / Wrong Wiring / Short / Resistance vectors with actual THT + board.
+- Probe single IO, two IO, release while Production table remains visible.
+- Expansion boundaries IO32/33, IO64/65 and configured active-card range.
+- Keysight/FTDI/relay/master-sample regression.

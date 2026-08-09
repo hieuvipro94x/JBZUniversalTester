@@ -1,0 +1,240 @@
+﻿namespace JBZUniversalTester.Models;
+
+public sealed class ProductionSettings
+{
+    // ============================================================
+    // THIẾT BỊ / I/O
+    // ============================================================
+
+    /// <summary>Chọn họ bo: tự động, FTDI D2XX hoặc firmware UART TTL.</summary>
+    public BoardMode BoardMode { get; set; } = BoardMode.Auto;
+
+    /// <summary>Cổng COM ưu tiên cho bo UART TTL, ví dụ COM5. Để trống để tự nhận dạng.</summary>
+    public string UartPort { get; set; } = string.Empty;
+
+    /// <summary>V14: profile/model riêng của firmware UART TTL. Không dùng THT D2XX để suy diễn protocol.</summary>
+    public string LastUartModelPath { get; set; } = string.Empty;
+
+
+    /// <summary>
+    /// Số scan-unit mà firmware nhận ở byte thứ ba của START_SCAN.
+    /// Trace Htdrv trong project xác nhận command xx=4 quét 256 I/O, vì vậy
+    /// 1 scan-unit = 64 I/O = 2 card vật lý x 32 I/O. Giá trị này được đồng
+    /// bộ tự động từ ExpansionCardCount.
+    /// </summary>
+    public int CardCount { get; set; } = 1;
+
+    public int IoConfirm1 { get; set; } = 1;
+
+    public int IoConfirmN { get; set; } = 1;
+
+    public int UsbDelay { get; set; } = 1;
+
+    public int StartCardNumber { get; set; } = 1;
+
+    public bool UseTestPointer { get; set; } = true;
+
+    /// <summary>
+    /// Trường compatibility cho cấu hình V12.9.2 trở về trước. Từ V12.9.5
+    /// Production luôn dùng Master state machine tự động; Normalize() luôn ép true.
+    /// Không còn checkbox/nút Master thủ công trên TestView.
+    /// </summary>
+    public bool AutoMasterSequence { get; set; } = true;
+
+    /// <summary>
+    /// Số điểm lỗi dây duy nhất phải phát hiện trên MASTER NG. Giá trị này là
+    /// fallback/default; cấu hình theo từng model nằm trong MasterFaultCountsByModel.
+    /// </summary>
+    public int MasterFaultRequiredCount { get; set; } = 2;
+
+    /// <summary>
+    /// Cấu hình Số lỗi Master theo mã hàng/model. Key ưu tiên PartNumber; nếu THT
+    /// chưa có PartNumber thì dùng tên model/tên file.
+    /// </summary>
+    public Dictionary<string, int> MasterFaultCountsByModel { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public int WaterproofSerialPort { get; set; }
+
+    /// <summary>
+    /// Số module/card mở rộng người vận hành cấu hình: 1..10.
+    /// 1 module = 2 card vật lý x 32 I/O = 64 I/O.
+    /// 10 module = 20 card vật lý = 640 I/O.
+    /// START_SCAN xx dùng chính số module/scan-unit này.
+    /// </summary>
+    public int ExpansionCardCount { get; set; } = 1;
+
+    // ============================================================
+    // THÔNG TIN PRODUCTION
+    // ============================================================
+
+    // Giá trị LOTNO dành cho sản phẩm kế tiếp. Chỉ chỉnh trong màn Cài đặt.
+    // Sau mỗi sản phẩm hoàn tất (PASS hoặc FAIL), phần mềm tự tăng +1 và lưu lại.
+    public long LotNo { get; set; } = 2000;
+
+    // Giữ trường cũ để đọc các file cấu hình V11.4 trở về trước.
+    public string Lot { get; set; } = string.Empty;
+
+    public string DeviceName { get; set; } = string.Empty;
+
+    public string DeviceNumber { get; set; } = string.Empty;
+
+    public string OperatorCompany { get; set; } = string.Empty;
+
+    public string ProductionLine { get; set; } = string.Empty;
+
+    public double TemperatureTolerance { get; set; }
+
+    public int MinimumErrorLogValue { get; set; }
+
+    public bool AutoSaveErrors { get; set; }
+
+    // ============================================================
+    // THỜI GIAN
+    // ============================================================
+
+    public int ShortConfirmMs { get; set; } = 0;
+
+    /// <summary>Thời gian Relay 1 - MỞ/ĐẨY JIG giữ ON trước khi cưỡng bức OFF.</summary>
+    public int Relay1JigPulseMs { get; set; } = 250;
+
+    /// <summary>Thời gian Relay 2 - MARKING giữ ON trước khi cưỡng bức OFF.</summary>
+    public int Relay2MarkingPulseMs { get; set; } = 250;
+
+    /// <summary>Khoảng chờ an toàn sau khi R2 MARKING OFF trước khi R1 JIG ON trong chu trình PASS.</summary>
+    public int PassMarkingToJigDelayMs { get; set; } = 430;
+
+    /// <summary>Compatibility V15.1 trở về trước: "R1,R2". V15.2 UI không còn dùng trực tiếp.</summary>
+    public string StampDelay { get; set; } = "250,250";
+
+    public int OversizeWaitSeconds { get; set; }
+
+    public int ShieldDelay { get; set; } = 1;
+
+    public int ResistanceDelayMs { get; set; }
+
+    public string Password { get; set; } = string.Empty;
+
+    // ============================================================
+    // GIAO DIỆN
+    // ============================================================
+
+    public int ItemHeight { get; set; } = 31;
+
+    public int ScrollDelay { get; set; } = 15;
+
+    public int PageDelay { get; set; } = 30;
+
+    public bool ShowTitle { get; set; } = true;
+
+    public bool ShowConnector { get; set; }
+
+    // ============================================================
+    // MODEL
+    // ============================================================
+
+    public string LastThtPath { get; set; } = string.Empty;
+
+    // ============================================================
+    // ĐO ĐIỆN TRỞ R1-R5
+    // ============================================================
+
+    public ResistanceChannelSetting[] ResistanceChannels { get; set; } =
+    [
+        new()
+        {
+            Enabled = false,
+            Name = "R1",
+            Channel = 1,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R2",
+            Channel = 2,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R3",
+            Channel = 3,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R4",
+            Channel = 4,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R5",
+            Channel = 5,
+            MinOhm = 0,
+            MaxOhm = 0
+        }
+    ];
+
+    // ============================================================
+    // LỊCH SỬ / IN TEM
+    // ============================================================
+
+    /// <summary>In tem tự động ngay khi sản phẩm PASS.</summary>
+    public bool AutoPrintLabelOnPass { get; set; } = true;
+
+    /// <summary>Thư mục tương đối chứa DB/export lịch sử.</summary>
+    public string HistoryDirectory { get; set; } = "Data/History";
+
+    // ============================================================
+    // MÁY IN TEM
+    // ============================================================
+
+    public LabelSettings Label { get; set; } = new();
+}
+
+public sealed class ResistanceChannelSetting
+{
+    public bool Enabled { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public int Channel { get; set; }
+
+    public double MinOhm { get; set; }
+
+    public double MaxOhm { get; set; }
+}
+
+public sealed class LabelSettings
+{
+    /// <summary>
+    /// Tên máy in được cài trong Windows.
+    /// Có thể để trống nếu gửi EPL trực tiếp qua COM.
+    /// </summary>
+    public string PrinterName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Cổng COM của máy in tem, ví dụ COM3.
+    /// </summary>
+    public string PrinterCom { get; set; } = string.Empty;
+
+    public int WidthMm { get; set; } = 90;
+
+    public int HeightMm { get; set; } = 15;
+
+    public string FormatName { get; set; } = "KS91";
+
+    public int BaudRate { get; set; } = 9600;
+
+    public int WriteTimeoutMs { get; set; } = 3000;
+
+    public int Copies { get; set; } = 1;
+}

@@ -1,0 +1,32 @@
+JBZUniversalTester V11.6 - PROBE ISOLATION + IMMEDIATE WRONG WIRING
+==================================================================
+
+1. TestPin/Probe được cách ly tuyệt đối khỏi Production bằng RuntimeMode:
+   - Background
+   - Production
+   - Probe
+   - ShuttingDown
+
+2. Mỗi lần chuyển mode tăng runtime generation.
+   - Callback/handler lỗi Production đã xếp hàng từ generation cũ bị bỏ.
+   - Probe không thể mở popup Đấu sai/Chập mạch.
+   - Probe không thể làm đỏ DataGrid Production.
+   - Chỉ PinProbeWindow nhận ScanFrame Mode=Probe.
+
+3. Đấu sai/chập thật trong Production báo NGAY:
+   - Bỏ xác nhận 1000 ms.
+   - Không chờ trạng thái "ĐANG KIỂM TRA...".
+   - WiringFault được ưu tiên xử lý trước cập nhật trạng thái sản phẩm.
+   - TESTPOINT.wav bắt đầu ngay khi fault row xuất hiện.
+
+4. Production ShortConfirmMs được migrate về 0.
+   Màn Cài đặt hiển thị "BÁO NGAY" để tránh nhầm với logic cũ.
+
+5. Decoder Production không bỏ frame đầu tiên sau START_SCAN.
+   Transport luôn PURGE trước START_SCAN nên frame đầu là stream sạch.
+   Giảm gần một chu kỳ quét độ trễ khi phát hiện lỗi/PASS sau restart mode.
+
+6. Sau khi thoát Probe:
+   - quay về Background scan Production,
+   - TestEngine vẫn DISABLED cho tới khi vào TestView/ARM Production,
+   - không thể tự sinh lỗi khi người vận hành chưa bắt đầu test.

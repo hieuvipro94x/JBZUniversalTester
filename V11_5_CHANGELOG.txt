@@ -1,0 +1,37 @@
+JBZUniversalTester V11.5 - PERSISTENT MODEL STATISTICS + AUTO LOTNO
+===================================================================
+
+1. Sản lượng được lưu riêng theo từng mã hàng
+   - Tổng số
+   - Số đạt
+   - Số lỗi
+   - Tỷ lệ đạt
+   - Kết quả cuối cùng
+   - LOTNO của lần test cuối
+   - Thời gian test cuối
+
+2. Đổi mã hàng không làm mất sản lượng
+   - Chọn mã A -> xem số liệu A.
+   - Chọn mã B -> xem số liệu B.
+   - Quay lại mã A -> nạp lại đúng số liệu A đã lưu.
+   - Dữ liệu nằm trong production.statistics.json cạnh EXE.
+
+3. LOTNO chỉ chỉnh trong Cài đặt
+   - ProductionSettings.LotNo là LOTNO hiện tại/sản phẩm kế tiếp.
+   - TestView chỉ hiển thị OneWay + IsReadOnly=true.
+   - Ví dụ đặt 2000: sản phẩm hoàn tất -> tự lưu 2001; sản phẩm tiếp theo -> 2002...
+   - PASS và FAIL đều là sản phẩm hoàn tất nên đều tăng LOTNO.
+   - Lỗi thiết bị/USB/VISA không cộng sản lượng và không tăng LOTNO.
+
+4. Chống cộng nhầm sản lượng khi đổi mã
+   - Đổi model sẽ hủy mọi task chu trình cũ trước khi thay _model.
+   - Một chu kỳ chỉ được RecordCompletedProduct đúng một lần.
+
+5. Fail production được ghi nhận
+   - FAIL điện trở
+   - CHƯA ĐẠT cuối chu trình
+   - Đấu sai / chập mạch sau khi người vận hành xác nhận popup
+
+6. Tương thích cấu hình cũ
+   - Nếu production.settings.json cũ chưa có LotNo nhưng Lot cũ là số,
+     chương trình tự migrate sang LotNo.

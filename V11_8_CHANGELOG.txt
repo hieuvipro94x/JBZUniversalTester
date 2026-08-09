@@ -1,0 +1,19 @@
+JBZUniversalTester V11.8
+
+1. Tách routing frame tuyệt đối:
+   - D2XX -> TestViewModel router -> TestEngine chỉ khi RuntimeMode.Production.
+   - D2XX -> PinProbeWindow chỉ khi RuntimeMode.Probe.
+   - TestEngine không còn subscribe trực tiếp Board.FrameReceived.
+   => Đầu dò GND không thể tạo popup đấu sai/chập production.
+
+2. Probe:
+   - I/O không có trong THT vẫn hiển thị riêng lẻ IO(n).
+   - I/O có map hiển thị Giắc/Chân/Tên dây/Màu/Nối với theo THT.
+   - Nhả que -> dòng biến mất.
+
+3. Card/I/O:
+   - 1 logical scan-card = 32 I/O.
+   - Firmware quét theo cặp: 2 card = 64 I/O, 4 = 128, ... 20 = 640.
+   - Cài đặt người dùng: 1..10 card mở rộng; mỗi card mở rộng = 64 I/O.
+   - Tối đa 10 card mở rộng = 640 I/O.
+   - START_SCAN byte card tự đồng bộ 2,4,...20.

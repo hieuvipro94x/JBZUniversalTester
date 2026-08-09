@@ -1,0 +1,20 @@
+JBZUniversalTester V10 TRACE FIXED
+=================================
+
+Logic is based on the real production trace captured 2026-08-07.
+
+Main fixes:
+1) THT network source/receiver semantics implemented.
+2) Dynamic OPEN rows: connected = disappear; released = reappear.
+3) Multiple networks may be active in the same 128-I/O frame.
+4) Duplicate physical I/O rows in THT are preserved.
+5) Reciprocal LinkedWire is resolved as an undirected component.
+6) AO/a1..a7 are excluded from ordinary continuity requirements.
+7) Embedded THT resistance block is parsed (real sample R1/R2 8000..11000 ohm).
+8) Resistance command sequence matches trace: STOP, RESET, 90-01/91-channel, no release between R1/R2.
+9) Three post-resistance INIT1/INIT2 recovery cycles implemented.
+10) PASS relay timing matched to trace.
+11) Auto-restart scan after PASS with product-release re-arm protection.
+12) Auto-connect board at application startup remains enabled.
+
+See docs/V10_TRACE_ANALYSIS.md for evidence and exact timing.

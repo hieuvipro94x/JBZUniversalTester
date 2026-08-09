@@ -1,0 +1,35 @@
+JBZUniversalTester V12.10.2 - STATIC VALIDATION
+============================================================
+
+Result: 79/79 PASS, 0 FAIL
+
+Coverage:
+- All App/Views XAML files parse as XML.
+- x:Class code-behind classes exist.
+- All inspected XAML event handlers exist in code-behind.
+- StaticResource references resolve in App/local resources.
+- Version 12.10.2 / 12_10_2 / ReleaseFamily V12.10.2 synchronized.
+- TestView keeps compact Header + Probe/Card + 68px status + star FaultGrid.
+- FaultGrid remains visible and stretched in MasterBad.
+- MasterFaults ItemsControl is not restored.
+- Product header TextBox bindings remain explicit OneWay.
+- Master HashSet + detail Dictionary retained.
+- WrongWiring/Short reverse IO pairs use one canonical Master key.
+- RelatedIos fallback exists when Expected/Actual metadata is incomplete.
+- Duplicate fault may upgrade displayed detail without increasing count.
+- Master grid ordering is deterministic.
+- RowKey retains expected/actual IO dimensions.
+- DataGrid column headers are bold.
+- Brace balance checks pass for TestViewModel, MasterModels, TestEngine,
+  TestWindow.xaml.cs.
+- Logic simulation passes:
+  * wrong 1->7 + short 7->1 => same Master key
+  * short 1->7 + short 7->1 => same Master key
+  * IO1-IO7 and IO2-IO8 => distinct keys
+  * open expected 1-7 and 7-1 => same key
+  * single open IO24 and IO25 => distinct keys
+
+LIMITATION:
+- dotnet/MSBuild is unavailable in this sandbox.
+- WPF compile/runtime, NuGet restore, ftd2xx.dll, visa32.dll and hardware tests
+  are not claimed as verified here.

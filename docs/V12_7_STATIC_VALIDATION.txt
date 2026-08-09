@@ -1,0 +1,18 @@
+JBZUniversalTester V12.7.0 - STATIC VALIDATION
+==============================================
+
+[OK] Version.props = 12.7.0 / 12.7.0.0 / 12_7_0
+[OK] Probe classifier runs before TestEngine.ProcessFrame.
+[OK] Probe display creates exactly one FaultRow.
+[OK] Probe row Kind = Probe (not WrongWiring/Short).
+[OK] Fault path contains no SetRelayAsync call.
+[OK] TestEngine.EjectFaultProductAsync contains AllRelaysOffAsync only.
+[OK] Automatic SetRelayAsync remains only in CompletePassAsync.
+[OK] Manual TEST RELAY commands remain explicit operator actions.
+[OK] Master FAIL paths do not reset engine before physical removal.
+[OK] XML/XAML project files parse successfully.
+
+Build note:
+This environment does not have the .NET SDK/MSBuild installed, therefore an actual
+net8.0-windows compilation cannot be executed here. Run Clean + Rebuild in Visual
+Studio on the target Windows development machine.

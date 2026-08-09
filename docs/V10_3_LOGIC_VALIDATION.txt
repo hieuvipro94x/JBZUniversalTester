@@ -1,0 +1,53 @@
+V10.3 STATIC / TRACE VALIDATION
+2026-08-07
+
+[PASS] XML: all XAML + csproj parse successfully.
+[PASS] JSON: appsettings.json and appsettings.example.json parse successfully.
+[PASS] C# structural scan: (), [], {} balanced outside strings/comments.
+
+PRODUCTION TRACE VALIDATION
+- Command: 8C 00 02 00 for 2 cards / 128 IO.
+- Graph parser found real PASS rounds with 115 source entries (not 128).
+- Verified required relations in the same frame:
+  IO1 -> 18
+  IO2 -> 25
+  IO3 -> 17,22,24
+  IO4 -> 23
+  IO9 -> 10
+  IO11 -> 14,26
+  IO12 -> 13
+  IO15 -> 19
+  IO16 -> 27
+  IO20 -> 21
+- Union targets: 10,13,14,17,18,19,21,22,23,24,25,26,27.
+
+TESTPIN TRACE VALIDATION
+- Captured cfg: CardCount=4, UsbDelay=1 ms, ExpansionCardCount=0.
+- Command: 8C 00 04 00.
+- Model max IO: 224 -> ceil(224/64)=4 cards.
+- Parser reconstructs 256-source diagnostic rounds.
+- Probe frame examples:
+  target IO74 hit 110 times and IO72 hit 73 times during contact onset;
+  following full rounds: IO72=256 hits, IO74=256 hits.
+- Original UI trace explicitly renders IO(72) and IO(74).
+
+THT SAME-WIRE VALIDATION (WH322244.tht)
+- Parsed model_text contains same-name pairs above 128, including:
+  BG01 IO1/86
+  BM06 IO6/176
+  BF09 IO9/132
+  LT21 IO135/187
+  ER01 IO149/193
+  OK IO223/224
+- Therefore 128-I/O-only logic cannot validate this model.
+
+BUILD NOTE
+- No .NET SDK/compiler exists in this analysis environment, so final Windows WPF
+  compilation was not executed here. Build on Windows with BUILD_ONE_FILE.cmd.
+
+TESTVIEW ROW VALIDATION
+- TestView now lists only THT pins that have a real WireName/map, matching the
+  original screen behavior (blank-wire I/O rows such as 4/5/7 are not shown).
+- Same-wire two-pin network: both rows visible while open, both disappear after
+  confirmed SOURCE->TARGET continuity, and both return immediately when released.
+- A wrong SOURCE->TARGET pair remains eligible for the latched red/error-popup path.

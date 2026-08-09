@@ -1,0 +1,20 @@
+JBZUniversalTester V12.3.1 - WPF DESIGNER FIX
+
+1. Sửa XDG0008 WireColorToBrushConverter không tồn tại trong clr-namespace.
+   - TestWindow.xaml không còn khởi tạo converter custom trực tiếp.
+   - FaultRow cung cấp WireColorBrush và converter cung cấp API static ToBrush().
+
+2. Sửa XDG0008/XDG0024 FaultKind trong DataTrigger.
+   - XAML không còn x:Static models:FaultKind.*.
+   - DataTrigger dùng KindName string, không phụ thuộc custom CLR enum khi Designer chưa build.
+
+3. Sửa XDG resource WireColorToBrushConverter incompatible type.
+   - Binding cột màu dây chuyển trực tiếp sang WireColorBrush.
+
+4. Dọn lại Grid.RowDefinitions ở ProductionSettingsWindow sau khi thêm Auto Master.
+
+5. Probe là trạng thái đầu dò, không tô đỏ như lỗi Short/WrongWiring; chuyển sang nền xanh nhạt.
+
+6. Đã kiểm tra toàn bộ file XAML đều well-formed XML.
+
+Lưu ý: môi trường đóng gói không có .NET SDK nên không chạy được dotnet build tại đây.

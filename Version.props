@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project>
+  <!--
+    JBZUniversalTester - SINGLE SOURCE OF TRUTH FOR VERSIONING
+
+    QUY TAC BAT BUOC:
+    - Moi lan sua source va phat hanh mot ban moi: tang VersionPrefix.
+    - Dong thoi cap nhat AssemblyVersion/FileVersion theo cung version.
+    - VersionFileTag dung de tao ten EXE rieng, tranh nham lan cac ban build.
+
+    Vi du lan sau:
+      12.10.2 -> next release
+      AssemblyVersion 12.10.2.0 -> next release
+      FileVersion     12.10.2.0 -> next release
+      VersionFileTag  12_10_2 -> next release
+  -->
+  <PropertyGroup>
+    <VersionPrefix>15.2.0</VersionPrefix>
+    <Version>15.2.0</Version>
+    <AssemblyVersion>15.2.0.0</AssemblyVersion>
+    <FileVersion>15.2.0.0</FileVersion>
+    <InformationalVersion>15.2.0</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <VersionFileTag>15_2_0</VersionFileTag>
+    <Product>JBZUniversalTester</Product>
+    <AssemblyTitle>JBZUniversalTester V15.2.0</AssemblyTitle>
+    <Description>JBZ Universal Tester - Production Harness Tester</Description>
+    <Company>JBZ</Company>
+    <Copyright>Copyright © JBZ 2026</Copyright>
+  </PropertyGroup>
+</Project>

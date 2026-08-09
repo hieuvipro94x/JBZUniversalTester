@@ -1,0 +1,79 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+[Bb]uild/
+[Dd]ist/
+[Oo]ut/
+[Pp]ublish/
+
+# Visual Studio / IDE state and caches
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.rsuser
+*.cache
+
+# Test and coverage output
+TestResults/
+coverage/
+coverage.*
+*.trx
+
+# Logs, temporary files, and backups
+[Ll]og/
+[Ll]ogs/
+[Bb]ackup/
+[Bb]ackups/
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.orig
+*~
+
+# Local and machine-specific configuration
+appsettings.json
+appsettings.Local.json
+appsettings.local.json
+appsettings.Development.json
+*.local.json
+*.user.json
+/UniversalTester.cfg
+
+# Runtime data generated on a workstation
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Credentials, tokens, secrets, and private keys
+.env
+.env.*
+!.env.example
+credentials.json
+credentials.*.json
+secrets.json
+secrets.*.json
+token.json
+tokens.json
+.credentials/
+.secrets/
+.tokens/
+*.pfx
+*.p12
+*.pem
+*.key
+*.snk
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini

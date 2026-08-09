@@ -1,0 +1,12 @@
+JBZUniversalTester V10.1 production flow patch
+
+- MainWindow Start -> TestWindow tự scan; bỏ nút BẮT ĐẦU QUÉT I/O.
+- TestView hiển thị toàn bộ pin map THT.
+- Cặp đúng: dòng pin biến mất; nhả: dòng quay lại.
+- OpenCount đếm row pin hở đang hiển thị.
+- Wrong/Short: row đỏ, TESTPOINT.wav loop, dừng production.
+- Popup hiển thị I/O / giắc / chân / tên dây.
+- OK popup -> pulse relay mở jig -> chờ tháo sản phẩm -> tự re-arm.
+- Không cho Keysight/PASS chạy khi đang có lỗi wiring.
+- Pin AO/a1..a7 vẫn hiển thị nhưng không tham gia continuity.
+- Fault eject relay cấu hình được trong appsettings.json.

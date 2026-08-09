@@ -1,0 +1,45 @@
+JBZUniversalTester V12.9.1 - TESTVIEW / FAULT / HISTORY / STARTUP LOG
+Date: 2026-08-08
+
+1. TestView responsive layout
+- Rút gọn label: Mã hàng, Sản phẩm, Mã KH.
+- Ngày giờ font 18 Bold trong Border riêng.
+- Đổi "Số lỗi hở mạch" thành "Dây chưa kết nối".
+- Tách counter Đấu sai và Chập mạch.
+- Vùng lỗi chính hiển thị tên lỗi + Mong đợi + Thực tế.
+- Giữ Probe song song, không thay thế bảng Production.
+- Sửa regression: không còn Faults.Clear() khi chuyển/refresh Probe; release chỉ xóa ProbeContacts.
+
+2. Central fault model
+- ProductFaultType + FaultTypeCatalog.
+- FaultDetail chứa expected/actual source-target, related IO, connector/pin/wire.
+- CompletedTestResult là snapshot dùng chung khi chốt một sản phẩm.
+
+3. TestEngine
+- Đấu sai: source đúng nhưng target ngoài network -> lưu expected/actual.
+- Chập: cạnh nối hai component THT khác nhau -> ShortCircuit.
+- Open đổi tên DÂY CHƯA KẾT NỐI và lưu cặp expected.
+- Short/Wrong được ưu tiên lên đầu danh sách.
+
+4. History / Export
+- SQLite migration thêm FaultType/FaultCode/Expected/Actual/FaultDetailsJson/FaultSummary và resistance min/max/measured.
+- Không cần xóa DB V12.9 cũ.
+- History UI thêm Loại lỗi, Mong đợi, Thực tế, Chi tiết lỗi.
+- Result History chuẩn hóa PASS/FAIL; tên lỗi nằm ở FaultType/FaultCode.
+- FaultDetailsJson lưu thêm metadata connector/pin của target thực tế khi đấu sai.
+- CSV/XLSX export thêm các trường fault mới.
+
+5. Startup config/log
+- Startup tự bảo đảm appsettings.json, production.settings.json, UniversalTester.cfg, Data/History/test-history.db.
+- Config JSON lỗi được backup *.invalid_yyyyMMdd_HHmmss.*.
+- Async log theo Data/Logs/Application|Board|Test|Error.
+- Level Normal/Diagnostic/ProtocolTrace; RX/TX board được xếp Diagnostic.
+
+6. Probe/Card regression
+- Không đổi BoardIoDecoder Probe mode hoặc ProbeContactClassifier routing.
+- Không đưa Probe vào TestEngine/History/LOT.
+- BoardCapacity/card mapping giữ nguyên V12.9.
+
+Build note:
+- Source đã được static-validation trong môi trường sửa.
+- Môi trường sửa không cài .NET SDK/MSBuild nên không thể chạy dotnet build WPF tại đây.

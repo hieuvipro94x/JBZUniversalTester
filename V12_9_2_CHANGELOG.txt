@@ -1,0 +1,35 @@
+JBZUniversalTester V12.9.2 - PROBE / CARD / BOTTOM TOOLBAR NO DELAY
+==================================================================
+
+1. Probe/Card status row
+- Tách 4 vùng độc lập: ĐẦU DÒ | trạng thái | Cards | hướng dẫn/ProbeContacts.
+- Cards bind qua collection Cards, hiển thị cả card bật và card tắt.
+- Card dùng WrapPanel để tự xuống dòng, không khóa vùng card 380 px.
+- Card có Probe activity highlight riêng; nhấc Probe chỉ xóa highlight.
+- Hướng dẫn nằm cột phải, căn phải; có ProbeContacts thì hướng dẫn ẩn.
+- ProbeContacts dùng WrapPanel và không chen vào vùng Cards.
+
+2. Probe latency
+- Bỏ InlineProbeQuarantineMs=700 ms.
+- RELEASE không còn giữ ProbeContacts bằng TTL; frame mới không có Probe sẽ xóa UI ngay.
+- Relay safety hold 1500 ms được thay bằng debounce release rất ngắn 40 ms; không giữ UI.
+- BoardIoDecoder Probe phát frame ngay cho cả TOUCH và RELEASE event, không chờ C0.
+- Probe mode không dùng RequiredStableFrames của Production.
+- Không có Task.Delay/DispatcherTimer trên đường OnBoardFrameReceived của Probe.
+- UI update dùng Dispatcher.BeginInvoke ngay khi state đổi.
+- Thêm guard runtime generation để callback Probe cũ không ghi UI sau khi đổi mode.
+- Thêm diagnostic PROBE_LATENCY (chỉ ghi khi log level >= Diagnostic).
+
+3. Bottom toolbar
+- Bỏ bottom row 10 px và cơ chế animate Height cũ.
+- Toolbar là overlay ở đáy, không chiếm layout khi ẩn.
+- Hot zone trong suốt 24 px ở mép dưới.
+- Show 200 ms / Hide 180 ms, QuadraticEase.
+- Hide có grace 200 ms chỉ dành cho toolbar UX.
+- Theo dõi riêng mouse over hot zone và toolbar để không chớp khi đi qua mép.
+- Khi ẩn: translate theo ActualHeight + 8, opacity=0, hit test=false; không còn dải xám/viền đáy.
+- Animation dùng SnapshotAndReplace để đổi hướng mượt khi rê chuột nhanh.
+
+4. Version
+- VersionPrefix / AssemblyVersion / FileVersion / InformationalVersion = 12.9.2.
+- VersionFileTag = 12_9_2.

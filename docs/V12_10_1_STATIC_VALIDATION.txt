@@ -1,0 +1,73 @@
+JBZUniversalTester V12.10.1 - STATIC VALIDATION
+==========================================================
+
+01. [PASS] All XAML XML parse - OK
+02. [PASS] VersionPrefix 12.10.1
+03. [PASS] Version 12.10.1
+04. [PASS] AssemblyVersion 12.10.1.0
+05. [PASS] FileVersion 12.10.1.0
+06. [PASS] InformationalVersion 12.10.1
+07. [PASS] Version tag 12_10_1
+08. [PASS] Assembly title V12.10.1
+09. [PASS] ReleaseFamily V12.10.1
+10. [PASS] TestWindow backup exists
+11. [PASS] TestViewModel backup exists
+12. [PASS] No root 3* master row
+13. [PASS] No root 2* detail row
+14. [PASS] Main detail row is star
+15. [PASS] Status strip fixed 68px
+16. [PASS] No Master large FontSize 44
+17. [PASS] Status title 26px
+18. [PASS] Status message compact 16px
+19. [PASS] Master progress compact 20px
+20. [PASS] No ActiveFault Expected large panel
+21. [PASS] No ActiveFault Actual large panel
+22. [PASS] TabControl row 3
+23. [PASS] TabControl horizontal stretch
+24. [PASS] TabControl vertical stretch
+25. [PASS] Fault tab content stretch
+26. [PASS] FaultGrid exists
+27. [PASS] FaultGrid horizontal stretch
+28. [PASS] FaultGrid vertical stretch
+29. [PASS] FaultGrid has no IsMasterBadPhase trigger
+30. [PASS] FaultGrid has no Visibility Collapsed
+31. [PASS] MasterFaults ItemsControl removed from XAML
+32. [PASS] FaultGrid uses production grid style
+33. [PASS] Column proportions retained
+34. [PASS] Grid font 15
+35. [PASS] Grid header 40
+36. [PASS] ItemHeight min 30 max 44
+37. [PASS] MasterFaultKey HashSet retained
+38. [PASS] Master unique detail dictionary
+39. [PASS] Master keys clear with details
+40. [PASS] Unique key gate before add detail
+41. [PASS] Master snapshot sync after unique add
+42. [PASS] BuildMasterFaultGridRows exists
+43. [PASS] BuildMasterFaultGridRow exists
+44. [PASS] Live MasterBad faults from engine
+45. [PASS] MasterBad display snapshot in RefreshFaults
+46. [PASS] RowKey includes expected source
+47. [PASS] RowKey includes expected target
+48. [PASS] RowKey includes actual source
+49. [PASS] RowKey includes actual target
+50. [PASS] MasterFaultKey normalizes Open/Short
+51. [PASS] PartNumber OneWay retained
+52. [PASS] ProductName OneWay retained
+53. [PASS] VehicleType OneWay retained
+54. [PASS] CustomerCode OneWay retained
+55. [PASS] Lot OneWay retained
+56. [PASS] Cards retained
+57. [PASS] ProbeContacts retained
+58. [PASS] Bottom toolbar overlay retained
+59. [PASS] Bottom hot zone 24 retained
+60. [PASS] No manual master commands
+61. [PASS] Default fault tab selection exists
+62. [PASS] Validation PowerShell included
+63. [PASS] Verify build cmd included
+64. [PASS] C# brace balance ViewModels/TestViewModel.cs - balance=0
+65. [PASS] C# brace balance Models/MasterModels.cs - balance=0
+66. [PASS] C# brace balance Services/TestEngine.cs - balance=0
+
+TOTAL: 66/66 PASS, 0 FAIL
+
+BUILD NOTE: dotnet/MSBuild khong co trong sandbox; build/runtime WPF chua duoc xac nhan tai day.

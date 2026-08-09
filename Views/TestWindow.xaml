@@ -1,0 +1,654 @@
+﻿<Window x:Class="JBZUniversalTester.Views.TestWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="UniversalTester - Màn hình kiểm tra"
+        WindowState="Maximized"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        Background="#F4F4F2"
+        FontFamily="Segoe UI"
+        Loaded="TestWindow_Loaded"
+        Closing="TestWindow_Closing">
+
+    <Window.Resources>
+        <SolidColorBrush x:Key="PageBackground" Color="#F4F4F2"/>
+        <SolidColorBrush x:Key="FieldBackground" Color="#F2F2F2"/>
+        <SolidColorBrush x:Key="GridBorderColor" Color="#D1D1CF"/>
+        <SolidColorBrush x:Key="NormalText" Color="#5B5B5B"/>
+        <SolidColorBrush x:Key="PassColor" Color="#0B9A25"/>
+        <SolidColorBrush x:Key="FailColor" Color="#E51C23"/>
+        <SolidColorBrush x:Key="RunningColor" Color="#FFF09A"/>
+        <SolidColorBrush x:Key="ProbeColor" Color="#75DA79"/>
+
+        <Style x:Key="ProductionButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#EEEEEC"/>
+            <Setter Property="Foreground" Value="{StaticResource NormalText}"/>
+            <Setter Property="BorderBrush" Value="#555555"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="12,7"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="InfoLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="Foreground" Value="{StaticResource NormalText}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,4,10,4"/>
+        </Style>
+
+        <Style x:Key="ReadOnlyFieldStyle" TargetType="TextBox">
+            <Setter Property="Height" Value="31"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Foreground" Value="{StaticResource NormalText}"/>
+            <Setter Property="Background" Value="{StaticResource FieldBackground}"/>
+            <Setter Property="BorderBrush" Value="#555555"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="7,3"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="IsReadOnlyCaretVisible" Value="False"/>
+            <Setter Property="IsTabStop" Value="False"/>
+            <Setter Property="Focusable" Value="False"/>
+        </Style>
+
+        <Style x:Key="CounterFieldStyle"
+       TargetType="TextBox"
+       BasedOn="{StaticResource ReadOnlyFieldStyle}">
+
+            <!-- Không ép chiều rộng -->
+            <Setter Property="Width" Value="Auto"/>
+
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="FontSize" Value="17"/>
+
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Nhãn ở cột phải: to, đậm và dễ đọc khi vận hành -->
+        <Style x:Key="RightSummaryLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#3B3B3B"/>
+            <Setter Property="HorizontalAlignment" Value="Right"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextAlignment" Value="Right"/>
+            <Setter Property="Margin" Value="0,0,12,0"/>
+        </Style>
+
+        <!-- Giá trị ở cột phải: số lớn, đậm và căn giữa -->
+        <Style x:Key="RightSummaryValueStyle"
+               TargetType="TextBox"
+               BasedOn="{StaticResource CounterFieldStyle}">
+            <Setter Property="Height" Value="38"/>
+            <Setter Property="MinWidth" Value="92"/>
+            <Setter Property="FontSize" Value="19"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="BorderThickness" Value="1.2"/>
+            <Setter Property="Margin" Value="0,3,0,3"/>
+        </Style>
+
+        <Style x:Key="ProductionGrid" TargetType="DataGrid">
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="CanUserDeleteRows" Value="False"/>
+            <Setter Property="CanUserResizeRows" Value="False"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="GridLinesVisibility" Value="All"/>
+            <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource GridBorderColor}"/>
+            <Setter Property="VerticalGridLinesBrush" Value="{StaticResource GridBorderColor}"/>
+            <Setter Property="BorderBrush" Value="#707070"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="RowBackground" Value="#FCFCFB"/>
+            <Setter Property="AlternatingRowBackground" Value="#F7F7F5"/>
+            <Setter Property="RowHeight" Value="31"/>
+            <Setter Property="ColumnHeaderHeight" Value="40"/>
+            <Setter Property="FontSize" Value="15"/>
+            <!-- V12.10.2: header FaultGrid phải rõ khi vận hành từ xa. -->
+            <Setter Property="ColumnHeaderStyle">
+                <Setter.Value>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="FontSize" Value="15"/>
+                        <Setter Property="FontWeight" Value="Bold"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                        <Setter Property="VerticalContentAlignment" Value="Center"/>
+                        <Setter Property="Padding" Value="6,2"/>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="RowStyle">
+                <Setter.Value>
+                    <Style TargetType="DataGridRow">
+                        <Setter Property="Foreground" Value="#333333"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding KindName}" Value="Open">
+                                <Setter Property="Background" Value="#FFF0F0"/>
+                                <Setter Property="Foreground" Value="#B71C1C"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding KindName}" Value="WrongWiring">
+                                <Setter Property="Background" Value="#E32636"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding KindName}" Value="Short">
+                                <Setter Property="Background" Value="#E32636"/>
+                                <Setter Property="Foreground" Value="White"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding KindName}" Value="Probe">
+                                <Setter Property="Background" Value="#E8F5E9"/>
+                                <Setter Property="Foreground" Value="#146B2E"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid Background="{StaticResource PageBackground}" Margin="10,8,10,0" ClipToBounds="True">
+        <Grid.RowDefinitions>
+            <!-- V12.10.1: Header/Probe/Status đều Auto; chỉ TabControl/FaultGrid nhận chiều cao *. -->
+            <RowDefinition Height="128"/>
+            <RowDefinition Height="Auto" MinHeight="44"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*" MinHeight="300"/>
+        </Grid.RowDefinitions>
+
+        <!-- ========================================================= -->
+        <!-- HEADER COMPACT: MODEL / PRODUCT / LOT / STATISTICS         -->
+        <!-- Không còn Board Status chiếm diện tích TestView.           -->
+        <!-- ========================================================= -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2.35*" MinWidth="680"/>
+                <ColumnDefinition Width="1.15*" MinWidth="430"/>
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0"
+                    Margin="0,0,8,0"
+                    Padding="10,7"
+                    Background="#F9F9F8"
+                    BorderBrush="#CFCFCD"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="54"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock x:Name="TestAppVersionText"
+                                   Grid.Column="0"
+                                   Margin="2,0,12,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"
+                                   FontWeight="Bold"
+                                   Foreground="#273F91"/>
+
+                        <TextBlock x:Name="ModelTitleText"
+                                   Grid.Column="1"
+                                   Text="{Binding ModelName, Mode=OneWay}"
+                                   Margin="8,0"
+                                   FontSize="28"
+                                   FontWeight="Bold"
+                                   Foreground="#414141"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextTrimming="CharacterEllipsis"/>
+
+                        <Border Grid.Column="2"
+                                Padding="10,5"
+                                Background="#ECEFF4"
+                                BorderBrush="#C6CBD2"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                VerticalAlignment="Center">
+                            <TextBlock x:Name="CurrentTimeText"
+                                       FontSize="18"
+                                       FontWeight="Bold"
+                                       Foreground="#30343B"/>
+                        </Border>
+                    </Grid>
+
+                    <Grid Grid.Row="1" Margin="0,3,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="1.25*" MinWidth="100"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="1.2*" MinWidth="100"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="0.85*" MinWidth="80"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="0.85*" MinWidth="80"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="78"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Column="0" Text="Mã hàng" Style="{StaticResource InfoLabelStyle}" Margin="0,2,6,2"/>
+                        <TextBox Grid.Column="1" Text="{Binding PartNumber, Mode=OneWay}" ToolTip="{Binding PartNumber, Mode=OneWay}" Style="{StaticResource ReadOnlyFieldStyle}" Height="30" Margin="0,2,10,2"/>
+
+                        <TextBlock Grid.Column="2" Text="Sản phẩm" Style="{StaticResource InfoLabelStyle}" Margin="0,2,6,2"/>
+                        <TextBox Grid.Column="3" Text="{Binding ProductName, Mode=OneWay}" ToolTip="{Binding ProductName, Mode=OneWay}" Style="{StaticResource ReadOnlyFieldStyle}" Height="30" Margin="0,2,10,2"/>
+
+                        <TextBlock Grid.Column="4" Text="Loại xe" Style="{StaticResource InfoLabelStyle}" Margin="0,2,6,2"/>
+                        <TextBox Grid.Column="5" Text="{Binding VehicleType, Mode=OneWay}" ToolTip="{Binding VehicleType, Mode=OneWay}" Style="{StaticResource ReadOnlyFieldStyle}" Height="30" Margin="0,2,10,2"/>
+
+                        <TextBlock Grid.Column="6" Text="Mã KH" Style="{StaticResource InfoLabelStyle}" Margin="0,2,6,2"/>
+                        <TextBox Grid.Column="7" Text="{Binding CustomerCode, Mode=OneWay}" ToolTip="{Binding CustomerCode, Mode=OneWay}" Style="{StaticResource ReadOnlyFieldStyle}" Height="30" Margin="0,2,10,2"/>
+
+                        <TextBlock Grid.Column="8" Text="LOT" Style="{StaticResource InfoLabelStyle}" Margin="0,2,6,2"/>
+                        <TextBox Grid.Column="9" Text="{Binding Lot, Mode=OneWay}" Style="{StaticResource CounterFieldStyle}" Height="30" Margin="0,2,0,2"/>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1"
+                    Padding="9,7"
+                    Background="#F9F9F8"
+                    BorderBrush="#CFCFCD"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center">
+                        <TextBlock Text="TỔNG" FontSize="11" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding Total}" FontSize="20" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="1" HorizontalAlignment="Center">
+                        <TextBlock Text="ĐẠT" FontSize="11" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding Pass}" FontSize="20" FontWeight="Bold" Foreground="#0B8F28" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="2" HorizontalAlignment="Center">
+                        <TextBlock Text="LỖI" FontSize="11" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding Fail}" FontSize="20" FontWeight="Bold" Foreground="#D32F2F" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="0" Grid.Column="3" HorizontalAlignment="Center">
+                        <TextBlock Text="TỶ LỆ" FontSize="11" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding Rate, StringFormat={}{0:0.00}%}" FontSize="18" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Grid.Column="0" HorizontalAlignment="Center">
+                        <TextBlock Text="CHƯA NỐI" FontSize="10.5" FontWeight="Bold" Foreground="#777" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding OpenCount}" FontSize="17" FontWeight="Bold" Foreground="#D84315" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="1" HorizontalAlignment="Center">
+                        <TextBlock Text="ĐẤU SAI" FontSize="10.5" FontWeight="Bold" Foreground="#777" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding WrongCount}" FontSize="17" FontWeight="Bold" Foreground="#D32F2F" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="2" HorizontalAlignment="Center">
+                        <TextBlock Text="CHẬP" FontSize="10.5" FontWeight="Bold" Foreground="#777" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding ShortCount}" FontSize="17" FontWeight="Bold" Foreground="#B71C1C" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Row="1" Grid.Column="3" HorizontalAlignment="Center">
+                        <TextBlock Text="MẠNG / MASTER" FontSize="10.5" FontWeight="Bold" Foreground="#777" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding NetworkProgress}" FontSize="17" FontWeight="Bold" Foreground="#174EA6" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ========================================================= -->
+        <!-- PROBE / CARD COMPACT                                      -->
+        <!-- ========================================================= -->
+        <Border Grid.Row="1"
+                Margin="0,6,0,0"
+                Padding="7,4"
+                Background="#F7F7F5"
+                BorderBrush="#BDBDBA"
+                BorderThickness="1"
+                CornerRadius="4">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="78"/>
+                    <ColumnDefinition Width="92"/>
+                    <ColumnDefinition Width="1.8*"/>
+                    <ColumnDefinition Width="1.5*" MinWidth="430"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0" Text="ĐẦU DÒ" FontSize="13" FontWeight="Bold" VerticalAlignment="Center"/>
+
+                <Border Grid.Column="1" Margin="3,0,8,0" Padding="7,2"
+                        Background="#E8F5E9" BorderBrush="#8DBA91" BorderThickness="1" CornerRadius="3">
+                    <TextBlock Text="{Binding ProbeModeText}" FontSize="11.5" FontWeight="Bold"
+                               Foreground="#1B6B2A" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+
+                <ItemsControl Grid.Column="2" ItemsSource="{Binding Cards}" VerticalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border MinWidth="52" Height="34" Margin="2,1" Padding="4,2" CornerRadius="3" BorderThickness="1">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="#E8F5E9"/>
+                                        <Setter Property="BorderBrush" Value="#8DBA91"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                                <Setter Property="Background" Value="#ECECEC"/>
+                                                <Setter Property="BorderBrush" Value="#B8B8B8"/>
+                                            </DataTrigger>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsEnabled}" Value="True"/>
+                                                    <Condition Binding="{Binding HasProbeActivity}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Background" Value="#FFE27A"/>
+                                                <Setter Property="BorderBrush" Value="#C88700"/>
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding CardText}" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                    <TextBlock Text="{Binding StateText}" FontSize="7.5" HorizontalAlignment="Center" Foreground="#666"/>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Grid Grid.Column="3" Margin="10,0,0,0">
+                    <TextBlock Text="Sẵn sàng - chạm đầu dò vào chân I/O hoặc chân PIN trên JIG"
+                               Foreground="#666" FontStyle="Italic" FontSize="11.5"
+                               HorizontalAlignment="Right" TextAlignment="Right" VerticalAlignment="Center"
+                               TextWrapping="Wrap" Margin="12,0,8,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasInlineProbeContacts}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <ItemsControl ItemsSource="{Binding ProbeContacts}" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <ItemsControl.Style>
+                            <Style TargetType="ItemsControl">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasInlineProbeContacts}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ItemsControl.Style>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" HorizontalAlignment="Right"/></ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="3,1" Padding="8,4" Background="White" BorderBrush="#7D9AB8" BorderThickness="1" CornerRadius="3">
+                                    <StackPanel>
+                                        <WrapPanel>
+                                            <TextBlock Text="{Binding ProbeIoText}" FontWeight="Bold" Foreground="#174EA6"/>
+                                            <TextBlock Margin="8,0,0,0" Text="Giắc " FontWeight="SemiBold" Foreground="#666"/>
+                                            <TextBlock Text="{Binding Connector}" FontWeight="Bold"/>
+                                            <TextBlock Margin="8,0,0,0" Text="Chân " FontWeight="SemiBold" Foreground="#666"/>
+                                            <TextBlock Text="{Binding Pin}" FontWeight="Bold"/>
+                                            <TextBlock Margin="8,0,0,0" Text="{Binding ProbeWireText}" FontWeight="SemiBold"/>
+                                        </WrapPanel>
+                                        <WrapPanel Margin="0,2,0,0">
+                                            <TextBlock Text="Dập nối " Foreground="#666"/>
+                                            <TextBlock Text="{Binding Splice}" FontWeight="SemiBold"/>
+                                            <TextBlock Margin="8,0,0,0" Text="Tiết diện " Foreground="#666"/>
+                                            <TextBlock Text="{Binding Section}" FontWeight="SemiBold"/>
+                                            <Border Width="24" Height="15" Margin="8,0,4,0" Background="{Binding WireColorBrush}" BorderBrush="#555" BorderThickness="1"/>
+                                            <TextBlock Text="{Binding ProbeColorText}"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- ========================================================= -->
+        <!-- V12.10.1 STATUS STRIP: Master/Production rõ nhưng GỌN.     -->
+        <!-- Chi tiết IO/PIN nằm trong FaultGrid phía dưới.             -->
+        <!-- ========================================================= -->
+        <Border Grid.Row="2"
+                Height="68"
+                Margin="0,6,0,6"
+                Padding="14,6"
+                Background="{Binding ActiveFaultBackground}"
+                BorderBrush="#777"
+                BorderThickness="1.4"
+                CornerRadius="5">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2.4*"/>
+                    <ColumnDefinition Width="3.6*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Column="0"
+                           Text="{Binding ActiveFaultTitle}"
+                           Foreground="{Binding ActiveFaultForeground}"
+                           FontSize="26"
+                           FontWeight="Bold"
+                           VerticalAlignment="Center"
+                           TextAlignment="Left"
+                           TextTrimming="CharacterEllipsis"
+                           Margin="2,0,14,0"/>
+
+                <TextBlock Grid.Column="1"
+                           Text="{Binding ActiveFaultMessage}"
+                           Foreground="{Binding ActiveFaultForeground}"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           TextAlignment="Left"
+                           TextWrapping="Wrap"
+                           TextTrimming="CharacterEllipsis"
+                           Margin="0,0,14,0"/>
+
+                <Border Grid.Column="2"
+                        MinWidth="150"
+                        Padding="12,5"
+                        Background="#F7FFFFFF"
+                        BorderBrush="#66777777"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        VerticalAlignment="Center">
+                    <TextBlock Text="{Binding MasterProgressText}"
+                               Foreground="#8B1A1A"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               TextAlignment="Center">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding MasterProgressText}" Value="">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- ========================================================= -->
+        <!-- DETAIL AREA: MASTER FAULT SNAPSHOT / PRODUCTION NETWORKS  -->
+        <!-- ========================================================= -->
+        <TabControl Grid.Row="3"
+                    Margin="0,0,0,5"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    SelectedIndex="{Binding SelectedOperationTabIndex, Mode=TwoWay}">
+            <TabItem Header="DANH SÁCH LỖI / MẠNG I/O"
+                     HorizontalContentAlignment="Stretch"
+                     VerticalContentAlignment="Stretch">
+                <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                    <!-- V12.10.1: FaultGrid luôn hiện trong MasterBad và Production.
+                         ViewModel cấp snapshot fault MASTER unique vào chính collection Faults. -->
+                    <DataGrid x:Name="FaultGrid"
+                              ItemsSource="{Binding Faults}"
+                              RowHeight="{Binding ItemHeight}"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Stretch"
+                              Style="{StaticResource ProductionGrid}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Loại lỗi" Binding="{Binding FaultType}" Width="1.15*"/>
+                            <DataGridTextColumn Header="I/O" Binding="{Binding Io}" Width="0.8*"/>
+                            <DataGridTextColumn x:Name="ConnectorColumn" Header="Giắc" Binding="{Binding Connector}" Width="0.8*"/>
+                            <DataGridTextColumn Header="Chân" Binding="{Binding Pin}" Width="0.75*"/>
+                            <DataGridTextColumn Header="Tên dây" Binding="{Binding WireName}" Width="1.25*"/>
+                            <DataGridTextColumn Header="Dây dập nối" Binding="{Binding Splice}" Width="1.35*"/>
+                            <DataGridTextColumn Header="Tiết diện" Binding="{Binding Section}" Width="0.9*"/>
+                            <DataGridTemplateColumn Header="Màu dây" Width="0.9*">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="7,4" MinWidth="42" Height="24" HorizontalAlignment="Stretch"
+                                                Background="{Binding WireColorBrush}" BorderBrush="#666" BorderThickness="1" CornerRadius="2"
+                                                ToolTip="{Binding Color}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Trạng thái" Binding="{Binding Status}" Width="1.8*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="ĐO ĐIỆN TRỞ">
+                <DataGrid ItemsSource="{Binding Resistance}" Style="{StaticResource ProductionGrid}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Bước" Binding="{Binding Name}" Width="1.2*"/>
+                        <DataGridTextColumn Header="Kênh" Binding="{Binding Channel}" Width="0.7*"/>
+                        <DataGridTextColumn Header="Giá trị" Binding="{Binding Display}" Width="1.3*"/>
+                        <DataGridTextColumn Header="Min Ω" Binding="{Binding MinOhm}" Width="1*"/>
+                        <DataGridTextColumn Header="Max Ω" Binding="{Binding MaxOhm}" Width="1*"/>
+                        <DataGridTextColumn Header="Kết quả" Binding="{Binding ResultText}" Width="1*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </TabItem>
+
+            <TabItem Header="TEST RELAY: R1 JIG / R2 MARKING">
+                <StackPanel Margin="30">
+                    <TextBlock Text="KIỂM TRA RELAY ĐẦU RA" FontSize="24" FontWeight="Bold"/>
+                    <TextBlock Text="Chỉ sử dụng khi máy không chạy chu kỳ sản xuất. Nhấn nút sẽ pulse rồi tự OFF."
+                               Foreground="Red" Margin="0,7,0,20"/>
+                    <UniformGrid Columns="3">
+                        <Button Command="{Binding Relay1Command}" Height="70" Content="RELAY 1 - MỞ JIG (PULSE 1 LẦN)"/>
+                        <Button Command="{Binding Relay2Command}" Height="70" Content="RELAY 2 - MARKING (PULSE 1 LẦN)"/>
+                        <Button Command="{Binding RelaysOffCommand}" Height="70" Background="#F6C4C4" Content="TẮT RELAY - TRẠNG THÁI CHỜ"/>
+                    </UniformGrid>
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="NHẬT KÝ THIẾT BỊ">
+                <ListBox ItemsSource="{Binding Logs}" FontFamily="Consolas" FontSize="14" Background="#111" Foreground="#E8E8E8"/>
+            </TabItem>
+        </TabControl>
+
+        <!-- ========================================================= -->
+        <!-- BOTTOM TOOLBAR OVERLAY: không chiếm chiều cao khi ẩn       -->
+        <!-- ========================================================= -->
+        <Border x:Name="BottomToolbarHotZone"
+                Grid.RowSpan="4"
+                Height="24"
+                VerticalAlignment="Bottom"
+                Background="Transparent"
+                Panel.ZIndex="290"
+                MouseEnter="BottomToolbarHotZone_MouseEnter"
+                MouseLeave="BottomToolbarHotZone_MouseLeave"/>
+
+        <Grid x:Name="BottomToolbarOverlay"
+              Grid.RowSpan="4"
+              VerticalAlignment="Bottom"
+              Panel.ZIndex="300"
+              ClipToBounds="True"
+              IsHitTestVisible="False">
+            <Border x:Name="BottomButtonPanel"
+                    Height="62"
+                    Margin="0"
+                    Background="#F4F4F2"
+                    BorderBrush="#777"
+                    BorderThickness="1"
+                    CornerRadius="5,5,0,0"
+                    Opacity="0"
+                    IsHitTestVisible="False"
+                    MouseEnter="BottomButtonPanel_MouseEnter"
+                    MouseLeave="BottomButtonPanel_MouseLeave">
+                <Border.RenderTransform><TranslateTransform x:Name="BottomToolbarTranslate"/></Border.RenderTransform>
+
+                <Grid Margin="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.1*"/>
+                        <ColumnDefinition Width="1.1*"/>
+                        <ColumnDefinition Width="1.1*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0" Content="ĐO ĐIỆN TRỞ" Margin="4,0" Command="{Binding MeasureCommand}" FontSize="15" FontWeight="Bold">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource ProductionButtonStyle}">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ProductionEnabled}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+
+
+                    <Button Grid.Column="1" Content="DỪNG AN TOÀN" Margin="4,0" Command="{Binding StopCommand}"
+                            Style="{StaticResource ProductionButtonStyle}" Background="#F1B8B8" FontSize="15" FontWeight="Bold"/>
+
+                    <Button Grid.Column="2" Content="VỀ TRANG CHÍNH" Margin="4,0" Click="BackToMain_Click"
+                            Style="{StaticResource ProductionButtonStyle}" Background="#E7E7E7" FontSize="15" FontWeight="Bold"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

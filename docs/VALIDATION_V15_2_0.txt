@@ -1,0 +1,17 @@
+JBZUniversalTester V15.2.0 STATIC VALIDATION
+================================================
+PASS: Relay1JigPulseMs riêng.
+PASS: Relay2MarkingPulseMs riêng.
+PASS: PassMarkingToJigDelayMs riêng.
+PASS: UI tách 3 trường timing.
+PASS: FAIL dùng PulseJigRelayAsync.
+PASS: PASS R2 safe pulse trước R1 safe pulse.
+PASS: Manual R1/R2 dùng TestEngine safe pulse.
+PASS: Safe pulse có finally.
+PASS: Safe-OFF retry 3 lần.
+PASS: Safe-OFF thất bại sẽ chặn workflow tiếp theo.
+PASS: XAML/XML parse sanity.
+PASS: C# brace sanity.
+
+LIMITATION:
+Chưa thể chạy dotnet build/bo D2XX thật trong môi trường hiện tại.

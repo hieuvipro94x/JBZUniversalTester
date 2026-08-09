@@ -1,0 +1,327 @@
+﻿<Window x:Class="JBZUniversalTester.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="UniversalTester - JBZ Production"
+        WindowState="Maximized"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        Background="#F7F7F5"
+        FontFamily="Segoe UI"
+        Loaded="MainWindow_Loaded"
+        Closing="MainWindow_Closing">
+
+    <Window.Resources>
+
+        <SolidColorBrush x:Key="PageBackground" Color="#F7F7F5"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="#555555"/>
+        <SolidColorBrush x:Key="TextMuted" Color="#777777"/>
+        <SolidColorBrush x:Key="BrandBlue" Color="#273F91"/>
+        <SolidColorBrush x:Key="StatusPurple" Color="#8E44AD"/>
+
+        <Style x:Key="FlatButton" TargetType="Button">
+            <Setter Property="Height" Value="50"/>
+            <Setter Property="Margin" Value="3"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="Background" Value="#EFEFEE"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="#666666"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+
+                            <ContentPresenter
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+                        </Border>
+
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Background"
+                                        Value="#DDDDDA"/>
+                            </Trigger>
+
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Background"
+                                        Value="#CBCBC8"/>
+                            </Trigger>
+
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Opacity"
+                                        Value="0.42"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButton"
+               TargetType="Button"
+               BasedOn="{StaticResource FlatButton}">
+            <Setter Property="Width" Value="540"/>
+            <Setter Property="Height" Value="56"/>
+            <Setter Property="Background" Value="{StaticResource StatusPurple}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="18"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+
+    </Window.Resources>
+
+    <Grid Background="{StaticResource PageBackground}">
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="88"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="64"/>
+        </Grid.RowDefinitions>
+
+        <!-- ====================================================== -->
+        <!-- HEADER                                                 -->
+        <!-- ====================================================== -->
+
+        <Grid Grid.Row="0"
+              Margin="20,16,20,0">
+
+            <TextBlock Text="{Binding Home.SourcePath, Mode=OneWay}"
+                       Foreground="{StaticResource TextMuted}"
+                       FontSize="15"
+                       TextWrapping="Wrap"
+                       TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Top"/>
+
+            <StackPanel HorizontalAlignment="Right"
+                        VerticalAlignment="Top">
+
+                <TextBlock x:Name="AppVersionText"
+                           Text="JBZ Universal"
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="15"
+                           TextAlignment="Right"/>
+
+                <TextBlock Text="Chương trình đang trong giai đoạn thử nghiệm..."
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="13"
+                           Margin="0,5,0,0"
+                           TextAlignment="Right"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- ====================================================== -->
+        <!-- MÀN HÌNH KHỞI ĐỘNG / CHỌN MÃ HÀNG                     -->
+        <!-- ====================================================== -->
+
+        <Grid Grid.Row="1">
+
+            <StackPanel Width="1080"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+
+                <Border Width="220"
+                        Background="White"
+                        HorizontalAlignment="Center"
+                        BorderBrush="#D0D0CE"
+                        BorderThickness="1">
+
+                    <StackPanel>
+
+                        <TextBlock Text="VINA"
+                                   Foreground="{StaticResource BrandBlue}"
+                                   FontSize="58"
+                                   FontWeight="Bold"
+                                   TextAlignment="Center"
+                                   Margin="16,4"/>
+
+                        <Border Background="{StaticResource BrandBlue}">
+                            <TextBlock Text="JBZVINA-2026"
+                                       Foreground="White"
+                                       FontSize="22"
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"
+                                       Padding="8,4"/>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="{Binding Home.ModelName, Mode=OneWay}"
+                           Foreground="{StaticResource TextPrimary}"
+                           FontSize="44"
+                           TextAlignment="Center"
+                           Margin="0,24,0,10"/>
+
+                <WrapPanel HorizontalAlignment="Center"
+                           Margin="0,0,0,18">
+
+                    <TextBlock Text="Mã sản phẩm: "
+                               FontSize="19"
+                               Foreground="{StaticResource TextMuted}"/>
+
+                    <TextBlock Text="{Binding Home.PartNumber, Mode=OneWay}"
+                               FontSize="19"
+                               Foreground="{StaticResource TextPrimary}"
+                               Margin="0,0,30,0"/>
+
+                    <TextBlock Text="Tên sản phẩm: "
+                               FontSize="19"
+                               Foreground="{StaticResource TextMuted}"/>
+
+                    <TextBlock Text="{Binding Home.ProductName, Mode=OneWay}"
+                               FontSize="19"
+                               Foreground="{StaticResource TextPrimary}"
+                               Margin="0,0,30,0"/>
+
+                    <TextBlock Text="Loại xe: "
+                               FontSize="19"
+                               Foreground="{StaticResource TextMuted}"/>
+
+                    <TextBlock Text="{Binding Home.VehicleType, Mode=OneWay}"
+                               FontSize="19"
+                               Foreground="{StaticResource TextPrimary}"/>
+                </WrapPanel>
+
+                <Button Content="BẤM KIỂM TRA ĐỂ BẮT ĐẦU"
+                        Click="OpenTestWindow_Click"
+                        Style="{StaticResource PrimaryButton}"/>
+
+                <TextBlock Text="{Binding Status, Mode=OneWay}"
+                           HorizontalAlignment="Center"
+                           Foreground="{StaticResource TextMuted}"
+                           FontSize="14"
+                           Margin="0,14,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- ====================================================== -->
+        <!-- THANH CHỨC NĂNG                                        -->
+        <!-- ====================================================== -->
+
+        <Grid Grid.Row="2"
+              Margin="4,0,4,4">
+
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="210"/>
+                <ColumnDefinition Width="190"/>
+                <ColumnDefinition Width="190"/>
+                <ColumnDefinition Width="190"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="120"/>
+            </Grid.ColumnDefinitions>
+
+            <Button Grid.Column="0"
+                    Click="OpenTestWindow_Click"
+                    Style="{StaticResource FlatButton}"
+                    Content="BẮT ĐẦU KIỂM TRA"
+                    ToolTip="Đầu dò chân I/O hoạt động song song ngay trong màn hình kiểm tra"/>
+
+            <!-- V12.8: bỏ lối vào PinProbeWindow riêng. Đầu dò hoạt động song song
+                 trong TestWindow nên người vận hành không cần chuyển chế độ. -->
+            <Button Grid.Column="1"
+                    Click="OpenHistory_Click"
+                    Style="{StaticResource FlatButton}"
+                    Content="LỊCH SỬ"/>
+
+            <Button Grid.Column="2"
+                    Click="OpenSettings_Click"
+                    Style="{StaticResource FlatButton}"
+                    Content="CÀI ĐẶT"/>
+
+            <Button Grid.Column="3"
+                    Command="{Binding Home.LoadModelCommand}"
+                    Style="{StaticResource FlatButton}"
+                    Content="CHỌN MÃ HÀNG"/>
+
+            <Button Grid.Column="5"
+                    Command="{Binding ExitCommand}"
+                    Style="{StaticResource FlatButton}"
+                    Content="KẾT THÚC"/>
+        </Grid>
+    
+
+        <!-- ====================================================== -->
+        <!-- V12.9 - SINGLE WINDOW INTERNAL PAGE HOST               -->
+        <!-- Cài đặt/Lịch sử được nhúng trong MainWindow, không     -->
+        <!-- tạo Window/ShowDialog nên không sinh thêm Alt+Tab.      -->
+        <!-- ====================================================== -->
+        <ContentControl x:Name="InternalPageHost"
+                        Grid.Row="0"
+                        Grid.RowSpan="3"
+                        Panel.ZIndex="20"
+                        Visibility="Collapsed"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch"
+                        Background="#F3F4F6"/>
+
+        <!-- Password gate cũng nằm trong cùng MainWindow. -->
+        <Grid x:Name="SettingsPasswordGate"
+              Grid.Row="0"
+              Grid.RowSpan="3"
+              Panel.ZIndex="30"
+              Visibility="Collapsed"
+              Background="#CC202020">
+            <Border Width="520"
+                    Padding="26"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Background="White"
+                    BorderBrush="#777777"
+                    BorderThickness="1"
+                    CornerRadius="6">
+                <StackPanel>
+                    <TextBlock Text="XÁC NHẬN MẬT KHẨU CÀI ĐẶT"
+                               FontSize="22"
+                               FontWeight="Bold"
+                               Foreground="#30343B"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="Cài đặt sẽ mở ngay trong giao diện chính sau khi xác nhận."
+                               Margin="0,8,0,18"
+                               Foreground="#666666"
+                               HorizontalAlignment="Center"/>
+                    <PasswordBox x:Name="SettingsPasswordBox"
+                                 Height="40"
+                                 FontSize="18"
+                                 Padding="8,4"
+                                 KeyDown="SettingsPasswordBox_KeyDown"/>
+                    <TextBlock x:Name="SettingsPasswordErrorText"
+                               Margin="0,8,0,0"
+                               Foreground="#C62828"
+                               FontWeight="SemiBold"
+                               Text="Mật khẩu không đúng."
+                               Visibility="Collapsed"/>
+                    <Grid Margin="0,18,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0"
+                                Margin="0,0,6,0"
+                                Content="XÁC NHẬN"
+                                Style="{StaticResource FlatButton}"
+                                Click="ConfirmSettingsPassword_Click"/>
+                        <Button Grid.Column="1"
+                                Margin="6,0,0,0"
+                                Content="HỦY"
+                                Style="{StaticResource FlatButton}"
+                                Click="CancelSettingsPassword_Click"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </Grid>
+</Grid>
+</Window>

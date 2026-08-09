@@ -1,0 +1,8 @@
+JBZUniversalTester V11.4 - TESTPIN ROW / FAULT-FIRST
+
+1. TestPin không dùng bảng Faults production.
+2. Chạm que GND vào I/O nào -> chỉ dòng I/O đó xuất hiện ở PinProbeWindow và đỏ toàn dòng.
+3. Nhả que -> dòng Probe biến mất ngay khi nhận vòng Probe rỗng.
+4. TestPin không còn popup modal, không báo chập/đấu sai, không PASS/FAIL, không relay/Keysight.
+5. Thêm guard sau await StopScan và ngay trước MessageBox để callback lỗi production cũ không thể hiện popup sau khi đã chuyển Probe mode.
+6. Production: mọi dòng WrongWiring/Short luôn được sort lên đầu DataGrid; các dòng hở mạch phía sau vẫn giữ thứ tự THT.

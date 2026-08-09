@@ -1,0 +1,109 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="Version.props" />
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- V12.10.2: namespace code giu nguyen, ten EXE/assembly co version de khong ghi de ban cu -->
+    <RootNamespace>JBZUniversalTester</RootNamespace>
+    <AssemblyName>JBZUniversalTester_V$(VersionFileTag)</AssemblyName>
+
+    <!-- Phần mềm 32-bit -->
+    <PlatformTarget>x86</PlatformTarget>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+
+    <ApplicationIcon>logo.ico</ApplicationIcon>
+
+    <!-- Xuất bản thành một EXE -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <UseAppHost>true</UseAppHost>
+
+    <!-- Máy đích phải có .NET 8 Desktop Runtime x86 -->
+    <SelfContained>false</SelfContained>
+    <PublishSelfContained>false</PublishSelfContained>
+
+    <!-- Nhúng thư viện native vào bundle -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+
+    <!-- Framework-dependent không hỗ trợ nén bundle -->
+    <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+
+    <!-- Giảm dung lượng -->
+    <PublishReadyToRun>false</PublishReadyToRun>
+
+    <!-- Không trim ứng dụng WPF -->
+    <PublishTrimmed>false</PublishTrimmed>
+
+    <!-- Không tạo PDB trong bản Release -->
+    <DebugType Condition="'$(Configuration)' == 'Release'">None</DebugType>
+    <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
+
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!-- V12.9: chan build neu Version.props bi cap nhat lech. -->
+  <Target Name="ValidateVersionConfiguration" BeforeTargets="BeforeBuild">
+    <PropertyGroup>
+      <ExpectedVersionFileTag>$([System.String]::Copy('$(Version)').Replace('.', '_'))</ExpectedVersionFileTag>
+    </PropertyGroup>
+    <Error Condition="'$(Version)' == ''" Text="Version.props: Version khong duoc de trong." />
+    <Error Condition="'$(AssemblyVersion)' == ''" Text="Version.props: AssemblyVersion khong duoc de trong." />
+    <Error Condition="'$(FileVersion)' == ''" Text="Version.props: FileVersion khong duoc de trong." />
+    <Error Condition="'$(AssemblyVersion)' != '$(Version).0'"
+           Text="Version.props khong dong bo: AssemblyVersion=$(AssemblyVersion), can la $(Version).0." />
+    <Error Condition="'$(FileVersion)' != '$(Version).0'"
+           Text="Version.props khong dong bo: FileVersion=$(FileVersion), can la $(Version).0." />
+    <Error Condition="'$(InformationalVersion)' != '$(Version)'"
+           Text="Version.props khong dong bo: InformationalVersion=$(InformationalVersion), can la $(Version)." />
+    <Error Condition="'$(VersionFileTag)' != '$(ExpectedVersionFileTag)'"
+           Text="Version.props khong dong bo: VersionFileTag=$(VersionFileTag), can la $(ExpectedVersionFileTag)." />
+  </Target>
+
+  <!-- Icon -->
+  <ItemGroup>
+    <None Remove="logo.ico" />
+    <Resource Include="logo.ico" />
+  </ItemGroup>
+
+  <!-- SQLite -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.12" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.10" />
+  </ItemGroup>
+
+  <!-- Self-tests là project console riêng, không được compile vào WPF app. -->
+  <ItemGroup>
+    <Compile Remove="Tests\**\*.cs" />
+  </ItemGroup>
+
+  <!-- Nhúng âm thanh vào EXE -->
+  <ItemGroup>
+    <None Remove="Assets\Sounds\CLICK.wav" />
+    <None Remove="Assets\Sounds\DINGDONG.wav" />
+    <None Remove="Assets\Sounds\START.wav" />
+    <None Remove="Assets\Sounds\TESTPOINT.wav" />
+
+    <EmbeddedResource Include="Assets\Sounds\CLICK.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.CLICK.wav</LogicalName>
+    </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\DINGDONG.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.DINGDONG.wav</LogicalName>
+    </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\START.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.START.wav</LogicalName>
+    </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\TESTPOINT.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.TESTPOINT.wav</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

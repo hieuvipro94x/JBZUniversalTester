@@ -1,0 +1,7 @@
+JBZUniversalTester V12.6.0 - CS0177 BUILD FIX
+
+1. Fixed compile error CS0177 in Services/ThtModelParser.cs / TryGetBranchNumber().
+2. branchNumber is now initialized on every return path; regex failure no longer leaves the out parameter unassigned.
+3. Parsing uses a local parsedBranchNumber and assigns the out parameter only after validation.
+4. Version bumped from 12.5.0 to 12.6.0 according to project versioning policy.
+5. AssemblyVersion/FileVersion = 12.6.0.0, InformationalVersion = 12.6.0, EXE tag = 12_6_0.

@@ -1,0 +1,33 @@
+JBZUniversalTester V12.9.5
+==========================
+
+MASTER AUTO
+- Loai bo UI/command Master thu cong tren TestView.
+- Them MasterSequenceState state machine: Waiting/Testing/Ejecting Good -> Waiting/Testing/Ejecting Bad -> Completed.
+- Good Master bat buoc continuity PASS va resistance PASS neu model co buoc do; relay JIG tu dong, khong MARKING.
+- Bad Master xac nhan theo so fault day duy nhat N/N; Open/WrongWiring/ShortCircuit moi duoc tinh.
+- HashSet<MasterFaultKey> chong dem trung cung fault qua nhieu frame.
+- 1/N giu Master Gate LOCKED; chi N/N moi eject JIG va ProductionEnabled=true.
+- Master khong goi RecordCompletedProduct, khong tang LOT/Total/Pass/Fail Production.
+- Log rieng MASTER GOOD/BAD START/PASS/EJECT/COMPLETED.
+
+CONFIG THEO MODEL
+- Them MasterFaultRequiredCount fallback.
+- Them MasterFaultCountsByModel de luu So loi Master theo ma hang/model.
+- production.settings.json va UniversalTester.cfg deu luu/nap cau hinh moi.
+- Doi model hoac doi So loi Master se reset Master Gate ve 0/N.
+
+TESTVIEW VAN HANH
+- Xoa hang MASTER SAMPLE manual.
+- Xoa Board Status khoi TestView.
+- Header thong tin + LOT + thong ke compact.
+- Probe/Card row compact, giu tat ca card bat/tat va ProbeContacts song song.
+- Mot vung trang thai trung tam chung cho Master va Production, la vung lon nhat.
+- Fault Master hien tung dong do rieng, co IO/PIN va Mong doi/Thuc te.
+- Xoa nut XAC NHAN PASS + RELAY khoi bottom toolbar Production; relay thu cong nam trong tab diagnostic.
+- Bottom toolbar tiep tuc overlay/auto-hide theo V12.9.2.
+
+REGRESSION GIU NGUYEN
+- Probe release/touch khong TTL 1-2 giay.
+- Card mo rong va Probe activity tach biet.
+- History/Fault model/async logs V12.9.1 giu nguyen.

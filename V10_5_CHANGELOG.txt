@@ -1,0 +1,31 @@
+JBZUniversalTester V10.5 - TESTPIN GND / FAST PASS
+Ngày: 2026-08-07
+
+1. Tách decoder TestPin khỏi decoder production.
+   - TestPin: 80/81 nn = NORMAL của chính I/O; A0/A1 nn = chính I/O đang chạm GND.
+   - Production: giữ SOURCE 80/81 -> TARGET A0/A1.
+   - Snapshot Probe không bao giờ đi vào TestEngine, vì vậy không thể tạo lỗi chập/đấu sai giả.
+
+2. Trace 20260807_145543 xác nhận:
+   - START_SCAN 8C 00 04 00.
+   - 256 word / snapshot.
+   - Frame 24 không chạm: không A0/A1.
+   - Frame 25..28: 80 00, A0 01, 80 02... => chỉ IO(2) đang chạm.
+   - Chu kỳ snapshot khoảng 300-315 ms.
+
+3. Tăng tốc TestPin:
+   - phát snapshot ngay khi byte A0/A1 tới, không chờ C0 00.
+   - C0 00 chỉ xác nhận trạng thái nhả que để xóa IO khỏi màn hình.
+   - khi không có THT vẫn hiện số IO; có THT thì tra tên dây, giắc, chân, tiết diện, màu.
+
+4. Trạng thái production:
+   CHỜ LẮP SẢN PHẨM -> ĐANG KIỂM TRA -> PASS.
+   PASS đổi nền xanh lá (#58D36B) và giữ tới khi tháo sản phẩm.
+
+5. Tăng tốc PASS:
+   - ngay khi điều kiện cuối cùng đạt: đổi PASS + phát DINGDONG ngay.
+   - model không điện trở: bỏ delay 500 ms trước relay, STOP_SCAN xong kích Relay 1 ngay.
+   - PostResistanceRelayDelayMs mặc định đổi về 0 ms.
+   - giữ RelayPulse và RelayInterlock theo cấu hình để không làm sai timing cơ khí.
+
+6. Giữ toàn bộ cleanup/fast scan của V10.4.

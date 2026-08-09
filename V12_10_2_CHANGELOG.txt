@@ -1,0 +1,25 @@
+JBZUniversalTester V12.10.2 - MASTER FAULT DEDUP / FAULTGRID HARDENING
+=====================================================================
+
+1. Bump version 12.10.1 -> 12.10.2.
+2. Backup V12.10.1 files before repair:
+   - Backup/TestWindow_V12_10_1_before_master_fault_fix.xaml
+   - Backup/TestViewModel_V12_10_1_before_master_fault_fix.cs
+   - Backup/MasterModels_V12_10_1_before_master_fault_fix.cs
+3. Fix MasterFaultKey so one physical IO edge is counted once even when
+   firmware/engine reports opposite directions or classifies the same edge as
+   WrongWiring vs ShortCircuit on different frames.
+4. Add RelatedIos fallback for incomplete fault metadata.
+5. Duplicate Master fault no longer increments count; a later, richer fault
+   detail may replace the displayed detail without changing 1/N progress.
+6. Rebuild legacy MasterFaults snapshot after detail upgrade.
+7. Sort Master FaultGrid deterministically by fault priority / IO.
+8. Make DataGrid column headers bold and centered for production readability.
+9. Keep V12.10.1 compact TestView layout, FaultGrid stretch, Probe/Card,
+   Master Auto, ReadOnly OneWay bindings, bottom toolbar and Production logic.
+10. Add Scripts/Validate-V12.10.2.ps1 and VERIFY_BUILD_V12_10_2.cmd.
+
+Static audit in repair sandbox: 79/79 PASS.
+.NET SDK/MSBuild is not installed in the sandbox, therefore Windows WPF build,
+FTDI, VISA and real hardware runtime still require VERIFY_BUILD_V12_10_2.cmd
+on the target/build PC.

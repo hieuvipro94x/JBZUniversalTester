@@ -1,0 +1,10 @@
+{
+  "partNumber": "EXAMPLE",
+  "d2xx": {
+    "tht": "D2XX/EXAMPLE.tht"
+  },
+  "uartTtl": {
+    "model": "UART/EXAMPLE.model",
+    "setup": "UART/EXAMPLE.setup"
+  }
+}

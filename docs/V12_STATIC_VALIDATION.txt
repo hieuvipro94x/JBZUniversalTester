@@ -1,0 +1,19 @@
+JBZUniversalTester V12.0 static validation
+=========================================
+- All XAML files parsed as XML: OK
+- appsettings.json parsed as JSON: OK
+- All XAML event-handler names found in matching code-behind: OK
+- No gross C# brace-count mismatch found: OK
+- Version fields updated to 12.0.0: OK
+- MainWindow History button opens HistoryWindow: OK
+- Settings password gate wired: OK
+- UseTestPointer gate wired: OK
+- Settings Save uses ProductionConfigService.Save: OK
+- Printer COM is optional; Windows printer / preview fallback allowed: OK
+- StampDelay 2-value validation wired: OK
+- TestWindow live time, fixed status panel, UI settings wired: OK
+- History fields / CSV / XLSX / HtdrvName wired: OK
+- EPL PASS label generation / printer path wired: OK
+- ALL6 sample values/order documented: OK
+
+Build note: this container has no Windows .NET SDK, so a real WPF compile must be run on the Windows development PC.

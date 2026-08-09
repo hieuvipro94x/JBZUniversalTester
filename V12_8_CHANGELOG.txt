@@ -1,0 +1,45 @@
+JBZUniversalTester V12.8.0
+==========================
+
+1. ĐẦU DÒ CHẠY SONG SONG VỚI PRODUCTION
+- Không còn thay thế/ẩn bảng Faults khi chạm đầu dò.
+- Bảng cấu hình đang kiểm tra luôn giữ nguyên trên DataGrid.
+- ProbeContacts là collection UI riêng chỉ dùng cho thanh trạng thái đầu dò.
+- Nhấc đầu dò: ProbeContacts tự xóa sau debounce/quarantine, cấu hình test không cần dựng lại từ đầu.
+
+2. HỖ TRỢ 2 CHÂN I/O CÙNG LÚC
+- ProbeContactClassifier bổ sung DetectMany(...), nhận tối đa 2 contact mạnh nhất trong cùng frame.
+- TestViewModel giữ danh sách contact thay vì chỉ một I/O duy nhất.
+- Nếu cùng lúc chạm hai chân, thanh đầu dò hiển thị hai thẻ IO song song.
+
+3. THANH ĐẦU DÒ THAY CHO DÒNG THIẾT BỊ
+- Bỏ TextBlock THIẾT BỊ/HardwareStatus khỏi TestWindow.
+- Khi không chạm: hiển thị SẴN SÀNG.
+- Khi chạm: hiển thị ĐANG DÒ (n).
+- I/O không có map THT: hiển thị IO (xx).
+- I/O có map THT: hiển thị IO (xx), Tên dây, ô màu thực và tên màu tiếng Việt.
+- Bổ sung ColorName/ToVietnameseName để ví dụ mã B/BK hiển thị Màu Đen.
+
+4. KHÔNG CÒN CHẾ ĐỘ ĐẦU DÒ TÁCH RIÊNG TRONG MENU CHÍNH
+- Bỏ nút KIỂM TRA CHÂN PIN khỏi MainWindow.
+- Đầu dò hoạt động tự động ngay trong màn hình BẮT ĐẦU KIỂM TRA.
+- Source PinProbeWindow cũ vẫn giữ để tương thích nội bộ nhưng không còn lối vào vận hành chính.
+
+5. BOTTOM MENU KHÔNG CÒN OVERLAY
+- BottomMenuArea được đưa vào RowDefinition Auto riêng.
+- Trạng thái thu gọn cao 10 px làm vùng bắt chuột.
+- Khi rê chuột xuống đáy, Height animate lên 66 px và Grid layout lại thật.
+- TabControl/DataGrid bị đẩy lên mượt, không bị thanh nút phủ lên nội dung.
+- Loại bỏ Panel.ZIndex và TranslateTransform của menu nổi cũ.
+
+6. AN TOÀN RELAY GIỮ NGUYÊN TỪ V12.7
+- Frame đầu dò không vào TestEngine.
+- Probe/NG/Short/WrongWiring không được kích relay.
+- Relay tự động chỉ được phép chạy trong chuỗi PASS hợp lệ theo interlock hiện có.
+
+7. VERSION
+- Version: 12.8.0
+- AssemblyVersion: 12.8.0.0
+- FileVersion: 12.8.0.0
+- InformationalVersion: 12.8.0
+- EXE: JBZUniversalTester_V12_8_0.exe

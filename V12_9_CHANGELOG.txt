@@ -1,0 +1,44 @@
+JBZUniversalTester V12.9.0
+==========================
+
+1. SINGLE-WINDOW UI
+- Cài đặt chuyển từ Window sang ProductionSettingsPage trong MainWindow.
+- Lịch sử chuyển từ Window sang HistoryPage trong MainWindow.
+- Password Settings chuyển thành inline gate trong MainWindow.
+- Xóa ProductionSettingsWindow, HistoryWindow, PasswordPromptWindow.
+- Xóa PinProbeWindow khỏi UI vận hành; Probe hiển thị song song trên TestWindow.
+- CÀI ĐẶT/LỊCH SỬ không tạo cửa sổ Alt+Tab riêng.
+
+2. CARD CAPACITY CENTRALIZED
+- Thêm Models/BoardCapacity.cs.
+- Thêm Services/BoardAddressMapper.cs.
+- 1 physical card = 32 IO.
+- 1 expansion module = 2 physical card = 64 IO.
+- Settings 1..10 -> 64..640 IO.
+- START_SCAN xx lấy từ ScanCardCount central.
+- Trace project xx=4 -> 256 IO được dùng làm căn cứ sửa raw START_SCAN mapping.
+
+3. RUNTIME RECONFIGURE
+- Save Settings -> reload -> stop scan -> relay OFF -> rebuild capacity/cards -> restart scan.
+- Giữ FTDI mở, không close/open vì thay card.
+- scanGeneration loại stale callback/worker cũ.
+
+4. TESTVIEW CARD DYNAMIC
+- Hiển thị 20 physical card với ACTIVE/DISABLED.
+- Card có Probe activity highlight riêng.
+- Probe release chỉ mất highlight, card vẫn ACTIVE.
+
+5. PROBE / THT
+- Giữ single board FrameReceived router tại TestViewModel.
+- Production/explicit Probe semantics vẫn tách trong BoardIoDecoder.
+- Explicit Probe state hỗ trợ tập nhiều IO.
+- Inline Probe vẫn song song với Production và không xóa cấu hình test.
+- THT lookup dùng ILookup<int, PinRecord>, giữ duplicate mapping.
+- IO ngoài current BoardCapacity bị decoder reject, không fake fault/probe.
+
+6. VERSION
+- Version 12.9.0
+- AssemblyVersion/FileVersion 12.9.0.0
+- EXE: JBZUniversalTester_V12_9_0.exe
+
+Xem báo cáo chi tiết: docs/V12_9_REPAIR_REPORT.md

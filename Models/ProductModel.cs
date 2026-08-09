@@ -1,0 +1,119 @@
+namespace JBZUniversalTester.Models;
+
+public sealed record PinRecord(
+    string Connector,
+    string WireName,
+    int IoNumber,
+    string PinNumber,
+    string SpliceName = "",
+    string Section = "",
+    string Color = "");
+
+/// <summary>
+/// Một mạng dây theo đúng thứ tự xuất hiện trong file THT.
+/// Htdrv gốc dùng I/O đầu tiên của mỗi network làm điểm kích (source),
+/// các I/O còn lại là điểm phải trả A0 ACTIVE khi dây thông.
+/// </summary>
+public sealed record WireNet(
+    string Name,
+    IReadOnlyList<int> IoNumbers,
+    IReadOnlyList<PinRecord> Pins)
+{
+    public int SourceIo => IoNumbers.Count > 0 ? IoNumbers[0] : 0;
+
+    public IReadOnlyList<int> ExpectedActiveIo =>
+        IoNumbers.Count <= 1
+            ? Array.Empty<int>()
+            : IoNumbers.Skip(1).Distinct().ToArray();
+
+    public bool IsSplice => IoNumbers.Count > 2;
+
+    public string IoText => string.Join(" ↔ ", IoNumbers);
+}
+
+
+/// <summary>
+/// Một nhánh CLIP trong THT. Quy tắc V12.4 theo cấu hình thực tế:
+/// - AO/A0 là đầu chung của tất cả CLIP.
+/// - aN chỉ là TÊN/THỨ TỰ của nhánh CLIP.
+/// - Cột I/O trên chính row aN mới là I/O được cấu hình cho đầu còn lại.
+/// Không được suy diễn a1=IO1, a2=IO2... nếu cột I/O khai báo khác.
+/// </summary>
+public sealed record ClipBranch(
+    string Name,
+    int BranchNumber,
+    int TargetIo,
+    PinRecord ClipPin,
+    PinRecord? TargetPin)
+{
+    public string NetName => $"CLIP:{Name.ToUpperInvariant()}";
+}
+
+/// <summary>
+/// Topology CLIP: mọi a1/a2/a3... có một đầu nối chung A0; đầu còn lại
+/// của từng aN đi tới đúng I/O ghi trong cột I/O của row aN trong file THT.
+/// </summary>
+public sealed class ClipTopology
+{
+    public PinRecord CommonPin { get; }
+    public IReadOnlyList<ClipBranch> Branches { get; }
+    public int CommonIo => CommonPin.IoNumber;
+
+    public ClipTopology(PinRecord commonPin, IReadOnlyList<ClipBranch> branches)
+    {
+        CommonPin = commonPin;
+        Branches = branches;
+    }
+
+    public bool IsSpecialPin(PinRecord pin) =>
+        ReferenceEquals(pin, CommonPin) ||
+        Branches.Any(branch => ReferenceEquals(pin, branch.ClipPin));
+}
+
+public sealed class ProductModel
+{
+    public string ModelName { get; set; } = "";
+    public string PartNumber { get; set; } = "";
+    public string ProductName { get; set; } = "";
+    public string VehicleType { get; set; } = "";
+    public string CustomerCode { get; set; } = "";
+
+    // Các trường Part table gốc dùng trong ALL6.xls/history/label.
+    public string Eco { get; set; } = "";
+    public string Nco { get; set; } = "";
+    public string Alc { get; set; } = "";
+    public string SourcePath { get; set; } = "";
+
+    public List<PinRecord> Pins { get; set; } = [];
+    public List<WireNet> Nets { get; set; } = [];
+    public List<ResistanceStep> ResistanceSteps { get; set; } = [];
+
+    /// <summary>
+    /// I/O đặc biệt không đủ thông tin để dựng topology. AO/aN hợp lệ sẽ được
+    /// đưa vào ClipTopology, chỉ dữ liệu special bị thiếu/malformed mới nằm đây.
+    /// </summary>
+    public HashSet<int> IgnoredIo { get; set; } = [];
+
+    /// <summary>Topology cụm CLIP A0/AO + a1/a2/a3... nếu model có khai báo.</summary>
+    public ClipTopology? Clip { get; set; }
+
+    public int MaxIo
+    {
+        get
+        {
+            int pinMax = Pins.Count == 0 ? 0 : Pins.Max(x => x.IoNumber);
+            int clipTargetMax = Clip is not null && Clip.Branches.Count > 0
+                ? Clip.Branches.Max(branch => branch.TargetIo)
+                : 0;
+            return Math.Max(pinMax, clipTargetMax);
+        }
+    }
+}
+
+public sealed record ResistanceStep(
+    string Name,
+    int Channel,
+    double MinOhm,
+    double MaxOhm,
+    string RouteA = "",
+    string RouteB = "");
