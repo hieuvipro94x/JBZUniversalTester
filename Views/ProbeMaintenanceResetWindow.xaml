@@ -32,7 +32,7 @@
         </StackPanel>
 
         <TextBlock Grid.Row="4" Margin="0,12,0,0" Foreground="#B91C1C"
-                   Text="Chỉ xác nhận sau khi Probe Pin đã được thay thế thực tế. Thao tác này chỉ reset counter bảo trì; không xóa sản lượng/lịch sử test."
+                   Text="Liên hệ kỹ thuật để reset."
                    TextWrapping="Wrap"/>
 
         <Grid Grid.Row="5">

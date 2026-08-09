@@ -411,5 +411,154 @@ Cuối task phải báo:
 * push status;
 * local/remote synchronized hay không.
 
+## Task Instruction Files
+
+Detailed task specifications may be stored under:
+
+`docs/tasks/`
+
+When the user references a task file:
+
+1. Read AGENTS.md first.
+2. Read only the referenced task file.
+3. Do not scan other task files.
+4. Read only source files required by that task.
+5. Do not repeat the entire task specification in responses.
+6. Keep progress/status responses concise.
+7. At completion, report only:
+   - root cause;
+   - files changed;
+   - verification;
+   - commit;
+   - push status.
+
+## Token / Context Efficiency
+
+Keep context usage efficient.
+
+- Do not repeatedly summarize AGENTS.md.
+- Do not repeat the user's full requirements.
+- Do not dump large source files unless necessary.
+- Do not print large diffs unless requested.
+- Do not print full build logs when build succeeds.
+- On build failure, show only relevant error sections.
+- Do not rescan the whole repository for normal tasks.
+- Reuse already established project knowledge.
+- Read only files relevant to the current task.
+- Keep progress messages concise.
+- Final reports should be concise and actionable.
+# Multi-PC Git Workflow
+
+GitHub is the synchronization source between development PCs.
+
+## Before starting any coding task
+
+Always:
+
+1. Run `git status`.
+2. Run `git fetch origin`.
+3. Check whether the current branch is:
+   - synchronized;
+   - ahead;
+   - behind;
+   - diverged.
+
+If the working tree is clean and remote has newer commits:
+
+`git pull --rebase`
+
+Do this BEFORE editing source code.
+
+Never start editing from an outdated local branch when a newer remote version exists.
+
+## After completing a coding task
+
+Before commit:
+
+1. Build/test the relevant changes.
+2. Review `git diff`.
+3. Ensure only task-related files are included.
+4. Check for secrets, build output and temporary files.
+
+If verification passes:
+
+1. Stage only relevant files.
+2. Create a Conventional Commit.
+3. Run `git fetch origin` again.
+4. Check whether remote changed while the task was being performed.
+
+If remote did not change:
+
+`git push`
+
+If remote changed:
+- integrate the remote changes safely;
+- prefer rebase when appropriate;
+- resolve conflicts carefully;
+- build/test again;
+- then push.
+
+## End-of-work rule
+
+Before finishing work on a PC for the day:
+
+- all completed work must be committed;
+- completed and verified commits must be pushed to GitHub;
+- run `git status`;
+- confirm local branch and remote branch are synchronized.
+
+Do not leave completed work only on one PC.
+
+## Moving to another PC
+
+At the beginning of work on another PC:
+
+1. `git status`
+2. `git fetch origin`
+3. `git pull --rebase`
+
+Only start editing after synchronization succeeds.
+
+## Unfinished work
+
+Do NOT automatically commit incomplete or broken code just because the work session is ending.
+
+If work is incomplete:
+- do not push broken changes to `main`;
+- preferably create/use a work branch such as:
+  `work/<task-name>`
+  or
+  `feature/<task-name>`;
+- commit incomplete work only when necessary to transfer it between PCs;
+- clearly mark the commit as WIP.
+
+Example:
+
+`git commit -m "wip: continue UART reconnect investigation"`
+
+Push the WIP branch, not stable `main`.
+
+On the other PC:
+- fetch;
+- checkout the same branch;
+- pull;
+- continue the task.
+
+When completed and verified:
+- replace future commits with proper task commits as appropriate;
+- merge through the normal repository workflow.
+
+## Safety
+
+Never automatically:
+- force push;
+- reset --hard;
+- clean -fd;
+- discard user changes;
+- overwrite remote changes;
+- resolve conflicts by blindly choosing ours/theirs.
+
+If the local and remote branches diverge unexpectedly, stop automatic synchronization and report the situation before destructive actions.
+
 
 
