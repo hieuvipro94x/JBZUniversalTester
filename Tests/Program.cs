@@ -1,7 +1,9 @@
 using System.IO.Compression;
+using System.Reflection;
 using System.Text;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
+using JBZUniversalTester.Views;
 using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.SelfTests;
@@ -18,7 +20,8 @@ internal static class Program
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("ALL6 label data order", TestLabel),
-            ("Pi legacy golden compiler", TestPiCompiler)
+            ("Pi legacy golden compiler", TestPiCompiler),
+            ("Product picker extension filter", TestProductPickerFilter)
         ];
 
         int failed = 0;
@@ -38,6 +41,25 @@ internal static class Program
 
         Console.WriteLine($"SELF-TEST SUMMARY: {tests.Length - failed}/{tests.Length} PASS");
         return failed == 0 ? 0 : 1;
+    }
+
+    private static void TestProductPickerFilter()
+    {
+        MethodInfo filter = typeof(ProductFilePickerWindow).GetMethod(
+            "IsSupportedProductFile",
+            BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Product picker filter method not found.");
+
+        bool Accepts(string fileName) =>
+            (bool)(filter.Invoke(null, [fileName]) ?? false);
+
+        Assert(Accepts("sample.tht"), ".tht must be visible");
+        Assert(Accepts("sample.THT"), ".THT must be visible");
+        Assert(Accepts("sample.model"), ".model must be visible");
+        Assert(Accepts("sample.MODEL"), ".MODEL must be visible");
+        Assert(!Accepts("sample.json"), ".json must be hidden");
+        Assert(!Accepts("sample.jbzproduct.json"), ".jbzproduct.json must be hidden");
+        Assert(!Accepts("sample.setup"), ".setup must be hidden");
     }
 
     private static void TestBoardCapacity()

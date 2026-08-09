@@ -2,7 +2,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using JBZUniversalTester.Core;
-using Microsoft.Win32;
+using JBZUniversalTester.Views;
 
 namespace JBZUniversalTester.ViewModels;
 
@@ -45,24 +45,25 @@ public sealed class HomeViewModel : ObservableObject
 
     private async Task LoadModelAsync()
     {
-        var dialog = new OpenFileDialog
-        {
-            Title = "Chọn file cấu hình JBZ",
-            Filter = "JBZ Product Bundle (*.jbzproduct.json)|*.jbzproduct.json|JBZ Pi model (*.model)|*.model|JBZ D2XX model (*.tht)|*.tht|Tất cả file (*.*)|*.*",
-            CheckFileExists = true
-        };
+        string? initialDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
+        var dialog = new ProductFilePickerWindow(initialDirectory);
+        Window? owner = Application.Current?.MainWindow;
+        if (owner is not null)
+            dialog.Owner = owner;
+        else
+            dialog.WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
-        if (dialog.ShowDialog() == true)
+        if (dialog.ShowDialog() == true && dialog.SelectedFilePath is string selectedFilePath)
         {
             try
             {
-                await _main.LoadModelAsync(dialog.FileName);
+                await _main.LoadModelAsync(selectedFilePath);
             }
             catch (InvalidDataException ex)
             {
                 MessageBox.Show(
-                    $"Không thể đọc file cấu hình JBZ (.jbzproduct.json/.model/.tht).\n\n" +
-                    $"File: {dialog.FileName}\n\n" +
+                    $"Không thể đọc file mã hàng JBZ (.model/.tht).\n\n" +
+                    $"File: {selectedFilePath}\n\n" +
                     $"{ex.Message}\n\n" +
                     "Hãy kiểm tra đúng file mã hàng gốc. Nếu file đang được phần mềm khác ghi/copy, " +
                     "đợi hoàn tất rồi chọn lại.",
@@ -74,7 +75,7 @@ public sealed class HomeViewModel : ObservableObject
             {
                 MessageBox.Show(
                     $"Không thể mở file mã hàng vì file đang bận hoặc lỗi I/O.\n\n" +
-                    $"File: {dialog.FileName}\n\n{ex.Message}",
+                    $"File: {selectedFilePath}\n\n{ex.Message}",
                     "Không mở được file model",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
