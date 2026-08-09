@@ -91,6 +91,8 @@
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="4"/>
             <Setter Property="Padding" Value="16"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="UseLayoutRounding" Value="True"/>
         </Style>
 
         <Style TargetType="DataGrid">
@@ -371,21 +373,26 @@
                     <Border.Resources>
                         <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
                             <Setter Property="Height" Value="32"/>
-                            <Setter Property="Margin" Value="0,3"/>
+                            <Setter Property="Margin" Value="0,2"/>
                             <Setter Property="Padding" Value="7,3"/>
                             <Setter Property="BorderBrush" Value="#858E9A"/>
                             <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="HorizontalAlignment" Value="Stretch"/>
                             <Setter Property="VerticalContentAlignment" Value="Center"/>
+                            <Setter Property="SnapsToDevicePixels" Value="True"/>
+                            <Setter Property="UseLayoutRounding" Value="True"/>
                         </Style>
                         <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
-                            <Setter Property="Margin" Value="0,7"/>
+                            <Setter Property="Margin" Value="0"/>
+                            <Setter Property="HorizontalAlignment" Value="Left"/>
                             <Setter Property="VerticalAlignment" Value="Center"/>
                         </Style>
                     </Border.Resources>
                     <StackPanel>
                         <TextBlock Text="THỜI GIAN QUÉT / XÁC NHẬN LỖI / BẢO TRÌ"
                                    Style="{StaticResource SectionTitleStyle}"
-                                   Margin="0,0,0,12"/>
+                                   Margin="0,0,0,14"
+                                   Padding="2,0,0,0"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="175"/>
@@ -394,9 +401,9 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="36"/><RowDefinition Height="36"/><RowDefinition Height="36"/>
-                                <RowDefinition Height="36"/><RowDefinition Height="36"/><RowDefinition Height="36"/>
-                                <RowDefinition Height="36"/><RowDefinition Height="36"/><RowDefinition Height="36"/>
+                                <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
+                                <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
+                                <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
                             </Grid.RowDefinitions>
 
                             <TextBlock Text="Chu kỳ quét IO (ms)" Style="{StaticResource FieldLabelStyle}"/>
@@ -414,24 +421,29 @@
                             <TextBlock Grid.Row="6" Text="Chu kỳ thay Probe Pin" Style="{StaticResource FieldLabelStyle}"/>
                             <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.ProbeReplacementThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                            <TextBlock Grid.Column="2" Text="R1 JIG - pulse (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBlock Grid.Column="2" Text="R1 JIG - pulse (ms)" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <TextBox Grid.Column="3" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="1" Grid.Column="2" Text="R2 MARKING - pulse (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="R2 MARKING - pulse (ms)" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding Settings.Relay2MarkingPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="2" Grid.Column="2" Text="PASS: chờ R2 → R1 (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2" Text="PASS: chờ R2 → R1 (ms)" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <TextBox Grid.Row="2" Grid.Column="3" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="3" Grid.Column="2" Text="Trễ đo điện trở (ms)" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBlock Grid.Row="3" Grid.Column="2" Text="Trễ đo điện trở (ms)" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <TextBox Grid.Row="3" Grid.Column="3" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="4" Grid.Column="2" Text="Chiều cao mục" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBlock Grid.Row="4" Grid.Column="2" Text="Chiều cao mục" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <TextBox Grid.Row="4" Grid.Column="3" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="5" Grid.Column="2" Text="Độ trễ cuộn / trang" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
-                            <StackPanel Grid.Row="5" Grid.Column="3" Orientation="Horizontal">
-                                <TextBox Width="70" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                <TextBox Width="70" Margin="5,0,0,0" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            </StackPanel>
-                            <TextBlock Grid.Row="6" Grid.Column="2" Text="Hiển thị tiêu đề" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBlock Grid.Row="5" Grid.Column="2" Text="Độ trễ cuộn / trang" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
+                            <Grid Grid.Row="5" Grid.Column="3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox Grid.Column="0" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBox Grid.Column="2" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            </Grid>
+                            <TextBlock Grid.Row="6" Grid.Column="2" Text="Hiển thị tiêu đề" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <CheckBox Grid.Row="6" Grid.Column="3" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
-                            <TextBlock Grid.Row="7" Grid.Column="2" Text="Hiển thị connector" Style="{StaticResource FieldLabelStyle}" Margin="10,0,0,0"/>
+                            <TextBlock Grid.Row="7" Grid.Column="2" Text="Hiển thị connector" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <CheckBox Grid.Row="7" Grid.Column="3" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
                         </Grid>
                     </StackPanel>
