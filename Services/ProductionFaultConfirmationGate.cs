@@ -15,16 +15,13 @@ public sealed record ProductionFaultConfirmationSnapshot(
     bool ProductStable);
 
 /// <summary>
-/// Monotonic confirmation state above raw transport observations. Timers are
-/// continuous: a recovered signal removes its candidate instead of accumulating
-/// several short outages into one product fault.
+/// Confirmation state above raw transport observations. Missing/open contacts are
+/// ignored as product faults; Short/WrongConnection keep their own debounce.
 /// </summary>
 public sealed class ProductionFaultConfirmationGate
 {
     private readonly ProductionSettings _settings;
     private readonly TimeProvider _timeProvider;
-    private readonly Dictionary<string, long> _openCandidateSince = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, BounceState> _openBounce = new(StringComparer.Ordinal);
     private readonly HashSet<string> _confirmedOpen = new(StringComparer.Ordinal);
     private readonly Dictionary<(int SourceIo, int TargetIo), UnexpectedCandidate> _unexpectedCandidates = [];
     private readonly HashSet<(int SourceIo, int TargetIo)> _confirmedUnexpected = [];
@@ -49,15 +46,18 @@ public sealed class ProductionFaultConfirmationGate
     public ProductionFaultConfirmationSnapshot Observe(
         IReadOnlyDictionary<string, bool> expectedConnections,
         IReadOnlyCollection<UnexpectedFaultObservation> unexpectedConnections,
-        bool hasProductActivity)
+        bool hasProductActivity,
+        bool readyToEvaluateFaults = true)
     {
         ArgumentNullException.ThrowIfNull(expectedConnections);
         ArgumentNullException.ThrowIfNull(unexpectedConnections);
 
         long now = _timeProvider.GetTimestamp();
         UpdateProductPresence(hasProductActivity, now);
-        UpdateOpenCandidates(expectedConnections, hasProductActivity, now);
-        UpdateUnexpectedCandidates(unexpectedConnections, now);
+        bool readyToEvaluate = readyToEvaluateFaults &&
+                               IsReadyToEvaluateProductFaults(hasProductActivity, now);
+        UpdateOpenCandidates(expectedConnections, readyToEvaluate, now);
+        UpdateUnexpectedCandidates(unexpectedConnections, readyToEvaluate, now);
         UpdateCleanStability(expectedConnections, unexpectedConnections, hasProductActivity, now);
         _lastHasProductActivity = hasProductActivity;
 
@@ -66,8 +66,6 @@ public sealed class ProductionFaultConfirmationGate
 
     public void Reset()
     {
-        _openCandidateSince.Clear();
-        _openBounce.Clear();
         _confirmedOpen.Clear();
         _unexpectedCandidates.Clear();
         _confirmedUnexpected.Clear();
@@ -109,85 +107,36 @@ public sealed class ProductionFaultConfirmationGate
         if (!_productActivitySeen)
             return;
 
-        // Mất toàn bộ contact trong một cycle chưa chốt kết quả không
-        // đủ bằng chứng để kết luận OPEN của sản phẩm.
+        // Máº¥t toÃ n bá»™ contact trong má»™t cycle chÆ°a chá»‘t káº¿t quáº£ khÃ´ng
+        // Ä‘á»§ báº±ng chá»©ng Ä‘á»ƒ káº¿t luáº­n OPEN cá»§a sáº£n pháº©m.
         _contactUnstable = true;
         _confirmedOpen.Clear();
-        _openCandidateSince.Clear();
         _contactLossSince ??= now;
         _contactLossTimedOut = HasElapsed(
             _contactLossSince.Value,
-            Math.Max(0, _settings.JigContactUnstableWindowMs),
+            ProductionTimingPolicy.DefaultJigContactUnstableWindowMs,
             now);
     }
 
+    private bool IsReadyToEvaluateProductFaults(bool hasProductActivity, long now) =>
+        hasProductActivity &&
+        _firstActivityAt is long firstActivity &&
+        HasElapsed(firstActivity, ProductionTimingPolicy.DefaultProductSettleTimeMs, now);
+
     private void UpdateOpenCandidates(
         IReadOnlyDictionary<string, bool> expectedConnections,
-        bool hasProductActivity,
+        bool readyToEvaluate,
         long now)
     {
-        foreach (string removedKey in _openCandidateSince.Keys
-                     .Where(key => !expectedConnections.ContainsKey(key))
-                     .ToArray())
-        {
-            _openCandidateSince.Remove(removedKey);
-            _confirmedOpen.Remove(removedKey);
-            _openBounce.Remove(removedKey);
-        }
-
-        bool settleElapsed = hasProductActivity &&
-                             _firstActivityAt is long firstActivity &&
-                             HasElapsed(firstActivity, Math.Max(0, _settings.ProductSettleTimeMs), now);
-
-        foreach ((string key, bool connected) in expectedConnections)
-        {
-            if (connected)
-            {
-                if (_openCandidateSince.Remove(key))
-                    RegisterOpenRecovery(key, now);
-                _confirmedOpen.Remove(key);
-                continue;
-            }
-
-            if (!hasProductActivity || !settleElapsed)
-            {
-                _openCandidateSince.Remove(key);
-                _confirmedOpen.Remove(key);
-                continue;
-            }
-
-            if (!_openCandidateSince.TryGetValue(key, out long started))
-            {
-                started = now;
-                _openCandidateSince[key] = started;
-            }
-
-            if (HasElapsed(started, Math.Max(0, _settings.OpenCircuitConfirmMs), now))
-                _confirmedOpen.Add(key);
-        }
-    }
-
-    private void RegisterOpenRecovery(string key, long now)
-    {
-        int windowMs = Math.Max(0, _settings.JigContactUnstableWindowMs);
-        if (!_openBounce.TryGetValue(key, out BounceState? state) ||
-            HasElapsed(state.WindowStartedAt, windowMs, now))
-        {
-            _openBounce[key] = new BounceState(now, 1);
-            return;
-        }
-
-        state = state with { RecoveryCount = state.RecoveryCount + 1 };
-        _openBounce[key] = state;
-        if (state.RecoveryCount >= 2)
-            _contactUnstable = true;
+        _confirmedOpen.Clear();
     }
 
     private void UpdateUnexpectedCandidates(
         IReadOnlyCollection<UnexpectedFaultObservation> observations,
+        bool readyToEvaluate,
         long now)
     {
-        if (observations.Count == 0)
+        if (observations.Count == 0 || !readyToEvaluate)
         {
             _unexpectedCandidates.Clear();
             _confirmedUnexpected.Clear();
@@ -217,8 +166,8 @@ public sealed class ProductionFaultConfirmationGate
             }
 
             int confirmMs = type == ProductFaultType.ShortCircuit
-                ? Math.Max(0, _settings.ShortCircuitConfirmMs)
-                : Math.Max(0, _settings.WrongConnectionConfirmMs);
+                ? ProductionTimingPolicy.DefaultShortCircuitConfirmMs
+                : ProductionTimingPolicy.DefaultWrongConnectionConfirmMs;
 
             if (HasElapsed(candidate.StartedAt, confirmMs, now))
                 _confirmedUnexpected.Add(key);
@@ -246,16 +195,15 @@ public sealed class ProductionFaultConfirmationGate
         _allCorrectSince ??= now;
         _productStable = HasElapsed(
             _allCorrectSince.Value,
-            Math.Max(0, _settings.ProductSettleTimeMs),
+            ProductionTimingPolicy.DefaultProductSettleTimeMs,
             now);
 
         if (_productStable && _contactUnstable)
         {
-            // Một chu kỳ continuity sạch, liên tục là re-evaluation PASS
-            // cho contact warning; không dịch ngược warning thành product fault.
+            // Má»™t chu ká»³ continuity sáº¡ch, liÃªn tá»¥c lÃ  re-evaluation PASS
+            // cho contact warning; khÃ´ng dá»‹ch ngÆ°á»£c warning thÃ nh product fault.
             _contactUnstable = false;
             _contactLossTimedOut = false;
-            _openBounce.Clear();
         }
     }
 
@@ -270,6 +218,5 @@ public sealed class ProductionFaultConfirmationGate
         _contactLossTimedOut,
         _productStable);
 
-    private sealed record BounceState(long WindowStartedAt, int RecoveryCount);
     private sealed record UnexpectedCandidate(ProductFaultType Type, long StartedAt);
 }

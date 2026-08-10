@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -213,29 +213,100 @@ internal static class Program
 
         ProductModel pair = Model(("PAIR", new[] { 1, 18 }));
         engine.SetModel(pair);
-        engine.ProcessFrame(Frame((1, new[] { 18 })));
-        Assert(engine.ContinuityPassed && !engine.HasWiringFault, "Expected IO1-IO18 passes");
+        FaultRow initialMissing = engine.BuildRows().Single(row => row.Kind == FaultKind.MissingConnection);
+        Assert(initialMissing.ProductFaultType == ProductFaultType.None &&
+               initialMissing.IoText == "IO1 <-> IO18" &&
+               initialMissing.Pin == "1 <-> 18" &&
+               initialMissing.WireName == "PAIR",
+            "Model load shows one display-only row with full expected pair metadata");
+        ScanFrame pairPassFrame = Frame((1, new[] { 18 }));
+        engine.ProcessFrame(pairPassFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(pairPassFrame);
+        Assert(engine.ContinuityPassed &&
+               !engine.HasWiringFault &&
+               !engine.BuildRows().Any(row => row.Kind == FaultKind.MissingConnection),
+            "Expected IO1-IO18 passes and pending row disappears");
 
         engine.SetModel(pair);
-        engine.ProcessFrame(Frame((1, new[] { 40 })));
+        ScanFrame wrongFrame = Frame((1, new[] { 40 }));
+        engine.ProcessFrame(wrongFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(wrongFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(wrongFrame);
         Assert(engine.HasWiringFault, "IO1-IO40 is wiring fault");
 
         engine.SetModel(pair);
         engine.ProcessFrame(Frame());
-        Assert(engine.BuildRows().Any(row => row.Kind == FaultKind.Open), "Missing IO1-IO18 is open");
-        Assert(!engine.HasConfirmedOpenCircuit, "Empty fixture is not inferred as confirmed product OPEN");
+        Assert(engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
+            "Missing IO1-IO18 is a display-only pending row");
+        Assert(!engine.BuildRows().Any(row => row.Kind == FaultKind.Open), "Missing IO1-IO18 is not a production fault row");
+        Assert(!engine.HasConfirmedOpenCircuit, "Empty fixture is not inferred as product OPEN");
+
+        engine.SetModel(pair);
+        ScanFrame oneEndOnly = Frame((1, Array.Empty<int>()));
+        engine.ProcessFrame(oneEndOnly);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 25);
+        engine.ProcessFrame(oneEndOnly);
+        Assert(engine.HasExpectedSourceCoverage &&
+               !engine.ReadyToEvaluateProductFaults &&
+               !engine.HasConfirmedOpenCircuit &&
+               !engine.HasWiringFault &&
+               engine.BuildRows().Any(row => row.Kind == FaultKind.MissingConnection),
+            "One endpoint held during install remains display-only and does not become OPEN product FAIL");
+
+        ProductModel twoPairs = Model(("PAIR-A", new[] { 1, 18 }), ("PAIR-B", new[] { 2, 8 }));
+        engine.SetModel(twoPairs);
+        ScanFrame twoPairPass = Frame((1, new[] { 18 }), (2, new[] { 8 }));
+        engine.ProcessFrame(twoPairPass);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(twoPairPass);
+        engine.ProcessFrame(Frame((2, new[] { 8 })));
+        Assert(engine.IsPassReleaseStarted && !engine.IsProductReleased,
+            "After PASS/eject, losing one required connection detects release start before full release");
+
+        engine.SetModel(twoPairs);
+        engine.ProcessFrame(Frame((1, new[] { 18 })));
+        Assert(!engine.ReadyToEvaluateProductFaults &&
+               !engine.HasConfirmedOpenCircuit &&
+               !engine.HasWiringFault,
+            "Partial source coverage is installing, not product FAIL");
+        ScanFrame fullCoverageOpen = Frame((1, new[] { 18 }), (2, Array.Empty<int>()));
+        engine.ProcessFrame(fullCoverageOpen);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(fullCoverageOpen);
+        Assert(engine.ReadyToEvaluateProductFaults &&
+               !engine.HasConfirmedOpenCircuit &&
+               !engine.HasWiringFault &&
+               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
+            "Full source coverage with missing endpoint remains display-only");
 
         ProductModel splice = Model(("SPLICE", new[] { 5, 20, 33 }));
         engine.SetModel(splice);
-        engine.ProcessFrame(Frame((5, new[] { 20 })));
+        ScanFrame spliceOpenFrame = Frame((5, new[] { 20 }));
+        engine.ProcessFrame(spliceOpenFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(spliceOpenFrame);
         IReadOnlyList<FaultDetail> confirmedSpliceOpen = engine.BuildConfirmedOpenFaults();
-        Assert(confirmedSpliceOpen.Count == 1 &&
-               confirmedSpliceOpen[0].ExpectedTargetIo == 33,
-            "Confirmed splice OPEN identifies the actually missing target");
+        Assert(confirmedSpliceOpen.Count == 0 &&
+               !engine.BuildRows().Any(row => row.Kind == FaultKind.Open) &&
+               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
+            "Splice missing target is display-only, not production OPEN");
 
         engine.SetModel(splice);
-        engine.ProcessFrame(Frame((5, new[] { 20, 33 })));
-        Assert(engine.ContinuityPassed && !engine.HasWiringFault, "Splice component passes");
+        ScanFrame splicePassFrame = Frame((5, new[] { 20, 33 }));
+        engine.ProcessFrame(splicePassFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(splicePassFrame);
+        Assert(engine.ContinuityPassed &&
+               !engine.HasWiringFault &&
+               !engine.BuildRows().Any(row => row.Kind == FaultKind.MissingConnection),
+            "Splice component passes and pending row disappears");
+
+        engine.ProcessFrame(spliceOpenFrame);
+        Assert(engine.BuildRows().Any(row => row.Kind == FaultKind.MissingConnection),
+            "Removing a completed connection re-adds display-only pending row");
 
         engine.SetModel(pair);
         engine.ProcessFrame(new ScanFrame(
@@ -261,27 +332,25 @@ internal static class Program
         var openA = new Dictionary<string, bool> { ["A"] = false, ["B"] = true };
 
         gate.Observe(clean, [], hasProductActivity: true);
-        clock.Advance(TimeSpan.FromMilliseconds(51));
+        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultProductSettleTimeMs + 1));
         Assert(gate.Observe(clean, [], true).ProductStable, "Clean product settles before PASS");
 
-        gate.Observe(openA, [], true);
-        clock.Advance(TimeSpan.FromMilliseconds(50));
-        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Count == 0, "OPEN shorter than threshold is candidate only");
-        Assert(gate.Observe(clean, [], true).ConfirmedOpenKeys.Count == 0, "OPEN recovery resets candidate timer");
-        clock.Advance(TimeSpan.FromMilliseconds(10));
-        gate.Observe(openA, [], true);
-        clock.Advance(TimeSpan.FromMilliseconds(50));
-        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Count == 0, "Separated OPEN intervals do not accumulate");
-        gate.Observe(clean, [], true);
+        gate.Reset();
+        gate.Observe(openA, [], hasProductActivity: false);
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        Assert(gate.Observe(openA, [], false).ConfirmedOpenKeys.Count == 0, "Jig empty is not inferred as product OPEN");
 
-        clock.Advance(TimeSpan.FromMilliseconds(10));
+        gate.Reset();
         gate.Observe(openA, [], true);
-        clock.Advance(TimeSpan.FromMilliseconds(101));
-        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Contains("A"), "Continuous OPEN reaches confirmed product fault");
+        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultProductSettleTimeMs - 1));
+        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Count == 0, "OPEN is ignored before product settle gate");
+        clock.Advance(TimeSpan.FromMilliseconds(2));
+        Assert(gate.Observe(openA, [], true).ConfirmedOpenKeys.Count == 0, "OPEN remains ignored after product settle gate");
+        Assert(gate.Observe(clean, [], true).ConfirmedOpenKeys.Count == 0, "OPEN recovery has no product fault to clear");
 
         gate.Reset();
         gate.Observe(clean, [], true);
-        clock.Advance(TimeSpan.FromMilliseconds(51));
+        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultProductSettleTimeMs + 1));
         gate.Observe(clean, [], true);
         gate.Observe(openA, [], true);
         clock.Advance(TimeSpan.FromMilliseconds(20));
@@ -290,8 +359,8 @@ internal static class Program
         gate.Observe(openA, [], true);
         clock.Advance(TimeSpan.FromMilliseconds(20));
         ProductionFaultConfirmationSnapshot bounce = gate.Observe(clean, [], true);
-        Assert(bounce.ContactUnstable && bounce.ConfirmedOpenKeys.Count == 0, "Repeated contact bounce becomes jig warning, not product FAIL");
-        clock.Advance(TimeSpan.FromMilliseconds(51));
+        Assert(!bounce.ContactUnstable && bounce.ConfirmedOpenKeys.Count == 0, "Repeated OPEN bounce is ignored, not product FAIL");
+        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultProductSettleTimeMs + 1));
         ProductionFaultConfirmationSnapshot recovered = gate.Observe(clean, [], true);
         Assert(!recovered.ContactUnstable && recovered.ProductStable, "Clean re-evaluation clears jig warning");
 
@@ -303,8 +372,11 @@ internal static class Program
 
         gate.Reset();
         var shortFault = new[] { new UnexpectedFaultObservation(1, 2, ProductFaultType.ShortCircuit) };
+        gate.Observe(clean, [], true);
+        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultProductSettleTimeMs + 1));
+        gate.Observe(clean, [], true);
         gate.Observe(clean, shortFault, true);
-        clock.Advance(TimeSpan.FromMilliseconds(79));
+        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultShortCircuitConfirmMs - 1));
         Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient SHORT not confirmed");
         clock.Advance(TimeSpan.FromMilliseconds(2));
         Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Contains((1, 2)), "Stable SHORT confirmed");
@@ -312,7 +384,7 @@ internal static class Program
 
         var wrongFault = new[] { new UnexpectedFaultObservation(3, 4, ProductFaultType.WrongWiring) };
         gate.Observe(clean, wrongFault, true);
-        clock.Advance(TimeSpan.FromMilliseconds(89));
+        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs - 1));
         Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient wrong connection not confirmed");
         clock.Advance(TimeSpan.FromMilliseconds(2));
         Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Contains((3, 4)), "Stable wrong connection confirmed");
@@ -328,24 +400,24 @@ internal static class Program
             ProbeReplacementThreshold = -1
         };
         ProductionTimingPolicy.Normalize(invalid);
-        Assert(invalid.IoScanIntervalMs >= 1 &&
-               invalid.OpenCircuitConfirmMs >= 20 &&
-               invalid.ShortCircuitConfirmMs >= 20 &&
-               invalid.WrongConnectionConfirmMs <= 10_000 &&
-               invalid.ProductSettleTimeMs >= 20 &&
-               invalid.JigContactUnstableWindowMs >= 100 &&
+        Assert(invalid.IoScanIntervalMs == ProductionTimingPolicy.DefaultIoScanIntervalMs &&
+               invalid.ShortCircuitConfirmMs == ProductionTimingPolicy.DefaultShortCircuitConfirmMs &&
+               invalid.WrongConnectionConfirmMs == ProductionTimingPolicy.DefaultWrongConnectionConfirmMs &&
+               invalid.ProductSettleTimeMs == ProductionTimingPolicy.DefaultProductSettleTimeMs &&
+               invalid.JigContactUnstableWindowMs == ProductionTimingPolicy.DefaultJigContactUnstableWindowMs &&
                invalid.ProbeReplacementThreshold >= 1_000,
-            "Timing/maintenance settings validation bounds");
+            "Timing settings normalize to internal defaults and maintenance setting keeps bounds");
 
         string settingsJson = JsonSerializer.Serialize(settings);
         ProductionSettings reloaded = JsonSerializer.Deserialize<ProductionSettings>(settingsJson)
             ?? throw new InvalidOperationException("Timing settings JSON reload");
+        ProductionTimingPolicy.Normalize(reloaded);
         Assert(reloaded.OpenCircuitConfirmMs == 100 &&
-               reloaded.ShortCircuitConfirmMs == 80 &&
-               reloaded.WrongConnectionConfirmMs == 90 &&
-               reloaded.ProductSettleTimeMs == 50 &&
-               reloaded.JigContactUnstableWindowMs == 500,
-            "Timing settings persist/reload");
+               reloaded.ShortCircuitConfirmMs == ProductionTimingPolicy.DefaultShortCircuitConfirmMs &&
+               reloaded.WrongConnectionConfirmMs == ProductionTimingPolicy.DefaultWrongConnectionConfirmMs &&
+               reloaded.ProductSettleTimeMs == ProductionTimingPolicy.DefaultProductSettleTimeMs &&
+               reloaded.JigContactUnstableWindowMs == ProductionTimingPolicy.DefaultJigContactUnstableWindowMs,
+            "Legacy timing settings load but normalize to internal runtime defaults");
     }
 
     private static void TestProductionCounters()
@@ -408,7 +480,10 @@ internal static class Program
     {
         using TestEngine engine = CreateEngine(out FakeBoard board);
         engine.SetModel(Model(("PAIR", new[] { 1, 18 })));
-        engine.ProcessFrame(Frame((1, new[] { 18 })));
+        ScanFrame passFrame = Frame((1, new[] { 18 }));
+        engine.ProcessFrame(passFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(passFrame);
         bool ok = engine.CompletePassAsync([]).GetAwaiter().GetResult();
         Assert(ok, "PASS relay workflow accepted");
         Assert(board.Commands.Count(command => command == "SET:2") == 1, "PASS R2 exactly once");

@@ -153,10 +153,11 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" Margin="12">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" CanContentScroll="False">
+            <Grid Margin="12">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <!-- HÀNG TRÊN -->
@@ -389,7 +390,7 @@
                         </Style>
                     </Border.Resources>
                     <StackPanel>
-                        <TextBlock Text="THỜI GIAN QUÉT / XÁC NHẬN LỖI / BẢO TRÌ"
+                        <TextBlock Text="RELAY / BẢO TRÌ"
                                    Style="{StaticResource SectionTitleStyle}"
                                    Margin="0,0,0,14"
                                    Padding="2,0,0,0"/>
@@ -405,21 +406,8 @@
                                 <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
                                 <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
                             </Grid.RowDefinitions>
-
-                            <TextBlock Text="Chu kỳ quét IO (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Column="1" Text="{Binding Settings.IoScanIntervalMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="1" Text="Xác nhận hở mạch (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Settings.OpenCircuitConfirmMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="2" Text="Xác nhận chập mạch (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Settings.ShortCircuitConfirmMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="3" Text="Xác nhận sai kết nối (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Settings.WrongConnectionConfirmMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="4" Text="Ổn định sau khi lắp (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Settings.ProductSettleTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="5" Text="Đánh giá tiếp xúc JIG (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.JigContactUnstableWindowMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Grid.Row="6" Text="Chu kỳ thay Probe Pin" Style="{StaticResource FieldLabelStyle}"/>
-                            <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.ProbeReplacementThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                            <TextBlock Text="Chu kỳ thay Probe Pin" Style="{StaticResource FieldLabelStyle}"/>
+                            <TextBox Grid.Column="1" Text="{Binding Settings.ProbeReplacementThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
                             <TextBlock Grid.Column="2" Text="R1 JIG - pulse (ms)" Style="{StaticResource FieldLabelStyle}" Margin="16,0,10,0"/>
                             <TextBox Grid.Column="3" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
@@ -451,7 +439,7 @@
             </Grid>
 
             <!-- HÀNG DƯỚI: KHÔNG ĐỂ TRỐNG -->
-            <Grid Grid.Row="1" Margin="0,8,0,0">
+            <Grid Grid.Row="1" Margin="0,8,0,0" MinHeight="450">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="2.2*"/>
                     <ColumnDefinition Width="1.2*"/>
@@ -474,6 +462,8 @@
 
                         <DataGrid Grid.Row="1"
                                   ItemsSource="{Binding ResistanceChannels}"
+                                  MinHeight="225"
+                                  VerticalAlignment="Stretch"
                                   SelectionMode="Single"
                                   Margin="0">
                             <DataGrid.Columns>
@@ -502,14 +492,14 @@
                         <TextBlock Text="TEM / MÁY IN / MODEL GẦN NHẤT" Style="{StaticResource SectionTitleStyle}"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="145"/>
-                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="170"/>
+                                <ColumnDefinition Width="*" MinWidth="220"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
-                                <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
-                                <RowDefinition Height="38"/><RowDefinition Height="38"/><RowDefinition Height="38"/>
-                                <RowDefinition Height="38"/>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
                             <TextBlock Text="Máy in Windows" Style="{StaticResource FieldLabelStyle}"/>
@@ -548,6 +538,7 @@
                 </Border>
             </Grid>
         </Grid>
+        </ScrollViewer>
 
         <Border Grid.Row="2"
                 Background="White"

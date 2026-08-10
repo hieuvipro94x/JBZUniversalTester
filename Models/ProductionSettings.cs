@@ -93,22 +93,22 @@ public sealed class ProductionSettings
     // THỜI GIAN
     // ============================================================
 
-    /// <summary>Khoảng nghỉ khi D2XX không có dữ liệu, giới hạn CPU polling.</summary>
+    /// <summary>Legacy config compatibility only. Runtime uses ProductionTimingPolicy.DefaultIoScanIntervalMs.</summary>
     public int IoScanIntervalMs { get; set; } = 2;
 
-    /// <summary>OPEN phải liên tục đủ thời gian này mới là product fault.</summary>
+    /// <summary>Legacy config only. Runtime no longer uses a separate OPEN confirmation delay.</summary>
     public int OpenCircuitConfirmMs { get; set; } = 150;
 
-    /// <summary>SHORT phải liên tục đủ thời gian này mới là product fault.</summary>
+    /// <summary>Legacy config compatibility only. Runtime uses ProductionTimingPolicy.DefaultShortCircuitConfirmMs.</summary>
     public int ShortCircuitConfirmMs { get; set; }
 
-    /// <summary>Wrong connection phải liên tục đủ thời gian này mới là product fault.</summary>
+    /// <summary>Legacy config compatibility only. Runtime uses ProductionTimingPolicy.DefaultWrongConnectionConfirmMs.</summary>
     public int WrongConnectionConfirmMs { get; set; } = 100;
 
-    /// <summary>Khoảng ổn định tối thiểu sau khi sản phẩm bắt đầu có continuity.</summary>
+    /// <summary>Legacy config compatibility only. Runtime uses ProductionTimingPolicy.DefaultProductSettleTimeMs.</summary>
     public int ProductSettleTimeMs { get; set; } = 200;
 
-    /// <summary>Cửa sổ đánh giá contact bounce/mất toàn bộ contact.</summary>
+    /// <summary>Legacy config compatibility only. Runtime uses ProductionTimingPolicy.DefaultJigContactUnstableWindowMs.</summary>
     public int JigContactUnstableWindowMs { get; set; } = 1000;
 
     /// <summary>Chu kỳ bảo trì Probe Pin dùng chung; counter vẫn tách theo model.</summary>

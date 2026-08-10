@@ -114,8 +114,8 @@
             <Setter Property="BorderBrush" Value="#707070"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Background" Value="White"/>
-            <Setter Property="RowBackground" Value="#FCFCFB"/>
-            <Setter Property="AlternatingRowBackground" Value="#F7F7F5"/>
+            <Setter Property="RowBackground" Value="White"/>
+            <Setter Property="AlternatingRowBackground" Value="White"/>
             <Setter Property="RowHeight" Value="31"/>
             <Setter Property="ColumnHeaderHeight" Value="40"/>
             <Setter Property="FontSize" Value="15"/>
@@ -128,18 +128,25 @@
                         <Setter Property="HorizontalContentAlignment" Value="Center"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
                         <Setter Property="Padding" Value="6,2"/>
+                        <Setter Property="Background" Value="#E9EBEF"/>
                     </Style>
                 </Setter.Value>
             </Setter>
             <Setter Property="RowStyle">
                 <Setter.Value>
                     <Style TargetType="DataGridRow">
+                        <Setter Property="Background" Value="White"/>
                         <Setter Property="Foreground" Value="#333333"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding KindName}" Value="Open">
                                 <Setter Property="Background" Value="#FFF0F0"/>
                                 <Setter Property="Foreground" Value="#B71C1C"/>
                                 <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding KindName}" Value="MissingConnection">
+                                <Setter Property="Background" Value="#FFF8E1"/>
+                                <Setter Property="Foreground" Value="#5D4037"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding KindName}" Value="WrongWiring">
                                 <Setter Property="Background" Value="#E32636"/>
@@ -157,6 +164,16 @@
                                 <Setter Property="FontWeight" Value="Bold"/>
                             </DataTrigger>
                         </Style.Triggers>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="CellStyle">
+                <Setter.Value>
+                    <Style TargetType="DataGridCell">
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource GridBorderColor}"/>
+                        <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                        <Setter Property="Padding" Value="2,0"/>
                     </Style>
                 </Setter.Value>
             </Setter>
@@ -567,10 +584,13 @@
                               RowHeight="{Binding ItemHeight}"
                               HorizontalAlignment="Stretch"
                               VerticalAlignment="Stretch"
+                              Background="White"
+                              RowBackground="White"
+                              AlternatingRowBackground="White"
                               Style="{StaticResource ProductionGrid}">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Loại lỗi" Binding="{Binding FaultType}" Width="1.15*"/>
-                            <DataGridTextColumn Header="I/O" Binding="{Binding Io}" Width="0.8*"/>
+                            <DataGridTextColumn Header="I/O" Binding="{Binding IoText}" Width="0.8*"/>
                             <DataGridTextColumn x:Name="ConnectorColumn" Header="Giắc" Binding="{Binding Connector}" Width="0.8*"/>
                             <DataGridTextColumn Header="Chân" Binding="{Binding Pin}" Width="0.75*"/>
                             <DataGridTextColumn Header="Tên dây" Binding="{Binding WireName}" Width="1.25*"/>
@@ -579,8 +599,9 @@
                             <DataGridTemplateColumn Header="Màu dây" Width="0.9*">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <Border Margin="7,4" MinWidth="42" Height="24" HorizontalAlignment="Stretch"
-                                                Background="{Binding WireColorBrush}" BorderBrush="#666" BorderThickness="1" CornerRadius="2"
+                                        <Border Margin="7,4" MinWidth="42" Height="22" HorizontalAlignment="Stretch"
+                                                Background="{Binding WireColorBrush}" BorderBrush="#808080" BorderThickness="1" CornerRadius="1"
+                                                SnapsToDevicePixels="True"
                                                 ToolTip="{Binding Color}"/>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>

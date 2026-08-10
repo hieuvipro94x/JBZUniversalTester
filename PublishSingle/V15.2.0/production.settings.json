@@ -1,0 +1,98 @@
+{
+  "BoardMode": 0,
+  "UartPort": "",
+  "LastUartModelPath": "",
+  "CardCount": 4,
+  "IoConfirm1": 1,
+  "IoConfirmN": 1,
+  "UsbDelay": 1,
+  "StartCardNumber": 1,
+  "UseTestPointer": true,
+  "AutoMasterSequence": true,
+  "MasterFaultRequiredCount": 2,
+  "MasterFaultCountsByModel": {
+    "WH321798": 2
+  },
+  "WaterproofSerialPort": 0,
+  "ExpansionCardCount": 4,
+  "LotNo": 2000,
+  "Lot": "",
+  "DeviceName": "",
+  "DeviceNumber": "",
+  "OperatorCompany": "",
+  "ProductionLine": "",
+  "TemperatureTolerance": 0,
+  "MinimumErrorLogValue": 0,
+  "AutoSaveErrors": false,
+  "IoScanIntervalMs": 2,
+  "OpenCircuitConfirmMs": 150,
+  "ShortCircuitConfirmMs": 100,
+  "WrongConnectionConfirmMs": 100,
+  "ProductSettleTimeMs": 200,
+  "JigContactUnstableWindowMs": 1000,
+  "ProbeReplacementThreshold": 200000,
+  "ShortConfirmMs": 100,
+  "Relay1JigPulseMs": 250,
+  "Relay2MarkingPulseMs": 250,
+  "PassMarkingToJigDelayMs": 430,
+  "StampDelay": "250,250",
+  "OversizeWaitSeconds": 0,
+  "ShieldDelay": 1,
+  "ResistanceDelayMs": 0,
+  "Password": "",
+  "ItemHeight": 31,
+  "ScrollDelay": 15,
+  "PageDelay": 30,
+  "ShowTitle": true,
+  "ShowConnector": false,
+  "LastThtPath": "C:\\Users\\Administrator\\Downloads\\NE N EV UART WH322026.tht",
+  "ResistanceChannels": [
+    {
+      "Enabled": false,
+      "Name": "R1",
+      "Channel": 1,
+      "MinOhm": 0,
+      "MaxOhm": 0
+    },
+    {
+      "Enabled": false,
+      "Name": "R2",
+      "Channel": 2,
+      "MinOhm": 0,
+      "MaxOhm": 0
+    },
+    {
+      "Enabled": false,
+      "Name": "R3",
+      "Channel": 3,
+      "MinOhm": 0,
+      "MaxOhm": 0
+    },
+    {
+      "Enabled": false,
+      "Name": "R4",
+      "Channel": 4,
+      "MinOhm": 0,
+      "MaxOhm": 0
+    },
+    {
+      "Enabled": false,
+      "Name": "R5",
+      "Channel": 5,
+      "MinOhm": 0,
+      "MaxOhm": 0
+    }
+  ],
+  "AutoPrintLabelOnPass": true,
+  "HistoryDirectory": "Data/History",
+  "Label": {
+    "PrinterName": "",
+    "PrinterCom": "",
+    "WidthMm": 90,
+    "HeightMm": 15,
+    "FormatName": "KS91",
+    "BaudRate": 9600,
+    "WriteTimeoutMs": 3000,
+    "Copies": 1
+  }
+}

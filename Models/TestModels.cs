@@ -3,7 +3,7 @@ using JBZUniversalTester.Converters;
 using System.Windows.Media;
 namespace JBZUniversalTester.Models;
 
-public enum FaultKind { Start, Open, WrongWiring, Short, Resistance, Info, Probe }
+public enum FaultKind { Start, Open, MissingConnection, WrongWiring, Short, Resistance, Info, Probe }
 
 /// <summary>Chế độ giải mã cùng stream scan của bo.</summary>
 public enum BoardScanMode { Production, Probe }
@@ -31,6 +31,11 @@ public sealed class FaultRow : ObservableObject
     // Không bind enum/custom converter trực tiếp trong XAML để WPF Designer
     // có thể render ngay cả trước lần build đầu tiên.
     public string KindName => Kind.ToString();
+    public string IoText => RelatedIos.Length > 1
+        ? string.Join(" <-> ", RelatedIos.Select(io => $"IO{io}"))
+        : Io > 0
+            ? $"IO{Io}"
+            : string.Empty;
     public Brush WireColorBrush => WireColorToBrushConverter.ToBrush(Color);
     public string ColorName => WireColorToBrushConverter.ToVietnameseName(Color);
     public string ProbeIoText => $"IO ({Io})";

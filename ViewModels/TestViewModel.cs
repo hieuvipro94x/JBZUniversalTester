@@ -74,6 +74,8 @@ public sealed class TestViewModel : ObservableObject
     private int _resultRecordedThisCycle;
     private int _probeCycleRecordedThisCycle;
     private DateTime _cycleStartedAt = DateTime.Now;
+    private string _activeCycleId = Guid.NewGuid().ToString("N");
+    private string _lastFaultRejectSignature = string.Empty;
     private long _dailyTestCount;
     private long _monthlyTestCount;
     private long _lifetimeTestCount;
@@ -294,9 +296,9 @@ public sealed class TestViewModel : ObservableObject
     }
 
     // Htdrv gốc hiển thị/đếm theo từng dòng pin map đang còn trên bảng.
-    // Vì vậy OpenCount phải là số row Dây chưa kết nối, không phải số network.
+    // Chưa nối là trạng thái hiển thị thao tác, không phải OPEN fault/FAIL.
     public int OpenCount =>
-        Faults.Count(x => x.Kind == FaultKind.Open);
+        Faults.Count(x => x.Kind == FaultKind.MissingConnection);
 
     public int WrongCount =>
         Faults.Count(x => x.Kind == FaultKind.WrongWiring);
@@ -1248,6 +1250,8 @@ public sealed class TestViewModel : ObservableObject
                     _productDetectedThisCycle = false;
                     Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
                     Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+                    _activeCycleId = Guid.NewGuid().ToString("N");
+                    _lastFaultRejectSignature = string.Empty;
                     Lot = _productionSettings.LotNo.ToString();
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog("Đã tháo sản phẩm lỗi - chờ lắp sản phẩm lại.");
@@ -1272,6 +1276,8 @@ public sealed class TestViewModel : ObservableObject
                     _productDetectedThisCycle = false;
                     Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
                     Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+                    _activeCycleId = Guid.NewGuid().ToString("N");
+                    _lastFaultRejectSignature = string.Empty;
                     Lot = _productionSettings.LotNo.ToString();
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog("PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
@@ -1283,9 +1289,20 @@ public sealed class TestViewModel : ObservableObject
             // Chỉ product fault đã qua monotonic confirmation gate mới được
             // dừng scan/popup/ghi FAIL. Candidate raw không đi vào lifecycle FAIL.
             if (_cycleActive &&
-                (_engine.HasWiringFault || _engine.HasConfirmedOpenCircuit) &&
+                _engine.ReadyToEvaluateProductFaults &&
+                _engine.LastFrameValid &&
+                _engine.HasWiringFault &&
                 Interlocked.CompareExchange(ref _wiringFaultHandlingStarted, 1, 0) == 0)
             {
+                IReadOnlyCollection<WiringFaultPair> wiringFaults = _engine.WiringFaults;
+                int faultCount = wiringFaults.Count;
+                string faultType = FaultTypeCatalog.Code(wiringFaults.FirstOrDefault()?.FaultType ?? ProductFaultType.WrongWiring);
+                AddLog(
+                    "[FAIL-AUDIT] " +
+                    $"CycleId={_activeCycleId} Generation={generation} Mode=Production State={State} " +
+                    $"ReadyToTest={_engine.ReadyToEvaluateProductFaults} FrameValid={_engine.LastFrameValid} " +
+                    $"FrameId={_engine.LastFrameSequence} FaultType={faultType} FaultCount={faultCount} " +
+                    $"ResultCommitted={Volatile.Read(ref _resultRecordedThisCycle) != 0} Reason=ConfirmedProductFault");
                 _ = HandleWiringFaultAsync(generation);
                 return;
             }
@@ -1456,18 +1473,7 @@ public sealed class TestViewModel : ObservableObject
 
     private void HandleUartOpen(BoardProtocolEvent evt)
     {
-        int[] values = evt.Values.Select(v => int.TryParse(v, out int n) ? n : 0)
-            .Where(n => n > 0).ToArray();
-        if (values.Length == 0)
-            return;
-
-        int network = values[0];
-        int[] pins = values.Skip(1).Distinct().ToArray();
-        if (pins.Length == 0)
-            _uartOpenSnapshots.Remove(network);
-        else
-            _uartOpenSnapshots[network] = pins;
-
+        _uartOpenSnapshots.Clear();
         InvokeUi(RefreshUartFaultRows);
     }
 
@@ -1489,27 +1495,6 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         Faults.Clear();
-        foreach ((int network, int[] pins) in _uartOpenSnapshots.OrderBy(x => x.Key))
-        {
-            int io = pins.FirstOrDefault(network);
-            PinRecord? pin = FindPinByIo(io);
-            Faults.Add(new FaultRow
-            {
-                Kind = FaultKind.Open,
-                ProductFaultType = ProductFaultType.OpenCircuit,
-                FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.OpenCircuit),
-                Io = io,
-                RelatedIos = pins,
-                Connector = pin?.Connector ?? string.Empty,
-                Pin = pin?.PinNumber ?? string.Empty,
-                WireName = pin?.WireName ?? string.Empty,
-                Splice = pin?.SpliceName ?? string.Empty,
-                Section = pin?.Section ?? string.Empty,
-                Color = pin?.Color ?? string.Empty,
-                Status = "Không có kết nối: " + string.Join(" ↔ ", pins.Select(DescribeIoCompact))
-            });
-        }
-
         foreach ((int a, int b) in _uartWrongPairs.OrderBy(x => x.A).ThenBy(x => x.B))
         {
             PinRecord? pin = FindPinByIo(a);
@@ -1562,6 +1547,18 @@ public sealed class TestViewModel : ObservableObject
             }
             else
             {
+                if (_uartWrongPairs.Count == 0)
+                {
+                    _uartOpenSnapshots.Clear();
+                    InvokeUi(() =>
+                    {
+                        RefreshUartFaultRows();
+                        State = "ĐANG KIỂM TRA...";
+                    });
+                    AddLog("UART :CIRCUIT khác 0 nhưng chỉ có OPEN/missing hoặc không có lỗi positive-contact; bỏ qua, không ghi FAIL.");
+                    return;
+                }
+
                 InvokeUi(() => State = "KHÔNG ĐẠT");
                 _sound.SetWiringFaultAlarm(true);
                 IReadOnlyList<FaultDetail> faults = CaptureFaultDetails();
@@ -1624,6 +1621,8 @@ public sealed class TestViewModel : ObservableObject
         {
             await Task.Delay(50, CurrentCycleToken());
             _cycleStartedAt = DateTime.Now;
+            _activeCycleId = Guid.NewGuid().ToString("N");
+            _lastFaultRejectSignature = string.Empty;
             Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
             Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
             _productDetectedThisCycle = false;
@@ -1642,15 +1641,6 @@ public sealed class TestViewModel : ObservableObject
     private IReadOnlyList<FaultDetail> BuildUartSnapshotFaultDetails()
     {
         var details = new List<FaultDetail>();
-        foreach ((int _, int[] pins) in _uartOpenSnapshots.OrderBy(x => x.Key))
-        {
-            details.Add(EnrichFaultDetail(new FaultDetail
-            {
-                Type = ProductFaultType.OpenCircuit,
-                RelatedIos = pins
-            }));
-        }
-
         foreach ((int a, int b) in _uartWrongPairs.OrderBy(x => x.A).ThenBy(x => x.B))
         {
             details.Add(EnrichFaultDetail(new FaultDetail
@@ -2503,6 +2493,8 @@ public sealed class TestViewModel : ObservableObject
         _productDetectedThisCycle = false;
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+        _activeCycleId = Guid.NewGuid().ToString("N");
+        _lastFaultRejectSignature = string.Empty;
         _cycleStartedAt = DateTime.Now;
         Lot = _productionSettings.LotNo.ToString();
 
@@ -2639,9 +2631,8 @@ public sealed class TestViewModel : ObservableObject
             .ThenBy(x => x.TargetIo)
             .ToArray();
 
-        FaultDetail[] dialogFaults = _engine.BuildConfirmedOpenFaults()
-            .Select(EnrichFaultDetail)
-            .Concat(wiringPairs.Select(pair => EnrichFaultDetail(new FaultDetail
+        FaultDetail[] dialogFaults = wiringPairs
+            .Select(pair => EnrichFaultDetail(new FaultDetail
             {
                 Type = pair.FaultType,
                 ExpectedSourceIo = pair.ExpectedSourceIo,
@@ -2650,7 +2641,7 @@ public sealed class TestViewModel : ObservableObject
                 ActualTargetIo = pair.TargetIo,
                 RelatedIos = [pair.SourceIo, pair.TargetIo],
                 Message = pair.Reason
-            })))
+            }))
             .GroupBy(fault => new
             {
                 fault.Type,
@@ -2690,16 +2681,26 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
+        // Popup NG chỉ được mở sau khi result FAIL đã commit thành công.
+        if (!_productDetectedThisCycle)
+            _cycleStartedAt = DateTime.Now;
+        bool committed = RecordCompletedProduct(false, primaryName, cycleModel, generation, cycleToken);
+        if (!committed)
+        {
+            AbortProductionFaultForProbe();
+            return;
+        }
+
+        AddLog(
+            "[NG-DIALOG] " +
+            $"CycleId={_activeCycleId} Reason=Committed{FaultTypeCatalog.Code(primaryType)} " +
+            $"State={State} ReadyToTest={_engine.ReadyToEvaluateProductFaults} FrameValid={_engine.LastFrameValid}");
+
         var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             dialogFaults,
             "Sau khi XÁC NHẬN: JIG sẽ được đưa về trạng thái tháo hàng an toàn; MARKING luôn OFF khi FAIL.");
         faultDialog.Owner = Application.Current?.MainWindow;
         faultDialog.ShowDialog();
-
-        // Người vận hành đã xác nhận popup: sản phẩm được tính là FAIL một lần.
-        if (!_productDetectedThisCycle)
-            _cycleStartedAt = DateTime.Now;
-        RecordCompletedProduct(false, primaryName, cycleModel, generation, cycleToken);
 
         // V13.0: sau xác nhận FAIL chỉ Relay 1 JIG được pulse. Relay 2 MARKING
         // luôn OFF; Probe không bao giờ được phép đi vào handler này.
@@ -2758,7 +2759,7 @@ public sealed class TestViewModel : ObservableObject
         if (_board is IFirmwareProtocolBoard firmware && firmware.UsesFirmwareCycleResult)
         {
             FaultDetail[] firmwareDetails = Faults
-                .Where(row => row.Kind is FaultKind.Open or FaultKind.WrongWiring or FaultKind.Short)
+                .Where(row => row.Kind is FaultKind.WrongWiring or FaultKind.Short)
                 .Select(row => EnrichFaultDetail(row.ToFaultDetail()))
                 .ToArray();
 
@@ -2821,7 +2822,7 @@ public sealed class TestViewModel : ObservableObject
         }
         else
         {
-            details.AddRange(_engine.BuildConfirmedOpenFaults().Select(EnrichFaultDetail));
+            // OPEN/missing expected connections are not product faults in current Production flow.
         }
 
         foreach (ResistanceResult resistance in Resistance.Where(item => !item.Passed))
@@ -3062,7 +3063,7 @@ public sealed class TestViewModel : ObservableObject
                     break;
 
                 case MasterSequenceState.EjectingGoodMaster:
-                    if (_engine.IsProductReleased)
+                    if (_engine.IsPassReleaseStarted)
                         TransitionToBadMaster();
                     break;
 
@@ -3963,7 +3964,7 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    private void RecordCompletedProduct(
+    private bool RecordCompletedProduct(
         bool passed,
         string resultText,
         ProductModel cycleModel,
@@ -3977,7 +3978,7 @@ public sealed class TestViewModel : ObservableObject
             Volatile.Read(ref _inlineProbeContactIo) != 0 ||
             !MasterApproved ||
             Interlocked.CompareExchange(ref _resultRecordedThisCycle, 1, 0) != 0)
-            return;
+            return false;
 
         ProductModel model = cycleModel;
 
@@ -3985,7 +3986,9 @@ public sealed class TestViewModel : ObservableObject
         bool lotSequencePersisted = TryReserveNextLot(completedLot, out string lotSequenceError);
         DateTime finished = DateTime.Now;
         DateTime started = _cycleStartedAt <= finished ? _cycleStartedAt : finished;
-        string cycleId = Guid.NewGuid().ToString("N");
+        string cycleId = string.IsNullOrWhiteSpace(_activeCycleId)
+            ? Guid.NewGuid().ToString("N")
+            : _activeCycleId;
 
         IReadOnlyList<FaultDetail> faultDetails = passed
             ? Array.Empty<FaultDetail>()
@@ -4149,6 +4152,16 @@ public sealed class TestViewModel : ObservableObject
             (passed ? ", " : $" - {failureName}, ") +
             $"Tổng {Total}, PASS {Pass}, FAIL {Fail}, tỷ lệ {Rate:0.00}%. " +
             $"LOTNO kế tiếp: {_productionSettings.LotNo}.");
+
+        if (!passed)
+        {
+            AddLog(
+                "[FAIL-COMMIT] " +
+                $"CycleId={cycleId} Result=FAIL FaultType={primaryFault?.Code ?? failureName} " +
+                $"CounterIncremented=true HistorySaved={historySaved} ResultCommitted=true");
+        }
+
+        return true;
     }
 
     private void ApplyExtendedStatistics(ModelProductionStatistics stats)

@@ -8,30 +8,30 @@
         <Style x:Key="CompactButton"
                TargetType="Button"
                BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="MinHeight" Value="32"/>
-            <Setter Property="Height" Value="32"/>
-            <Setter Property="Padding" Value="14,4"/>
-            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="MinWidth" Value="86"/>
+            <Setter Property="Padding" Value="14,5"/>
+            <Setter Property="Margin" Value="4,0"/>
             <Setter Property="FontSize" Value="12"/>
         </Style>
 
         <Style x:Key="FilterTextBox"
                TargetType="TextBox"
                BasedOn="{StaticResource {x:Type TextBox}}">
-            <Setter Property="MinHeight" Value="30"/>
-            <Setter Property="Height" Value="30"/>
-            <Setter Property="Padding" Value="7,2"/>
+            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="MinWidth" Value="90"/>
+            <Setter Property="Padding" Value="8,3"/>
             <Setter Property="FontSize" Value="12"/>
         </Style>
 
         <Style x:Key="FilterLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="Foreground" Value="#5B6470"/>
             <Setter Property="Margin" Value="1,0,0,3"/>
         </Style>
 
         <Style x:Key="HistoryHeaderStyle" TargetType="DataGridColumnHeader">
-            <Setter Property="Height" Value="32"/>
+            <Setter Property="MinWidth" Value="86"/>
             <Setter Property="Background" Value="#E8EDF3"/>
             <Setter Property="Foreground" Value="#293241"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -39,7 +39,14 @@
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="BorderBrush" Value="#C8D0D9"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
-            <Setter Property="Padding" Value="5,0"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="ContentTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" TextWrapping="Wrap" TextAlignment="Center"/>
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="CenterCellText" TargetType="TextBlock">
@@ -50,7 +57,7 @@
 
     <Grid Margin="8">
         <Grid.RowDefinitions>
-            <RowDefinition Height="52"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="36"/>
@@ -62,15 +69,15 @@
                 BorderBrush="#D2D8DF"
                 BorderThickness="1"
                 CornerRadius="3"
-                Padding="12,6"
+                Padding="12,8"
                 Margin="0,0,0,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="110"/>
-                    <ColumnDefinition Width="110"/>
-                    <ColumnDefinition Width="110"/>
-                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="115"/>
+                    <ColumnDefinition Width="115"/>
+                    <ColumnDefinition Width="115"/>
+                    <ColumnDefinition Width="310"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
@@ -135,28 +142,28 @@
                 CornerRadius="3"
                 Padding="9,7"
                 Margin="0,0,0,6">
-            <WrapPanel VerticalAlignment="Center">
-                <StackPanel Width="142" Margin="0,0,8,0">
+            <WrapPanel VerticalAlignment="Center" ItemHeight="58">
+                <StackPanel Width="150" Margin="0,0,10,4">
                     <TextBlock Text="Từ ngày" Style="{StaticResource FilterLabel}"/>
                     <DatePicker x:Name="FromDatePicker" Height="30" FontSize="12"/>
                 </StackPanel>
 
-                <StackPanel Width="142" Margin="0,0,8,0">
+                <StackPanel Width="150" Margin="0,0,10,4">
                     <TextBlock Text="Đến ngày" Style="{StaticResource FilterLabel}"/>
                     <DatePicker x:Name="ToDatePicker" Height="30" FontSize="12"/>
                 </StackPanel>
 
-                <StackPanel Width="105" Margin="0,0,8,0">
+                <StackPanel Width="115" Margin="0,0,10,4">
                     <TextBlock Text="LOTNO" Style="{StaticResource FilterLabel}"/>
                     <TextBox x:Name="LotTextBox" Style="{StaticResource FilterTextBox}"/>
                 </StackPanel>
 
-                <StackPanel Width="220" Margin="0,0,8,0">
+                <StackPanel Width="245" Margin="0,0,10,4">
                     <TextBlock Text="Mã hàng / tên hàng" Style="{StaticResource FilterLabel}"/>
                     <TextBox x:Name="PartTextBox" Style="{StaticResource FilterTextBox}"/>
                 </StackPanel>
 
-                <StackPanel Width="205" Margin="0,0,8,0">
+                <StackPanel Width="235" Margin="0,0,10,4">
                     <TextBlock Text="Kết quả" Style="{StaticResource FilterLabel}"/>
                     <ComboBox x:Name="ResultComboBox"
                               Height="30"
@@ -172,7 +179,7 @@
                     </ComboBox>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="2,15,0,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="2,17,0,4">
                     <Button Content="TÌM KIẾM"
                             Width="106"
                             Style="{StaticResource CompactButton}"
@@ -202,8 +209,8 @@
                       CanUserResizeRows="False"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      RowHeight="28"
-                      ColumnHeaderHeight="32"
+                      RowHeight="32"
+                      ColumnHeaderHeight="40"
                       FontSize="11.5"
                       Background="White"
                       BorderThickness="0"
@@ -231,15 +238,15 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Timestamp"
                                         Binding="{Binding Finished, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
-                                        Width="145"/>
-                    <DataGridTextColumn Header="Part Name" Binding="{Binding PartName}" Width="115"/>
-                    <DataGridTextColumn Header="Part Number" Binding="{Binding PartNumber}" Width="130"/>
+                                        Width="155"/>
+                    <DataGridTextColumn Header="Part Name" Binding="{Binding PartName}" Width="150" MinWidth="130"/>
+                    <DataGridTextColumn Header="Part Number" Binding="{Binding PartNumber}" Width="150" MinWidth="130"/>
                     <DataGridTextColumn Header="ECO" Binding="{Binding Eco}" Width="95"/>
                     <DataGridTextColumn Header="NCO" Binding="{Binding Nco}" Width="90"/>
                     <DataGridTextColumn Header="ALC" Binding="{Binding Alc}" Width="100"/>
-                    <DataGridTextColumn Header="Lot Number" Binding="{Binding LotNo}" Width="85" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Lot Number" Binding="{Binding LotNo}" Width="100" MinWidth="95" ElementStyle="{StaticResource CenterCellText}"/>
 
-                    <DataGridTemplateColumn Header="Test Result" Width="105">
+                    <DataGridTemplateColumn Header="Test Result" Width="115" MinWidth="110">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding PassedText}"
@@ -268,9 +275,9 @@
                     <DataGridTextColumn Header="Deviation" Binding="{Binding CustomerFault.Deviation}" Width="120"/>
                     <DataGridTextColumn Header="Assessment" Binding="{Binding CustomerFault.Assessment}" Width="190"/>
                     <DataGridTextColumn Header="Software Version" Binding="{Binding HtdrvName}" Width="260"/>
-                    <DataGridTextColumn Header="Open Count" Binding="{Binding OpenCount}" Width="82" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Incorrect Connection Count" Binding="{Binding WrongCount}" Width="165" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Short Circuit Count" Binding="{Binding ShortCount}" Width="120" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Open Count" Binding="{Binding OpenCount}" Width="105" MinWidth="95" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Incorrect Connection Count" Binding="{Binding WrongCount}" Width="205" MinWidth="185" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Short Circuit Count" Binding="{Binding ShortCount}" Width="155" MinWidth="145" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Resistance" Binding="{Binding Resistance}" Width="180"/>
                     <DataGridTextColumn Header="Test Station" Binding="{Binding DeviceName}" Width="130"/>
                     <DataGridTextColumn Header="Model" Binding="{Binding ModelName}" Width="125"/>
@@ -282,7 +289,7 @@
         <Grid Grid.Row="3" Margin="2,4,2,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="310"/>
             </Grid.ColumnDefinitions>
 
             <TextBlock x:Name="SummaryText"

@@ -2,12 +2,23 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using JBZUniversalTester.Models;
 
 namespace JBZUniversalTester.Services;
 
 public static class ProductionConfigService
 {
+    private static readonly string[] LegacyTimingKeys =
+    [
+        nameof(ProductionSettings.IoScanIntervalMs),
+        nameof(ProductionSettings.ShortCircuitConfirmMs),
+        nameof(ProductionSettings.WrongConnectionConfirmMs),
+        nameof(ProductionSettings.ProductSettleTimeMs),
+        nameof(ProductionSettings.JigContactUnstableWindowMs),
+        nameof(ProductionSettings.ShortConfirmMs)
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -94,11 +105,22 @@ public static class ProductionConfigService
         Directory.CreateDirectory(ConfigDirectory);
         Normalize(settings);
 
-        string json = JsonSerializer.Serialize(settings, JsonOptions);
+        string json = SerializeSettingsForSave(settings);
         AtomicWrite(JsonPath, json);
         SaveLegacyCfg(settings, LegacyCfgPath);
     }
 
+    private static string SerializeSettingsForSave(ProductionSettings settings)
+    {
+        JsonNode? node = JsonSerializer.SerializeToNode(settings, JsonOptions);
+        if (node is not JsonObject root)
+            return JsonSerializer.Serialize(settings, JsonOptions);
+
+        foreach (string key in LegacyTimingKeys)
+            root.Remove(key);
+
+        return root.ToJsonString(JsonOptions);
+    }
     /// <summary>
     /// V12: UniversalTester.cfg dùng tên key tiếng Anh 100% và ghi ĐẦY ĐỦ
     /// mọi trường trên màn Cài đặt. Tên method được giữ để code cũ vẫn gọi được.
@@ -131,15 +153,7 @@ public static class ProductionConfigService
             $"[TemperatureTolerance]{F(settings.TemperatureTolerance)}",
             $"[MinimumErrorLogValue]{settings.MinimumErrorLogValue}",
             $"[AutoSaveErrors]{Bool(settings.AutoSaveErrors)}",
-
-            $"[IoScanIntervalMs]{settings.IoScanIntervalMs}",
-            $"[OpenCircuitConfirmMs]{settings.OpenCircuitConfirmMs}",
-            $"[ShortCircuitConfirmMs]{settings.ShortCircuitConfirmMs}",
-            $"[WrongConnectionConfirmMs]{settings.WrongConnectionConfirmMs}",
-            $"[ProductSettleTimeMs]{settings.ProductSettleTimeMs}",
-            $"[JigContactUnstableWindowMs]{settings.JigContactUnstableWindowMs}",
             $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
-            $"[ShortConfirmMs]{settings.ShortConfirmMs}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
             $"[Relay2MarkingPulseMs]{settings.Relay2MarkingPulseMs}",
             $"[PassMarkingToJigDelayMs]{settings.PassMarkingToJigDelayMs}",

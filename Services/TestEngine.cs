@@ -39,6 +39,11 @@ public sealed class TestEngine : IDisposable
     bool _contactUnstable;
     bool _contactLossTimedOut;
     bool _productStable;
+    bool _readyToEvaluateProductFaults;
+    bool _hasExpectedSourceCoverage;
+    bool _lastFrameValid;
+    long _lastFrameSequence;
+    int _lastFrameUnknownBytes;
     bool _disposed;
 
     public event EventHandler? Changed;
@@ -82,6 +87,31 @@ public sealed class TestEngine : IDisposable
     public bool ContactLossTimedOut
     {
         get { lock (_gate) return _contactLossTimedOut; }
+    }
+
+    public bool ReadyToEvaluateProductFaults
+    {
+        get { lock (_gate) return _readyToEvaluateProductFaults; }
+    }
+
+    public bool HasExpectedSourceCoverage
+    {
+        get { lock (_gate) return _hasExpectedSourceCoverage; }
+    }
+
+    public bool LastFrameValid
+    {
+        get { lock (_gate) return _lastFrameValid; }
+    }
+
+    public long LastFrameSequence
+    {
+        get { lock (_gate) return _lastFrameSequence; }
+    }
+
+    public int LastFrameUnknownBytes
+    {
+        get { lock (_gate) return _lastFrameUnknownBytes; }
     }
 
     /// <summary>
@@ -297,6 +327,11 @@ public sealed class TestEngine : IDisposable
             _contactUnstable = false;
             _contactLossTimedOut = false;
             _productStable = false;
+            _readyToEvaluateProductFaults = false;
+            _hasExpectedSourceCoverage = false;
+            _lastFrameValid = false;
+            _lastFrameSequence = 0;
+            _lastFrameUnknownBytes = 0;
             // Frame production hoàn chỉnh đầu tiên sau Reset luôn phải phát
             // Changed, kể cả nó rỗng. Sau PASS relay có thể đã nhả toàn bộ
             // harness trước frame đầu tiên; nếu bỏ event rỗng thì UI sẽ mắc
@@ -318,7 +353,8 @@ public sealed class TestEngine : IDisposable
         if (!_frameProcessingEnabled ||
             frame.Mode != BoardScanMode.Production ||
             model is null ||
-            !frame.Complete)
+            !frame.Complete ||
+            frame.UnknownBytes > 0)
             return;
 
         bool changed;
@@ -338,6 +374,7 @@ public sealed class TestEngine : IDisposable
             bool previousContactUnstable = _contactUnstable;
             bool previousContactLossTimedOut = _contactLossTimedOut;
             bool previousProductStable = _productStable;
+            bool previousReadyToEvaluate = _readyToEvaluateProductFaults;
 
             _currentActive.Clear();
             foreach (int io in frame.ActiveIo)
@@ -415,10 +452,19 @@ public sealed class TestEngine : IDisposable
                 }
             }
 
+            bool hasProductActivity = HasProductActivityUnsafe(model);
+            bool hasExpectedSourceCoverage = HasExpectedSourceCoverageUnsafe(model);
+            _hasExpectedSourceCoverage = hasExpectedSourceCoverage;
+            _readyToEvaluateProductFaults = hasProductActivity && hasExpectedSourceCoverage;
+            _lastFrameValid = true;
+            _lastFrameSequence = frame.Sequence;
+            _lastFrameUnknownBytes = frame.UnknownBytes;
+
             UpdateWiringFaults(
                 model,
                 _expectedConnectionScratch,
-                HasProductActivityUnsafe(model));
+                hasProductActivity,
+                _readyToEvaluateProductFaults);
 
             changed =
                 _forceNextFrameChanged ||
@@ -431,7 +477,8 @@ public sealed class TestEngine : IDisposable
                 !previousConfirmedOpen.SetEquals(_confirmedOpenKeys) ||
                 previousContactUnstable != _contactUnstable ||
                 previousContactLossTimedOut != _contactLossTimedOut ||
-                previousProductStable != _productStable;
+                previousProductStable != _productStable ||
+                previousReadyToEvaluate != _readyToEvaluateProductFaults;
 
             _forceNextFrameChanged = false;
         }
@@ -444,7 +491,8 @@ public sealed class TestEngine : IDisposable
     void UpdateWiringFaults(
         ProductModel model,
         IReadOnlyDictionary<string, bool> expectedConnections,
-        bool hasProductActivity)
+        bool hasProductActivity,
+        bool readyToEvaluateFaults)
     {
         // Đấu sai phải xét theo COMPONENT điện thật, không chỉ theo một chiều
         // source->target. Trace cho thấy một component nhiều nhánh có thể sinh
@@ -487,7 +535,8 @@ public sealed class TestEngine : IDisposable
                     fault.TargetIo,
                     fault.FaultType))
                 .ToArray(),
-            hasProductActivity);
+            hasProductActivity,
+            readyToEvaluateFaults);
 
         _confirmedOpenKeys.Clear();
         foreach (string key in snapshot.ConfirmedOpenKeys)
@@ -588,69 +637,38 @@ public sealed class TestEngine : IDisposable
 
     public IReadOnlyList<FaultDetail> BuildConfirmedOpenFaults()
     {
-        lock (_gate)
-        {
-            ProductModel? model = _model;
-            if (model is null || _confirmedOpenKeys.Count == 0)
-                return [];
-
-            var details = new List<FaultDetail>();
-            foreach (WireNet net in model.Nets)
-            {
-                if (!_confirmedOpenKeys.Contains(_confirmationKeyByNet[net]))
-                    continue;
-
-                PinRecord? sourcePin = net.Pins.FirstOrDefault(pin => pin.IoNumber == net.SourceIo);
-                HashSet<int> actualTargets = _currentConnections.GetValueOrDefault(net.SourceIo) ?? [];
-                foreach (int target in net.ExpectedActiveIo.Where(io => !actualTargets.Contains(io)))
-                {
-                    PinRecord? targetPin = net.Pins.FirstOrDefault(pin => pin.IoNumber == target);
-                    details.Add(new FaultDetail
-                    {
-                        Type = ProductFaultType.OpenCircuit,
-                        ExpectedSourceIo = net.SourceIo,
-                        ExpectedTargetIo = target,
-                        RelatedIos = net.IoNumbers.Distinct().ToArray(),
-                        ConnectorFrom = sourcePin?.Connector ?? string.Empty,
-                        PinFrom = sourcePin?.PinNumber ?? string.Empty,
-                        ConnectorTo = targetPin?.Connector ?? string.Empty,
-                        PinTo = targetPin?.PinNumber ?? string.Empty,
-                        WireName = net.Name,
-                        WireColor = sourcePin?.Color ?? targetPin?.Color ?? string.Empty
-                    });
-                }
-            }
-
-            if (model.Clip is not null)
-            {
-                foreach (ClipBranch branch in model.Clip.Branches)
-                {
-                    if (!_confirmedOpenKeys.Contains(_confirmationKeyByClip[branch]))
-                        continue;
-
-                    details.Add(new FaultDetail
-                    {
-                        Type = ProductFaultType.OpenCircuit,
-                        ExpectedSourceIo = model.Clip.CommonIo,
-                        ExpectedTargetIo = branch.TargetIo,
-                        RelatedIos = [model.Clip.CommonIo, branch.TargetIo],
-                        ConnectorFrom = branch.ClipPin.Connector,
-                        PinFrom = branch.ClipPin.PinNumber,
-                        ConnectorTo = branch.TargetPin?.Connector ?? string.Empty,
-                        PinTo = branch.TargetPin?.PinNumber ?? string.Empty,
-                        WireName = branch.NetName,
-                        WireColor = branch.TargetPin?.Color ?? branch.ClipPin.Color
-                    });
-                }
-            }
-
-            return details;
-        }
+        // OPEN/missing expected connections are legacy/history data only.
+        // Current Production flow must not generate product OPEN faults.
+        return [];
     }
 
     private bool HasProductActivityUnsafe(ProductModel model) =>
         _currentConnections.Any(pair =>
             pair.Value.Any(target => IsProductActivityEdge(model, pair.Key, target)));
+
+    private bool HasExpectedSourceCoverageUnsafe(ProductModel model)
+    {
+        int expectedSources = 0;
+
+        foreach (WireNet net in model.Nets)
+        {
+            if (net.ExpectedActiveIo.Count == 0)
+                continue;
+
+            expectedSources++;
+            if (!_currentConnections.ContainsKey(net.SourceIo))
+                return false;
+        }
+
+        if (model.Clip is not null && model.Clip.Branches.Count > 0)
+        {
+            expectedSources++;
+            if (!_currentConnections.ContainsKey(model.Clip.CommonIo))
+                return false;
+        }
+
+        return expectedSources > 0;
+    }
 
     private static string NetConfirmationKey(string name) => $"NET:{name}";
     private static string ClipConfirmationKey(string name) => $"CLIP:{name}";
@@ -863,7 +881,15 @@ public sealed class TestEngine : IDisposable
                 }
 
                 if (visible)
-                    rows.Add(CreateOpenRow(pin));
+                    continue;
+            }
+
+            foreach (WireNet net in model.Nets)
+            {
+                if (net.ExpectedActiveIo.Count == 0 || _passedNets.Contains(net.Name))
+                    continue;
+
+                rows.Add(CreateMissingConnectionRow(net));
             }
 
             // CLIP được kiểm tra riêng: mọi nhánh dùng chung A0 nhưng mỗi aN
@@ -876,31 +902,7 @@ public sealed class TestEngine : IDisposable
                     if (_passedNets.Contains(branch.NetName))
                         continue;
 
-                    PinRecord displayPin = branch.TargetPin ?? branch.ClipPin;
-                    string targetDescription = branch.TargetPin is null
-                        ? $"I/O {branch.TargetIo} (chưa có pin map thường trong THT)"
-                        : $"I/O {branch.TargetIo} - {branch.TargetPin.Connector} - chân {branch.TargetPin.PinNumber}";
-
-                    rows.Add(new FaultRow
-                    {
-                        Kind = FaultKind.Open,
-                        ProductFaultType = ProductFaultType.OpenCircuit,
-                        FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.OpenCircuit),
-                        Io = branch.TargetIo,
-                        ExpectedSourceIo = model.Clip.CommonIo,
-                        ExpectedTargetIo = branch.TargetIo,
-                        RelatedIos = new[] { model.Clip.CommonIo, branch.TargetIo },
-                        Connector = displayPin.Connector,
-                        Pin = displayPin.PinNumber,
-                        WireName = string.IsNullOrWhiteSpace(displayPin.WireName)
-                            ? $"CLIP {branch.Name}"
-                            : displayPin.WireName,
-                        Splice = $"A0(IO{model.Clip.CommonIo}) -> {branch.Name} -> IO{branch.TargetIo}",
-                        Section = displayPin.Section,
-                        Color = displayPin.Color,
-                        Status = $"Chưa thông CLIP {branch.Name}: A0(IO{model.Clip.CommonIo}) -> " +
-                                 $"{branch.Name} -> {targetDescription}"
-                    });
+                    rows.Add(CreateMissingClipConnectionRow(model.Clip, branch));
                 }
             }
 
@@ -937,7 +939,7 @@ public sealed class TestEngine : IDisposable
 
         // V11.4: lỗi đấu sai/chập luôn phải nằm ở đầu bảng để người vận hành
         // nhìn thấy ngay. OrderBy của LINQ là stable nên thứ tự pin THT bên
-        // trong nhóm lỗi và nhóm hở mạch vẫn được giữ nguyên.
+        // trong nhóm lỗi vẫn được giữ nguyên.
         return rows
             .OrderBy(row => row.ProductFaultType == ProductFaultType.None
                 ? 90
@@ -980,37 +982,84 @@ public sealed class TestEngine : IDisposable
         };
     }
 
-    FaultRow CreateOpenRow(PinRecord pin)
+    static FaultRow CreateMissingConnectionRow(WireNet net)
     {
-        WireNet? net = (_netsByPin.GetValueOrDefault(pin) ?? Array.Empty<WireNet>())
-            .FirstOrDefault(candidate => !_passedNets.Contains(candidate.Name));
-
-        int expectedSource = net?.SourceIo ?? pin.IoNumber;
-        int expectedTarget = net?.ExpectedActiveIo.FirstOrDefault(io => io != expectedSource) ?? 0;
-        if (expectedTarget <= 0 && net is not null)
-            expectedTarget = net.IoNumbers.FirstOrDefault(io => io != expectedSource);
-
-        string expectedText = expectedTarget > 0
-            ? $"IO{expectedSource} <-> IO{expectedTarget}"
-            : $"IO{pin.IoNumber}";
+        PinRecord? sourcePin = net.Pins.FirstOrDefault(pin => pin.IoNumber == net.SourceIo);
+        int expectedTarget = net.ExpectedActiveIo.FirstOrDefault();
+        PinRecord? targetPin = expectedTarget > 0
+            ? net.Pins.FirstOrDefault(pin => pin.IoNumber == expectedTarget)
+            : null;
+        PinRecord? displayPin = sourcePin ?? targetPin ?? net.Pins.FirstOrDefault();
+        string pinText = BuildJoinedText(net.Pins.Select(pin => pin.PinNumber));
+        string connectorText = BuildJoinedText(net.Pins.Select(pin => pin.Connector));
+        string wireText = string.IsNullOrWhiteSpace(net.Name)
+            ? BuildJoinedText(net.Pins.Select(pin => pin.WireName))
+            : net.Name;
 
         return new FaultRow
         {
-            Kind = FaultKind.Open,
-            ProductFaultType = ProductFaultType.OpenCircuit,
-            FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.OpenCircuit),
-            Io = pin.IoNumber,
-            ExpectedSourceIo = expectedSource > 0 ? expectedSource : null,
+            Kind = FaultKind.MissingConnection,
+            ProductFaultType = ProductFaultType.None,
+            FaultType = "CHƯA KẾT NỐI",
+            Io = net.SourceIo,
+            ExpectedSourceIo = net.SourceIo,
             ExpectedTargetIo = expectedTarget > 0 ? expectedTarget : null,
-            RelatedIos = net?.IoNumbers.Distinct().ToArray() ?? new[] { pin.IoNumber },
-            Connector = pin.Connector,
-            Pin = pin.PinNumber,
-            WireName = pin.WireName,
-            Splice = pin.SpliceName,
-            Section = pin.Section,
-            Color = pin.Color,
-            Status = $"Chưa kết nối: {expectedText}"
+            RelatedIos = net.IoNumbers.Distinct().ToArray(),
+            Connector = string.IsNullOrWhiteSpace(connectorText)
+                ? displayPin?.Connector ?? string.Empty
+                : connectorText,
+            Pin = string.IsNullOrWhiteSpace(pinText)
+                ? displayPin?.PinNumber ?? string.Empty
+                : pinText,
+            WireName = string.IsNullOrWhiteSpace(wireText)
+                ? displayPin?.WireName ?? string.Empty
+                : wireText,
+            Splice = displayPin?.SpliceName ?? string.Empty,
+            Section = displayPin?.Section ?? string.Empty,
+            Color = displayPin?.Color ?? string.Empty,
+            Status = $"CHƯA KẾT NỐI: {string.Join(" <-> ", net.IoNumbers.Select(io => $"IO{io}"))}"
         };
+    }
+
+    static FaultRow CreateMissingClipConnectionRow(ClipTopology clip, ClipBranch branch)
+    {
+        PinRecord displayPin = branch.TargetPin ?? branch.ClipPin;
+        string targetDescription = branch.TargetPin is null
+            ? $"IO{branch.TargetIo}"
+            : $"IO{branch.TargetIo} - {branch.TargetPin.Connector} - chân {branch.TargetPin.PinNumber}";
+
+        return new FaultRow
+        {
+            Kind = FaultKind.MissingConnection,
+            ProductFaultType = ProductFaultType.None,
+            FaultType = "CHƯA KẾT NỐI",
+            Io = branch.TargetIo,
+            ExpectedSourceIo = clip.CommonIo,
+            ExpectedTargetIo = branch.TargetIo,
+            RelatedIos = [clip.CommonIo, branch.TargetIo],
+            Connector = displayPin.Connector,
+            Pin = displayPin.PinNumber,
+            WireName = string.IsNullOrWhiteSpace(displayPin.WireName)
+                ? $"CLIP {branch.Name}"
+                : displayPin.WireName,
+            Splice = $"A0(IO{clip.CommonIo}) -> {branch.Name} -> IO{branch.TargetIo}",
+            Section = displayPin.Section,
+            Color = displayPin.Color,
+            Status = $"CHƯA KẾT NỐI: A0(IO{clip.CommonIo}) -> {branch.Name} -> {targetDescription}"
+        };
+    }
+
+    private static string BuildJoinedText(IEnumerable<string?> values)
+    {
+        string[] parts = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return parts.Length == 0
+            ? string.Empty
+            : string.Join(" <-> ", parts);
     }
 
     /// <summary>
