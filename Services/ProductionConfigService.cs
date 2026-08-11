@@ -131,8 +131,6 @@ public static class ProductionConfigService
         var lines = new List<string>
         {
             $"[BoardMode]{settings.BoardMode}",
-            $"[UartPort]{settings.UartPort}",
-            $"[LastUartModelPath]{settings.LastUartModelPath}",
             $"[CardCount]{settings.CardCount}",
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
             $"[IoConfirm1]{settings.IoConfirm1}",
@@ -289,9 +287,6 @@ public static class ProductionConfigService
         string boardModeText = S(map, "BoardMode", settings.BoardMode.ToString());
         if (Enum.TryParse(boardModeText, true, out BoardMode parsedBoardMode))
             settings.BoardMode = parsedBoardMode;
-        settings.UartPort = S(map, "UartPort", settings.UartPort);
-        settings.LastUartModelPath = S(map, "LastUartModelPath", settings.LastUartModelPath);
-
         int legacyScanCount = IAny(map, settings.CardCount, "CardCount", "카드 수");
         int expansionModules = I(map, "ExpansionCardCount", legacyScanCount);
         settings.ExpansionCardCount = Math.Clamp(
@@ -399,8 +394,6 @@ public static class ProductionConfigService
     {
         if (!Enum.IsDefined(typeof(BoardMode), settings.BoardMode))
             settings.BoardMode = BoardMode.Auto;
-        settings.UartPort = (settings.UartPort ?? string.Empty).Trim().ToUpperInvariant();
-        settings.LastUartModelPath = (settings.LastUartModelPath ?? string.Empty).Trim();
 
         settings.Label ??= new LabelSettings();
         settings.ResistanceChannels ??= [];

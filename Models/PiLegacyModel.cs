@@ -147,55 +147,6 @@ public static class PiLegacyModelParser
     }
 }
 
-public static class PiLegacyModelCompiler
-{
-    public static UartModelProfile Compile(PiLegacyModel model)
-    {
-        var connectorMap = model.ConnectorNames.Select((name,index)=>(name,index))
-            .ToDictionary(x=>x.name,x=>x.index,StringComparer.OrdinalIgnoreCase);
-        var sources = model.Pins.Where(p => p.Parent is "-1" or "").ToList();
-        var targetPins = model.Pins.Where(p => p.Parent.Length > 0 && p.Parent != "-1").ToList();
-        var targetsFlat = sources.SelectMany(p=>p.Targets).ToList();
-        if (targetsFlat.Count != targetPins.Count)
-            throw new InvalidDataException($"Số target source={targetsFlat.Count} nhưng số pin target={targetPins.Count}. Không tự đoán topology.");
-
-        var commands = new List<UartModelCommand>();
-        void Add(string tx) => commands.Add(UartModelProfile.CreateDefault(tx));
-        Add($":MODEL,{model.ModelName}");
-        Add($":PINCOUNT,{sources.Count}");
-        int offset=0;
-        for(int i=0;i<sources.Count;i++)
-        {
-            PiLegacyPin p=sources[i];
-            Add($":PINDATA,{i},{p.PhysicalPin},{offset},{p.Targets.Count},0,0");
-            offset += p.Targets.Count;
-        }
-        var arrayChunks = Chunk(targetsFlat,64);
-        Add($":ARRAYCOUNT,{arrayChunks.Count}");
-        for(int i=0;i<arrayChunks.Count;i++) Add($":ARRAY,{i},{arrayChunks[i].Count}" + (arrayChunks[i].Count>0 ? ","+string.Join(',',arrayChunks[i]) : ""));
-
-        var conValues = model.Pins.Select(p=>connectorMap[p.Connector]).ToList();
-        conValues.Add(5000); conValues.Add(65535);
-        var conChunks = Chunk(conValues,64);
-        Add($":CONCOUNT,{conChunks.Count}");
-        for(int i=0;i<conChunks.Count;i++) Add($":CON,{i},{conChunks[i].Count},{string.Join(',',conChunks[i])}");
-
-        var connectorChunks=Chunk(model.ConnectorPinCounts.ToList(),64);
-        Add($":CONNECTORCOUNT,{connectorChunks.Count}");
-        for(int i=0;i<connectorChunks.Count;i++) Add($":CONNECTOR,{i},{connectorChunks[i].Count},{string.Join(',',connectorChunks[i])}");
-        Add(":FINISH");
-        UartModelProfile.ValidateCommands(commands);
-        return new UartModelProfile { ModelName=model.ModelName, SourcePath=model.SourcePath, Commands=commands };
-    }
-
-    static List<List<int>> Chunk(List<int> values,int size)
-    {
-        var result=new List<List<int>>();
-        for(int i=0;i<values.Count;i+=size) result.Add(values.Skip(i).Take(size).ToList());
-        return result;
-    }
-}
-
 public sealed class PiSetupProfile
 {
     public string SourcePath { get; init; } = string.Empty;

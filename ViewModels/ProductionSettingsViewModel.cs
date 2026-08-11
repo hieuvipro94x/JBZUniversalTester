@@ -28,15 +28,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         set { if (value) SetBoardMode(BoardMode.D2xx); }
     }
 
-    public bool IsD2xxSettingsEnabled => Settings.BoardMode != BoardMode.UartTtl;
-    public bool IsUartSettingsEnabled => Settings.BoardMode != BoardMode.D2xx;
-
-    public bool UseUartTtlBoard
-    {
-        get => Settings.BoardMode == BoardMode.UartTtl;
-        set { if (value) SetBoardMode(BoardMode.UartTtl); }
-    }
-
     private void SetBoardMode(BoardMode mode)
     {
         if (Settings.BoardMode == mode)
@@ -44,9 +35,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         Settings.BoardMode = mode;
         Raise(nameof(UseAutoBoard));
         Raise(nameof(UseD2xxBoard));
-        Raise(nameof(UseUartTtlBoard));
-        Raise(nameof(IsD2xxSettingsEnabled));
-        Raise(nameof(IsUartSettingsEnabled));
     }
 
     public int MasterFaultRequiredCount

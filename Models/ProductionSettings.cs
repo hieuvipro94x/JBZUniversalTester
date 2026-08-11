@@ -6,14 +6,8 @@ public sealed class ProductionSettings
     // THIẾT BỊ / I/O
     // ============================================================
 
-    /// <summary>Chọn họ bo: tự động, FTDI D2XX hoặc firmware UART TTL.</summary>
+    /// <summary>Chọn họ bo D2XX. Auto giữ tương thích config cũ nhưng chỉ kết nối D2XX.</summary>
     public BoardMode BoardMode { get; set; } = BoardMode.Auto;
-
-    /// <summary>Cổng COM ưu tiên cho bo UART TTL, ví dụ COM5. Để trống để tự nhận dạng.</summary>
-    public string UartPort { get; set; } = string.Empty;
-
-    /// <summary>V14: profile/model riêng của firmware UART TTL. Không dùng THT D2XX để suy diễn protocol.</summary>
-    public string LastUartModelPath { get; set; } = string.Empty;
 
 
     /// <summary>

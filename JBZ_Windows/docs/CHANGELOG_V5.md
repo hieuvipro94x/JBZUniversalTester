@@ -1,0 +1,21 @@
+# Thay đổi V5 so với V4
+
+- Phân tích và replay trace thực tế `JBZ_TRACE_20260805_155547`.
+- Sửa OPEN từ cơ chế cộng dồn sang snapshot thay thế theo network id.
+- Dòng `:OPEN,<id>` xóa lỗi của mạng tương ứng.
+- Bộ đếm hở mạch tính theo số đường liên kết chưa hoàn thành, hỗ trợ mạng nhiều nhánh.
+- Gộp `OTHER,A,B` và `OTHER,B,A` thành một lỗi đấu sai.
+- Bộ đếm Đấu sai tính theo cặp; bảng vẫn hiện hai dòng S/E.
+- Đấu sai luôn nằm đầu bảng.
+- Phân biệt dòng **Đầu dây S** và **Hở mạch** như giao diện gốc.
+- PASS/FAIL kết luận theo `CIRCUIT,0/1`, không dựa vào lịch sử OPEN.
+- FAIL xác nhận gửi UNCONNECT, không STOP và không nạp lại model.
+- PASS gửi PASSPEN sau 300 ms; nhận PEN mới gửi UNCONNECT.
+- Chu kỳ kế tiếp chỉ START sau UNCONNECT, delay mặc định 20 ms.
+- MAXEXT chỉ gửi một lần sau MEASURE.
+- Gom redraw bảng 60 ms để giảm giật khi nhận hàng trăm OPEN.
+- Khóa lệnh ghi UART và transaction ACK để tránh lệnh chồng nhau.
+- Tải model đóng UART sau BOOT, chờ 2,5 giây rồi kết nối lại.
+- KIỂM TRA bị khóa cho đến khi MODELNAME trên bo khớp model vừa tải.
+- Về menu/thoát luôn STOP sạch và tắt OUTPUT 0–4.
+- Thêm 13 bài kiểm thử, gồm replay 5 chu kỳ trace và đối chiếu 115 command model.

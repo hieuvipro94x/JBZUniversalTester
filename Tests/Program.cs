@@ -22,7 +22,6 @@ internal static class Program
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("ALL6 label data order", TestLabel),
             ("PASS label snapshot/idempotency/traceability", TestLabelPrintingSafety),
-            ("Pi legacy golden compiler", TestPiCompiler),
             ("Standard product picker filter", TestProductPickerFilter),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
@@ -508,7 +507,7 @@ internal static class Program
             var record = new TestHistoryRecord
             {
                 Started = finished.AddSeconds(-2), Finished = finished,
-                PartName = "UART", PartNumber = "NI375C1000", Eco = "NE N EV", Alc = "NI375/C1000",
+                PartName = "PRODUCT", PartNumber = "NI375C1000", Eco = "NE N EV", Alc = "NI375/C1000",
                 LotNo = 2001, Result = "PASS", Passed = true, ModelName = "MODEL-A",
                 HtdrvName = "JBZUniversalTester V15.2.0", OpenCount = 0,
                 MeasuredResistance = 101.5, ResistanceMin = 100, ResistanceMax = 110
@@ -577,12 +576,12 @@ internal static class Program
 
     private static void TestLabel()
     {
-        var data = new LabelPrintData("UART", "NI375C1000", "NE N EV", "", "NI375/C1000", 2001,
+        var data = new LabelPrintData("PRODUCT", "NI375C1000", "NE N EV", "", "NI375/C1000", 2001,
             new DateTime(2024, 7, 15, 14, 7, 8));
         string epl = EplLabelService.BuildPassLabel(data, new LabelSettings());
         int part = epl.IndexOf("NI375C1000", StringComparison.Ordinal);
         int eco = epl.IndexOf("NE N EV", part + 1, StringComparison.Ordinal);
-        int name = epl.IndexOf("UART", eco + 1, StringComparison.Ordinal);
+        int name = epl.IndexOf("PRODUCT", eco + 1, StringComparison.Ordinal);
         int serial = epl.IndexOf("2407152001WH", name + 1, StringComparison.Ordinal);
         int barcode = epl.IndexOf("NI375C10002407152001", serial + 1, StringComparison.Ordinal);
         Assert(part >= 0 && part < eco && eco < name && name < serial && serial < barcode, "ALL6 EPL value order");
@@ -667,33 +666,6 @@ internal static class Program
         finally
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    private static void TestPiCompiler()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "JBZSelfTests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            string path = Path.Combine(root, "1.model");
-            string p1 = string.Join('|', new[] { "1", "C1", "1", "L1", "", "", "", "", "-1", "2" });
-            string p2 = string.Join('|', new[] { "2", "C1", "2", "L1", "", "", "", "", "1", "" });
-            File.WriteAllText(path, $"[Common]\nModel=111\nName=222\n[Connector]\nCount=1\nC1=C1|2\n[Pin]\nCount=2\nP1={p1}\nP2={p2}\n", Encoding.UTF8);
-            UartModelProfile profile = PiLegacyModelCompiler.Compile(PiLegacyModelParser.Load(path));
-            string[] actual = profile.Commands.Select(command => command.Tx).ToArray();
-            string[] expected =
-            [
-                ":MODEL,1", ":PINCOUNT,1", ":PINDATA,0,1,0,1,0,0",
-                ":ARRAYCOUNT,1", ":ARRAY,0,1,2", ":CONCOUNT,1",
-                ":CON,0,4,0,0,5000,65535", ":CONNECTORCOUNT,1",
-                ":CONNECTOR,0,1,2", ":FINISH"
-            ];
-            Assert(actual.SequenceEqual(expected), "Golden Pi command sequence");
-        }
-        finally
-        {
             Directory.Delete(root, recursive: true);
         }
     }

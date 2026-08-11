@@ -1,0 +1,927 @@
+{
+  "format": "jbz-model-protocol-v1",
+  "model_name": "WH322110",
+  "source": "/mnt/data/reference/JBZ_v2_UART_Universal.txt",
+  "commands": [
+    {
+      "tx": ":MODEL,WH322110",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,MODEL",
+        "timeout": 3.0
+      }
+    },
+    {
+      "tx": ":PINCOUNT,102",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINCOUNT",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,0,1,0,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,0",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,1,2,1,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,1",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,2,3,2,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,2",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,3,4,3,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,3",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,4,5,4,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,4",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,5,6,5,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,5",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,6,7,6,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,6",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,7,8,7,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,7",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,8,9,8,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,8",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,9,10,9,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,9",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,10,12,10,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,10",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,11,13,11,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,11",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,12,14,12,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,12",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,13,15,13,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,13",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,14,16,14,2,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,14",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,15,17,16,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,15",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,16,18,17,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,16",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,17,19,18,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,17",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,18,20,19,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,18",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,19,21,20,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,19",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,20,23,21,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,20",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,21,24,22,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,21",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,22,25,23,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,22",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,23,26,24,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,23",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,24,27,25,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,24",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,25,28,26,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,25",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,26,29,27,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,26",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,27,30,28,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,27",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,28,31,29,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,28",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,29,32,30,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,29",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,30,34,31,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,30",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,31,35,32,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,31",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,32,36,33,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,32",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,33,37,34,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,33",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,34,38,35,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,34",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,35,39,36,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,35",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,36,40,37,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,36",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,37,41,38,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,37",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,38,42,39,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,38",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,39,43,40,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,39",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,40,45,41,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,40",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,41,46,42,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,41",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,42,47,43,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,42",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,43,48,44,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,43",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,44,49,45,2,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,44",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,45,50,47,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,45",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,46,51,48,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,46",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,47,52,49,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,47",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,48,53,50,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,48",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,49,54,51,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,49",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,50,80,52,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,50",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,51,84,53,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,51",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,52,94,53,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,52",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,53,102,53,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,53",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,54,107,54,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,54",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,55,108,55,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,55",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,56,109,56,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,56",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,57,110,57,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,57",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,58,111,58,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,58",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,59,113,59,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,59",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,60,114,60,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,60",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,61,115,61,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,61",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,62,118,62,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,62",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,63,119,63,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,63",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,64,120,64,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,64",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,65,121,65,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,65",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,66,122,66,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,66",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,67,123,67,2,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,67",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,68,124,69,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,68",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,69,125,70,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,69",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,70,126,71,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,70",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,71,127,72,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,71",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,72,128,73,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,72",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,73,130,74,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,73",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,74,131,75,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,74",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,75,132,76,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,75",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,76,133,77,2,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,76",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,77,134,79,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,77",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,78,135,80,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,78",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,79,136,81,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,79",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,80,137,82,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,80",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,81,138,83,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,81",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,82,139,84,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,82",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,83,140,85,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,83",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,84,141,86,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,84",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,85,142,87,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,85",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,86,144,88,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,86",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,87,145,89,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,87",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,88,146,90,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,88",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,89,147,91,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,89",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,90,148,92,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,90",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,91,149,93,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,91",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,92,150,93,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,92",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,93,161,94,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,93",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,94,172,95,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,94",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,95,183,96,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,95",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,96,194,97,1,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,96",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,97,196,98,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,97",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,98,197,98,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,98",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,99,198,98,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,99",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,100,199,98,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,100",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":PINDATA,101,200,98,0,0,0",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,PINDATA,101",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":ARRAYCOUNT,2",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,ARRAYCOUNT",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":ARRAY,0,64,60,59,56,71,70,58,69,57,68,11,65,64,72,76,63,75,74,62,73,61,22,93,92,77,83,82,79,67,78,66,33,89,88,85,98,97,87,96,86,95,44,106,105,99,117,104,116,101,91,100,90,55,81,103,160,158,156,155,165,169,167,166,154,159",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,ARRAY,0",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":ARRAY,1,34,157,153,152,171,112,170,168,164,163,129,176,181,179,175,143,177,187,192,190,186,185,182,180,178,174,193,191,189,188,151,162,173,184,195",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,ARRAY,1",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":CONCOUNT,4",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,CONCOUNT",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":CON,0,64,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,4,4,4,5,5,5,5,5,5,5,5,5",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,CON,0",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":CON,1,64,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,CON,1",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":CON,2,64,7,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,9,9,9,9,9,9,9,9,9,9,9,10,10,10,10,10,10,10,10,10,10,10,11,11,11,11,11,11,11,11,11,11,11,12,12,12,12,12,12,12,12",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,CON,2",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":CON,3,10,12,12,12,13,13,13,13,13,5000,65535",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,CON,3",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":CONNECTORCOUNT,1",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,CONNECTORCOUNT",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":CONNECTOR,0,14,11,11,11,11,11,26,22,26,22,11,11,11,11,5",
+      "expect": {
+        "mode": "exact",
+        "value": ":OK,CONNECTOR,0",
+        "timeout": 2.0
+      }
+    },
+    {
+      "tx": ":FINISH",
+      "expect": {
+        "mode": "prefix",
+        "value": ":OK,FINISH,",
+        "timeout": 4.0
+      }
+    }
+  ]
+}

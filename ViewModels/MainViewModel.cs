@@ -47,7 +47,7 @@ public sealed class MainViewModel : ObservableObject
 
     // V12.9: MainWindow/Transport/Decoder/TestView cùng đọc một BoardCapacity.
     public BoardMode ActiveBoardMode => _board is UnifiedBoardTransport unified ? unified.ActiveMode : _productionSettings.BoardMode;
-    public bool UsesD2xxCardCapacity => ActiveBoardMode != BoardMode.UartTtl && _productionSettings.BoardMode != BoardMode.UartTtl;
+    public bool UsesD2xxCardCapacity => true;
 
     public BoardCapacity CurrentBoardCapacity => BoardCapacity.FromSettings(_productionSettings);
 
@@ -229,36 +229,17 @@ public sealed class MainViewModel : ObservableObject
         ProductModel? model;
         string extension = Path.GetExtension(full).ToLowerInvariant();
         ProductBundle? bundle = null;
-        PiLegacyModel? piModel = null;
-        PiSetupProfile? piSetup = null;
 
         if (full.EndsWith(".jbzproduct.json", StringComparison.OrdinalIgnoreCase))
         {
             bundle = ProductBundle.Load(full);
-            BoardMode effective = EffectiveBoardModeForModelSelection();
-            if (effective == BoardMode.UartTtl)
-            {
-                if (string.IsNullOrWhiteSpace(bundle.UartModelPath) || !File.Exists(bundle.UartModelPath))
-                    throw new InvalidDataException($"Bundle {bundle.PartNumber} chưa có file .model cho JBZ UART TTL.");
-                piModel = await Task.Run(() => PiLegacyModelParser.Load(bundle.UartModelPath));
-                model = await Test.LoadPreparedModelAsync(piModel.ToProductModel());
-                if (!string.IsNullOrWhiteSpace(bundle.UartSetupPath) && File.Exists(bundle.UartSetupPath))
-                    piSetup = await Task.Run(() => PiSetupProfile.Load(bundle.UartSetupPath));
-            }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(bundle.D2xxThtPath) || !File.Exists(bundle.D2xxThtPath))
-                    throw new InvalidDataException($"Bundle {bundle.PartNumber} chưa có file .tht cho JBZ D2XX.");
-                model = await Test.LoadSelectedModelFromPathAsync(bundle.D2xxThtPath);
-            }
+            if (string.IsNullOrWhiteSpace(bundle.D2xxThtPath) || !File.Exists(bundle.D2xxThtPath))
+                throw new InvalidDataException($"Bundle {bundle.PartNumber} chưa có file .tht cho JBZ D2XX.");
+            model = await Test.LoadSelectedModelFromPathAsync(bundle.D2xxThtPath);
         }
         else if (extension == ".model")
         {
-            piModel = await Task.Run(() => PiLegacyModelParser.Load(full));
-            model = await Test.LoadPreparedModelAsync(piModel.ToProductModel());
-            string setupPath = ResolvePiSetupPath(full);
-            if (File.Exists(setupPath))
-                piSetup = await Task.Run(() => PiSetupProfile.Load(setupPath));
+            throw new InvalidDataException("Project này chỉ dùng bo JBZ D2XX và file mã hàng .tht.");
         }
         else
         {
@@ -280,137 +261,8 @@ public sealed class MainViewModel : ObservableObject
 
         if (!HasEnoughCardsForModel) ShowCardCapacityWarning();
 
-        await EnsureBoardSpecificModelAsync(model, piModel, piSetup, bundle);
         ExplicitModelLoaded?.Invoke(model);
         return model;
-    }
-
-    private BoardMode EffectiveBoardModeForModelSelection()
-    {
-        if (_board is UnifiedBoardTransport unified && unified.ActiveMode != BoardMode.Auto)
-            return unified.ActiveMode;
-        return _productionSettings.BoardMode == BoardMode.UartTtl ? BoardMode.UartTtl : BoardMode.D2xx;
-    }
-
-    private static string ResolvePiSetupPath(string modelPath)
-    {
-        string dir = Path.GetDirectoryName(Path.GetFullPath(modelPath)) ?? string.Empty;
-        string stem = Path.GetFileNameWithoutExtension(modelPath);
-        return Path.Combine(dir, stem + ".setup");
-    }
-
-    private async Task EnsureBoardSpecificModelAsync(
-        ProductModel model,
-        PiLegacyModel? piModel = null,
-        PiSetupProfile? piSetup = null,
-        ProductBundle? bundle = null)
-    {
-        if (_board is not IFirmwareProtocolBoard firmware || !firmware.UsesFirmwareCycleResult)
-            return;
-
-        UartModelProfile profile;
-        if (piModel is not null)
-        {
-            profile = await Task.Run(() => PiLegacyModelCompiler.Compile(piModel));
-        }
-        else
-        {
-            string profilePath = ResolveUartProfilePath(model);
-            if (string.IsNullOrWhiteSpace(profilePath) || !File.Exists(profilePath))
-                throw new InvalidDataException(
-                    $"Mã hàng {model.PartNumber ?? model.ModelName} chưa có cấu hình JBZ UART TTL. " +
-                    "V15 ưu tiên file .model gốc của Pi; profile V14 chỉ còn là fallback tương thích.");
-            profile = Path.GetExtension(profilePath).Equals(".model", StringComparison.OrdinalIgnoreCase)
-                ? await Task.Run(() => PiLegacyModelCompiler.Compile(PiLegacyModelParser.Load(profilePath)))
-                : await Task.Run(() => UartModelProfile.Load(profilePath));
-        }
-
-        if (piSetup is not null)
-        {
-            string linked = Path.GetFileNameWithoutExtension(piSetup.LinkedModelPath.Replace('\\','/'));
-            string selected = Path.GetFileNameWithoutExtension(profile.SourcePath);
-            if (!string.IsNullOrWhiteSpace(linked) && !string.Equals(NormalizeModelKey(linked), NormalizeModelKey(selected), StringComparison.OrdinalIgnoreCase))
-                Test.AddExternalLog($"UART SETUP WARNING: setup link='{piSetup.LinkedModelPath}', selected model='{profile.SourcePath}'.");
-            Test.AddExternalLog($"UART SETUP: {Path.GetFileName(piSetup.SourcePath)}; Barcode={(piSetup.BarcodeEnabled ? "ON" : "OFF")}; PreTest={(piSetup.PreTestEnabled ? "ON" : "OFF")}; PinChange={piSetup.PinChangeCurrent}/{piSetup.PinChangeCount}");
-        }
-
-        string boardModel = string.Empty;
-        try { boardModel = await firmware.QueryModelNameAsync(); }
-        catch (Exception ex) { Test.AddExternalLog($"UART MODELNAME warning: {ex.Message}"); }
-
-        if (!string.Equals(NormalizeModelKey(boardModel), NormalizeModelKey(profile.ModelName), StringComparison.OrdinalIgnoreCase))
-        {
-            Status = $"ĐANG ĐỒNG BỘ MODEL UART: {profile.ModelName}";
-            await firmware.UploadModelProfileAsync(profile);
-            string verify = string.Empty;
-            try { verify = await firmware.QueryModelNameAsync(); } catch { }
-            if (!string.IsNullOrWhiteSpace(verify) && !string.Equals(NormalizeModelKey(verify), NormalizeModelKey(profile.ModelName), StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException($"Upload UART xong nhưng MODELNAME='{verify}', mong '{profile.ModelName}'.");
-            _productionSettings.LastUartModelPath = profile.SourcePath;
-            ProductionConfigService.Save(_productionSettings);
-            Test.AddExternalLog($"UART MODEL SYNC: board='{boardModel}' -> pc='{profile.ModelName}' ({Path.GetFileName(profile.SourcePath)})");
-        }
-        else
-        {
-            Test.AddExternalLog($"UART MODEL OK: {boardModel}; không upload lại.");
-        }
-    }
-
-    private string ResolveUartProfilePath(ProductModel model)
-    {
-        var candidates = new List<string>();
-        // V14 safety: profile cùng stem với mã hàng đang chọn luôn ưu tiên trước.
-        // LastUartModelPath chỉ là fallback và chỉ dùng nếu tên model/profile phù hợp.
-        string d2xxPath = model.SourcePath;
-        string sourceStem = string.Empty;
-        if (!string.IsNullOrWhiteSpace(d2xxPath))
-        {
-            string full = Path.GetFullPath(d2xxPath);
-            string? dir = Path.GetDirectoryName(full);
-            sourceStem = Path.GetFileNameWithoutExtension(full);
-            if (dir is not null)
-            {
-                candidates.Add(Path.Combine(dir, sourceStem + ".model"));
-                candidates.Add(Path.Combine(dir, sourceStem + ".profile.json"));
-                candidates.Add(Path.Combine(dir, sourceStem + ".uart.txt"));
-                candidates.Add(Path.Combine(dir, sourceStem + ".protocol.txt"));
-            }
-        }
-
-        string lastPath = _productionSettings.LastUartModelPath;
-        if (!string.IsNullOrWhiteSpace(lastPath) && File.Exists(lastPath))
-        {
-            string lastStem = UartProfileStem(lastPath);
-            string normalizedLast = NormalizeModelKey(lastStem);
-            string[] validKeys = [sourceStem, model.PartNumber, model.ModelName];
-
-            if (validKeys.Any(key =>
-                    !string.IsNullOrWhiteSpace(key) &&
-                    string.Equals(normalizedLast, NormalizeModelKey(key), StringComparison.OrdinalIgnoreCase)))
-            {
-                candidates.Add(lastPath);
-            }
-            else
-            {
-                Test.AddExternalLog(
-                    $"UART PROFILE SAFETY: bỏ qua LastUartModelPath '{Path.GetFileName(lastPath)}' " +
-                    $"vì không khớp mã hàng hiện tại '{model.PartNumber ?? model.ModelName}'.");
-            }
-        }
-
-        return candidates.FirstOrDefault(File.Exists) ?? string.Empty;
-    }
-
-    private static string UartProfileStem(string path)
-    {
-        string file = Path.GetFileName(path);
-        foreach (string suffix in new[] { ".profile.json", ".uart.txt", ".protocol.txt", ".model" })
-        {
-            if (file.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                return file[..^suffix.Length];
-        }
-
-        return Path.GetFileNameWithoutExtension(file);
     }
 
     private static string NormalizeModelKey(string? value) =>
@@ -430,12 +282,10 @@ public sealed class MainViewModel : ObservableObject
     public async Task ReloadProductionSettingsAsync()
     {
         BoardMode oldBoardMode = _productionSettings.BoardMode;
-        string oldUartPort = _productionSettings.UartPort ?? string.Empty;
 
         ProductionConfigService.ReloadInto(_productionSettings);
 
-        bool boardSelectionChanged = oldBoardMode != _productionSettings.BoardMode ||
-            !string.Equals(oldUartPort, _productionSettings.UartPort ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        bool boardSelectionChanged = oldBoardMode != _productionSettings.BoardMode;
 
         if (boardSelectionChanged)
             await Test.ReconnectBoardForSettingsAsync();

@@ -1,564 +1,138 @@
-Bây giờ hãy tạo `AGENTS.md` tại root project.
+# Project Overview
+
+JBZUniversalTester is a Windows production harness tester for JBZ wiring products. The current .NET application is WPF on .NET 8 for Windows x86, with self-tests in `Tests/`.
+
+The project has two hardware families that must stay conceptually separate:
+
+- D2XX backend: FTDI D2XX transport, scan frames, `.tht` model files, PC-side `TestEngine`, D2XX card capacity and relay behavior.
+- UART TTL backend: original Raspberry Pi Universal Tester firmware protocol over Windows COM/USB-UART, 115200 8N1 CRLF, `.model` topology, `.setup` runtime config, firmware-driven OPEN/OTHER/TESTPIN/CIRCUIT lifecycle.
+
+V15.2 refactor direction: split mixed production logic into independent Windows apps, e.g. `JBZ.PiBoard.PC.exe` for the original Pi board protocol and `JBZ.Windows.Integrated.exe` for the native Windows/D2XX system, with only proven neutral infrastructure shared.
+
+# Architecture Boundaries
+
+D2XX and UART TTL are different backend/protocol systems. Do not mix protocol semantics, state transitions, pin mapping, resistance commands, waterproof flow, model download, or PASS/FAIL behavior between them.
+
+Source of truth:
+
+- `.tht`: D2XX model source, parsed by `ThtModelParser`.
+- `.model`: Pi/UART topology source, parsed/compiled by Pi legacy model code.
+- `.setup`: Pi/UART runtime configuration, not topology and not sent raw to firmware.
+- Product Bundle (`*.jbzproduct.json`): links one part number to backend-specific files. It must not be used to infer or convert between `.tht` and `.model`.
+
+Current source code is the final source of truth. If docs and source conflict, investigate with the smallest relevant source reads instead of guessing.
+
+# Important Modules
+
+- `JBZUniversalTester.csproj`: main WPF app project.
+- `Tests/JBZUniversalTester.SelfTests.csproj`, `Tests/Program.cs`: self-test harness.
+- `Models/ProductModel.cs`, `Models/TestModels.cs`: neutral model/result DTOs.
+- `Models/ProductBundle.cs`: backend-specific product bundle mapping.
+- `Models/BoardMode.cs`, `Models/ProductionSettings.cs`: production configuration surface.
+- `Models/PiLegacyModel.cs`: Pi `.model`/`.setup` parsing and legacy compiler when present.
+- `Services/ThtModelParser.cs`: D2XX `.tht` parser.
+- `Services/D2xxBoardTransport.cs`: FTDI D2XX lifecycle, scan, relay, resistance routing.
+- `Services/UnifiedBoardTransport.cs`: board transport selector/wrapper; must not become a semantic mixing layer.
+- `Services/TestEngine.cs`: PC-side continuity/fault engine for D2XX flow.
+- `Services/BoardAddressMapper.cs`, `Services/BoardIoDecoder.cs`, `Services/ProbeContactClassifier.cs`: D2XX pin/frame/probe mapping.
+- `Services/ProductionConfigService.cs`: load/save production settings.
+- `ViewModels/MainViewModel.cs`, `ViewModels/TestViewModel.cs`, `ViewModels/ProductionSettingsViewModel.cs`: production UI orchestration; historically high-risk for mixed backend state.
+- `Views/MainWindow.xaml(.cs)`, `Views/TestWindow.xaml(.cs)`, `Views/ProductionSettingsPage.xaml`: WPF wiring and operator UI.
+
+# Golden Rules / Invariants
+
+- Do not convert `.tht` to `.model` or `.model` to `.tht` by inference.
+- UART `*IDN?` must identify a real Universal Tester board; do not accept WP-100, GT800, or random USB serial devices.
+- UART parser requires a persistent CRLF frame buffer. A read is not a command.
+- UART `:MAXEXT,...` is sent only after firmware sends `:MEASURE`.
+- UART `:OPEN` during live monitoring is not automatically final FAIL.
+- UART `:OTHER` represents wrong/cross connection and must not be collapsed into OPEN.
+- UART TESTPIN comes from firmware physical pins and `.model`; D2XX probe uses D2XX mapping/classifier.
+- Probe/TESTPIN must not create FAIL, increment production, or fire relay.
+- ProductRemoved/removal confirmation is required before re-arming the next cycle.
+- FAIL must not trigger marking relay. D2XX FAIL allows only JIG/Relay 1 after confirmation.
+- JIG/relay/output must return to initial state after each cycle.
+- Hardware lifecycle must serialize owner/reader/dispose/reconnect and reject stale callbacks.
+- Never guess firmware commands, ADC formulas, channel mapping, COM roles, FTDI serials, timing, retry policy, or data formats.
+
+# Historical Regressions
+
+Avoid repeating these known failures:
+
+- `StackOverflowException` from recursive property/setter/event loops.
+- WPF read-only bindings accidentally configured as `TwoWay`.
+- Backup/copy files compiled into the app.
+- Stale callbacks after model/board/mode changes.
+- Multiple readers or owners on the same FTDI/COM device.
+- Disposing a hardware handle while a worker is still reading.
+- Probe events entering the fault engine.
+- Treating one IO returning as full ProductRemoved.
+- Duplicate physical edges inflating master counts.
+- FAIL path accidentally firing Relay 2.
+- AUTO activating D2XX and UART at the same time.
+- Treating `:RESISTOR,3961` as ohms instead of raw ADC.
+
+# Coding Safety Rules
+
+- Make minimal, task-scoped changes.
+- Find root cause before editing.
+- Do not refactor outside the requested task.
+- Do not change protocol/API/data formats unless explicitly required.
+- Do not upgrade dependencies unless requested.
+- Do not hide errors with empty `catch`; log or preserve meaningful failures.
+- Do not edit generated/build output.
+- Do not create `*.bak`, `*_old.cs`, `*_copy.cs`, `*_fixed.cs`, or similar backup source files.
+- Do not delete source unless the task explicitly requires it and the diff is understood.
+- Do not use broad runtime switches like `IsPi`, `PiMode`, `LegacyPi`, `UsePiBoard`, or `PlatformMode` inside shared production flow.
+
+# Hardware Safety Rules
+
+- One physical FTDI/COM device has one active owner/reader.
+- Avoid multiple `SerialPort.DataReceived`/reader loops on one COM.
+- On reconnect, fully dispose or cancel the previous lifecycle before opening again.
+- Guard generation/stale callbacks so old transport events cannot mutate current state.
+- If a COM is occupied, report it as occupied, not as "board not found".
+- Do not assume firmware behavior not proven by trace or current source.
+
+# Bug Fix Workflow
+
+1. Read `AGENTS.md`.
+2. Understand the task.
+3. Identify relevant files.
+4. Read only required code.
+5. Find root cause.
+6. Apply minimal fix.
+7. Build/test.
+8. Check targeted regression risk.
+9. Review diff.
+10. Report clear result.
 
+# Feature Workflow
 
+- Identify the integration point first.
+- Preserve D2XX/UART architecture boundaries.
+- Do not break the other backend.
+- Build/test the affected app and tests.
+- Update documentation if an invariant changes.
 
-QUAN TRỌNG:
+# Build / Verification
 
+Known verification commands:
 
+- `dotnet clean`
+- `dotnet restore`
+- `dotnet build -c Release`
+- `VERIFY_BUILD_V15_0_0.cmd`
+- `VERIFY_BUILD_V15_2_0.cmd` when working on V15.2 changes.
 
-\* Không scan lại toàn bộ repository.
+# Definition of Done
 
-\* Không thực hiện lại review.
+A task is not done just because compile passes. Verification must match the risk: unit/self-tests for logic, build for project structure, and explicit hardware status for D2XX/COM behavior. If real hardware was not tested, say so clearly.
 
-\* Sử dụng context đã có trong session hiện tại.
+# Detailed Technical Reference
 
-\* Sử dụng `docs/BAO\_CAO\_TONG\_HOP\_CODEX\_REVIEW\_V15\_0\_0.md` làm nguồn kỹ thuật chính.
+Primary deep reference:
 
-\* Chỉ đọc lại một source file cụ thể nếu thật sự cần xác minh một chi tiết chưa chắc chắn.
+`docs/BAO_CAO_TONG_HOP_CODEX_REVIEW_V15_0_0.md`
 
-
-
-Mục tiêu:
-
-`AGENTS.md` phải là project operating manual ngắn gọn để các Codex session sau có thể hiểu project nhanh mà không cần đọc lại toàn repo.
-
-
-
-AGENTS.md cần có:
-
-
-
-\# Project Overview
-
-
-
-\* mục đích project;
-
-\* framework/công nghệ;
-
-\* kiến trúc tổng quát;
-
-\* D2XX backend;
-
-\* UART TTL backend.
-
-
-
-\# Architecture Boundaries
-
-
-
-\* D2XX và UART TTL là hai backend/protocol riêng;
-
-\* không được trộn semantics giữa hai backend;
-
-\* ghi rõ source-of-truth của `.tht`, `.model`, `.setup` và Product Bundle.
-
-
-
-\# Important Modules
-
-
-
-\* các module/file quan trọng đã được xác định trong review;
-
-\* mô tả ngắn vai trò từng phần.
-
-
-
-\# Golden Rules / Invariants
-
-
-
-\* protocol rules;
-
-\* model/setup rules;
-
-\* pin mapping;
-
-\* TESTPIN;
-
-\* PASS/FAIL;
-
-\* ProductRemoved;
-
-\* JIG;
-
-\* hardware lifecycle;
-
-\* những giá trị Codex tuyệt đối không được tự suy đoán.
-
-
-
-\# Historical Regressions
-
-
-
-Tóm tắt các regression quan trọng đã phát hiện và phải tránh tái phạm.
-
-
-
-\# Coding Safety Rules
-
-
-
-\* minimal change;
-
-\* root cause trước;
-
-\* không refactor ngoài task;
-
-\* không tự đổi protocol/API/data format;
-
-\* không nâng dependency nếu không được yêu cầu;
-
-\* không che lỗi bằng empty catch;
-
-\* không sửa generated/build output;
-
-\* không tự xóa source.
-
-
-
-\# Hardware Safety Rules
-
-
-
-\* một owner/reader phù hợp cho FTDI/COM;
-
-\* tránh multiple readers;
-
-\* lifecycle/dispose/reconnect;
-
-\* stale callback;
-
-\* không đoán firmware behavior.
-
-
-
-\# Bug Fix Workflow
-
-
-
-1\. Đọc AGENTS.md.
-
-2\. Hiểu task.
-
-3\. Xác định file liên quan.
-
-4\. Chỉ đọc code cần thiết.
-
-5\. Tìm root cause.
-
-6\. Minimal fix.
-
-7\. Build/test.
-
-8\. Kiểm tra regression.
-
-9\. Review diff.
-
-10\. Báo cáo rõ kết quả.
-
-
-
-\# Feature Workflow
-
-
-
-\* xác định integration point;
-
-\* giữ architecture boundary;
-
-\* không phá backend còn lại;
-
-\* build/test;
-
-\* cập nhật documentation nếu invariant thay đổi.
-
-
-
-\# Build / Verification
-
-
-
-Ghi các command đã xác minh, bao gồm nếu đúng:
-
-
-
-\* `dotnet clean`
-
-\* `dotnet restore`
-
-\* `dotnet build -c Release`
-
-\* `VERIFY\_BUILD\_V15\_0\_0.cmd`
-
-
-
-\# Definition of Done
-
-
-
-Không được coi task hoàn thành chỉ vì compile PASS.
-
-Phải có verification phù hợp và nói rõ phần chưa test được bằng hardware thật.
-
-
-
-\# Detailed Technical Reference
-
-
-
-Tham chiếu:
-
-`docs/BAO\_CAO\_TONG\_HOP\_CODEX\_REVIEW\_V15\_0\_0.md`
-
-
-
-Ghi rõ:
-
-
-
-\* task thông thường chỉ đọc AGENTS.md + source liên quan;
-
-\* chỉ mở báo cáo kỹ thuật khi cần investigation sâu;
-
-\* source code hiện tại là source of truth cuối cùng;
-
-\* nếu documentation và source mâu thuẫn phải điều tra, không tự đoán.
-
-
-
-Giữ AGENTS.md ngắn gọn, không copy nguyên báo cáo review.
-
-
-
-Sau khi tạo xong:
-
-
-
-\* hiển thị nội dung tóm tắt AGENTS.md;
-
-\* cho biết file nằm ở đâu;
-
-\* không review lại project.
-
-# Git / GitHub Workflow
-
-## At Task Start
-
-Trước mỗi coding task:
-
-1. Đọc `AGENTS.md`.
-2. Chạy `git status`.
-3. Xác định current branch.
-4. Chạy `git fetch origin`.
-5. Kiểm tra local branch so với remote:
-
-   * synchronized;
-   * ahead;
-   * behind;
-   * diverged.
-
-Nếu working tree sạch và remote có commit mới:
-
-* đồng bộ an toàn bằng `git pull --rebase`.
-
-Không pull/rebase mù quáng nếu working tree có local modifications.
-
-Không tự stash, reset hoặc discard thay đổi của user.
-
-## During Task
-
-* Chỉ sửa file thuộc phạm vi task.
-* Không trộn unrelated changes.
-* Tuân theo Bug Fix / Feature Workflow trong `AGENTS.md`.
-
-## Before Commit
-
-Sau khi sửa:
-
-1. Build/test phù hợp.
-2. Chạy `git diff`.
-3. Kiểm tra diff chỉ chứa task hiện tại.
-4. Kiểm tra secret/credential.
-5. Không stage build output/temp file.
-6. Chỉ stage file thuộc task.
-
-## Auto Commit
-
-Nếu task coding đã hoàn thành và verification phù hợp PASS:
-
-Codex được phép tự tạo commit mà không cần hỏi lại.
-
-Dùng Conventional Commits:
-
-* `fix: ...`
-* `feat: ...`
-* `docs: ...`
-* `refactor: ...`
-* `test: ...`
-* `chore: ...`
-
-Không dùng `git add .` mù quáng khi working tree chứa unrelated changes.
-
-## Before Push
-
-Ngay trước push:
-
-1. `git fetch origin`
-2. Kiểm tra remote branch có commit mới hay không.
-
-Nếu remote thay đổi:
-
-* integrate an toàn;
-* không force push;
-* nếu resolve conflict thì build/test lại.
-
-## Auto Push
-
-Nếu:
-
-* commit thành công;
-* verification phù hợp PASS;
-* remote an toàn;
-* không có conflict;
-* không có secret;
-
-Codex được phép tự `git push` branch hiện tại lên `origin` mà không cần hỏi lại.
-
-Nếu branch chưa có upstream:
-
-`git push -u origin <branch>`
-
-## Branch Policy
-
-Thay đổi nhỏ, an toàn:
-
-* có thể làm trên branch hiện tại nếu phù hợp.
-
-Thay đổi lớn liên quan:
-
-* architecture;
-* D2XX/UART protocol;
-* hardware transport;
-* PASS/FAIL lifecycle;
-* firmware interaction;
-* database/schema;
-* refactor nhiều module;
-
-ưu tiên branch:
-
-* `feature/<name>`
-* `fix/<name>`
-* `refactor/<name>`
-
-Không tự merge branch lớn vào `main` nếu task không yêu cầu.
-
-## Forbidden Git Actions
-
-Codex tuyệt đối không tự động:
-
-* `git push --force`
-* `git push -f`
-* `git push --force-with-lease`
-* `git reset --hard`
-* `git clean -fd`
-* rewrite shared history
-* delete repository
-* delete remote branch
-* delete tag
-* delete release
-* đổi PRIVATE thành PUBLIC
-* discard unrelated user changes
-* commit secrets.
-
-## Exceptions
-
-Không auto commit/push nếu:
-
-* tôi nói không commit;
-* tôi nói không push;
-* task chỉ review/phân tích;
-* verification fail;
-* conflict chưa giải quyết;
-* có unrelated changes chưa rõ;
-* phát hiện secret;
-* remote/repository không đúng như dự kiến.
-
-## Task Completion
-
-Coding task bình thường:
-
-`status`
-→ `fetch/sync`
-→ `edit`
-→ `build/test`
-→ `diff review`
-→ `commit`
-→ `fetch`
-→ `push`
-→ `status`
-
-Cuối task phải báo:
-
-* branch;
-* files changed;
-* verification;
-* commit hash ngắn;
-* commit message;
-* push status;
-* local/remote synchronized hay không.
-
-## Task Instruction Files
-
-Detailed task specifications may be stored under:
-
-`docs/tasks/`
-
-When the user references a task file:
-
-1. Read AGENTS.md first.
-2. Read only the referenced task file.
-3. Do not scan other task files.
-4. Read only source files required by that task.
-5. Do not repeat the entire task specification in responses.
-6. Keep progress/status responses concise.
-7. At completion, report only:
-   - root cause;
-   - files changed;
-   - verification;
-   - commit;
-   - push status.
-
-## Token / Context Efficiency
-
-Keep context usage efficient.
-
-- Do not repeatedly summarize AGENTS.md.
-- Do not repeat the user's full requirements.
-- Do not dump large source files unless necessary.
-- Do not print large diffs unless requested.
-- Do not print full build logs when build succeeds.
-- On build failure, show only relevant error sections.
-- Do not rescan the whole repository for normal tasks.
-- Reuse already established project knowledge.
-- Read only files relevant to the current task.
-- Keep progress messages concise.
-- Final reports should be concise and actionable.
-# Multi-PC Git Workflow
-
-GitHub is the synchronization source between development PCs.
-
-## Before starting any coding task
-
-Always:
-
-1. Run `git status`.
-2. Run `git fetch origin`.
-3. Check whether the current branch is:
-   - synchronized;
-   - ahead;
-   - behind;
-   - diverged.
-
-If the working tree is clean and remote has newer commits:
-
-`git pull --rebase`
-
-Do this BEFORE editing source code.
-
-Never start editing from an outdated local branch when a newer remote version exists.
-
-## After completing a coding task
-
-Before commit:
-
-1. Build/test the relevant changes.
-2. Review `git diff`.
-3. Ensure only task-related files are included.
-4. Check for secrets, build output and temporary files.
-
-If verification passes:
-
-1. Stage only relevant files.
-2. Create a Conventional Commit.
-3. Run `git fetch origin` again.
-4. Check whether remote changed while the task was being performed.
-
-If remote did not change:
-
-`git push`
-
-If remote changed:
-- integrate the remote changes safely;
-- prefer rebase when appropriate;
-- resolve conflicts carefully;
-- build/test again;
-- then push.
-
-## End-of-work rule
-
-Before finishing work on a PC for the day:
-
-- all completed work must be committed;
-- completed and verified commits must be pushed to GitHub;
-- run `git status`;
-- confirm local branch and remote branch are synchronized.
-
-Do not leave completed work only on one PC.
-
-## Moving to another PC
-
-At the beginning of work on another PC:
-
-1. `git status`
-2. `git fetch origin`
-3. `git pull --rebase`
-
-Only start editing after synchronization succeeds.
-
-## Unfinished work
-
-Do NOT automatically commit incomplete or broken code just because the work session is ending.
-
-If work is incomplete:
-- do not push broken changes to `main`;
-- preferably create/use a work branch such as:
-  `work/<task-name>`
-  or
-  `feature/<task-name>`;
-- commit incomplete work only when necessary to transfer it between PCs;
-- clearly mark the commit as WIP.
-
-Example:
-
-`git commit -m "wip: continue UART reconnect investigation"`
-
-Push the WIP branch, not stable `main`.
-
-On the other PC:
-- fetch;
-- checkout the same branch;
-- pull;
-- continue the task.
-
-When completed and verified:
-- replace future commits with proper task commits as appropriate;
-- merge through the normal repository workflow.
-
-## Safety
-
-Never automatically:
-- force push;
-- reset --hard;
-- clean -fd;
-- discard user changes;
-- overwrite remote changes;
-- resolve conflicts by blindly choosing ours/theirs.
-
-If the local and remote branches diverge unexpectedly, stop automatic synchronization and report the situation before destructive actions.
-
-
-
+Normal tasks should read only `AGENTS.md` plus relevant source files. Open the technical report only for deeper investigation. Source code remains the final source of truth; documentation/source conflicts require investigation, not guesses.

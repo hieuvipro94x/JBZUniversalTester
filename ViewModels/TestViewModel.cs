@@ -69,8 +69,7 @@ public sealed class TestViewModel : ObservableObject
     // V12.10.3: TestEngine.Reset() phát Changed đồng bộ. Trong Master state machine,
     // reset nội bộ không được phép tái nhập OnEngineChanged trước khi state hoàn tất.
     private int _suppressEngineChanged;
-    // Gate liên luồng: callback D2XX chạy qua Dispatcher, còn UART protocol
-    // chạy từ reader task. Mỗi chu kỳ chỉ một caller được chốt side effects.
+    // Gate liên luồng: mỗi chu kỳ chỉ một caller được chốt side effects.
     private int _resultRecordedThisCycle;
     private int _probeCycleRecordedThisCycle;
     private DateTime _cycleStartedAt = DateTime.Now;
@@ -80,13 +79,6 @@ public sealed class TestViewModel : ObservableObject
     private long _monthlyTestCount;
     private long _lifetimeTestCount;
     private long _probeCycleCount;
-
-    // V13.0 DUAL BOARD: UART firmware emits high-level TESTPIN/OPEN/OTHER/CIRCUIT
-    // events directly. D2XX continues to use ScanFrame + TestEngine unchanged.
-    private readonly Dictionary<int, int[]> _uartOpenSnapshots = [];
-    private readonly HashSet<(int A, int B)> _uartWrongPairs = [];
-    private int _uartResultHandlingStarted;
-    private string _uartWaitingRemovalReason = string.Empty;
 
     // V11.9: nhận dạng đầu dò GND ngay cả khi TestView đang mở. Firmware có
     // chữ ký fan-out dày (một source kéo theo hàng chục target liên tiếp).
@@ -653,8 +645,6 @@ public sealed class TestViewModel : ObservableObject
         _engine.Changed += OnEngineChanged;
         _board.Log += OnBoardLog;
         _board.FrameReceived += OnBoardFrameReceived;
-        if (_board is IFirmwareProtocolBoard firmwareBoard)
-            firmwareBoard.ProtocolEventReceived += OnFirmwareProtocolEventReceived;
 
         RebuildActiveCards();
 
@@ -717,8 +707,7 @@ public sealed class TestViewModel : ObservableObject
                 $"Không thể {action} vì CHƯA KẾT NỐI VỚI BO MẠCH TEST.\n\n" +
                 "Phần mềm vẫn tiếp tục hoạt động. Hãy kiểm tra:\n" +
                 "• LOẠI BO MẠCH trong Cài đặt\n" +
-                "• D2XX: cáp USB/driver FTDI\n" +
-                "• UART TTL: COM, TX/RX/GND và 115200 8N1\n\n" +
+                "• D2XX: cáp USB/driver FTDI\n\n" +
                 "Sau khi bo được kết nối, hãy thử lại thao tác.";
 
             BoardConnectionMessage = "CHƯA KẾT NỐI VỚI BO MẠCH TEST";
@@ -730,24 +719,6 @@ public sealed class TestViewModel : ObservableObject
                 "Chưa kết nối bo mạch test",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
-            return false;
-        }
-
-        if (requireD2xxRelay &&
-            _board is UnifiedBoardTransport unified &&
-            unified.ActiveMode == BoardMode.UartTtl)
-        {
-            string message =
-                $"Không thể {action} bằng nút Relay D2XX.\n\n" +
-                "Bo hiện tại là JBZ UART TTL. Firmware UART điều khiển chu trình tháo hàng " +
-                "bằng PASSPEN/UNCONNECT, không dùng Relay 1/Relay 2 D2XX.";
-
-            AddLog($"MANUAL BLOCKED: {action} - backend UART TTL không hỗ trợ relay D2XX.");
-            MessageBox.Show(
-                message,
-                "Chức năng không áp dụng cho bo UART TTL",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
             return false;
         }
 
@@ -1363,308 +1334,6 @@ public sealed class TestViewModel : ObservableObject
             }
         });
     }
-
-    private void OnFirmwareProtocolEventReceived(object? sender, BoardProtocolEvent evt)
-    {
-        if (_board is not IFirmwareProtocolBoard firmware || !firmware.UsesFirmwareCycleResult)
-            return;
-
-        switch (evt.Family.ToUpperInvariant())
-        {
-            case "START":
-                InvokeUi(() => State = "ĐANG KIỂM TRA...");
-                break;
-
-            case "MEASURE":
-                InvokeUi(() => State = "ĐANG ĐO / KIỂM TRA...");
-                break;
-
-            case "CLEAR":
-                _uartOpenSnapshots.Clear();
-                _uartWrongPairs.Clear();
-                InvokeUi(RefreshUartFaultRows);
-                break;
-
-            case "TESTPIN":
-                HandleUartProbe(evt);
-                break;
-
-            case "PIN":
-                // Firmware variants may emit :PIN,<io>,0/1 instead of TESTPIN.
-                if (evt.Values.Count >= 2 && (evt.Values[1] == "0" || evt.Values[1] == "1"))
-                {
-                    var translated = new BoardProtocolEvent(
-                        evt.Timestamp, "TESTPIN", evt.Raw,
-                        [evt.Values[0], evt.Values[1] == "1" ? "ON" : "OFF"]);
-                    HandleUartProbe(translated);
-                }
-                break;
-
-            case "OPEN":
-                HandleUartOpen(evt);
-                break;
-
-            case "OTHER":
-                HandleUartOther(evt);
-                break;
-
-            case "CIRCUIT":
-                if (evt.Values.Count > 0 && int.TryParse(evt.Values[0], out int circuit))
-                {
-                    if (Interlocked.CompareExchange(ref _uartResultHandlingStarted, 1, 0) == 0)
-                    {
-                        // UART firmware chỉ cung cấp kết quả cycle cấp cao; CIRCUIT là
-                        // bằng chứng fixture đã thực sự thực hiện một test, không đếm theo :START/frame.
-                        RecordProbeCycleStarted();
-                        _ = HandleUartCircuitResultAsync(circuit);
-                    }
-                }
-                break;
-
-            case "PEN":
-                if (string.Equals(_uartWaitingRemovalReason, "PASS", StringComparison.OrdinalIgnoreCase))
-                    _ = RequestUartRemovalAsync("PASS");
-                break;
-
-            case "REMOVAL":
-                InvokeUi(() => State = "HÃY THÁO TOÀN BỘ SẢN PHẨM");
-                break;
-
-            case "UNCONNECT":
-                _ = CompleteUartRemovalAsync();
-                break;
-
-            case "ERROR":
-                InvokeUi(() => State = "LỖI BO UART TTL");
-                AddLog($"UART firmware error: {evt.Raw}");
-                break;
-        }
-    }
-
-    private void HandleUartProbe(BoardProtocolEvent evt)
-    {
-        if (!_productionSettings.UseTestPointer || evt.Values.Count < 2 ||
-            !int.TryParse(evt.Values[0], out int io) || io <= 0)
-            return;
-
-        bool active = evt.Values[1].Equals("ON", StringComparison.OrdinalIgnoreCase) || evt.Values[1] == "1";
-        int[] current = SnapshotInlineProbeContacts();
-        int[] next = active
-            ? current.Append(io).Distinct().OrderBy(x => x).Take(2).ToArray()
-            : current.Where(x => x != io).ToArray();
-
-        bool changed = UpdateInlineProbeContacts(next);
-        if (!changed)
-            return;
-
-        InvokeUi(() =>
-        {
-            if (next.Length > 0)
-            {
-                ShowInlineProbeContacts(next);
-                _sound.PlayTestPoint();
-            }
-            else
-            {
-                ClearInlineProbeDisplay();
-            }
-        });
-    }
-
-    private void HandleUartOpen(BoardProtocolEvent evt)
-    {
-        _uartOpenSnapshots.Clear();
-        InvokeUi(RefreshUartFaultRows);
-    }
-
-    private void HandleUartOther(BoardProtocolEvent evt)
-    {
-        int[] values = evt.Values.Select(v => int.TryParse(v, out int n) ? n : 0)
-            .Where(n => n > 0).Take(2).ToArray();
-        if (values.Length < 2)
-            return;
-        int a = Math.Min(values[0], values[1]);
-        int b = Math.Max(values[0], values[1]);
-        _uartWrongPairs.Add((a, b));
-        InvokeUi(RefreshUartFaultRows);
-    }
-
-    private void RefreshUartFaultRows()
-    {
-        if (_board is not IFirmwareProtocolBoard firmware || !firmware.UsesFirmwareCycleResult)
-            return;
-
-        Faults.Clear();
-        foreach ((int a, int b) in _uartWrongPairs.OrderBy(x => x.A).ThenBy(x => x.B))
-        {
-            PinRecord? pin = FindPinByIo(a);
-            Faults.Add(new FaultRow
-            {
-                Kind = FaultKind.WrongWiring,
-                ProductFaultType = ProductFaultType.WrongWiring,
-                FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.WrongWiring),
-                Io = a,
-                ActualSourceIo = a,
-                ActualTargetIo = b,
-                RelatedIos = [a, b],
-                Connector = pin?.Connector ?? string.Empty,
-                Pin = pin?.PinNumber ?? string.Empty,
-                WireName = pin?.WireName ?? string.Empty,
-                Splice = pin?.SpliceName ?? string.Empty,
-                Section = pin?.Section ?? string.Empty,
-                Color = pin?.Color ?? string.Empty,
-                Status = $"SAI KẾT NỐI: {DescribeIoCompact(a)} ↔ {DescribeIoCompact(b)}"
-            });
-        }
-    }
-
-    private async Task HandleUartCircuitResultAsync(int circuit)
-    {
-        if (_board is not IFirmwareProtocolBoard firmware || !firmware.UsesFirmwareCycleResult || _model is null)
-            return;
-
-        ProductModel cycleModel = _model;
-        long generation = Volatile.Read(ref _runtimeGeneration);
-        CancellationToken cycleToken = CurrentCycleToken();
-
-        try
-        {
-            cycleToken.ThrowIfCancellationRequested();
-            if (circuit == 0)
-            {
-                _uartOpenSnapshots.Clear();
-                _uartWrongPairs.Clear();
-                InvokeUi(() =>
-                {
-                    RefreshUartFaultRows();
-                    State = "PASS";
-                });
-                RecordCompletedProduct(true, "PASS", cycleModel, generation, cycleToken);
-                _uartWaitingRemovalReason = "PASS";
-                AddLog("UART :CIRCUIT,0 => PASS. Chờ 300 ms rồi gửi PASSPEN giống Pi/V11.");
-                await Task.Delay(300, cycleToken);
-                await firmware.SendPassPenAsync(500, UartPinCount(), cycleToken);
-            }
-            else
-            {
-                if (_uartWrongPairs.Count == 0)
-                {
-                    _uartOpenSnapshots.Clear();
-                    InvokeUi(() =>
-                    {
-                        RefreshUartFaultRows();
-                        State = "ĐANG KIỂM TRA...";
-                    });
-                    AddLog("UART :CIRCUIT khác 0 nhưng chỉ có OPEN/missing hoặc không có lỗi positive-contact; bỏ qua, không ghi FAIL.");
-                    return;
-                }
-
-                InvokeUi(() => State = "KHÔNG ĐẠT");
-                _sound.SetWiringFaultAlarm(true);
-                IReadOnlyList<FaultDetail> faults = CaptureFaultDetails();
-                await InvokeUiAsync(() =>
-                {
-                    var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-                        faults,
-                        "Sau XÁC NHẬN, hệ thống sẽ đưa JIG sang bước tháo hàng an toàn.");
-                    dialog.Owner = Application.Current?.MainWindow;
-                    dialog.ShowDialog();
-                });
-                _sound.SetWiringFaultAlarm(false);
-                RecordCompletedProduct(false, "FAIL", cycleModel, generation, cycleToken);
-                await RequestUartRemovalAsync("FAIL");
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            AddLog($"UART result workflow error: {ex.Message}");
-            InvokeUi(() => State = "LỖI CHU TRÌNH UART");
-        }
-    }
-
-    private Task RequestUartRemovalAsync(string reason)
-    {
-        if (_board is not IFirmwareProtocolBoard firmware || !firmware.UsesFirmwareCycleResult)
-            return Task.CompletedTask;
-        _uartWaitingRemovalReason = reason;
-        InvokeUi(() => State = reason == "PASS" ? "ĐÃ ĐÓNG DẤU - HÃY THÁO SẢN PHẨM" : "LỖI - HÃY THÁO SẢN PHẨM");
-        AddLog($"UART {reason}: TX :UNCONNECT,500,{UartPinCount()}");
-        return firmware.RequestUnconnectAsync(500, UartPinCount(), CurrentCycleToken());
-    }
-
-    private async Task CompleteUartRemovalAsync()
-    {
-        if (_board is not IFirmwareProtocolBoard firmware || !firmware.UsesFirmwareCycleResult)
-            return;
-        if (string.IsNullOrWhiteSpace(_uartWaitingRemovalReason))
-            return;
-
-        _uartWaitingRemovalReason = string.Empty;
-        _uartOpenSnapshots.Clear();
-        _uartWrongPairs.Clear();
-        ClearInlineProbeContactsState(clearLastSeen: true);
-        Interlocked.Exchange(ref _uartResultHandlingStarted, 0);
-        InvokeUi(() =>
-        {
-            ClearInlineProbeDisplay();
-            RefreshUartFaultRows();
-            State = "SẴN SÀNG";
-        });
-
-        if (!_cycleActive || _lifetimeCts.IsCancellationRequested)
-            return;
-
-        try
-        {
-            await Task.Delay(50, CurrentCycleToken());
-            _cycleStartedAt = DateTime.Now;
-            _activeCycleId = Guid.NewGuid().ToString("N");
-            _lastFaultRejectSignature = string.Empty;
-            Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
-            Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
-            _productDetectedThisCycle = false;
-            InvokeUi(() => Lot = _productionSettings.LotNo.ToString());
-            AddLog("UART :UNCONNECT => ranh giới sản phẩm sạch; bắt đầu chu kỳ mới bằng :START.");
-            await firmware.StartFirmwareCycleAsync(0, CurrentCycleToken());
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            AddLog($"UART không START được chu kỳ kế tiếp: {ex.Message}");
-            InvokeUi(() => State = "BO UART MẤT KẾT NỐI");
-        }
-    }
-
-    private IReadOnlyList<FaultDetail> BuildUartSnapshotFaultDetails()
-    {
-        var details = new List<FaultDetail>();
-        foreach ((int a, int b) in _uartWrongPairs.OrderBy(x => x.A).ThenBy(x => x.B))
-        {
-            details.Add(EnrichFaultDetail(new FaultDetail
-            {
-                Type = ProductFaultType.WrongWiring,
-                ActualSourceIo = a,
-                ActualTargetIo = b,
-                RelatedIos = [a, b]
-            }));
-        }
-
-        if (details.Count == 0)
-        {
-            details.Add(new FaultDetail
-            {
-                Type = ProductFaultType.SystemDeviceError,
-                Message = "Bo kết luận mạch không đạt nhưng chưa cung cấp chi tiết vị trí."
-            });
-        }
-
-        return details;
-    }
-
-    private int UartPinCount() => Math.Max(1, _model?.Pins.Select(p => p.IoNumber).Where(io => io > 0).Distinct().Count() ?? 1);
 
     private Task InvokeUiAsync(Action action)
     {
@@ -2319,8 +1988,6 @@ public sealed class TestViewModel : ObservableObject
         _engine.Changed -= OnEngineChanged;
         _board.Log -= OnBoardLog;
         _board.FrameReceived -= OnBoardFrameReceived;
-        if (_board is IFirmwareProtocolBoard firmwareBoard)
-            firmwareBoard.ProtocolEventReceived -= OnFirmwareProtocolEventReceived;
 
         _lifetimeCts.Dispose();
     }
@@ -2451,7 +2118,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 BoardConnectionMessage =
                     "Chưa kết nối bo JBZ. Hãy kiểm tra LOẠI BO MẠCH trong Cài đặt; " +
-                    "D2XX: cáp/driver FTDI; UART TTL: COM, TX/RX/GND, mức 3.3V và 115200 8N1.";
+                    "D2XX: cáp/driver FTDI.";
             }
 
             State = "BO CHƯA KẾT NỐI";
@@ -2469,8 +2136,7 @@ public sealed class TestViewModel : ObservableObject
         // mọi delay/relay/đo còn chạy của chu kỳ cũ sẽ bị hủy trước cleanup board.
         CancellationToken cycleToken = BeginCycleOperations();
 
-        // D2XX luôn bắt đầu từ relay OFF. UART TTL không có relay D2XX;
-        // backend UART map AllRelaysOff thành no-op và dùng PASSPEN/UNCONNECT.
+        // D2XX luôn bắt đầu từ relay OFF.
         await _board.AllRelaysOffAsync(cycleToken);
 
         // Chỉ ghi lại khi model thực sự được dùng để bắt đầu một chu kỳ kiểm tra.
@@ -2512,24 +2178,6 @@ public sealed class TestViewModel : ObservableObject
         InvokeUi(RebuildActiveCards);
         await _board.StartScanAsync(BoardScanMode.Production, cycleToken);
         InvokeUi(UpdateCardScanningState);
-
-        if (_board is IFirmwareProtocolBoard firmware && firmware.UsesFirmwareCycleResult)
-        {
-            // Firmware Pi tự kết luận CIRCUIT và tự phát TESTPIN. Không chạy
-            // Master state-machine D2XX vì nó phụ thuộc raw ScanFrame.
-            MasterApproved = true;
-            MasterStatus = "UART TTL • KẾT QUẢ THEO FIRMWARE (:CIRCUIT)";
-            RaiseMasterState();
-            _cycleActive = true;
-            _uartOpenSnapshots.Clear();
-            _uartWrongPairs.Clear();
-            _uartWaitingRemovalReason = string.Empty;
-            Interlocked.Exchange(ref _uartResultHandlingStarted, 0);
-            State = "ĐANG KIỂM TRA...";
-            AddLog($"UART TTL: ARM chu kỳ bằng :START trên {firmware.ActivePort}; kết quả theo :CIRCUIT.");
-            await firmware.StartFirmwareCycleAsync(0, cycleToken);
-            return;
-        }
 
         if (!MasterApproved)
         {
@@ -2756,18 +2404,6 @@ public sealed class TestViewModel : ObservableObject
 
     private IReadOnlyList<FaultDetail> CaptureFaultDetails()
     {
-        if (_board is IFirmwareProtocolBoard firmware && firmware.UsesFirmwareCycleResult)
-        {
-            FaultDetail[] firmwareDetails = Faults
-                .Where(row => row.Kind is FaultKind.WrongWiring or FaultKind.Short)
-                .Select(row => EnrichFaultDetail(row.ToFaultDetail()))
-                .ToArray();
-
-            return firmwareDetails.Length > 0
-                ? firmwareDetails
-                : BuildUartSnapshotFaultDetails();
-        }
-
         var details = _engine.WiringFaults
             .Select(pair =>
             {
@@ -3760,15 +3396,9 @@ public sealed class TestViewModel : ObservableObject
         BoardConnectionMessage = string.Empty;
         HardwareStatus = "Bo: đang nhận dạng lại...";
         State = "ĐANG NHẬN DẠNG LOẠI BO";
-        AddLog($"Áp dụng LOẠI BO MẠCH: {BoardModeCatalog.DisplayName(_productionSettings.BoardMode)}; UART={_productionSettings.UartPort}.");
+        AddLog($"Áp dụng LOẠI BO MẠCH: {BoardModeCatalog.DisplayName(_productionSettings.BoardMode)}.");
         await InitializeHardwareAsync();
-        if (_board is IFirmwareProtocolBoard firmware && firmware.UsesFirmwareCycleResult)
-        {
-            MasterApproved = true;
-            MasterStatus = "UART TTL • KẾT QUẢ THEO FIRMWARE (:CIRCUIT)";
-            RaiseMasterState();
-        }
-        else if (_model is not null)
+        if (_model is not null)
         {
             ResetMasterGateForModel();
         }
@@ -4240,14 +3870,6 @@ public sealed class TestViewModel : ObservableObject
         if (!MasterApproved)
         {
             message = "Không thể reset counter trong chu trình xác nhận MASTER.";
-            return false;
-        }
-
-        if (_board is IFirmwareProtocolBoard firmware &&
-            firmware.UsesFirmwareCycleResult &&
-            _cycleActive)
-        {
-            message = "Hãy DỪNG AN TOÀN chu kỳ UART trước khi xác nhận thay Probe Pin.";
             return false;
         }
 

@@ -175,30 +175,12 @@
                         <Border Margin="0,0,0,10" Padding="10,8" Background="#F7F9FC" BorderBrush="#D4DAE4" BorderThickness="1" CornerRadius="4">
                             <StackPanel>
                                 <TextBlock Text="LOẠI BO MẠCH" FontSize="14" FontWeight="Bold" Foreground="#284B9B" Margin="0,0,0,5"/>
-                                <RadioButton Content="Tự động nhận dạng" GroupName="BoardMode" IsChecked="{Binding UseAutoBoard, Mode=TwoWay}"/>
+                                <RadioButton Content="Tự động nhận dạng D2XX" GroupName="BoardMode" IsChecked="{Binding UseAutoBoard, Mode=TwoWay}"/>
                                 <RadioButton Content="JBZ D2XX" GroupName="BoardMode" IsChecked="{Binding UseD2xxBoard, Mode=TwoWay}"/>
-                                <RadioButton Content="JBZ UART TTL" GroupName="BoardMode" IsChecked="{Binding UseUartTtlBoard, Mode=TwoWay}"/>
-                                <Grid Margin="22,2,0,0">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="110"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="COM ưu tiên" Style="{StaticResource FieldLabelStyle}"/>
-                                    <TextBox Grid.Column="1" Text="{Binding Settings.UartPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Ví dụ COM5; để trống để tự nhận dạng"/>
-                                </Grid>
-                                <Grid Margin="22,4,0,0" IsEnabled="{Binding IsUartSettingsEnabled}">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="110"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="Profile UART" Style="{StaticResource FieldLabelStyle}"/>
-                                    <TextBox Grid.Column="1" Text="{Binding Settings.LastUartModelPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                             ToolTip="Profile riêng của firmware: .profile.json / .uart.txt / .protocol.txt. Có thể để trống nếu profile nằm cạnh file THT cùng tên."/>
-                                </Grid>
                             </StackPanel>
                         </Border>
 
-                        <Grid IsEnabled="{Binding IsD2xxSettingsEnabled}">
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="175"/>
                                 <ColumnDefinition Width="*"/>
