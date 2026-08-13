@@ -8,6 +8,7 @@ public enum AppLogCategory
     Application,
     Board,
     Test,
+    Performance,
     Error
 }
 
@@ -75,6 +76,7 @@ public sealed class AsyncFileLogService : IDisposable
     public void Application(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Application, message, level);
     public void Board(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Board, message, level);
     public void Test(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Test, message, level);
+    public void Performance(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Performance, message, level);
     public void Error(string message) => Write(AppLogCategory.Error, message, AppLogLevel.Normal);
 
     private async Task WriterLoopAsync()

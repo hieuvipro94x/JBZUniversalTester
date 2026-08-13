@@ -9,7 +9,8 @@ namespace JBZUniversalTester.ViewModels;
 
 public sealed class HomeViewModel : ObservableObject
 {
-    private const string ProductFileFilter = "Mã hàng JBZ (*.tht;*.model)|*.tht;*.model";
+    private const string ProductFileFilter =
+        "JBZ THT (*.tht)|*.tht|Mã hàng legacy (*.model)|*.model";
     private readonly MainViewModel _main;
 
     // Cho HomeView mở màn hình kiểm tra chân pin và cài đặt.
@@ -80,7 +81,7 @@ public sealed class HomeViewModel : ObservableObject
             {
                 MessageBox.Show(
                     owner ?? Application.Current?.MainWindow,
-                    "Chỉ có thể chọn file mã hàng .tht hoặc .model.",
+                    "Chỉ có thể chọn file mã hàng .tht hoặc .model legacy.",
                     "File không được hỗ trợ",
                     MessageBoxButton.OK,
                     MessageBoxImage.Warning);

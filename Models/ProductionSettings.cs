@@ -29,6 +29,12 @@ public sealed class ProductionSettings
     public bool UseTestPointer { get; set; } = true;
 
     /// <summary>
+    /// Maintenance-only mode. When enabled, production test is locked and relay
+    /// commands are available only through the existing board transport owner.
+    /// </summary>
+    public bool ManualModeEnabled { get; set; }
+
+    /// <summary>
     /// Trường compatibility cho cấu hình V12.9.2 trở về trước. Từ V12.9.5
     /// Production luôn dùng Master state machine tự động; Normalize() luôn ép true.
     /// Không còn checkbox/nút Master thủ công trên TestView.

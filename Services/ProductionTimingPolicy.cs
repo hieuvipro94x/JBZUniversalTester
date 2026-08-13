@@ -9,6 +9,11 @@ public static class ProductionTimingPolicy
     public const int DefaultWrongConnectionConfirmMs = 100;
     public const int DefaultProductSettleTimeMs = 200;
     public const int DefaultJigContactUnstableWindowMs = 1000;
+    public const int StartupStopToHandshakeMs = 500;
+    public const int StartupHandshakeToInit1Ms = 15;
+    public const int StartupInit1ToInit2Ms = 350;
+    public const int D2xxControlWaitSleepMs = 1;
+    public const int D2xxIdlePollSleepMs = 2;
 
     public static void Normalize(ProductionSettings settings)
     {

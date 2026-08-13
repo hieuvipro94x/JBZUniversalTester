@@ -1,0 +1,499 @@
+TASK RIÊNG — SỬA CỘT MÀU DÂY HIỂN THỊ DẠNG BLOCK LIỀN NHAU GIỐNG ẢNH THAM CHIẾU
+PROJECT: JBZUniversalTester
+
+============================================================
+MỤC TIÊU
+============================================================
+
+Hiện tại phần màu dây #1 #2 #3 #4 đang hiển thị quá nhỏ / tách xa nhau.
+
+Yêu cầu mới:
+
+- Nếu dây chỉ có 1 màu:
+  → hiển thị 1 block màu rộng, rõ.
+
+- Nếu dây có 2 màu, ví dụ:
+  R/L
+
+  thì phải hiển thị:
+  [ R ][ L ]
+
+  hai block màu:
+  - rộng hơn hiện tại;
+  - nằm sát/gần nhau;
+  - nhìn giống một cụm màu của cùng một dây;
+  - khoảng cách giữa hai block rất nhỏ hoặc gần như không có.
+
+Ảnh tham chiếu cho thấy:
+- block màu dạng hình chữ nhật đứng;
+- màu chiếm gần hết chiều rộng vùng hiển thị;
+- hai màu nằm cạnh nhau;
+- không phải các ô vuông nhỏ nằm cách xa.
+
+============================================================
+1. CHỈ SỬA PRESENTATION
+============================================================
+
+KHÔNG sửa:
+
+- parser THT;
+- WireName;
+- scan I/O;
+- TestEngine;
+- SOURCE/TARGET;
+- Connector grouping;
+- CLIP;
+- Resistance;
+- Relay;
+- PASS/FAIL.
+
+Chỉ sửa:
+- XAML;
+- DataTemplate;
+- converter/style màu dây;
+- model presentation property nếu thực sự cần.
+
+============================================================
+2. RÀ SOÁT CÁCH HIỂN THỊ MÀU HIỆN TẠI
+============================================================
+
+Search:
+
+rg -n --hidden --glob "!bin/**" --glob "!obj/**" `
+"#1|#2|#3|#4|WireColor|Color1|Color2|Color3|Color4|Brush|WireColorConverter|DataGridTemplateColumn|Rectangle" .
+
+Phải xác định:
+- file XAML đang tạo ô màu;
+- converter tạo Brush;
+- kích thước hiện tại của Rectangle/Border;
+- margin giữa #1/#2/#3/#4.
+
+============================================================
+3. BLOCK MÀU PHẢI RỘNG HƠN
+============================================================
+
+Không dùng block 18x18 hoặc 20x20 quá nhỏ.
+
+Mỗi màu nên có kích thước gần:
+
+Width khoảng 42–58 px
+Height khoảng 24–32 px
+
+Tùy row height hiện tại.
+
+Mục tiêu:
+màu phải nhìn rõ từ xa trên dây chuyền.
+
+Không bo góc lớn.
+
+CornerRadius:
+0 hoặc tối đa 1–2 px.
+
+============================================================
+4. HAI MÀU PHẢI NẰM GẦN NHAU
+============================================================
+
+Ví dụ dây:
+
+R/L
+
+không được hiển thị:
+
+[ R ]          [ L ]
+
+với khoảng cách lớn.
+
+Phải hiển thị:
+
+[ R ][ L ]
+
+Khoảng cách giữa 2 màu:
+0–2 px.
+
+Ví dụ XAML concept:
+
+<StackPanel Orientation="Horizontal"
+            HorizontalAlignment="Center">
+
+    <Border Width="48"
+            Height="28"
+            Margin="0"
+            Background="{Binding Color1Brush}"/>
+
+    <Border Width="48"
+            Height="28"
+            Margin="1,0,0,0"
+            Background="{Binding Color2Brush}"/>
+
+</StackPanel>
+
+Không bắt buộc dùng đúng code này nếu architecture hiện tại khác.
+
+============================================================
+5. KHÔNG ÉP MỖI MÀU VÀO CỘT XA NHAU NẾU KHÔNG CẦN
+============================================================
+
+Nếu hiện tại #1 #2 #3 #4 là bốn DataGridColumn độc lập quá xa nhau,
+cần cân nhắc cách hiển thị sao cho vẫn giữ header #1 #2 #3 #4
+nhưng khoảng cách visual giữa màu thực tế nhỏ hơn.
+
+Có 2 phương án:
+
+PHƯƠNG ÁN A — GIỮ 4 CỘT
+- giảm width từng cột;
+- giảm padding cell;
+- các Rectangle mở rộng gần hết cell;
+- border giữa các cột mảnh.
+
+PHƯƠNG ÁN B — nếu giao diện cho phép
+- dùng một vùng template chung chứa 4 color blocks;
+- header vẫn hiển thị #1 #2 #3 #4 phía trên.
+
+Ưu tiên PHƯƠNG ÁN A nếu không muốn thay cấu trúc DataGrid nhiều.
+
+============================================================
+6. WIDTH CÁC CỘT #1 #2 #3 #4
+============================================================
+
+Hiện tại không được để mỗi cột quá rộng.
+
+Đề xuất:
+
+#1 Width khoảng 50–60
+#2 Width khoảng 50–60
+#3 Width khoảng 50–60
+#4 Width khoảng 50–60
+
+Cell padding gần 0.
+
+Mỗi color rectangle:
+Width gần full cell trừ 2–4 px.
+
+Ví dụ:
+
+ColumnWidth = 54
+RectangleWidth = 50
+
+Kết quả:
+hai màu R/L nhìn gần như nối liền.
+
+============================================================
+7. KHÔNG HIỂN THỊ CHỮ R/L TRONG BLOCK NẾU ẢNH GỐC CHỈ HIỂN THỊ MÀU
+============================================================
+
+Ảnh tham chiếu chỉ cần block màu.
+
+Vì vậy Production UI ưu tiên:
+
+R:
+block đỏ
+
+L:
+block xanh/lam theo mapping của project
+
+Không cần chữ:
+R
+L
+
+trên block.
+
+Nếu hiện tại operator cần mã màu bằng text ở nơi khác thì giữ ở Diagnostics,
+không nhồi vào block chính.
+
+============================================================
+8. MAPPING MÀU PHẢI GIỮ ĐÚNG
+============================================================
+
+Không sửa quy ước màu đã xác minh trong project.
+
+Ví dụ:
+
+R → RED
+Y → YELLOW
+G → GREEN
+P → PINK
+GR → GRAY
+BR → BROWN
+OR → ORANGE
+L → màu theo mapping hiện tại của project
+
+Không tự đoán lại L/B nếu factory coding khác.
+
+Reuse đúng WireColor mapping hiện có.
+
+============================================================
+9. DÂY 1 MÀU
+============================================================
+
+Ví dụ:
+
+R
+
+Expected:
+
+[ RED ]
+
+#2/#3/#4 trống.
+
+Block R vẫn rộng gần full cell.
+
+Không co nhỏ chỉ vì có một màu.
+
+============================================================
+10. DÂY 2 MÀU
+============================================================
+
+Ví dụ:
+
+R/L
+
+Expected visual:
+
+[ RED ][ L COLOR ]
+
+Hai block cùng chiều cao.
+Cùng width.
+Cách nhau tối đa 1–2 px.
+
+============================================================
+11. DÂY 3 MÀU
+============================================================
+
+Ví dụ:
+
+R/L/Y
+
+Expected:
+
+[ RED ][ L ][ YELLOW ]
+
+#4 trống.
+
+Không tăng khoảng cách giữa các block.
+
+============================================================
+12. DÂY 4 MÀU
+============================================================
+
+Ví dụ:
+
+R/L/Y/B
+
+Expected:
+
+[ R ][ L ][ Y ][ B ]
+
+cả 4 nằm đều nhau.
+
+============================================================
+13. EMPTY COLOR
+============================================================
+
+Nếu color slot không có giá trị:
+
+không vẽ border giả nổi bật.
+
+Có thể:
+- transparent;
+- hoặc cell trống.
+
+Không hiển thị một ô trắng có viền khiến operator tưởng đó là màu W.
+
+Màu trắng W thật phải có:
+- fill trắng;
+- border xám mảnh
+để vẫn phân biệt được.
+
+============================================================
+14. WHITE COLOR
+============================================================
+
+Nếu:
+
+W
+
+thì block trắng cần:
+
+Background = White
+BorderBrush = #B0B0B0
+BorderThickness = 1
+
+để nhìn thấy trên nền bảng trắng.
+
+Các màu khác có thể không cần border hoặc dùng border rất mảnh.
+
+============================================================
+15. ROW HEIGHT
+============================================================
+
+Nếu block màu cao hơn hiện tại,
+điều chỉnh RowHeight vừa đủ.
+
+Ví dụ:
+
+RowHeight khoảng 32–38 px
+
+Block:
+26–30 px
+
+Không làm row cao quá mức.
+
+============================================================
+16. HEADER #1 #2 #3 #4
+============================================================
+
+Giữ header:
+
+#1
+#2
+#3
+#4
+
+Căn giữa.
+
+Header width khớp block bên dưới.
+
+Không đổi text.
+
+============================================================
+17. GRID LINE
+============================================================
+
+Grid line giữa #1/#2/#3/#4 nên rất mảnh.
+
+Nếu đường grid quá dày làm hai màu trông tách xa:
+- giữ line 1 px;
+- giảm cell margin/padding.
+
+Không được bỏ toàn bộ grid nếu bảng còn cần style tester công nghiệp.
+
+============================================================
+18. KHÔNG TẠO BRUSH MỚI MỖI FRAME
+============================================================
+
+Color là dữ liệu model cố định.
+
+Brush phải:
+- cache;
+- StaticResource;
+- hoặc frozen brush.
+
+Không tạo SolidColorBrush mới mỗi scan frame.
+
+============================================================
+19. KHÔNG UPDATE MÀU TRONG HOT SCAN PATH
+============================================================
+
+Màu dây được build khi load model.
+
+Không bind nó vào current scan state nếu không cần.
+
+Scan chỉ thay status/visibility.
+
+============================================================
+20. TEST VISUAL BẮT BUỘC
+============================================================
+
+Test các case:
+
+R
+
+R/L
+
+R/Y
+
+G/B
+
+R/L/Y
+
+R/L/Y/B
+
+W
+
+BR/OR
+
+Expected:
+- block rộng;
+- sát nhau;
+- đúng màu;
+- không chữ thừa;
+- không khoảng trắng lớn.
+
+============================================================
+21. SCREENSHOT COMPARISON
+============================================================
+
+Sau sửa:
+- chạy TestWindow;
+- dùng một row có 2 màu;
+- chụp screenshot;
+- so với ảnh tham chiếu.
+
+Mục tiêu:
+hai block nhìn gần nhau giống ảnh:
+một cụm màu liên tục.
+
+============================================================
+22. CODEX PHẢI BÁO
+============================================================
+
+ROOT CAUSE:
+vì sao block hiện tại nhỏ/tách xa?
+
+FILE XAML:
+...
+
+COLOR CONVERTER:
+...
+
+OLD SIZE:
+...
+
+NEW SIZE:
+...
+
+COLUMN WIDTH:
+#1
+#2
+#3
+#4
+
+CELL MARGIN:
+...
+
+FILES MODIFIED:
+...
+
+BUSINESS LOGIC MODIFIED:
+NO
+
+SCAN LOGIC MODIFIED:
+NO
+
+BUILD DEBUG:
+PASS/FAIL
+
+BUILD RELEASE:
+PASS/FAIL
+
+============================================================
+TIÊU CHÍ HOÀN THÀNH
+============================================================
+
+Ví dụ dây R/L:
+
+KHÔNG:
+
+[ R ]           [ L ]
+
+PHẢI:
+
+[████████][████████]
+   RED       L
+
+Hai block:
+- rộng;
+- cao vừa đủ;
+- gần sát nhau;
+- dễ nhìn từ xa;
+- giống ảnh tester công nghiệp.

@@ -5,7 +5,7 @@ using System.IO;
 
 namespace JBZUniversalTester.Services;
 
-public sealed class KeysightVisaService : IDisposable
+public class KeysightVisaService : IDisposable
 {
     const int VI_SUCCESS = 0;
     const uint VI_TMO_INFINITE = 0xFFFFFFFF;
@@ -15,9 +15,10 @@ public sealed class KeysightVisaService : IDisposable
     uint _resourceManager;
     uint _session;
 
-    public bool IsConnected => _session != 0;
+    public virtual bool IsConnected => _session != 0;
     public string ConnectedResource { get; private set; } = string.Empty;
-    public string InstrumentId { get; private set; } = string.Empty;
+    public virtual string InstrumentId { get; private set; } = string.Empty;
+    public string LastRawResistanceResponse { get; private set; } = string.Empty;
 
     [DllImport("visa32.dll", CallingConvention = CallingConvention.StdCall)]
     static extern int viOpenDefaultRM(out uint session);
@@ -86,7 +87,7 @@ public sealed class KeysightVisaService : IDisposable
         }
     }
 
-    public string Connect(string resource)
+    public virtual string Connect(string resource)
     {
         if (string.IsNullOrWhiteSpace(resource))
             throw new ArgumentException("VISA Resource rỗng.", nameof(resource));
@@ -116,7 +117,7 @@ public sealed class KeysightVisaService : IDisposable
     /// Chỉ gọi khi model thực sự có bước đo điện trở. Ưu tiên resource cấu hình;
     /// nếu rỗng hoặc lỗi thì tự tìm USBTMC và chọn thiết bị trả IDN Keysight/34461A.
     /// </summary>
-    public string ConnectAutomatic(string? preferredResource = null)
+    public virtual string ConnectAutomatic(string? preferredResource = null)
     {
         if (IsConnected) return InstrumentId;
 
@@ -124,17 +125,22 @@ public sealed class KeysightVisaService : IDisposable
         if (!string.IsNullOrWhiteSpace(preferredResource))
             candidates.Add(preferredResource.Trim());
         candidates.AddRange(DiscoverUsbInstruments());
+        AsyncFileLogService.Current.Test(
+            $"[AUTO-R] VISA resource found count={candidates.Distinct(StringComparer.OrdinalIgnoreCase).Count()}");
 
         Exception? lastError = null;
         foreach (var resource in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try
             {
+                AsyncFileLogService.Current.Test($"[AUTO-R] VISA try resource={resource}");
                 var idn = Connect(resource);
+                AsyncFileLogService.Current.Test($"[AUTO-R] IDN = {idn}");
                 if (idn.Contains("KEYSIGHT", StringComparison.OrdinalIgnoreCase) ||
                     idn.Contains("34461", StringComparison.OrdinalIgnoreCase) ||
                     idn.Contains("AGILENT", StringComparison.OrdinalIgnoreCase))
                 {
+                    AsyncFileLogService.Current.Test("[AUTO-R] Keysight ready");
                     return idn;
                 }
 
@@ -153,7 +159,7 @@ public sealed class KeysightVisaService : IDisposable
             (lastError is null ? string.Empty : $" Lỗi cuối: {lastError.Message}"));
     }
 
-    public string Query(string command)
+    public virtual string Query(string command)
     {
         lock (_sync)
         {
@@ -167,11 +173,14 @@ public sealed class KeysightVisaService : IDisposable
         }
     }
 
-    public double MeasureResistance(string command = ":MEASURE:RES?")
+    public virtual double MeasureResistance(string command = ":MEASURE:RES?")
     {
         var raw = Query(command);
+        LastRawResistanceResponse = raw;
         if (!double.TryParse(raw.Split(',')[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
             throw new FormatException("Keysight trả dữ liệu không hợp lệ: " + raw);
+        AsyncFileLogService.Current.Test(
+            FormattableString.Invariant($"[RES] Keysight raw response = {raw}; Parsed canonical = {value:0.##########} Ohm"));
         return value;
     }
 

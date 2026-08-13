@@ -15,13 +15,21 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 public partial class ProductionSettingsPage : UserControl
 {
-    private readonly ProductionSettingsViewModel _vm = new();
+    private readonly MainViewModel? _main;
+    private readonly ProductionSettingsViewModel _vm;
 
     public event EventHandler? SettingsSaved;
     public event EventHandler? RequestClose;
 
     public ProductionSettingsPage()
+        : this(null)
     {
+    }
+
+    public ProductionSettingsPage(MainViewModel? main)
+    {
+        _main = main;
+        _vm = new ProductionSettingsViewModel(main?.Test);
         InitializeComponent();
         DataContext = _vm;
         InitializeComboBoxItems();
@@ -36,8 +44,7 @@ public partial class ProductionSettingsPage : UserControl
             .Range(1, BoardCapacity.MaxExpansionModuleCount)
             .Select(n => new CardIoOption(
                 n,
-                $"{n} card mở rộng - {n * BoardCapacity.IoPerExpansionModule} IO " +
-                $"({n * BoardCapacity.PhysicalCardsPerExpansionModule} card vật lý)"))
+                $"{n} card / {n * BoardCapacity.IoPerExpansionModule} IO"))
             .ToArray();
 
         if (_vm.Settings.ExpansionCardCount <= 0)
@@ -116,16 +123,25 @@ public partial class ProductionSettingsPage : UserControl
                 return;
             }
 
+            bool oldManual = _main?.ProductionSettings.ManualModeEnabled ?? false;
+            bool newManual = _vm.IsManualModeEnabled;
+            if (newManual && !oldManual && _main is not null && !_main.Test.CanEnterManualMode)
+            {
+                ShowMessage(
+                    "Không thể bật Manual khi đang kiểm tra. Hãy kết thúc chu kỳ trước.",
+                    "Manual Mode",
+                    MessageBoxImage.Warning);
+                _vm.IsManualModeEnabled = false;
+                return;
+            }
+
             // Đồng bộ CardCount compatibility từ BoardCapacity ngay trước save.
             BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
             _vm.Settings.CardCount = capacity.ScanCardCount;
             _vm.Save();
 
             ShowMessage(
-                "Đã lưu toàn bộ cấu hình.\n\n" +
-                $"{Path.Combine(AppContext.BaseDirectory, "production.settings.json")}\n" +
-                $"{Path.Combine(AppContext.BaseDirectory, "UniversalTester.cfg")}\n\n" +
-                $"Board capacity: {capacity}",
+                "Đã lưu cấu hình.",
                 "JBZ",
                 MessageBoxImage.Information);
 
@@ -137,6 +153,9 @@ public partial class ProductionSettingsPage : UserControl
         }
     }
 
+    public void SetManualRuntimeActive(bool active) =>
+        _vm.SetManualRuntimeActive(active);
+
     private bool ValidateSettings(out string error)
     {
         if (_vm.Settings.LotNo < 0)
@@ -145,9 +164,9 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         }
 
-        if (_vm.MasterFaultRequiredCount is < 1 or > 99)
+        if (_vm.MasterFaultRequiredCount is < 0 or > 99)
         {
-            error = "Số lỗi Master phải từ 1 đến 99 điểm lỗi duy nhất.";
+            error = "Số lỗi Master phải từ 0 đến 99. 0 = bỏ kiểm tra Master.";
             return false;
         }
 
@@ -220,12 +239,12 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         }
 
-        foreach (ResistanceChannelSetting channel in _vm.ResistanceChannels)
+        foreach (ResistanceChannelEditor channel in _vm.ResistanceChannels)
         {
-            if (!channel.Enabled)
+            if (channel.ChannelSelection == 0)
                 continue;
 
-            if (channel.Channel is < 1 or > 5)
+            if (channel.ChannelSelection is < 1 or > 5)
             {
                 error = $"Kênh của {channel.Name} phải nằm trong khoảng 1 đến 5.";
                 return false;

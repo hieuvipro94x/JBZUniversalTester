@@ -1,0 +1,876 @@
+TASK RIÊNG — SỬA CONNECTOR MAPPING / THỨ TỰ DÒNG TESTWINDOW + KHÓA SORT TOÀN BỘ DATAGRID
+PROJECT: JBZUniversalTester
+
+============================================================
+MỤC TIÊU
+============================================================
+
+Sửa cách hiển thị cột Connector và thứ tự các dòng trên TestWindow.
+
+Yêu cầu:
+
+1. Đổi tên header:
+   "GIẮC"
+   thành:
+   "CONNECTOR"
+
+2. Cột CONNECTOR phải hiển thị ĐÚNG GIÁ TRỊ CONNECTOR TRONG MODEL/THT.
+
+Ví dụ model ghi:
+
+HOLDER 01
+HOLDER 12
+HOLDER 13
+
+thì UI phải hiển thị:
+
+HOLDER 01
+HOLDER 12
+HOLDER 13
+
+Nếu THT chỉ ghi:
+
+1
+12
+13
+
+thì có thể hiển thị:
+
+1
+12
+13
+
+KHÔNG được tự tạo số thứ tự:
+
+Connector 1
+Connector 2
+Connector 3
+
+theo vị trí xuất hiện.
+
+3. Không sort toàn bảng theo WireName/Tên dây.
+
+4. Các endpoint thuộc cùng một dây/network phải hiển thị LIỀN KỀ nhau.
+
+5. Các Connector có liên hệ với nhau phải được hiển thị xen kẽ giống ảnh tester gốc.
+
+6. Khóa hoàn toàn chức năng sort/reorder cột của TestWindow để operator
+không thể click header rồi làm thay đổi thứ tự Production.
+
+============================================================
+1. TRACE NGUỒN CONNECTOR HIỆN TẠI
+============================================================
+
+Search:
+
+rg -n --hidden --glob "!bin/**" --glob "!obj/**" `
+"Connector|ConnectorName|ConnectorNo|ConnectorNumber|Holder|GIẮC|BuildRows|OrderBy|ThenBy|GroupBy|SortMemberPath|CanUserSort|CanUserReorder" .
+
+Phải xác định:
+
+THT
+ ↓
+PinRecord / Endpoint
+ ↓
+Connector property nào
+ ↓
+DisplayRow
+ ↓
+TestWindow
+
+Báo chính xác chỗ nào đang biến Connector thành số thứ tự hiện tại.
+
+============================================================
+2. KHÔNG ĐƯỢC RENUMBER CONNECTOR
+============================================================
+
+SAI:
+
+THT:
+HOLDER 01
+HOLDER 12
+HOLDER 13
+
+nhưng code map thành:
+
+1
+2
+3
+
+hoặc:
+
+ConnectorIndex = distinctConnectors.IndexOf(...) + 1
+
+PHẢI BỎ.
+
+Cột CONNECTOR phải lấy raw/model connector identity.
+
+Ví dụ:
+
+row.Connector = endpoint.Connector
+
+Không lấy:
+
+ConnectorOrder
+ConnectorGroupIndex
+DistinctIndex
+
+làm text hiển thị.
+
+Các index/order chỉ được dùng để SORT nội bộ.
+
+============================================================
+3. CONNECTOR CÓ THỂ LÀ SỐ HOẶC CHỮ
+============================================================
+
+Không parse bắt buộc Connector thành int.
+
+Phải hỗ trợ:
+
+1
+2
+12
+
+HOLDER 01
+HOLDER 12
+
+C01
+C02
+
+A
+B
+
+J1
+J10
+
+Connector phải dùng string identity.
+
+Nếu cần natural sort thì viết comparer riêng,
+nhưng không làm mất raw text.
+
+============================================================
+4. CÁCH SẮP XẾP ĐÚNG GIỐNG ẢNH
+============================================================
+
+Ảnh reference thể hiện kiểu:
+
+HOLDER 01 | Pin 1
+HOLDER 12 | Pin 3
+
+HOLDER 01 | Pin 2
+HOLDER 12 | Pin 8
+
+HOLDER 01 | Pin 3
+HOLDER 12 | Pin 6
+
+HOLDER 01 | Pin 4
+HOLDER 12 | Pin 2
+
+...
+
+sau đó sang quan hệ:
+
+HOLDER 01 | Pin 6
+HOLDER 13 | Pin 3
+
+HOLDER 01 | Pin 7
+HOLDER 13 | Pin 8
+
+...
+
+Đây mới là presentation mong muốn.
+
+Không được:
+
+HOLDER 01
+HOLDER 01
+HOLDER 01
+HOLDER 01
+...
+HOLDER 12
+HOLDER 12
+HOLDER 12
+...
+
+vì operator không nhìn được chân nào đang đi với chân nào.
+
+============================================================
+5. UNIT HIỂN THỊ CHÍNH LÀ EXPECTED NETWORK
+============================================================
+
+Dùng expected electrical network từ THT làm đơn vị sắp xếp.
+
+Ví dụ Wire X:
+
+Endpoint A:
+Connector = HOLDER 01
+Pin = 1
+
+Endpoint B:
+Connector = HOLDER 12
+Pin = 3
+
+Display:
+
+HOLDER 01 | Pin 1 | Wire X
+HOLDER 12 | Pin 3 | Wire X
+
+hai dòng phải nằm sát nhau.
+
+Sau đó mới tới network tiếp theo.
+
+============================================================
+6. KHÔNG GỘP HAI ENDPOINT THÀNH MỘT DÒNG
+============================================================
+
+Vẫn giữ yêu cầu:
+
+MỖI I/O = MỘT ROW.
+
+Không:
+
+HOLDER 01 <-> HOLDER 12
+
+Không:
+
+Pin 1 <-> Pin 3
+
+Không:
+
+IO1 <-> IO2
+
+Đúng:
+
+row 1:
+IO...
+Connector HOLDER 01
+Pin 1
+
+row 2:
+IO...
+Connector HOLDER 12
+Pin 3
+
+============================================================
+7. THỨ TỰ NETWORK KHÔNG ĐƯỢC DỰA VÀO WIRENAME ALPHABET
+============================================================
+
+Không:
+
+OrderBy(x => x.WireName)
+
+Không:
+
+GroupBy(WireName).OrderBy(Name)
+
+WireName chỉ xác định electrical relationship.
+
+Không dùng alphabet để quyết định Production order.
+
+============================================================
+8. TẠO CONNECTOR RELATION GROUP
+============================================================
+
+Từ expected networks tạo graph:
+
+Connector A ↔ Connector B
+
+Ví dụ:
+
+network X:
+HOLDER01 ↔ HOLDER12
+
+network Y:
+HOLDER01 ↔ HOLDER12
+
+network Z:
+HOLDER01 ↔ HOLDER13
+
+=> relation groups:
+
+GROUP 1:
+HOLDER01 + HOLDER12
+
+GROUP 2:
+HOLDER01 + HOLDER13
+
+Trong mỗi group:
+các network của đúng cặp Connector đó nằm liên tiếp.
+
+============================================================
+9. SORT KEY ĐỀ XUẤT
+============================================================
+
+Mỗi endpoint row nên có display metadata:
+
+ConnectorGroupOrder
+NetworkOrder
+EndpointOrder
+OriginalThtOrder
+
+Final order:
+
+ConnectorGroupOrder
+→ NetworkOrder
+→ EndpointOrder
+
+KHÔNG:
+
+WireName alphabetical.
+
+============================================================
+10. ƯU TIÊN ORIGINAL THT ORDER
+============================================================
+
+Nếu THT đã lưu các network theo đúng order Production,
+hãy giữ thứ tự đó.
+
+Khi xây connector group:
+
+first appearance order trong THT
+
+nên được ưu tiên hơn alphabet sort nếu không có rule khác.
+
+Ví dụ HOLDER01-HOLDER12 xuất hiện trước HOLDER01-HOLDER13:
+
+giữ đúng như vậy.
+
+============================================================
+11. CÙNG CẶP CONNECTOR PHẢI NẰM LIỀN NHAU
+============================================================
+
+Ví dụ:
+
+HOLDER01 ↔ HOLDER12
+
+có 10 dây.
+
+Phải hiện đủ 10 network đó liên tục trước khi sang group khác nếu đó là
+order model/reference.
+
+Mỗi network gồm 2 row:
+
+HOLDER01
+HOLDER12
+
+HOLDER01
+HOLDER12
+
+HOLDER01
+HOLDER12
+
+...
+
+Điều này giúp operator nhìn ngay:
+chân bên Holder01 đang kết nối với chân nào bên Holder12.
+
+============================================================
+12. NETWORK 3 ENDPOINT
+============================================================
+
+Nếu một WireNet có:
+
+HOLDER01 Pin1
+HOLDER12 Pin3
+HOLDER20 Pin8
+
+thì 3 row phải nằm sát nhau:
+
+HOLDER01
+HOLDER12
+HOLDER20
+
+Không tách chúng ra các vị trí khác nhau.
+
+============================================================
+13. CONNECTOR CHỈ CÓ MỘT ENDPOINT
+============================================================
+
+Nếu một row không có peer connector do model thực sự như vậy,
+vẫn giữ row theo OriginalThtOrder / connector group phù hợp.
+
+Không tạo peer giả.
+
+============================================================
+14. CLIP A0/a1/a2 VẪN DÙNG RAW CONNECTOR
+============================================================
+
+CLIP cũng áp dụng cùng nguyên tắc:
+
+I/O 201
+Connector = giá trị thực từ THT
+WireName = A0
+
+I/O 202
+Connector = giá trị thực
+WireName = a1
+
+Không renumber Connector.
+
+Không hiển thị IO201↔IO202.
+
+CLIP memory giữ nguyên task trước.
+
+============================================================
+15. KHI NETWORK CHƯA KẾT NỐI
+============================================================
+
+Cả các endpoint của network đang chờ nên ở cạnh nhau.
+
+Ví dụ:
+
+CHỜ KẾT NỐI | 71 | HOLDER01 | Pin1 | M1C8
+CHỜ KẾT NỐI | 263| HOLDER12 | Pin3 | M1C8
+
+Operator nhìn được ngay hai đầu cần tương ứng.
+
+============================================================
+16. KHI NETWORK ĐÃ CONNECTED
+============================================================
+
+Nếu behavior hiện tại:
+
+connected → hide rows
+
+thì cả nhóm endpoint của network đó được remove theo state logic hiện có.
+
+Không làm một endpoint biến mất còn endpoint peer vẫn nằm lại nếu network PASS
+yêu cầu cả network hoàn thành.
+
+============================================================
+17. KHI NORMAL NETWORK OPEN LẠI
+============================================================
+
+Normal network open/lost:
+
+restore toàn bộ rows của network.
+
+Khi restore:
+phải quay về đúng vị trí cũ trong ConnectorGroup/NetworkOrder.
+
+Không append xuống cuối bảng.
+
+============================================================
+18. CLIP KHÔNG THEO OPEN RESTORE
+============================================================
+
+Giữ logic riêng:
+
+CLIP confirmed:
+latch + hide.
+
+CLIP mất tín hiệu:
+không restore.
+
+ProductRemoved/NewCycle:
+restore.
+
+Không thay đổi bởi task Connector này.
+
+============================================================
+19. ĐỔI HEADER "GIẮC" → "CONNECTOR"
+============================================================
+
+Trong TestWindow Production:
+
+Header chính xác:
+
+CONNECTOR
+
+Không dùng:
+
+GIẮC
+
+Không sửa các văn bản khác nếu không được yêu cầu.
+
+============================================================
+20. KHÓA SORT TOÀN BỘ DATAGRID
+============================================================
+
+Operator không được click header để sort.
+
+Trên DataGrid Production:
+
+CanUserSortColumns="False"
+
+Và để chắc chắn từng column:
+
+CanUserSort="False"
+
+nếu cần.
+
+Không để SortMemberPath kích hoạt sort.
+
+============================================================
+21. KHÓA REORDER CỘT
+============================================================
+
+Operator cũng không được kéo header đổi vị trí cột.
+
+Set:
+
+CanUserReorderColumns="False"
+
+Mục tiêu:
+
+thứ tự cột Production cố định.
+
+============================================================
+22. NÊN KHÓA RESIZE CỘT NẾU MUỐN GIAO DIỆN CỐ ĐỊNH
+============================================================
+
+Rà yêu cầu hiện tại.
+
+Để tránh operator kéo width làm loạn giao diện Production,
+ưu tiên:
+
+CanUserResizeColumns="False"
+
+nếu không có nhu cầu thao tác.
+
+Nếu hiện tại operator cần resize thì giữ,
+nhưng SORT + REORDER bắt buộc OFF.
+
+============================================================
+23. HEADER CLICK KHÔNG ĐƯỢC THAY ROW ORDER
+============================================================
+
+Regression:
+
+click:
+I/O
+CONNECTOR
+PIN
+TÊN DÂY
+#1
+#2...
+
+Expected:
+
+row order KHÔNG ĐỔI.
+
+Không có sort arrow.
+
+============================================================
+24. KHÔNG CHO ICollectionView TỰ SORT
+============================================================
+
+Search:
+
+SortDescriptions
+CustomSort
+CollectionViewSource
+ICollectionView
+
+Nếu ViewModel đang thêm sort tự động sau khi DataGrid click,
+remove user-sort path.
+
+Chỉ duy trì internal ProductionDisplayOrder.
+
+============================================================
+25. INTERNAL ORDER PHẢI DETERMINISTIC
+============================================================
+
+Sau mỗi:
+
+load model
+reset
+network restore
+model reload
+
+thứ tự phải giống nhau.
+
+Không phụ thuộc:
+HashSet iteration
+Dictionary iteration
+
+nếu có thể làm order thay đổi.
+
+Dùng explicit OriginalOrder/NetworkOrder.
+
+============================================================
+26. PERFORMANCE
+============================================================
+
+Connector grouping chỉ xây khi:
+
+- load model;
+- model change.
+
+Không recalculate connected components mỗi frame.
+
+Không:
+
+OrderBy(...)
+GroupBy(...)
+ToList(...)
+
+mỗi scan.
+
+Tạo MasterRows đã có DisplayOrder.
+
+Realtime chỉ:
+remove/insert rows theo state delta.
+
+============================================================
+27. CẤU TRÚC GỢI Ý
+============================================================
+
+Khi load model:
+
+BuildExpectedNetworks()
+ ↓
+BuildConnectorRelationGroups()
+ ↓
+AssignNetworkDisplayOrder()
+ ↓
+BuildEndpointRows()
+ ↓
+MasterRows immutable-ish
+
+Trong scan:
+
+Network state changed
+ ↓
+Hide/Restore corresponding rows
+
+Không sort lại.
+
+============================================================
+28. REGRESSION THEO ẢNH REFERENCE
+============================================================
+
+Input:
+
+Network1:
+HOLDER01 Pin1 ↔ HOLDER12 Pin3
+
+Network2:
+HOLDER01 Pin2 ↔ HOLDER12 Pin8
+
+Network3:
+HOLDER01 Pin3 ↔ HOLDER12 Pin6
+
+Network4:
+HOLDER01 Pin6 ↔ HOLDER13 Pin3
+
+Network5:
+HOLDER01 Pin7 ↔ HOLDER13 Pin8
+
+Expected UI:
+
+HOLDER01 | 1
+HOLDER12 | 3
+
+HOLDER01 | 2
+HOLDER12 | 8
+
+HOLDER01 | 3
+HOLDER12 | 6
+
+HOLDER01 | 6
+HOLDER13 | 3
+
+HOLDER01 | 7
+HOLDER13 | 8
+
+Đây là regression bắt buộc.
+
+============================================================
+29. REGRESSION RAW CONNECTOR VALUE
+============================================================
+
+THT:
+Connector = "HOLDER 12"
+
+Expected UI:
+HOLDER 12
+
+KHÔNG:
+2
+
+THT:
+Connector = "12"
+
+Expected:
+12
+
+KHÔNG tự đổi thành:
+HOLDER 12
+
+trừ khi model/config có explicit mapping đã xác minh.
+
+============================================================
+30. REGRESSION SORT LOCK
+============================================================
+
+Tự động test hoặc UI test:
+
+click header CONNECTOR nhiều lần.
+
+Expected:
+không thay đổi row order.
+
+click TÊN DÂY:
+không đổi.
+
+drag CONNECTOR header:
+không reorder.
+
+============================================================
+31. XÓA CỘT KẾT NỐI MẠNG VẪN GIỮ
+============================================================
+
+Theo task trước:
+
+TestWindow không còn cột:
+
+KẾT NỐI MẠNG
+
+Không khôi phục lại cột này để giải thích peer.
+
+Quan hệ peer phải được hiểu bằng VIỆC ĐẶT HAI ROW CẠNH NHAU.
+
+Đây chính là mục tiêu của connector grouping.
+
+============================================================
+32. OPERATOR VIEW CUỐI
+============================================================
+
+Ví dụ:
+
+LOẠI      I/O    CONNECTOR    PIN    TÊN DÂY    CỠ DÂY   #1 #2 #3 #4
+--------------------------------------------------------------------------------
+...        71    HOLDER 01      1      M1C8
+...       263    HOLDER 12      3      M1C8
+
+...       160    HOLDER 01      2      M1C6
+...       254    HOLDER 12      8      M1C6
+
+...       338    HOLDER 01      3      M1C0
+...       379    HOLDER 12      6      M1C0
+
+Nhìn bảng là biết endpoint nào thuộc cặp với endpoint nào,
+không cần cột "KẾT NỐI MẠNG".
+
+============================================================
+33. KHÔNG SỬA BUSINESS LOGIC
+============================================================
+
+Không thay:
+
+SOURCE/TARGET
+network equality
+wrong connection
+short detection
+probe
+CLIP latch
+Resistance
+FTDI
+relay
+
+Chỉ sửa:
+
+- connector identity presentation;
+- master row ordering/grouping;
+- DataGrid user sort/reorder behavior.
+
+============================================================
+34. BUILD
+============================================================
+
+dotnet clean
+
+xóa:
+
+bin
+obj
+
+dotnet build -c Debug
+dotnet build -c Release
+
+Run self tests.
+
+============================================================
+35. CODEX PHẢI BÁO
+============================================================
+
+ROOT CAUSE CONNECTOR DISPLAY:
+vì sao HOLDER12 hiện bị đổi thành connector index?
+
+FILE/METHOD:
+...
+
+ROOT CAUSE CURRENT SORT:
+đang OrderBy property nào?
+
+NEW ORDER:
+ConnectorGroup → Network → Endpoint
+
+RAW CONNECTOR PRESERVED:
+YES/NO
+
+HEADER GIẮC → CONNECTOR:
+file...
+
+USER SORT DISABLED:
+YES/NO
+
+USER REORDER DISABLED:
+YES/NO
+
+FILES MODIFIED:
+...
+
+BUSINESS TEST LOGIC MODIFIED:
+NO
+
+BUILD DEBUG:
+PASS/FAIL
+
+BUILD RELEASE:
+PASS/FAIL
+
+============================================================
+TIÊU CHÍ HOÀN THÀNH
+============================================================
+
+1. Header là:
+CONNECTOR
+
+2. Cột Connector hiện đúng dữ liệu THT:
+HOLDER 01
+HOLDER 12
+HOLDER 13
+hoặc số raw nếu THT là số.
+
+3. Không renumber connector theo thứ tự.
+
+4. Hai endpoint cùng network nằm sát nhau.
+
+5. Các network cùng cặp Connector hiển thị xen kẽ:
+
+HOLDER01
+HOLDER12
+
+HOLDER01
+HOLDER12
+
+...
+
+6. Sang connector pair khác mới:
+
+HOLDER01
+HOLDER13
+
+...
+
+7. Không sort theo WireName alphabet.
+
+8. Không còn cột KẾT NỐI MẠNG.
+
+9. Click bất kỳ header nào cũng KHÔNG làm thay đổi order.
+
+10. Operator không kéo đổi vị trí cột được.
+
+11. Scan/TestEngine không bị ảnh hưởng.

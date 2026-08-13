@@ -2,8 +2,8 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
-using System.Windows.Input;
 using System.Windows.Threading;
+using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
 using JBZUniversalTester.Versioning;
 
@@ -18,10 +18,6 @@ public partial class TestWindow : Window
     private readonly DispatcherTimer _clockTimer;
     private NotifyCollectionChangedEventHandler? _faultsChangedHandler;
     private CancellationTokenSource? _scrollCts;
-    private readonly DispatcherTimer _bottomToolbarHideTimer;
-    private bool _isMouseOverBottomHotZone;
-    private bool _isMouseOverBottomToolbar;
-    private bool _bottomToolbarVisible;
 
     public TestWindow(TestViewModel viewModel, bool autoStartProduction = true)
     {
@@ -40,14 +36,14 @@ public partial class TestWindow : Window
         };
         _clockTimer.Tick += (_, _) => UpdateClock();
 
-        // V12.9.2: delay 200 ms chỉ dành cho UX toolbar, tuyệt đối không dùng cho Probe.
-        _bottomToolbarHideTimer = new DispatcherTimer(DispatcherPriority.Input)
-        {
-            Interval = TimeSpan.FromMilliseconds(200)
-        };
-        _bottomToolbarHideTimer.Tick += BottomToolbarHideTimer_Tick;
-
         UpdateClock();
+        ContentRendered += TestWindow_ContentRendered;
+    }
+
+    private void TestWindow_ContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= TestWindow_ContentRendered;
+        StartupPerformanceTrace.Mark("T9 TestWindow first rendered");
     }
 
     private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("yyyy/MM/dd  HH:mm:ss");
@@ -62,9 +58,8 @@ public partial class TestWindow : Window
             return;
 
         _clockTimer.Start();
-        InitializeBottomToolbar();
         ModelTitleText.Visibility = viewModel.ShowTitle ? Visibility.Visible : Visibility.Collapsed;
-        ConnectorColumn.Visibility = viewModel.ShowConnector ? Visibility.Visible : Visibility.Collapsed;
+        ConnectorColumn.Visibility = Visibility.Visible;
 
         _faultsChangedHandler = (_, _) => ScheduleScrollToFirstFault(viewModel);
         viewModel.Faults.CollectionChanged += _faultsChangedHandler;
@@ -105,80 +100,6 @@ public partial class TestWindow : Window
         }, DispatcherPriority.Background);
     }
 
-    private void InitializeBottomToolbar()
-    {
-        _bottomToolbarHideTimer.Stop();
-        _isMouseOverBottomHotZone = false;
-        _isMouseOverBottomToolbar = false;
-        _bottomToolbarVisible = false;
-
-        BottomButtonPanel.Visibility = Visibility.Collapsed;
-        BottomToolbarHotZone.Visibility = Visibility.Visible;
-    }
-
-    private void BottomToolbarHotZone_MouseEnter(object sender, MouseEventArgs e)
-    {
-        _isMouseOverBottomHotZone = true;
-        _bottomToolbarHideTimer.Stop();
-        ShowBottomToolbar();
-    }
-
-    private void BottomToolbarHotZone_MouseLeave(object sender, MouseEventArgs e)
-    {
-        _isMouseOverBottomHotZone = false;
-        ScheduleBottomToolbarHide();
-    }
-
-    private void BottomButtonPanel_MouseEnter(object sender, MouseEventArgs e)
-    {
-        _isMouseOverBottomToolbar = true;
-        _bottomToolbarHideTimer.Stop();
-        ShowBottomToolbar();
-    }
-
-    private void BottomButtonPanel_MouseLeave(object sender, MouseEventArgs e)
-    {
-        _isMouseOverBottomToolbar = false;
-        ScheduleBottomToolbarHide();
-    }
-
-    private void ScheduleBottomToolbarHide()
-    {
-        if (_isMouseOverBottomHotZone || _isMouseOverBottomToolbar)
-            return;
-
-        _bottomToolbarHideTimer.Stop();
-        _bottomToolbarHideTimer.Start();
-    }
-
-    private void BottomToolbarHideTimer_Tick(object? sender, EventArgs e)
-    {
-        _bottomToolbarHideTimer.Stop();
-        if (!_isMouseOverBottomHotZone && !_isMouseOverBottomToolbar)
-            HideBottomToolbar();
-    }
-
-    private void ShowBottomToolbar()
-    {
-        _bottomToolbarHideTimer.Stop();
-        if (_bottomToolbarVisible)
-            return;
-
-        _bottomToolbarVisible = true;
-        BottomToolbarHotZone.Visibility = Visibility.Collapsed;
-        BottomButtonPanel.Visibility = Visibility.Visible;
-    }
-
-    private void HideBottomToolbar()
-    {
-        if (!_bottomToolbarVisible)
-            return;
-
-        _bottomToolbarVisible = false;
-        BottomButtonPanel.Visibility = Visibility.Collapsed;
-        BottomToolbarHotZone.Visibility = Visibility.Visible;
-    }
-
     private async void BackToMain_Click(object sender, RoutedEventArgs e)
     {
         if (_closeInProgress)
@@ -196,32 +117,6 @@ public partial class TestWindow : Window
             _allowClose = true;
             Close();
         }
-    }
-
-    private void ResetProbeMaintenance_Click(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not TestViewModel viewModel)
-            return;
-
-        var dialog = new ProbeMaintenanceResetWindow(
-            viewModel.PartNumber,
-            viewModel.ModelName,
-            viewModel.ProbeCycleCount,
-            viewModel.ProbeReplacementThreshold)
-        {
-            Owner = this
-        };
-
-        if (dialog.ShowDialog() != true)
-            return;
-
-        bool reset = viewModel.TryResetProbeCycle(dialog.AdminPassword, out string message);
-        MessageBox.Show(
-            this,
-            message,
-            reset ? "Bảo trì Probe Pin" : "Không thể reset Probe Pin",
-            MessageBoxButton.OK,
-            reset ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
     private async void TestWindow_Closing(object? sender, CancelEventArgs e)
@@ -260,7 +155,6 @@ public partial class TestWindow : Window
     private void CleanupUiHandlers()
     {
         _clockTimer.Stop();
-        _bottomToolbarHideTimer.Stop();
         _scrollCts?.Cancel();
         _scrollCts?.Dispose();
         _scrollCts = null;

@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using JBZUniversalTester.ViewModels;
 using JBZUniversalTester.Models;
+using JBZUniversalTester.Services;
 using JBZUniversalTester.Versioning;
 
 namespace JBZUniversalTester.Views;
@@ -21,12 +22,20 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        StartupPerformanceTrace.Mark("T1 MainWindow constructed");
         Title = $"UniversalTester {AppVersion.DisplayVersion} - JBZ Production";
         AppVersionText.Text = $"JBZ Universal : {AppVersion.DisplayVersion}";
 
         _viewModel = new MainViewModel();
         _viewModel.ExplicitModelLoaded += ViewModel_ExplicitModelLoaded;
         DataContext = _viewModel;
+        ContentRendered += MainWindow_ContentRendered;
+    }
+
+    private void MainWindow_ContentRendered(object? sender, EventArgs e)
+    {
+        ContentRendered -= MainWindow_ContentRendered;
+        StartupPerformanceTrace.Mark("T2 MainWindow first ContentRendered");
     }
 
     private void ViewModel_ExplicitModelLoaded(ProductModel model)
@@ -79,6 +88,16 @@ public partial class MainWindow : Window
             MessageBox.Show(
                 "Hãy chọn mã hàng trước khi bắt đầu kiểm tra.",
                 "Chưa chọn mã hàng",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        if (_viewModel.ProductionSettings.ManualModeEnabled)
+        {
+            MessageBox.Show(
+                "Manual Mode đang bật. Hãy tắt Manual và lưu cài đặt trước khi bắt đầu Production Test.",
+                "Production bị khóa",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
             return;
@@ -212,7 +231,7 @@ public partial class MainWindow : Window
     {
         CloseInternalPage();
 
-        _settingsPage = new ProductionSettingsPage();
+        _settingsPage = new ProductionSettingsPage(_viewModel);
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
 
@@ -225,6 +244,7 @@ public partial class MainWindow : Window
         try
         {
             await _viewModel.ReloadProductionSettingsAsync();
+            _settingsPage?.SetManualRuntimeActive(_viewModel.ProductionSettings.ManualModeEnabled);
         }
         catch (Exception ex)
         {
@@ -237,7 +257,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        CloseInternalPage();
+        if (!_viewModel.ProductionSettings.ManualModeEnabled)
+            CloseInternalPage();
     }
 
     private void OpenHistory_Click(

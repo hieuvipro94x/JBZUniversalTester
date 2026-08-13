@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using JBZUniversalTester.Models;
@@ -46,6 +47,11 @@ public sealed class D2xxBoardTransport : IBoardTransport
     BoardScanMode _scanMode = BoardScanMode.Production;
     long _scanGeneration;
     int _controlWaiters;
+    long _lastPerfAggregateTick;
+    long _pollCount;
+    long _bytesReceived;
+    long _framesPublished;
+    long _decodeTicks;
     int _disposeStarted;
     int _disposed;
 
@@ -60,6 +66,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     public bool IsConnected => _handle != IntPtr.Zero;
     public bool IsScanning => _scanTask is { IsCompleted: false };
+    public BoardScanMode CurrentScanMode => _scanMode;
     public BoardCapacity Capacity => _capacity;
 
     public event EventHandler<ScanFrame>? FrameReceived;
@@ -274,15 +281,16 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
                 _scanPrepared = false;
 
-                // Fast startup: KHÔNG dùng handshake 8A/0F để chặn kết nối.
-                // Chỉ kéo firmware về IDLE rồi INIT đúng sequence đã thấy trong trace.
-                await WriteAsync(CmdStopScan, ct);
-                await Task.Delay(30, ct);
+                // Startup theo trace Htdrv: STOP_SCAN -> ~500 ms -> HANDSHAKE
+                // 8A/0F -> INIT_1 -> INIT_2. Nếu handshake fail thì không scan.
+                await WriteAsync(CmdStopScan, ct, purgeBeforeWrite: true);
+                await Task.Delay(ProductionTimingPolicy.StartupStopToHandshakeMs, ct);
+                await HandshakeAsync(ct);
+                await Task.Delay(ProductionTimingPolicy.StartupHandshakeToInit1Ms, ct);
+                await PrepareScanAsync(ct);
                 // V12.4: khi vừa kết nối, relay phải ở trạng thái chờ/không kích.
                 // R1 chỉ mở JIG, R2 chỉ MARKING khi workflow yêu cầu.
                 await AllRelaysOffAsync(ct);
-                await PurgeAsync(ct);
-                await PrepareScanAsync(ct);
 
                 Log?.Invoke(
                     this,
@@ -430,7 +438,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             return;
 
         await WriteAsync(CmdInit1, ct);
-        await Task.Delay(350, ct);
+        await Task.Delay(ProductionTimingPolicy.StartupInit1ToInit2Ms, ct);
         await WriteAsync(CmdInit2, ct);
         _scanPrepared = true;
     }
@@ -521,7 +529,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 0x00
             ];
 
-            // WriteAsync đã PURGE + WRITE dưới cùng một D2XX lock.
+            // START_SCAN bắt đầu vòng stream mới nên purge đúng thời điểm,
+            // không purge tùy tiện giữa các frame đang được reader tách.
+            await PurgeAsync(ct);
             await WriteAsync(startScan, ct);
 
             // QUAN TRỌNG: START_SCAN không làm mất INIT. Giữ prepared=true để
@@ -661,6 +671,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         await WriteAsync(routeA, ct);
         await Task.Delay(350, ct);
         await WriteAsync(routeB, ct);
+        _scanPrepared = false;
     }
 
     public async Task ReleaseResistanceRouteAsync(
@@ -687,15 +698,22 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     public Task SetRelayAsync(int relay, CancellationToken ct = default) => relay switch
     {
-        1 => WriteAsync([0x8E, 0x00, 0x00, 0x01], ct),
-        2 => WriteAsync([0x8E, 0x00, 0x00, 0x02], ct),
+        1 => WriteRelayAsync([0x8E, 0x00, 0x00, 0x01], "RELAY1", ct),
+        2 => WriteRelayAsync([0x8E, 0x00, 0x00, 0x02], "RELAY2", ct),
         _ => throw new ArgumentOutOfRangeException(nameof(relay))
     };
 
     public Task AllRelaysOffAsync(CancellationToken ct = default) =>
         IsConnected
-            ? WriteAsync([0x8E, 0x00, 0x00, 0x00], ct)
+            ? WriteRelayAsync([0x8E, 0x00, 0x00, 0x00], "ALL_RELAYS_OFF", ct)
             : Task.CompletedTask;
+
+    async Task WriteRelayAsync(byte[] command, string reason, CancellationToken ct)
+    {
+        await WriteAsync(command, ct);
+        _scanPrepared = false;
+        Log?.Invoke(this, $"D2XX PREPARE INVALIDATED after {reason}; next START_SCAN will run INIT recovery.");
+    }
 
     Task ScanLoopAsync(
         BoardIoDecoder decoder,
@@ -716,19 +734,18 @@ public sealed class D2xxBoardTransport : IBoardTransport
         long generation,
         CancellationToken ct)
     {
-        try { Thread.CurrentThread.Priority = ThreadPriority.AboveNormal; } catch { }
-
-        int idleDelayMs = ProductionTimingPolicy.DefaultIoScanIntervalMs;
-        int emptyPolls = 0;
+        int idleDelayMs = ProductionTimingPolicy.D2xxIdlePollSleepMs;
         var buffer = new byte[65536];
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
+                Interlocked.Increment(ref _pollCount);
+
                 if (Volatile.Read(ref _controlWaiters) > 0)
                 {
-                    Thread.Yield();
+                    ct.WaitHandle.WaitOne(ProductionTimingPolicy.D2xxControlWaitSleepMs);
                     continue;
                 }
 
@@ -782,22 +799,18 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
                 if (queued == 0 || read == 0)
                 {
-                    // Giữ phản hồi đầu vào nhanh: vài chục poll đầu chỉ Yield,
-                    // chỉ Sleep khi USB thực sự im lâu. Nhờ vậy bấm BẮT ĐẦU/
-                    // chạm dây không phải chờ một chuỗi sleep 1 ms liên tiếp,
-                    // nhưng worker cũng không chiếm 100% CPU khi jig đang rỗng.
-                    emptyPolls++;
-                    if (emptyPolls <= 32 || idleDelayMs == 0)
-                        Thread.Yield();
-                    else
-                        Thread.Sleep(idleDelayMs);
+                    PublishPerfAggregateIfDue(mode);
+                    ct.WaitHandle.WaitOne(idleDelayMs);
                     continue;
                 }
 
-                emptyPolls = 0;
+                Interlocked.Add(ref _bytesReceived, (long)read);
+                long decodeStarted = Stopwatch.GetTimestamp();
+                IReadOnlyList<ScanFrame> decodedFrames = decoder.Feed(
+                    buffer.AsSpan(0, checked((int)read)));
+                Interlocked.Add(ref _decodeTicks, Stopwatch.GetTimestamp() - decodeStarted);
 
-                foreach (ScanFrame decoded in decoder.Feed(
-                             buffer.AsSpan(0, checked((int)read))))
+                foreach (ScanFrame decoded in decodedFrames)
                 {
                     if (ct.IsCancellationRequested)
                         break;
@@ -811,6 +824,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
                     PublishFrame(decoded);
                 }
+
+                PublishPerfAggregateIfDue(mode);
             }
         }
         catch (OperationCanceledException)
@@ -843,54 +858,85 @@ public sealed class D2xxBoardTransport : IBoardTransport
         }
     }
 
+    void PublishPerfAggregateIfDue(BoardScanMode mode)
+    {
+        long now = Environment.TickCount64;
+        long previous = Interlocked.Read(ref _lastPerfAggregateTick);
+        if (previous != 0 && now - previous < 5000)
+            return;
+        if (Interlocked.CompareExchange(ref _lastPerfAggregateTick, now, previous) != previous)
+            return;
+
+        long polls = Interlocked.Exchange(ref _pollCount, 0);
+        long bytes = Interlocked.Exchange(ref _bytesReceived, 0);
+        long frames = Interlocked.Exchange(ref _framesPublished, 0);
+        long decodeTicks = Interlocked.Exchange(ref _decodeTicks, 0);
+        double intervalSeconds = previous == 0 ? 5.0 : Math.Max(0.001, (now - previous) / 1000.0);
+        double decodeMs = decodeTicks <= 0
+            ? 0
+            : decodeTicks * 1000.0 / Stopwatch.Frequency;
+
+        AsyncFileLogService.Current.Performance(
+            "BOARD_METRICS " +
+            $"mode={mode} polls_per_sec={polls / intervalSeconds:0.###} " +
+            $"frames_per_sec={frames / intervalSeconds:0.###} bytes={bytes} " +
+            $"decode_avg_ms={(frames > 0 ? decodeMs / frames : 0):0.###} " +
+            $"threads={Process.GetCurrentProcess().Threads.Count} " +
+            $"handles={Process.GetCurrentProcess().HandleCount} " +
+            $"memory_mb={GC.GetTotalMemory(false) / 1024.0 / 1024.0:0.###}");
+    }
+
     void PublishFrame(ScanFrame decoded)
     {
-        string signature = $"{decoded.Mode}:" + string.Join(",", decoded.ActiveIo.Order());
-        bool signatureChanged =
-            !string.Equals(signature, _lastScanSignature, StringComparison.Ordinal);
-
+        Interlocked.Increment(ref _framesPublished);
         long now = Environment.TickCount64;
         bool forceLog = decoded.UnknownBytes > 0 ||
                         (decoded.Mode == BoardScanMode.Production && !decoded.Complete);
+        bool canLogTransition = now - _lastScanLogTick >= 50;
 
         // Log DataGrid/ObservableCollection không được phép kéo chậm worker.
         // Chỉ log trạng thái RX tối đa khoảng 20 lần/giây; FrameReceived vẫn
         // phát TẤT CẢ frame cho TestEngine nên logic test không bị giảm tốc.
-        if (forceLog || (signatureChanged && now - _lastScanLogTick >= 50))
+        if (forceLog || canLogTransition)
         {
-            _lastScanLogTick = now;
-            _lastScanSignature = signature;
+            string signature = $"{decoded.Mode}:" + string.Join(",", decoded.ActiveIo.Order());
+            bool signatureChanged =
+                !string.Equals(signature, _lastScanSignature, StringComparison.Ordinal);
 
-            string ioText = decoded.ActiveIo.Count == 0
-                ? "không có I/O active"
-                : $"I/O {string.Join(", ", decoded.ActiveIo.Order())}";
+            if (forceLog || signatureChanged)
+            {
+                _lastScanLogTick = now;
+                _lastScanSignature = signature;
 
-            string quality = decoded.Mode == BoardScanMode.Probe
-                ? decoded.Complete
-                    ? "snapshot TestPin hoàn chỉnh"
-                    : "TestPin phát hiện tức thời"
-                : decoded.Complete
-                    ? $"frame production hoàn chỉnh, {decoded.Connections.Count} source"
-                    : "frame production đầu đồng bộ/chưa hoàn chỉnh";
+                string ioText = decoded.ActiveIo.Count == 0
+                    ? "không có I/O active"
+                    : $"I/O {string.Join(", ", decoded.ActiveIo.Order())}";
 
-            string sync = decoded.UnknownBytes > 0
-                ? $", bỏ {decoded.UnknownBytes} byte mất đồng bộ"
-                : string.Empty;
+                string quality = decoded.Mode == BoardScanMode.Probe
+                    ? decoded.Complete
+                        ? "snapshot TestPin hoàn chỉnh"
+                        : "TestPin phát hiện tức thời"
+                    : decoded.Complete
+                        ? $"frame production hoàn chỉnh, {decoded.Connections.Count} source"
+                        : "frame production đầu đồng bộ/chưa hoàn chỉnh";
 
-            Log?.Invoke(
-                this,
-                $"RX frame #{decoded.Sequence}: {ioText} [{quality}{sync}]");
-        }
-        else if (signatureChanged)
-        {
-            // Giữ signature mới để không xếp hàng log lặp khi UI đang bận.
-            _lastScanSignature = signature;
+                string sync = decoded.UnknownBytes > 0
+                    ? $", bỏ {decoded.UnknownBytes} byte mất đồng bộ"
+                    : string.Empty;
+
+                Log?.Invoke(
+                    this,
+                    $"RX frame #{decoded.Sequence}: {ioText} [{quality}{sync}]");
+            }
         }
 
         FrameReceived?.Invoke(this, decoded);
     }
 
-    async Task WriteAsync(byte[] data, CancellationToken ct)
+    async Task WriteAsync(
+        byte[] data,
+        CancellationToken ct,
+        bool purgeBeforeWrite = false)
     {
         EnsureConnected();
 
@@ -904,7 +950,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 if (handle == IntPtr.Zero)
                     throw new InvalidOperationException("Bo JBZ đã đóng kết nối.");
 
-                Ensure(FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
+                if (purgeBeforeWrite)
+                    Ensure(FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
+
                 Ensure(
                     FT_Write(handle, data, (uint)data.Length, out uint written),
                     "FT_Write");

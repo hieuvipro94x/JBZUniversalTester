@@ -7,7 +7,22 @@ public sealed record PinRecord(
     string PinNumber,
     string SpliceName = "",
     string Section = "",
-    string Color = "");
+    string Color = "",
+    string ConnectorPinCount = "",
+    string PinType = "",
+    string WireConnection = "",
+    int OriginalOrder = 0);
+
+public sealed record ConnectorPin(
+    string LocalPinNumber,
+    int PhysicalIo,
+    string WireName,
+    PinRecord Pin);
+
+public sealed record ConnectorDefinition(
+    string ConnectorId,
+    int? DeclaredPinCount,
+    IReadOnlyList<ConnectorPin> Pins);
 
 /// <summary>
 /// Một mạng dây theo đúng thứ tự xuất hiện trong file THT.
@@ -86,6 +101,8 @@ public sealed class ProductModel
 
     public List<PinRecord> Pins { get; set; } = [];
     public List<WireNet> Nets { get; set; } = [];
+    public List<ConnectorDefinition> Connectors { get; set; } = [];
+    public List<string> TopologyWarnings { get; set; } = [];
     public List<ResistanceStep> ResistanceSteps { get; set; } = [];
 
     /// <summary>

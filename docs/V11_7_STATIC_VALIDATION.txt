@@ -1,8 +1,0 @@
-PrepareProbeUiMode present: OK
-production guard present: OK
-probe constructor locks production: OK
-unmapped probe IO(n): OK
-typed BuildNetsByPin: OK
-probe can open without model: OK
-
-Basic JSON/XAML/C# structure checks: OK

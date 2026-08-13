@@ -22,6 +22,7 @@ public sealed class UnifiedBoardTransport : IBoardTransport
 
     public bool IsConnected => _d2xx.IsConnected;
     public bool IsScanning => _d2xx.IsScanning;
+    public BoardScanMode CurrentScanMode => _d2xx.CurrentScanMode;
     public BoardCapacity Capacity => _d2xx.Capacity;
     public BoardMode ActiveMode { get; private set; } = BoardMode.Auto;
 

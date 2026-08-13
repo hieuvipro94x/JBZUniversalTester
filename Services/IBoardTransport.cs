@@ -6,6 +6,7 @@ public interface IBoardTransport : IAsyncDisposable
 {
     bool IsConnected { get; }
     bool IsScanning { get; }
+    BoardScanMode CurrentScanMode { get; }
     BoardCapacity Capacity { get; }
     event EventHandler<ScanFrame>? FrameReceived;
     event EventHandler<string>? Log;

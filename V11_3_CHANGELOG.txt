@@ -1,7 +1,0 @@
-JBZUniversalTester V11.3 - FAST MODEL LOAD / AUTO TESTVIEW
-
-1. Chọn file THT -> parse background -> tự mở TestView, không cần bấm BẮT ĐẦU KIỂM TRA lần 2.
-2. Model do người vận hành chọn luôn ưu tiên; auto-load model gần nhất ở startup không thể hoàn thành muộn rồi ghi đè.
-3. TestWindow không chờ InitializeAsync() (bao gồm startup model task) nữa; chỉ chờ hardware.
-4. BuildRows dùng lookup pin->network dựng một lần khi SetModel, bỏ O(P*N) mỗi refresh.
-5. SetModel dựng Faults trước khi TestWindow.Show(), nên DataGrid có cấu hình ngay lần render đầu.

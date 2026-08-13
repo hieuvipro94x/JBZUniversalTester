@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -36,6 +37,9 @@ public sealed class TestViewModel : ObservableObject
     private readonly object _initializationGate = new();
     private readonly object _cycleTokenGate = new();
     private readonly object _lotReservationGate = new();
+    private readonly object _pendingLogGate = new();
+    private readonly SemaphoreSlim _manualRelayGate = new(1, 1);
+    private readonly Queue<string> _pendingUiLogs = new();
     private readonly CancellationTokenSource _lifetimeCts = new();
     private CancellationTokenSource? _cycleCts;
 
@@ -66,6 +70,32 @@ public sealed class TestViewModel : ObservableObject
     private int _probeSessionActive;
     private int _runtimeMode = (int)RuntimeMode.Background;
     private long _runtimeGeneration;
+    private int _engineUiUpdateQueued;
+    private int _logUiFlushQueued;
+    private int _deviceFault;
+    private int _deviceFaultDialogShown;
+    private int _deviceFaultTransitionCount;
+    private int _deviceFaultDialogCount;
+    private int _manualActiveRelay;
+    private int _firstFrameReceivedLogged;
+    private int _firstLogicalStateLogged;
+    private int _firstUiUpdateRenderedLogged;
+    private long _lastObservedProductionFrameSequence;
+    private long _cycleStartFrameSequence;
+    private int _freshFrameGateActive;
+    private int _stalePreCycleFrameLogged;
+    private int _secondRequiredNetSeenLogged;
+    private int _continuityPassedLogged;
+    private long _productionFramesReceived;
+    private long _productionFramesProcessed;
+    private long _productionFramesDropped;
+    private long _productionFramesRoutedToProbe;
+    private long _engineUiUpdatesScheduled;
+    private long _engineUiUpdatesRendered;
+    private long _lastContinuousScanMetricsTick;
+    private string _lastPassGateSignature = string.Empty;
+    private string _lastPassRemainingSignature = string.Empty;
+    private string _lastProductDetectSignature = string.Empty;
     // V12.10.3: TestEngine.Reset() phát Changed đồng bộ. Trong Master state machine,
     // reset nội bộ không được phép tái nhập OnEngineChanged trước khi state hoàn tất.
     private int _suppressEngineChanged;
@@ -79,6 +109,8 @@ public sealed class TestViewModel : ObservableObject
     private long _monthlyTestCount;
     private long _lifetimeTestCount;
     private long _probeCycleCount;
+    private string _deviceFaultMessage =
+        "Phát hiện trạng thái dữ liệu I/O không ổn định. Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.";
 
     // V11.9: nhận dạng đầu dò GND ngay cả khi TestView đang mở. Firmware có
     // chữ ký fan-out dày (một source kéo theo hàng chục target liên tiếp).
@@ -142,9 +174,25 @@ public sealed class TestViewModel : ObservableObject
     public string ProbeModeText => HasInlineProbeContacts
         ? $"ĐANG DÒ ({ProbeContacts.Count})"
         : "SẴN SÀNG";
-
+    public string ProbeBarText => ProbeContacts.FirstOrDefault()?.Status
+        ?? "SẴN SÀNG - BO TỰ PHÁT HIỆN ĐẦU DÒ TRONG CHU KỲ KIỂM TRA";
+    public string ProbeBarBackground => HasInlineProbeContacts ? "#23D9D9" : "#F8F8F6";
     public ObservableCollection<ResistanceResult> Resistance { get; } = new();
     public ObservableCollection<string> Logs { get; } = new();
+
+    public bool IsDeviceFault => Volatile.Read(ref _deviceFault) != 0;
+    public bool IsManualModeActive => _productionSettings.ManualModeEnabled;
+    public bool CanEnterManualMode => !IsDeviceFault && !IsManualForbiddenWorkActive;
+    public bool IsMasterBannerVisible => IsMasterSequenceActive && !IsDeviceFault;
+    public string DeviceFaultMessage => _deviceFaultMessage;
+    public int DeviceFaultTransitionCount => Volatile.Read(ref _deviceFaultTransitionCount);
+    public int DeviceFaultDialogCount => Volatile.Read(ref _deviceFaultDialogCount);
+    public long ProductionFramesReceived => Interlocked.Read(ref _productionFramesReceived);
+    public long ProductionFramesProcessed => Interlocked.Read(ref _productionFramesProcessed);
+    public long ProductionFramesDropped => Interlocked.Read(ref _productionFramesDropped);
+    public long ProductionFramesRoutedToProbe => Interlocked.Read(ref _productionFramesRoutedToProbe);
+    public long EngineUiUpdatesScheduled => Interlocked.Read(ref _engineUiUpdatesScheduled);
+    public long EngineUiUpdatesRendered => Interlocked.Read(ref _engineUiUpdatesRendered);
 
     /// <summary>
     /// Phát trực tiếp frame scan đã được transport map về I/O toàn cục.
@@ -161,8 +209,58 @@ public sealed class TestViewModel : ObservableObject
             {
                 Raise(nameof(StateBackground));
                 Raise(nameof(StateForeground));
+                Raise(nameof(ResultStatusText));
+                Raise(nameof(MasterBannerText));
+                Raise(nameof(IsMasterBannerVisible));
                 RaiseActiveFault();
             }
+        }
+    }
+
+    public string ResultStatusText
+    {
+        get
+        {
+            if (IsDeviceFault)
+                return "LỖI THIẾT BỊ";
+
+            string value = State ?? string.Empty;
+
+            if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
+                return "MANUAL";
+
+            if (IsMasterSequenceActive)
+                return value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase)
+                    ? "CHỜ MASTER"
+                    : "MASTER";
+
+            if (value.Equals("PASS", StringComparison.OrdinalIgnoreCase))
+                return "ĐẠT";
+
+            if (value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("LỖI", StringComparison.OrdinalIgnoreCase))
+                return "KHÔNG ĐẠT";
+
+            if (value.Contains("ĐANG", StringComparison.OrdinalIgnoreCase))
+                return "ĐANG TEST";
+
+            return "SẴN SÀNG";
+        }
+    }
+
+    public string MasterBannerText
+    {
+        get
+        {
+            if (!IsMasterBannerVisible)
+                return string.Empty;
+
+            string state = NormalizeSingleLine(State);
+            string status = NormalizeSingleLine(MasterStatus);
+
+            return string.Join("      ", new[] { state, status }.Where(x => !string.IsNullOrWhiteSpace(x)));
         }
     }
 
@@ -174,38 +272,48 @@ public sealed class TestViewModel : ObservableObject
     {
         get
         {
+            if (IsDeviceFault)
+                return "#C62828";
+
             string value = State ?? string.Empty;
+
+            if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
+                return "#FFF3A0";
 
             if (IsMasterSequenceActive)
             {
                 if (value.Contains("LỖI THIẾT BỊ", StringComparison.OrdinalIgnoreCase) ||
                     value.Contains("FAIL", StringComparison.OrdinalIgnoreCase))
-                    return "#F07B7B";
+                    return "#C62828";
 
-                return MasterState is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster
-                    ? "#8BE39A"
-                    : "#FFE46B";
+                return "#FFF3A0";
             }
 
             if (MasterApproved && value.Contains("SẴN SÀNG SẢN XUẤT", StringComparison.OrdinalIgnoreCase))
-                return "#8BE39A";
+                return "#FFF3A0";
 
             if (value.Equals("PASS", StringComparison.OrdinalIgnoreCase))
-                return "#58D36B";
+                return "#2AA84A";
 
             if (value.Contains("LỖI", StringComparison.OrdinalIgnoreCase) ||
                 value.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
                 value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase))
-                return "#F07B7B";
+                return "#C62828";
 
             if (value.Contains("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
-                return "#FFE46B";
+                return "#FFF3A0";
 
-            return "#FFF0A0";
+            if (value.Contains("SẴN SÀNG", StringComparison.OrdinalIgnoreCase) ||
+                value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase))
+                return "#FFF3A0";
+
+            return "#FFF3A0";
         }
     }
 
-    public string StateForeground => "#202020";
+    public string StateForeground => StateBackground.Equals("#FFF3A0", StringComparison.OrdinalIgnoreCase)
+        ? "#222222"
+        : "#FFFFFF";
 
     public string Lot
     {
@@ -315,9 +423,7 @@ public sealed class TestViewModel : ObservableObject
         get
         {
             if (IsMasterSequenceActive)
-                return (State ?? string.Empty)
-                    .Replace("\r", " ", StringComparison.Ordinal)
-                    .Replace("\n", " • ", StringComparison.Ordinal);
+                return NormalizeSingleLine(State);
 
             if (State.Equals("PASS", StringComparison.OrdinalIgnoreCase))
                 return "PASS";
@@ -326,6 +432,12 @@ public sealed class TestViewModel : ObservableObject
             return fault?.Name ?? State;
         }
     }
+
+    private static string NormalizeSingleLine(string? value) =>
+        (value ?? string.Empty)
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " • ", StringComparison.Ordinal)
+            .Trim();
 
     public string ActiveFaultMessage
     {
@@ -345,8 +457,8 @@ public sealed class TestViewModel : ObservableObject
                     ? fault.Message
                     : $"Dây {fault.WireName} chưa kết nối";
 
-            if (fault.Type == ProductFaultType.ResistanceOutOfRange && fault.MeasuredResistance is double measured)
-                return $"Đo {measured:0.###} Ω | Giới hạn {fault.ResistanceMin:0.###}–{fault.ResistanceMax:0.###} Ω";
+            if (fault.Type == ProductFaultType.ResistanceOutOfRange)
+                return fault.Message;
 
             return fault.Message;
         }
@@ -554,9 +666,12 @@ public sealed class TestViewModel : ObservableObject
             if (Set(ref _masterSequenceState, value))
             {
                 Raise(nameof(IsMasterSequenceActive));
+                Raise(nameof(IsMasterBannerVisible));
                 Raise(nameof(IsMasterBadPhase));
                 Raise(nameof(ProductionEnabled));
                 Raise(nameof(MasterProgressText));
+                Raise(nameof(ResultStatusText));
+                Raise(nameof(MasterBannerText));
                 Raise(nameof(NetworkProgress));
                 RaiseActiveFault();
             }
@@ -571,8 +686,11 @@ public sealed class TestViewModel : ObservableObject
             if (Set(ref _masterApproved, value))
             {
                 Raise(nameof(IsMasterSequenceActive));
+                Raise(nameof(IsMasterBannerVisible));
                 Raise(nameof(ProductionEnabled));
                 Raise(nameof(MasterProgressText));
+                Raise(nameof(ResultStatusText));
+                Raise(nameof(MasterBannerText));
                 Raise(nameof(NetworkProgress));
                 RaiseActiveFault();
             }
@@ -600,7 +718,10 @@ public sealed class TestViewModel : ObservableObject
         private set
         {
             if (Set(ref _masterStatus, value))
+            {
+                Raise(nameof(MasterBannerText));
                 RaiseActiveFault();
+            }
         }
     }
 
@@ -618,6 +739,7 @@ public sealed class TestViewModel : ObservableObject
     public AsyncRelayCommand Relay1Command { get; }
     public AsyncRelayCommand Relay2Command { get; }
     public AsyncRelayCommand RelaysOffCommand { get; }
+    public AsyncRelayCommand ResetDeviceFaultCommand { get; }
 
     public TestViewModel(
         MainViewModel main,
@@ -697,6 +819,8 @@ public sealed class TestViewModel : ObservableObject
                 AddLog("Tất cả relay OFF");
             });
 
+        ResetDeviceFaultCommand = new AsyncRelayCommand(ResetDeviceFaultAsync);
+
     }
 
     private bool EnsureManualBoardReady(string action, bool requireD2xxRelay = false)
@@ -725,13 +849,333 @@ public sealed class TestViewModel : ObservableObject
         return true;
     }
 
+    public async Task EnterManualModeAsync()
+    {
+        if (!CanEnterManualMode)
+            throw new InvalidOperationException(
+                "Không thể bật Manual khi đang kiểm tra. Hãy kết thúc chu kỳ trước.");
+
+        _productionSettings.ManualModeEnabled = true;
+        CancelCycleOperations();
+        SwitchRuntimeMode(RuntimeMode.Background);
+        Interlocked.Exchange(ref _probeSessionActive, 0);
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
+        Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+        Interlocked.Exchange(ref _masterPostStarted, 0);
+        Interlocked.Exchange(ref _masterEjectStarted, 0);
+        _cycleActive = false;
+        _waitForProductRelease = false;
+        _waitForFaultProductRemoval = false;
+        _productDetectedThisCycle = false;
+        _sound.SetWiringFaultAlarm(false);
+        _sound.StopAll();
+        _engine.SetFrameProcessingEnabled(false);
+
+        if (_board.IsConnected)
+        {
+            if (_board.IsScanning)
+                await _board.StopScanAsync();
+            await _board.AllRelaysOffAsync();
+        }
+
+        Volatile.Write(ref _manualActiveRelay, 0);
+        State = "MANUAL";
+        Raise(nameof(IsManualModeActive));
+        Raise(nameof(CanEnterManualMode));
+        AddLog("MANUAL MODE ON - Production Test bị khóa, tất cả relay OFF.");
+    }
+
+    public async Task ExitManualModeAsync()
+    {
+        _productionSettings.ManualModeEnabled = false;
+
+        await _manualRelayGate.WaitAsync();
+        try
+        {
+            if (_board.IsConnected)
+                await _board.AllRelaysOffAsync();
+            Volatile.Write(ref _manualActiveRelay, 0);
+        }
+        finally
+        {
+            _manualRelayGate.Release();
+        }
+
+        Raise(nameof(IsManualModeActive));
+        Raise(nameof(CanEnterManualMode));
+        State = ReadyStateForCurrentModel();
+        AddLog("MANUAL MODE OFF - relay OFF, Production Test đã mở khóa.");
+
+        if (_board.IsConnected)
+            await EnsureContinuousProductionScanAsync();
+    }
+
+    public async Task<int> SetManualRelayAsync(int relay, bool turnOn)
+    {
+        if (!IsManualModeActive)
+            throw new InvalidOperationException("Manual Mode chưa bật.");
+        if (IsDeviceFault)
+            throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy khởi tạo lại trước.");
+        if (relay is not 1 and not 2)
+            throw new ArgumentOutOfRangeException(nameof(relay));
+        if (!EnsureManualBoardReady($"manual Relay {relay}", requireD2xxRelay: true))
+            return Volatile.Read(ref _manualActiveRelay);
+
+        long started = Stopwatch.GetTimestamp();
+        AsyncFileLogService.Current.Performance(
+            $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=button_click");
+
+        await _manualRelayGate.WaitAsync();
+        try
+        {
+            AsyncFileLogService.Current.Performance(
+                $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=command_enqueued");
+
+            if (_board.IsScanning)
+                await _board.StopScanAsync();
+
+            try
+            {
+                await _board.AllRelaysOffAsync();
+                if (turnOn)
+                    await _board.SetRelayAsync(relay);
+
+                Volatile.Write(ref _manualActiveRelay, turnOn ? relay : 0);
+                double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                AsyncFileLogService.Current.Performance(
+                    $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=ui_update elapsed_ms={elapsedMs:0.###}");
+                AddLog(turnOn
+                    ? $"MANUAL Relay {relay} ON - relay còn lại đã OFF."
+                    : $"MANUAL Relay {relay} OFF - tất cả relay OFF.");
+                return Volatile.Read(ref _manualActiveRelay);
+            }
+            catch (Exception ex)
+            {
+                try { await _board.AllRelaysOffAsync(); }
+                catch (Exception offEx) { AddLog($"MANUAL safe OFF sau lỗi relay thất bại: {offEx.Message}"); }
+                Volatile.Write(ref _manualActiveRelay, 0);
+                EnterDeviceFault(ex, "ManualRelay");
+                throw;
+            }
+        }
+        finally
+        {
+            _manualRelayGate.Release();
+        }
+    }
+
+    public async Task ResetManualOutputsAsync()
+    {
+        if (!IsManualModeActive)
+            throw new InvalidOperationException("Manual Mode chưa bật.");
+        if (IsDeviceFault)
+            throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy khởi tạo lại trước.");
+        if (!EnsureManualBoardReady("manual RESET", requireD2xxRelay: true))
+            return;
+
+        await _manualRelayGate.WaitAsync();
+        try
+        {
+            try
+            {
+                if (_board.IsScanning)
+                    await _board.StopScanAsync();
+                await _board.AllRelaysOffAsync();
+                await _board.ResetClearAsync();
+                await _board.AllRelaysOffAsync();
+                Volatile.Write(ref _manualActiveRelay, 0);
+                State = "MANUAL";
+                AddLog("MANUAL RESET - reset clear hoàn tất, tất cả relay OFF.");
+            }
+            catch (Exception ex)
+            {
+                try { await _board.AllRelaysOffAsync(); }
+                catch (Exception offEx) { AddLog($"MANUAL safe OFF sau lỗi reset thất bại: {offEx.Message}"); }
+                Volatile.Write(ref _manualActiveRelay, 0);
+                EnterDeviceFault(ex, "ManualReset");
+                throw;
+            }
+        }
+        finally
+        {
+            _manualRelayGate.Release();
+        }
+    }
+
     private string ReadyStateForCurrentModel()
     {
+        if (IsManualModeActive)
+            return "MANUAL";
+
         if (_model is null)
             return "CHỜ CHỌN MÃ HÀNG";
         return MasterApproved
             ? "CHỜ LẮP SẢN PHẨM"
             : "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+    }
+
+    private void ReportDeviceFaultForTest(Exception exception, int desiredRowsCount = -1) =>
+        EnterDeviceFault(exception, "SELF-TEST", desiredRowsCount);
+
+    private Task ResetDeviceFaultForTestAsync() => ResetDeviceFaultAsync();
+
+    private void EnterDeviceFault(Exception exception, string source, int desiredRowsCount = -1)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        bool firstTransition = Interlocked.Exchange(ref _deviceFault, 1) == 0;
+        if (firstTransition)
+            Interlocked.Increment(ref _deviceFaultTransitionCount);
+
+        string diagnostic =
+            $"DEVICE FAULT [{source}]{Environment.NewLine}" +
+            $"Timestamp={DateTime.Now:O}{Environment.NewLine}" +
+            $"Exception={exception.GetType().FullName}{Environment.NewLine}" +
+            $"Message={exception.Message}{Environment.NewLine}" +
+            $"StackTrace={exception.StackTrace}{Environment.NewLine}" +
+            $"InnerException={exception.InnerException}{Environment.NewLine}" +
+            $"Thread={Environment.CurrentManagedThreadId}{Environment.NewLine}" +
+            $"CycleId={_activeCycleId}{Environment.NewLine}" +
+            $"MasterState={MasterState}{Environment.NewLine}" +
+            $"ProductionState={State}{Environment.NewLine}" +
+            $"Faults.Count={Faults.Count}{Environment.NewLine}" +
+            $"desiredRows.Count={desiredRowsCount}{Environment.NewLine}" +
+            $"Model={_model?.ModelName ?? "(none)"} / {_model?.PartNumber ?? "(none)"}{Environment.NewLine}" +
+            $"BoardGeneration={Volatile.Read(ref _runtimeGeneration)}{Environment.NewLine}" +
+            $"LastFrameSequence={_engine.LastFrameSequence}";
+
+        AsyncFileLogService.Current.Error(diagnostic);
+        AddLog($"DEVICE FAULT: {exception.GetType().Name}: {exception.Message}");
+
+        if (!firstTransition)
+            return;
+
+        _deviceFaultMessage =
+            "Phát hiện trạng thái dữ liệu I/O không ổn định. Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.";
+        _cycleActive = false;
+        _waitForProductRelease = false;
+        _waitForFaultProductRemoval = false;
+        _productDetectedThisCycle = false;
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
+        Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+        Interlocked.Exchange(ref _masterPostStarted, 0);
+        Interlocked.Exchange(ref _masterEjectStarted, 0);
+        Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+        SwitchRuntimeMode(RuntimeMode.Background);
+        CancelCycleOperations();
+        _sound.SetWiringFaultAlarm(false);
+        _engine.SetFrameProcessingEnabled(false);
+        State = "LỖI THIẾT BỊ";
+        RaiseDeviceFaultState();
+
+        _ = SafeLockHardwareForDeviceFaultAsync();
+        ShowDeviceFaultDialogOnce();
+    }
+
+    private async Task SafeLockHardwareForDeviceFaultAsync()
+    {
+        try
+        {
+            if (_board.IsConnected)
+            {
+                await _board.StopScanAsync();
+                await _board.AllRelaysOffAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"DeviceFault hardware lock failed: {ex}");
+            AddLog($"DEVICE FAULT: không thể cưỡng bức dừng phần cứng: {ex.Message}");
+        }
+    }
+
+    private void ShowDeviceFaultDialogOnce()
+    {
+        if (Interlocked.Exchange(ref _deviceFaultDialogShown, 1) != 0)
+            return;
+
+        Interlocked.Increment(ref _deviceFaultDialogCount);
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null)
+            return;
+
+        dispatcher.BeginInvoke(new Action(() =>
+        {
+            MessageBox.Show(
+                "Phát hiện trạng thái dữ liệu I/O không ổn định.\n\n" +
+                "Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.\n\n" +
+                "Hãy kiểm tra:\n" +
+                "- kết nối USB/FTDI;\n" +
+                "- nguồn bo;\n" +
+                "- socket/jig;\n" +
+                "- cáp tín hiệu.\n\n" +
+                "Sau khi kiểm tra, bấm KHỞI TẠO LẠI trên màn hình Test.",
+                "LỖI THIẾT BỊ / DỮ LIỆU I/O",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }));
+    }
+
+    private void RaiseDeviceFaultState()
+    {
+        Raise(nameof(IsDeviceFault));
+        Raise(nameof(IsMasterBannerVisible));
+        Raise(nameof(DeviceFaultMessage));
+        Raise(nameof(DeviceFaultTransitionCount));
+        Raise(nameof(DeviceFaultDialogCount));
+        Raise(nameof(ResultStatusText));
+        Raise(nameof(StateBackground));
+        Raise(nameof(StateForeground));
+        RaiseActiveFault();
+    }
+
+    private async Task ResetDeviceFaultAsync()
+    {
+        if (!IsDeviceFault)
+            return;
+
+        AddLog("DEVICE FAULT: operator yêu cầu khởi tạo lại.");
+        _deviceFaultMessage = "Đang khởi tạo lại thiết bị...";
+        Raise(nameof(DeviceFaultMessage));
+
+        try
+        {
+            SwitchRuntimeMode(RuntimeMode.Background);
+            CancelCycleOperations();
+            _engine.SetFrameProcessingEnabled(false);
+            ResetEngineWithoutChangedReentry();
+            Faults.Clear();
+            Resistance.Clear();
+            ClearInlineProbeContactsState(clearLastSeen: true);
+            InvokeUi(ClearInlineProbeDisplay);
+
+            if (_board.IsConnected)
+            {
+                await _board.StopScanAsync();
+                await _board.AllRelaysOffAsync();
+            }
+            else
+            {
+                await InitializeHardwareAsync();
+            }
+
+            Interlocked.Exchange(ref _deviceFault, 0);
+            Interlocked.Exchange(ref _deviceFaultDialogShown, 0);
+            _deviceFaultMessage =
+                "Phát hiện trạng thái dữ liệu I/O không ổn định. Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.";
+            State = ReadyStateForCurrentModel();
+            RaiseDeviceFaultState();
+            await EnsureContinuousProductionScanAsync();
+            AddLog("DEVICE FAULT: khởi tạo lại hoàn tất.");
+        }
+        catch (Exception ex)
+        {
+            _deviceFaultMessage = "Không thể khởi tạo lại thiết bị. Hãy kiểm tra kết nối bo.";
+            State = "LỖI THIẾT BỊ";
+            RaiseDeviceFaultState();
+            AsyncFileLogService.Current.Error($"DeviceFault reset failed: {ex}");
+            AddLog($"DEVICE FAULT: khởi tạo lại thất bại: {ex.Message}");
+        }
     }
 
     private static string ResolveHistoryDatabasePath(ProductionSettings settings)
@@ -843,6 +1287,7 @@ public sealed class TestViewModel : ObservableObject
     private async Task EnsureContinuousProductionScanAsync()
     {
         if (_lifetimeCts.IsCancellationRequested ||
+            IsManualModeActive ||
             Volatile.Read(ref _probeSessionActive) != 0 ||
             Volatile.Read(ref _postContinuityStarted) != 0 ||
             Volatile.Read(ref _wiringFaultHandlingStarted) != 0 ||
@@ -871,6 +1316,60 @@ public sealed class TestViewModel : ObservableObject
         {
             AddLog($"Không khởi động được scan nền: {ex.Message}");
         }
+    }
+
+    private async Task StartProductionScanAndVerifyFrameAsync(
+        CancellationToken ct,
+        string reason)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        long baseline = Volatile.Read(ref _lastObservedProductionFrameSequence);
+        await _board.StartScanAsync(BoardScanMode.Production, ct);
+
+        if (await WaitForNextProductionFrameAsync(baseline, 1_200, ct))
+        {
+            AddLog($"START_SCAN OK sau {reason}: đã nhận frame production mới.");
+            return;
+        }
+
+        AddLog($"START_SCAN sau {reason} chưa có frame đầu - tự recovery STOP/START một lần.");
+        await _board.StopScanAsync(CancellationToken.None);
+
+        baseline = Volatile.Read(ref _lastObservedProductionFrameSequence);
+        await _board.StartScanAsync(BoardScanMode.Production, ct);
+
+        if (await WaitForNextProductionFrameAsync(baseline, 1_500, ct))
+        {
+            AddLog($"Recovery scan OK sau {reason}: stream production đã trở lại.");
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"START_SCAN sau {reason} không trả frame production trong thời gian watchdog.");
+    }
+
+    private async Task<bool> WaitForNextProductionFrameAsync(
+        long baselineSequence,
+        int timeoutMs,
+        CancellationToken ct)
+    {
+        var watch = Stopwatch.StartNew();
+        while (watch.ElapsedMilliseconds < timeoutMs)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (!_board.IsConnected)
+                return false;
+
+            long current = Volatile.Read(ref _lastObservedProductionFrameSequence);
+            if (current > 0 && current != baselineSequence)
+                return true;
+
+            await Task.Delay(25, ct);
+        }
+
+        return Volatile.Read(ref _lastObservedProductionFrameSequence) != baselineSequence;
     }
 
     private async Task HardwareMonitorLoopAsync(CancellationToken ct)
@@ -945,6 +1444,14 @@ public sealed class TestViewModel : ObservableObject
 
         await Task.WhenAll(boardTask, modelTask);
 
+        if (IsManualModeActive)
+        {
+            await EnterManualModeAsync();
+            _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeCts.Token);
+            StartupPerformanceTrace.Mark("T7 Board READY");
+            return;
+        }
+
         if (_board.IsConnected)
             await EnsureContinuousProductionScanAsync();
 
@@ -954,6 +1461,7 @@ public sealed class TestViewModel : ObservableObject
         State = _board.IsConnected
             ? ReadyStateForCurrentModel()
             : (_model is null ? "BO CHƯA KẾT NỐI" : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI");
+        StartupPerformanceTrace.Mark("T7 Board READY");
     }
 
     private static void ValidateModelPath(string path, out string fullPath)
@@ -978,7 +1486,19 @@ public sealed class TestViewModel : ObservableObject
         int generation = Interlocked.Increment(ref _modelLoadGeneration);
         State = "ĐANG NẠP MÃ HÀNG...";
 
-        ProductModel model = await Task.Run(() => _modelParser.Load(fullPath));
+        ProductModel model;
+        using (StartupPerformanceTrace.Measure("THT_MODEL_LOAD"))
+        {
+            model = await Task.Run(() =>
+            {
+                long parseStarted = Stopwatch.GetTimestamp();
+                ProductModel parsed = _modelParser.Load(fullPath);
+                double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
+                AsyncFileLogService.Current.Performance(
+                    $"MODEL_LOAD_PERF phase=THT_PARSE path={Path.GetFileName(fullPath)} duration_ms={parseMs:0.###}");
+                return parsed;
+            });
+        }
 
         // Nếu người vận hành chọn tiếp file khác trong lúc file này đang parse,
         // bỏ kết quả cũ thay vì ghi đè model mới hơn.
@@ -986,6 +1506,7 @@ public sealed class TestViewModel : ObservableObject
             return null;
 
         SetModel(model);
+        StartupPerformanceTrace.Mark("T8 model ready");
         State = _board.IsConnected ? ReadyStateForCurrentModel() : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
         return model;
     }
@@ -1031,11 +1552,20 @@ public sealed class TestViewModel : ObservableObject
             // file mới trong lúc parse đang chạy, generation đổi và kết quả
             // startup này bị bỏ ngay, tuyệt đối không ghi đè model mới.
             int generation = Volatile.Read(ref _modelLoadGeneration);
-            ProductModel startupModel = await Task.Run(() => _modelParser.Load(fullPath));
+            ProductModel startupModel = await Task.Run(() =>
+            {
+                long parseStarted = Stopwatch.GetTimestamp();
+                ProductModel parsed = _modelParser.Load(fullPath);
+                double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
+                AsyncFileLogService.Current.Performance(
+                    $"MODEL_LOAD_PERF phase=STARTUP_THT_PARSE path={Path.GetFileName(fullPath)} duration_ms={parseMs:0.###}");
+                return parsed;
+            });
 
             if (generation == Volatile.Read(ref _modelLoadGeneration) && _model is null)
             {
                 SetModel(startupModel);
+                StartupPerformanceTrace.Mark("T8 model ready");
                 AddLog($"Đã tự tải model gần nhất: {Path.GetFileName(fullPath)}");
             }
             else
@@ -1179,6 +1709,9 @@ public sealed class TestViewModel : ObservableObject
 
     private void OnEngineChanged(object? sender, EventArgs e)
     {
+        if (IsDeviceFault)
+            return;
+
         // TestEngine.Reset() phát Changed đồng bộ. Bỏ qua callback lồng nhau
         // khi chính ViewModel đang reset engine trong một transition Master.
         if (Volatile.Read(ref _suppressEngineChanged) != 0)
@@ -1197,16 +1730,77 @@ public sealed class TestViewModel : ObservableObject
 
         if (!MasterApproved)
         {
-            HandleMasterEngineChanged(generation);
+            try
+            {
+                HandleMasterEngineChanged(generation);
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+            {
+                EnterDeviceFault(ex, "MasterEngineChanged");
+            }
             return;
         }
 
-        InvokeUi(() =>
+        try
         {
+            ScheduleEngineUiUpdate(generation);
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            EnterDeviceFault(ex, "EngineChanged");
+        }
+    }
+
+    private void ScheduleEngineUiUpdate(long generation)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+        {
+            try
+            {
+                Interlocked.Increment(ref _engineUiUpdatesRendered);
+                ProcessEngineChangedOnUi(generation);
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+            {
+                EnterDeviceFault(ex, "ProcessEngineChangedOnUi");
+            }
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _engineUiUpdateQueued, 1) != 0)
+            return;
+
+        Interlocked.Increment(ref _engineUiUpdatesScheduled);
+        dispatcher.BeginInvoke(new Action(() =>
+        {
+            Interlocked.Exchange(ref _engineUiUpdateQueued, 0);
+            try
+            {
+                Interlocked.Increment(ref _engineUiUpdatesRendered);
+                ProcessEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration));
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+            {
+                EnterDeviceFault(ex, "ProcessEngineChangedOnUi.Dispatcher");
+            }
+        }));
+    }
+
+    private void ProcessEngineChangedOnUi(long generation)
+    {
+            if (IsDeviceFault)
+                return;
+
             if (!IsProductionFaultContext(generation))
                 return;
 
             RefreshFaults();
+            if (Volatile.Read(ref _firstLogicalStateLogged) != 0 &&
+                Interlocked.CompareExchange(ref _firstUiUpdateRenderedLogged, 1, 0) == 0)
+            {
+                AsyncFileLogService.Current.Performance("FIRST_UI_UPDATE_RENDERED");
+            }
 
             // Sau lỗi: chỉ chờ tháo sản phẩm, không phát lại lỗi.
             if (_waitForFaultProductRemoval)
@@ -1214,16 +1808,7 @@ public sealed class TestViewModel : ObservableObject
                 if (_engine.IsProductReleased)
                 {
                     _waitForFaultProductRemoval = false;
-                    _engine.Reset();
-                    Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
-                    Interlocked.Exchange(ref _postContinuityStarted, 0);
-                    _cycleActive = true;
-                    _productDetectedThisCycle = false;
-                    Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
-                    Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
-                    _activeCycleId = Guid.NewGuid().ToString("N");
-                    _lastFaultRejectSignature = string.Empty;
-                    Lot = _productionSettings.LotNo.ToString();
+                    ResetFullCycleAfterProductRemoved();
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog("Đã tháo sản phẩm lỗi - chờ lắp sản phẩm lại.");
                 }
@@ -1241,15 +1826,7 @@ public sealed class TestViewModel : ObservableObject
                 if (_engine.IsProductReleased)
                 {
                     _waitForProductRelease = false;
-                    _engine.Reset();
-                    Interlocked.Exchange(ref _postContinuityStarted, 0);
-                    _cycleActive = true;
-                    _productDetectedThisCycle = false;
-                    Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
-                    Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
-                    _activeCycleId = Guid.NewGuid().ToString("N");
-                    _lastFaultRejectSignature = string.Empty;
-                    Lot = _productionSettings.LotNo.ToString();
+                    ResetFullCycleAfterProductRemoved();
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog("PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
                 }
@@ -1268,6 +1845,10 @@ public sealed class TestViewModel : ObservableObject
                 IReadOnlyCollection<WiringFaultPair> wiringFaults = _engine.WiringFaults;
                 int faultCount = wiringFaults.Count;
                 string faultType = FaultTypeCatalog.Code(wiringFaults.FirstOrDefault()?.FaultType ?? ProductFaultType.WrongWiring);
+                double cycleFaultMs = Math.Max(0, (DateTime.Now - _cycleStartedAt).TotalMilliseconds);
+                AsyncFileLogService.Current.Performance(
+                    $"FAULT_CONFIRMATION_LATENCY type={faultType} cycle_elapsed_ms={cycleFaultMs:0.###} " +
+                    $"frame={_engine.LastFrameSequence} count={faultCount}");
                 AddLog(
                     "[FAIL-AUDIT] " +
                     $"CycleId={_activeCycleId} Generation={generation} Mode=Production State={State} " +
@@ -1328,11 +1909,38 @@ public sealed class TestViewModel : ObservableObject
 
             if (_cycleActive &&
                 _engine.ContinuityPassed &&
+                !_engine.HasWiringFault &&
                 Interlocked.CompareExchange(ref _postContinuityStarted, 1, 0) == 0)
             {
+                AsyncFileLogService.Current.Performance(
+                    $"AUTO_RESISTANCE_TRIGGER continuity_complete={_engine.ContinuityPassed} " +
+                    $"resistance_enabled={IsResistanceEnabledForModel(_model)} scan_running={_board.IsScanning}");
                 _ = RunAutomaticPostContinuityAsync();
             }
-        });
+    }
+
+    private void ResetFullCycleAfterProductRemoved()
+    {
+        _engine.ResetProductCycle();
+        Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
+        Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+        Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+        _cycleActive = true;
+        _productDetectedThisCycle = false;
+        _lastFaultRejectSignature = string.Empty;
+        _lastPassGateSignature = string.Empty;
+        _lastPassRemainingSignature = string.Empty;
+        _lastProductDetectSignature = string.Empty;
+        _activeCycleId = Guid.NewGuid().ToString("N");
+        _cycleStartedAt = DateTime.Now;
+        Lot = _productionSettings.LotNo.ToString();
+        Resistance.Clear();
+        SelectedOperationTabIndex = 0;
+        ClearInlineProbeContactsState(clearLastSeen: true);
+        InvokeUi(ClearInlineProbeDisplay);
+        RefreshFaults();
+        RaiseActiveFault();
     }
 
     private Task InvokeUiAsync(Action action)
@@ -1363,8 +1971,28 @@ public sealed class TestViewModel : ObservableObject
 
     private void OnBoardFrameReceived(object? sender, ScanFrame frame)
     {
+        if (IsDeviceFault)
+            return;
+
+        try
+        {
         RuntimeMode mode = CurrentRuntimeMode;
         long generation = Volatile.Read(ref _runtimeGeneration);
+        if (mode == RuntimeMode.Production &&
+            frame.Mode == BoardScanMode.Production &&
+            Interlocked.CompareExchange(ref _firstFrameReceivedLogged, 1, 0) == 0)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"FIRST_FRAME_RECEIVED seq={frame.Sequence} complete={frame.Complete}");
+        }
+
+        if (frame.Mode == BoardScanMode.Production &&
+            frame.Complete &&
+            frame.UnknownBytes == 0 &&
+            frame.Sequence > 0)
+        {
+            Volatile.Write(ref _lastObservedProductionFrameSequence, frame.Sequence);
+        }
 
         // V12.9.2: router duy nhất + cập nhật Probe theo snapshot/event hiện tại.
         // Không Task.Delay, không DispatcherTimer và không TTL để giữ contact cũ.
@@ -1414,10 +2042,37 @@ public sealed class TestViewModel : ObservableObject
             Volatile.Read(ref _probeSessionActive) == 0 &&
             frame.Mode == BoardScanMode.Production)
         {
+            Interlocked.Increment(ref _productionFramesReceived);
+
+            if (Volatile.Read(ref _freshFrameGateActive) != 0)
+            {
+                long cycleStartSequence = Volatile.Read(ref _cycleStartFrameSequence);
+                if (cycleStartSequence > 0 &&
+                    frame.Sequence > 0 &&
+                    frame.Sequence <= cycleStartSequence)
+                {
+                    if (Interlocked.CompareExchange(ref _stalePreCycleFrameLogged, 1, 0) == 0)
+                    {
+                        AsyncFileLogService.Current.Performance(
+                            $"PASS_GATE seq={frame.Sequence} cycleStartSeq={cycleStartSequence} scanMode={frame.Mode} " +
+                            $"frameComplete={frame.Complete} reason=STALE_PRE_CYCLE_FRAME action=ignored");
+                    }
+
+                    Interlocked.Increment(ref _productionFramesDropped);
+                    LogContinuousScanMetricsIfDue();
+                    return;
+                }
+
+                Interlocked.Exchange(ref _freshFrameGateActive, 0);
+                AsyncFileLogService.Current.Performance(
+                    $"FRESH_FRAME_ACCEPTED seq={frame.Sequence} cycleStartSeq={cycleStartSequence}");
+            }
+
             // Probe là lớp quan sát SONG SONG. Nếu frame hiện tại có chữ ký Probe,
             // cập nhật ngay contact hiện tại và chặn frame đó khỏi TestEngine.
             if (TryDetectInlineProbeContacts(frame, out int[] touchedIos))
             {
+                Interlocked.Increment(ref _productionFramesRoutedToProbe);
                 bool changed = UpdateInlineProbeContacts(touchedIos);
                 Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
                 _sound.SetWiringFaultAlarm(false);
@@ -1439,6 +2094,7 @@ public sealed class TestViewModel : ObservableObject
                     });
                 }
 
+                LogContinuousScanMetricsIfDue();
                 return;
             }
 
@@ -1461,10 +2117,28 @@ public sealed class TestViewModel : ObservableObject
                 });
             }
 
+            long processStarted = Stopwatch.GetTimestamp();
             _engine.ProcessFrame(frame);
+            Interlocked.Increment(ref _productionFramesProcessed);
+            double processMs = Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
+            LogPassGateAfterProductionFrame(frame, processMs);
+            LogContinuousScanMetricsIfDue();
+            if (processMs > 50)
+                AsyncFileLogService.Current.Performance(
+                    $"HOT_PATH_WARNING phase=TestEngine.ProcessFrame seq={frame.Sequence} duration_ms={processMs:0.###}");
+            if (Interlocked.CompareExchange(ref _firstLogicalStateLogged, 1, 0) == 0)
+            {
+                AsyncFileLogService.Current.Performance(
+                    $"FIRST_LOGICAL_STATE_READY seq={frame.Sequence} duration_ms={processMs:0.###}");
+            }
         }
 
         // Background/ShuttingDown: chỉ quét nền, không test và không tạo lỗi.
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            EnterDeviceFault(ex, "BoardFrameReceived");
+        }
     }
 
     private static void LogProbeLatency(ScanFrame frame, DateTime uiRequestedAt, IReadOnlyList<int> ios)
@@ -1476,16 +2150,152 @@ public sealed class TestViewModel : ObservableObject
             ? "RELEASE"
             : $"TOUCH {string.Join(", ", ios.Select(io => $"IO{io}"))}";
 
-        AsyncFileLogService.Current.Board(
+        AsyncFileLogService.Current.Performance(
             $"PROBE_LATENCY {state}; RX->VM={rxToVmMs:0.0} ms; VM->UI={vmToUiMs:0.0} ms; seq={frame.Sequence}",
-            AppLogLevel.Diagnostic);
+            AppLogLevel.Normal);
+    }
+
+    private void LogContinuousScanMetricsIfDue()
+    {
+        long now = Environment.TickCount64;
+        long previous = Interlocked.Read(ref _lastContinuousScanMetricsTick);
+        if (previous != 0 && now - previous < 5000)
+            return;
+        if (Interlocked.CompareExchange(ref _lastContinuousScanMetricsTick, now, previous) != previous)
+            return;
+
+        long received = Interlocked.Read(ref _productionFramesReceived);
+        long processed = Interlocked.Read(ref _productionFramesProcessed);
+        long dropped = Interlocked.Read(ref _productionFramesDropped);
+        long probeRouted = Interlocked.Read(ref _productionFramesRoutedToProbe);
+        long engineProcessed = _engine.FramesProcessed;
+        long uiScheduled = Interlocked.Read(ref _engineUiUpdatesScheduled);
+        long uiRendered = Interlocked.Read(ref _engineUiUpdatesRendered);
+
+        AsyncFileLogService.Current.Performance(
+            "CONTINUOUS_SCAN_METRICS " +
+            $"rx_production={received} engine_processed_by_vm={processed} " +
+            $"engine_processed_total={engineProcessed} dropped={dropped} probe_routed={probeRouted} " +
+            $"ui_scheduled={uiScheduled} ui_rendered={uiRendered} " +
+            $"scan_running={_board.IsScanning} mode={CurrentRuntimeMode}");
+    }
+
+    private void LogPassGateAfterProductionFrame(ScanFrame frame, double processMs)
+    {
+        if (!frame.Complete || frame.UnknownBytes > 0)
+            return;
+
+        PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
+        LogProductDetect(frame, gate);
+        LogPassLatencyMarkers(frame, gate, processMs);
+
+        if (gate.ContinuityPassed &&
+            _cycleActive &&
+            MasterApproved &&
+            Volatile.Read(ref _postContinuityStarted) == 0)
+        {
+            return;
+        }
+
+        string reason = ResolvePassGateReason(gate);
+        string signature =
+            $"{frame.Sequence}|{gate.ExpectedNetCount}|{gate.PassedNetCount}|" +
+            $"{gate.WrongCandidateCount}|{gate.WrongConfirmedCount}|" +
+            $"{gate.ShortCandidateCount}|{gate.ShortConfirmedCount}|" +
+            $"{gate.HasProductActivity}|{MasterApproved}|{_cycleActive}|" +
+            $"{Volatile.Read(ref _postContinuityStarted)}|{reason}";
+
+        if (!string.Equals(signature, _lastPassGateSignature, StringComparison.Ordinal))
+        {
+            _lastPassGateSignature = signature;
+            AsyncFileLogService.Current.Performance(
+                $"PASS_GATE seq={frame.Sequence} cycle={_activeCycleId} scanMode={frame.Mode} " +
+                $"frameComplete={frame.Complete} expected={gate.ExpectedNetCount} passed={gate.PassedNetCount} " +
+                $"remaining={gate.RemainingNetworks.Count} wrongCandidates={gate.WrongCandidateCount} " +
+                $"wrongConfirmed={gate.WrongConfirmedCount} shortCandidates={gate.ShortCandidateCount} " +
+                $"shortConfirmed={gate.ShortConfirmedCount} hasWiringFault={gate.HasWiringFault} " +
+                $"continuityPassed={gate.ContinuityPassed} productDetected={gate.HasProductActivity} " +
+                $"masterApproved={MasterApproved} cycleActive={_cycleActive} probeActive={Volatile.Read(ref _probeSessionActive) != 0} " +
+                $"postContinuityStarted={Volatile.Read(ref _postContinuityStarted)} process_ms={processMs:0.###} reason={reason}");
+        }
+
+        if (gate.RemainingNetworks.Count > 0)
+        {
+            string remaining = string.Join(" | ", gate.RemainingNetworks.Select(item => item.Display));
+            string remainingSignature = $"{gate.LastFrameSequence}|{remaining}";
+            if (!string.Equals(remainingSignature, _lastPassRemainingSignature, StringComparison.Ordinal))
+            {
+                _lastPassRemainingSignature = remainingSignature;
+                AsyncFileLogService.Current.Performance(
+                    $"PASS_REMAINING seq={frame.Sequence} count={gate.RemainingNetworks.Count} nets={remaining}");
+            }
+        }
+    }
+
+    private void LogProductDetect(ScanFrame frame, PassGateDiagnostics gate)
+    {
+        int expected = gate.ExpectedNetCount;
+        int present = gate.PassedNetCount;
+        int threshold = expected <= 2 ? 1 : Math.Max(1, Math.Min(expected, _settings.Board.RequiredStableFrames));
+        bool detected = gate.HasProductActivity;
+        string signature = $"{expected}|{present}|{threshold}|{detected}";
+        if (string.Equals(signature, _lastProductDetectSignature, StringComparison.Ordinal))
+            return;
+
+        _lastProductDetectSignature = signature;
+        AsyncFileLogService.Current.Performance(
+            $"PRODUCT_DETECT seq={frame.Sequence} expected={expected} present={present} threshold={threshold} detected={detected}");
+    }
+
+    private void LogPassLatencyMarkers(ScanFrame frame, PassGateDiagnostics gate, double processMs)
+    {
+        if (gate.ExpectedNetCount == 2 &&
+            gate.PassedNetCount == 2 &&
+            Interlocked.CompareExchange(ref _secondRequiredNetSeenLogged, 1, 0) == 0)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"PASS_LATENCY T_SECOND_REQUIRED_NET_SEEN seq={frame.Sequence} process_ms={processMs:0.###}");
+        }
+
+        if (gate.ContinuityPassed &&
+            Interlocked.CompareExchange(ref _continuityPassedLogged, 1, 0) == 0)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"PASS_LATENCY T_CONTINUITY_PASSED seq={frame.Sequence} process_ms={processMs:0.###} expected={gate.ExpectedNetCount} passed={gate.PassedNetCount}");
+        }
+    }
+
+    private string ResolvePassGateReason(PassGateDiagnostics gate)
+    {
+        if (!_cycleActive)
+            return "CYCLE_INACTIVE";
+        if (!MasterApproved)
+            return "MASTER_LOCKED";
+        if (Volatile.Read(ref _probeSessionActive) != 0 || IsProbeRelayInterlockActive())
+            return "PROBE_INTERLOCK";
+        if (gate.WrongConfirmedCount > 0)
+            return "WRONG_CONFIRMED";
+        if (gate.ShortConfirmedCount > 0)
+            return "SHORT_CONFIRMED";
+        if (gate.WrongCandidateCount > 0)
+            return "WRONG_CANDIDATE";
+        if (gate.ShortCandidateCount > 0)
+            return "SHORT_CANDIDATE";
+        if (gate.ExpectedNetCount <= 0)
+            return "NO_EXPECTED_NET";
+        if (gate.PassedNetCount != gate.ExpectedNetCount)
+            return "MISSING_REQUIRED_NET";
+        if (!gate.HasProductActivity)
+            return "NO_PRODUCT_ACTIVITY";
+        if (Volatile.Read(ref _postContinuityStarted) != 0)
+            return "POST_CONTINUITY_ALREADY_STARTED";
+        return "UNKNOWN";
     }
 
     private bool TryDetectInlineProbeContacts(ScanFrame frame, out int[] ios)
     {
         ios = Array.Empty<int>();
-        if (!_productionSettings.UseTestPointer ||
-            frame.Mode != BoardScanMode.Production)
+        if (frame.Mode != BoardScanMode.Production)
         {
             return false;
         }
@@ -1570,9 +2380,6 @@ public sealed class TestViewModel : ObservableObject
 
     private bool IsProbeRelayInterlockActive()
     {
-        if (!_productionSettings.UseTestPointer)
-            return false;
-
         if (Volatile.Read(ref _probeSessionActive) != 0 ||
             Volatile.Read(ref _inlineProbeContactIo) != 0)
         {
@@ -1589,6 +2396,14 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task WaitForProbeRelayInterlockAsync(CancellationToken ct)
     {
+        long started = Stopwatch.GetTimestamp();
+        int requestedMs = 0;
+        if (!IsProbeRelayInterlockActive())
+        {
+            AsyncFileLogService.Current.Performance("PROBE_INTERLOCK_WAIT requested_ms=0 actual_ms=0");
+            return;
+        }
+
         bool logged = false;
         while (IsProbeRelayInterlockActive())
         {
@@ -1599,8 +2414,22 @@ public sealed class TestViewModel : ObservableObject
                 AddLog("Khóa relay an toàn: chờ debounce RELEASE đầu dò rất ngắn trước khi cho phép chuỗi PASS.");
             }
 
-            await Task.Delay(50, ct);
+            int delayMs = 5;
+            long lastTicks = Interlocked.Read(ref _inlineProbeLastSeenUtcTicks);
+            if (lastTicks > 0 && Volatile.Read(ref _inlineProbeContactIo) == 0)
+            {
+                double elapsedMs = Math.Max(0, TimeSpan.FromTicks(DateTime.UtcNow.Ticks - lastTicks).TotalMilliseconds);
+                double remainingMs = ProbeRelayReleaseDebounceMs - elapsedMs;
+                delayMs = (int)Math.Clamp(Math.Ceiling(remainingMs), 1, 10);
+            }
+
+            requestedMs += delayMs;
+            await Task.Delay(delayMs, ct);
         }
+
+        double actualMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        AsyncFileLogService.Current.Performance(
+            $"PROBE_INTERLOCK_WAIT requested_ms={requestedMs} actual_ms={actualMs:0.###}");
     }
 
     private IReadOnlyList<FaultRow> BuildProbeDisplayRows(IEnumerable<int> ios)
@@ -1783,10 +2612,13 @@ public sealed class TestViewModel : ObservableObject
         ProbeContacts.Clear();
         foreach (FaultRow row in rows)
             ProbeContacts.Add(row);
+        SynchronizeInlineProbeFaultRows(rows);
 
         UpdateProbeCardActivity(ios);
         Raise(nameof(HasInlineProbeContacts));
         Raise(nameof(ProbeModeText));
+        Raise(nameof(ProbeBarText));
+        Raise(nameof(ProbeBarBackground));
 
         string display = string.Join(", ", rows.Select(row => $"IO({row.Io})"));
         AddLog($"Đầu dò phát hiện {display}; hiển thị song song và bỏ qua logic chập của frame probe.");
@@ -1796,10 +2628,32 @@ public sealed class TestViewModel : ObservableObject
     {
         if (ProbeContacts.Count > 0)
             ProbeContacts.Clear();
+        RemoveInlineProbeFaultRows();
 
         UpdateProbeCardActivity(Array.Empty<int>());
         Raise(nameof(HasInlineProbeContacts));
         Raise(nameof(ProbeModeText));
+        Raise(nameof(ProbeBarText));
+        Raise(nameof(ProbeBarBackground));
+    }
+
+    private void SynchronizeInlineProbeFaultRows(IReadOnlyList<FaultRow> rows)
+    {
+        RemoveInlineProbeFaultRows();
+
+        for (int index = rows.Count - 1; index >= 0; index--)
+            Faults.Insert(0, rows[index]);
+
+        RaiseTestStatistics();
+    }
+
+    private void RemoveInlineProbeFaultRows()
+    {
+        for (int index = Faults.Count - 1; index >= 0; index--)
+        {
+            if (Faults[index].Kind == FaultKind.Probe)
+                Faults.RemoveAt(index);
+        }
     }
 
     private void RebuildActiveCards()
@@ -1867,8 +2721,11 @@ public sealed class TestViewModel : ObservableObject
             }
 
             State = "ĐANG KẾT NỐI BO";
+            StartupPerformanceTrace.Mark("T4 D2XX open started");
 
             var info = await _board.ConnectAsync(_lifetimeCts.Token);
+            StartupPerformanceTrace.Mark("T5 D2XX open completed");
+            StartupPerformanceTrace.Mark("T6 Handshake completed");
 
             if (_lifetimeCts.IsCancellationRequested)
                 return;
@@ -1922,8 +2779,10 @@ public sealed class TestViewModel : ObservableObject
         if (_visa.IsConnected) return;
 
         State = "ĐANG CHUẨN BỊ ĐO ĐIỆN TRỞ";
+        AddLog("[AUTO-R] Keysight connecting");
         var idn = await Task.Run(() =>
             _visa.ConnectAutomatic(_settings.Keysight.Resource));
+        AddLog($"[AUTO-R] Keysight connected: {idn}");
         AddLog($"Đã tự kết nối Keysight: {idn}");
     }
 
@@ -2103,6 +2962,21 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task StartTestAsync()
     {
+        AsyncFileLogService.Current.Performance("TEST_START_REQUEST");
+
+        if (IsDeviceFault)
+        {
+            AddLog("Không thể bắt đầu chu kỳ mới vì TestWindow đang khóa DeviceFault.");
+            return;
+        }
+
+        if (IsManualModeActive)
+        {
+            State = "MANUAL";
+            AddLog("Không thể bắt đầu Production Test vì Manual Mode đang bật.");
+            return;
+        }
+
         if (_model is null)
         {
             throw new InvalidOperationException(
@@ -2149,6 +3023,22 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _postContinuityStarted, 0);
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _masterPostStarted, 0);
+        Interlocked.Exchange(ref _firstFrameReceivedLogged, 0);
+        Interlocked.Exchange(ref _firstLogicalStateLogged, 0);
+        Interlocked.Exchange(ref _firstUiUpdateRenderedLogged, 0);
+        Interlocked.Exchange(ref _stalePreCycleFrameLogged, 0);
+        Interlocked.Exchange(ref _secondRequiredNetSeenLogged, 0);
+        Interlocked.Exchange(ref _continuityPassedLogged, 0);
+        Interlocked.Exchange(ref _productionFramesReceived, 0);
+        Interlocked.Exchange(ref _productionFramesProcessed, 0);
+        Interlocked.Exchange(ref _productionFramesDropped, 0);
+        Interlocked.Exchange(ref _productionFramesRoutedToProbe, 0);
+        Interlocked.Exchange(ref _engineUiUpdatesScheduled, 0);
+        Interlocked.Exchange(ref _engineUiUpdatesRendered, 0);
+        Interlocked.Exchange(ref _lastContinuousScanMetricsTick, 0);
+        _lastPassGateSignature = string.Empty;
+        _lastPassRemainingSignature = string.Empty;
+        _lastProductDetectSignature = string.Empty;
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
         _sound.SetWiringFaultAlarm(false);
@@ -2176,7 +3066,23 @@ public sealed class TestViewModel : ObservableObject
         // INIT lại nên chuyển rất nhanh nhưng vẫn purge/invalidate sạch frame cũ.
         _board.ConfigureScanRange(_model.MaxIo);
         InvokeUi(RebuildActiveCards);
-        await _board.StartScanAsync(BoardScanMode.Production, cycleToken);
+        if (_board.IsScanning && _board.CurrentScanMode == BoardScanMode.Production)
+        {
+            long cycleStartSequence = Volatile.Read(ref _lastObservedProductionFrameSequence);
+            Volatile.Write(ref _cycleStartFrameSequence, cycleStartSequence);
+            Interlocked.Exchange(ref _freshFrameGateActive, cycleStartSequence > 0 ? 1 : 0);
+            AsyncFileLogService.Current.Performance("D2XX_START_SCAN_REUSED");
+            AsyncFileLogService.Current.Performance(
+                $"FRESH_FRAME_GATE_ARMED active={cycleStartSequence > 0} cycleStartSeq={cycleStartSequence}");
+            AddLog("Tái sử dụng scan nền Production đang chạy; không STOP/START scan khi ARM.");
+        }
+        else
+        {
+            Volatile.Write(ref _cycleStartFrameSequence, 0);
+            Interlocked.Exchange(ref _freshFrameGateActive, 0);
+            await _board.StartScanAsync(BoardScanMode.Production, cycleToken);
+            AsyncFileLogService.Current.Performance("D2XX_START_SCAN_SENT");
+        }
         InvokeUi(UpdateCardScanningState);
 
         if (!MasterApproved)
@@ -2222,6 +3128,18 @@ public sealed class TestViewModel : ObservableObject
     private bool IsProbeSessionActive =>
         IsRuntimeMode(RuntimeMode.Probe) &&
         Volatile.Read(ref _probeSessionActive) != 0;
+
+    private bool IsManualForbiddenWorkActive =>
+        _cycleActive ||
+        _waitForProductRelease ||
+        _waitForFaultProductRemoval ||
+        Volatile.Read(ref _probeSessionActive) != 0 ||
+        Volatile.Read(ref _postContinuityStarted) != 0 ||
+        Volatile.Read(ref _wiringFaultHandlingStarted) != 0 ||
+        Volatile.Read(ref _masterPostStarted) != 0 ||
+        Volatile.Read(ref _masterEjectStarted) != 0 ||
+        CurrentRuntimeMode == RuntimeMode.Production ||
+        CurrentRuntimeMode == RuntimeMode.Probe;
 
     private void AbortProductionFaultForProbe()
     {
@@ -2361,7 +3279,9 @@ public sealed class TestViewModel : ObservableObject
             AddLog($"Lỗi đã xác nhận: R1 JIG pulse đúng 1 lần ({_productionSettings.Relay1JigPulseMs} ms) rồi OFF; R2 MARKING luôn OFF.");
 
             _waitForFaultProductRemoval = true;
-            await _board.StartScanAsync(BoardScanMode.Production);
+            await StartProductionScanAndVerifyFrameAsync(
+                CurrentCycleToken(),
+                "FAIL_CONFIRM_RELAY");
             State = "LỖI - CHỜ THÁO TOÀN BỘ SẢN PHẨM";
         }
         catch (Exception ex)
@@ -2543,7 +3463,7 @@ public sealed class TestViewModel : ObservableObject
         ResistanceMin = resistance.MinOhm,
         ResistanceMax = resistance.MaxOhm,
         WireName = resistance.Name,
-        Message = $"{resistance.Name}: {resistance.Display}; giới hạn {resistance.MinOhm:0.###}–{resistance.MaxOhm:0.###} Ω"
+        Message = $"{resistance.ChannelText} {resistance.Name}: MIN {resistance.MinDisplayText}; Đo {resistance.Display}; MAX {resistance.MaxDisplayText}"
     };
 
     private FaultDetail? GetVisiblePrimaryFault()
@@ -2577,11 +3497,23 @@ public sealed class TestViewModel : ObservableObject
         _masterDetectedFaultDetails.Clear();
         MasterFaults.Clear();
         _masterRequiredFaultCount = _model is null
-            ? Math.Clamp(_productionSettings.MasterFaultRequiredCount, 1, 99)
+            ? Math.Clamp(_productionSettings.MasterFaultRequiredCount, 0, 99)
             : ProductionConfigService.GetMasterFaultRequiredCount(_productionSettings, _model);
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
+
+        if (_masterRequiredFaultCount <= 0)
+        {
+            MasterApproved = true;
+            MasterState = MasterSequenceState.Completed;
+            MasterStatus = "MASTER DISABLED";
+            State = ReadyStateForCurrentModel();
+            AddLog("MASTER DISABLED - cấu hình Số lỗi Master tối thiểu = 0, vào Production trực tiếp.");
+            RaiseMasterState();
+            return;
+        }
+
         MasterState = MasterSequenceState.WaitingGoodMaster;
         MasterStatus = $"CẦN MASTER ĐẠT → MASTER SAI DÂY ({_masterRequiredFaultCount} LỖI)";
         State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
@@ -2596,6 +3528,7 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(NetworkProgress));
         Raise(nameof(IsMasterBadPhase));
         Raise(nameof(IsMasterSequenceActive));
+        Raise(nameof(IsMasterBannerVisible));
         Raise(nameof(ProductionEnabled));
         RaiseActiveFault();
     }
@@ -2604,6 +3537,16 @@ public sealed class TestViewModel : ObservableObject
     {
         if (_model is null || MasterApproved)
             return;
+
+        if (MasterRequiredFaultCount <= 0)
+        {
+            MasterApproved = true;
+            MasterState = MasterSequenceState.Completed;
+            MasterStatus = "MASTER DISABLED";
+            State = "CHỜ LẮP SẢN PHẨM";
+            RaiseMasterState();
+            return;
+        }
 
         if (!_board.IsConnected)
             await InitializeHardwareAsync();
@@ -2653,94 +3596,106 @@ public sealed class TestViewModel : ObservableObject
 
         InvokeUi(() =>
         {
-            if (!IsRuntimeContext(RuntimeMode.Production, generation) || MasterApproved)
-                return;
-
-            RefreshFaults();
-
-            switch (MasterState)
+            try
             {
-                case MasterSequenceState.WaitingGoodMaster:
-                    if (_engine.HasProductActivity)
-                    {
-                        MasterState = MasterSequenceState.TestingGoodMaster;
-                        State = "ĐANG KIỂM TRA MẪU MASTER ĐẠT";
-                        MasterStatus = "ĐANG KIỂM TRA TOÀN BỘ CONTINUITY / ĐIỆN TRỞ";
-                        AddLog("MASTER GOOD: phát hiện mẫu, bắt đầu kiểm tra tự động.");
-                    }
-                    break;
-
-                case MasterSequenceState.TestingGoodMaster:
-                    if (_engine.IsProductReleased)
-                    {
-                        Interlocked.Exchange(ref _masterPostStarted, 0);
-                        MasterState = MasterSequenceState.WaitingGoodMaster;
-                        ResetEngineWithoutChangedReentry();
-                        State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
-                        MasterStatus = "MASTER ĐẠT CHƯA PASS - LẮP LẠI MẪU ĐẠT";
-                        AddLog("MASTER GOOD chưa PASS và đã tháo; giữ gate LOCKED, chờ kiểm tra lại.");
-                        break;
-                    }
-
-                    if (_engine.HasWiringFault)
-                    {
-                        State = "MASTER ĐẠT - FAIL";
-                        MasterStatus = "MẪU MASTER ĐẠT ĐANG CÓ LỖI DÂY - KIỂM TRA / THÁO MẪU";
-                        // Không alarm/eject theo logic Product FAIL. Good master chỉ được eject sau PASS thật.
-                        _sound.SetWiringFaultAlarm(false);
-                        break;
-                    }
-
-                    if (_engine.ContinuityPassed &&
-                        Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
-                    {
-                        _ = CompleteGoodMasterAsync(generation);
-                    }
-                    break;
-
-                case MasterSequenceState.EjectingGoodMaster:
-                    if (_engine.IsPassReleaseStarted)
-                        TransitionToBadMaster();
-                    break;
-
-                case MasterSequenceState.WaitingBadMaster:
-                    if (_engine.HasProductActivity)
-                    {
-                        MasterState = MasterSequenceState.TestingBadMaster;
-                        State = "ĐANG KIỂM TRA MẪU SAI DÂY";
-                        MasterStatus = $"ĐANG XÁC NHẬN LỖI MASTER: {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
-                        Interlocked.Exchange(
-                            ref _masterBadCollectNotBeforeUtcTicks,
-                            DateTime.UtcNow.AddMilliseconds(MasterBadSettleMs).Ticks);
-                        AddLog($"MASTER BAD START - cần {MasterRequiredFaultCount} fault dây duy nhất.");
-                        _ = CollectMasterFaultsAfterSettleAsync(generation);
-                    }
-                    break;
-
-                case MasterSequenceState.TestingBadMaster:
-                    if (_engine.IsProductReleased)
-                    {
-                        // Không xóa HashSet 1/N: cùng mẫu có thể mất contact tạm thời. Gate chỉ mở ở N/N.
-                        Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
-                        MasterState = MasterSequenceState.WaitingBadMaster;
-                        ResetEngineWithoutChangedReentry();
-                        State = "ĐANG CHỜ LẮP MẪU SAI DÂY";
-                        MasterStatus = MasterDetectedFaultCount == 0
-                            ? $"CHỜ MASTER LỖI • 0/{MasterRequiredFaultCount}"
-                            : $"MASTER LỖI CHƯA ĐỦ • {MasterDetectedFaultCount}/{MasterRequiredFaultCount} • CHỜ LỖI CÒN THIẾU";
-                        AddLog($"MASTER BAD released khi mới {MasterDetectedFaultCount}/{MasterRequiredFaultCount}; không mở Production.");
-                        break;
-                    }
-
-                    CollectCurrentMasterFaults(generation);
-                    break;
-
-                case MasterSequenceState.EjectingBadMaster:
-                    if (_engine.IsProductReleased)
-                        CompleteMasterValidation();
-                    break;
+                ProcessMasterEngineChangedOnUi(generation);
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+            {
+                EnterDeviceFault(ex, "MasterEngineChanged.Dispatcher");
             }
         });
+    }
+
+    private void ProcessMasterEngineChangedOnUi(long generation)
+    {
+        if (IsDeviceFault || !IsRuntimeContext(RuntimeMode.Production, generation) || MasterApproved)
+            return;
+
+        RefreshFaults();
+
+        switch (MasterState)
+        {
+            case MasterSequenceState.WaitingGoodMaster:
+                if (_engine.HasProductActivity)
+                {
+                    MasterState = MasterSequenceState.TestingGoodMaster;
+                    State = "ĐANG KIỂM TRA MẪU MASTER ĐẠT";
+                    MasterStatus = "ĐANG KIỂM TRA TOÀN BỘ CONTINUITY / ĐIỆN TRỞ";
+                    AddLog("MASTER GOOD: phát hiện mẫu, bắt đầu kiểm tra tự động.");
+                }
+                break;
+
+            case MasterSequenceState.TestingGoodMaster:
+                if (_engine.IsProductReleased)
+                {
+                    Interlocked.Exchange(ref _masterPostStarted, 0);
+                    MasterState = MasterSequenceState.WaitingGoodMaster;
+                    ResetEngineWithoutChangedReentry();
+                    State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+                    MasterStatus = "MASTER ĐẠT CHƯA PASS - LẮP LẠI MẪU ĐẠT";
+                    AddLog("MASTER GOOD chưa PASS và đã tháo; giữ gate LOCKED, chờ kiểm tra lại.");
+                    break;
+                }
+
+                if (_engine.HasWiringFault)
+                {
+                    State = "MASTER ĐẠT - FAIL";
+                    MasterStatus = "MẪU MASTER ĐẠT ĐANG CÓ LỖI DÂY - KIỂM TRA / THÁO MẪU";
+                    // Không alarm/eject theo logic Product FAIL. Good master chỉ được eject sau PASS thật.
+                    _sound.SetWiringFaultAlarm(false);
+                    break;
+                }
+
+                if (_engine.ContinuityPassed &&
+                    Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
+                {
+                    _ = CompleteGoodMasterAsync(generation);
+                }
+                break;
+
+            case MasterSequenceState.EjectingGoodMaster:
+                if (_engine.IsPassReleaseStarted)
+                    TransitionToBadMaster();
+                break;
+
+            case MasterSequenceState.WaitingBadMaster:
+                if (_engine.HasProductActivity)
+                {
+                    MasterState = MasterSequenceState.TestingBadMaster;
+                    State = "ĐANG KIỂM TRA MẪU SAI DÂY";
+                    MasterStatus = $"ĐANG XÁC NHẬN LỖI MASTER: {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
+                    Interlocked.Exchange(
+                        ref _masterBadCollectNotBeforeUtcTicks,
+                        DateTime.UtcNow.AddMilliseconds(MasterBadSettleMs).Ticks);
+                    AddLog($"MASTER BAD START - cần {MasterRequiredFaultCount} fault dây duy nhất.");
+                    _ = CollectMasterFaultsAfterSettleAsync(generation);
+                }
+                break;
+
+            case MasterSequenceState.TestingBadMaster:
+                if (_engine.IsProductReleased)
+                {
+                    // Không xóa HashSet 1/N: cùng mẫu có thể mất contact tạm thời. Gate chỉ mở ở N/N.
+                    Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
+                    MasterState = MasterSequenceState.WaitingBadMaster;
+                    ResetEngineWithoutChangedReentry();
+                    State = "ĐANG CHỜ LẮP MẪU SAI DÂY";
+                    MasterStatus = MasterDetectedFaultCount == 0
+                        ? $"CHỜ MASTER LỖI • 0/{MasterRequiredFaultCount}"
+                        : $"MASTER LỖI CHƯA ĐỦ • {MasterDetectedFaultCount}/{MasterRequiredFaultCount} • CHỜ LỖI CÒN THIẾU";
+                    AddLog($"MASTER BAD released khi mới {MasterDetectedFaultCount}/{MasterRequiredFaultCount}; không mở Production.");
+                    break;
+                }
+
+                CollectCurrentMasterFaults(generation);
+                break;
+
+            case MasterSequenceState.EjectingBadMaster:
+                if (_engine.IsProductReleased)
+                    CompleteMasterValidation();
+                break;
+        }
     }
 
     private async Task CollectMasterFaultsAfterSettleAsync(long generation)
@@ -3007,13 +3962,13 @@ public sealed class TestViewModel : ObservableObject
             Resistance.Clear();
             bool resistancePassed = true;
 
-            if (_model.ResistanceSteps.Count > 0)
+            if (IsResistanceEnabledForModel(_model))
             {
                 await EnsureKeysightConnectedAsync();
                 List<ResistanceResult> results = await _engine.MeasureResistanceAsync(ct);
                 foreach (ResistanceResult result in results)
                     Resistance.Add(result);
-                resistancePassed = Resistance.Count == _model.ResistanceSteps.Count && Resistance.All(item => item.Passed);
+                resistancePassed = Resistance.Count == ResolveEnabledResistanceSteps(_model).Count && Resistance.All(item => item.Passed);
             }
 
             if (!resistancePassed)
@@ -3063,7 +4018,7 @@ public sealed class TestViewModel : ObservableObject
             // EjectingGoodMaster giả; chỉ frame scan thật sau restart mới xác nhận RELEASE.
             ResetEngineWithoutChangedReentry();
             _engine.SetFrameProcessingEnabled(true);
-            await _board.StartScanAsync(BoardScanMode.Production, ct);
+            await StartProductionScanAndVerifyFrameAsync(ct, "MASTER_GOOD_EJECT");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -3135,7 +4090,7 @@ public sealed class TestViewModel : ObservableObject
             // tự phát Changed và hoàn tất Master Gate ngay trong cùng call stack.
             ResetEngineWithoutChangedReentry();
             _engine.SetFrameProcessingEnabled(true);
-            await _board.StartScanAsync(BoardScanMode.Production, ct);
+            await StartProductionScanAndVerifyFrameAsync(ct, "MASTER_BAD_EJECT");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -3208,9 +4163,88 @@ public sealed class TestViewModel : ObservableObject
             await RunAutomaticPostContinuityAsync();
     }
 
+    private void PrepareResistanceRows(ProductModel model)
+    {
+        Resistance.Clear();
+
+        foreach (ResistanceStep originalStep in ResolveEnabledResistanceSteps(model))
+        {
+            (int channel, double minOhm, double maxOhm) = ResolveProductionResistanceChannel(originalStep);
+            Resistance.Add(new ResistanceResult
+            {
+                Name = originalStep.Name,
+                Channel = channel,
+                MinOhm = minOhm,
+                MaxOhm = maxOhm
+            });
+        }
+    }
+
+    private bool IsResistanceEnabledForModel(ProductModel? model) =>
+        model is not null && ResolveEnabledResistanceSteps(model).Count > 0;
+
+    private List<ResistanceStep> ResolveEnabledResistanceSteps(ProductModel model)
+    {
+        ResistanceChannelSetting[] enabledChannels = _productionSettings.ResistanceChannels
+            .Where(channel => channel.Enabled)
+            .ToArray();
+
+        if (enabledChannels.Length == 0)
+            return [];
+
+        return model.ResistanceSteps
+            .Where(step => enabledChannels.Any(channel =>
+                string.Equals(channel.Name, step.Name, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(step => ResolveProductionResistanceChannel(step).Channel)
+            .ToList();
+    }
+
+    private (int Channel, double MinOhm, double MaxOhm) ResolveProductionResistanceChannel(
+        ResistanceStep step)
+    {
+        ResistanceChannelSetting? productionChannel = _productionSettings.ResistanceChannels
+            .FirstOrDefault(channel => channel.Enabled &&
+                string.Equals(channel.Name, step.Name, StringComparison.OrdinalIgnoreCase));
+
+        int channelNumber = productionChannel?.Channel ?? step.Channel;
+        double minOhm = step.MinOhm;
+        double maxOhm = step.MaxOhm;
+        if (productionChannel is not null && minOhm == 0 && maxOhm == 0)
+        {
+            minOhm = productionChannel.MinOhm;
+            maxOhm = productionChannel.MaxOhm;
+        }
+
+        return (channelNumber, minOhm, maxOhm);
+    }
+
+    private void UpdateResistanceRows(IReadOnlyList<ResistanceResult> results)
+    {
+        foreach (ResistanceResult result in results)
+        {
+            ResistanceResult? row = Resistance.FirstOrDefault(item =>
+                item.Channel == result.Channel &&
+                string.Equals(item.Name, result.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (row is null)
+            {
+                Resistance.Add(result);
+                continue;
+            }
+
+            row.ValueOhm = result.ValueOhm;
+            row.IsOpen = result.IsOpen;
+            row.IsStable = result.IsStable;
+            row.Passed = result.Passed;
+            row.MeasurementStatus = result.MeasurementStatus;
+            row.SampleCount = result.SampleCount;
+            row.StabilizationTimeMs = result.StabilizationTimeMs;
+        }
+    }
+
     private async Task RunAutomaticPostContinuityAsync()
     {
-        if (!_cycleActive || _model is null)
+        if (IsDeviceFault || !_cycleActive || _model is null)
             return;
 
         ProductModel cycleModel = _model;
@@ -3222,41 +4256,63 @@ public sealed class TestViewModel : ObservableObject
         try
         {
             ct.ThrowIfCancellationRequested();
+            AsyncFileLogService.Current.Performance(
+                $"PASS_LATENCY T_POST_CONTINUITY_TASK_START cycle={_activeCycleId}");
             AddLog("Toàn bộ mạng I/O đã đạt theo model THT.");
+            AddLog($"[AUTO-R] Continuity complete = {_engine.ContinuityPassed}");
+            AddLog($"[AUTO-R] Continuity passed = {_engine.ContinuityPassed}");
+            AddLog($"[AUTO-R] Wrong/Short active = {_engine.HasWiringFault}");
+            AddLog($"[AUTO-R] Resistance setting enabled = {IsResistanceEnabledForModel(_model)}");
+            AddLog($"[AUTO-R] Model resistance step count = {_model.ResistanceSteps.Count}");
+            AddLog($"[AUTO-R] Selected channel count = {ResolveEnabledResistanceSteps(_model).Count}");
+            AddLog($"[AUTO-R] Selected channels = {string.Join(",", ResolveEnabledResistanceSteps(_model).Select(step => $"CH{ResolveProductionResistanceChannel(step).Channel}"))}");
             // Không tạo trạng thái trung gian trên bảng lớn. Người vận hành chỉ
             // thấy CHỜ LẮP -> ĐANG KIỂM TRA -> PASS.
 
-            if (_model.ResistanceSteps.Count > 0)
+            if (IsResistanceEnabledForModel(_model))
             {
-                // Vẫn giữ chữ ĐANG KIỂM TRA trong lúc đo điện trở.
-                State = "ĐANG KIỂM TRA...";
+                State = "KIỂM TRA ĐIỆN TRỞ";
+                AddLog("[AUTO-R] Trigger automatic resistance = YES");
                 if (_productionSettings.PageDelay > 0)
-                    await Task.Delay(Math.Clamp(_productionSettings.PageDelay, 0, 5000), ct);
+                {
+                    AsyncFileLogService.Current.Performance(
+                        $"RESISTANCE_PAGE_DELAY_SKIPPED configured_ms={Math.Clamp(_productionSettings.PageDelay, 0, 5000)}");
+                }
+
+                PrepareResistanceRows(_model);
                 SelectedOperationTabIndex = 1;
-                Resistance.Clear();
+                AddLog("[AUTO-R] Switching TestWindow to resistance view");
 
                 await EnsureKeysightConnectedAsync();
 
                 List<ResistanceResult> results =
-                    await _engine.MeasureResistanceAsync(ct);
+                    await _engine.MeasureResistanceAsync(
+                        result => UpdateResistanceRows([result]),
+                        ct);
 
-                foreach (ResistanceResult result in results)
-                    Resistance.Add(result);
+                UpdateResistanceRows(results);
 
                 AddLog(
-                    $"Hoàn thành {Resistance.Count}/{_model.ResistanceSteps.Count} " +
+                    $"Hoàn thành {Resistance.Count}/{ResolveEnabledResistanceSteps(_model).Count} " +
                     "phép đo điện trở.");
 
-                if (Resistance.Count != _model.ResistanceSteps.Count ||
+                if (Resistance.Count != ResolveEnabledResistanceSteps(_model).Count ||
                     Resistance.Any(x => !x.Passed))
                 {
                     _cycleActive = false;
-                    RecordCompletedProduct(
+                    bool committed = RecordCompletedProduct(
                         false,
                         FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange),
                         cycleModel,
                         generation,
                         ct);
+                    if (!committed)
+                    {
+                        Interlocked.Exchange(ref _postContinuityStarted, 0);
+                        AddLog("Resistance FAIL đã được chu kỳ hiện tại xử lý trước đó; bỏ qua popup/eject lặp.");
+                        return;
+                    }
+
                     State = FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange);
                     RaiseTestStatistics();
                     AddLog("Điện trở không đạt. Không chạy relay PASS.");
@@ -3270,6 +4326,30 @@ public sealed class TestViewModel : ObservableObject
                         "Không chạy relay PASS. Hãy xử lý sản phẩm không đạt theo quy trình vận hành.");
                     faultDialog.Owner = Application.Current?.MainWindow;
                     faultDialog.ShowDialog();
+
+                    try
+                    {
+                        State = "ĐANG MỞ JIG HÀNG LỖI";
+                        await _engine.EjectFaultProductAsync();
+                        AddLog("Resistance FAIL đã xác nhận: chỉ R1 JIG pulse rồi OFF; R2 MARKING luôn OFF.");
+
+                        _waitForFaultProductRemoval = true;
+                        await StartProductionScanAndVerifyFrameAsync(
+                            CurrentCycleToken(),
+                            "RESISTANCE_FAIL_CONFIRM_RELAY");
+                        State = "LỖI ĐIỆN TRỞ - CHỜ THÁO TOÀN BỘ SẢN PHẨM";
+                    }
+                    catch (Exception ex)
+                    {
+                        _waitForFaultProductRemoval = false;
+                        State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
+                        AddLog($"Không thể eject/restart scan sau lỗi điện trở: {ex.Message}");
+                        MessageBox.Show(
+                            $"Không thể mở JIG hoặc khởi động lại scan sau lỗi điện trở.\nRelay 2 MARKING vẫn OFF.\n\n{ex.Message}",
+                            "Lỗi thiết bị",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Error);
+                    }
                     return;
                 }
 
@@ -3277,12 +4357,30 @@ public sealed class TestViewModel : ObservableObject
             }
             else
             {
+                AddLog("[AUTO-R] Trigger automatic resistance = NO");
                 AddLog("Model không yêu cầu đo điện trở - bỏ qua Keysight.");
             }
 
-            // V12.4: PASS + DINGDONG bắt đầu cùng mốc Relay 2 MARKING.
-            // Engine MARKING trước; chỉ sau khi MARKING hoàn tất mới pulse
-            // Relay 1 để mở/tháo JIG.
+            bool passUiTriggered = false;
+            void TriggerPassUi()
+            {
+                if (passUiTriggered)
+                    return;
+
+                passUiTriggered = true;
+                State = "PASS";
+                AsyncFileLogService.Current.Performance(
+                    $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
+                _sound.SetWiringFaultAlarm(false);
+                _sound.PlayTestOk();
+                AddLog("PASS - continuity/điện trở đạt; chuẩn bị chuỗi relay MARKING/JIG.");
+            }
+
+            TriggerPassUi();
+
+            // PASS UI/sound phải bật ngay khi điều kiện logic đã đạt.
+            // Relay chạy sau: MARKING trước; chỉ sau khi MARKING hoàn tất mới
+            // pulse Relay 1 để mở/tháo JIG.
             // Tuyệt đối không cho relay PASS chạy trong lúc/Ngay sau khi que
             // dò GND còn tạo tín hiệu. Sau lockout phải xác nhận continuity
             // vẫn PASS và không có wiring fault mới được MARKING/JIG.
@@ -3295,19 +4393,17 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            bool passUiTriggered = false;
             bool ok = await _engine.CompletePassAsync(
                 Resistance,
                 onPassStarted: () =>
                 {
-                    if (passUiTriggered)
+                    if (!passUiTriggered)
+                    {
+                        TriggerPassUi();
                         return;
+                    }
 
-                    passUiTriggered = true;
-                    State = "PASS";
-                    _sound.SetWiringFaultAlarm(false);
-                    _sound.PlayTestOk();
-                    AddLog("PASS - Relay 2 MARKING bắt đầu; sau MARKING mới Relay 1 mở JIG.");
+                    AddLog("Relay 2 MARKING bắt đầu; sau MARKING mới Relay 1 mở JIG.");
                 },
                 ct: ct);
 
@@ -3343,13 +4439,18 @@ public sealed class TestViewModel : ObservableObject
             _cycleActive = true;
             SelectedOperationTabIndex = 0;
 
-            await _board.StartScanAsync(BoardScanMode.Production, ct);
+            await StartProductionScanAndVerifyFrameAsync(ct, "PASS_RELAY_SEQUENCE");
             State = "PASS";
             AddLog("Đã restart scan. Chờ nhả sản phẩm/jig trước chu kỳ tiếp theo.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             AddLog("Chu trình cũ đã được hủy sạch.");
+            return;
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            EnterDeviceFault(ex, "RunAutomaticPostContinuity");
             return;
         }
         catch (Exception ex)
@@ -3366,6 +4467,9 @@ public sealed class TestViewModel : ObservableObject
             {
                 // Giữ lỗi gốc của chu trình để chẩn đoán.
             }
+
+            Interlocked.Exchange(ref _postContinuityStarted, 0);
+            await EnsureContinuousProductionScanAsync();
 
             State = "LỖI CHU TRÌNH TEST";
             AddLog($"Chu trình tự động bị dừng: {ex.Message}");
@@ -3422,6 +4526,23 @@ public sealed class TestViewModel : ObservableObject
             $"{_board.Capacity}.");
     }
 
+    public void RefreshProductionSettingsOnly()
+    {
+        if (_model is not null)
+        {
+            int configuredMasterFaults = ProductionConfigService.GetMasterFaultRequiredCount(_productionSettings, _model);
+            if (configuredMasterFaults != _masterRequiredFaultCount && !IsManualModeActive)
+            {
+                ResetMasterGateForModel();
+                AddLog($"Cấu hình Số lỗi Master thay đổi -> reset Master Gate về 0/{configuredMasterFaults}.");
+            }
+        }
+
+        RefreshProductionUiSettings();
+        State = ReadyStateForCurrentModel();
+        AddLog("Đã áp dụng cấu hình mềm; không restart scan và không reconnect FTDI.");
+    }
+
     /// <summary>
     /// V12.9: áp dụng thay đổi card xuống tận runtime. Scan cũ bị dừng,
     /// generation transport bị invalidate, RX được purge bởi command D2XX,
@@ -3464,7 +4585,12 @@ public sealed class TestViewModel : ObservableObject
 
         if (_board.IsConnected && wasScanning)
         {
-            await _board.StartScanAsync(resumeMode);
+            if (resumeMode == BoardScanMode.Production)
+                await StartProductionScanAndVerifyFrameAsync(
+                    _lifetimeCts.Token,
+                    "PRODUCTION_RECONFIGURE");
+            else
+                await _board.StartScanAsync(resumeMode);
         }
 
         // Chỉ Production đang ARM mới được nối lại engine. Background vẫn chỉ scan nền.
@@ -3508,7 +4634,13 @@ public sealed class TestViewModel : ObservableObject
         _pinsByIoLookup = _model.Pins.ToLookup(pin => pin.IoNumber);
 
         _sound.SetWiringFaultAlarm(false);
+        long setModelStarted = Stopwatch.GetTimestamp();
         _engine.SetModel(model);
+        double setModelMs = Stopwatch.GetElapsedTime(setModelStarted).TotalMilliseconds;
+        AsyncFileLogService.Current.Performance(
+            $"MODEL_LOAD_PERF phase=TestEngine.SetModel model={model.ModelName} duration_ms={setModelMs:0.###}");
+        LogExpectedNetBuild(model);
+        LogModelTopology(model);
         ResetMasterGateForModel();
 
         // Chỉ áp dụng SỐ CARD ĐÃ CẤU HÌNH. Không tự nâng theo model.
@@ -3562,6 +4694,67 @@ public sealed class TestViewModel : ObservableObject
                     $"{branch.Name}->IO{branch.TargetIo}"));
 
             AddLog($"CLIP THT: A0/AO common=IO{model.Clip.CommonIo}; {clipMap}");
+        }
+    }
+
+    private void LogExpectedNetBuild(ProductModel model)
+    {
+        PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
+        BoardCapacity capacity = _board.Capacity;
+        int duplicateNetNames = model.Nets
+            .GroupBy(net => net.Name, StringComparer.OrdinalIgnoreCase)
+            .Count(group => group.Count() > 1);
+        int duplicatePhysical = model.Nets
+            .GroupBy(net => string.Join(",", net.IoNumbers.OrderBy(io => io)))
+            .Count(group => group.Count() > 1);
+        int singlePin = model.Nets.Count(net => net.SourceIo > 0 && net.ExpectedActiveIo.Count == 0);
+        int invalid = model.Nets.Count(net => net.SourceIo <= 0 || net.IoNumbers.Any(io => io <= 0));
+        int outsideCapacity = model.Pins
+            .Where(pin => pin.IoNumber > 0)
+            .Select(pin => pin.IoNumber)
+            .Distinct()
+            .Count(io => !capacity.ContainsGlobalIo(io));
+        int probeOnly = model.Pins.Count(pin =>
+            !string.IsNullOrWhiteSpace(pin.WireName) &&
+            model.Nets.All(net => !net.Pins.Contains(pin)) &&
+            model.Clip?.IsSpecialPin(pin) != true);
+        int normal = gate.ExpectedNetworks.Count(item => item.Category.StartsWith("normal", StringComparison.OrdinalIgnoreCase));
+        int clip = gate.ExpectedNetworks.Count(item => item.Category.Equals("CLIP", StringComparison.OrdinalIgnoreCase));
+        string expectedList = string.Join(" | ", gate.ExpectedNetworks.Select(item => item.Display));
+
+        AsyncFileLogService.Current.Performance(
+            $"EXPECTED_NET_BUILD model=\"{model.ModelName}\" thtPinRows={model.Pins.Count} rawNets={model.Nets.Count} " +
+            $"eligibleProductionNets={gate.ExpectedNetCount} ExpectedNetCount={gate.ExpectedNetCount} maxIo={model.MaxIo} " +
+            $"configuredCapacity={capacity.TotalIoCapacity} capacityRange=IO{capacity.FirstGlobalIo}-{capacity.LastGlobalIo} " +
+            $"normal={normal} duplicateName={duplicateNetNames} duplicatePhysical={duplicatePhysical} CLIP={clip} " +
+            $"probeOnly={probeOnly} outsideCapacity={outsideCapacity} invalid={invalid} singlePin={singlePin} " +
+            $"resistanceOnly={model.ResistanceSteps.Count} expected=\"{expectedList}\"");
+    }
+
+    private void LogModelTopology(ProductModel model)
+    {
+        AsyncFileLogService.Current.Performance(
+            $"MODEL_TOPOLOGY model=\"{model.ModelName}\" terminal_rows={model.Pins.Count} " +
+            $"connectors={model.Connectors.Count} required_networks={model.Nets.Count}");
+
+        foreach (string warning in model.TopologyWarnings)
+            AsyncFileLogService.Current.Performance(warning);
+
+        foreach (ConnectorDefinition connector in model.Connectors)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"CONNECTOR id={connector.ConnectorId} declaredPins={connector.DeclaredPinCount?.ToString() ?? "-"} mappedPins={connector.Pins.Count}");
+        }
+
+        foreach (WireNet net in model.Nets)
+        {
+            string ios = string.Join(",", net.IoNumbers.Select(io => $"IO{io}"));
+            string endpoints = string.Join(
+                ", ",
+                net.Pins.Select(pin => $"C{pin.Connector}:P{pin.PinNumber}->IO{pin.IoNumber}"));
+
+            AsyncFileLogService.Current.Performance(
+                $"NETWORK name=\"{net.Name}\" ios=[{ios}] endpoints=[{endpoints}]");
         }
     }
 
@@ -3734,6 +4927,8 @@ public sealed class TestViewModel : ObservableObject
         {
             historyStore.Add(history);
             historySaved = true;
+            AsyncFileLogService.Current.Performance(
+                $"PASS_LATENCY T_HISTORY_COMMIT cycle={cycleId} result={resultStatus}");
             string historyFault = passed ? string.Empty : $" - {failureName}";
             AddLog($"History: cycle {cycleId}, LOT {completedLot} {resultStatus}{historyFault} đã lưu vào {historyStore.DatabasePath}.");
         }
@@ -4015,10 +5210,15 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        if (!MasterApproved && IsMasterBadPhase)
-            SynchronizeFaultRows(BuildMasterFaultGridRows());
-        else
-            SynchronizeFaultRows(_engine.BuildRows());
+        IReadOnlyList<FaultRow> desiredRows = !MasterApproved && IsMasterBadPhase
+            ? BuildMasterFaultGridRows()
+            : _engine.BuildRows();
+
+        FaultRow[] probeRows = ProbeContacts.ToArray();
+        if (probeRows.Length > 0 && IsRuntimeMode(RuntimeMode.Production))
+            desiredRows = probeRows.Concat(desiredRows).ToArray();
+
+        SynchronizeFaultRows(desiredRows);
 
         RaiseTestStatistics();
 
@@ -4043,45 +5243,85 @@ public sealed class TestViewModel : ObservableObject
 
     private void SynchronizeFaultRows(IReadOnlyList<FaultRow> desiredRows)
     {
-        // DataGrid production có thể có 100-200+ pin. Clear()+Add() toàn bộ
-        // collection ở mỗi thay đổi I/O gây layout lại toàn bảng và làm cảm
-        // giác scan chậm. Đồng bộ vi sai để chỉ thêm/xóa/move các dòng đổi.
-        var desiredKeys = desiredRows
-            .Select(RowKey)
-            .ToHashSet(StringComparer.Ordinal);
-
-        for (int index = Faults.Count - 1; index >= 0; index--)
+        try
         {
-            if (!desiredKeys.Contains(RowKey(Faults[index])))
-                Faults.RemoveAt(index);
-        }
-
-        for (int desiredIndex = 0; desiredIndex < desiredRows.Count; desiredIndex++)
-        {
-            FaultRow desired = desiredRows[desiredIndex];
-            string key = RowKey(desired);
-
-            int currentIndex = -1;
-            for (int index = desiredIndex; index < Faults.Count; index++)
+            // DataGrid production có thể có 100-200+ pin. Clear()+Add() toàn bộ
+            // collection ở mỗi thay đổi I/O gây layout lại toàn bảng và làm cảm
+            // giác scan chậm. Đồng bộ vi sai để chỉ thêm/xóa/move các dòng đổi.
+            var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
+            var desiredKeyByRow = new Dictionary<FaultRow, string>(ReferenceEqualityComparer.Instance);
+            foreach (FaultRow row in desiredRows)
             {
-                if (string.Equals(RowKey(Faults[index]), key, StringComparison.Ordinal))
+                string key = RowKey(row);
+                desiredKeys.Add(key);
+                desiredKeyByRow[row] = key;
+            }
+
+            for (int index = Faults.Count - 1; index >= 0; index--)
+            {
+                if (!desiredKeys.Contains(RowKey(Faults[index])))
+                    Faults.RemoveAt(index);
+            }
+
+            var rowByKey = new Dictionary<string, FaultRow>(StringComparer.Ordinal);
+            var indexByKey = new Dictionary<string, int>(StringComparer.Ordinal);
+            RebuildFaultRowIndex(rowByKey, indexByKey);
+
+            for (int desiredIndex = 0; desiredIndex < desiredRows.Count; desiredIndex++)
+            {
+                FaultRow desired = desiredRows[desiredIndex];
+                string key = desiredKeyByRow[desired];
+
+                if (!rowByKey.TryGetValue(key, out FaultRow? current))
                 {
-                    currentIndex = index;
-                    break;
+                    Faults.Insert(desiredIndex, desired);
+                    RebuildFaultRowIndex(rowByKey, indexByKey, desiredIndex);
+                    continue;
+                }
+
+                current.Status = desired.Status;
+
+                int currentIndex = indexByKey[key];
+                if (currentIndex != desiredIndex)
+                {
+                    Faults.Move(currentIndex, desiredIndex);
+                    RebuildFaultRowIndex(rowByKey, indexByKey, Math.Min(currentIndex, desiredIndex));
                 }
             }
+        }
+        catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+        {
+            EnterDeviceFault(ex, "SynchronizeFaultRows", desiredRows.Count);
+        }
+    }
 
-            if (currentIndex < 0)
+    private void RebuildFaultRowIndex(
+        Dictionary<string, FaultRow> rowByKey,
+        Dictionary<string, int> indexByKey,
+        int startIndex = 0)
+    {
+        if (startIndex <= 0)
+        {
+            rowByKey.Clear();
+            indexByKey.Clear();
+        }
+        else
+        {
+            foreach (string key in indexByKey
+                         .Where(pair => pair.Value >= startIndex)
+                         .Select(pair => pair.Key)
+                         .ToArray())
             {
-                Faults.Insert(desiredIndex, desired);
-                continue;
+                indexByKey.Remove(key);
+                rowByKey.Remove(key);
             }
+        }
 
-            FaultRow current = Faults[currentIndex];
-            current.Status = desired.Status;
-
-            if (currentIndex != desiredIndex)
-                Faults.Move(currentIndex, desiredIndex);
+        for (int index = Math.Max(0, startIndex); index < Faults.Count; index++)
+        {
+            string key = RowKey(Faults[index]);
+            rowByKey[key] = Faults[index];
+            indexByKey[key] = index;
         }
     }
 
@@ -4106,6 +5346,9 @@ public sealed class TestViewModel : ObservableObject
 
     private void RaiseActiveFault()
     {
+        Raise(nameof(ResultStatusText));
+        Raise(nameof(MasterBannerText));
+        Raise(nameof(IsMasterBannerVisible));
         Raise(nameof(ActiveFaultTitle));
         Raise(nameof(ActiveFaultMessage));
         Raise(nameof(ActiveFaultExpectedText));
@@ -4118,15 +5361,67 @@ public sealed class TestViewModel : ObservableObject
 
     private void AddLog(string text)
     {
+        AsyncFileLogService.Current.Test(text);
+
+        string line = $"{DateTime.Now:HH:mm:ss.fff}  {text}";
         var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is not null && !dispatcher.CheckAccess())
+        if (dispatcher is null)
         {
-            dispatcher.BeginInvoke(new Action(() => AddLog(text)));
+            InsertLogLine(line);
             return;
         }
 
-        AsyncFileLogService.Current.Test(text);
-        Logs.Insert(0, $"{DateTime.Now:HH:mm:ss.fff}  {text}");
+        lock (_pendingLogGate)
+            _pendingUiLogs.Enqueue(line);
+
+        if (Interlocked.Exchange(ref _logUiFlushQueued, 1) == 0)
+            dispatcher.BeginInvoke(new Action(FlushPendingUiLogs));
+    }
+
+    private void FlushPendingUiLogs()
+    {
+        const int MaxBatch = 50;
+        int count = 0;
+
+        while (count < MaxBatch)
+        {
+            string? line;
+            lock (_pendingLogGate)
+            {
+                line = _pendingUiLogs.Count > 0
+                    ? _pendingUiLogs.Dequeue()
+                    : null;
+            }
+
+            if (line is null)
+                break;
+
+            InsertLogLine(line);
+            count++;
+        }
+
+        bool hasMore;
+        lock (_pendingLogGate)
+            hasMore = _pendingUiLogs.Count > 0;
+
+        if (hasMore)
+        {
+            Application.Current?.Dispatcher.BeginInvoke(new Action(FlushPendingUiLogs));
+            return;
+        }
+
+        Interlocked.Exchange(ref _logUiFlushQueued, 0);
+
+        lock (_pendingLogGate)
+            hasMore = _pendingUiLogs.Count > 0;
+
+        if (hasMore && Interlocked.Exchange(ref _logUiFlushQueued, 1) == 0)
+            Application.Current?.Dispatcher.BeginInvoke(new Action(FlushPendingUiLogs));
+    }
+
+    private void InsertLogLine(string line)
+    {
+        Logs.Insert(0, line);
         while (Logs.Count > 300)
             Logs.RemoveAt(Logs.Count - 1);
     }

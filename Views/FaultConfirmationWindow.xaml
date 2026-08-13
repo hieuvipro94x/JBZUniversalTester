@@ -1,91 +1,77 @@
 <Window x:Class="JBZUniversalTester.Views.FaultConfirmationWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Xử lý hàng không đạt"
-        Width="780" Height="590"
+        Title="Xu ly hang khong dat"
+        Width="520" Height="330"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        Background="#F3F4F6"
-        FontFamily="Segoe UI"
+        Background="#C62828"
+        FontFamily="Arial"
         ShowInTaskbar="False">
-    <Grid Margin="18">
+    <Grid Margin="14">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="58"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="58"/>
         </Grid.RowDefinitions>
 
-        <Border Background="#B91C1C" CornerRadius="8" Padding="14,10">
-            <TextBlock Text="XỬ LÝ HÀNG KHÔNG ĐẠT" Foreground="White"
-                       HorizontalAlignment="Center" FontSize="25" FontWeight="Bold"/>
+        <Border Background="#23D9D9"
+                BorderBrush="#333333"
+                BorderThickness="2">
+            <TextBlock Text="X&#7916; L&#221; H&#192;NG KH&#212;NG &#272;&#7840;T"
+                       Foreground="#333333"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       FontSize="22"
+                       FontWeight="Bold"/>
         </Border>
 
-        <TextBlock x:Name="SummaryText"
-                   Grid.Row="1"
-                   Margin="0,14,0,10"
-                   HorizontalAlignment="Center"
-                   FontSize="18"
-                   FontWeight="Bold"
-                   Foreground="#991B1B"/>
+        <StackPanel Grid.Row="1"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center">
+            <TextBlock Text="KI&#7874;M TRA M&#7840;CH KH&#212;NG &#272;&#7840;T."
+                       Foreground="#FFE000"
+                       HorizontalAlignment="Center"
+                       TextAlignment="Center"
+                       FontSize="19"
+                       FontWeight="Bold"/>
+            <TextBlock Text="H&#195;Y X&#7916; L&#221; S&#7842;N PH&#7848;M L&#7894;I."
+                       Foreground="#FFE000"
+                       HorizontalAlignment="Center"
+                       TextAlignment="Center"
+                       FontSize="19"
+                       FontWeight="Bold"
+                       Margin="0,7,0,22"/>
+            <TextBlock x:Name="SummaryText"
+                       Foreground="#FFE000"
+                       HorizontalAlignment="Center"
+                       TextAlignment="Center"
+                       FontSize="18"
+                       FontWeight="Bold"/>
+            <TextBlock x:Name="FooterText"
+                       Foreground="#FFE000"
+                       HorizontalAlignment="Center"
+                       TextAlignment="Center"
+                       TextWrapping="Wrap"
+                       FontSize="13"
+                       FontWeight="Bold"
+                       Margin="0,8,0,0"
+                       MaxWidth="450"/>
+            <ItemsControl x:Name="FaultItemsControl" Visibility="Collapsed"/>
+        </StackPanel>
 
-        <Border Grid.Row="2" Background="White" BorderBrush="#D1D5DB" BorderThickness="1"
-                CornerRadius="6" Padding="14">
-            <ScrollViewer VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-                <ItemsControl x:Name="FaultItemsControl">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border Margin="0,0,0,10"
-                                    Padding="12,10"
-                                    Background="#FFF7F7"
-                                    BorderBrush="#E5B7B7"
-                                    BorderThickness="1"
-                                    CornerRadius="5">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Title}"
-                                               FontSize="18"
-                                               FontWeight="Bold"
-                                               Foreground="#991B1B"/>
-                                    <ItemsControl Margin="0,7,0,0" ItemsSource="{Binding Lines}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Grid Margin="0,2">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="190"/>
-                                                        <ColumnDefinition Width="*"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBlock Text="{Binding Label}"
-                                                               FontSize="15"
-                                                               FontWeight="SemiBold"
-                                                               Foreground="#374151"/>
-                                                    <TextBlock Grid.Column="1"
-                                                               Text="{Binding Value}"
-                                                               FontSize="15"
-                                                               Foreground="#111827"
-                                                               TextWrapping="Wrap"/>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-        </Border>
-
-        <Grid Grid.Row="3" Margin="0,16,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="230"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock x:Name="FooterText" VerticalAlignment="Center"
-                       FontSize="14" Foreground="#4B5563" TextWrapping="Wrap" Margin="0,0,14,0"/>
-            <Button Grid.Column="1" Height="58" Content="XÁC NHẬN"
-                    FontSize="18" FontWeight="Bold" IsDefault="True"
-                    Background="#F59E0B" Foreground="#111827" Click="Confirm_Click"/>
-        </Grid>
+        <Button Grid.Row="2"
+                Width="120"
+                Height="52"
+                HorizontalAlignment="Right"
+                Content="X&#193;C NH&#7852;N"
+                FontSize="15"
+                FontWeight="Bold"
+                IsDefault="True"
+                Background="#E7E7E4"
+                Foreground="#101010"
+                BorderBrush="#333333"
+                BorderThickness="2"
+                Click="Confirm_Click"/>
     </Grid>
 </Window>

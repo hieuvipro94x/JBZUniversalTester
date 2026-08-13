@@ -7,7 +7,7 @@ public sealed record UnexpectedFaultObservation(
     int TargetIo,
     ProductFaultType Type);
 
-public sealed record ProductionFaultConfirmationSnapshot(
+public readonly record struct ProductionFaultConfirmationSnapshot(
     IReadOnlySet<string> ConfirmedOpenKeys,
     IReadOnlySet<(int SourceIo, int TargetIo)> ConfirmedUnexpectedPairs,
     bool ContactUnstable,
@@ -20,6 +20,11 @@ public sealed record ProductionFaultConfirmationSnapshot(
 /// </summary>
 public sealed class ProductionFaultConfirmationGate
 {
+    private static readonly IReadOnlySet<string> EmptyOpenKeys =
+        new HashSet<string>(StringComparer.Ordinal);
+    private static readonly IReadOnlySet<(int SourceIo, int TargetIo)> EmptyUnexpectedPairs =
+        new HashSet<(int SourceIo, int TargetIo)>();
+
     private readonly ProductionSettings _settings;
     private readonly TimeProvider _timeProvider;
     private readonly HashSet<string> _confirmedOpen = new(StringComparer.Ordinal);
@@ -180,9 +185,21 @@ public sealed class ProductionFaultConfirmationGate
         bool hasProductActivity,
         long now)
     {
+        bool allExpectedConnected = expectedConnections.Count > 0;
+        if (allExpectedConnected)
+        {
+            foreach (bool connected in expectedConnections.Values)
+            {
+                if (!connected)
+                {
+                    allExpectedConnected = false;
+                    break;
+                }
+            }
+        }
+
         bool allCorrect = hasProductActivity &&
-                          expectedConnections.Count > 0 &&
-                          expectedConnections.Values.All(connected => connected) &&
+                          allExpectedConnected &&
                           unexpectedConnections.Count == 0;
 
         if (!allCorrect)
@@ -212,8 +229,12 @@ public sealed class ProductionFaultConfirmationGate
         _timeProvider.GetElapsedTime(started, now) >= TimeSpan.FromMilliseconds(milliseconds);
 
     private ProductionFaultConfirmationSnapshot Snapshot() => new(
-        _confirmedOpen.ToHashSet(StringComparer.Ordinal),
-        _confirmedUnexpected.ToHashSet(),
+        _confirmedOpen.Count == 0
+            ? EmptyOpenKeys
+            : _confirmedOpen.ToHashSet(StringComparer.Ordinal),
+        _confirmedUnexpected.Count == 0
+            ? EmptyUnexpectedPairs
+            : _confirmedUnexpected.ToHashSet(),
         _contactUnstable,
         _contactLossTimedOut,
         _productStable);

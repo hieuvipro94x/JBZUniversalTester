@@ -725,12 +725,45 @@ public sealed class ThtModelParser
             return string.Empty;
 
         // Hai tên dây nhìn giống nhau trong Htdrv phải luôn rơi vào cùng một net,
-        // kể cả file có full-width/Unicode hoặc khoảng trắng thừa.
+        // kể cả file có full-width/Unicode, khoảng trắng thừa hoặc marker/icon
+        // trang trí trước tên dây trong cell Htdrv.
         string normalized = value
             .Normalize(NormalizationForm.FormKC)
             .Trim();
 
-        return Regex.Replace(normalized, @"\s+", " ");
+        string collapsed = Regex.Replace(normalized, @"\s+", " ");
+        return TrimWireNameDecorators(collapsed);
+    }
+
+    private static string TrimWireNameDecorators(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        int start = 0;
+        int end = value.Length - 1;
+
+        while (start <= end && IsWireNameDecorator(value[start]))
+            start++;
+
+        while (end >= start && IsWireNameDecorator(value[end]))
+            end--;
+
+        return start > end
+            ? string.Empty
+            : value[start..(end + 1)].Trim();
+    }
+
+    private static bool IsWireNameDecorator(char character)
+    {
+        UnicodeCategory category = char.GetUnicodeCategory(character);
+        return category is UnicodeCategory.Control
+            or UnicodeCategory.Format
+            or UnicodeCategory.PrivateUse
+            or UnicodeCategory.OtherNotAssigned
+            or UnicodeCategory.Surrogate
+            or UnicodeCategory.OtherSymbol
+            or UnicodeCategory.EnclosingMark;
     }
 
     private static ProductModel BuildProductModel(
@@ -752,6 +785,9 @@ public sealed class ThtModelParser
         Dictionary<string, string> canonicalWireNames =
             BuildCanonicalWireMap(wireDefinitions);
 
+        Dictionary<string, int> connectorPinCounts =
+            ParseConnectorPinCounts(tables.Connectors);
+
         List<RawPin> rawPins = ParsePins(tables.Pins);
 
         if (rawPins.Count == 0)
@@ -764,8 +800,11 @@ public sealed class ThtModelParser
         var specialPins = new List<RawPin>();
         var pinByRaw = new Dictionary<RawPin, PinRecord>();
 
-        foreach (RawPin rawPin in rawPins)
+        for (int rawIndex = 0; rawIndex < rawPins.Count; rawIndex++)
         {
+            RawPin rawPin = rawPins[rawIndex];
+            int originalOrder = rawIndex + 1;
+
             if (rawPin.Connector.Equals(
                     "_DISCARD",
                     StringComparison.OrdinalIgnoreCase))
@@ -789,7 +828,11 @@ public sealed class ThtModelParser
                     rawPin.Connector,
                     string.Empty,
                     rawPin.IoNumber,
-                    rawPin.PinNumber);
+                    rawPin.PinNumber,
+                    ConnectorPinCount: ResolveConnectorPinCount(rawPin, connectorPinCounts),
+                    PinType: rawPin.PinType,
+                    WireConnection: rawPin.WireConnection,
+                    OriginalOrder: originalOrder);
                 model.Pins.Add(emptyWirePin);
                 pinByRaw[rawPin] = emptyWirePin;
                 continue;
@@ -821,6 +864,11 @@ public sealed class ThtModelParser
                 direct?.Color,
                 canonical?.Color);
 
+            string wireConnection = FirstNotEmpty(
+                rawPin.WireConnection,
+                direct?.LinkedWire,
+                canonical?.LinkedWire);
+
             var pin = new PinRecord(
                 rawPin.Connector,
                 exactWireName,
@@ -828,7 +876,11 @@ public sealed class ThtModelParser
                 rawPin.PinNumber,
                 linkedWire,
                 section,
-                color);
+                color,
+                ResolveConnectorPinCount(rawPin, connectorPinCounts),
+                rawPin.PinType,
+                wireConnection,
+                originalOrder);
 
             // Giữ nguyên tất cả row pin. THT thật có thể dùng cùng một I/O cho
             // nhiều circuit (trace/model production có I/O 11 cho PR1 và SS1).
@@ -871,7 +923,12 @@ public sealed class ThtModelParser
         // Dựng riêng topology CLIP sau normal network. Không trộn CLIP vào
         // WireNet thông thường vì CLIP có một đầu A0 chung và quan hệ có thể
         // xuất hiện theo cả hai chiều trong frame board.
-        model.Clip = BuildClipTopology(model, specialPins, normalPins, pinByRaw);
+        model.Clip = BuildClipTopology(
+            model,
+            specialPins,
+            normalPins,
+            pinByRaw,
+            connectorPinCounts);
 
         // Nếu file có row AO/aN nhưng thiếu A0 hoặc không có branch hợp lệ,
         // fallback an toàn: chỉ các special row không dựng được topology mới
@@ -897,6 +954,11 @@ public sealed class ThtModelParser
             throw new InvalidDataException(
                 "File THT không có chân kiểm tra hợp lệ.");
         }
+
+        model.Connectors = BuildConnectorDefinitions(
+            model.Pins,
+            connectorPinCounts,
+            model.TopologyWarnings);
 
         // Format thật trong stream Contents được ưu tiên. Nếu file đời khác
         // không có block nhúng thì mới fallback sang bảng text.
@@ -1187,6 +1249,19 @@ public sealed class ThtModelParser
                 "Type1",
                 "PinType");
 
+            string pinCount = row.Get(
+                "핀수",
+                "핀 수",
+                "PinCount",
+                "Pin Count",
+                "Pins");
+
+            string wireConnection = row.Get(
+                "선연결",
+                "PinLink",
+                "LinkedWire",
+                "WireConnection");
+
             if (!string.IsNullOrWhiteSpace(connector))
             {
                 lastConnector = connector;
@@ -1204,7 +1279,9 @@ public sealed class ThtModelParser
                 WireName = wireName,
                 IoNumber = ioNumber,
                 PinNumber = pinNumber,
+                PinCount = pinCount,
                 PinType = pinType,
+                WireConnection = wireConnection,
                 PinOrder = row.Get("핀차수", "TestOrder", "PinOrder"),
                 PinOption = row.Get("핀옵션", "Option", "PinOption"),
                 Remark = row.Get("비고", "Remark")
@@ -1212,6 +1289,132 @@ public sealed class ThtModelParser
         }
 
         return result;
+    }
+
+    private static Dictionary<string, int> ParseConnectorPinCounts(ThtTextTable connectorTable)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ThtTextRow row in connectorTable.Rows)
+        {
+            string connector = row.Get(
+                "커넥터",
+                "Connector",
+                "ConnectorId",
+                "번호",
+                "번 호",
+                "No");
+
+            string pinCountText = row.Get(
+                "핀수",
+                "핀 수",
+                "PinCount",
+                "Pin Count",
+                "Pins");
+
+            if (string.IsNullOrWhiteSpace(connector) ||
+                !int.TryParse(pinCountText.Trim(), out int pinCount) ||
+                pinCount <= 0)
+            {
+                continue;
+            }
+
+            result[connector.Trim()] = pinCount;
+        }
+
+        return result;
+    }
+
+    private static string ResolveConnectorPinCount(
+        RawPin pin,
+        IReadOnlyDictionary<string, int> connectorPinCounts)
+    {
+        if (!string.IsNullOrWhiteSpace(pin.Connector) &&
+            connectorPinCounts.TryGetValue(pin.Connector.Trim(), out int count))
+        {
+            return count.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return pin.PinCount;
+    }
+
+    private static List<ConnectorDefinition> BuildConnectorDefinitions(
+        IReadOnlyList<PinRecord> pins,
+        IReadOnlyDictionary<string, int> connectorPinCounts,
+        ICollection<string> warnings)
+    {
+        var connectors = new List<ConnectorDefinition>();
+
+        foreach (IGrouping<string, PinRecord> connectorGroup in pins
+                     .Where(pin => !string.IsNullOrWhiteSpace(pin.Connector))
+                     .GroupBy(pin => pin.Connector.Trim(), StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(group => NaturalSortKey(group.Key), StringComparer.OrdinalIgnoreCase))
+        {
+            int[] rowDeclaredCounts = connectorGroup
+                .Select(pin => ParseOptionalInt(pin.ConnectorPinCount))
+                .Where(value => value.HasValue)
+                .Select(value => value!.Value)
+                .Distinct()
+                .OrderBy(value => value)
+                .ToArray();
+
+            int? tableDeclaredCount = connectorPinCounts.TryGetValue(connectorGroup.Key, out int tableCount)
+                ? tableCount
+                : null;
+
+            int[] declaredCounts = tableDeclaredCount.HasValue
+                ? [tableDeclaredCount.Value]
+                : rowDeclaredCounts;
+
+            if (rowDeclaredCounts.Length > 1)
+            {
+                warnings.Add(
+                    $"MODEL_WARNING_CONNECTOR_PINCOUNT_MISMATCH connector={connectorGroup.Key} values=[{string.Join(",", rowDeclaredCounts)}]");
+            }
+
+            int? maxLocalPin = connectorGroup
+                .Select(pin => ParseOptionalInt(pin.PinNumber))
+                .Where(value => value.HasValue)
+                .Select(value => value!.Value)
+                .DefaultIfEmpty(0)
+                .Max();
+
+            if (tableDeclaredCount.HasValue && maxLocalPin > tableDeclaredCount.Value)
+            {
+                warnings.Add(
+                    $"MODEL_WARNING_CONNECTOR_PINCOUNT_RANGE connector={connectorGroup.Key} declared={tableDeclaredCount.Value} maxMappedPin={maxLocalPin}");
+            }
+
+            ConnectorPin[] connectorPins = connectorGroup
+                .Select(pin => new ConnectorPin(
+                    pin.PinNumber,
+                    pin.IoNumber,
+                    pin.WireName,
+                    pin))
+                .OrderBy(pin => NaturalSortKey(pin.LocalPinNumber), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(pin => pin.PhysicalIo)
+                .ToArray();
+
+            connectors.Add(new ConnectorDefinition(
+                connectorGroup.Key,
+                declaredCounts.Length > 0 ? declaredCounts[0] : null,
+                connectorPins));
+        }
+
+        return connectors;
+    }
+
+    private static int? ParseOptionalInt(string value) =>
+        int.TryParse((value ?? string.Empty).Trim(), out int parsed) && parsed > 0
+            ? parsed
+            : null;
+
+    private static string NaturalSortKey(string value)
+    {
+        string normalized = (value ?? string.Empty).Trim();
+        return int.TryParse(normalized, out int number)
+            ? number.ToString("D10", CultureInfo.InvariantCulture)
+            : normalized;
     }
 
     /// <summary>
@@ -1301,7 +1504,8 @@ public sealed class ThtModelParser
         ProductModel model,
         IReadOnlyCollection<RawPin> specialPins,
         IReadOnlyCollection<ParsedPin> normalPins,
-        IReadOnlyDictionary<RawPin, PinRecord> pinByRaw)
+        IReadOnlyDictionary<RawPin, PinRecord> pinByRaw,
+        IReadOnlyDictionary<string, int> connectorPinCounts)
     {
         RawPin? commonRaw = specialPins.FirstOrDefault(pin => IsCommonA0(pin.PinType));
         if (commonRaw is null)
@@ -1327,7 +1531,10 @@ public sealed class ThtModelParser
             FirstNotEmpty(commonRaw.WireName, "CLIP-A0"),
             commonRaw.IoNumber,
             FirstNotEmpty(commonRaw.PinNumber, "A0"),
-            "CLIP COMMON");
+            "CLIP COMMON",
+            ConnectorPinCount: ResolveConnectorPinCount(commonRaw, connectorPinCounts),
+            PinType: commonRaw.PinType,
+            WireConnection: commonRaw.WireConnection);
 
         AddModelPinIfMissing(model, commonPin);
 
@@ -1355,7 +1562,10 @@ public sealed class ThtModelParser
                 FirstNotEmpty(raw.WireName, $"CLIP-{branchName.ToUpperInvariant()}"),
                 targetIo,
                 FirstNotEmpty(raw.PinNumber, branchName),
-                $"{branchName} -> I/O {targetIo}");
+                $"{branchName} -> I/O {targetIo}",
+                ConnectorPinCount: ResolveConnectorPinCount(raw, connectorPinCounts),
+                PinType: raw.PinType,
+                WireConnection: raw.WireConnection);
 
             AddModelPinIfMissing(model, clipPin);
             normalByIo.TryGetValue(targetIo, out PinRecord? targetPin);
@@ -1569,7 +1779,9 @@ public sealed class ThtModelParser
         public string WireName { get; init; } = string.Empty;
         public int IoNumber { get; init; }
         public string PinNumber { get; init; } = string.Empty;
+        public string PinCount { get; init; } = string.Empty;
         public string PinType { get; init; } = string.Empty;
+        public string WireConnection { get; init; } = string.Empty;
         public string PinOrder { get; init; } = string.Empty;
         public string PinOption { get; init; } = string.Empty;
         public string Remark { get; init; } = string.Empty;
@@ -1578,7 +1790,9 @@ public sealed class ThtModelParser
             (!string.IsNullOrWhiteSpace(Connector) ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(WireName) ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(PinNumber) ? 1 : 0) +
+            (!string.IsNullOrWhiteSpace(PinCount) ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(PinType) ? 1 : 0) +
+            (!string.IsNullOrWhiteSpace(WireConnection) ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(PinOrder) ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(PinOption) ? 1 : 0) +
             (!string.IsNullOrWhiteSpace(Remark) ? 1 : 0);

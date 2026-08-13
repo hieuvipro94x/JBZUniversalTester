@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace JBZUniversalTester.Models;
@@ -297,13 +298,14 @@ public static class FaultDisplayFormatter
         double? max = fault.ResistanceMax;
         ResistanceScale scale = ChooseResistanceScale(value, min, max);
 
+        bool isOpen = fault.Message.Contains("OPEN", StringComparison.OrdinalIgnoreCase);
         limits = min is double lower && max is double upper
             ? $"{FormatResistance(lower, scale)} – {FormatResistance(upper, scale)}"
             : string.Empty;
-        measured = value is double actual ? FormatResistance(actual, scale) : "NO VALUE";
+        measured = value is double actual ? FormatResistance(actual, scale) : isOpen ? "OPEN" : "NO VALUE";
         deviation = string.Empty;
-        operatorAssessment = "KHÔNG XÁC ĐỊNH";
-        customerAssessment = "VALUE UNAVAILABLE";
+        operatorAssessment = isOpen ? "OPEN" : "KHÔNG XÁC ĐỊNH";
+        customerAssessment = isOpen ? "OPEN" : "VALUE UNAVAILABLE";
 
         if (value is not double measuredValue || min is not double minimum || max is not double maximum)
             return;
@@ -335,17 +337,17 @@ public static class FaultDisplayFormatter
     {
         double maximum = values.Where(value => value.HasValue).Select(value => Math.Abs(value!.Value)).DefaultIfEmpty(0).Max();
         return maximum >= 1_000_000
-            ? new ResistanceScale(1_000_000, "MΩ")
+            ? new ResistanceScale(1_000_000, "MΩ", "0.000")
             : maximum >= 1_000
-                ? new ResistanceScale(1_000, "kΩ")
-                : new ResistanceScale(1, "Ω");
+                ? new ResistanceScale(1_000, "kΩ", "0.000")
+                : new ResistanceScale(1, "Ω", "0.00");
     }
 
     private static string FormatResistance(double value, ResistanceScale scale) =>
-        FormattableString.Invariant($"{value / scale.Divisor:0.###} {scale.Unit}");
+        (value / scale.Divisor).ToString(scale.Format, CultureInfo.InvariantCulture) + " " + scale.Unit;
 
     private static string FormatSignedResistance(double value, ResistanceScale scale) =>
-        FormattableString.Invariant($"{value / scale.Divisor:+0.###;-0.###;0} {scale.Unit}");
+        (value / scale.Divisor).ToString("+" + scale.Format + ";-" + scale.Format + ";0", CultureInfo.InvariantCulture) + " " + scale.Unit;
 
     private static string StandardConnection(FaultDetail fault, bool vietnamese)
     {
@@ -444,5 +446,5 @@ public static class FaultDisplayFormatter
     private static string JoinParts(params string[] parts) =>
         string.Join("; ", parts.Where(part => !string.IsNullOrWhiteSpace(part)));
 
-    private readonly record struct ResistanceScale(double Divisor, string Unit);
+    private readonly record struct ResistanceScale(double Divisor, string Unit, string Format);
 }

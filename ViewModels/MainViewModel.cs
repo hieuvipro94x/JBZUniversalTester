@@ -84,6 +84,7 @@ public sealed class MainViewModel : ObservableObject
     {
         _settings = AppSettings.Load();
         _productionSettings = ProductionConfigService.Load();
+        StartupPerformanceTrace.Mark("T3 Settings loaded");
         // Yêu cầu 3: ngay khi app khởi động, ghi lại đầy đủ config tiếng Anh.
         ProductionConfigService.EnsureSavedOnStartup(_productionSettings);
 
@@ -281,16 +282,40 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     public async Task ReloadProductionSettingsAsync()
     {
-        BoardMode oldBoardMode = _productionSettings.BoardMode;
+        ProductionSettings old = new()
+        {
+            BoardMode = _productionSettings.BoardMode,
+            ExpansionCardCount = _productionSettings.ExpansionCardCount,
+            StartCardNumber = _productionSettings.StartCardNumber,
+            UsbDelay = _productionSettings.UsbDelay,
+            ManualModeEnabled = _productionSettings.ManualModeEnabled
+        };
 
         ProductionConfigService.ReloadInto(_productionSettings);
 
-        bool boardSelectionChanged = oldBoardMode != _productionSettings.BoardMode;
+        bool boardSelectionChanged = old.BoardMode != _productionSettings.BoardMode;
+        bool manualChanged = old.ManualModeEnabled != _productionSettings.ManualModeEnabled;
+        bool scanHardwareChanged =
+            old.ExpansionCardCount != _productionSettings.ExpansionCardCount ||
+            old.StartCardNumber != _productionSettings.StartCardNumber ||
+            old.UsbDelay != _productionSettings.UsbDelay;
 
-        if (boardSelectionChanged)
+        if (manualChanged)
+        {
+            if (_productionSettings.ManualModeEnabled)
+                await Test.EnterManualModeAsync();
+            else
+                await Test.ExitManualModeAsync();
+        }
+
+        if (_productionSettings.ManualModeEnabled && !boardSelectionChanged)
+            Test.RefreshProductionSettingsOnly();
+        else if (boardSelectionChanged)
             await Test.ReconnectBoardForSettingsAsync();
-        else
+        else if (scanHardwareChanged)
             await Test.RefreshProductionConfigurationAsync();
+        else
+            Test.RefreshProductionSettingsOnly();
 
         RefreshSettingsBindings();
     }

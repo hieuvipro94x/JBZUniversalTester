@@ -148,6 +148,12 @@ public sealed class AppSettings
         Storage ??= new StorageSettings();
 
         Test.ResistanceChannels ??= [];
+        Test.ResistanceMinimumSettleMs = Math.Clamp(Test.ResistanceMinimumSettleMs, 0, 60_000);
+        Test.ResistanceSampleIntervalMs = Math.Clamp(Test.ResistanceSampleIntervalMs, 0, 10_000);
+        Test.ResistanceStableSampleCount = Math.Clamp(Test.ResistanceStableSampleCount, 1, 20);
+        Test.ResistanceStableAbsoluteToleranceOhm = Math.Max(0, Test.ResistanceStableAbsoluteToleranceOhm);
+        Test.ResistanceStableRelativeTolerancePercent = Math.Max(0, Test.ResistanceStableRelativeTolerancePercent);
+        Test.ResistanceStabilityTimeoutMs = Math.Clamp(Test.ResistanceStabilityTimeoutMs, 100, 120_000);
     }
 
     private static void BackupInvalidFile()
@@ -212,6 +218,12 @@ public sealed class TestSettings
     public int FaultEjectPulseMs { get; set; } = 250;
 
     public double ResistanceOpenThreshold { get; set; } = 1e30;
+    public int ResistanceMinimumSettleMs { get; set; } = 300;
+    public int ResistanceSampleIntervalMs { get; set; } = 50;
+    public int ResistanceStableSampleCount { get; set; } = 3;
+    public double ResistanceStableAbsoluteToleranceOhm { get; set; } = 5;
+    public double ResistanceStableRelativeTolerancePercent { get; set; } = 0.2;
+    public int ResistanceStabilityTimeoutMs { get; set; } = 3000;
 
     public List<ResistanceChannelSettings> ResistanceChannels
     {

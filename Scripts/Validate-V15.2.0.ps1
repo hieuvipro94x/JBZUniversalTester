@@ -11,7 +11,8 @@ $version = Get-Content (Join-Path $ProjectRoot 'Version.props') -Raw -Encoding U
 $engine = Get-Content (Join-Path $ProjectRoot 'Services\TestEngine.cs') -Raw -Encoding UTF8
 $testVm = Get-Content (Join-Path $ProjectRoot 'ViewModels\TestViewModel.cs') -Raw -Encoding UTF8
 $history = Get-Content (Join-Path $ProjectRoot 'Services\HistoryExportService.cs') -Raw -Encoding UTF8
-$uart = Get-Content (Join-Path $ProjectRoot 'Services\UartTtlBoardTransport.cs') -Raw -Encoding UTF8
+$uartPath = Join-Path $ProjectRoot 'Services\UartTtlBoardTransport.cs'
+$uart = if (Test-Path $uartPath) { Get-Content $uartPath -Raw -Encoding UTF8 } else { $null }
 $pi = Get-Content (Join-Path $ProjectRoot 'Models\PiLegacyModel.cs') -Raw -Encoding UTF8
 $settingsXaml = Get-Content (Join-Path $ProjectRoot 'Views\ProductionSettingsPage.xaml') -Raw -Encoding UTF8
 
@@ -22,7 +23,9 @@ Check 'FAIL eject only calls R1 helper' ($engine -match 'EjectFaultProductAsync[
 Check 'PASS R2 before R1' ($engine.IndexOf('await PulseMarkingRelayAsync') -lt $engine.IndexOf('await PulseJigRelayAsync'))
 Check 'Result side effects use interlocked gate' ($testVm -match 'Interlocked\.CompareExchange\(ref _resultRecordedThisCycle, 1, 0\)')
 Check 'TestEngine does not subscribe board frames' ($engine -notmatch 'FrameReceived\s*\+=')
-Check 'UART uses protocol events, no binary frame field event' ($uart -match 'FrameReceived\s*\r?\n\s*\{' -and $uart -match 'ProtocolEventReceived')
+Check 'UART absent or isolated from D2XX build' (
+    $null -eq $uart -or
+    ($uart -match 'FrameReceived\s*\r?\n\s*\{' -and $uart -match 'ProtocolEventReceived'))
 Check 'History uses one column definition' ($history -match 'HistoryColumn\[\] Columns' -and $history -notmatch 'string\[\] Headers')
 Check 'XLSX native DateTime/number output' ($history -match 'ToOADate\(\)' -and $history -match 'HistoryCellType\.Number')
 Check 'Pi parser accepts UTF BOM' ($pi -match "TrimStart\('\\uFEFF'\)")

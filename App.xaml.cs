@@ -12,6 +12,7 @@ public partial class App : Application
     {
         AsyncFileLogService.Current.Initialize();
         AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
+        StartupPerformanceTrace.Mark("T0 App.OnStartup");
         StartupBootstrapService.EnsureStartupFiles();
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;

@@ -138,6 +138,7 @@ public static class ProductionConfigService
             $"[UsbDelay]{settings.UsbDelay}",
             $"[StartCardNumber]{settings.StartCardNumber}",
             $"[UseTestPointer]{Bool(settings.UseTestPointer)}",
+            $"[ManualModeEnabled]{Bool(settings.ManualModeEnabled)}",
             $"[AutoMasterSequence]{Bool(settings.AutoMasterSequence)}",
             $"[MasterFaultRequiredCount]{settings.MasterFaultRequiredCount}",
             $"[WaterproofSerialPort]{settings.WaterproofSerialPort}",
@@ -229,15 +230,15 @@ public static class ProductionConfigService
 
         string primaryKey = GetMasterModelKey(model);
         if (settings.MasterFaultCountsByModel.TryGetValue(primaryKey, out int count))
-            return Math.Clamp(count, 1, 99);
+            return Math.Clamp(count, 0, 99);
 
         string pathKey = GetMasterModelKeyFromPath(model.SourcePath);
         if (settings.MasterFaultCountsByModel.TryGetValue(pathKey, out count))
-            return Math.Clamp(count, 1, 99);
+            return Math.Clamp(count, 0, 99);
 
         if (!string.IsNullOrWhiteSpace(model.ModelName) &&
             settings.MasterFaultCountsByModel.TryGetValue(model.ModelName.Trim(), out count))
-            return Math.Clamp(count, 1, 99);
+            return Math.Clamp(count, 0, 99);
 
         return settings.MasterFaultRequiredCount;
     }
@@ -248,7 +249,7 @@ public static class ProductionConfigService
         Normalize(settings);
         string key = GetMasterModelKeyFromPath(path);
         return settings.MasterFaultCountsByModel.TryGetValue(key, out int count)
-            ? Math.Clamp(count, 1, 99)
+            ? Math.Clamp(count, 0, 99)
             : settings.MasterFaultRequiredCount;
     }
 
@@ -256,7 +257,7 @@ public static class ProductionConfigService
     {
         ArgumentNullException.ThrowIfNull(settings);
         Normalize(settings);
-        int normalized = Math.Clamp(count, 1, 99);
+        int normalized = Math.Clamp(count, 0, 99);
         string key = GetMasterModelKeyFromPath(path);
         if (string.Equals(key, "DEFAULT", StringComparison.OrdinalIgnoreCase))
             settings.MasterFaultRequiredCount = normalized;
@@ -299,6 +300,7 @@ public static class ProductionConfigService
         settings.UsbDelay = IAny(map, settings.UsbDelay, "UsbDelay", "USB 지연");
         settings.StartCardNumber = I(map, "StartCardNumber", settings.StartCardNumber);
         settings.UseTestPointer = B(map, "UseTestPointer", settings.UseTestPointer);
+        settings.ManualModeEnabled = B(map, "ManualModeEnabled", settings.ManualModeEnabled);
         settings.AutoMasterSequence = B(map, "AutoMasterSequence", settings.AutoMasterSequence);
         settings.MasterFaultRequiredCount = I(map, "MasterFaultRequiredCount", settings.MasterFaultRequiredCount);
         settings.WaterproofSerialPort = I(map, "WaterproofSerialPort", settings.WaterproofSerialPort);
@@ -407,7 +409,7 @@ public static class ProductionConfigService
 
         // V12.9.5: Master luôn tự động trong Production. Không còn đường manual song song.
         settings.AutoMasterSequence = true;
-        settings.MasterFaultRequiredCount = Math.Clamp(settings.MasterFaultRequiredCount, 1, 99);
+        settings.MasterFaultRequiredCount = Math.Clamp(settings.MasterFaultRequiredCount, 0, 99);
 
         foreach (string key in settings.MasterFaultCountsByModel.Keys.ToArray())
         {
@@ -416,7 +418,7 @@ public static class ProductionConfigService
                 settings.MasterFaultCountsByModel.Remove(key);
                 continue;
             }
-            settings.MasterFaultCountsByModel[key] = Math.Clamp(settings.MasterFaultCountsByModel[key], 1, 99);
+            settings.MasterFaultCountsByModel[key] = Math.Clamp(settings.MasterFaultCountsByModel[key], 0, 99);
         }
 
         if (settings.LotNo < 0) settings.LotNo = 0;

@@ -1,6 +1,42 @@
 ﻿using JBZUniversalTester.Models;
 
+using System.Globalization;
+using System.Text.RegularExpressions;
+
 namespace JBZUniversalTester.Services;
+
+public sealed record ExpectedNetworkDiagnostic(
+    string Key,
+    string Name,
+    string Category,
+    int SourceIo,
+    IReadOnlyList<int> ExpectedIo,
+    bool Passed)
+{
+    public string Display => ExpectedIo.Count == 0
+        ? $"{Name}: IO{SourceIo}"
+        : $"{Name}: IO{SourceIo}<->{string.Join(",", ExpectedIo.Select(io => $"IO{io}"))}";
+}
+
+public sealed record PassGateDiagnostics(
+    int ExpectedNetCount,
+    int PassedNetCount,
+    IReadOnlyList<ExpectedNetworkDiagnostic> ExpectedNetworks,
+    IReadOnlyList<ExpectedNetworkDiagnostic> RemainingNetworks,
+    int WrongCandidateCount,
+    int WrongConfirmedCount,
+    int ShortCandidateCount,
+    int ShortConfirmedCount,
+    bool HasProductActivity,
+    bool HasExpectedSourceCoverage,
+    bool ProductStable,
+    bool ContactUnstable,
+    bool ContactLossTimedOut,
+    bool ContinuityPassed,
+    bool HasWiringFault,
+    bool LastFrameValid,
+    long LastFrameSequence,
+    int LastFrameUnknownBytes);
 
 /// <summary>
 /// V10.3 continuity engine reconstructed from the 2026-08-07 production and
@@ -10,6 +46,7 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class TestEngine : IDisposable
 {
+    const int ClipDisplayOrderBase = -1_000_000;
     public const int JigEjectRelay = 1;
     public const int MarkingRelay = 2;
 
@@ -28,11 +65,16 @@ public sealed class TestEngine : IDisposable
     readonly Dictionary<int, HashSet<int>> _currentConnections = [];
     readonly HashSet<int> _unexpectedIo = [];
     readonly HashSet<WiringFaultPair> _wiringFaults = [];
+    readonly HashSet<WiringFaultPair> _candidateWiringFaults = [];
     readonly HashSet<string> _confirmedOpenKeys = new(StringComparer.Ordinal);
+    readonly HashSet<string> _latchedClipKeys = new(StringComparer.OrdinalIgnoreCase);
+    readonly HashSet<(int SourceIo, int TargetIo)> _unexpectedPairScratch = [];
     Dictionary<int, int> _componentByIo = [];
     Dictionary<PinRecord, WireNet[]> _netsByPin = new(ReferenceEqualityComparer.Instance);
     Dictionary<WireNet, string> _confirmationKeyByNet = new(ReferenceEqualityComparer.Instance);
     Dictionary<ClipBranch, string> _confirmationKeyByClip = new(ReferenceEqualityComparer.Instance);
+    Dictionary<PinRecord, int> _displayOrderByPin = new(ReferenceEqualityComparer.Instance);
+    Dictionary<WireNet, int> _displayOrderByNet = new(ReferenceEqualityComparer.Instance);
     readonly Dictionary<string, bool> _expectedConnectionScratch = new(StringComparer.Ordinal);
     volatile bool _frameProcessingEnabled = true;
     bool _forceNextFrameChanged = true;
@@ -43,6 +85,7 @@ public sealed class TestEngine : IDisposable
     bool _hasExpectedSourceCoverage;
     bool _lastFrameValid;
     long _lastFrameSequence;
+    long _framesProcessed;
     int _lastFrameUnknownBytes;
     bool _disposed;
 
@@ -59,9 +102,14 @@ public sealed class TestEngine : IDisposable
                 return _wiringFaults.ToArray();
         }
     }
-    public int ExpectedNetCount => _model is null
-        ? 0
-        : _model.Nets.Count + (_model.Clip?.Branches.Count ?? 0);
+    public int ExpectedNetCount
+    {
+        get
+        {
+            lock (_gate)
+                return _model is null ? 0 : ProductionExpectedNetCount(_model);
+        }
+    }
     public bool HasResistanceSteps => _model?.ResistanceSteps.Count > 0;
     public int ResistanceStepCount => _model?.ResistanceSteps.Count ?? 0;
 
@@ -98,6 +146,8 @@ public sealed class TestEngine : IDisposable
     {
         get { lock (_gate) return _hasExpectedSourceCoverage; }
     }
+
+    public long FramesProcessed => Interlocked.Read(ref _framesProcessed);
 
     public bool LastFrameValid
     {
@@ -172,10 +222,10 @@ public sealed class TestEngine : IDisposable
 
                 foreach (WireNet net in _model.Nets)
                 {
-                    HashSet<int> actual =
-                        _currentConnections.GetValueOrDefault(net.SourceIo) ?? [];
+                    if (!IsEligibleProductionNet(net))
+                        continue;
 
-                    if (net.ExpectedActiveIo.Any(io => !actual.Contains(io)))
+                    if (!IsWireNetConnected(net, _currentConnections))
                         return true;
                 }
 
@@ -183,12 +233,15 @@ public sealed class TestEngine : IDisposable
                 {
                     foreach (ClipBranch branch in _model.Clip.Branches)
                     {
+                        if (!IsEligibleClipBranch(_model.Clip, branch))
+                            continue;
+
                         if (!IsClipBranchConnected(_model.Clip, branch, _currentConnections))
                             return true;
                     }
                 }
 
-                return _model.Nets.Count == 0 && (_model.Clip?.Branches.Count ?? 0) == 0;
+                return ProductionExpectedNetCount(_model) == 0;
             }
         }
     }
@@ -205,12 +258,15 @@ public sealed class TestEngine : IDisposable
 
                 int ordinaryMissing = _model.Nets.Sum(net =>
                 {
-                    HashSet<int> actual = _currentConnections.GetValueOrDefault(net.SourceIo) ?? [];
-                    return net.ExpectedActiveIo.Count(io => !actual.Contains(io));
+                    if (!IsEligibleProductionNet(net))
+                        return 0;
+
+                    return CountDisconnectedEndpoints(net, _currentConnections);
                 });
 
                 int clipMissing = _model.Clip?.Branches.Count(branch =>
-                    !_passedNets.Contains(branch.NetName)) ?? 0;
+                    !_passedNets.Contains(branch.NetName) &&
+                    !_latchedClipKeys.Contains(ClipConfirmationKey(branch.NetName))) ?? 0;
 
                 return ordinaryMissing + clipMissing;
             }
@@ -223,16 +279,49 @@ public sealed class TestEngine : IDisposable
         {
             lock (_gate)
             {
-                int expected = _model is null
-                    ? 0
-                    : _model.Nets.Count + (_model.Clip?.Branches.Count ?? 0);
+                int expected = _model is null ? 0 : ProductionExpectedNetCount(_model);
+                int passed = _model is null ? 0 : CountPassedExpectedUnsafe(_model);
 
                 return _model is not null &&
                        expected > 0 &&
-                       _passedNets.Count == expected &&
-                       _productStable &&
+                       passed == expected &&
+                       _candidateWiringFaults.Count == 0 &&
                        _wiringFaults.Count == 0;
             }
+        }
+    }
+
+    public PassGateDiagnostics GetPassGateDiagnostics()
+    {
+        lock (_gate)
+        {
+            ProductModel? model = _model;
+            ExpectedNetworkDiagnostic[] expectedNetworks = model is null
+                ? []
+                : BuildExpectedNetworkDiagnosticsUnsafe(model);
+            ExpectedNetworkDiagnostic[] remainingNetworks = expectedNetworks
+                .Where(item => !item.Passed)
+                .ToArray();
+
+            return new PassGateDiagnostics(
+                expectedNetworks.Length,
+                expectedNetworks.Count(item => item.Passed),
+                expectedNetworks,
+                remainingNetworks,
+                _candidateWiringFaults.Count(item => item.FaultType == ProductFaultType.WrongWiring),
+                _wiringFaults.Count(item => item.FaultType == ProductFaultType.WrongWiring),
+                _candidateWiringFaults.Count(item => item.FaultType == ProductFaultType.ShortCircuit),
+                _wiringFaults.Count(item => item.FaultType == ProductFaultType.ShortCircuit),
+                model is not null && HasProductActivityUnsafe(model),
+                _hasExpectedSourceCoverage,
+                _productStable,
+                _contactUnstable,
+                _contactLossTimedOut,
+                ContinuityPassed,
+                _wiringFaults.Count > 0,
+                _lastFrameValid,
+                _lastFrameSequence,
+                _lastFrameUnknownBytes);
         }
     }
 
@@ -258,6 +347,8 @@ public sealed class TestEngine : IDisposable
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _componentByIo = BuildExpectedComponents(model);
         _netsByPin = BuildNetsByPin(model);
+        _displayOrderByPin = BuildDisplayOrderByPin(model);
+        _displayOrderByNet = BuildNetworkDisplayOrder(model);
         _confirmationKeyByNet = new Dictionary<WireNet, string>(ReferenceEqualityComparer.Instance);
         foreach (WireNet net in model.Nets)
             _confirmationKeyByNet[net] = NetConfirmationKey(net.Name);
@@ -265,6 +356,7 @@ public sealed class TestEngine : IDisposable
         _confirmationKeyByClip = new Dictionary<ClipBranch, string>(ReferenceEqualityComparer.Instance);
         foreach (ClipBranch branch in model.Clip?.Branches ?? [])
             _confirmationKeyByClip[branch] = ClipConfirmationKey(branch.NetName);
+        _latchedClipKeys.Clear();
         Reset();
     }
 
@@ -300,6 +392,239 @@ public sealed class TestEngine : IDisposable
         return result;
     }
 
+    static Dictionary<PinRecord, int> BuildDisplayOrderByPin(ProductModel model)
+    {
+        var result = new Dictionary<PinRecord, int>(ReferenceEqualityComparer.Instance);
+        var parent = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        string NormalizeConnector(string connector) => (connector ?? string.Empty).Trim();
+
+        string Find(string connector)
+        {
+            connector = NormalizeConnector(connector);
+            if (!parent.TryGetValue(connector, out string? value))
+            {
+                parent[connector] = connector;
+                return connector;
+            }
+
+            if (value.Equals(connector, StringComparison.OrdinalIgnoreCase))
+                return connector;
+
+            string root = Find(value);
+            parent[connector] = root;
+            return root;
+        }
+
+        void Union(string a, string b)
+        {
+            if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b))
+                return;
+
+            string rootA = Find(a);
+            string rootB = Find(b);
+            if (!rootA.Equals(rootB, StringComparison.OrdinalIgnoreCase))
+                parent[rootB] = rootA;
+        }
+
+        foreach (PinRecord pin in model.Pins)
+        {
+            if (!string.IsNullOrWhiteSpace(pin.Connector))
+                Find(pin.Connector);
+        }
+
+        foreach (WireNet net in model.Nets)
+        {
+            string[] connectors = net.Pins
+                .Select(pin => NormalizeConnector(pin.Connector))
+                .Where(connector => !string.IsNullOrWhiteSpace(connector))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            for (int i = 1; i < connectors.Length; i++)
+                Union(connectors[0], connectors[i]);
+        }
+
+        if (model.Clip is not null)
+        {
+            foreach (ClipBranch branch in model.Clip.Branches)
+            {
+                Union(model.Clip.CommonPin.Connector, branch.ClipPin.Connector);
+                if (branch.TargetPin is not null)
+                    Union(model.Clip.CommonPin.Connector, branch.TargetPin.Connector);
+            }
+        }
+
+        var pinsByConnector = model.Pins
+            .Where(pin => !string.IsNullOrWhiteSpace(pin.Connector))
+            .GroupBy(pin => NormalizeConnector(pin.Connector), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+
+        var connectorsByComponent = pinsByConnector.Keys
+            .GroupBy(Find, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                string[] connectors = group.ToArray();
+                int minOriginal = connectors
+                    .SelectMany(connector => pinsByConnector[connector])
+                    .Select(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
+                    .DefaultIfEmpty(int.MaxValue)
+                    .Min();
+
+                return new
+                {
+                    Connectors = connectors,
+                    MinOriginal = minOriginal,
+                    Natural = connectors.Select(NaturalSortKey).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).First()
+                };
+            })
+            .OrderBy(group => group.MinOriginal)
+            .ThenBy(group => group.Natural, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        int order = 0;
+        foreach (var component in connectorsByComponent)
+        {
+            foreach (string connector in component.Connectors
+                         .OrderBy(connector => ConnectorOriginalOrder(connector, pinsByConnector))
+                         .ThenBy(NaturalSortKey, StringComparer.OrdinalIgnoreCase))
+            {
+                foreach (PinRecord pin in pinsByConnector[connector]
+                             .OrderBy(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
+                             .ThenBy(pin => NaturalSortKey(pin.PinNumber), StringComparer.OrdinalIgnoreCase)
+                             .ThenBy(pin => pin.IoNumber))
+                {
+                    result[pin] = order++;
+                }
+            }
+        }
+
+        foreach (PinRecord pin in model.Pins)
+        {
+            if (!result.ContainsKey(pin))
+                result[pin] = order++;
+        }
+
+        return result;
+    }
+
+    static int ConnectorOriginalOrder(
+        string connector,
+        IReadOnlyDictionary<string, PinRecord[]> pinsByConnector)
+    {
+        return pinsByConnector.TryGetValue(connector, out PinRecord[]? pins)
+            ? pins.Select(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
+                .DefaultIfEmpty(int.MaxValue)
+                .Min()
+            : int.MaxValue;
+    }
+
+    static Dictionary<WireNet, int> BuildNetworkDisplayOrder(ProductModel model)
+    {
+        var result = new Dictionary<WireNet, int>(ReferenceEqualityComparer.Instance);
+        var entries = model.Nets
+            .Select((net, modelIndex) => new
+            {
+                Net = net,
+                ModelIndex = modelIndex,
+                RelationKey = ConnectorRelationKey(net),
+                FirstOriginal = FirstOriginalOrder(net),
+                RelationNatural = ConnectorRelationNaturalKey(net)
+            })
+            .Where(entry => IsEligibleProductionNet(entry.Net))
+            .ToArray();
+
+        var groupOrder = entries
+            .GroupBy(entry => entry.RelationKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new
+            {
+                Key = group.Key,
+                FirstOriginal = group.Min(entry => entry.FirstOriginal),
+                FirstModelIndex = group.Min(entry => entry.ModelIndex),
+                Natural = group
+                    .Select(entry => entry.RelationNatural)
+                    .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+                    .First()
+            })
+            .OrderBy(group => group.FirstOriginal)
+            .ThenBy(group => group.FirstModelIndex)
+            .ThenBy(group => group.Natural, StringComparer.OrdinalIgnoreCase)
+            .Select((group, index) => new { group.Key, Index = index })
+            .ToDictionary(group => group.Key, group => group.Index, StringComparer.OrdinalIgnoreCase);
+
+        int order = 0;
+        foreach (var group in entries
+                     .GroupBy(entry => entry.RelationKey, StringComparer.OrdinalIgnoreCase)
+                     .OrderBy(group => groupOrder[group.Key]))
+        {
+            foreach (var entry in group
+                         .OrderBy(item => item.FirstOriginal)
+                         .ThenBy(item => item.ModelIndex))
+            {
+                result[entry.Net] = order++ * 1000;
+            }
+        }
+
+        return result;
+    }
+
+    static string ConnectorRelationKey(WireNet net)
+    {
+        string[] connectors = NetworkConnectors(net)
+            .Select(NaturalSortKey)
+            .OrderBy(value => value, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return connectors.Length == 0
+            ? $"<no-connector>{net.Name}"
+            : string.Join("\u001f", connectors);
+    }
+
+    static string ConnectorRelationNaturalKey(WireNet net) =>
+        string.Join("\u001f", NetworkConnectors(net).Select(NaturalSortKey));
+
+    static string[] NetworkConnectors(WireNet net)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var connectors = new List<string>();
+
+        foreach (PinRecord pin in net.Pins
+                     .OrderBy(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
+                     .ThenBy(pin => pin.IoNumber))
+        {
+            string connector = (pin.Connector ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(connector) || !seen.Add(connector))
+                continue;
+
+            connectors.Add(connector);
+        }
+
+        return connectors.ToArray();
+    }
+
+    static int FirstOriginalOrder(WireNet net) =>
+        net.Pins
+            .Select(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
+            .DefaultIfEmpty(int.MaxValue)
+            .Min();
+
+    static string NaturalSortKey(string value)
+    {
+        string normalized = (value ?? string.Empty).Trim();
+        Match match = Regex.Match(
+            normalized,
+            @"^(?<prefix>\D*?)(?<number>\d+)(?<suffix>.*)$",
+            RegexOptions.CultureInvariant);
+
+        if (!match.Success)
+            return normalized;
+
+        return match.Groups["prefix"].Value +
+               int.Parse(match.Groups["number"].Value, CultureInfo.InvariantCulture)
+                   .ToString("D10", CultureInfo.InvariantCulture) +
+               match.Groups["suffix"].Value;
+    }
+
     /// <summary>
     /// PinProbe chỉ cần raw ScanFrame để nhận IO que dò; tắt engine production
     /// trong thời gian đó để không tốn CPU cho pass/fault/UI và không tạo trạng
@@ -322,6 +647,7 @@ public sealed class TestEngine : IDisposable
             _currentConnections.Clear();
             _unexpectedIo.Clear();
             _wiringFaults.Clear();
+            _candidateWiringFaults.Clear();
             _confirmedOpenKeys.Clear();
             _faultConfirmation.Reset();
             _contactUnstable = false;
@@ -342,6 +668,14 @@ public sealed class TestEngine : IDisposable
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
+    public void ResetProductCycle()
+    {
+        lock (_gate)
+            _latchedClipKeys.Clear();
+
+        Reset();
+    }
+
     public void ProcessFrame(ScanFrame frame)
     {
         if (_disposed)
@@ -357,6 +691,7 @@ public sealed class TestEngine : IDisposable
             frame.UnknownBytes > 0)
             return;
 
+        Interlocked.Increment(ref _framesProcessed);
         bool changed;
 
         lock (_gate)
@@ -367,55 +702,54 @@ public sealed class TestEngine : IDisposable
             if (!_frameProcessingEnabled || frame.Mode != BoardScanMode.Production)
                 return;
 
-            string previousConnectionSignature = BuildConnectionSignature(_currentConnections);
-            var previousPassed = _passedNets.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var previousFaults = _wiringFaults.ToHashSet();
-            var previousConfirmedOpen = _confirmedOpenKeys.ToHashSet(StringComparer.Ordinal);
+            bool sameActive = _currentActive.SetEquals(frame.ActiveIo);
+            bool sameConnections = ConnectionsEqual(_currentConnections, frame.Connections);
+            bool passedChanged = false;
             bool previousContactUnstable = _contactUnstable;
             bool previousContactLossTimedOut = _contactLossTimedOut;
             bool previousProductStable = _productStable;
             bool previousReadyToEvaluate = _readyToEvaluateProductFaults;
 
-            _currentActive.Clear();
-            foreach (int io in frame.ActiveIo)
-                _currentActive.Add(io);
+            if (!sameActive)
+            {
+                _currentActive.Clear();
+                foreach (int io in frame.ActiveIo)
+                    _currentActive.Add(io);
+            }
 
-            _currentConnections.Clear();
-            foreach (var pair in frame.Connections)
-                _currentConnections[pair.Key] = pair.Value.ToHashSet();
+            if (!sameConnections)
+            {
+                _currentConnections.Clear();
+                foreach (var pair in frame.Connections)
+                    _currentConnections[pair.Key] = pair.Value.ToHashSet();
+            }
 
-            // Đúng protocol Htdrv: kiểm tra từng network bằng quan hệ SOURCE -> TARGET.
-            // Vì vậy một target đúng nhưng xuất hiện dưới source khác sẽ KHÔNG PASS.
+            // Continuity vật lý là cạnh điện hai chiều. Htdrv có thể thấy
+            // IO1->IO2 hoặc IO2->IO1 cho cùng một dây hai chân; cả hai đều
+            // phải được tính là đúng network, không phải OPEN/missing.
             _expectedConnectionScratch.Clear();
             foreach (WireNet net in model.Nets)
             {
-                HashSet<int> actualTargets =
-                    _currentConnections.GetValueOrDefault(net.SourceIo) ?? [];
+                if (!IsEligibleProductionNet(net))
+                    continue;
 
-                bool connected = net.ExpectedActiveIo.Count > 0 &&
-                                 net.ExpectedActiveIo.All(actualTargets.Contains);
+                bool connected = IsWireNetConnected(net, _currentConnections);
                 _expectedConnectionScratch[_confirmationKeyByNet[net]] = connected;
 
                 if (!connected)
                 {
                     _stableCounters[net.Name] = 0;
-                    _passedNets.Remove(net.Name);
+                    passedChanged |= _passedNets.Remove(net.Name);
                     continue;
                 }
 
                 int stable = _stableCounters.GetValueOrDefault(net.Name) + 1;
                 _stableCounters[net.Name] = stable;
 
-                int configuredConfirm = net.ExpectedActiveIo.Count <= 1
-                    ? _production.IoConfirm1
-                    : _production.IoConfirmN;
-
-                int requiredFrames = configuredConfirm > 0
-                    ? configuredConfirm
-                    : Math.Max(1, _settings.Board.RequiredStableFrames);
-
-                if (stable >= requiredFrames)
-                    _passedNets.Add(net.Name);
+                // Kết nối đúng được chấp nhận ngay trên một complete board snapshot.
+                // IoConfirm*/RequiredStableFrames chỉ còn thuộc đường xác nhận lỗi
+                // đấu sai/chập, không được làm chậm PASS sạch.
+                passedChanged |= _passedNets.Add(net.Name);
             }
 
             // CLIP không phải WireNet thường. A0/AO là common, còn aN là
@@ -426,6 +760,17 @@ public sealed class TestEngine : IDisposable
             {
                 foreach (ClipBranch branch in model.Clip.Branches)
                 {
+                    if (!IsEligibleClipBranch(model.Clip, branch))
+                        continue;
+
+                    string clipKey = ClipConfirmationKey(branch.NetName);
+                    if (_latchedClipKeys.Contains(clipKey))
+                    {
+                        _expectedConnectionScratch[_confirmationKeyByClip[branch]] = true;
+                        passedChanged |= _passedNets.Add(branch.NetName);
+                        continue;
+                    }
+
                     bool connected = IsClipBranchConnected(
                         model.Clip,
                         branch,
@@ -435,20 +780,15 @@ public sealed class TestEngine : IDisposable
                     if (!connected)
                     {
                         _stableCounters[branch.NetName] = 0;
-                        _passedNets.Remove(branch.NetName);
+                        passedChanged |= _passedNets.Remove(branch.NetName);
                         continue;
                     }
 
                     int stable = _stableCounters.GetValueOrDefault(branch.NetName) + 1;
                     _stableCounters[branch.NetName] = stable;
 
-                    int configuredConfirm = _production.IoConfirm1;
-                    int requiredFrames = configuredConfirm > 0
-                        ? configuredConfirm
-                        : Math.Max(1, _settings.Board.RequiredStableFrames);
-
-                    if (stable >= requiredFrames)
-                        _passedNets.Add(branch.NetName);
+                    passedChanged |= _latchedClipKeys.Add(clipKey);
+                    passedChanged |= _passedNets.Add(branch.NetName);
                 }
             }
 
@@ -460,7 +800,7 @@ public sealed class TestEngine : IDisposable
             _lastFrameSequence = frame.Sequence;
             _lastFrameUnknownBytes = frame.UnknownBytes;
 
-            UpdateWiringFaults(
+            bool wiringChanged = UpdateWiringFaults(
                 model,
                 _expectedConnectionScratch,
                 hasProductActivity,
@@ -468,13 +808,10 @@ public sealed class TestEngine : IDisposable
 
             changed =
                 _forceNextFrameChanged ||
-                !string.Equals(
-                    previousConnectionSignature,
-                    BuildConnectionSignature(_currentConnections),
-                    StringComparison.Ordinal) ||
-                !previousPassed.SetEquals(_passedNets) ||
-                !previousFaults.SetEquals(_wiringFaults) ||
-                !previousConfirmedOpen.SetEquals(_confirmedOpenKeys) ||
+                !sameActive ||
+                !sameConnections ||
+                passedChanged ||
+                wiringChanged ||
                 previousContactUnstable != _contactUnstable ||
                 previousContactLossTimedOut != _contactLossTimedOut ||
                 previousProductStable != _productStable ||
@@ -488,7 +825,7 @@ public sealed class TestEngine : IDisposable
             Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    void UpdateWiringFaults(
+    bool UpdateWiringFaults(
         ProductModel model,
         IReadOnlyDictionary<string, bool> expectedConnections,
         bool hasProductActivity,
@@ -501,7 +838,8 @@ public sealed class TestEngine : IDisposable
         // mỗi frame. Đây là một trong các tối ưu quan trọng để scan gần tốc độ
         // Htdrv gốc khi model có hàng trăm pin.
         IReadOnlyDictionary<int, int> componentByIo = _componentByIo;
-        var unexpectedNow = new HashSet<(int Source, int Target)>();
+        HashSet<(int SourceIo, int TargetIo)> unexpectedNow = _unexpectedPairScratch;
+        unexpectedNow.Clear();
 
         foreach (var pair in _currentConnections)
         {
@@ -524,13 +862,26 @@ public sealed class TestEngine : IDisposable
             }
         }
 
-        WiringFaultPair[] classified = unexpectedNow
-            .Select(pair => ClassifyUnexpectedPair(model, pair.Source, pair.Target))
-            .ToArray();
+        WiringFaultPair[] classified = unexpectedNow.Count == 0
+            ? Array.Empty<WiringFaultPair>()
+            : unexpectedNow
+                .Select(pair => ClassifyUnexpectedPair(model, pair.SourceIo, pair.TargetIo))
+                .ToArray();
+
+        bool changed = false;
+        if (!_candidateWiringFaults.SetEquals(classified))
+        {
+            changed = true;
+            _candidateWiringFaults.Clear();
+            foreach (WiringFaultPair fault in classified)
+                _candidateWiringFaults.Add(fault);
+        }
 
         ProductionFaultConfirmationSnapshot snapshot = _faultConfirmation.Observe(
             expectedConnections,
-            classified.Select(fault => new UnexpectedFaultObservation(
+            classified.Length == 0
+                ? Array.Empty<UnexpectedFaultObservation>()
+                : classified.Select(fault => new UnexpectedFaultObservation(
                     fault.SourceIo,
                     fault.TargetIo,
                     fault.FaultType))
@@ -538,26 +889,50 @@ public sealed class TestEngine : IDisposable
             hasProductActivity,
             readyToEvaluateFaults);
 
-        _confirmedOpenKeys.Clear();
-        foreach (string key in snapshot.ConfirmedOpenKeys)
-            _confirmedOpenKeys.Add(key);
+        if (!_confirmedOpenKeys.SetEquals(snapshot.ConfirmedOpenKeys))
+        {
+            changed = true;
+            _confirmedOpenKeys.Clear();
+            foreach (string key in snapshot.ConfirmedOpenKeys)
+                _confirmedOpenKeys.Add(key);
+        }
+
         _contactUnstable = snapshot.ContactUnstable;
         _contactLossTimedOut = snapshot.ContactLossTimedOut;
         _productStable = snapshot.ProductStable;
 
-        _wiringFaults.Clear();
-        foreach (WiringFaultPair fault in classified)
+        if (classified.Length == 0)
         {
-            if (snapshot.ConfirmedUnexpectedPairs.Contains((fault.SourceIo, fault.TargetIo)))
-                _wiringFaults.Add(fault);
+            if (_wiringFaults.Count > 0 || _unexpectedIo.Count > 0)
+            {
+                changed = true;
+                _wiringFaults.Clear();
+                _unexpectedIo.Clear();
+            }
+
+            return changed;
         }
 
-        _unexpectedIo.Clear();
-        foreach (WiringFaultPair fault in _wiringFaults)
+        WiringFaultPair[] confirmedFaults = classified
+            .Where(fault => snapshot.ConfirmedUnexpectedPairs.Contains((fault.SourceIo, fault.TargetIo)))
+            .ToArray();
+
+        if (!_wiringFaults.SetEquals(confirmedFaults))
         {
-            _unexpectedIo.Add(fault.SourceIo);
-            _unexpectedIo.Add(fault.TargetIo);
+            changed = true;
+            _wiringFaults.Clear();
+            foreach (WiringFaultPair fault in confirmedFaults)
+                _wiringFaults.Add(fault);
+
+            _unexpectedIo.Clear();
+            foreach (WiringFaultPair fault in _wiringFaults)
+            {
+                _unexpectedIo.Add(fault.SourceIo);
+                _unexpectedIo.Add(fault.TargetIo);
+            }
         }
+
+        return changed;
     }
 
     private static WiringFaultPair ClassifyUnexpectedPair(
@@ -624,8 +999,9 @@ public sealed class TestEngine : IDisposable
         bool changed = false;
         lock (_gate)
         {
-            changed = _wiringFaults.Count > 0 || _unexpectedIo.Count > 0;
+            changed = _wiringFaults.Count > 0 || _unexpectedIo.Count > 0 || _candidateWiringFaults.Count > 0;
             _wiringFaults.Clear();
+            _candidateWiringFaults.Clear();
             _unexpectedIo.Clear();
             _faultConfirmation.ClearUnexpected();
             _productStable = false;
@@ -642,9 +1018,19 @@ public sealed class TestEngine : IDisposable
         return [];
     }
 
-    private bool HasProductActivityUnsafe(ProductModel model) =>
-        _currentConnections.Any(pair =>
-            pair.Value.Any(target => IsProductActivityEdge(model, pair.Key, target)));
+    private bool HasProductActivityUnsafe(ProductModel model)
+    {
+        foreach (KeyValuePair<int, HashSet<int>> pair in _currentConnections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (IsProductActivityEdge(model, pair.Key, target))
+                    return true;
+            }
+        }
+
+        return false;
+    }
 
     private bool HasExpectedSourceCoverageUnsafe(ProductModel model)
     {
@@ -672,6 +1058,72 @@ public sealed class TestEngine : IDisposable
 
     private static string NetConfirmationKey(string name) => $"NET:{name}";
     private static string ClipConfirmationKey(string name) => $"CLIP:{name}";
+
+    private static int ProductionExpectedNetCount(ProductModel model) =>
+        model.Nets.Count(IsEligibleProductionNet) +
+        (model.Clip?.Branches.Count(branch => IsEligibleClipBranch(model.Clip, branch)) ?? 0);
+
+    private static bool IsEligibleProductionNet(WireNet net) =>
+        net.SourceIo > 0 && net.ExpectedActiveIo.Count > 0;
+
+    private static bool IsEligibleClipBranch(ClipTopology clip, ClipBranch branch) =>
+        clip.CommonIo > 0 && branch.TargetIo > 0;
+
+    private ExpectedNetworkDiagnostic[] BuildExpectedNetworkDiagnosticsUnsafe(ProductModel model)
+    {
+        var result = new List<ExpectedNetworkDiagnostic>();
+
+        foreach (WireNet net in model.Nets)
+        {
+            if (!IsEligibleProductionNet(net))
+                continue;
+
+            result.Add(new ExpectedNetworkDiagnostic(
+                NetConfirmationKey(net.Name),
+                net.Name,
+                net.IsSplice ? "normal-splice" : "normal",
+                net.SourceIo,
+                net.ExpectedActiveIo.ToArray(),
+                _passedNets.Contains(net.Name)));
+        }
+
+        if (model.Clip is not null)
+        {
+            foreach (ClipBranch branch in model.Clip.Branches)
+            {
+                if (!IsEligibleClipBranch(model.Clip, branch))
+                    continue;
+
+                result.Add(new ExpectedNetworkDiagnostic(
+                    ClipConfirmationKey(branch.NetName),
+                    branch.NetName,
+                    "CLIP",
+                    model.Clip.CommonIo,
+                    [branch.TargetIo],
+                    _passedNets.Contains(branch.NetName) ||
+                    _latchedClipKeys.Contains(ClipConfirmationKey(branch.NetName))));
+            }
+        }
+
+        return result.ToArray();
+    }
+
+    private int CountPassedExpectedUnsafe(ProductModel model)
+    {
+        int count = model.Nets.Count(net =>
+            IsEligibleProductionNet(net) &&
+            _passedNets.Contains(net.Name));
+
+        if (model.Clip is not null)
+        {
+            count += model.Clip.Branches.Count(branch =>
+                IsEligibleClipBranch(model.Clip, branch) &&
+                (_passedNets.Contains(branch.NetName) ||
+                 _latchedClipKeys.Contains(ClipConfirmationKey(branch.NetName))));
+        }
+
+        return count;
+    }
 
 
     private static bool IsProductActivityEdge(
@@ -702,6 +1154,78 @@ public sealed class TestEngine : IDisposable
     {
         return (connections.TryGetValue(a, out HashSet<int>? fromA) && fromA.Contains(b)) ||
                (connections.TryGetValue(b, out HashSet<int>? fromB) && fromB.Contains(a));
+    }
+
+    private static bool IsWireNetConnected(
+        WireNet net,
+        IReadOnlyDictionary<int, HashSet<int>> connections)
+    {
+        if (!IsEligibleProductionNet(net))
+            return false;
+
+        HashSet<int> reachable = BuildReachableNetEndpoints(net, connections);
+        return net.IoNumbers
+            .Where(io => io > 0)
+            .Distinct()
+            .All(reachable.Contains);
+    }
+
+    private static bool IsEndpointConnectedWithinNet(
+        WireNet net,
+        int endpoint,
+        IReadOnlyDictionary<int, HashSet<int>> connections)
+    {
+        if (endpoint == net.SourceIo)
+            return IsWireNetConnected(net, connections);
+
+        return BuildReachableNetEndpoints(net, connections).Contains(endpoint);
+    }
+
+    private static int CountDisconnectedEndpoints(
+        WireNet net,
+        IReadOnlyDictionary<int, HashSet<int>> connections)
+    {
+        if (!IsEligibleProductionNet(net))
+            return 0;
+
+        HashSet<int> reachable = BuildReachableNetEndpoints(net, connections);
+        return net.ExpectedActiveIo.Count(io => !reachable.Contains(io));
+    }
+
+    private static HashSet<int> BuildReachableNetEndpoints(
+        WireNet net,
+        IReadOnlyDictionary<int, HashSet<int>> connections)
+    {
+        HashSet<int> endpoints = net.IoNumbers
+            .Where(io => io > 0)
+            .Distinct()
+            .ToHashSet();
+        var reachable = new HashSet<int>();
+        if (net.SourceIo <= 0 || !endpoints.Contains(net.SourceIo))
+            return reachable;
+
+        var queue = new Queue<int>();
+        reachable.Add(net.SourceIo);
+        queue.Enqueue(net.SourceIo);
+
+        while (queue.Count > 0)
+        {
+            int current = queue.Dequeue();
+            foreach (int candidate in endpoints)
+            {
+                if (candidate == current ||
+                    reachable.Contains(candidate) ||
+                    !HasElectricalEdge(connections, current, candidate))
+                {
+                    continue;
+                }
+
+                reachable.Add(candidate);
+                queue.Enqueue(candidate);
+            }
+        }
+
+        return reachable;
     }
 
     static Dictionary<int, int> BuildExpectedComponents(ProductModel model)
@@ -759,25 +1283,31 @@ public sealed class TestEngine : IDisposable
         return parent.Keys.ToDictionary(io => io, Find);
     }
 
-    static string BuildConnectionSignature(
-        IReadOnlyDictionary<int, HashSet<int>> connections)
+    static bool ConnectionsEqual(
+        IReadOnlyDictionary<int, HashSet<int>> current,
+        IReadOnlyDictionary<int, IReadOnlySet<int>> next)
     {
-        return string.Join(
-            ";",
-            connections
-                .Where(pair => pair.Value.Count > 0)
-                .OrderBy(pair => pair.Key)
-                .Select(pair =>
-                    $"{pair.Key}>{string.Join(',', pair.Value.Order())}"));
+        if (current.Count != next.Count)
+            return false;
+
+        foreach (KeyValuePair<int, HashSet<int>> pair in current)
+        {
+            if (!next.TryGetValue(pair.Key, out IReadOnlySet<int>? nextTargets) ||
+                !pair.Value.SetEquals(nextTargets))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
     /// Bảng động theo đúng cách vận hành Htdrv:
-    /// - Ban đầu hiển thị TOÀN BỘ pin map có trong THT.
-    /// - Network 2 chân: khi receiver được xác nhận A0 thì cả source + target ẩn.
-    /// - Nhả dây: receiver về 80, hai dòng hiện lại ngay.
-    /// - Splice nhiều nhánh: target nào đang A0 thì target đó ẩn; source chỉ ẩn
-    ///   khi toàn bộ nhánh của network đã đạt.
+    /// - Ban đầu hiển thị endpoint rows của các network chưa hoàn thành.
+    /// - Network PASS sạch: mọi endpoint row của network biến mất khỏi bảng.
+    /// - Network mở lại: endpoint rows tự hiện lại theo thứ tự model.
+    /// - Splice nhiều nhánh chỉ biến mất khi toàn bộ logical network đã đạt.
     /// - I/O bất thường được giữ tại đúng vị trí pin và tô đỏ ở View.
     /// </summary>
     public IReadOnlyList<FaultRow> BuildRows()
@@ -819,6 +1349,7 @@ public sealed class TestEngine : IDisposable
                         Kind = FaultKind.Info,
                         FaultType = "I/O đặc biệt",
                         Io = pin.IoNumber,
+                        DisplayOrder = ResolveDisplayOrder(pin),
                         Connector = pin.Connector,
                         Pin = pin.PinNumber,
                         WireName = pin.WireName,
@@ -840,6 +1371,7 @@ public sealed class TestEngine : IDisposable
                         Kind = FaultKind.Info,
                         FaultType = "Map pin",
                         Io = pin.IoNumber,
+                        DisplayOrder = ResolveDisplayOrder(pin),
                         Connector = pin.Connector,
                         Pin = pin.PinNumber,
                         WireName = pin.WireName,
@@ -851,45 +1383,9 @@ public sealed class TestEngine : IDisposable
                     continue;
                 }
 
-                bool visible = false;
-
-                foreach (WireNet net in memberships)
-                {
-                    bool netPassed = _passedNets.Contains(net.Name);
-                    bool isSource = pin.IoNumber == net.SourceIo;
-
-                    if (net.IoNumbers.Count == 2)
-                    {
-                        // Cặp 2 chân: chỉ ẩn sau khi net đã qua bộ lọc ổn định.
-                        if (!netPassed)
-                            visible = true;
-                    }
-                    else if (isSource)
-                    {
-                        if (!netPassed)
-                            visible = true;
-                    }
-                    else
-                    {
-                        // Splice: chỉ ẩn receiver nếu TARGET đó xuất hiện đúng
-                        // dưới SOURCE của chính network, không dùng union A0 toàn frame.
-                        HashSet<int> actualTargets =
-                            _currentConnections.GetValueOrDefault(net.SourceIo) ?? [];
-                        if (!actualTargets.Contains(pin.IoNumber))
-                            visible = true;
-                    }
-                }
-
-                if (visible)
-                    continue;
-            }
-
-            foreach (WireNet net in model.Nets)
-            {
-                if (net.ExpectedActiveIo.Count == 0 || _passedNets.Contains(net.Name))
-                    continue;
-
-                rows.Add(CreateMissingConnectionRow(net));
+                // Endpoint rows for normal production nets are emitted from
+                // model.Nets below so the UI list can hide/restore a whole
+                // network atomically while preserving model order.
             }
 
             // CLIP được kiểm tra riêng: mọi nhánh dùng chung A0 nhưng mỗi aN
@@ -897,13 +1393,36 @@ public sealed class TestEngine : IDisposable
             // đạt mới còn trên bảng.
             if (model.Clip is not null)
             {
-                foreach (ClipBranch branch in model.Clip.Branches)
+                if (!AnyClipBranchLatched(model.Clip))
+                    rows.Add(CreateClipCommonDisplayRow(model.Clip));
+
+                foreach (ClipBranch branch in OrderedClipBranches(model.Clip))
                 {
-                    if (_passedNets.Contains(branch.NetName))
+                    if (!IsEligibleClipBranch(model.Clip, branch))
+                        continue;
+
+                    if (_latchedClipKeys.Contains(ClipConfirmationKey(branch.NetName)))
                         continue;
 
                     rows.Add(CreateMissingClipConnectionRow(model.Clip, branch));
                 }
+            }
+
+            // NETWORK MAPPING là danh sách endpoint chưa hoàn thành.
+            // Một WireName vẫn là một logical network; khi network PASS sạch,
+            // endpoint rows chỉ biến mất khỏi presentation, không bị xóa khỏi
+            // model hay expected network state.
+            foreach (WireNet net in model.Nets)
+            {
+                if (!IsEligibleProductionNet(net))
+                    continue;
+
+                bool netPassed = _passedNets.Contains(net.Name);
+                bool hasWiringFault = HasWiringFaultForNet(net);
+                if (netPassed && !hasWiringFault)
+                    continue;
+
+                rows.AddRange(CreateNetworkMappingRows(net, netPassed));
             }
 
             // Trường hợp source/target lỗi không có pin map trong THT.
@@ -926,6 +1445,7 @@ public sealed class TestEngine : IDisposable
                         ProductFaultType = fault.FaultType,
                         FaultType = FaultTypeCatalog.DisplayName(fault.FaultType),
                         Io = io,
+                        DisplayOrder = int.MaxValue,
                         ExpectedSourceIo = fault.ExpectedSourceIo,
                         ExpectedTargetIo = fault.ExpectedTargetIo,
                         ActualSourceIo = fault.SourceIo,
@@ -944,6 +1464,7 @@ public sealed class TestEngine : IDisposable
             .OrderBy(row => row.ProductFaultType == ProductFaultType.None
                 ? 90
                 : FaultTypeCatalog.Priority(row.ProductFaultType))
+            .ThenBy(row => row.DisplayOrder)
             .ToArray();
     }
 
@@ -965,6 +1486,7 @@ public sealed class TestEngine : IDisposable
             ProductFaultType = type,
             FaultType = FaultTypeCatalog.DisplayName(type),
             Io = pin.IoNumber,
+            DisplayOrder = ResolveDisplayOrder(pin),
             ExpectedSourceIo = fault?.ExpectedSourceIo,
             ExpectedTargetIo = fault?.ExpectedTargetIo,
             ActualSourceIo = fault?.SourceIo,
@@ -982,71 +1504,201 @@ public sealed class TestEngine : IDisposable
         };
     }
 
-    static FaultRow CreateMissingConnectionRow(WireNet net)
+    bool HasWiringFaultForNet(WireNet net)
     {
-        PinRecord? sourcePin = net.Pins.FirstOrDefault(pin => pin.IoNumber == net.SourceIo);
-        int expectedTarget = net.ExpectedActiveIo.FirstOrDefault();
-        PinRecord? targetPin = expectedTarget > 0
-            ? net.Pins.FirstOrDefault(pin => pin.IoNumber == expectedTarget)
-            : null;
-        PinRecord? displayPin = sourcePin ?? targetPin ?? net.Pins.FirstOrDefault();
-        string pinText = BuildJoinedText(net.Pins.Select(pin => pin.PinNumber));
-        string connectorText = BuildJoinedText(net.Pins.Select(pin => pin.Connector));
-        string wireText = string.IsNullOrWhiteSpace(net.Name)
-            ? BuildJoinedText(net.Pins.Select(pin => pin.WireName))
-            : net.Name;
+        HashSet<int> endpoints = net.IoNumbers
+            .Where(io => io > 0)
+            .Distinct()
+            .ToHashSet();
 
-        return new FaultRow
-        {
-            Kind = FaultKind.MissingConnection,
-            ProductFaultType = ProductFaultType.None,
-            FaultType = "CHƯA KẾT NỐI",
-            Io = net.SourceIo,
-            ExpectedSourceIo = net.SourceIo,
-            ExpectedTargetIo = expectedTarget > 0 ? expectedTarget : null,
-            RelatedIos = net.IoNumbers.Distinct().ToArray(),
-            Connector = string.IsNullOrWhiteSpace(connectorText)
-                ? displayPin?.Connector ?? string.Empty
-                : connectorText,
-            Pin = string.IsNullOrWhiteSpace(pinText)
-                ? displayPin?.PinNumber ?? string.Empty
-                : pinText,
-            WireName = string.IsNullOrWhiteSpace(wireText)
-                ? displayPin?.WireName ?? string.Empty
-                : wireText,
-            Splice = displayPin?.SpliceName ?? string.Empty,
-            Section = displayPin?.Section ?? string.Empty,
-            Color = displayPin?.Color ?? string.Empty,
-            Status = $"CHƯA KẾT NỐI: {string.Join(" <-> ", net.IoNumbers.Select(io => $"IO{io}"))}"
-        };
+        if (endpoints.Count == 0)
+            return false;
+
+        return _candidateWiringFaults.Any(fault =>
+                   endpoints.Contains(fault.SourceIo) || endpoints.Contains(fault.TargetIo)) ||
+               _wiringFaults.Any(fault =>
+                   endpoints.Contains(fault.SourceIo) || endpoints.Contains(fault.TargetIo));
     }
 
-    static FaultRow CreateMissingClipConnectionRow(ClipTopology clip, ClipBranch branch)
+    IReadOnlyList<FaultRow> CreateNetworkMappingRows(WireNet net, bool connected)
+    {
+        PinRecord[] pins = net.Pins
+            .Where(pin => pin.IoNumber > 0)
+            .GroupBy(pin => pin.IoNumber)
+            .Select(group => group.First())
+            .OrderBy(ResolveDisplayOrder)
+            .ToArray();
+
+        if (pins.Length == 0)
+            return [];
+
+        HashSet<int> endpointIos = net.IoNumbers
+            .Where(io => io > 0)
+            .Distinct()
+            .ToHashSet();
+        string wireText = string.IsNullOrWhiteSpace(net.Name)
+            ? pins.FirstOrDefault(pin => !string.IsNullOrWhiteSpace(pin.WireName))?.WireName ?? string.Empty
+            : net.Name;
+        string stateText = connected ? "ĐÃ KẾT NỐI" : "CHỜ KẾT NỐI";
+
+        return pins
+            .Select((pin, endpointIndex) =>
+            {
+                int? firstPeer = endpointIos
+                    .Where(io => io != pin.IoNumber)
+                    .OrderBy(io => ResolvePeerOrder(net, io))
+                    .Cast<int?>()
+                    .FirstOrDefault();
+
+                return new FaultRow
+                {
+                    Kind = connected ? FaultKind.Info : FaultKind.MissingConnection,
+                    ProductFaultType = ProductFaultType.None,
+                    FaultType = connected ? "THÔNG MẠCH" : "CHƯA KẾT NỐI",
+                    Io = pin.IoNumber,
+                    DisplayOrder = ResolveNetworkEndpointDisplayOrder(net, pin, endpointIndex),
+                    ExpectedSourceIo = net.SourceIo,
+                    ExpectedTargetIo = firstPeer,
+                    Connector = pin.Connector,
+                    Pin = pin.PinNumber,
+                    WireName = string.IsNullOrWhiteSpace(wireText) ? pin.WireName : wireText,
+                    Splice = pin.SpliceName,
+                    Section = pin.Section,
+                    Color = pin.Color,
+                    Status = stateText
+                };
+            })
+            .ToArray();
+    }
+
+    int ResolveNetworkEndpointDisplayOrder(WireNet net, PinRecord pin, int endpointIndex) =>
+        _displayOrderByNet.TryGetValue(net, out int baseOrder)
+            ? baseOrder + Math.Clamp(endpointIndex, 0, 999)
+            : ResolveDisplayOrder(pin);
+
+    // Giữ method compatibility cho code/test cũ nếu còn gọi trực tiếp.
+    FaultRow CreateMissingConnectionRow(WireNet net) =>
+        CreateNetworkMappingRows(net, connected: false).First();
+
+    FaultRow CreateMissingClipConnectionRow(ClipTopology clip, ClipBranch branch)
     {
         PinRecord displayPin = branch.TargetPin ?? branch.ClipPin;
-        string targetDescription = branch.TargetPin is null
-            ? $"IO{branch.TargetIo}"
-            : $"IO{branch.TargetIo} - {branch.TargetPin.Connector} - chân {branch.TargetPin.PinNumber}";
-
         return new FaultRow
         {
             Kind = FaultKind.MissingConnection,
             ProductFaultType = ProductFaultType.None,
             FaultType = "CHƯA KẾT NỐI",
             Io = branch.TargetIo,
+            DisplayOrder = ClipDisplayOrder(branch),
             ExpectedSourceIo = clip.CommonIo,
             ExpectedTargetIo = branch.TargetIo,
-            RelatedIos = [clip.CommonIo, branch.TargetIo],
             Connector = displayPin.Connector,
             Pin = displayPin.PinNumber,
-            WireName = string.IsNullOrWhiteSpace(displayPin.WireName)
-                ? $"CLIP {branch.Name}"
-                : displayPin.WireName,
-            Splice = $"A0(IO{clip.CommonIo}) -> {branch.Name} -> IO{branch.TargetIo}",
+            WireName = ResolveClipDisplayName(displayPin.WireName, branch.Name),
+            Splice = displayPin.SpliceName,
             Section = displayPin.Section,
             Color = displayPin.Color,
-            Status = $"CHƯA KẾT NỐI: A0(IO{clip.CommonIo}) -> {branch.Name} -> {targetDescription}"
+            Status = "CHỜ KẾT NỐI"
         };
+    }
+
+    FaultRow CreateClipCommonDisplayRow(ClipTopology clip)
+    {
+        PinRecord common = clip.CommonPin;
+        return new FaultRow
+        {
+            Kind = FaultKind.MissingConnection,
+            ProductFaultType = ProductFaultType.None,
+            FaultType = "CHƯA KẾT NỐI",
+            Io = common.IoNumber,
+            DisplayOrder = ClipDisplayOrderBase,
+            Connector = common.Connector,
+            Pin = common.PinNumber,
+            WireName = ResolveClipCommonDisplayName(common),
+            Splice = common.SpliceName,
+            Section = common.Section,
+            Color = common.Color,
+            Status = "CHỜ KẾT NỐI"
+        };
+    }
+
+    bool AnyClipBranchLatched(ClipTopology clip) =>
+        clip.Branches.Any(branch => _latchedClipKeys.Contains(ClipConfirmationKey(branch.NetName)));
+
+    static IEnumerable<ClipBranch> OrderedClipBranches(ClipTopology clip) =>
+        clip.Branches
+            .OrderBy(ClipOriginalOrder)
+            .ThenBy(branch => branch.BranchNumber)
+            .ThenBy(branch => branch.TargetIo);
+
+    static int ClipOriginalOrder(ClipBranch branch)
+    {
+        int clipOrder = branch.ClipPin.OriginalOrder > 0
+            ? branch.ClipPin.OriginalOrder
+            : int.MaxValue;
+        int targetOrder = branch.TargetPin?.OriginalOrder > 0
+            ? branch.TargetPin.OriginalOrder
+            : int.MaxValue;
+
+        return Math.Min(clipOrder, targetOrder);
+    }
+
+    static int ClipDisplayOrder(ClipBranch branch)
+    {
+        int original = ClipOriginalOrder(branch);
+        int sequence = original == int.MaxValue
+            ? Math.Clamp(branch.BranchNumber, 1, 999_999)
+            : Math.Clamp(original, 1, 999_999);
+
+        return ClipDisplayOrderBase + sequence;
+    }
+
+    static string FirstNotEmpty(params string?[] values)
+    {
+        foreach (string? value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return string.Empty;
+    }
+
+    static string ResolveClipDisplayName(string? pinWireName, string branchName)
+    {
+        string candidate = FirstNotEmpty(pinWireName);
+        if (candidate.StartsWith("CLIP-", StringComparison.OrdinalIgnoreCase) ||
+            candidate.StartsWith("CLIP ", StringComparison.OrdinalIgnoreCase))
+        {
+            return branchName;
+        }
+
+        return FirstNotEmpty(candidate, branchName);
+    }
+
+    static string ResolveClipCommonDisplayName(PinRecord common)
+    {
+        string candidate = FirstNotEmpty(common.WireName);
+        if (candidate.StartsWith("CLIP-", StringComparison.OrdinalIgnoreCase) ||
+            candidate.StartsWith("CLIP ", StringComparison.OrdinalIgnoreCase))
+        {
+            return FirstNotEmpty(common.PinType, common.PinNumber, "A0");
+        }
+
+        return FirstNotEmpty(candidate, common.PinType, common.PinNumber);
+    }
+
+    int ResolveDisplayOrder(PinRecord pin) =>
+        _displayOrderByPin.TryGetValue(pin, out int order)
+            ? order
+            : pin.OriginalOrder > 0
+                ? pin.OriginalOrder
+                : int.MaxValue;
+
+    int ResolvePeerOrder(WireNet net, int io)
+    {
+        PinRecord? pin = net.Pins.FirstOrDefault(item => item.IoNumber == io);
+        return pin is null ? int.MaxValue : ResolveDisplayOrder(pin);
     }
 
     private static string BuildJoinedText(IEnumerable<string?> values)
@@ -1097,6 +1749,13 @@ public sealed class TestEngine : IDisposable
         {
             // Luôn bắt đầu từ trạng thái OFF để không kế thừa trạng thái relay trước đó.
             await ForceAllRelaysOffAsync(relayName + " PRE", ct);
+            string relayMarker = relay == MarkingRelay
+                ? "T_RELAY2"
+                : relay == JigEjectRelay
+                    ? "T_RELAY1"
+                    : $"T_RELAY{relay}";
+            AsyncFileLogService.Current.Performance(
+                $"PASS_LATENCY {relayMarker}_START relay={relay} name=\"{relayName}\" pulse_ms={pulseMs}");
             await _board.SetRelayAsync(relay, ct);
             AsyncFileLogService.Current.Test($"RELAY {relayName} ON - pulse {pulseMs} ms");
             await Task.Delay(pulseMs, ct);
@@ -1107,6 +1766,13 @@ public sealed class TestEngine : IDisposable
             {
                 // CancellationToken của cycle có thể đã cancel. Safe-OFF vẫn phải cố chạy độc lập.
                 await ForceAllRelaysOffAsync(relayName + " POST", CancellationToken.None);
+                string relayMarker = relay == MarkingRelay
+                    ? "T_RELAY2"
+                    : relay == JigEjectRelay
+                        ? "T_RELAY1"
+                        : $"T_RELAY{relay}";
+                AsyncFileLogService.Current.Performance(
+                    $"PASS_LATENCY {relayMarker}_END relay={relay} name=\"{relayName}\"");
                 AsyncFileLogService.Current.Test($"RELAY {relayName} OFF - safe idle");
             }
             catch (Exception ex)
@@ -1145,11 +1811,40 @@ public sealed class TestEngine : IDisposable
         throw new InvalidOperationException($"Không thể cưỡng bức ALL RELAYS OFF ({reason}).", last);
     }
 
+    private List<ResistanceStep> ResolveEnabledResistanceSteps(ProductModel model)
+    {
+        ResistanceChannelSetting[] enabledChannels = _production.ResistanceChannels
+            .Where(channel => channel.Enabled)
+            .ToArray();
+
+        if (enabledChannels.Length == 0)
+            return [];
+
+        return model.ResistanceSteps
+            .Where(step => enabledChannels.Any(channel =>
+                string.Equals(channel.Name, step.Name, StringComparison.OrdinalIgnoreCase)))
+            .OrderBy(step =>
+            {
+                ResistanceChannelSetting? channel = enabledChannels.FirstOrDefault(item =>
+                    string.Equals(item.Name, step.Name, StringComparison.OrdinalIgnoreCase));
+                return channel?.Channel ?? step.Channel;
+            })
+            .ToList();
+    }
+
+    public Task<List<ResistanceResult>> MeasureResistanceAsync(CancellationToken ct = default) =>
+        MeasureResistanceAsync(null, ct);
+
     public async Task<List<ResistanceResult>> MeasureResistanceAsync(
+        Action<ResistanceResult>? onChannelUpdated,
         CancellationToken ct = default)
     {
         ProductModel? model = _model;
         if (model is null || model.ResistanceSteps.Count == 0)
+            return [];
+
+        List<ResistanceStep> enabledSteps = ResolveEnabledResistanceSteps(model);
+        if (enabledSteps.Count == 0)
             return [];
 
         if (!_visa.IsConnected)
@@ -1165,7 +1860,7 @@ public sealed class TestEngine : IDisposable
 
         try
         {
-            foreach (ResistanceStep originalStep in model.ResistanceSteps.OrderBy(x => x.Channel))
+            foreach (ResistanceStep originalStep in enabledSteps)
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -1197,37 +1892,230 @@ public sealed class TestEngine : IDisposable
                     RouteB = string.IsNullOrWhiteSpace(originalStep.RouteB) ? (route?.RouteB ?? string.Empty) : originalStep.RouteB
                 };
 
+                AsyncFileLogService.Current.Test(
+                    $"[AUTO-R] CH{step.Channel} select mask=0x{ResistanceChannelMask(step.Channel):X2}");
                 await _board.SelectResistanceRouteAsync(step, ct);
 
-                int resistanceDelay = Math.Max(
-                    Math.Max(0, _settings.Keysight.SettleDelayMs),
-                    Math.Max(0, _production.ResistanceDelayMs));
-                if (resistanceDelay > 0)
-                    await Task.Delay(resistanceDelay, ct);
-
-                double value = _visa.MeasureResistance(_settings.Keysight.Command);
-                bool open = !double.IsFinite(value) ||
-                            Math.Abs(value) >= _settings.Test.ResistanceOpenThreshold;
-
-                results.Add(new ResistanceResult
+                var measuring = new ResistanceResult
                 {
                     Name = step.Name,
                     Channel = step.Channel,
-                    ValueOhm = open ? null : value,
                     MinOhm = step.MinOhm,
                     MaxOhm = step.MaxOhm,
-                    IsOpen = open,
-                    Passed = !open && value >= step.MinOhm && value <= step.MaxOhm
-                });
+                    MeasurementStatus = "ĐANG ĐO"
+                };
+                onChannelUpdated?.Invoke(measuring);
+
+                ResistanceResult result = await MeasureChannelStableAsync(step, ct);
+                results.Add(result);
+                onChannelUpdated?.Invoke(result);
             }
         }
         finally
         {
-            await _board.ReleaseResistanceRouteAsync(ct);
+            await _board.ReleaseResistanceRouteAsync(CancellationToken.None);
         }
 
         return results;
     }
+
+    private async Task<ResistanceResult> MeasureChannelStableAsync(
+        ResistanceStep step,
+        CancellationToken ct)
+    {
+        int minimumSettleMs = Math.Max(
+            Math.Max(0, _settings.Keysight.SettleDelayMs),
+            Math.Max(
+                Math.Max(0, _production.ResistanceDelayMs),
+                Math.Max(0, _settings.Test.ResistanceMinimumSettleMs)));
+        int sampleIntervalMs = Math.Max(0, _settings.Test.ResistanceSampleIntervalMs);
+        int stableSampleCount = Math.Clamp(_settings.Test.ResistanceStableSampleCount, 1, 20);
+        int timeoutMs = Math.Max(100, _settings.Test.ResistanceStabilityTimeoutMs);
+        double absoluteTolerance = Math.Max(0, _settings.Test.ResistanceStableAbsoluteToleranceOhm);
+        double relativeTolerancePercent = Math.Max(0, _settings.Test.ResistanceStableRelativeTolerancePercent);
+
+        AsyncFileLogService.Current.Test(
+            $"[AUTO-R] CH{step.Channel} minimum settle start ms={minimumSettleMs}");
+        if (minimumSettleMs > 0)
+            await Task.Delay(minimumSettleMs, ct);
+        AsyncFileLogService.Current.Test($"[AUTO-R] CH{step.Channel} minimum settle complete");
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var finiteWindow = new Queue<double>();
+        int sampleCount = 0;
+        int openStreak = 0;
+
+        while (stopwatch.ElapsedMilliseconds < timeoutMs)
+        {
+            ct.ThrowIfCancellationRequested();
+            sampleCount++;
+
+            double sample = await Task.Run(
+                () => _visa.MeasureResistance(_settings.Keysight.Command),
+                ct);
+            bool open = !double.IsFinite(sample) ||
+                        Math.Abs(sample) >= _settings.Test.ResistanceOpenThreshold;
+
+            AsyncFileLogService.Current.Test(open
+                ? $"[AUTO-R] CH{step.Channel} sample#{sampleCount}=OPEN"
+                : $"[AUTO-R] CH{step.Channel} sample#{sampleCount}={sample:0.###}");
+
+            if (open)
+            {
+                openStreak++;
+                finiteWindow.Clear();
+
+                if (openStreak >= stableSampleCount)
+                {
+                    AsyncFileLogService.Current.Test(
+                        $"[AUTO-R] CH{step.Channel} OPEN samples={sampleCount} stable_time={stopwatch.ElapsedMilliseconds}ms");
+                    ResistanceResult result = BuildResistanceResult(
+                        step,
+                        valueOhm: null,
+                        open: true,
+                        stable: true,
+                        status: "FAIL",
+                        sampleCount,
+                        stopwatch.ElapsedMilliseconds);
+                    LogResistanceDiagnostic(result);
+                    return result;
+                }
+            }
+            else
+            {
+                openStreak = 0;
+                finiteWindow.Enqueue(sample);
+                while (finiteWindow.Count > stableSampleCount)
+                    finiteWindow.Dequeue();
+
+                if (finiteWindow.Count >= stableSampleCount &&
+                    IsStableWindow(finiteWindow, absoluteTolerance, relativeTolerancePercent))
+                {
+                    double value = Median(finiteWindow);
+                    bool passed = value >= step.MinOhm && value <= step.MaxOhm;
+                    AsyncFileLogService.Current.Test(
+                        $"[AUTO-R] CH{step.Channel} stable stable_time={stopwatch.ElapsedMilliseconds}ms samples={sampleCount} final={value:0.###} {(passed ? "PASS" : "FAIL")}");
+                    ResistanceResult result = BuildResistanceResult(
+                        step,
+                        value,
+                        open: false,
+                        stable: true,
+                        status: passed ? "PASS" : "FAIL",
+                        sampleCount,
+                        stopwatch.ElapsedMilliseconds);
+                    LogResistanceDiagnostic(result);
+                    return result;
+                }
+            }
+
+            if (sampleIntervalMs > 0)
+                await Task.Delay(sampleIntervalMs, ct);
+        }
+
+        AsyncFileLogService.Current.Test(
+            $"[AUTO-R] CH{step.Channel} UNSTABLE timeout_ms={timeoutMs} samples={sampleCount}");
+        ResistanceResult unstableResult = BuildResistanceResult(
+            step,
+            valueOhm: null,
+            open: false,
+            stable: false,
+            status: "UNSTABLE",
+            sampleCount,
+            stopwatch.ElapsedMilliseconds);
+        LogResistanceDiagnostic(unstableResult);
+        return unstableResult;
+    }
+
+    private void LogResistanceDiagnostic(ResistanceResult result)
+    {
+        string raw = string.IsNullOrWhiteSpace(_visa.LastRawResistanceResponse)
+            ? "(not captured)"
+            : _visa.LastRawResistanceResponse;
+        string valueText = result.IsOpen
+            ? "OPEN"
+            : result.ValueOhm is double value
+                ? FormattableString.Invariant($"{value:0.##########}")
+                : "NO VALUE";
+
+        AsyncFileLogService.Current.Test($"[RES] {result.ChannelText} raw instrument response = {raw}");
+        AsyncFileLogService.Current.Test($"[RES] {result.ChannelText} ValueOhm = {valueText}");
+        AsyncFileLogService.Current.Test(FormattableString.Invariant($"[RES] {result.ChannelText} MinOhm = {result.MinOhm:0.##########}"));
+        AsyncFileLogService.Current.Test(FormattableString.Invariant($"[RES] {result.ChannelText} MaxOhm = {result.MaxOhm:0.##########}"));
+        AsyncFileLogService.Current.Test($"[RES] {result.ChannelText} DisplayUnit = {result.DisplayUnitText}");
+        AsyncFileLogService.Current.Test($"[RES] {result.ChannelText} DisplayValue = {result.Display}");
+        AsyncFileLogService.Current.Test($"[RES] {result.ChannelText} Result = {result.ResultText}");
+    }
+
+    private static ResistanceResult BuildResistanceResult(
+        ResistanceStep step,
+        double? valueOhm,
+        bool open,
+        bool stable,
+        string status,
+        int sampleCount,
+        long stabilizationTimeMs)
+    {
+        bool passed = stable &&
+                      !open &&
+                      valueOhm is double value &&
+                      value >= step.MinOhm &&
+                      value <= step.MaxOhm;
+
+        return new ResistanceResult
+        {
+            Name = step.Name,
+            Channel = step.Channel,
+            ValueOhm = open ? null : valueOhm,
+            MinOhm = step.MinOhm,
+            MaxOhm = step.MaxOhm,
+            IsOpen = open,
+            IsStable = stable,
+            Passed = passed,
+            MeasurementStatus = status,
+            SampleCount = sampleCount,
+            StabilizationTimeMs = stabilizationTimeMs
+        };
+    }
+
+    private static bool IsStableWindow(
+        IEnumerable<double> values,
+        double absoluteTolerance,
+        double relativeTolerancePercent)
+    {
+        double[] window = values.ToArray();
+        if (window.Length == 0)
+            return false;
+
+        double min = window.Min();
+        double max = window.Max();
+        double range = max - min;
+        if (range <= absoluteTolerance)
+            return true;
+
+        double representative = Median(window);
+        if (representative == 0 || relativeTolerancePercent <= 0)
+            return false;
+
+        double relative = range / Math.Abs(representative) * 100.0;
+        return relative <= relativeTolerancePercent;
+    }
+
+    private static double Median(IEnumerable<double> values)
+    {
+        double[] ordered = values.OrderBy(value => value).ToArray();
+        if (ordered.Length == 0)
+            return double.NaN;
+
+        int middle = ordered.Length / 2;
+        return ordered.Length % 2 == 1
+            ? ordered[middle]
+            : (ordered[middle - 1] + ordered[middle]) / 2.0;
+    }
+
+    private static int ResistanceChannelMask(int channel) =>
+        channel <= 0 || channel > 30
+            ? 0
+            : 1 << (channel - 1);
 
     public async Task<bool> CompletePassAsync(
         IReadOnlyList<ResistanceResult> resistance,
@@ -1239,14 +2127,15 @@ public sealed class TestEngine : IDisposable
         if (model is null)
             return false;
 
-        bool resistanceOk = model.ResistanceSteps.Count == 0 ||
-                            (resistance.Count == model.ResistanceSteps.Count &&
+        int expectedResistanceCount = ResolveEnabledResistanceSteps(model).Count;
+        bool resistanceOk = expectedResistanceCount == 0 ||
+                            (resistance.Count == expectedResistanceCount &&
                              resistance.All(x => x.Passed));
 
         if (!ContinuityPassed || !resistanceOk)
             return false;
 
-        if (model.ResistanceSteps.Count == 0)
+        if (expectedResistanceCount == 0)
         {
             // Trace production thật:
             // continuity PASS -> STOP_SCAN -> RESET_CLEAR -> MARKING (Relay 2)
@@ -1257,7 +2146,7 @@ public sealed class TestEngine : IDisposable
             await _board.ResetClearAsync(ct);
         }
 
-        int relayStartDelayMs = model.ResistanceSteps.Count > 0
+        int relayStartDelayMs = expectedResistanceCount > 0
             ? Math.Max(0, _settings.Test.PostResistanceRelayDelayMs)
             : 0;
 
