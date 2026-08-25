@@ -1,90 +1,86 @@
 ﻿@echo off
 setlocal EnableExtensions
 chcp 65001 >nul
-title JBZUniversalTester - Auto Version + Publish + Git Push
+title JBZUniversalTester - Build + Version + GitHub
 
 set "ROOT=%~dp0"
 set "PS_SCRIPT=%ROOT%Scripts\Publish-OneFile.ps1"
 set "VERSION_FILE=%ROOT%Version.props"
 
-pushd "%ROOT%" >nul
-
-echo ============================================================
-echo JBZUniversalTester - AUTO VERSION + PUBLISH + GITHUB
-echo ============================================================
-echo.
-
-rem ============================================================
-rem 0. BASIC CHECKS
-rem ============================================================
-
-if not exist "%PS_SCRIPT%" (
-    echo [ERROR] File not found:
-    echo %PS_SCRIPT%
-    popd >nul
+pushd "%ROOT%" >nul 2>&1
+if errorlevel 1 (
+    echo [LỖI] Không thể mo thu muc project:
+    echo %ROOT%
     pause
     exit /b 1
 )
 
+echo ============================================================
+echo JBZUniversalTester - BUILD + TỰ TĂNG VERSION + GITHUB
+echo ============================================================
+echo.
+
+if not exist "%PS_SCRIPT%" (
+    echo [LỖI] Không tìm thấy:
+    echo %PS_SCRIPT%
+    goto :FAIL
+)
+
 if not exist "%VERSION_FILE%" (
-    echo [ERROR] File not found:
+    echo [LỖI] Không tìm thấy:
     echo %VERSION_FILE%
-    popd >nul
-    pause
-    exit /b 1
+    goto :FAIL
+)
+
+if not exist "%ROOT%.gitignore" (
+    echo [LỖI] Không tìm thấy .gitignore tai:
+    echo %ROOT%.gitignore
+    echo Dung lai de tranh day nham file runtime/build len GitHub.
+    goto :FAIL
 )
 
 where git >nul 2>&1
 if errorlevel 1 (
-    echo [GIT ERROR] Git is not installed or not available in PATH.
-    popd >nul
-    pause
-    exit /b 2
+    echo [LỖI GIT] Chưa cài Git hoac Git chua co trong PATH.
+    goto :FAIL
 )
 
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
-    echo [GIT ERROR] "%ROOT%" is not a Git repository.
-    popd >nul
-    pause
-    exit /b 3
+    echo [LỖI GIT] Thư mục nay khong phai repository Git.
+    goto :FAIL
 )
 
 for /f "delims=" %%B in ('git branch --show-current') do set "CURRENT_BRANCH=%%B"
 if /I not "%CURRENT_BRANCH%"=="main" (
-    echo [GIT ERROR] Current branch is "%CURRENT_BRANCH%".
-    echo Auto publish/push is allowed only on branch "main".
-    echo Run:
-    echo     git switch main
-    popd >nul
-    pause
-    exit /b 4
+    echo [LỖI GIT] Nhánh hiện tại: %CURRENT_BRANCH%
+    echo Chỉ cho phép chay tren nhanh main.
+    echo Hãy chạy: git switch main
+    goto :FAIL
 )
 
 git remote get-url origin >nul 2>&1
 if errorlevel 1 (
-    echo [GIT ERROR] Remote "origin" is not configured.
-    popd >nul
-    pause
-    exit /b 5
+    echo [LỖI GIT] Chưa cấu hình remote origin.
+    goto :FAIL
 )
 
-rem ============================================================
-rem 1. AUTO-INCREMENT VERSION
-rem    Example: 16.0.31 -> 16.0.32
-rem ============================================================
+echo [GIT] Nhánh hiện tại: main
+echo [GIT] Mọi file được stage sẽ tuân theo .gitignore.
+echo.
 
+rem ============================================================
+rem B1 - TANG VERSION
+rem ============================================================
 echo ============================================================
-echo STEP 1/3 - AUTO INCREMENT VERSION
+echo BƯỚC 1/3 - TỰ TĂNG PHIÊN BẢN
 echo ============================================================
 
 set "VERSION_BACKUP=%TEMP%\JBZUniversalTester_Version_%RANDOM%_%RANDOM%.props"
 copy /Y "%VERSION_FILE%" "%VERSION_BACKUP%" >nul
 if errorlevel 1 (
-    echo [ERROR] Cannot create temporary Version.props backup.
-    popd >nul
-    pause
-    exit /b 6
+    echo [LỖI] Không thể tao bản tạm Version.props.
+    goto :FAIL
 )
 
 set "NEW_VERSION="
@@ -95,7 +91,7 @@ for /f "usebackq delims=" %%V in (`powershell.exe -NoLogo -NoProfile -ExecutionP
  "[xml]$x=Get-Content -LiteralPath $p -Raw;" ^
  "$g=@($x.Project.PropertyGroup)[0];" ^
  "$current=[string]$g.Version;" ^
- "if([string]::IsNullOrWhiteSpace($current)){throw 'Version is empty in Version.props'};" ^
+ "if([string]::IsNullOrWhiteSpace($current)){throw 'Version empty'};" ^
  "$v=[Version]$current;" ^
  "$patch=if($v.Build -lt 0){0}else{$v.Build};" ^
  "$n=('{0}.{1}.{2}' -f $v.Major,$v.Minor,($patch+1));" ^
@@ -116,28 +112,34 @@ for /f "usebackq delims=" %%V in (`powershell.exe -NoLogo -NoProfile -ExecutionP
  "Write-Output $n"`) do set "NEW_VERSION=%%V"
 
 if not defined NEW_VERSION (
-    echo [VERSION ERROR] Cannot increment Version.props.
+    echo [LỖI VERSION] Không thể tang Version.props.
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
-    popd >nul
-    pause
-    exit /b 7
+    goto :FAIL
 )
 
 set "VERSION_TAG=%NEW_VERSION:.=_%"
 set "EXPECTED_EXE=%ROOT%PublishSingle\V%NEW_VERSION%\JBZUniversalTester_V%VERSION_TAG%.exe"
 
-echo [VERSION] New version : %NEW_VERSION%
-echo [VERSION] EXE name    : JBZUniversalTester_V%VERSION_TAG%.exe
-echo [VERSION] Output      : PublishSingle\V%NEW_VERSION%\
+echo Phiên bản mới : V%NEW_VERSION%
+echo File EXE       : JBZUniversalTester_V%VERSION_TAG%.exe
+echo Thư mục        : PublishSingle\V%NEW_VERSION%\
 echo.
 
-rem ============================================================
-rem 2. PUBLISH
-rem ============================================================
+choice /C YN /N /M "Tiếp tục BUILD phiên bản V%NEW_VERSION%? [Y/N]: "
+if errorlevel 2 (
+    echo Đã hủy. Đang khôi phục Version.props...
+    copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
+    del /Q "%VERSION_BACKUP%" >nul 2>&1
+    goto :CANCEL
+)
 
+rem ============================================================
+rem B2 - PUBLISH
+rem ============================================================
+echo.
 echo ============================================================
-echo STEP 2/3 - PUBLISH ONE FILE V%NEW_VERSION%
+echo BƯỚC 2/3 - BUILD/PUBLISH V%NEW_VERSION%
 echo ============================================================
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
@@ -146,163 +148,128 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
   -Configuration "Release" ^
   -OutputFolder "PublishSingle"
 
-set "EXIT_CODE=%ERRORLEVEL%"
-echo.
-
-if not "%EXIT_CODE%"=="0" (
-    echo ============================================================
-    echo PUBLISH FAILED.
-    echo Version.props will be restored to the previous version.
-    echo Git commit/push was NOT run.
-    echo ============================================================
+set "BUILD_EXIT=%ERRORLEVEL%"
+if not "%BUILD_EXIT%"=="0" (
+    echo.
+    echo [LỖI] BUILD/PUBLISH THẤT BẠI.
+    echo Khôi phục Version.props cu.
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
-    popd >nul
-    pause
-    exit /b %EXIT_CODE%
+    goto :FAIL
 )
 
 if not exist "%EXPECTED_EXE%" (
-    echo ============================================================
-    echo [ERROR] Publish reported success but versioned EXE is missing:
+    echo.
+    echo [LỖI] Publish thành công nhung không tìm thấy EXE:
     echo %EXPECTED_EXE%
-    echo Version.props will be restored.
-    echo ============================================================
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
-    popd >nul
-    pause
-    exit /b 8
+    goto :FAIL
 )
 
 del /Q "%VERSION_BACKUP%" >nul 2>&1
 
-echo ============================================================
-echo PUBLISH SUCCESS
-echo VERSION : %NEW_VERSION%
-echo EXE     : JBZUniversalTester_V%VERSION_TAG%.exe
-echo FOLDER  : PublishSingle\V%NEW_VERSION%\
-echo ============================================================
+echo.
+echo BUILD THÀNH CÔNG: V%NEW_VERSION%
+echo EXE: %EXPECTED_EXE%
 echo.
 
 rem ============================================================
-rem 3. COMMIT SOURCE + PUSH MAIN
+rem B3 - GIT
 rem ============================================================
-
 echo ============================================================
-echo STEP 3/3 - COMMIT AND PUSH SOURCE TO GITHUB MAIN
+echo BƯỚC 3/3 - TỔNG HỢP SOURCE THEO .GITIGNORE
 echo ============================================================
 
-echo [GIT] Staging source changes...
-
-rem Always include the exact CMD file currently being executed.
-rem %~nx0 = current script file name, so renaming this file will not break Git staging.
-set "SELF_SCRIPT=%~nx0"
-echo [GIT] Including build script: %SELF_SCRIPT%
-git add -f -- "%SELF_SCRIPT%"
+git add -A
 if errorlevel 1 (
-    echo [GIT ERROR] Cannot stage current build script: %SELF_SCRIPT%
-    echo Make sure this CMD file is located inside the Git repository root:
-    echo     %ROOT%
-    popd >nul
-    pause
-    exit /b 9
+    echo [LỖI GIT] git add -A that bai.
+    goto :FAIL
 )
 
-rem Publish/runtime files are intentionally NOT auto-committed.
-rem Keep Labels/, Services/, Models/, Views/, Tests/, Version.props, etc.
-git add -A -- . ^
-  ":(exclude)PublishSingle/**" ^
-  ":(exclude)Data/**" ^
-  ":(exclude)Data.zip" ^
-  ":(exclude)ALL13.csv" ^
-  ":(exclude)publish.log" ^
-  ":(exclude)publish_V*.log"
+echo.
+echo Các thay đổi sẽ được commit:
+echo ------------------------------------------------------------
+git status --short
+echo ------------------------------------------------------------
+echo.
 
-if errorlevel 1 (
-    echo [GIT ERROR] git add failed.
-    echo Version %NEW_VERSION% was published locally but NOT pushed.
-    popd >nul
-    pause
-    exit /b 9
+choice /C YN /N /M "Commit và đẩy source lên GitHub main? [Y/N]: "
+if errorlevel 2 (
+    echo Đã hủy push. File build V%NEW_VERSION% vẫn được giữ trên máy.
+    goto :CANCEL
 )
 
 git diff --cached --quiet
 if errorlevel 1 (
-    echo [GIT] Creating commit for V%NEW_VERSION%...
     git commit -m "Release V%NEW_VERSION% - auto publish"
     if errorlevel 1 (
-        echo [GIT ERROR] git commit failed.
-        echo Version %NEW_VERSION% remains on this PC.
-        popd >nul
-        pause
-        exit /b 10
+        echo [LỖI GIT] git commit that bai.
+        goto :FAIL
     )
 ) else (
-    echo [GIT] No source changes to commit.
+    echo Không có thay doi moi can commit.
 )
 
-echo [GIT] Fetching origin/main...
+echo.
+echo Đang fetch origin...
 git fetch origin
 if errorlevel 1 (
-    echo [GIT ERROR] git fetch failed.
-    echo Check Internet/GitHub login.
-    echo Local V%NEW_VERSION% is safe on this PC.
-    popd >nul
-    pause
-    exit /b 11
+    echo [LỖI GIT] git fetch that bai.
+    goto :FAIL
 )
 
-echo [GIT] Rebasing local main onto origin/main...
+echo Đang rebase với origin/main...
 git rebase --autostash origin/main
 if errorlevel 1 (
-    echo.
-    echo ============================================================
-    echo [GIT ERROR] REBASE FAILED.
-    echo Resolve the conflict manually.
-    echo Then run:
-    echo     git rebase --continue
-    echo     git push origin main
-    echo.
-    echo Local V%NEW_VERSION% is NOT lost.
-    echo ============================================================
-    popd >nul
-    pause
-    exit /b 12
+    echo [LỖI GIT] REBASE THẤT BẠI. Có thể có xung đột code.
+    echo Xử lý xung đột rồi chạy:
+    echo git rebase --continue
+    echo git push origin main
+    goto :FAIL
 )
 
-echo [GIT] Pushing main to GitHub...
+echo.
+echo Các commit đang chờ push:
+git log --oneline origin/main..HEAD
+echo.
+
+choice /C YN /N /M "Xác nhận PUSH lên origin/main ngay bây giờ? [Y/N]: "
+if errorlevel 2 (
+    echo Đã hủy PUSH. Commit van an toan tren may.
+    goto :CANCEL
+)
+
 git push origin main
 if errorlevel 1 (
-    echo.
-    echo ============================================================
-    echo [GIT ERROR] PUSH FAILED.
-    echo Check Internet / GitHub authentication / repository access.
-    echo Local commit V%NEW_VERSION% is still safe on this PC.
-    echo ============================================================
-    popd >nul
-    pause
-    exit /b 13
+    echo [LỖI GIT] PUSH thất bại.
+    goto :FAIL
 )
 
 echo.
 echo ============================================================
-echo ALL DONE
+echo HOÀN TẤT THÀNH CÔNG
+echo Version : V%NEW_VERSION%
+echo GitHub  : origin/main đã cập nhật
 echo ============================================================
-echo VERSION : V%NEW_VERSION%
-echo EXE     : %EXPECTED_EXE%
-echo GITHUB  : origin/main UPDATED
-echo ============================================================
-echo.
-
 git status -sb
-echo.
+goto :DONE
 
-echo When using another PC:
-echo     git switch main
-echo     git pull origin main
+:CANCEL
 echo.
+echo Đã hủy theo yeu cau. Không có source nao bi xoa.
+goto :DONE
 
-popd >nul
+:FAIL
+echo.
+echo ============================================================
+echo ĐÃ DỪNG DO CÓ LỖI
+echo Cửa sổ sẽ KHÔNG tự động đóng.
+echo ============================================================
+goto :DONE
+
+:DONE
+echo.
 pause
+popd >nul
 exit /b 0
