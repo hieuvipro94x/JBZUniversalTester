@@ -12,10 +12,10 @@ public partial class ProbeMaintenanceResetWindow : Window
         long replacementThreshold)
     {
         InitializeComponent();
-        ModelText.Text = $"Mã hàng: {partNumber}  •  Model: {modelName}";
+        ModelText.Text = $"Mã hàng: {partNumber}  —  Model: {modelName}";
         CounterText.Text =
-            $"Chu kỳ hiện tại: {currentCycles:N0}\n" +
-            $"Chu kỳ thay thế: {replacementThreshold:N0}";
+            $"Số lượt hiện tại: {currentCycles:N0}\n" +
+            $"Giới hạn thay Pin: {replacementThreshold:N0}";
         Loaded += (_, _) => AdminPasswordBox.Focus();
     }
 

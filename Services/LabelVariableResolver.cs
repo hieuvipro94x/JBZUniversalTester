@@ -1,0 +1,123 @@
+using System.Globalization;
+using System.IO;
+using JBZUniversalTester.Models;
+
+namespace JBZUniversalTester.Services;
+
+public static class LabelVariableResolver
+{
+    private const string SmallLabelCustomerPrefix = "SQDZ";
+
+    private static readonly IReadOnlyDictionary<int, string> SmallLabelYearCodes =
+        new Dictionary<int, string>
+        {
+            [2026] = "Q"
+        };
+
+    public static IReadOnlyDictionary<string, string> Resolve(
+        ProductModel model,
+        LabelPrintData data,
+        LabelSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(data);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Lowest priority: machine/profile settings and defaults.
+            ["PROFILE"] = settings.FormatName ?? string.Empty,
+            ["FORMAT_NAME"] = settings.FormatName ?? string.Empty,
+
+            // Product fields parsed from the current THT.
+            ["PART_NUMBER"] = model.PartNumber,
+            ["PRODUCT_NAME"] = model.ProductName,
+            ["PART_NAME"] = model.ProductName,
+            ["VEHICLE_TYPE"] = model.VehicleType,
+            ["CUSTOMER_CODE"] = model.CustomerCode,
+            ["ECO"] = model.Eco,
+            ["NCO"] = model.Nco,
+            ["ALC"] = model.Alc,
+            ["MODEL_NAME"] = model.ModelName
+        };
+
+        // THT variables override ordinary ProductModel/settings values.
+        foreach ((string name, string value) in model.LabelVariables)
+        {
+            if (!string.IsNullOrWhiteSpace(name))
+                values[name.Trim()] = value ?? string.Empty;
+        }
+
+        bool isSmallLabel =
+            LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) ==
+            LabelSettings.SmallTemplate;
+        LabelIdentity identity = EplLabelService.BuildIdentity(data);
+        string lot = isSmallLabel
+            ? data.LotNo.ToString("D4", CultureInfo.InvariantCulture)
+            : data.LotNo.ToString(CultureInfo.InvariantCulture);
+        string barcode = string.IsNullOrWhiteSpace(data.Barcode)
+            ? identity.BarcodeValue
+            : data.Barcode;
+        string barcodePrint = string.IsNullOrWhiteSpace(data.BarcodePrint)
+            ? barcode
+            : data.BarcodePrint;
+
+        if (isSmallLabel)
+        {
+            string yearCode = ResolveSmallLabelYearCode(data.TestedAt.Year);
+            string monthCode = data.TestedAt.Month.ToString(CultureInfo.InvariantCulture);
+            string dayCode = ResolveSmallLabelDayCode(data.TestedAt.Day);
+            string smallLabelBarcode =
+                $"{data.PartNumber},{SmallLabelCustomerPrefix}{yearCode}{monthCode}{dayCode}{lot}";
+
+            values["YEAR_CODE"] = yearCode;
+            values["MONTH_CODE"] = monthCode;
+            values["DAY_CODE"] = dayCode;
+            values["SMALL_LABEL_BARCODE"] = smallLabelBarcode;
+            values["PART_NUMBER"] = data.PartNumber;
+            barcode = smallLabelBarcode;
+            barcodePrint = smallLabelBarcode;
+        }
+
+        // Highest priority: immutable data captured for the completed cycle.
+        values["LOT"] = lot;
+        values["LOT_NO"] = lot;
+        values["SEQUENCE"] = lot;
+        values["TEST_DATE"] = data.TestedAt.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        values["TEST_TIME"] = data.TestedAt.ToString("HHmmss", CultureInfo.InvariantCulture);
+        values["DATE_YYMMDD"] = data.TestedAt.ToString("yyMMdd", CultureInfo.InvariantCulture);
+        values["DATE_YYYYMMDD"] = data.TestedAt.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
+        values["TIME_HHMMSS"] = data.TestedAt.ToString("HHmmss", CultureInfo.InvariantCulture);
+        values["PRINT_DATE"] = data.TestedAt.ToString("yyMMdd", CultureInfo.InvariantCulture);
+        values["CYCLE_ID"] = data.CycleId;
+        values["SERIAL_TEXT"] = identity.SerialText;
+        values["BARCODE_VALUE"] = isSmallLabel ? barcode : identity.BarcodeValue;
+        values["BARCODE"] = barcode;
+        values["BARCODE_PRINT"] = barcodePrint;
+
+        return values;
+    }
+
+    private static string ResolveSmallLabelYearCode(int year)
+    {
+        if (SmallLabelYearCodes.TryGetValue(year, out string? code))
+            return code;
+
+        throw UndefinedDateCode($"Year={year}");
+    }
+
+    private static string ResolveSmallLabelDayCode(int day)
+    {
+        if (day is >= 1 and <= 26)
+            return ((char)('A' + day - 1)).ToString(CultureInfo.InvariantCulture);
+
+        throw UndefinedDateCode($"Day={day}");
+    }
+
+    private static InvalidDataException UndefinedDateCode(string detail)
+    {
+        string message = $"LABEL_DATE_CODE_UNDEFINED {detail}";
+        AsyncFileLogService.Current.Error($"[LABEL][ERROR] {message}");
+        return new InvalidDataException(message);
+    }
+}

@@ -9,10 +9,12 @@ public sealed class TestHistoryRecord
     public DateTime Finished { get; set; }
     public string PartName { get; set; } = string.Empty;
     public string PartNumber { get; set; } = string.Empty;
+    public string VehicleType { get; set; } = string.Empty;
     public string Eco { get; set; } = string.Empty;
     public string Nco { get; set; } = string.Empty;
     public string Alc { get; set; } = string.Empty;
     public long LotNo { get; set; }
+    public long ProductionCounter { get; set; }
     public string Result { get; set; } = string.Empty;
     public bool Passed { get; set; }
     public string ModelName { get; set; } = string.Empty;
@@ -77,7 +79,12 @@ public sealed record LabelPrintData(
     string Nco,
     string Alc,
     long LotNo,
-    DateTime TestedAt);
+    DateTime TestedAt,
+    string VehicleType = "",
+    string CustomerCode = "",
+    string CycleId = "",
+    string Barcode = "",
+    string BarcodePrint = "");
 
 public enum LabelPrintStatus
 {
@@ -95,6 +102,8 @@ public enum LabelPrintStatus
 public sealed record LabelPrintRequest(
     string CycleId,
     LabelPrintData Data,
+    string Payload,
+    LabelProfile Profile,
     string ModelName,
     string ModelFile,
     string PrinterName,
@@ -104,27 +113,81 @@ public sealed record LabelPrintRequest(
     string FormatName,
     int BaudRate,
     int WriteTimeoutMs,
-    int Copies)
+    int Copies,
+    string RawDestination,
+    string ExternalHelperPath,
+    string ExternalHelperArgument,
+    string ExternalPrintFile)
 {
     public string Printer => !string.IsNullOrWhiteSpace(PrinterCom)
         ? PrinterCom.Trim()
         : PrinterName.Trim();
 
-    public static LabelPrintRequest Capture(TestHistoryRecord history, LabelSettings settings)
+    public static LabelPrintRequest Capture(
+        TestHistoryRecord history,
+        ProductModel model,
+        LabelSettings settings)
     {
         ArgumentNullException.ThrowIfNull(history);
+        ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(settings);
+
+        var data = new LabelPrintData(
+            model.ProductName,
+            model.PartNumber,
+            model.Eco,
+            model.Nco,
+            model.Alc,
+            history.LotNo,
+            history.Finished,
+            model.VehicleType,
+            model.CustomerCode,
+            history.CycleId);
+
+        LabelIdentity identity = JBZUniversalTester.Services.EplLabelService.BuildIdentity(data);
+        data = data with { Barcode = identity.BarcodeValue, BarcodePrint = identity.BarcodeValue };
+        IReadOnlyDictionary<string, string> variables =
+            JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
+
+        bool isSmallLabel =
+            JBZUniversalTester.Services.LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) ==
+            LabelSettings.SmallTemplate;
+        if (isSmallLabel)
+        {
+            string barcode = variables["SMALL_LABEL_BARCODE"];
+            data = data with { Barcode = barcode, BarcodePrint = barcode };
+            variables = JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
+        }
+        else if (!string.IsNullOrWhiteSpace(model.LabelTemplate.BarcodeTemplate))
+        {
+            string barcode = JBZUniversalTester.Services.LabelTemplateRenderer.Render(
+                model.LabelTemplate.BarcodeTemplate,
+                variables,
+                model.PartNumber,
+                model.LabelTemplate.ProfileId);
+            data = data with { Barcode = barcode, BarcodePrint = barcode };
+            variables = JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
+        }
+
+        LabelProfile profile = JBZUniversalTester.Services.LabelProfileResolver.Resolve(model, settings);
+        string template = JBZUniversalTester.Services.LabelTemplateProvider.Load(profile, model.LabelTemplate.RawTemplate);
+        string payload = JBZUniversalTester.Services.LabelTemplateRenderer.Render(
+            profile, template, variables, model.PartNumber);
+
+        if (isSmallLabel)
+        {
+            JBZUniversalTester.Services.AsyncFileLogService.Current.Application(
+                $"[LABEL] Type={LabelSettings.SmallTemplate} PartNumber={data.PartNumber} " +
+                $"YearCode={variables["YEAR_CODE"]} MonthCode={variables["MONTH_CODE"]} " +
+                $"DayCode={variables["DAY_CODE"]} Lot={variables["LOT_NO"]} Barcode={data.Barcode}",
+                JBZUniversalTester.Services.AppLogLevel.Diagnostic);
+        }
 
         return new LabelPrintRequest(
             history.CycleId,
-            new LabelPrintData(
-                history.PartName,
-                history.PartNumber,
-                history.Eco,
-                history.Nco,
-                history.Alc,
-                history.LotNo,
-                history.Finished),
+            data,
+            payload,
+            profile,
             history.ModelName,
             history.ModelFile,
             settings.PrinterName ?? string.Empty,
@@ -134,10 +197,16 @@ public sealed record LabelPrintRequest(
             settings.FormatName ?? string.Empty,
             Math.Clamp(settings.BaudRate, 1200, 921600),
             Math.Clamp(settings.WriteTimeoutMs, 500, 30_000),
-            Math.Clamp(settings.Copies, 1, 20));
+            profile.Copies,
+            settings.RawDestination ?? string.Empty,
+            profile.ExternalHelperPath,
+            profile.ExternalHelperArgument,
+            profile.ExternalPrintFile);
     }
 }
 
 public sealed record LabelIdentity(string SerialText, string BarcodeValue);
 
 public sealed record LabelPrintTransportResult(bool Printed, string Message);
+
+public sealed record LabelPrinterConnectionResult(bool Connected, string Message);

@@ -8,6 +8,9 @@ public interface IBoardTransport : IAsyncDisposable
     bool IsScanning { get; }
     BoardScanMode CurrentScanMode { get; }
     BoardCapacity Capacity { get; }
+    DateTime LastFrameTimestampUtc { get; }
+    long LastFrameSequence { get; }
+    long FramesReceived { get; }
     event EventHandler<ScanFrame>? FrameReceived;
     event EventHandler<string>? Log;
     Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default);

@@ -74,6 +74,7 @@ Avoid repeating these known failures:
 
 # Coding Safety Rules
 
+- Every source-code change must include a release version increment in `Version.props`; keep `VersionPrefix`, `Version`, `AssemblyVersion`, `FileVersion`, `InformationalVersion`, `VersionFileTag`, and `AssemblyTitle` synchronized.
 - Make minimal, task-scoped changes.
 - Find root cause before editing.
 - Do not refactor outside the requested task.

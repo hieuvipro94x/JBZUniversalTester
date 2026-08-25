@@ -41,10 +41,12 @@ public sealed class TestHistoryStore
                     Finished TEXT NOT NULL,
                     PartName TEXT NOT NULL DEFAULT '',
                     PartNumber TEXT NOT NULL DEFAULT '',
+                    VehicleType TEXT NOT NULL DEFAULT '',
                     Eco TEXT NOT NULL DEFAULT '',
                     Nco TEXT NOT NULL DEFAULT '',
                     Alc TEXT NOT NULL DEFAULT '',
                     LotNo INTEGER NOT NULL DEFAULT 0,
+                    ProductionCounter INTEGER NOT NULL DEFAULT 0,
                     Result TEXT NOT NULL DEFAULT '',
                     Passed INTEGER NOT NULL DEFAULT 0,
                     ModelName TEXT NOT NULL DEFAULT '',
@@ -95,6 +97,8 @@ public sealed class TestHistoryStore
 
         // Migration không phá DB V12.9 cũ: bổ sung từng cột nếu DB đã tồn tại.
         EnsureColumn(connection, "FaultType", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "VehicleType", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "ProductionCounter", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "FaultCode", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "ExpectedSourceIo", "INTEGER NULL");
         EnsureColumn(connection, "ExpectedTargetIo", "INTEGER NULL");
@@ -160,8 +164,8 @@ public sealed class TestHistoryStore
         command.CommandText = """
             INSERT INTO TestHistory
             (
-                Started, Finished, PartName, PartNumber, Eco, Nco, Alc,
-                LotNo, Result, Passed, ModelName, ModelFile, HtdrvName,
+                Started, Finished, PartName, PartNumber, VehicleType, Eco, Nco, Alc,
+                LotNo, ProductionCounter, Result, Passed, ModelName, ModelFile, HtdrvName,
                 OpenCount, WrongCount, ShortCount, Resistance,
                 DeviceName, DeviceNumber, OperatorCompany, ProductionLine,
                 FaultType, FaultCode, ExpectedSourceIo, ExpectedTargetIo,
@@ -172,8 +176,8 @@ public sealed class TestHistoryStore
             )
             VALUES
             (
-                $Started, $Finished, $PartName, $PartNumber, $Eco, $Nco, $Alc,
-                $LotNo, $Result, $Passed, $ModelName, $ModelFile, $HtdrvName,
+                $Started, $Finished, $PartName, $PartNumber, $VehicleType, $Eco, $Nco, $Alc,
+                $LotNo, $ProductionCounter, $Result, $Passed, $ModelName, $ModelFile, $HtdrvName,
                 $OpenCount, $WrongCount, $ShortCount, $Resistance,
                 $DeviceName, $DeviceNumber, $OperatorCompany, $ProductionLine,
                 $FaultType, $FaultCode, $ExpectedSourceIo, $ExpectedTargetIo,
@@ -236,8 +240,8 @@ public sealed class TestHistoryStore
         int limit = Math.Clamp(criteria.MaxRows, 1, 50_000);
         command.CommandText = $"""
             SELECT
-                Id, Started, Finished, PartName, PartNumber, Eco, Nco, Alc,
-                LotNo, Result, Passed, ModelName, ModelFile, HtdrvName,
+                Id, Started, Finished, PartName, PartNumber, VehicleType, Eco, Nco, Alc,
+                LotNo, ProductionCounter, Result, Passed, ModelName, ModelFile, HtdrvName,
                 OpenCount, WrongCount, ShortCount, Resistance,
                 DeviceName, DeviceNumber, OperatorCompany, ProductionLine,
                 FaultType, FaultCode, ExpectedSourceIo, ExpectedTargetIo,
@@ -266,10 +270,12 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$Finished", record.Finished.ToString("O"));
         command.Parameters.AddWithValue("$PartName", record.PartName ?? string.Empty);
         command.Parameters.AddWithValue("$PartNumber", record.PartNumber ?? string.Empty);
+        command.Parameters.AddWithValue("$VehicleType", record.VehicleType ?? string.Empty);
         command.Parameters.AddWithValue("$Eco", record.Eco ?? string.Empty);
         command.Parameters.AddWithValue("$Nco", record.Nco ?? string.Empty);
         command.Parameters.AddWithValue("$Alc", record.Alc ?? string.Empty);
         command.Parameters.AddWithValue("$LotNo", record.LotNo);
+        command.Parameters.AddWithValue("$ProductionCounter", record.ProductionCounter);
         command.Parameters.AddWithValue("$Result", record.Result ?? string.Empty);
         command.Parameters.AddWithValue("$Passed", record.Passed ? 1 : 0);
         command.Parameters.AddWithValue("$ModelName", record.ModelName ?? string.Empty);
@@ -318,44 +324,46 @@ public sealed class TestHistoryStore
             Finished = ParseDate(reader.GetString(2)),
             PartName = reader.GetString(3),
             PartNumber = reader.GetString(4),
-            Eco = reader.GetString(5),
-            Nco = reader.GetString(6),
-            Alc = reader.GetString(7),
-            LotNo = reader.GetInt64(8),
-            Result = reader.GetString(9),
-            Passed = reader.GetInt64(10) != 0,
-            ModelName = reader.GetString(11),
-            ModelFile = reader.GetString(12),
-            HtdrvName = reader.GetString(13),
-            OpenCount = reader.GetInt32(14),
-            WrongCount = reader.GetInt32(15),
-            ShortCount = reader.GetInt32(16),
-            Resistance = reader.GetString(17),
-            DeviceName = reader.GetString(18),
-            DeviceNumber = reader.GetString(19),
-            OperatorCompany = reader.GetString(20),
-            ProductionLine = reader.GetString(21),
-            FaultType = reader.GetString(22),
-            FaultCode = reader.GetString(23),
-            ExpectedSourceIo = GetNullableInt(reader, 24),
-            ExpectedTargetIo = GetNullableInt(reader, 25),
-            ActualSourceIo = GetNullableInt(reader, 26),
-            ActualTargetIo = GetNullableInt(reader, 27),
-            FaultDetailsJson = reader.GetString(28),
-            FaultSummary = reader.GetString(29),
-            MeasuredResistance = GetNullableDouble(reader, 30),
-            ResistanceMin = GetNullableDouble(reader, 31),
-            ResistanceMax = GetNullableDouble(reader, 32),
-            CycleId = reader.GetString(33),
-            LabelSerial = reader.GetString(34),
-            BarcodeValue = reader.GetString(35),
-            LabelProfile = reader.GetString(36),
-            PrintStatus = reader.GetString(37),
-            PrintTimestamp = reader.IsDBNull(38) ? null : ParseDate(reader.GetString(38)),
-            Printer = reader.GetString(39),
-            LabelCopies = reader.GetInt32(40),
-            ReprintCount = reader.GetInt32(41),
-            PrintMessage = reader.GetString(42)
+            VehicleType = reader.GetString(5),
+            Eco = reader.GetString(6),
+            Nco = reader.GetString(7),
+            Alc = reader.GetString(8),
+            LotNo = reader.GetInt64(9),
+            ProductionCounter = reader.GetInt64(10),
+            Result = reader.GetString(11),
+            Passed = reader.GetInt64(12) != 0,
+            ModelName = reader.GetString(13),
+            ModelFile = reader.GetString(14),
+            HtdrvName = reader.GetString(15),
+            OpenCount = reader.GetInt32(16),
+            WrongCount = reader.GetInt32(17),
+            ShortCount = reader.GetInt32(18),
+            Resistance = reader.GetString(19),
+            DeviceName = reader.GetString(20),
+            DeviceNumber = reader.GetString(21),
+            OperatorCompany = reader.GetString(22),
+            ProductionLine = reader.GetString(23),
+            FaultType = reader.GetString(24),
+            FaultCode = reader.GetString(25),
+            ExpectedSourceIo = GetNullableInt(reader, 26),
+            ExpectedTargetIo = GetNullableInt(reader, 27),
+            ActualSourceIo = GetNullableInt(reader, 28),
+            ActualTargetIo = GetNullableInt(reader, 29),
+            FaultDetailsJson = reader.GetString(30),
+            FaultSummary = reader.GetString(31),
+            MeasuredResistance = GetNullableDouble(reader, 32),
+            ResistanceMin = GetNullableDouble(reader, 33),
+            ResistanceMax = GetNullableDouble(reader, 34),
+            CycleId = reader.GetString(35),
+            LabelSerial = reader.GetString(36),
+            BarcodeValue = reader.GetString(37),
+            LabelProfile = reader.GetString(38),
+            PrintStatus = reader.GetString(39),
+            PrintTimestamp = reader.IsDBNull(40) ? null : ParseDate(reader.GetString(40)),
+            Printer = reader.GetString(41),
+            LabelCopies = reader.GetInt32(42),
+            ReprintCount = reader.GetInt32(43),
+            PrintMessage = reader.GetString(44)
         };
     }
 
@@ -377,13 +385,36 @@ public sealed class TestHistoryStore
                 PrintMessage = ''
             WHERE Id = $Id
               AND CycleId = $CycleId
-              AND PrintStatus = $NotRequested;
+              AND PrintStatus IN ($NotRequested, $Failed);
             """;
         command.Parameters.AddWithValue("$Pending", LabelPrintStatus.Pending.ToString());
         command.Parameters.AddWithValue("$NotRequested", LabelPrintStatus.NotRequested.ToString());
+        command.Parameters.AddWithValue("$Failed", LabelPrintStatus.Failed.ToString());
         command.Parameters.AddWithValue("$Id", historyId);
         command.Parameters.AddWithValue("$CycleId", cycleId);
         return command.ExecuteNonQuery() == 1;
+    }
+
+    public void IncrementLabelReprint(long historyId, string cycleId, DateTime printedAt, string message)
+    {
+        using SqliteConnection connection = Open();
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE TestHistory
+            SET ReprintCount = ReprintCount + 1,
+                PrintTimestamp = $PrintTimestamp,
+                PrintMessage = $PrintMessage
+            WHERE Id = $Id
+              AND CycleId = $CycleId
+              AND PrintStatus = $Printed;
+            """;
+        command.Parameters.AddWithValue("$PrintTimestamp", printedAt.ToString("O"));
+        command.Parameters.AddWithValue("$PrintMessage", message ?? string.Empty);
+        command.Parameters.AddWithValue("$Id", historyId);
+        command.Parameters.AddWithValue("$CycleId", cycleId);
+        command.Parameters.AddWithValue("$Printed", LabelPrintStatus.Printed.ToString());
+        command.ExecuteNonQuery();
     }
 
     public void UpdateLabelPrintOutcome(

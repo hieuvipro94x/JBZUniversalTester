@@ -29,17 +29,7 @@ public static class EplLabelService
     public static string BuildPassLabel(LabelPrintRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        LabelIdentity identity = BuildIdentity(request.Data);
-
-        return Build(
-            request.Data.PartNumber,
-            request.Data.Eco,
-            request.Data.PartName,
-            identity.SerialText,
-            identity.BarcodeValue,
-            request.FormatName,
-            request.WidthMm,
-            request.HeightMm);
+        return request.Payload;
     }
 
     public static LabelIdentity BuildIdentity(LabelPrintData data)

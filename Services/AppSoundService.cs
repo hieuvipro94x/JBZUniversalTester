@@ -24,17 +24,20 @@ public sealed class AppSoundService : IDisposable
     private SoundPlayer? _clickPlayer;
     private SoundPlayer? _testOkPlayer;
     private SoundPlayer? _startupPlayer;
+    private SoundPlayer? _testPointContactPlayer;
     private SoundPlayer? _wiringFaultPlayer;
 
     // Giữ stream sống trong toàn bộ vòng đời SoundPlayer.
     private MemoryStream? _clickStream;
     private MemoryStream? _testOkStream;
     private MemoryStream? _startupStream;
+    private MemoryStream? _testPointContactStream;
     private MemoryStream? _wiringFaultStream;
 
     private bool _initialized;
     private bool _disposed;
     private bool _wiringFaultAlarmActive;
+    private bool _testPointContactSoundActive;
 
     private int _globalButtonHandlerRegistered;
     private int _startupPlayed;
@@ -48,6 +51,17 @@ public sealed class AppSoundService : IDisposable
             lock (_gate)
             {
                 return _wiringFaultAlarmActive;
+            }
+        }
+    }
+
+    public bool IsTestPointContactSoundActive
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _testPointContactSoundActive;
             }
         }
     }
@@ -71,6 +85,7 @@ public sealed class AppSoundService : IDisposable
                 _clickPlayer = CreatePlayer("CLICK.wav", out _clickStream);
                 _testOkPlayer = CreatePlayer("DINGDONG.wav", out _testOkStream);
                 _startupPlayer = CreatePlayer("START.wav", out _startupStream);
+                _testPointContactPlayer = CreatePlayer("TESTPOINT.wav", out _testPointContactStream);
                 _wiringFaultPlayer = CreatePlayer("TESTPOINT.wav", out _wiringFaultStream);
 
                 _initialized = true;
@@ -122,7 +137,41 @@ public sealed class AppSoundService : IDisposable
         {
             if (_disposed || _wiringFaultAlarmActive)
                 return;
-            SafePlay(_wiringFaultPlayer);
+            SafePlay(_testPointContactPlayer);
+        }
+    }
+
+    /// <summary>
+    /// Phát TESTPOINT.wav liên tục trong thời gian đầu dò đang chạm Pin.
+    /// Đây chỉ là âm xác nhận tiếp xúc, hoàn toàn độc lập với trạng thái lỗi dây.
+    /// </summary>
+    public void SetTestPointContactSound(bool active)
+    {
+        EnsureInitialized();
+
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
+
+            // RELEASE luôn cưỡng bức Stop, kể cả cờ trạng thái đã về false
+            // từ một callback trước đó. Điều này tránh WAV looping bị sót khi
+            // frame/UI release đến gần nhau.
+            if (active && _testPointContactSoundActive)
+                return;
+
+            _testPointContactSoundActive = active;
+            try
+            {
+                if (active)
+                    _testPointContactPlayer?.PlayLooping();
+                else
+                    _testPointContactPlayer?.Stop();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Không thể đổi âm tiếp xúc đầu dò: {ex}");
+            }
         }
     }
 
@@ -171,10 +220,12 @@ public sealed class AppSoundService : IDisposable
             }
 
             _wiringFaultAlarmActive = false;
+            _testPointContactSoundActive = false;
 
             SafeStop(_clickPlayer);
             SafeStop(_testOkPlayer);
             SafeStop(_startupPlayer);
+            SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
         }
     }
@@ -298,11 +349,13 @@ public sealed class AppSoundService : IDisposable
             _clickPlayer?.Dispose();
             _testOkPlayer?.Dispose();
             _startupPlayer?.Dispose();
+            _testPointContactPlayer?.Dispose();
             _wiringFaultPlayer?.Dispose();
 
             _clickStream?.Dispose();
             _testOkStream?.Dispose();
             _startupStream?.Dispose();
+            _testPointContactStream?.Dispose();
             _wiringFaultStream?.Dispose();
 
             _disposed = true;

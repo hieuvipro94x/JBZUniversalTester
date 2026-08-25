@@ -100,6 +100,32 @@ public partial class TestWindow : Window
         }, DispatcherPriority.Background);
     }
 
+    private void ResetProbeCounter_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not TestViewModel viewModel)
+            return;
+
+        var dialog = new ProbeMaintenanceResetWindow(
+            viewModel.PartNumber,
+            viewModel.ModelName,
+            viewModel.ProbeCycleCount,
+            viewModel.ProbeReplacementThreshold)
+        {
+            Owner = this
+        };
+
+        if (dialog.ShowDialog() != true)
+            return;
+
+        bool reset = viewModel.TryResetProbeCycle(dialog.AdminPassword, out string message);
+        MessageBox.Show(
+            this,
+            message,
+            reset ? "Đã reset counter Pin" : "Không thể reset counter Pin",
+            MessageBoxButton.OK,
+            reset ? MessageBoxImage.Information : MessageBoxImage.Warning);
+    }
+
     private async void BackToMain_Click(object sender, RoutedEventArgs e)
     {
         if (_closeInProgress)

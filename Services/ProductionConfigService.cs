@@ -107,7 +107,10 @@ public static class ProductionConfigService
 
         string json = SerializeSettingsForSave(settings);
         AtomicWrite(JsonPath, json);
-        SaveLegacyCfg(settings, LegacyCfgPath);
+        // Preserve compatibility on upgraded machines without creating a
+        // duplicate configuration file on a fresh installation.
+        if (File.Exists(LegacyCfgPath))
+            SaveLegacyCfg(settings, LegacyCfgPath);
     }
 
     private static string SerializeSettingsForSave(ProductionSettings settings)
@@ -142,6 +145,11 @@ public static class ProductionConfigService
             $"[AutoMasterSequence]{Bool(settings.AutoMasterSequence)}",
             $"[MasterFaultRequiredCount]{settings.MasterFaultRequiredCount}",
             $"[WaterproofSerialPort]{settings.WaterproofSerialPort}",
+            $"[WaterProofPortName]{settings.WaterProofMachine.PortName}",
+            $"[WaterProofBaudRate]{settings.WaterProofMachine.BaudRate}",
+            $"[WaterProofAutoConnect]{Bool(settings.WaterProofMachine.AutoConnect)}",
+            $"[WaterProofReadTimeoutMs]{settings.WaterProofMachine.ReadTimeoutMs}",
+            $"[WaterProofWriteTimeoutMs]{settings.WaterProofMachine.WriteTimeoutMs}",
 
             $"[LotNo]{settings.LotNo}",
             $"[Lot]{settings.Lot}",
@@ -155,6 +163,9 @@ public static class ProductionConfigService
             $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
             $"[Relay2MarkingPulseMs]{settings.Relay2MarkingPulseMs}",
+            $"[JigEjectRelayEnabled]{Bool(settings.JigEjectRelayEnabled)}",
+            $"[PassMarkingRelayEnabled]{Bool(settings.PassMarkingRelayEnabled)}",
+            $"[PassJigRelayFirst]{Bool(settings.PassJigRelayFirst)}",
             $"[PassMarkingToJigDelayMs]{settings.PassMarkingToJigDelayMs}",
             $"[StampDelayMs]{settings.Relay1JigPulseMs},{settings.Relay2MarkingPulseMs}", // compatibility
             $"[OversizeWaitSeconds]{settings.OversizeWaitSeconds}",
@@ -179,7 +190,14 @@ public static class ProductionConfigService
             $"[LabelFormatName]{settings.Label.FormatName}",
             $"[LabelBaudRate]{settings.Label.BaudRate}",
             $"[LabelWriteTimeoutMs]{settings.Label.WriteTimeoutMs}",
-            $"[LabelCopies]{settings.Label.Copies}"
+            $"[LabelCopies]{settings.Label.Copies}",
+            $"[LabelTemplateType]{settings.Label.TemplateType}",
+            $"[LabelTemplatePath]{settings.Label.TemplatePath}",
+            $"[LabelEncodingName]{settings.Label.EncodingName}",
+            $"[LabelRawDestination]{settings.Label.RawDestination}",
+            $"[LabelExternalHelperPath]{settings.Label.ExternalHelperPath}",
+            $"[LabelExternalHelperArgument]{settings.Label.ExternalHelperArgument}",
+            $"[LabelExternalPrintFile]{settings.Label.ExternalPrintFile}"
         };
 
         foreach ((string modelKey, int requiredCount) in settings.MasterFaultCountsByModel
@@ -187,6 +205,20 @@ public static class ProductionConfigService
         {
             string encodedKey = Uri.EscapeDataString(modelKey);
             lines.Add($"[MasterFault.{encodedKey}]{requiredCount}");
+        }
+
+        foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
+                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            string encodedKey = Uri.EscapeDataString(modelKey);
+            lines.Add(
+                $"[WaterProof.Model.{encodedKey}]" +
+                $"{Bool(profile.Enabled)};{Bool(profile.Channel1Enabled)};{Bool(profile.Channel2Enabled)};" +
+                $"{Bool(profile.Channel3Enabled)};{F(profile.PressMin)};{F(profile.LeakLimit)};" +
+                $"{profile.PressTimeMs};{profile.WaitTimeMs};" +
+                $"{Uri.EscapeDataString(profile.Channel1Connector)};" +
+                $"{Uri.EscapeDataString(profile.Channel2Connector)};" +
+                $"{Uri.EscapeDataString(profile.Channel3Connector)}");
         }
 
         foreach (ResistanceChannelSetting resistance in settings.ResistanceChannels)
@@ -265,9 +297,37 @@ public static class ProductionConfigService
             settings.MasterFaultCountsByModel[key] = normalized;
     }
 
+    public static WaterProofModelSettings GetWaterProofProfileForPath(
+        ProductionSettings settings,
+        string? path)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Normalize(settings);
+        string key = GetMasterModelKeyFromPath(path);
+        return settings.WaterProofProfilesByModel.TryGetValue(key, out WaterProofModelSettings? profile)
+            ? profile.Clone()
+            : new WaterProofModelSettings();
+    }
+
+    public static void SetWaterProofProfileForPath(
+        ProductionSettings settings,
+        string? path,
+        WaterProofModelSettings profile)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(profile);
+        Normalize(settings);
+        string key = GetMasterModelKeyFromPath(path);
+        settings.WaterProofProfilesByModel[key] = NormalizeWaterProofProfile(profile.Clone());
+    }
+
     public static void EnsureSavedOnStartup(ProductionSettings settings)
     {
-        try { Save(settings); }
+        try
+        {
+            if (!File.Exists(JsonPath))
+                Save(settings);
+        }
         catch { /* startup không được treo chỉ vì thư mục readonly */ }
     }
 
@@ -304,6 +364,11 @@ public static class ProductionConfigService
         settings.AutoMasterSequence = B(map, "AutoMasterSequence", settings.AutoMasterSequence);
         settings.MasterFaultRequiredCount = I(map, "MasterFaultRequiredCount", settings.MasterFaultRequiredCount);
         settings.WaterproofSerialPort = I(map, "WaterproofSerialPort", settings.WaterproofSerialPort);
+        settings.WaterProofMachine.PortName = S(map, "WaterProofPortName", settings.WaterProofMachine.PortName);
+        settings.WaterProofMachine.BaudRate = I(map, "WaterProofBaudRate", settings.WaterProofMachine.BaudRate);
+        settings.WaterProofMachine.AutoConnect = B(map, "WaterProofAutoConnect", settings.WaterProofMachine.AutoConnect);
+        settings.WaterProofMachine.ReadTimeoutMs = I(map, "WaterProofReadTimeoutMs", settings.WaterProofMachine.ReadTimeoutMs);
+        settings.WaterProofMachine.WriteTimeoutMs = I(map, "WaterProofWriteTimeoutMs", settings.WaterProofMachine.WriteTimeoutMs);
 
         foreach ((string key, string value) in map)
         {
@@ -350,6 +415,9 @@ public static class ProductionConfigService
             settings.Relay2MarkingPulseMs = legacyR2;
         }
         settings.PassMarkingToJigDelayMs = I(map, "PassMarkingToJigDelayMs", settings.PassMarkingToJigDelayMs);
+        settings.JigEjectRelayEnabled = B(map, "JigEjectRelayEnabled", settings.JigEjectRelayEnabled);
+        settings.PassMarkingRelayEnabled = B(map, "PassMarkingRelayEnabled", settings.PassMarkingRelayEnabled);
+        settings.PassJigRelayFirst = B(map, "PassJigRelayFirst", settings.PassJigRelayFirst);
         settings.OversizeWaitSeconds = I(map, "OversizeWaitSeconds", settings.OversizeWaitSeconds);
         settings.ShieldDelay = I(map, "ShieldDelayMs", settings.ShieldDelay);
         settings.ResistanceDelayMs = I(map, "ResistanceDelayMs", settings.ResistanceDelayMs);
@@ -373,6 +441,39 @@ public static class ProductionConfigService
         settings.Label.BaudRate = I(map, "LabelBaudRate", settings.Label.BaudRate);
         settings.Label.WriteTimeoutMs = I(map, "LabelWriteTimeoutMs", settings.Label.WriteTimeoutMs);
         settings.Label.Copies = I(map, "LabelCopies", settings.Label.Copies);
+        settings.Label.TemplateType = S(map, "LabelTemplateType", settings.Label.TemplateType);
+        settings.Label.TemplatePath = S(map, "LabelTemplatePath", settings.Label.TemplatePath);
+        settings.Label.EncodingName = S(map, "LabelEncodingName", settings.Label.EncodingName);
+        settings.Label.RawDestination = S(map, "LabelRawDestination", settings.Label.RawDestination);
+        settings.Label.ExternalHelperPath = S(map, "LabelExternalHelperPath", settings.Label.ExternalHelperPath);
+        settings.Label.ExternalHelperArgument = S(map, "LabelExternalHelperArgument", settings.Label.ExternalHelperArgument);
+        settings.Label.ExternalPrintFile = S(map, "LabelExternalPrintFile", settings.Label.ExternalPrintFile);
+
+        foreach ((string key, string value) in map)
+        {
+            const string prefix = "WaterProof.Model.";
+            if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string modelKey = Uri.UnescapeDataString(key[prefix.Length..]);
+            if (string.IsNullOrWhiteSpace(modelKey))
+                continue;
+
+            string[] parts = value.Split(';');
+            var profile = new WaterProofModelSettings();
+            if (parts.Length > 0) profile.Enabled = ParseBool(parts[0], profile.Enabled);
+            if (parts.Length > 1) profile.Channel1Enabled = ParseBool(parts[1], profile.Channel1Enabled);
+            if (parts.Length > 2) profile.Channel2Enabled = ParseBool(parts[2], profile.Channel2Enabled);
+            if (parts.Length > 3) profile.Channel3Enabled = ParseBool(parts[3], profile.Channel3Enabled);
+            if (parts.Length > 4 && double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double pressMin)) profile.PressMin = pressMin;
+            if (parts.Length > 5 && double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out double leakLimit)) profile.LeakLimit = leakLimit;
+            if (parts.Length > 6 && int.TryParse(parts[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out int pressTime)) profile.PressTimeMs = pressTime;
+            if (parts.Length > 7 && int.TryParse(parts[7], NumberStyles.Integer, CultureInfo.InvariantCulture, out int waitTime)) profile.WaitTimeMs = waitTime;
+            if (parts.Length > 8) profile.Channel1Connector = Uri.UnescapeDataString(parts[8]);
+            if (parts.Length > 9) profile.Channel2Connector = Uri.UnescapeDataString(parts[9]);
+            if (parts.Length > 10) profile.Channel3Connector = Uri.UnescapeDataString(parts[10]);
+            settings.WaterProofProfilesByModel[modelKey] = NormalizeWaterProofProfile(profile);
+        }
 
         foreach (ResistanceChannelSetting channel in settings.ResistanceChannels)
         {
@@ -399,11 +500,19 @@ public static class ProductionConfigService
 
         settings.Label ??= new LabelSettings();
         settings.ResistanceChannels ??= [];
+        settings.WaterProofMachine ??= new WaterProofMachineSettings();
+        settings.WaterProofProfilesByModel ??= new Dictionary<string, WaterProofModelSettings>(StringComparer.OrdinalIgnoreCase);
         settings.MasterFaultCountsByModel ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         if (settings.MasterFaultCountsByModel.Comparer != StringComparer.OrdinalIgnoreCase)
         {
             settings.MasterFaultCountsByModel = new Dictionary<string, int>(
                 settings.MasterFaultCountsByModel,
+                StringComparer.OrdinalIgnoreCase);
+        }
+        if (settings.WaterProofProfilesByModel.Comparer != StringComparer.OrdinalIgnoreCase)
+        {
+            settings.WaterProofProfilesByModel = new Dictionary<string, WaterProofModelSettings>(
+                settings.WaterProofProfilesByModel,
                 StringComparer.OrdinalIgnoreCase);
         }
 
@@ -441,6 +550,28 @@ public static class ProductionConfigService
         BoardCapacity capacity = BoardCapacity.FromSettings(settings);
         settings.CardCount = capacity.ScanCardCount;
         settings.WaterproofSerialPort = Math.Clamp(settings.WaterproofSerialPort, 0, 999);
+        settings.WaterProofMachine.PortName = (settings.WaterProofMachine.PortName ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(settings.WaterProofMachine.PortName) && settings.WaterproofSerialPort > 0)
+            settings.WaterProofMachine.PortName = $"COM{settings.WaterproofSerialPort}";
+        settings.WaterProofMachine.BaudRate = Math.Clamp(settings.WaterProofMachine.BaudRate, 1200, 921600);
+        settings.WaterProofMachine.ReadTimeoutMs = Math.Clamp(settings.WaterProofMachine.ReadTimeoutMs, 100, 30_000);
+        settings.WaterProofMachine.WriteTimeoutMs = Math.Clamp(settings.WaterProofMachine.WriteTimeoutMs, 100, 30_000);
+        if (settings.WaterProofMachine.PortName.StartsWith("COM", StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(settings.WaterProofMachine.PortName[3..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int legacyCom))
+        {
+            settings.WaterproofSerialPort = Math.Clamp(legacyCom, 0, 999);
+        }
+
+        foreach (string key in settings.WaterProofProfilesByModel.Keys.ToArray())
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                settings.WaterProofProfilesByModel.Remove(key);
+                continue;
+            }
+            settings.WaterProofProfilesByModel[key] = NormalizeWaterProofProfile(
+                settings.WaterProofProfilesByModel[key] ?? new WaterProofModelSettings());
+        }
 
         // V15.2: ba thông số relay độc lập. 50..5000 ms tránh pulse bằng 0 hoặc giữ relay quá lâu do nhập nhầm.
         settings.Relay1JigPulseMs = Math.Clamp(settings.Relay1JigPulseMs, 50, 5_000);
@@ -465,32 +596,39 @@ public static class ProductionConfigService
         settings.Label.FormatName = string.IsNullOrWhiteSpace(settings.Label.FormatName) ? "KS91" : settings.Label.FormatName.Trim();
         settings.Label.BaudRate = Math.Clamp(settings.Label.BaudRate, 1200, 921600);
         settings.Label.WriteTimeoutMs = Math.Clamp(settings.Label.WriteTimeoutMs, 500, 30_000);
-        settings.Label.Copies = Math.Clamp(settings.Label.Copies, 1, 20);
+        settings.Label.Copies = 1;
+        settings.Label.TemplateType = LabelProfileResolver.NormalizeTemplateType(settings.Label.TemplateType);
+        settings.Label.TemplatePath = (settings.Label.TemplatePath ?? string.Empty).Trim();
+        settings.Label.EncodingName = string.IsNullOrWhiteSpace(settings.Label.EncodingName)
+            ? "us-ascii"
+            : settings.Label.EncodingName.Trim();
+        settings.Label.RawDestination = (settings.Label.RawDestination ?? string.Empty).Trim();
+        settings.Label.ExternalHelperPath = (settings.Label.ExternalHelperPath ?? string.Empty).Trim();
+        settings.Label.ExternalHelperArgument = (settings.Label.ExternalHelperArgument ?? string.Empty).Trim();
+        settings.Label.ExternalPrintFile = string.IsNullOrWhiteSpace(settings.Label.ExternalPrintFile)
+            ? "print.txt"
+            : settings.Label.ExternalPrintFile.Trim();
 
         EnsureResistanceChannels(settings);
     }
 
+    private static WaterProofModelSettings NormalizeWaterProofProfile(WaterProofModelSettings profile)
+    {
+        profile.Channel1Connector = (profile.Channel1Connector ?? string.Empty).Trim();
+        profile.Channel2Connector = (profile.Channel2Connector ?? string.Empty).Trim();
+        profile.Channel3Connector = (profile.Channel3Connector ?? string.Empty).Trim();
+        profile.PressMin = Math.Max(0, profile.PressMin);
+        profile.LeakLimit = Math.Max(0, profile.LeakLimit);
+        profile.PressTimeMs = Math.Clamp(profile.PressTimeMs, 1, 300_000);
+        profile.WaitTimeMs = Math.Clamp(profile.WaitTimeMs, 1, 300_000);
+        return profile;
+    }
+
     private static void EnsureResistanceChannels(ProductionSettings settings)
     {
-        var byName = settings.ResistanceChannels
-            .Where(x => !string.IsNullOrWhiteSpace(x.Name))
-            .ToDictionary(x => x.Name.Trim(), StringComparer.OrdinalIgnoreCase);
-
-        var list = new List<ResistanceChannelSetting>();
-        for (int i = 1; i <= 5; i++)
-        {
-            string name = $"R{i}";
-            if (!byName.TryGetValue(name, out ResistanceChannelSetting? item))
-            {
-                item = new ResistanceChannelSetting { Name = name, Channel = i };
-            }
-            item.Name = name;
-            item.Channel = Math.Clamp(item.Channel, 1, 5);
-            item.MinOhm = Math.Max(0, item.MinOhm);
-            item.MaxOhm = Math.Max(item.MinOhm, item.MaxOhm);
-            list.Add(item);
-        }
-        settings.ResistanceChannels = list.ToArray();
+        settings.ResistanceChannels = ResistanceMeasurementPlan.Normalize(
+            settings.ResistanceChannels,
+            message => AsyncFileLogService.Current.Error($"Resistance configuration: {message}"));
     }
 
     private static (string Key, string Value) ParseCfgLine(string raw)

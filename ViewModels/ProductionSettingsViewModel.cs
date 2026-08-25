@@ -1,4 +1,5 @@
 ﻿using System.Collections.ObjectModel;
+using System.IO;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
@@ -9,6 +10,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 {
     private int _masterFaultRequiredCount;
     private readonly TestViewModel? _test;
+    private readonly string _modelPath;
     private bool _manualRuntimeActive;
     private string _manualRelay1Status = "OFF";
     private string _manualRelay2Status = "OFF";
@@ -16,18 +18,27 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     public ProductionSettings Settings { get; }
     public ObservableCollection<ResistanceChannelEditor> ResistanceChannels { get; }
+    public WaterProofModelSettings WaterProof { get; }
+    public IReadOnlyList<string> WaterProofConnectorOptions { get; }
+    public string WaterProofModelKey =>
+        ProductionConfigService.GetMasterModelKeyFromPath(_modelPath);
     public IReadOnlyList<ChannelOption> ChannelOptions { get; } =
     [
         new(0, "Không dùng"),
-        new(1, "1"),
-        new(2, "2"),
-        new(3, "3"),
-        new(4, "4"),
-        new(5, "5")
+        new(1, "CH1"),
+        new(2, "CH2"),
+        new(3, "CH3"),
+        new(4, "CH4"),
+        new(5, "CH5"),
+        new(6, "CH6"),
+        new(7, "CH7"),
+        new(8, "CH8"),
+        new(9, "CH9"),
+        new(10, "CH10")
     ];
 
     public string MasterModelKey =>
-        ProductionConfigService.GetMasterModelKeyFromPath(Settings.LastThtPath);
+        ProductionConfigService.GetMasterModelKeyFromPath(_modelPath);
 
     public int MasterFaultRequiredCount
     {
@@ -50,7 +61,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
     }
 
-    public bool IsManualPanelVisible => IsManualModeEnabled;
+    public bool IsManualPanelVisible => true;
 
     public bool ManualRuntimeActive
     {
@@ -90,6 +101,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     {
         _test = test;
         Settings = ProductionConfigService.Load();
+        _modelPath = test?.CurrentModelPath ?? Settings.LastThtPath;
+        if (!string.IsNullOrWhiteSpace(_modelPath))
+            Settings.LastThtPath = _modelPath;
         _manualRuntimeActive = test is not null && Settings.ManualModeEnabled;
         _manualStatus = Settings.ManualModeEnabled
             ? "MANUAL - chờ lệnh bảo trì"
@@ -97,8 +111,11 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ResistanceChannels = new ObservableCollection<ResistanceChannelEditor>(
             Settings.ResistanceChannels.Select((setting, index) =>
                 new ResistanceChannelEditor(setting, index + 1)));
+        WaterProof = ProductionConfigService.GetWaterProofProfileForPath(
+            Settings, _modelPath);
+        WaterProofConnectorOptions = LoadWaterProofConnectorOptions(test, _modelPath);
         _masterFaultRequiredCount = ProductionConfigService.GetMasterFaultRequiredCountForPath(
-            Settings, Settings.LastThtPath);
+            Settings, _modelPath);
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
             async () => await RunManualRelayCommandAsync(1, true),
@@ -115,6 +132,33 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ManualResetCommand = new AsyncRelayCommand(
             RunManualResetAsync,
             CanUseManualControls);
+    }
+
+    private static IReadOnlyList<string> LoadWaterProofConnectorOptions(
+        TestViewModel? test,
+        string? thtPath)
+    {
+        IReadOnlyList<string> current = test?.CurrentConnectorIds ?? [];
+        if (current.Count > 0)
+            return current;
+
+        if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
+            return [];
+
+        try
+        {
+            return new ThtModelParser().Load(thtPath.Trim()).Connectors
+                .Select(connector => connector.ConnectorId)
+                .Where(connector => !string.IsNullOrWhiteSpace(connector))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            AsyncFileLogService.Current.Error(
+                $"Không đọc được danh sách connector THT cho cấu hình Leak: {ex.Message}");
+            return [];
+        }
     }
 
     public void SetManualRuntimeActive(bool active)
@@ -200,7 +244,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         Settings.AutoMasterSequence = true;
         Settings.ManualModeEnabled = IsManualModeEnabled;
         ProductionConfigService.SetMasterFaultRequiredCountForPath(
-            Settings, Settings.LastThtPath, MasterFaultRequiredCount);
+            Settings, _modelPath, MasterFaultRequiredCount);
+        ProductionConfigService.SetWaterProofProfileForPath(
+            Settings, _modelPath, WaterProof);
         ProductionConfigService.Save(Settings);
     }
 
@@ -218,6 +264,7 @@ public sealed record ChannelOption(int Value, string Display);
 
 public sealed class ResistanceChannelEditor : ObservableObject
 {
+    private bool _enabled;
     private int _channelSelection;
     private double _minOhm;
     private double _maxOhm;
@@ -225,10 +272,19 @@ public sealed class ResistanceChannelEditor : ObservableObject
     public string Name { get; }
     public string Label { get; }
 
+    public bool Enabled
+    {
+        get => _enabled;
+        set => Set(ref _enabled, value);
+    }
+
     public int ChannelSelection
     {
         get => _channelSelection;
-        set => Set(ref _channelSelection, Math.Clamp(value, 0, 5));
+        set => Set(ref _channelSelection, Math.Clamp(
+            value,
+            0,
+            D2xxResistanceRouting.MaxChannel));
     }
 
     public double MinOhm
@@ -245,22 +301,22 @@ public sealed class ResistanceChannelEditor : ObservableObject
 
     public ResistanceChannelEditor(ResistanceChannelSetting setting, int ordinal)
     {
-        Name = string.IsNullOrWhiteSpace(setting.Name)
-            ? $"R{ordinal}"
-            : setting.Name;
-        Label = $"R{ordinal}";
-        _channelSelection = setting.Enabled
-            ? Math.Clamp(setting.Channel, 1, 5)
-            : 0;
+        Name = $"R{ordinal}";
+        Label = Name;
+        _enabled = setting.Enabled;
+        _channelSelection = Math.Clamp(
+            setting.Channel,
+            0,
+            D2xxResistanceRouting.MaxChannel);
         _minOhm = setting.MinOhm;
         _maxOhm = setting.MaxOhm;
     }
 
     public ResistanceChannelSetting ToSetting() => new()
     {
-        Enabled = ChannelSelection is >= 1 and <= 5,
+        Enabled = Enabled,
         Name = Name,
-        Channel = ChannelSelection is >= 1 and <= 5 ? ChannelSelection : 0,
+        Channel = ChannelSelection,
         MinOhm = MinOhm,
         MaxOhm = MaxOhm
     };

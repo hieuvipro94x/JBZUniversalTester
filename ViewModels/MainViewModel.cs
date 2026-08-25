@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Models;
@@ -16,6 +16,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ProductionSettings _productionSettings;
     private readonly IBoardTransport _board;
     private readonly KeysightVisaService _visa = new();
+    private readonly WaterProofSerialService _waterProof = new();
     private readonly TestEngine _engine;
     private readonly SemaphoreSlim _shutdownGate = new(1, 1);
     private bool _shutdownCompleted;
@@ -107,6 +108,7 @@ public sealed class MainViewModel : ObservableObject
             _engine,
             _board,
             _visa,
+            _waterProof,
             _settings,
             _productionSettings
         );
@@ -145,9 +147,12 @@ public sealed class MainViewModel : ObservableObject
     {
         Status = "ĐANG NẠP MÃ HÀNG VÀ KẾT NỐI BO...";
 
+        Task printerConnectionTask = Test.AutoConnectLabelPrinterAsync();
+
         // TestViewModel thực hiện hai việc tự động: recovery/kết nối FTDI và
         // tải model gần nhất. SetModel sẽ đồng bộ model trở lại MainWindow.
         await Test.InitializeAsync();
+        await printerConnectionTask;
 
         Home.Refresh();
         Raise(nameof(CurrentBoardCapacity));
@@ -201,6 +206,14 @@ public sealed class MainViewModel : ObservableObject
             try
             {
                 _visa.Dispose();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                await _waterProof.DisposeAsync();
             }
             catch
             {
@@ -316,6 +329,8 @@ public sealed class MainViewModel : ObservableObject
             await Test.RefreshProductionConfigurationAsync();
         else
             Test.RefreshProductionSettingsOnly();
+
+        await Test.AutoConnectLabelPrinterAsync();
 
         RefreshSettingsBindings();
     }

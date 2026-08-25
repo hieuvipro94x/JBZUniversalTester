@@ -1,7 +1,7 @@
 <Window x:Class="JBZUniversalTester.Views.FaultConfirmationWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Xu ly hang khong dat"
+        Title="Xử lý hàng không đạt"
         Width="520" Height="330"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"

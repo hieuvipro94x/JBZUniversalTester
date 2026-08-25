@@ -99,6 +99,20 @@ public sealed class ProductModel
     public string Alc { get; set; } = "";
     public string SourcePath { get; set; } = "";
 
+    /// <summary>
+    /// Additional static label values read from the Part table in the THT file.
+    /// Keys are case-insensitive so a new THT column can be used by a template
+    /// without adding another hard-coded renderer branch.
+    /// </summary>
+    public Dictionary<string, string> LabelVariables { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Label definition carried by this loaded THT model. Raw EPL found in the
+    /// THT is preferred over an external profile template.
+    /// </summary>
+    public LabelTemplateDefinition LabelTemplate { get; set; } = new();
+
     public List<PinRecord> Pins { get; set; } = [];
     public List<WireNet> Nets { get; set; } = [];
     public List<ConnectorDefinition> Connectors { get; set; } = [];
@@ -126,6 +140,34 @@ public sealed class ProductModel
         }
     }
 }
+
+public sealed record LabelTemplateDefinition(
+    string RawTemplate = "",
+    int Copies = 1,
+    string ProfileId = "",
+    string BarcodeTemplate = "");
+
+public enum LabelPrintMode
+{
+    NeedsOriginalTrace = 0,
+    RawEpl = 1,
+    RawZpl = 2,
+    StoredForm = 3,
+    ExternalTemplate = 4,
+    ExternalHelper = 5
+}
+
+public sealed record LabelProfile(
+    string Id,
+    LabelPrintMode Mode,
+    string TemplatePath = "",
+    string StoredFormName = "",
+    string ExternalHelperPath = "",
+    string ExternalHelperArgument = "",
+    string ExternalPrintFile = "",
+    string EncodingName = "us-ascii",
+    int Copies = 1,
+    string VerificationStatus = "VERIFIED");
 
 public sealed record ResistanceStep(
     string Name,

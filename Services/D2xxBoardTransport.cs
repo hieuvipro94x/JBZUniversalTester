@@ -6,6 +6,20 @@ using JBZUniversalTester.Models;
 
 namespace JBZUniversalTester.Services;
 
+public sealed record D2xxDeviceInfo(
+    string Serial,
+    string Description,
+    uint Id,
+    uint LocationId,
+    uint Type,
+    bool IsOpen);
+
+public sealed record D2xxProtocolTrace(
+    DateTime TimestampUtc,
+    long StopwatchTimestamp,
+    string Direction,
+    byte[] Data);
+
 /// <summary>
 /// FTDI D2XX transport aligned with the production Htdrv trace captured on
 /// 2026-08-07. Scan initialization is stateful: INIT_1/INIT_2 prepare the board,
@@ -20,10 +34,11 @@ public sealed class D2xxBoardTransport : IBoardTransport
     const string TargetDescription = "FT245R USB FIFO";
     const uint FT_PURGE_RX = 1;
     const uint FT_PURGE_TX = 2;
+    const uint FT_EVENT_RXCHAR = 1;
 
     static readonly byte[] CmdHandshake = [0x8A, 0x01, 0x01, 0x01];
-    static readonly byte[] CmdInit1 = [0x91, 0x00, 0x00, 0x00];
-    static readonly byte[] CmdInit2 = [0x90, 0x00, 0x00, 0x30];
+    static readonly byte[] CmdInit1 = D2xxResistanceRouting.BuildReleaseRouteB();
+    static readonly byte[] CmdInit2 = D2xxResistanceRouting.BuildReleaseRouteA();
     static readonly byte[] CmdStopScan = [0x8D, 0x00, 0x00, 0x00];
     static readonly byte[] CmdResetClear = [0x80, 0x00, 0x00, 0x00];
 
@@ -33,6 +48,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
     readonly SemaphoreSlim _ioLock = new(1, 1);
     readonly SemaphoreSlim _connectLock = new(1, 1);
     readonly SemaphoreSlim _scanSwitchLock = new(1, 1);
+    readonly AutoResetEvent _rxEvent = new(false);
 
     IntPtr _handle;
     CancellationTokenSource? _scanCts;
@@ -51,6 +67,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
     long _pollCount;
     long _bytesReceived;
     long _framesPublished;
+    long _framesReceivedTotal;
+    long _lastFrameSequence;
+    long _lastFrameTimestampUtcTicks;
     long _decodeTicks;
     int _disposeStarted;
     int _disposed;
@@ -68,9 +87,20 @@ public sealed class D2xxBoardTransport : IBoardTransport
     public bool IsScanning => _scanTask is { IsCompleted: false };
     public BoardScanMode CurrentScanMode => _scanMode;
     public BoardCapacity Capacity => _capacity;
+    public DateTime LastFrameTimestampUtc
+    {
+        get
+        {
+            long ticks = Interlocked.Read(ref _lastFrameTimestampUtcTicks);
+            return ticks <= 0 ? DateTime.MinValue : new DateTime(ticks, DateTimeKind.Utc);
+        }
+    }
+    public long LastFrameSequence => Interlocked.Read(ref _lastFrameSequence);
+    public long FramesReceived => Interlocked.Read(ref _framesReceivedTotal);
 
     public event EventHandler<ScanFrame>? FrameReceived;
     public event EventHandler<string>? Log;
+    public event EventHandler<D2xxProtocolTrace>? ProtocolTrace;
 
     public D2xxBoardTransport(
         string serial,
@@ -88,6 +118,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall)]
     static extern uint FT_CreateDeviceInfoList(out uint numberOfDevices);
+
+    [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall)]
+    static extern uint FT_GetLibraryVersion(out uint libraryVersion);
 
     [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Ansi)]
     static extern uint FT_GetDeviceInfoDetail(
@@ -133,6 +166,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
     [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall)]
     static extern uint FT_GetQueueStatus(IntPtr handle, out uint amountInRxQueue);
 
+    [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall)]
+    static extern uint FT_SetEventNotification(IntPtr handle, uint eventMask, IntPtr eventHandle);
+
     static string GetStatusName(uint status) => status switch
     {
         0 => "FT_OK",
@@ -156,22 +192,32 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 $"{api} lỗi FTDI: {status} ({GetStatusName(status)})");
     }
 
-    private sealed record FtdiCandidate(string Serial, string Description, uint Id, uint LocationId);
+    private sealed record FtdiCandidate(
+        string Serial,
+        string Description,
+        uint Id,
+        uint LocationId,
+        bool IsOpen);
 
-    private FtdiCandidate FindTargetBoard()
+    public static uint GetD2xxLibraryVersion()
+    {
+        Ensure(FT_GetLibraryVersion(out uint version), "FT_GetLibraryVersion");
+        return version;
+    }
+
+    public static IReadOnlyList<D2xxDeviceInfo> EnumerateDevices()
     {
         Ensure(FT_CreateDeviceInfoList(out uint count), "FT_CreateDeviceInfoList");
 
-        var matches = new List<FtdiCandidate>();
+        var devices = new List<D2xxDeviceInfo>(checked((int)count));
         for (uint index = 0; index < count; index++)
         {
             var serial = new StringBuilder(64);
             var description = new StringBuilder(128);
-
             uint status = FT_GetDeviceInfoDetail(
                 index,
-                out _,
-                out _,
+                out uint flags,
+                out uint type,
                 out uint id,
                 out uint locationId,
                 serial,
@@ -181,22 +227,32 @@ public sealed class D2xxBoardTransport : IBoardTransport
             if (status != FT_OK)
                 continue;
 
-            string serialText = serial.ToString().TrimEnd('\0', ' ');
-            string descriptionText = description.ToString().TrimEnd('\0', ' ');
-
-            // Chỉ nhận đúng họ bo đã thấy trong trace/Device Info:
-            // FT245R USB FIFO + VID/PID 0403:6001 (ID 0x04036001).
-            if (id == TargetFtdiId &&
-                descriptionText.Contains("FT245R", StringComparison.OrdinalIgnoreCase) &&
-                descriptionText.Contains("USB FIFO", StringComparison.OrdinalIgnoreCase))
-            {
-                matches.Add(new FtdiCandidate(
-                    serialText,
-                    descriptionText,
-                    id,
-                    locationId));
-            }
+            devices.Add(new D2xxDeviceInfo(
+                serial.ToString().TrimEnd('\0', ' '),
+                description.ToString().TrimEnd('\0', ' '),
+                id,
+                locationId,
+                type,
+                (flags & 0x01) != 0));
         }
+
+        return devices;
+    }
+
+    private FtdiCandidate FindTargetBoard()
+    {
+        List<FtdiCandidate> matches = EnumerateDevices()
+            .Where(device =>
+                device.Id == TargetFtdiId &&
+                device.Description.Contains("FT245R", StringComparison.OrdinalIgnoreCase) &&
+                device.Description.Contains("USB FIFO", StringComparison.OrdinalIgnoreCase))
+            .Select(device => new FtdiCandidate(
+                device.Serial,
+                device.Description,
+                device.Id,
+                device.LocationId,
+                device.IsOpen))
+            .ToList();
 
         if (matches.Count == 0)
         {
@@ -205,17 +261,36 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 "Kiểm tra nguồn bo, cáp USB và driver FTDI D2XX.");
         }
 
-        // Nếu appsettings còn serial cũ AI050MBB nhưng bo thực tế là A90764PH,
-        // không được fail. Serial chỉ dùng để ưu tiên khi có nhiều bo cùng loại.
         if (!string.IsNullOrWhiteSpace(_serial))
         {
             FtdiCandidate? preferred = matches.FirstOrDefault(x =>
                 x.Serial.Equals(_serial, StringComparison.OrdinalIgnoreCase));
             if (preferred is not null)
-                return preferred;
+                return RequireAvailable(preferred);
         }
 
-        return matches[0];
+        if (matches.Count > 1)
+        {
+            string candidates = string.Join(
+                ", ",
+                matches.Select(item => $"{item.Description} [{item.Serial}] ID=0x{item.Id:X8}"));
+            throw new InvalidOperationException(
+                "Có nhiều bo FT245R phù hợp nhưng FtdiSerial không xác định đúng một bo. " +
+                $"Dừng để tránh mở nhầm thiết bị: {candidates}");
+        }
+
+        return RequireAvailable(matches[0]);
+    }
+
+    private static FtdiCandidate RequireAvailable(FtdiCandidate candidate)
+    {
+        if (candidate.IsOpen)
+        {
+            throw new InvalidOperationException(
+                $"Bo FTDI {candidate.Description} [{candidate.Serial}] đang bị phần mềm khác chiếm dụng.");
+        }
+
+        return candidate;
     }
 
     public async Task<BoardConnectionInfo> ConnectAsync(
@@ -277,6 +352,13 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     byte latencyMs = checked((byte)Math.Clamp(_production.UsbDelay, 1, 16));
                     Ensure(FT_SetLatencyTimer(_handle, latencyMs), "FT_SetLatencyTimer");
                     Ensure(FT_Purge(_handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
+                    _rxEvent.Reset();
+                    Ensure(
+                        FT_SetEventNotification(
+                            _handle,
+                            FT_EVENT_RXCHAR,
+                            _rxEvent.SafeWaitHandle.DangerousGetHandle()),
+                        "FT_SetEventNotification");
                 }, ct);
 
                 _scanPrepared = false;
@@ -658,15 +740,12 @@ public sealed class D2xxBoardTransport : IBoardTransport
     {
         EnsureConnected();
 
-        // Captured production sequence for both R1/R2:
+        // Canonical production sequence for every physical resistance channel:
         // 90 00 00 01 -> ~350 ms -> 91 00 00 <channel>.
-        byte[] routeA = ParseFrame(
-            step.RouteA,
-            [0x90, 0x00, 0x00, 0x01]);
-
-        byte[] routeB = ParseFrame(
-            step.RouteB,
-            [0x91, 0x00, 0x00, checked((byte)step.Channel)]);
+        // RouteA/RouteB remain on ResistanceStep for legacy import only. The
+        // production runtime must never derive the selector from those fields.
+        byte[] routeA = D2xxResistanceRouting.BuildRouteA();
+        byte[] routeB = D2xxResistanceRouting.BuildRouteB(step.Channel);
 
         await WriteAsync(routeA, ct);
         await Task.Delay(350, ct);
@@ -734,8 +813,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
         long generation,
         CancellationToken ct)
     {
-        int idleDelayMs = ProductionTimingPolicy.D2xxIdlePollSleepMs;
         var buffer = new byte[65536];
+        WaitHandle[] receiveWaitHandles = [_rxEvent, ct.WaitHandle];
 
         try
         {
@@ -800,11 +879,16 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 if (queued == 0 || read == 0)
                 {
                     PublishPerfAggregateIfDue(mode);
-                    ct.WaitHandle.WaitOne(idleDelayMs);
+
+                    // Htdrv gốc đăng ký FT_EVENT_RXCHAR và chỉ thức khi driver
+                    // báo có dữ liệu. Timeout giữ watchdog/perf metrics hoạt động
+                    // ngay cả khi bo im lặng; cancellation luôn đánh thức worker.
+                    WaitHandle.WaitAny(receiveWaitHandles, 1000);
                     continue;
                 }
 
                 Interlocked.Add(ref _bytesReceived, (long)read);
+                PublishProtocolTrace("RX", buffer.AsSpan(0, checked((int)read)));
                 long decodeStarted = Stopwatch.GetTimestamp();
                 IReadOnlyList<ScanFrame> decodedFrames = decoder.Feed(
                     buffer.AsSpan(0, checked((int)read)));
@@ -889,6 +973,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
     void PublishFrame(ScanFrame decoded)
     {
         Interlocked.Increment(ref _framesPublished);
+        Interlocked.Increment(ref _framesReceivedTotal);
+        Interlocked.Exchange(ref _lastFrameSequence, decoded.Sequence);
+        Interlocked.Exchange(ref _lastFrameTimestampUtcTicks, DateTime.UtcNow.Ticks);
         long now = Environment.TickCount64;
         bool forceLog = decoded.UnknownBytes > 0 ||
                         (decoded.Mode == BoardScanMode.Production && !decoded.Complete);
@@ -974,6 +1061,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         Log?.Invoke(
             this,
             $"TX {BitConverter.ToString(data).Replace("-", " ")}");
+        PublishProtocolTrace("TX", data);
     }
 
     async Task PurgeAsync(CancellationToken ct)
@@ -1029,7 +1117,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     FT_Read(handle, buffer, (uint)buffer.Length, out uint read),
                     "FT_Read");
 
-                return buffer[..(int)read];
+                byte[] received = buffer[..(int)read];
+                PublishProtocolTrace("RX", received);
+                return received;
             }
             finally
             {
@@ -1076,6 +1166,28 @@ public sealed class D2xxBoardTransport : IBoardTransport
         return values;
     }
 
+    void PublishProtocolTrace(string direction, ReadOnlySpan<byte> data)
+    {
+        EventHandler<D2xxProtocolTrace>? handler = ProtocolTrace;
+        if (handler is null || data.IsEmpty)
+            return;
+
+        try
+        {
+            handler.Invoke(
+                this,
+                new D2xxProtocolTrace(
+                    DateTime.UtcNow,
+                    Stopwatch.GetTimestamp(),
+                    direction,
+                    data.ToArray()));
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke(this, $"Protocol trace subscriber error: {ex.Message}");
+        }
+    }
+
     void EnsureConnected()
     {
         ThrowIfDisposed();
@@ -1107,6 +1219,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             _ioLock.Dispose();
             _connectLock.Dispose();
             _scanSwitchLock.Dispose();
+            _rxEvent.Dispose();
         }
     }
 }

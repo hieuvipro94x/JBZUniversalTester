@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="JBZUniversalTester.csproj" />
+  <Project Path="HardwareVerification/JBZUniversalTester.HardwareVerification.csproj" />
   <Project Path="Tests/JBZUniversalTester.SelfTests.csproj" />
 </Solution>

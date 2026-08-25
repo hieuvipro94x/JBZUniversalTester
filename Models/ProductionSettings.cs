@@ -54,7 +54,18 @@ public sealed class ProductionSettings
     public Dictionary<string, int> MasterFaultCountsByModel { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Legacy compatibility: số COM cũ của máy kín nước (5 = COM5).</summary>
     public int WaterproofSerialPort { get; set; }
+
+    /// <summary>Máy leak UART/RS232 riêng, không liên quan transport D2XX.</summary>
+    public WaterProofMachineSettings WaterProofMachine { get; set; } = new();
+
+    /// <summary>
+    /// Cấu hình leak theo từng file/model THT. Key là tên file không có phần mở rộng.
+    /// Model không có key hoặc Enabled=false sẽ bỏ qua hoàn toàn bước leak.
+    /// </summary>
+    public Dictionary<string, WaterProofModelSettings> WaterProofProfilesByModel { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Số module/card mở rộng người vận hành cấu hình: 1..10.
@@ -68,8 +79,9 @@ public sealed class ProductionSettings
     // THÔNG TIN PRODUCTION
     // ============================================================
 
-    // Giá trị LOTNO dành cho sản phẩm kế tiếp. Chỉ chỉnh trong màn Cài đặt.
-    // Sau mỗi sản phẩm hoàn tất (PASS hoặc FAIL), phần mềm tự tăng +1 và lưu lại.
+    // Giá trị LOTNO dành cho sản phẩm PASS kế tiếp. Người vận hành có thể đặt
+    // LOTNO bắt đầu trong màn Cài đặt; lịch sử test và tem cùng dùng giá trị này.
+    // Chỉ sau khi in tem PASS thành công, phần mềm mới tăng +1 và lưu lại.
     public long LotNo { get; set; } = 2000;
 
     // Giữ trường cũ để đọc các file cấu hình V11.4 trở về trước.
@@ -123,6 +135,15 @@ public sealed class ProductionSettings
     /// <summary>Thời gian Relay 2 - MARKING giữ ON trước khi cưỡng bức OFF.</summary>
     public int Relay2MarkingPulseMs { get; set; } = 250;
 
+    /// <summary>Bật/tắt Relay 1 JIG trong chuỗi PASS/FAIL/Master.</summary>
+    public bool JigEjectRelayEnabled { get; set; } = true;
+
+    /// <summary>Bật/tắt Relay 2 MARKING trong chuỗi PASS. FAIL/Master không bao giờ dùng MARKING.</summary>
+    public bool PassMarkingRelayEnabled { get; set; } = true;
+
+    /// <summary>PASS sequence: false = MARKING trước JIG; true = JIG trước MARKING.</summary>
+    public bool PassJigRelayFirst { get; set; }
+
     /// <summary>Khoảng chờ an toàn sau khi R2 MARKING OFF trước khi R1 JIG ON trong chu trình PASS.</summary>
     public int PassMarkingToJigDelayMs { get; set; } = 430;
 
@@ -158,7 +179,7 @@ public sealed class ProductionSettings
     public string LastThtPath { get; set; } = string.Empty;
 
     // ============================================================
-    // ĐO ĐIỆN TRỞ R1-R5
+    // ĐO ĐIỆN TRỞ R1-R10
     // ============================================================
 
     public ResistanceChannelSetting[] ResistanceChannels { get; set; } =
@@ -202,6 +223,46 @@ public sealed class ProductionSettings
             Channel = 5,
             MinOhm = 0,
             MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R6",
+            Channel = 6,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R7",
+            Channel = 7,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R8",
+            Channel = 8,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R9",
+            Channel = 9,
+            MinOhm = 0,
+            MaxOhm = 0
+        },
+        new()
+        {
+            Enabled = false,
+            Name = "R10",
+            Channel = 10,
+            MinOhm = 0,
+            MaxOhm = 0
         }
     ];
 
@@ -237,6 +298,9 @@ public sealed class ResistanceChannelSetting
 
 public sealed class LabelSettings
 {
+    public const string LargeTemplate = "TEM_TO";
+    public const string SmallTemplate = "TEM_BE";
+
     /// <summary>
     /// Tên máy in được cài trong Windows.
     /// Có thể để trống nếu gửi EPL trực tiếp qua COM.
@@ -259,4 +323,21 @@ public sealed class LabelSettings
     public int WriteTimeoutMs { get; set; } = 3000;
 
     public int Copies { get; set; } = 1;
+
+    /// <summary>Chọn file mẫu lệnh in dạng TXT trong thư mục Labels cạnh EXE.</summary>
+    public string TemplateType { get; set; } = LargeTemplate;
+
+    /// <summary>Explicit profile/template selection. No part-number inference is allowed.</summary>
+    public string TemplatePath { get; set; } = string.Empty;
+
+    public string EncodingName { get; set; } = "us-ascii";
+
+    /// <summary>Optional legacy raw destination such as LPT1.</summary>
+    public string RawDestination { get; set; } = string.Empty;
+
+    public string ExternalHelperPath { get; set; } = string.Empty;
+
+    public string ExternalHelperArgument { get; set; } = string.Empty;
+
+    public string ExternalPrintFile { get; set; } = "print.txt";
 }

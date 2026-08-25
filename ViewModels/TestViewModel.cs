@@ -15,6 +15,11 @@ namespace JBZUniversalTester.ViewModels;
 
 public sealed class TestViewModel : ObservableObject
 {
+    private sealed record LabelPrintContext(
+        LabelPrintRequest Request,
+        TestHistoryStore HistoryStore,
+        long HistoryId);
+
     private enum RuntimeMode
     {
         Background = 0,
@@ -23,21 +28,40 @@ public sealed class TestViewModel : ObservableObject
         ShuttingDown = 3
     }
 
+    private enum ProductionPhase
+    {
+        WaitingProduct = 0,
+        Continuity = 1,
+        Resistance = 2,
+        WaterProof = 3,
+        WaitingFaultConfirmation = 4,
+        WaitingProductRemoval = 5,
+        Completed = 6,
+        EquipmentError = 7
+    }
+
     private readonly MainViewModel _main;
     private readonly TestEngine _engine;
     private readonly IBoardTransport _board;
+    private readonly ScanSupervisor _scanSupervisor;
     private readonly KeysightVisaService _visa;
+    private readonly WaterProofSerialService _waterProof;
     private readonly AppSettings _settings;
     private readonly ProductionSettings _productionSettings;
+    private readonly LotSequenceService _lotSequence;
     private readonly ProductionStatisticsStore _statisticsStore = new();
+    private readonly PartCounterStore _partCounterStore = new();
+    private readonly LegacyPhtHistoryService _legacyHistory;
+    private readonly bool _requireStartupIoClear;
     private TestHistoryStore _historyStore;
     private readonly LabelPrintService _labelPrintService = new();
+    private readonly LabelDuplicateGuard _labelDuplicateGuard = new();
     private readonly AppSoundService _sound = AppSoundService.Current;
     private readonly ThtModelParser _modelParser = new();
     private readonly object _initializationGate = new();
     private readonly object _cycleTokenGate = new();
-    private readonly object _lotReservationGate = new();
     private readonly object _pendingLogGate = new();
+    private readonly object _labelStateGate = new();
     private readonly SemaphoreSlim _manualRelayGate = new(1, 1);
     private readonly Queue<string> _pendingUiLogs = new();
     private readonly CancellationTokenSource _lifetimeCts = new();
@@ -50,6 +74,11 @@ public sealed class TestViewModel : ObservableObject
     private string _state = "CHỜ CHỌN MÃ HÀNG";
     private string _lot = "0";
     private string _keysightResource;
+    private WaterProofModelSettings _waterProofProfile = new();
+    private WaterProofStage _waterProofStage = WaterProofStage.Idle;
+    private string _waterProofStageText = "CHỜ KIỂM TRA";
+    private string _waterProofOverallResult = "---";
+    private int _waterProofRunning;
     private string _hardwareStatus = "Bo: đang khởi tạo...";
     private string _boardConnectionMessage = "Chưa kết nối bo JBZ.";
     private string? _currentModelPath;
@@ -60,6 +89,7 @@ public sealed class TestViewModel : ObservableObject
     private bool _cycleActive;
     private bool _waitForProductRelease;
     private bool _waitForFaultProductRemoval;
+    private bool _waterProofEquipmentErrorAwaitingRemoval;
     private int _postContinuityStarted;
     private int _wiringFaultHandlingStarted;
     private Task? _hardwareInitializationTask;
@@ -69,6 +99,7 @@ public sealed class TestViewModel : ObservableObject
     private bool _productDetectedThisCycle;
     private int _probeSessionActive;
     private int _runtimeMode = (int)RuntimeMode.Background;
+    private int _productionPhase = (int)ProductionPhase.WaitingProduct;
     private long _runtimeGeneration;
     private int _engineUiUpdateQueued;
     private int _logUiFlushQueued;
@@ -83,6 +114,10 @@ public sealed class TestViewModel : ObservableObject
     private long _lastObservedProductionFrameSequence;
     private long _cycleStartFrameSequence;
     private int _freshFrameGateActive;
+    // 0 = chờ frame sạch, 1 = đang chuyển trạng thái trên UI, 2 = đã mở khóa.
+    // Frame không được đưa vào TestEngine trước khi đạt trạng thái 2.
+    private int _startupIoInterlockState = 2;
+    private string _startupIoWarningSignature = string.Empty;
     private int _stalePreCycleFrameLogged;
     private int _secondRequiredNetSeenLogged;
     private int _continuityPassedLogged;
@@ -94,6 +129,8 @@ public sealed class TestViewModel : ObservableObject
     private long _engineUiUpdatesRendered;
     private long _lastContinuousScanMetricsTick;
     private string _lastPassGateSignature = string.Empty;
+    private string _lastFaultGateSignature = string.Empty;
+    private string _lastFaultGateSuppressedSignature = string.Empty;
     private string _lastPassRemainingSignature = string.Empty;
     private string _lastProductDetectSignature = string.Empty;
     // V12.10.3: TestEngine.Reset() phát Changed đồng bộ. Trong Master state machine,
@@ -109,8 +146,12 @@ public sealed class TestViewModel : ObservableObject
     private long _monthlyTestCount;
     private long _lifetimeTestCount;
     private long _probeCycleCount;
+    private long _probeReplacementThreshold = PartCounterStore.DefaultReplacementThreshold;
     private string _deviceFaultMessage =
         "Phát hiện trạng thái dữ liệu I/O không ổn định. Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.";
+    private LabelPrintContext? _failedLabelPrint;
+    private LabelPrintContext? _lastSuccessfulLabelPrint;
+    private string _labelStatusText = "TEM: SẴN SÀNG";
 
     // V11.9: nhận dạng đầu dò GND ngay cả khi TestView đang mở. Firmware có
     // chữ ký fan-out dày (một source kéo theo hàng chục target liên tiếp).
@@ -121,6 +162,7 @@ public sealed class TestViewModel : ObservableObject
     private readonly object _inlineProbeGate = new();
     private int[] _inlineProbeContactIos = Array.Empty<int>();
     private long _inlineProbeLastSeenUtcTicks;
+    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 1, releaseFrames: 1, maxContacts: 2);
     // V12.9.2: Probe UI tuyệt đối không dùng TTL/quarantine dài.
     // Timestamp chỉ còn phục vụ interlock relay chống rung cực ngắn sau RELEASE,
     // không được phép giữ ProbeContacts trên giao diện.
@@ -141,6 +183,8 @@ public sealed class TestViewModel : ObservableObject
     private bool _masterFaultCollectionLocked;
     private int _masterPostStarted;
     private int _masterEjectStarted;
+    private int _legacyGoodMasterRecorded;
+    private int _legacyBadMasterRecorded;
     private long _masterBadCollectNotBeforeUtcTicks;
     private const int MasterBadSettleMs = 120;
     private string _masterStatus = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
@@ -178,7 +222,30 @@ public sealed class TestViewModel : ObservableObject
         ?? "SẴN SÀNG - BO TỰ PHÁT HIỆN ĐẦU DÒ TRONG CHU KỲ KIỂM TRA";
     public string ProbeBarBackground => HasInlineProbeContacts ? "#23D9D9" : "#F8F8F6";
     public ObservableCollection<ResistanceResult> Resistance { get; } = new();
+    public ObservableCollection<WaterProofChannelResult> WaterProofChannels { get; } = new();
     public ObservableCollection<string> Logs { get; } = new();
+
+    public bool IsWaterProofCardVisible => _model is not null && _waterProofProfile.Enabled;
+    public string WaterProofStageText => _waterProofStageText;
+    public string WaterProofOverallResult => _waterProofOverallResult;
+    public string WaterProofLeakLimitText => _waterProofProfile.LeakLimit.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+    public string WaterProofPortText => string.IsNullOrWhiteSpace(_productionSettings.WaterProofMachine.PortName)
+        ? "CHƯA CẤU HÌNH COM"
+        : _productionSettings.WaterProofMachine.PortName;
+    public string WaterProofCardBackground => _waterProofStage switch
+    {
+        WaterProofStage.Passed => "#E8F6EC",
+        WaterProofStage.Failed or WaterProofStage.Error => "#FDECEC",
+        WaterProofStage.Pressurizing or WaterProofStage.Waiting or WaterProofStage.Evaluating => "#FFF6C9",
+        _ => "#FFFFFF"
+    };
+    public string WaterProofAccentBrush => _waterProofStage switch
+    {
+        WaterProofStage.Passed => "#26A653",
+        WaterProofStage.Failed or WaterProofStage.Error => "#D32F2F",
+        WaterProofStage.Pressurizing or WaterProofStage.Waiting or WaterProofStage.Evaluating => "#F2B705",
+        _ => "#2B9C76"
+    };
 
     public bool IsDeviceFault => Volatile.Read(ref _deviceFault) != 0;
     public bool IsManualModeActive => _productionSettings.ManualModeEnabled;
@@ -229,19 +296,37 @@ public sealed class TestViewModel : ObservableObject
             if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
                 return "MANUAL";
 
+            if (value.StartsWith("CẢNH BÁO IO", StringComparison.OrdinalIgnoreCase))
+                return "CẢNH BÁO IO";
+
+            if (value.Contains("KIỂM TRA IO BAN ĐẦU", StringComparison.OrdinalIgnoreCase))
+                return "KIỂM TRA IO";
+
+            if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
+                return "CHƯA KẾT NỐI BO";
+
+            if (value.Contains("KẾT NỐI BO", StringComparison.OrdinalIgnoreCase))
+                return "ĐANG KẾT NỐI BO";
+
             if (IsMasterSequenceActive)
                 return value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase)
                     ? "CHỜ MASTER"
                     : "MASTER";
 
-            if (value.Equals("PASS", StringComparison.OrdinalIgnoreCase))
+            if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
                 return "ĐẠT";
+
+            if (value.Contains("ĐANG TEST LEAK", StringComparison.OrdinalIgnoreCase))
+                return "ĐANG TEST LEAK";
 
             if (value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase) ||
                 value.Contains("KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
                 value.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
                 value.Contains("LỖI", StringComparison.OrdinalIgnoreCase))
                 return "KHÔNG ĐẠT";
+
+            if (value.Contains("CHỜ THÁO", StringComparison.OrdinalIgnoreCase))
+                return "CHỜ THÁO";
 
             if (value.Contains("ĐANG", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG TEST";
@@ -280,6 +365,12 @@ public sealed class TestViewModel : ObservableObject
             if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
                 return "#FFF3A0";
 
+            if (value.StartsWith("CẢNH BÁO IO", StringComparison.OrdinalIgnoreCase))
+                return "#E65100";
+
+            if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
+                return "#C62828";
+
             if (IsMasterSequenceActive)
             {
                 if (value.Contains("LỖI THIẾT BỊ", StringComparison.OrdinalIgnoreCase) ||
@@ -292,7 +383,7 @@ public sealed class TestViewModel : ObservableObject
             if (MasterApproved && value.Contains("SẴN SÀNG SẢN XUẤT", StringComparison.OrdinalIgnoreCase))
                 return "#FFF3A0";
 
-            if (value.Equals("PASS", StringComparison.OrdinalIgnoreCase))
+            if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
                 return "#2AA84A";
 
             if (value.Contains("LỖI", StringComparison.OrdinalIgnoreCase) ||
@@ -509,6 +600,7 @@ public sealed class TestViewModel : ObservableObject
                 ProductFaultType.WrongWiring => "#E53935",
                 ProductFaultType.OpenCircuit => "#F28C28",
                 ProductFaultType.ResistanceOutOfRange => "#E53935",
+                ProductFaultType.WaterProofLeak => "#E53935",
                 _ => StateBackground
             };
         }
@@ -521,6 +613,12 @@ public sealed class TestViewModel : ObservableObject
 
     public string ModelName =>
         _model?.ModelName ?? string.Empty;
+
+    public IReadOnlyList<string> CurrentConnectorIds => _model?.Connectors
+        .Select(connector => connector.ConnectorId)
+        .Where(connector => !string.IsNullOrWhiteSpace(connector))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray() ?? [];
 
     public string PartNumber =>
         _model?.PartNumber ?? string.Empty;
@@ -648,15 +746,14 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    public long ProbeReplacementThreshold =>
-        Math.Max(1, _productionSettings.ProbeReplacementThreshold);
+    public long ProbeReplacementThreshold => _probeReplacementThreshold;
 
     public string ProbeCycleText => $"{ProbeCycleCount:N0} / {ProbeReplacementThreshold:N0}";
     public bool ProbeMaintenanceDue => ProbeCycleCount >= ProbeReplacementThreshold;
     public string ProbeMaintenanceStatus => ProbeMaintenanceDue
         ? "ĐẾN CHU KỲ THAY PROBE PIN"
         : "PROBE PIN ĐANG TRONG CHU KỲ SỬ DỤNG";
-    public string ProbeMaintenanceBackground => ProbeMaintenanceDue ? "#D32F2F" : "#E8F5E9";
+    public string ProbeMaintenanceBackground => ProbeMaintenanceDue ? "#C62828" : "#16734B";
 
     public MasterSequenceState MasterState
     {
@@ -740,21 +837,59 @@ public sealed class TestViewModel : ObservableObject
     public AsyncRelayCommand Relay2Command { get; }
     public AsyncRelayCommand RelaysOffCommand { get; }
     public AsyncRelayCommand ResetDeviceFaultCommand { get; }
+    public AsyncRelayCommand RetryLabelCommand { get; }
+    public AsyncRelayCommand ReprintLabelCommand { get; }
+
+    public string LabelStatusText
+    {
+        get => _labelStatusText;
+        private set => Set(ref _labelStatusText, value);
+    }
+
+    public bool IsLabelPrinterConnected => _labelPrintService.IsConnected;
+
+    public string LabelPrinterConnectedPort => _labelPrintService.ConnectedPort;
+
+    public bool CanRetryLabel
+    {
+        get
+        {
+            lock (_labelStateGate)
+                return _failedLabelPrint is not null;
+        }
+    }
+
+    public bool CanReprintLabel
+    {
+        get
+        {
+            lock (_labelStateGate)
+                return _lastSuccessfulLabelPrint is not null;
+        }
+    }
 
     public TestViewModel(
         MainViewModel main,
         TestEngine engine,
         IBoardTransport board,
         KeysightVisaService visa,
+        WaterProofSerialService waterProof,
         AppSettings settings,
-        ProductionSettings productionSettings)
+        ProductionSettings productionSettings,
+        LegacyPhtHistoryService? legacyHistory = null,
+        bool requireStartupIoClear = true)
     {
         _main = main;
         _engine = engine;
         _board = board;
+        _scanSupervisor = new ScanSupervisor(_board, AddLog);
         _visa = visa;
+        _waterProof = waterProof;
         _settings = settings;
         _productionSettings = productionSettings;
+        _legacyHistory = legacyHistory ?? new LegacyPhtHistoryService();
+        _requireStartupIoClear = requireStartupIoClear;
+        _lotSequence = new LotSequenceService(_productionSettings);
         _historyStore = new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
         Lot = _productionSettings.LotNo.ToString();
         _sound.Initialize();
@@ -767,6 +902,7 @@ public sealed class TestViewModel : ObservableObject
         _engine.Changed += OnEngineChanged;
         _board.Log += OnBoardLog;
         _board.FrameReceived += OnBoardFrameReceived;
+        _waterProof.Log += OnWaterProofLog;
 
         RebuildActiveCards();
 
@@ -820,6 +956,8 @@ public sealed class TestViewModel : ObservableObject
             });
 
         ResetDeviceFaultCommand = new AsyncRelayCommand(ResetDeviceFaultAsync);
+        RetryLabelCommand = new AsyncRelayCommand(RetryLastFailedLabelAsync, () => CanRetryLabel);
+        ReprintLabelCommand = new AsyncRelayCommand(ReprintLastSuccessfulLabelAsync, () => CanReprintLabel);
 
     }
 
@@ -1009,9 +1147,28 @@ public sealed class TestViewModel : ObservableObject
 
         if (_model is null)
             return "CHỜ CHỌN MÃ HÀNG";
+        if (_requireStartupIoClear && Volatile.Read(ref _startupIoInterlockState) != 2)
+            return "CHỜ KIỂM TRA IO BAN ĐẦU";
         return MasterApproved
             ? "CHỜ LẮP SẢN PHẨM"
             : "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+    }
+
+    private string PassRelaySequenceText()
+    {
+        bool jigEnabled = _productionSettings.JigEjectRelayEnabled;
+        bool markingEnabled = _productionSettings.PassMarkingRelayEnabled;
+
+        if (!jigEnabled && !markingEnabled)
+            return "PASS không kích relay theo cấu hình";
+        if (!jigEnabled)
+            return "Relay 2 MARKING";
+        if (!markingEnabled)
+            return "Relay 1 mở JIG";
+
+        return _productionSettings.PassJigRelayFirst
+            ? "Relay 1 mở JIG -> Relay 2 MARKING"
+            : "Relay 2 MARKING -> Relay 1 mở JIG";
     }
 
     private void ReportDeviceFaultForTest(Exception exception, int desiredRowsCount = -1) =>
@@ -1224,11 +1381,15 @@ public sealed class TestViewModel : ObservableObject
             _cycleCts = null;
         }
 
-        if (current is null)
-            return;
+        if (current is not null)
+        {
+            try { current.Cancel(); } catch { }
+            current.Dispose();
+        }
 
-        try { current.Cancel(); } catch { }
-        current.Dispose();
+        // SerialPort driver có thể đang kẹt trong ReadExisting/Write. Tách và
+        // đóng handle trên worker riêng để đóng view/app không chờ COM vô hạn.
+        _waterProof.AbortActiveRun();
     }
 
     /// <summary>
@@ -1301,13 +1462,19 @@ public sealed class TestViewModel : ObservableObject
 
         try
         {
-            // Đây chỉ là scan nền liên tục. Chưa bấm BẮT ĐẦU KIỂM TRA thì
-            // TestEngine bị khóa, nên scan không thể tự PASS/relay.
-            _engine.SetFrameProcessingEnabled(false);
-            _board.ConfigureScanRange(_model?.MaxIo ?? 0);
-            await _board.StartScanAsync(BoardScanMode.Production, _lifetimeCts.Token);
-            State = ReadyStateForCurrentModel();
-            AddLog("Bo đã kết nối và START SCAN I/O liên tục ở chế độ nền.");
+            bool backgroundOnly = CurrentRuntimeMode == RuntimeMode.Background &&
+                                  !_cycleActive &&
+                                  !_waitForProductRelease &&
+                                  !_waitForFaultProductRemoval;
+            if (backgroundOnly)
+                _engine.SetFrameProcessingEnabled(false);
+            bool started = await _scanSupervisor.EnsureProductionScanAsync(
+                _model?.MaxIo ?? 0,
+                _lifetimeCts.Token);
+            if (backgroundOnly)
+                State = ReadyStateForCurrentModel();
+            if (started)
+                AddLog("Bo đã kết nối và START SCAN I/O liên tục ở chế độ nền.");
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
@@ -1322,58 +1489,16 @@ public sealed class TestViewModel : ObservableObject
         CancellationToken ct,
         string reason)
     {
-        ct.ThrowIfCancellationRequested();
-
-        long baseline = Volatile.Read(ref _lastObservedProductionFrameSequence);
-        await _board.StartScanAsync(BoardScanMode.Production, ct);
-
-        if (await WaitForNextProductionFrameAsync(baseline, 1_200, ct))
-        {
-            AddLog($"START_SCAN OK sau {reason}: đã nhận frame production mới.");
-            return;
-        }
-
-        AddLog($"START_SCAN sau {reason} chưa có frame đầu - tự recovery STOP/START một lần.");
-        await _board.StopScanAsync(CancellationToken.None);
-
-        baseline = Volatile.Read(ref _lastObservedProductionFrameSequence);
-        await _board.StartScanAsync(BoardScanMode.Production, ct);
-
-        if (await WaitForNextProductionFrameAsync(baseline, 1_500, ct))
-        {
-            AddLog($"Recovery scan OK sau {reason}: stream production đã trở lại.");
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"START_SCAN sau {reason} không trả frame production trong thời gian watchdog.");
-    }
-
-    private async Task<bool> WaitForNextProductionFrameAsync(
-        long baselineSequence,
-        int timeoutMs,
-        CancellationToken ct)
-    {
-        var watch = Stopwatch.StartNew();
-        while (watch.ElapsedMilliseconds < timeoutMs)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            if (!_board.IsConnected)
-                return false;
-
-            long current = Volatile.Read(ref _lastObservedProductionFrameSequence);
-            if (current > 0 && current != baselineSequence)
-                return true;
-
-            await Task.Delay(25, ct);
-        }
-
-        return Volatile.Read(ref _lastObservedProductionFrameSequence) != baselineSequence;
+        await _scanSupervisor.StartProductionScanAndVerifyFrameAsync(
+            _model?.MaxIo ?? 0,
+            ct,
+            reason);
     }
 
     private async Task HardwareMonitorLoopAsync(CancellationToken ct)
     {
+        const int scanStallTimeoutMs = 2500;
+
         while (!ct.IsCancellationRequested)
         {
             try
@@ -1389,6 +1514,22 @@ public sealed class TestViewModel : ObservableObject
                     else if (!_board.IsScanning)
                     {
                         await EnsureContinuousProductionScanAsync();
+                    }
+                    else if (ShouldWatchProductionScan())
+                    {
+                        DateTime lastFrameUtc = _board.LastFrameTimestampUtc;
+                        if (lastFrameUtc != DateTime.MinValue)
+                        {
+                            double ageMs = (DateTime.UtcNow - lastFrameUtc).TotalMilliseconds;
+                            if (ageMs > scanStallTimeoutMs)
+                            {
+                                await RecoverProductionScanStallAsync(
+                                    ageMs,
+                                    _board.LastFrameSequence,
+                                    _board.FramesReceived,
+                                    ct);
+                            }
+                        }
                     }
                 }
             }
@@ -1411,6 +1552,58 @@ public sealed class TestViewModel : ObservableObject
             {
                 break;
             }
+        }
+    }
+
+    private bool ShouldWatchProductionScan()
+    {
+        if (!_board.IsConnected ||
+            !_board.IsScanning ||
+            _board.CurrentScanMode != BoardScanMode.Production ||
+            IsManualModeActive ||
+            IsDeviceFault)
+        {
+            return false;
+        }
+
+        RuntimeMode mode = CurrentRuntimeMode;
+        if (mode != RuntimeMode.Production && mode != RuntimeMode.Background)
+            return false;
+
+        ProductionPhase phase = CurrentProductionPhase;
+        return phase is ProductionPhase.WaitingProduct
+            or ProductionPhase.Continuity
+            or ProductionPhase.WaitingProductRemoval;
+    }
+
+    private async Task RecoverProductionScanStallAsync(
+        double ageMs,
+        long lastSequence,
+        long framesReceived,
+        CancellationToken ct)
+    {
+        try
+        {
+            bool recovered = await _scanSupervisor.RecoverProductionScanStallAsync(
+                ageMs,
+                lastSequence,
+                framesReceived,
+                _model?.MaxIo ?? 0,
+                InitializeHardwareAsync,
+                ct);
+            if (!recovered)
+            {
+                EnterDeviceFault(
+                    new InvalidOperationException("[SCAN-WATCHDOG] D2XX scan stalled after STOP/START and reconnect."),
+                    "ScanWatchdog");
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            EnterDeviceFault(ex, "ScanWatchdog");
         }
     }
 
@@ -1644,6 +1837,12 @@ public sealed class TestViewModel : ObservableObject
         CurrentRuntimeMode == mode &&
         Volatile.Read(ref _runtimeGeneration) == generation;
 
+    private ProductionPhase CurrentProductionPhase =>
+        (ProductionPhase)Volatile.Read(ref _productionPhase);
+
+    private void SetProductionPhase(ProductionPhase phase) =>
+        Volatile.Write(ref _productionPhase, (int)phase);
+
     /// <summary>
     /// Chỉ Production thật mới được phép tạo lỗi dây/popup.
     /// Probe phải bị loại kể cả khi callback Production cũ đã được xếp hàng
@@ -1664,26 +1863,10 @@ public sealed class TestViewModel : ObservableObject
     /// </summary>
     public void PrepareProbeUiMode()
     {
-        CancelCycleOperations();
-        SwitchRuntimeMode(RuntimeMode.Probe);
-        // Khóa context Production trước khi diagnostic explicit Probe bắt đầu.
-        Interlocked.Exchange(ref _probeSessionActive, 1);
-        ClearInlineProbeContactsState(clearLastSeen: true);
-        InvokeUi(ClearInlineProbeDisplay);
-
-        _cycleActive = false;
-        _waitForProductRelease = false;
-        _waitForFaultProductRemoval = false;
-        _productDetectedThisCycle = false;
-        Interlocked.Exchange(ref _postContinuityStarted, 0);
-        Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
-
-        _engine.SetFrameProcessingEnabled(false);
-        _sound.SetWiringFaultAlarm(false);
-        _sound.StopAll();
-
-        // Probe là lớp hiển thị song song. Không được xóa bảng cấu hình/
-        // trạng thái Production đang thấy trên TestView; chỉ ProbeContacts thay đổi.
+        // Probe/TestPin trong TestWindow là lớp quan sát song song trên stream
+        // production đã xác minh. Không đổi runtime/cycle/engine/transport.
+        if (!_productionSettings.UseTestPointer)
+            ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(RaiseTestStatistics);
     }
 
@@ -1720,8 +1903,7 @@ public sealed class TestViewModel : ObservableObject
         // V11.6: chỉ RuntimeMode.Production mới được phép cập nhật bảng lỗi,
         // phát TESTPOINT hoặc mở popup. Probe/Background bị chặn tuyệt đối.
         if (!IsRuntimeMode(RuntimeMode.Production) ||
-            Volatile.Read(ref _probeSessionActive) != 0 ||
-            Volatile.Read(ref _inlineProbeContactIo) != 0)
+            Volatile.Read(ref _probeSessionActive) != 0)
         {
             return;
         }
@@ -1796,6 +1978,7 @@ public sealed class TestViewModel : ObservableObject
                 return;
 
             RefreshFaults();
+            LogFaultGate(generation);
             if (Volatile.Read(ref _firstLogicalStateLogged) != 0 &&
                 Interlocked.CompareExchange(ref _firstUiUpdateRenderedLogged, 1, 0) == 0)
             {
@@ -1826,9 +2009,13 @@ public sealed class TestViewModel : ObservableObject
                 if (_engine.IsProductReleased)
                 {
                     _waitForProductRelease = false;
+                    bool wasWaterProofEquipmentRecovery = _waterProofEquipmentErrorAwaitingRemoval;
+                    _waterProofEquipmentErrorAwaitingRemoval = false;
                     ResetFullCycleAfterProductRemoved();
                     State = "CHỜ LẮP SẢN PHẨM";
-                    AddLog("PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
+                    AddLog(wasWaterProofEquipmentRecovery
+                        ? "Đã tháo sản phẩm sau lỗi thiết bị leak - ARM lại chu kỳ, leak COM sẽ reconnect ở lần chạy kế tiếp."
+                        : "PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
                 }
 
                 return;
@@ -1836,7 +2023,9 @@ public sealed class TestViewModel : ObservableObject
 
             // Chỉ product fault đã qua monotonic confirmation gate mới được
             // dừng scan/popup/ghi FAIL. Candidate raw không đi vào lifecycle FAIL.
+            ProductionPhase phase = CurrentProductionPhase;
             if (_cycleActive &&
+                phase == ProductionPhase.Continuity &&
                 _engine.ReadyToEvaluateProductFaults &&
                 _engine.LastFrameValid &&
                 _engine.HasWiringFault &&
@@ -1857,6 +2046,10 @@ public sealed class TestViewModel : ObservableObject
                     $"ResultCommitted={Volatile.Read(ref _resultRecordedThisCycle) != 0} Reason=ConfirmedProductFault");
                 _ = HandleWiringFaultAsync(generation);
                 return;
+            }
+            else if (_engine.HasWiringFault)
+            {
+                AddFaultGateSuppressedLog(phase);
             }
 
             if (_cycleActive && _engine.HasContactInstability)
@@ -1908,8 +2101,10 @@ public sealed class TestViewModel : ObservableObject
             }
 
             if (_cycleActive &&
+                phase == ProductionPhase.Continuity &&
                 _engine.ContinuityPassed &&
                 !_engine.HasWiringFault &&
+                _engine.ReadyToEvaluateProductFaults &&
                 Interlocked.CompareExchange(ref _postContinuityStarted, 1, 0) == 0)
             {
                 AsyncFileLogService.Current.Performance(
@@ -1924,18 +2119,24 @@ public sealed class TestViewModel : ObservableObject
         _engine.ResetProductCycle();
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _postContinuityStarted, 0);
+        Interlocked.Exchange(ref _waterProofRunning, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
         _cycleActive = true;
+        SetProductionPhase(ProductionPhase.Continuity);
+        _waterProofEquipmentErrorAwaitingRemoval = false;
         _productDetectedThisCycle = false;
         _lastFaultRejectSignature = string.Empty;
         _lastPassGateSignature = string.Empty;
+        _lastFaultGateSignature = string.Empty;
+        _lastFaultGateSuppressedSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;
         _lastProductDetectSignature = string.Empty;
         _activeCycleId = Guid.NewGuid().ToString("N");
         _cycleStartedAt = DateTime.Now;
         Lot = _productionSettings.LotNo.ToString();
         Resistance.Clear();
+        ResetWaterProofDisplay();
         SelectedOperationTabIndex = 0;
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
@@ -1967,6 +2168,12 @@ public sealed class TestViewModel : ObservableObject
             while (Logs.Count > 300)
                 Logs.RemoveAt(Logs.Count - 1);
         });
+    }
+
+    private void OnWaterProofLog(object? sender, string text)
+    {
+        AsyncFileLogService.Current.Board($"WATERPROOF {text}", AppLogLevel.Normal);
+        AddLog($"[WATERPROOF] {text}");
     }
 
     private void OnBoardFrameReceived(object? sender, ScanFrame frame)
@@ -2068,17 +2275,37 @@ public sealed class TestViewModel : ObservableObject
                     $"FRESH_FRAME_ACCEPTED seq={frame.Sequence} cycleStartSeq={cycleStartSequence}");
             }
 
-            // Probe là lớp quan sát SONG SONG. Nếu frame hiện tại có chữ ký Probe,
-            // cập nhật ngay contact hiện tại và chặn frame đó khỏi TestEngine.
-            if (TryDetectInlineProbeContacts(frame, out int[] touchedIos))
+            if (!HandleStartupIoInterlock(frame, generation))
+            {
+                LogContinuousScanMetricsIfDue();
+                return;
+            }
+
+            // Probe là lớp quan sát SONG SONG. Không suppress toàn bộ frame
+            // chỉ vì classifier nghi ngờ Probe; SHORT/WRONG thật vẫn phải đi
+            // qua TestEngine. UI chỉ đổi khi ProbeStateTracker đổi state.
+            bool probeChanged;
+            bool preserveProductionFaultsForProbe = false;
+            int[] displayedProbeIos;
+            if (_productionSettings.UseTestPointer &&
+                TryDetectInlineProbeContacts(frame, out int[] touchedIos))
             {
                 Interlocked.Increment(ref _productionFramesRoutedToProbe);
-                bool changed = UpdateInlineProbeContacts(touchedIos);
-                Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
-                _sound.SetWiringFaultAlarm(false);
-                _engine.ClearTransientWiringFaults();
+                preserveProductionFaultsForProbe = true;
+                probeChanged = UpdateInlineProbeContacts(touchedIos);
+                displayedProbeIos = SnapshotInlineProbeContacts();
 
-                if (changed)
+                // Nếu một frame đầu của cùng thao tác chạm đã kịp tạo candidate
+                // WRONG/SHORT trước khi đủ chữ ký classifier, xóa đúng các fault
+                // liên quan Pin đầu dò. Fault thật ở I/O khác vẫn được giữ nguyên.
+                if (_engine.SuppressProbeRelatedWiringFaults(displayedProbeIos) &&
+                    !_engine.HasWiringFault)
+                {
+                    Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+                    _sound.SetWiringFaultAlarm(false);
+                }
+
+                if (probeChanged)
                 {
                     DateTime requestedAt = DateTime.Now;
                     InvokeUi(() =>
@@ -2089,36 +2316,36 @@ public sealed class TestViewModel : ObservableObject
                             return;
                         }
 
-                        ShowInlineProbeContacts(touchedIos);
-                        LogProbeLatency(frame, requestedAt, touchedIos);
+                        ShowInlineProbeContacts(displayedProbeIos);
+                        LogProbeLatency(frame, requestedAt, displayedProbeIos);
                     });
                 }
-
-                LogContinuousScanMetricsIfDue();
-                return;
             }
-
-            // RELEASE: frame mới không còn Probe => xóa ngay. Timestamp lastSeen
-            // chỉ còn giữ interlock relay 40 ms, tuyệt đối không giữ UI.
-            if (ClearInlineProbeContactsState())
+            else
             {
-                _sound.SetWiringFaultAlarm(false);
-                DateTime requestedAt = DateTime.Now;
-                InvokeUi(() =>
-                {
-                    if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-                        Volatile.Read(ref _probeSessionActive) != 0)
-                    {
-                        return;
-                    }
+                probeChanged = _productionSettings.UseTestPointer
+                    ? UpdateInlineProbeContacts(Array.Empty<int>())
+                    : ClearInlineProbeContactsState(clearLastSeen: true);
 
-                    ClearInlineProbeDisplay();
-                    LogProbeLatency(frame, requestedAt, Array.Empty<int>());
-                });
+                if (probeChanged)
+                {
+                    DateTime requestedAt = DateTime.Now;
+                    InvokeUi(() =>
+                    {
+                        if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                            Volatile.Read(ref _probeSessionActive) != 0)
+                        {
+                            return;
+                        }
+
+                        ClearInlineProbeDisplay();
+                        LogProbeLatency(frame, requestedAt, Array.Empty<int>());
+                    });
+                }
             }
 
             long processStarted = Stopwatch.GetTimestamp();
-            _engine.ProcessFrame(frame);
+            _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
             Interlocked.Increment(ref _productionFramesProcessed);
             double processMs = Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
             LogPassGateAfterProductionFrame(frame, processMs);
@@ -2139,6 +2366,120 @@ public sealed class TestViewModel : ObservableObject
         {
             EnterDeviceFault(ex, "BoardFrameReceived");
         }
+    }
+
+    private bool HandleStartupIoInterlock(ScanFrame frame, long generation)
+    {
+        if (!_requireStartupIoClear || Volatile.Read(ref _startupIoInterlockState) == 2)
+            return true;
+
+        if (!frame.Complete || frame.UnknownBytes > 0 ||
+            Volatile.Read(ref _startupIoInterlockState) == 1)
+        {
+            return false;
+        }
+
+        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(frame);
+        if (pairs.Count > 0)
+        {
+            string signature = string.Join('|', pairs.Select(pair => $"{pair.FirstIo}-{pair.SecondIo}"));
+            if (!string.Equals(signature, _startupIoWarningSignature, StringComparison.Ordinal))
+            {
+                _startupIoWarningSignature = signature;
+                AddLog(
+                    "STARTUP IO INTERLOCK: chưa ARM vì đang có kết nối " +
+                    string.Join(", ", pairs.Select(pair => $"IO{pair.FirstIo}<->IO{pair.SecondIo}")));
+                InvokeUi(() => ShowStartupIoWarning(generation, pairs));
+            }
+
+            return false;
+        }
+
+        if (Interlocked.CompareExchange(ref _startupIoInterlockState, 1, 0) != 0)
+            return false;
+
+        _startupIoWarningSignature = string.Empty;
+        InvokeUi(() => CompleteStartupIoInterlock(generation));
+        return false;
+    }
+
+    private void ShowStartupIoWarning(
+        long generation,
+        IReadOnlyList<StartupIoContactPair> pairs)
+    {
+        if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+            Volatile.Read(ref _startupIoInterlockState) != 0)
+        {
+            return;
+        }
+
+        _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingProduct);
+        SelectedOperationTabIndex = 0;
+        Faults.Clear();
+
+        foreach (StartupIoContactPair pair in pairs)
+        {
+            PinRecord? first = FindPinByIo(pair.FirstIo);
+            PinRecord? second = FindPinByIo(pair.SecondIo);
+            string firstText = FormatStartupIoEndpoint(pair.FirstIo, first);
+            string secondText = FormatStartupIoEndpoint(pair.SecondIo, second);
+
+            Faults.Add(new FaultRow
+            {
+                Kind = FaultKind.Short,
+                ProductFaultType = ProductFaultType.ShortCircuit,
+                FaultType = "IO ĐANG NỐI/CHẬP TRƯỚC KHI TEST",
+                Io = pair.FirstIo,
+                ActualSourceIo = pair.FirstIo,
+                ActualTargetIo = pair.SecondIo,
+                RelatedIos = [pair.FirstIo, pair.SecondIo],
+                Connector = first?.Connector ?? string.Empty,
+                Pin = first?.PinNumber ?? string.Empty,
+                WireName = first?.WireName ?? string.Empty,
+                Section = first?.Section ?? string.Empty,
+                Color = first?.Color ?? string.Empty,
+                Status = $"{firstText} ĐANG NỐI VỚI {secondText} — HÃY THÁO SẢN PHẨM HOẶC SỬA CHẬP"
+            });
+        }
+
+        State = $"CẢNH BÁO IO\n{pairs.Count} CẶP ĐANG NỐI/CHẬP";
+    }
+
+    private void CompleteStartupIoInterlock(long generation)
+    {
+        if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+            Volatile.Read(ref _startupIoInterlockState) != 1)
+        {
+            return;
+        }
+
+        RefreshFaults();
+        if (MasterApproved)
+        {
+            _cycleActive = true;
+            SetProductionPhase(ProductionPhase.Continuity);
+            State = "CHỜ LẮP SẢN PHẨM";
+            AddLog("STARTUP IO INTERLOCK: frame sạch, Production đã được ARM.");
+        }
+        else
+        {
+            State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+            AddLog("STARTUP IO INTERLOCK: frame sạch, bắt đầu chuỗi MASTER.");
+            _ = StartAutomaticMasterSequenceAsync();
+        }
+
+        Interlocked.Exchange(ref _startupIoInterlockState, 2);
+    }
+
+    private static string FormatStartupIoEndpoint(int io, PinRecord? pin)
+    {
+        if (pin is null)
+            return $"IO{io}";
+
+        string connector = string.IsNullOrWhiteSpace(pin.Connector) ? "—" : pin.Connector.Trim();
+        string localPin = string.IsNullOrWhiteSpace(pin.PinNumber) ? "—" : pin.PinNumber.Trim();
+        return $"IO{io} (CN {connector} / PIN {localPin})";
     }
 
     private static void LogProbeLatency(ScanFrame frame, DateTime uiRequestedAt, IReadOnlyList<int> ios)
@@ -2198,8 +2539,11 @@ public sealed class TestViewModel : ObservableObject
         }
 
         string reason = ResolvePassGateReason(gate);
+        // Sequence thay đổi ở mọi frame nên không được dùng làm chữ ký trạng thái.
+        // Nếu có sequence ở đây, cùng một trạng thái logic vẫn ghi PASS_GATE liên
+        // tục theo tốc độ scan và tạo I/O đĩa không cần thiết trên máy cấu hình yếu.
         string signature =
-            $"{frame.Sequence}|{gate.ExpectedNetCount}|{gate.PassedNetCount}|" +
+            $"{gate.ExpectedNetCount}|{gate.PassedNetCount}|" +
             $"{gate.WrongCandidateCount}|{gate.WrongConfirmedCount}|" +
             $"{gate.ShortCandidateCount}|{gate.ShortConfirmedCount}|" +
             $"{gate.HasProductActivity}|{MasterApproved}|{_cycleActive}|" +
@@ -2215,6 +2559,8 @@ public sealed class TestViewModel : ObservableObject
                 $"wrongConfirmed={gate.WrongConfirmedCount} shortCandidates={gate.ShortCandidateCount} " +
                 $"shortConfirmed={gate.ShortConfirmedCount} hasWiringFault={gate.HasWiringFault} " +
                 $"continuityPassed={gate.ContinuityPassed} productDetected={gate.HasProductActivity} " +
+                $"sourceCoverage={gate.HasExpectedSourceCoverage} productStable={gate.ProductStable} " +
+                $"readyToEvaluate={_engine.ReadyToEvaluateProductFaults} " +
                 $"masterApproved={MasterApproved} cycleActive={_cycleActive} probeActive={Volatile.Read(ref _probeSessionActive) != 0} " +
                 $"postContinuityStarted={Volatile.Read(ref _postContinuityStarted)} process_ms={processMs:0.###} reason={reason}");
         }
@@ -2222,7 +2568,7 @@ public sealed class TestViewModel : ObservableObject
         if (gate.RemainingNetworks.Count > 0)
         {
             string remaining = string.Join(" | ", gate.RemainingNetworks.Select(item => item.Display));
-            string remainingSignature = $"{gate.LastFrameSequence}|{remaining}";
+            string remainingSignature = remaining;
             if (!string.Equals(remainingSignature, _lastPassRemainingSignature, StringComparison.Ordinal))
             {
                 _lastPassRemainingSignature = remainingSignature;
@@ -2230,6 +2576,71 @@ public sealed class TestViewModel : ObservableObject
                     $"PASS_REMAINING seq={frame.Sequence} count={gate.RemainingNetworks.Count} nets={remaining}");
             }
         }
+    }
+
+    private void LogFaultGate(long generation)
+    {
+        PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
+        ProductionPhase phase = CurrentProductionPhase;
+        string signature =
+            $"{generation}|{_cycleActive}|{phase}|{Volatile.Read(ref _waterProofRunning)}|" +
+            $"{Volatile.Read(ref _postContinuityStarted)}|{_engine.ReadyToEvaluateProductFaults}|" +
+            $"{_engine.LastFrameValid}|{_engine.HasWiringFault}|{gate.WrongConfirmedCount}|" +
+            $"{gate.ShortConfirmedCount}";
+
+        if (string.Equals(signature, _lastFaultGateSignature, StringComparison.Ordinal))
+            return;
+
+        _lastFaultGateSignature = signature;
+        AsyncFileLogService.Current.Performance(
+            "[FAULT-GATE] " +
+            $"cycleActive={_cycleActive} phase={phase} waterProofRunning={Volatile.Read(ref _waterProofRunning)} " +
+            $"postContinuityStarted={Volatile.Read(ref _postContinuityStarted)} " +
+            $"readyToEvaluate={_engine.ReadyToEvaluateProductFaults} lastFrameValid={_engine.LastFrameValid} " +
+            $"hasWiringFault={_engine.HasWiringFault} wrongConfirmed={gate.WrongConfirmedCount} " +
+            $"shortConfirmed={gate.ShortConfirmedCount}");
+    }
+
+    private void AddFaultGateSuppressedLog(ProductionPhase phase)
+    {
+        if (_cycleActive &&
+            phase == ProductionPhase.Continuity &&
+            _engine.ReadyToEvaluateProductFaults &&
+            _engine.LastFrameValid)
+        {
+            return;
+        }
+
+        string reason = ResolveFaultGateSuppressReason(phase);
+        string signature =
+            $"{reason}|{_cycleActive}|{phase}|{Volatile.Read(ref _waterProofRunning)}|" +
+            $"{Volatile.Read(ref _postContinuityStarted)}|{_engine.ReadyToEvaluateProductFaults}|" +
+            $"{_engine.LastFrameValid}|{_engine.HasWiringFault}";
+
+        if (string.Equals(signature, _lastFaultGateSuppressedSignature, StringComparison.Ordinal))
+            return;
+
+        _lastFaultGateSuppressedSignature = signature;
+        AsyncFileLogService.Current.Performance(
+            "[FAULT-GATE] SUPPRESSED " +
+            $"reason={reason} cycleActive={_cycleActive} phase={phase} " +
+            $"waterProofRunning={Volatile.Read(ref _waterProofRunning)} " +
+            $"postContinuityStarted={Volatile.Read(ref _postContinuityStarted)} " +
+            $"readyToEvaluate={_engine.ReadyToEvaluateProductFaults} lastFrameValid={_engine.LastFrameValid} " +
+            $"hasWiringFault={_engine.HasWiringFault}");
+    }
+
+    private string ResolveFaultGateSuppressReason(ProductionPhase phase)
+    {
+        if (!_cycleActive)
+            return "CYCLE_INACTIVE";
+        if (phase != ProductionPhase.Continuity)
+            return $"PHASE_{phase}";
+        if (!_engine.ReadyToEvaluateProductFaults)
+            return "NOT_READY_TO_EVALUATE";
+        if (!_engine.LastFrameValid)
+            return "LAST_FRAME_INVALID";
+        return "HANDLER_ALREADY_RUNNING_OR_GUARD";
     }
 
     private void LogProductDetect(ScanFrame frame, PassGateDiagnostics gate)
@@ -2347,23 +2758,29 @@ public sealed class TestViewModel : ObservableObject
             .OrderBy(value => value)
             .ToArray();
 
-        bool changed;
+        bool changed = _probeStateTracker.Update(normalized);
+        int[] active = _probeStateTracker.ActiveIos.ToArray();
         lock (_inlineProbeGate)
         {
-            changed = !_inlineProbeContactIos.SequenceEqual(normalized);
-            _inlineProbeContactIos = normalized;
+            _inlineProbeContactIos = active;
         }
 
-        Volatile.Write(ref _inlineProbeContactIo, normalized.FirstOrDefault());
+        Volatile.Write(ref _inlineProbeContactIo, active.FirstOrDefault());
+        if (active.Length > 0)
+        {
+            Interlocked.Exchange(ref _inlineProbeLastSeenUtcTicks, DateTime.UtcNow.Ticks);
+            if (changed)
+                _sound.SetTestPointContactSound(true);
+        }
         return changed;
     }
 
     private bool ClearInlineProbeContactsState(bool clearLastSeen = false)
     {
-        bool changed;
+        bool changed = _probeStateTracker.Clear();
+        _sound.SetTestPointContactSound(false);
         lock (_inlineProbeGate)
         {
-            changed = _inlineProbeContactIos.Length > 0;
             _inlineProbeContactIos = Array.Empty<int>();
         }
 
@@ -2380,6 +2797,9 @@ public sealed class TestViewModel : ObservableObject
 
     private bool IsProbeRelayInterlockActive()
     {
+        if (!_productionSettings.UseTestPointer)
+            return false;
+
         if (Volatile.Read(ref _probeSessionActive) != 0 ||
             Volatile.Read(ref _inlineProbeContactIo) != 0)
         {
@@ -2457,6 +2877,7 @@ public sealed class TestViewModel : ObservableObject
         IReadOnlyList<int> related = FindRelatedIo(io, wireName);
 
         string status;
+        bool mapped = pin is not null || !string.IsNullOrWhiteSpace(wireName);
         if (!string.IsNullOrWhiteSpace(clipStatus))
         {
             status = clipStatus;
@@ -2480,9 +2901,9 @@ public sealed class TestViewModel : ObservableObject
             new FaultRow
             {
                 Kind = FaultKind.Probe,
-                FaultType = "ĐẦU DÒ",
+                FaultType = "KIỂM TRA",
                 Io = io,
-                Connector = pin?.Connector ?? string.Empty,
+                Connector = mapped ? pin?.Connector ?? string.Empty : $"KHÔNG SỬ DỤNG IO({io})",
                 Pin = pin?.PinNumber ?? string.Empty,
                 WireName = wireName,
                 Splice = pin?.SpliceName ?? string.Empty,
@@ -2626,6 +3047,7 @@ public sealed class TestViewModel : ObservableObject
 
     private void ClearInlineProbeDisplay()
     {
+        _sound.SetTestPointContactSound(false);
         if (ProbeContacts.Count > 0)
             ProbeContacts.Clear();
         RemoveInlineProbeFaultRows();
@@ -2844,6 +3266,15 @@ public sealed class TestViewModel : ObservableObject
         {
         }
 
+        try
+        {
+            await _labelPrintService.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Cleanup máy in tem khi thoát chưa hoàn chỉnh: {ex.Message}");
+        }
+
         _engine.Changed -= OnEngineChanged;
         _board.Log -= OnBoardLog;
         _board.FrameReceived -= OnBoardFrameReceived;
@@ -2851,62 +3282,74 @@ public sealed class TestViewModel : ObservableObject
         _lifetimeCts.Dispose();
     }
 
-    public async Task StartProbeScanAsync()
+    public async Task<LabelPrinterConnectionResult> ConnectLabelPrinterAsync(
+        LabelSettings settings,
+        CancellationToken ct = default)
     {
-        // PrepareProbeUiMode() đã bật guard từ constructor. Nếu hàm được gọi
-        // trực tiếp ở nơi khác thì bật guard tại đây. Không return sớm vì vẫn
-        // phải chuyển transport sang decoder Probe.
-        Interlocked.Exchange(ref _probeSessionActive, 1);
+        LabelPrinterConnectionResult result = await _labelPrintService.ConnectAsync(settings, ct);
+        InvokeUi(() =>
+        {
+            LabelStatusText = $"TEM: {result.Message}";
+            Raise(nameof(IsLabelPrinterConnected));
+            Raise(nameof(LabelPrinterConnectedPort));
+        });
+        AddLog($"LABEL PRINTER: {result.Message}");
+        return result;
+    }
 
-        // V12.9 không còn PinProbeWindow riêng. Giữ fallback để API diagnostic
-        // explicit Probe vẫn an toàn nếu được gọi từ service/tool nội bộ.
-        if (!IsRuntimeMode(RuntimeMode.Probe))
-            PrepareProbeUiMode();
+    public async Task AutoConnectLabelPrinterAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterCom))
+        {
+            InvokeUi(() => LabelStatusText = "TEM: CHƯA CHỌN CỔNG IN");
+            return;
+        }
 
         try
         {
+            await ConnectLabelPrinterAsync(_productionSettings.Label, _lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+        }
+    }
+
+    public Task<LabelPrintTransportResult> PrintSettingsLabelAsync(
+        LabelPrintRequest request,
+        CancellationToken ct = default) =>
+        _labelPrintService.PrintPassLabelAsync(request, ct);
+
+    public async Task StartProbeScanAsync()
+    {
+        PrepareProbeUiMode();
+        try
+        {
+            if (!_productionSettings.UseTestPointer)
+            {
+                ClearInlineProbeContactsState(clearLastSeen: true);
+                InvokeUi(ClearInlineProbeDisplay);
+                AddLog("TESTPIN/Probe đang tắt theo Production Settings.UseTestPointer=false.");
+                return;
+            }
+
             if (!_board.IsConnected)
                 await InitializeHardwareAsync();
 
             if (!_board.IsConnected)
                 throw new InvalidOperationException("Bo JBZ chưa kết nối.");
 
-            // Hủy mọi relay/đo/PASS còn chạy của production trước khi đổi mode.
-            CancelCycleOperations();
+            bool started = await _scanSupervisor.EnsureProductionScanAsync(
+                _model?.MaxIo ?? 0,
+                _lifetimeCts.Token);
+            if (started)
+            {
+                InvokeUi(UpdateCardScanningState);
+            }
 
-            // Khóa production TRƯỚC khi dừng worker cũ. Nếu còn callback cũ
-            // đang xếp hàng trên Dispatcher, OnEngineChanged cũng sẽ bỏ qua.
-            _cycleActive = false;
-            _waitForProductRelease = false;
-            _waitForFaultProductRemoval = false;
-            _productDetectedThisCycle = false;
-            Interlocked.Exchange(ref _postContinuityStarted, 0);
-            Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
-            _sound.SetWiringFaultAlarm(false);
-            _sound.StopAll();
-            _engine.SetFrameProcessingEnabled(false);
-
-            // Giữ nguyên bảng cấu hình/kết quả Production trên TestView.
-            // Diagnostic Probe chỉ cập nhật ProbeContacts ở vùng riêng.
-            InvokeUi(RaiseTestStatistics);
-
-            // Dừng sạch mode cũ trước, sau đó mới cấu hình/switch sang Probe.
-            // Transport V10.7 còn dùng decoder riêng theo từng generation để
-            // đảm bảo byte TestPin không bao giờ lọt sang parser Production.
-            _board.ConfigureScanRange(_model?.MaxIo ?? 0);
-            await _board.StartScanAsync(BoardScanMode.Probe);
-            InvokeUi(UpdateCardScanningState);
-
-            State = "ĐANG DÒ CHÂN";
-            AddLog("TESTPIN: quét liên tục độc quyền; chỉ hiển thị I/O que GND đang chạm.");
+            AddLog("TESTPIN/Probe observer ON - dùng stream Production, không reset chu kỳ/engine/relay.");
         }
         catch (Exception ex)
         {
-            Interlocked.Exchange(ref _probeSessionActive, 0);
-            SwitchRuntimeMode(RuntimeMode.Background);
-            _engine.SetFrameProcessingEnabled(false);
-            _engine.Reset();
-
             if (!_board.IsConnected)
             {
                 BoardConnectionMessage = "CHƯA KẾT NỐI VỚI BO MẠCH TEST";
@@ -2929,29 +3372,10 @@ public sealed class TestViewModel : ObservableObject
 
     public async Task StopProbeScanAsync()
     {
-        if (Interlocked.Exchange(ref _probeSessionActive, 0) == 0)
-            return;
-
-        SwitchRuntimeMode(RuntimeMode.Background);
-
-        try
-        {
-            if (_board.IsConnected)
-            {
-                // Thoát Probe phải quay thẳng về production scan nền.
-                await _board.StartScanAsync(BoardScanMode.Production);
-                InvokeUi(UpdateCardScanningState);
-            }
-        }
-        finally
-        {
-            _sound.SetWiringFaultAlarm(false);
-            _sound.StopAll();
-            _engine.SetFrameProcessingEnabled(false);
-            _engine.Reset();
-            State = ReadyStateForCurrentModel();
-            AddLog("Đã đóng TestPin; tự quay lại quét I/O production liên tục.");
-        }
+        ClearInlineProbeContactsState(clearLastSeen: true);
+        InvokeUi(ClearInlineProbeDisplay);
+        await Task.CompletedTask;
+        AddLog("TESTPIN/Probe observer OFF - Production Test không đổi trạng thái.");
     }
 
     /// <summary>
@@ -3017,9 +3441,13 @@ public sealed class TestViewModel : ObservableObject
         SaveLastTestedModel();
 
         // Chu kỳ mới bắt đầu với trạng thái cảnh báo sạch.
-        _cycleActive = MasterApproved;
+        _cycleActive = !_requireStartupIoClear && MasterApproved;
+        SetProductionPhase(_cycleActive ? ProductionPhase.Continuity : ProductionPhase.WaitingProduct);
+        Interlocked.Exchange(ref _startupIoInterlockState, _requireStartupIoClear ? 0 : 2);
+        _startupIoWarningSignature = string.Empty;
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
+        Interlocked.Exchange(ref _waterProofRunning, 0);
         Interlocked.Exchange(ref _postContinuityStarted, 0);
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _masterPostStarted, 0);
@@ -3080,10 +3508,19 @@ public sealed class TestViewModel : ObservableObject
         {
             Volatile.Write(ref _cycleStartFrameSequence, 0);
             Interlocked.Exchange(ref _freshFrameGateActive, 0);
-            await _board.StartScanAsync(BoardScanMode.Production, cycleToken);
+            await _scanSupervisor.EnsureProductionScanAsync(
+                _model.MaxIo,
+                _lifetimeCts.Token);
             AsyncFileLogService.Current.Performance("D2XX_START_SCAN_SENT");
         }
         InvokeUi(UpdateCardScanningState);
+
+        if (_requireStartupIoClear)
+        {
+            State = "ĐANG KIỂM TRA IO BAN ĐẦU...";
+            AddLog("Đang chờ một frame IO sạch trước khi ARM Production/Master.");
+            return;
+        }
 
         if (!MasterApproved)
         {
@@ -3091,7 +3528,16 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        State = "CHỜ LẮP SẢN PHẨM";
+        // Scan nền có thể phát frame ngay trong lúc StartTestAsync đang ARM.
+        // Không được ghi đè ĐANG KIỂM TRA/ĐO ĐIỆN TRỞ vừa được callback cập
+        // nhật bằng trạng thái CHỜ LẮP (UI=SẴN SÀNG).
+        if (CurrentProductionPhase == ProductionPhase.Continuity &&
+            Volatile.Read(ref _postContinuityStarted) == 0)
+        {
+            State = _engine.HasProductActivity
+                ? "ĐANG KIỂM TRA..."
+                : "CHỜ LẮP SẢN PHẨM";
+        }
         AddLog("Đã ARM chu kỳ production trên luồng scan I/O đang chạy liên tục.");
     }
 
@@ -3100,6 +3546,7 @@ public sealed class TestViewModel : ObservableObject
         // Khóa/cancel workflow TRƯỚC khi gửi lệnh board. Nếu PASS task đang chờ
         // relay/interlock, nó phải dừng trước để không gửi command sau khi view đóng.
         _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingProduct);
         SwitchRuntimeMode(RuntimeMode.Background);
         CancelCycleOperations();
 
@@ -3138,7 +3585,6 @@ public sealed class TestViewModel : ObservableObject
         Volatile.Read(ref _wiringFaultHandlingStarted) != 0 ||
         Volatile.Read(ref _masterPostStarted) != 0 ||
         Volatile.Read(ref _masterEjectStarted) != 0 ||
-        CurrentRuntimeMode == RuntimeMode.Production ||
         CurrentRuntimeMode == RuntimeMode.Probe;
 
     private void AbortProductionFaultForProbe()
@@ -3154,6 +3600,7 @@ public sealed class TestViewModel : ObservableObject
         if (!IsProductionFaultContext(generation))
         {
             AbortProductionFaultForProbe();
+            SetProductionPhase(ProductionPhase.Continuity);
             return;
         }
 
@@ -3164,6 +3611,7 @@ public sealed class TestViewModel : ObservableObject
         CancellationToken cycleToken = CurrentCycleToken();
 
         _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingFaultConfirmation);
         State = "ĐANG XỬ LÝ LỖI DÂY";
         SelectedOperationTabIndex = 0;
 
@@ -3223,6 +3671,7 @@ public sealed class TestViewModel : ObservableObject
         if (dialogFaults.Length == 0)
         {
             AbortProductionFaultForProbe();
+            SetProductionPhase(ProductionPhase.Continuity);
             State = "ĐANG KIỂM TRA...";
             return;
         }
@@ -3244,6 +3693,7 @@ public sealed class TestViewModel : ObservableObject
         if (!IsProductionFaultContext(generation))
         {
             AbortProductionFaultForProbe();
+            SetProductionPhase(ProductionPhase.Continuity);
             return;
         }
 
@@ -3254,6 +3704,11 @@ public sealed class TestViewModel : ObservableObject
         if (!committed)
         {
             AbortProductionFaultForProbe();
+            await RecoverAfterUncommittedFailAsync(
+                cycleModel,
+                generation,
+                cycleToken,
+                "WIRING_FAIL");
             return;
         }
 
@@ -3267,6 +3722,7 @@ public sealed class TestViewModel : ObservableObject
             "Sau khi XÁC NHẬN: JIG sẽ được đưa về trạng thái tháo hàng an toàn; MARKING luôn OFF khi FAIL.");
         faultDialog.Owner = Application.Current?.MainWindow;
         faultDialog.ShowDialog();
+        SelectedOperationTabIndex = 0;
 
         // V13.0: sau xác nhận FAIL chỉ Relay 1 JIG được pulse. Relay 2 MARKING
         // luôn OFF; Probe không bao giờ được phép đi vào handler này.
@@ -3279,14 +3735,18 @@ public sealed class TestViewModel : ObservableObject
             AddLog($"Lỗi đã xác nhận: R1 JIG pulse đúng 1 lần ({_productionSettings.Relay1JigPulseMs} ms) rồi OFF; R2 MARKING luôn OFF.");
 
             _waitForFaultProductRemoval = true;
+            SetProductionPhase(ProductionPhase.WaitingProductRemoval);
             await StartProductionScanAndVerifyFrameAsync(
                 CurrentCycleToken(),
                 "FAIL_CONFIRM_RELAY");
-            State = "LỖI - CHỜ THÁO TOÀN BỘ SẢN PHẨM";
+            State = _waitForFaultProductRemoval
+                ? "CHỜ THÁO SẢN PHẨM"
+                : "SẴN SÀNG";
         }
         catch (Exception ex)
         {
             _waitForFaultProductRemoval = false;
+            SetProductionPhase(ProductionPhase.EquipmentError);
             State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
             AddLog($"Không thể eject/restart scan sau lỗi: {ex.Message}");
             MessageBox.Show(
@@ -3384,6 +3844,12 @@ public sealed class TestViewModel : ObservableObject
         foreach (ResistanceResult resistance in Resistance.Where(item => !item.Passed))
             details.Add(CreateResistanceFaultDetail(resistance));
 
+        foreach (WaterProofChannelResult channel in WaterProofChannels
+                     .Where(item => item.Enabled && item.IsMeasured && !item.Passed))
+        {
+            details.Add(CreateWaterProofFaultDetail(channel));
+        }
+
         return details
             .GroupBy(fault => new
             {
@@ -3476,7 +3942,8 @@ public sealed class TestViewModel : ObservableObject
             State.Contains("HỞ MẠCH", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("ĐẤU SAI", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("DÂY CHƯA", StringComparison.OrdinalIgnoreCase) ||
-            State.Contains("ĐIỆN TRỞ KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase);
+            State.Contains("ĐIỆN TRỞ KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
+            State.Contains("KÍN NƯỚC", StringComparison.OrdinalIgnoreCase);
 
         if (!_productDetectedThisCycle && !_waitForFaultProductRemoval && !stateIsFault)
             return null;
@@ -3501,6 +3968,8 @@ public sealed class TestViewModel : ObservableObject
             : ProductionConfigService.GetMasterFaultRequiredCount(_productionSettings, _model);
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
+        Interlocked.Exchange(ref _legacyGoodMasterRecorded, 0);
+        Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
 
         if (_masterRequiredFaultCount <= 0)
@@ -3572,6 +4041,8 @@ public sealed class TestViewModel : ObservableObject
         MasterFaults.Clear();
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
+        Interlocked.Exchange(ref _legacyGoodMasterRecorded, 0);
+        Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
 
         _engine.SetFrameProcessingEnabled(true);
@@ -3583,8 +4054,9 @@ public sealed class TestViewModel : ObservableObject
         MasterStatus = "MASTER GOOD START • TỰ ĐỘNG KIỂM TRA KHI LẮP MẪU";
         AddLog("MASTER GOOD START - production gate LOCKED; không cộng LOT/Pass/Fail.");
 
-        if (!_board.IsScanning)
-            await _board.StartScanAsync(BoardScanMode.Production, CurrentCycleToken());
+        await _scanSupervisor.EnsureProductionScanAsync(
+            _model?.MaxIo ?? 0,
+            _lifetimeCts.Token);
 
         RaiseMasterState();
     }
@@ -3968,7 +4440,7 @@ public sealed class TestViewModel : ObservableObject
                 List<ResistanceResult> results = await _engine.MeasureResistanceAsync(ct);
                 foreach (ResistanceResult result in results)
                     Resistance.Add(result);
-                resistancePassed = Resistance.Count == ResolveEnabledResistanceSteps(_model).Count && Resistance.All(item => item.Passed);
+                resistancePassed = Resistance.Count == ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count && Resistance.All(item => item.Passed);
             }
 
             if (!resistancePassed)
@@ -4008,6 +4480,7 @@ public sealed class TestViewModel : ObservableObject
             }
 
             _masterGoodVerified = true;
+            TryAppendLegacyMasterHistory(goodMaster: true);
             MasterState = MasterSequenceState.EjectingGoodMaster;
             State = "MASTER ĐẠT - PASS\nĐANG ĐẨY MẪU RA";
             MasterStatus = "MASTER GOOD PASS / EJECT - CHỜ MẪU RA KHỎI JIG";
@@ -4084,6 +4557,7 @@ public sealed class TestViewModel : ObservableObject
 
             // MASTER BAD fault là EXPECTED evidence: chỉ eject JIG sau N/N, không dùng Product FAIL behavior.
             await _engine.EjectMasterSampleAsync(ct);
+            TryAppendLegacyMasterHistory(goodMaster: false);
             AddLog("MASTER BAD EJECT - Relay 1 JIG tự động; không tăng FAIL/LOT.");
 
             // Chờ frame thật xác nhận MASTER BAD đã rời jig; Reset không được
@@ -4108,6 +4582,43 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    private void TryAppendLegacyMasterHistory(bool goodMaster)
+    {
+        ProductModel? model = _model;
+        if (model is null)
+            return;
+
+        bool reserved = goodMaster
+            ? Interlocked.CompareExchange(ref _legacyGoodMasterRecorded, 1, 0) == 0
+            : Interlocked.CompareExchange(ref _legacyBadMasterRecorded, 1, 0) == 0;
+        if (!reserved)
+            return;
+
+        try
+        {
+            PartCounterEntry counter = _partCounterStore.GetOrCreate(
+                model,
+                Math.Max(ProbeCycleCount, Total),
+                ProbeReplacementThreshold);
+            string path = _legacyHistory.AppendMaster(
+                model,
+                DateTime.Now,
+                counter.Counter,
+                goodMaster);
+            AddLog(
+                $"PHT HISTORY: {(goodMaster ? "MASTER GOOD" : "MASTER BAD")} " +
+                $"đã append vào {path}; counter không tăng.");
+        }
+        catch (Exception ex)
+        {
+            if (goodMaster)
+                Interlocked.Exchange(ref _legacyGoodMasterRecorded, 0);
+            else
+                Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
+            AddLog($"Không thể append lịch sử MASTER theo định dạng PHT20: {ex.Message}");
+        }
+    }
+
     private void CompleteMasterValidation()
     {
         if (!_masterGoodVerified || !_masterBadVerified || MasterDetectedFaultCount < MasterRequiredFaultCount)
@@ -4117,6 +4628,7 @@ public sealed class TestViewModel : ObservableObject
         MasterState = MasterSequenceState.Completed;
         _masterFaultCollectionLocked = true;
         _cycleActive = true;
+        SetProductionPhase(ProductionPhase.Continuity);
         _productDetectedThisCycle = false;
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         _waitForProductRelease = false;
@@ -4167,56 +4679,20 @@ public sealed class TestViewModel : ObservableObject
     {
         Resistance.Clear();
 
-        foreach (ResistanceStep originalStep in ResolveEnabledResistanceSteps(model))
+        foreach (ResistanceStep step in ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings))
         {
-            (int channel, double minOhm, double maxOhm) = ResolveProductionResistanceChannel(originalStep);
             Resistance.Add(new ResistanceResult
             {
-                Name = originalStep.Name,
-                Channel = channel,
-                MinOhm = minOhm,
-                MaxOhm = maxOhm
+                Name = step.Name,
+                Channel = step.Channel,
+                MinOhm = step.MinOhm,
+                MaxOhm = step.MaxOhm
             });
         }
     }
 
     private bool IsResistanceEnabledForModel(ProductModel? model) =>
-        model is not null && ResolveEnabledResistanceSteps(model).Count > 0;
-
-    private List<ResistanceStep> ResolveEnabledResistanceSteps(ProductModel model)
-    {
-        ResistanceChannelSetting[] enabledChannels = _productionSettings.ResistanceChannels
-            .Where(channel => channel.Enabled)
-            .ToArray();
-
-        if (enabledChannels.Length == 0)
-            return [];
-
-        return model.ResistanceSteps
-            .Where(step => enabledChannels.Any(channel =>
-                string.Equals(channel.Name, step.Name, StringComparison.OrdinalIgnoreCase)))
-            .OrderBy(step => ResolveProductionResistanceChannel(step).Channel)
-            .ToList();
-    }
-
-    private (int Channel, double MinOhm, double MaxOhm) ResolveProductionResistanceChannel(
-        ResistanceStep step)
-    {
-        ResistanceChannelSetting? productionChannel = _productionSettings.ResistanceChannels
-            .FirstOrDefault(channel => channel.Enabled &&
-                string.Equals(channel.Name, step.Name, StringComparison.OrdinalIgnoreCase));
-
-        int channelNumber = productionChannel?.Channel ?? step.Channel;
-        double minOhm = step.MinOhm;
-        double maxOhm = step.MaxOhm;
-        if (productionChannel is not null && minOhm == 0 && maxOhm == 0)
-        {
-            minOhm = productionChannel.MinOhm;
-            maxOhm = productionChannel.MaxOhm;
-        }
-
-        return (channelNumber, minOhm, maxOhm);
-    }
+        model is not null && ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count > 0;
 
     private void UpdateResistanceRows(IReadOnlyList<ResistanceResult> results)
     {
@@ -4242,6 +4718,400 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    private bool IsWaterProofEnabledForCurrentModel() =>
+        _model is not null && _waterProofProfile.Enabled;
+
+    private void LoadWaterProofProfileForCurrentModel()
+    {
+        _waterProofProfile = ProductionConfigService.GetWaterProofProfileForPath(
+            _productionSettings,
+            CurrentModelPath ?? _model?.SourcePath);
+        ResetWaterProofDisplay();
+        Raise(nameof(IsWaterProofCardVisible));
+        Raise(nameof(WaterProofLeakLimitText));
+        Raise(nameof(WaterProofPortText));
+    }
+
+    private void ResetWaterProofDisplay()
+    {
+        void ResetCore()
+        {
+            WaterProofChannels.Clear();
+            if (_waterProofProfile.Enabled)
+            {
+                for (int channel = 1; channel <= 3; channel++)
+                {
+                    if (_waterProofProfile.IsChannelEnabled(channel))
+                        WaterProofChannels.Add(new WaterProofChannelResult
+                        {
+                            Channel = channel,
+                            Enabled = true,
+                            Connector = _waterProofProfile.ConnectorForChannel(channel),
+                            LeakLimit = _waterProofProfile.LeakLimit
+                        });
+                }
+            }
+
+            _waterProofStage = WaterProofStage.Idle;
+            _waterProofStageText = "CHỜ KIỂM TRA";
+            _waterProofOverallResult = "---";
+            Raise(nameof(WaterProofStageText));
+            Raise(nameof(WaterProofOverallResult));
+            Raise(nameof(WaterProofCardBackground));
+            Raise(nameof(WaterProofAccentBrush));
+        }
+
+        InvokeUi(ResetCore);
+    }
+
+    private void SetWaterProofStage(WaterProofStage stage, string text, string? overall = null)
+    {
+        void Apply()
+        {
+            _waterProofStage = stage;
+            _waterProofStageText = text;
+            if (overall is not null)
+                _waterProofOverallResult = overall;
+            Raise(nameof(WaterProofStageText));
+            Raise(nameof(WaterProofOverallResult));
+            Raise(nameof(WaterProofCardBackground));
+            Raise(nameof(WaterProofAccentBrush));
+        }
+
+        InvokeUi(Apply);
+    }
+
+    private void ApplyWaterProofProgress(WaterProofProgress progress)
+    {
+        InvokeUi(() =>
+        {
+            _waterProofStage = progress.Stage;
+            _waterProofStageText = progress.Stage switch
+            {
+                WaterProofStage.Pressurizing => "ĐANG TẠO ÁP",
+                WaterProofStage.Waiting => "ĐANG GIỮ ÁP",
+                WaterProofStage.Evaluating => "ĐANG ĐÁNH GIÁ",
+                _ => _waterProofStageText
+            };
+
+            if (progress.Stage is WaterProofStage.Pressurizing or WaterProofStage.Waiting)
+            {
+                for (int i = 0; i < progress.Values.Count && i < 3; i++)
+                {
+                    WaterProofChannelResult? row = WaterProofChannels.FirstOrDefault(item => item.Channel == i + 1);
+                    if (row is null)
+                        continue;
+                    if (progress.Stage == WaterProofStage.Pressurizing)
+                        row.PressPressure = progress.Values[i];
+                    else
+                        row.WaitPressure = progress.Values[i];
+                }
+            }
+
+            Raise(nameof(WaterProofStageText));
+            Raise(nameof(WaterProofCardBackground));
+            Raise(nameof(WaterProofAccentBrush));
+        });
+    }
+
+    private Task ApplyWaterProofFinalResultAsync(WaterProofRunResult result) =>
+        InvokeUiAsync(() =>
+        {
+            foreach (WaterProofChannelMeasurement measurement in result.Channels.Where(item => item.Enabled))
+            {
+                WaterProofChannelResult? row = WaterProofChannels.FirstOrDefault(item => item.Channel == measurement.Channel);
+                if (row is null)
+                {
+                    row = new WaterProofChannelResult
+                    {
+                        Channel = measurement.Channel,
+                        Enabled = true,
+                        Connector = _waterProofProfile.ConnectorForChannel(measurement.Channel)
+                    };
+                    WaterProofChannels.Add(row);
+                }
+
+                row.LeakLimit = _waterProofProfile.LeakLimit;
+                row.FirstResultPressure = measurement.FirstPressure;
+                row.SecondResultPressure = measurement.SecondPressure;
+                row.Leak = measurement.Leak;
+                row.Passed = measurement.Passed;
+                row.IsMeasured = true;
+            }
+
+            _waterProofStage = result.Passed ? WaterProofStage.Passed : WaterProofStage.Failed;
+            _waterProofStageText = result.Passed ? "KÍN NƯỚC ĐẠT" : "KÍN NƯỚC KHÔNG ĐẠT";
+            _waterProofOverallResult = result.Passed ? "PASS" : "FAIL";
+            SelectedOperationTabIndex = 3;
+            Raise(nameof(WaterProofStageText));
+            Raise(nameof(WaterProofOverallResult));
+            Raise(nameof(WaterProofCardBackground));
+            Raise(nameof(WaterProofAccentBrush));
+        });
+
+    private void ArmWaterProofFaultRemovalWait()
+    {
+        // Scan vẫn có thể chạy trong lúc popup Leak đang mở. Reset snapshot
+        // trước khi chờ tháo để frame kế tiếp luôn phát Changed; nếu sản phẩm
+        // đã được tháo trong popup thì không bị bỏ lỡ ProductRemoved.
+        ResetEngineWithoutChangedReentry();
+        _engine.SetFrameProcessingEnabled(true);
+        _waitForFaultProductRemoval = true;
+        SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+        // Giữ bảng kết quả Leak trong suốt thời gian sản phẩm còn nối với
+        // bất kỳ I/O nào. ResetFullCycleAfterProductRemoved() là nơi duy nhất
+        // rời bảng kết quả sau frame xác nhận đã tháo toàn bộ sản phẩm.
+    }
+
+    private void ArmWaterProofEquipmentErrorRemovalWait()
+    {
+        ResetEngineWithoutChangedReentry();
+        _engine.SetFrameProcessingEnabled(true);
+        _waterProofEquipmentErrorAwaitingRemoval = true;
+        _waitForProductRelease = true;
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
+        SetProductionPhase(ProductionPhase.EquipmentError);
+        SelectedOperationTabIndex = 0;
+    }
+
+    private async Task PauseProductionScanForWaterProofAsync(CancellationToken ct)
+    {
+        if (_board.IsConnected && _board.IsScanning)
+            await _board.StopScanAsync(ct);
+
+        AddLog("[WATERPROOF] D2XX scan đã dừng trong công đoạn Leak; giữ snapshot continuity PASS đã xác nhận.");
+    }
+
+    private async Task PauseProductionScanForFinalPassAsync(CancellationToken ct)
+    {
+        if (_board.IsConnected && _board.IsScanning)
+            await _board.StopScanAsync(ct);
+
+        AddLog("[PASS] D2XX scan đã dừng trước chuỗi PASS; khóa snapshot continuity đã xác nhận.");
+    }
+
+    private void ArmPassProductRemovalWait()
+    {
+        // Kết quả PASS đã commit là bất biến. Chỉ reset snapshot PC và ARM
+        // ProductRemoved; không gửi RESET_CLEAR lần hai sau chuỗi relay PASS.
+        ResetEngineWithoutChangedReentry();
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
+        _waterProofEquipmentErrorAwaitingRemoval = false;
+        _waitForProductRelease = true;
+        _cycleActive = true;
+        SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+        // Không ẩn bảng kết quả ngay khi PASS. Người vận hành phải còn nhìn
+        // thấy kết quả cho tới khi D2XX xác nhận toàn bộ continuity đã mất.
+        // ResetFullCycleAfterProductRemoved() sẽ chuyển tab về 0.
+        State = "PASS - CHỜ THÁO SẢN PHẨM";
+    }
+
+    private bool TryValidateWaterProofConnectorGate(
+        ProductModel model,
+        out string error)
+    {
+        for (int channel = 1; channel <= 3; channel++)
+        {
+            if (!_waterProofProfile.IsChannelEnabled(channel))
+                continue;
+
+            string connectorId = _waterProofProfile.ConnectorForChannel(channel).Trim();
+            if (string.IsNullOrWhiteSpace(connectorId))
+            {
+                error = $"CH{channel} chưa chọn connector THT.";
+                return false;
+            }
+
+            if (!model.Connectors.Any(connector =>
+                    string.Equals(connector.ConnectorId, connectorId, StringComparison.OrdinalIgnoreCase)))
+            {
+                error = $"CH{channel}: connector '{connectorId}' không tồn tại trong THT {model.ModelName}.";
+                return false;
+            }
+
+            if (!_engine.IsConnectorConnected(connectorId))
+            {
+                error = $"CH{channel}: connector '{connectorId}' chưa được lắp đúng/đủ vào JIG.";
+                return false;
+            }
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool ShouldRestartAfterPass(
+        bool autoRestartConfigured,
+        bool waterProofCompleted) =>
+        autoRestartConfigured || waterProofCompleted;
+
+    private FaultDetail CreateWaterProofFaultDetail(WaterProofChannelResult channel) => new()
+    {
+        Type = ProductFaultType.WaterProofLeak,
+        WireName = channel.ChannelText,
+        Message = $"{channel.ChannelText}: áp giữ {channel.PressureText}; độ rò {channel.LeakText}; " +
+                  $"yêu cầu áp >= {_waterProofProfile.PressMin:0.###}, độ sụt <= {_waterProofProfile.LeakLimit:0.###}"
+    };
+
+    private async Task<bool> RunAutomaticWaterProofAsync(
+        ProductModel cycleModel,
+        long generation,
+        CancellationToken ct)
+    {
+        if (!IsWaterProofEnabledForCurrentModel())
+        {
+            AddLog("[WATERPROOF] Model không bật kiểm tra kín nước - bỏ qua UART leak.");
+            return true;
+        }
+
+        if (Interlocked.CompareExchange(ref _waterProofRunning, 1, 0) != 0)
+            throw new InvalidOperationException("Một chu trình kiểm tra kín nước khác đang chạy.");
+
+        try
+        {
+            if (_waterProofProfile.EnabledChannelCount == 0)
+                throw new InvalidOperationException("Model bật kiểm tra kín nước nhưng chưa chọn CH1/CH2/CH3.");
+
+            State = "ĐANG TEST LEAK";
+            SetWaterProofStage(WaterProofStage.Connecting, "ĐANG KẾT NỐI", "---");
+            AddLog(
+                $"[WATERPROOF] START model={cycleModel.ModelName} port={_productionSettings.WaterProofMachine.PortName} " +
+                $"channels={string.Join(",", Enumerable.Range(1, 3).Where(_waterProofProfile.IsChannelEnabled).Select(x =>
+                    string.IsNullOrWhiteSpace(_waterProofProfile.ConnectorForChannel(x))
+                        ? $"CH{x}"
+                        : $"CH{x}={_waterProofProfile.ConnectorForChannel(x)}"))}");
+
+            WaterProofRunResult run;
+            try
+            {
+                run = await _waterProof.RunTestAsync(
+                    _productionSettings.WaterProofMachine,
+                    _waterProofProfile,
+                    ApplyWaterProofProgress,
+                    ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                SetWaterProofStage(WaterProofStage.Error, "LỖI THIẾT BỊ LEAK", "ERROR");
+                State = "LỖI THIẾT BỊ KÍN NƯỚC";
+                AddLog($"[WATERPROOF] DEVICE ERROR: {ex.Message}");
+                AddLog("[WATERPROOF] Không ghi PASS/FAIL sản phẩm vì đây là lỗi thiết bị leak UART.");
+
+                try
+                {
+                    await _waterProof.DisconnectAsync();
+                    AddLog("[WATERPROOF] Leak COM đã disconnect riêng; D2XX/scan production giữ nguyên.");
+                }
+                catch (Exception disconnectEx)
+                {
+                    AddLog($"[WATERPROOF] Không thể disconnect Leak COM sau lỗi: {disconnectEx.Message}");
+                }
+
+                await InvokeUiAsync(() => MessageBox.Show(
+                    Application.Current?.MainWindow,
+                    $"Không thể hoàn thành kiểm tra kín nước qua UART/RS232.\n\n{ex.Message}\n\n" +
+                    "Bo D2XX vẫn được giữ độc lập; hãy kiểm tra cổng COM/máy leak, tháo sản phẩm rồi chạy lại.",
+                    "Lỗi thiết bị kín nước",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error));
+
+                ArmWaterProofEquipmentErrorRemovalWait();
+                try
+                {
+                    await StartProductionScanAndVerifyFrameAsync(
+                        CurrentCycleToken(),
+                        "WATERPROOF_DEVICE_ERROR");
+                    if (_waitForProductRelease)
+                        State = "LỖI THIẾT BỊ LEAK - CHỜ THÁO SẢN PHẨM";
+                }
+                catch (Exception scanEx)
+                {
+                    _waitForProductRelease = false;
+                    State = "LỖI THIẾT BỊ LEAK - KHÔNG THỂ KHỞI ĐỘNG LẠI SCAN";
+                    AddLog($"[WATERPROOF] Không thể restart D2XX sau lỗi Leak: {scanEx.Message}");
+                }
+                return false;
+            }
+
+            // Chờ UI/result collection cập nhật xong trước khi ghi history hoặc dựng popup FAIL.
+            // Nếu chỉ BeginInvoke rồi chạy tiếp, FaultConfirmation có thể nhận danh sách rỗng.
+            await ApplyWaterProofFinalResultAsync(run);
+            if (run.Passed)
+            {
+                AddLog("[WATERPROOF] PASS - tất cả kênh được bật đều đạt.");
+                return true;
+            }
+
+            _cycleActive = false;
+            SetProductionPhase(ProductionPhase.WaitingFaultConfirmation);
+            bool committed = RecordCompletedProduct(
+                false,
+                FaultTypeCatalog.DisplayName(ProductFaultType.WaterProofLeak),
+                cycleModel,
+                generation,
+                ct);
+            if (!committed)
+            {
+                AddLog("[WATERPROOF] FAIL đã được cycle hiện tại xử lý trước đó; bỏ qua popup/eject lặp.");
+                return false;
+            }
+
+            State = FaultTypeCatalog.DisplayName(ProductFaultType.WaterProofLeak);
+            RaiseTestStatistics();
+            FaultDetail[] faults = WaterProofChannels
+                .Where(item => item.Enabled && item.IsMeasured && !item.Passed)
+                .Select(CreateWaterProofFaultDetail)
+                .ToArray();
+
+            await InvokeUiAsync(() =>
+            {
+                var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
+                    faults,
+                    "Kiểm tra kín nước không đạt. Xác nhận để mở JIG và tháo toàn bộ sản phẩm.");
+                dialog.Owner = Application.Current?.MainWindow;
+                dialog.ShowDialog();
+            });
+
+            try
+            {
+                State = "ĐANG MỞ JIG HÀNG LỖI";
+                await _engine.EjectFaultProductAsync();
+                ArmWaterProofFaultRemovalWait();
+                await StartProductionScanAndVerifyFrameAsync(
+                    CurrentCycleToken(),
+                    "WATERPROOF_FAIL_CONFIRM_RELAY");
+                if (_waitForFaultProductRemoval)
+                    State = "LỖI KÍN NƯỚC - CHỜ THÁO TOÀN BỘ SẢN PHẨM";
+                else
+                    AddLog("Sản phẩm Leak FAIL đã được xác nhận tháo trong frame scan đầu tiên; chu kỳ mới đã ARM.");
+            }
+            catch (Exception ex)
+            {
+                _waitForFaultProductRemoval = false;
+                SetProductionPhase(ProductionPhase.EquipmentError);
+                State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
+                AddLog($"Không thể eject/restart scan sau lỗi kín nước: {ex.Message}");
+                await InvokeUiAsync(() => MessageBox.Show(
+                    Application.Current?.MainWindow,
+                    $"Không thể mở JIG hoặc khởi động lại scan sau lỗi kín nước.\n\n{ex.Message}",
+                    "Lỗi thiết bị",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error));
+            }
+
+            return false;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _waterProofRunning, 0);
+            AddLog($"[WATERPROOF] RUN FLAG RELEASED waterProofRunning={Volatile.Read(ref _waterProofRunning)}");
+        }
+    }
+
     private async Task RunAutomaticPostContinuityAsync()
     {
         if (IsDeviceFault || !_cycleActive || _model is null)
@@ -4256,6 +5126,21 @@ public sealed class TestViewModel : ObservableObject
         try
         {
             ct.ThrowIfCancellationRequested();
+            if (CurrentProductionPhase != ProductionPhase.Continuity ||
+                !_cycleActive ||
+                !_engine.ContinuityPassed ||
+                _engine.HasWiringFault ||
+                !_engine.ReadyToEvaluateProductFaults)
+            {
+                Interlocked.Exchange(ref _postContinuityStarted, 0);
+                AddLog(
+                    "[AUTO-R] Abort post-continuity: " +
+                    $"phase={CurrentProductionPhase} cycleActive={_cycleActive} " +
+                    $"continuityPassed={_engine.ContinuityPassed} hasWiringFault={_engine.HasWiringFault} " +
+                    $"readyToEvaluate={_engine.ReadyToEvaluateProductFaults}");
+                return;
+            }
+
             AsyncFileLogService.Current.Performance(
                 $"PASS_LATENCY T_POST_CONTINUITY_TASK_START cycle={_activeCycleId}");
             AddLog("Toàn bộ mạng I/O đã đạt theo model THT.");
@@ -4264,13 +5149,23 @@ public sealed class TestViewModel : ObservableObject
             AddLog($"[AUTO-R] Wrong/Short active = {_engine.HasWiringFault}");
             AddLog($"[AUTO-R] Resistance setting enabled = {IsResistanceEnabledForModel(_model)}");
             AddLog($"[AUTO-R] Model resistance step count = {_model.ResistanceSteps.Count}");
-            AddLog($"[AUTO-R] Selected channel count = {ResolveEnabledResistanceSteps(_model).Count}");
-            AddLog($"[AUTO-R] Selected channels = {string.Join(",", ResolveEnabledResistanceSteps(_model).Select(step => $"CH{ResolveProductionResistanceChannel(step).Channel}"))}");
+            List<ResistanceStep> configuredResistanceSteps =
+                ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings);
+            AddLog($"[AUTO-R] Selected channel count = {configuredResistanceSteps.Count}");
+            AddLog($"[AUTO-R] Selected channels = {string.Join(",", configuredResistanceSteps.Select(step => $"CH{step.Channel}"))}");
             // Không tạo trạng thái trung gian trên bảng lớn. Người vận hành chỉ
             // thấy CHỜ LẮP -> ĐANG KIỂM TRA -> PASS.
 
             if (IsResistanceEnabledForModel(_model))
             {
+                if (!_cycleActive || !_engine.ContinuityPassed || _engine.HasWiringFault)
+                {
+                    Interlocked.Exchange(ref _postContinuityStarted, 0);
+                    AddLog("[AUTO-R] Hủy đo điện trở vì trạng thái wiring đổi trước Resistance.");
+                    return;
+                }
+
+                SetProductionPhase(ProductionPhase.Resistance);
                 State = "KIỂM TRA ĐIỆN TRỞ";
                 AddLog("[AUTO-R] Trigger automatic resistance = YES");
                 if (_productionSettings.PageDelay > 0)
@@ -4293,13 +5188,14 @@ public sealed class TestViewModel : ObservableObject
                 UpdateResistanceRows(results);
 
                 AddLog(
-                    $"Hoàn thành {Resistance.Count}/{ResolveEnabledResistanceSteps(_model).Count} " +
+                    $"Hoàn thành {Resistance.Count}/{configuredResistanceSteps.Count} " +
                     "phép đo điện trở.");
 
-                if (Resistance.Count != ResolveEnabledResistanceSteps(_model).Count ||
+                if (Resistance.Count != configuredResistanceSteps.Count ||
                     Resistance.Any(x => !x.Passed))
                 {
                     _cycleActive = false;
+                    SetProductionPhase(ProductionPhase.WaitingFaultConfirmation);
                     bool committed = RecordCompletedProduct(
                         false,
                         FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange),
@@ -4310,6 +5206,11 @@ public sealed class TestViewModel : ObservableObject
                     {
                         Interlocked.Exchange(ref _postContinuityStarted, 0);
                         AddLog("Resistance FAIL đã được chu kỳ hiện tại xử lý trước đó; bỏ qua popup/eject lặp.");
+                        await RecoverAfterUncommittedFailAsync(
+                            cycleModel,
+                            generation,
+                            ct,
+                            "RESISTANCE_FAIL");
                         return;
                     }
 
@@ -4326,6 +5227,7 @@ public sealed class TestViewModel : ObservableObject
                         "Không chạy relay PASS. Hãy xử lý sản phẩm không đạt theo quy trình vận hành.");
                     faultDialog.Owner = Application.Current?.MainWindow;
                     faultDialog.ShowDialog();
+                    SelectedOperationTabIndex = 0;
 
                     try
                     {
@@ -4334,14 +5236,21 @@ public sealed class TestViewModel : ObservableObject
                         AddLog("Resistance FAIL đã xác nhận: chỉ R1 JIG pulse rồi OFF; R2 MARKING luôn OFF.");
 
                         _waitForFaultProductRemoval = true;
+                        SetProductionPhase(ProductionPhase.WaitingProductRemoval);
                         await StartProductionScanAndVerifyFrameAsync(
                             CurrentCycleToken(),
                             "RESISTANCE_FAIL_CONFIRM_RELAY");
-                        State = "LỖI ĐIỆN TRỞ - CHỜ THÁO TOÀN BỘ SẢN PHẨM";
+                        // Callback frame đầu tiên có thể đã xác nhận ProductRemoved
+                        // và đưa chu kỳ về READY. Không được ghi đè READY bằng trạng
+                        // thái FAIL sau khi hộp thoại đã được người vận hành xác nhận.
+                        State = _waitForFaultProductRemoval
+                            ? "CHỜ THÁO SẢN PHẨM"
+                            : "SẴN SÀNG";
                     }
                     catch (Exception ex)
                     {
                         _waitForFaultProductRemoval = false;
+                        SetProductionPhase(ProductionPhase.EquipmentError);
                         State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
                         AddLog($"Không thể eject/restart scan sau lỗi điện trở: {ex.Message}");
                         MessageBox.Show(
@@ -4361,31 +5270,70 @@ public sealed class TestViewModel : ObservableObject
                 AddLog("Model không yêu cầu đo điện trở - bỏ qua Keysight.");
             }
 
+            bool waterProofCompleted = false;
+            if (IsWaterProofEnabledForCurrentModel())
+            {
+                if (!_cycleActive || !_engine.ContinuityPassed || _engine.HasWiringFault)
+                {
+                    SetProductionPhase(ProductionPhase.Continuity);
+                    Interlocked.Exchange(ref _postContinuityStarted, 0);
+                    AddLog("[WATERPROOF] Không bắt đầu leak vì trạng thái wiring đổi trước WaterProof.");
+                    return;
+                }
+
+                if (!TryValidateWaterProofConnectorGate(cycleModel, out string connectorGateError))
+                {
+                    SetProductionPhase(ProductionPhase.Continuity);
+                    Interlocked.Exchange(ref _postContinuityStarted, 0);
+                    State = connectorGateError.Contains("không tồn tại", StringComparison.OrdinalIgnoreCase) ||
+                            connectorGateError.Contains("chưa chọn", StringComparison.OrdinalIgnoreCase)
+                        ? "LỖI CẤU HÌNH LEAK"
+                        : "ĐANG KIỂM TRA...";
+                    AddLog($"[WATERPROOF] BLOCKED: {connectorGateError}");
+                    return;
+                }
+
+                SetProductionPhase(ProductionPhase.WaterProof);
+                await PauseProductionScanForWaterProofAsync(ct);
+                bool waterProofPassed = await RunAutomaticWaterProofAsync(cycleModel, generation, ct);
+                if (!waterProofPassed)
+                    return;
+                waterProofCompleted = true;
+            }
+
+            SetProductionPhase(ProductionPhase.Completed);
+            await PauseProductionScanForFinalPassAsync(ct);
             bool passUiTriggered = false;
+            long passUiTimestamp = 0;
             void TriggerPassUi()
             {
                 if (passUiTriggered)
                     return;
 
                 passUiTriggered = true;
+                passUiTimestamp = Stopwatch.GetTimestamp();
                 State = "PASS";
                 AsyncFileLogService.Current.Performance(
                     $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
                 _sound.SetWiringFaultAlarm(false);
                 _sound.PlayTestOk();
-                AddLog("PASS - continuity/điện trở đạt; chuẩn bị chuỗi relay MARKING/JIG.");
+                AddLog("PASS - continuity/điện trở/kín nước theo cấu hình đã đạt; chuẩn bị chuỗi relay MARKING/JIG.");
             }
 
             TriggerPassUi();
 
             // PASS UI/sound phải bật ngay khi điều kiện logic đã đạt.
-            // Relay chạy sau: MARKING trước; chỉ sau khi MARKING hoàn tất mới
-            // pulse Relay 1 để mở/tháo JIG.
+            // Relay chạy sau theo cấu hình Production Settings.
             // Tuyệt đối không cho relay PASS chạy trong lúc/Ngay sau khi que
             // dò GND còn tạo tín hiệu. Sau lockout phải xác nhận continuity
             // vẫn PASS và không có wiring fault mới được MARKING/JIG.
             await WaitForProbeRelayInterlockAsync(ct);
-            if (!_cycleActive || !_engine.ContinuityPassed || _engine.HasWiringFault)
+            // Sau Leak PASS, D2XX đã chủ động STOP. Không được dùng frame rỗng
+            // còn sót lúc STOP để phủ định continuity đã xác nhận trước Leak.
+            bool continuityLatchedForFinalPass = waterProofCompleted;
+            if (!_cycleActive ||
+                (!continuityLatchedForFinalPass &&
+                 (!_engine.ContinuityPassed || _engine.HasWiringFault)))
             {
                 Interlocked.Exchange(ref _postContinuityStarted, 0);
                 State = "ĐANG KIỂM TRA...";
@@ -4403,45 +5351,68 @@ public sealed class TestViewModel : ObservableObject
                         return;
                     }
 
-                    AddLog("Relay 2 MARKING bắt đầu; sau MARKING mới Relay 1 mở JIG.");
+                    AddLog(PassRelaySequenceText() + " bắt đầu.");
                 },
+                continuityAlreadyValidated: continuityLatchedForFinalPass,
                 ct: ct);
 
             if (!ok)
             {
-                _cycleActive = false;
-                RecordCompletedProduct(false, "CHƯA ĐẠT", cycleModel, generation, ct);
-                State = "CHƯA ĐẠT";
-                AddLog("Sản phẩm chưa đạt điều kiện PASS cuối cùng.");
-                RaiseTestStatistics();
+                await HandleFinalPassRejectedAsync(cycleModel, generation, ct);
                 return;
             }
 
-            RecordCompletedProduct(true, "PASS", cycleModel, generation, ct);
-            AddLog("Chuỗi PASS hoàn tất: Relay 2 MARKING -> Relay 1 mở JIG -> tất cả relay OFF.");
+            bool passCommitted = RecordCompletedProduct(true, "PASS", cycleModel, generation, ct);
+            if (!passCommitted)
+            {
+                Interlocked.Exchange(ref _postContinuityStarted, 0);
+                await RecoverAfterUncommittedFailAsync(
+                    cycleModel,
+                    generation,
+                    ct,
+                    "PASS_COMMIT_REJECTED");
+                return;
+            }
+
+            AddLog("Chuỗi PASS hoàn tất: " + PassRelaySequenceText() + " -> tất cả relay OFF.");
             RaiseTestStatistics();
 
-            if (!_settings.Test.AutoRestartAfterPass)
+            if (!ShouldRestartAfterPass(
+                    _settings.Test.AutoRestartAfterPass,
+                    waterProofCompleted))
             {
                 _cycleActive = false;
+                SelectedOperationTabIndex = 0;
                 return;
             }
 
-            // Production trace: ~200 ms after relay2 OFF, Htdrv sends START_SCAN
-            // for the next product. Re-arm only after current harness is released.
-            await Task.Delay(
-                Math.Max(0, _settings.Test.PostRelayRestartDelayMs),
-                ct);
+            // CompletePassAsync đã đưa relay về OFF. ARM chờ tháo ngay trước
+            // mọi I/O tiếp theo để lỗi restart scan không thể đổi PASS thành đỏ
+            // hoặc giữ màn hình ở bảng kết quả Leak.
+            ArmPassProductRemovalWait();
 
-            _engine.Reset();
-            Interlocked.Exchange(ref _postContinuityStarted, 0);
-            _waitForProductRelease = true;
-            _cycleActive = true;
-            SelectedOperationTabIndex = 0;
+            if (passUiTimestamp != 0)
+            {
+                double passToReadyMs = Stopwatch.GetElapsedTime(passUiTimestamp).TotalMilliseconds;
+                AsyncFileLogService.Current.Performance(
+                    $"PASS_LATENCY T_PASS_TO_WAIT_REMOVE cycle={_activeCycleId} duration_ms={passToReadyMs:0.###}");
+                AddLog($"PASS -> CHỜ THÁO: {passToReadyMs:0} ms; đã ARM ProductRemoved.");
+            }
 
-            await StartProductionScanAndVerifyFrameAsync(ct, "PASS_RELAY_SEQUENCE");
-            State = "PASS";
-            AddLog("Đã restart scan. Chờ nhả sản phẩm/jig trước chu kỳ tiếp theo.");
+            try
+            {
+                await StartProductionScanAndVerifyFrameAsync(ct, "PASS_RELAY_SEQUENCE");
+                AddLog("Đã restart scan. Chờ nhả sản phẩm/jig trước chu kỳ tiếp theo.");
+            }
+            catch (Exception ex)
+            {
+                // PASS đã commit nên tuyệt đối không đổi thành FAIL. Giữ khóa
+                // ProductRemoved và thử khôi phục scan nền độc lập.
+                AddLog($"PASS đã lưu; restart scan chờ tháo chưa thành công: {ex.Message}");
+                await EnsureContinuousProductionScanAsync();
+                if (_waitForProductRelease)
+                    State = "PASS - CHỜ THÁO SẢN PHẨM";
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -4456,6 +5427,7 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             _cycleActive = false;
+            SetProductionPhase(ProductionPhase.EquipmentError);
             _waitForProductRelease = false;
 
             try
@@ -4477,9 +5449,168 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    private async Task HandleFinalPassRejectedAsync(
+        ProductModel cycleModel,
+        long generation,
+        CancellationToken ct)
+    {
+        _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingFaultConfirmation);
+        State = "CHƯA ĐẠT";
+        SelectedOperationTabIndex = 0;
+
+        try
+        {
+            if (_board.IsConnected)
+            {
+                await _board.StopScanAsync();
+                await _board.AllRelaysOffAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể dừng bo trước xác nhận NG cuối chu kỳ: {ex.Message}");
+        }
+
+        FaultDetail[] faults = BuildFinalPassRejectionFaults(cycleModel);
+        bool committed = RecordCompletedProduct(
+            false,
+            "CHƯA ĐẠT",
+            cycleModel,
+            generation,
+            ct,
+            faults);
+        if (!committed)
+        {
+            Interlocked.Exchange(ref _postContinuityStarted, 0);
+            AddLog("Final PASS rejection không commit được; không mở popup/eject lặp vì lifecycle kết quả đã đổi chủ.");
+            await RecoverAfterUncommittedFailAsync(
+                cycleModel,
+                generation,
+                ct,
+                "FINAL_PASS_REJECT");
+            return;
+        }
+
+        AddLog(
+            "[NG-DIALOG] " +
+            $"CycleId={_activeCycleId} Reason=FinalPassRejected " +
+            $"ContinuityPassed={_engine.ContinuityPassed} " +
+            $"Resistance={Resistance.Count}/{ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count}");
+
+        var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
+            faults,
+            "Không chạy relay PASS. Sau khi XÁC NHẬN: chỉ JIG được mở; MARKING luôn OFF khi FAIL.");
+        faultDialog.Owner = Application.Current?.MainWindow;
+        faultDialog.ShowDialog();
+
+        try
+        {
+            State = "ĐANG MỞ JIG HÀNG LỖI";
+            await _engine.EjectFaultProductAsync();
+            AddLog("Final PASS rejection đã xác nhận: chỉ R1 JIG pulse rồi OFF; R2 MARKING luôn OFF.");
+
+            _waitForFaultProductRemoval = true;
+            SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+            await StartProductionScanAndVerifyFrameAsync(
+                CurrentCycleToken(),
+                "FINAL_PASS_REJECT_CONFIRM_RELAY");
+            State = "LỖI - CHỜ THÁO TOÀN BỘ SẢN PHẨM";
+        }
+        catch (Exception ex)
+        {
+            _waitForFaultProductRemoval = false;
+            SetProductionPhase(ProductionPhase.EquipmentError);
+            State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
+            AddLog($"Không thể eject/restart scan sau NG cuối chu kỳ: {ex.Message}");
+            MessageBox.Show(
+                $"Không thể mở JIG hoặc khởi động lại scan sau NG cuối chu kỳ.\nRelay 2 MARKING vẫn OFF.\n\n{ex.Message}",
+                "Lỗi thiết bị",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private async Task RecoverAfterUncommittedFailAsync(
+        ProductModel cycleModel,
+        long generation,
+        CancellationToken cycleToken,
+        string reason)
+    {
+        _sound.SetWiringFaultAlarm(false);
+        _waitForFaultProductRemoval = false;
+
+        bool currentProductionContext =
+            !cycleToken.IsCancellationRequested &&
+            ReferenceEquals(_model, cycleModel) &&
+            IsRuntimeContext(RuntimeMode.Production, generation) &&
+            Volatile.Read(ref _probeSessionActive) == 0 &&
+            MasterApproved;
+
+        AddLog(
+            $"[FAIL-RECOVERY] Reason={reason} CurrentContext={currentProductionContext} " +
+            $"ResultCommitted={Volatile.Read(ref _resultRecordedThisCycle) != 0} " +
+            $"InlineProbeIo={Volatile.Read(ref _inlineProbeContactIo)} " +
+            $"TokenCanceled={cycleToken.IsCancellationRequested}");
+
+        if (!currentProductionContext)
+            return;
+
+        // Không được cộng FAIL lần hai hoặc mở popup lặp. Tuy nhiên chu kỳ cũng
+        // không được nằm vĩnh viễn ở KHÔNG ĐẠT: scan lại và bắt buộc xác nhận
+        // tháo toàn bộ sản phẩm trước khi ResetFullCycleAfterProductRemoved().
+        _waitForProductRelease = true;
+        _cycleActive = true;
+        SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+        State = "CHỜ THÁO SẢN PHẨM";
+
+        try
+        {
+            await StartProductionScanAndVerifyFrameAsync(
+                CurrentCycleToken(),
+                reason + "_UNCOMMITTED_RECOVERY");
+        }
+        catch (Exception ex)
+        {
+            _waitForProductRelease = false;
+            _cycleActive = false;
+            SetProductionPhase(ProductionPhase.EquipmentError);
+            State = "LỖI THIẾT BỊ - KHÔNG THỂ KHỞI ĐỘNG LẠI SCAN";
+            AddLog($"Không thể phục hồi scan sau {reason}: {ex.Message}");
+        }
+    }
+
+    private FaultDetail[] BuildFinalPassRejectionFaults(ProductModel model)
+    {
+        FaultDetail[] captured = CaptureFaultDetails().ToArray();
+        if (captured.Length > 0)
+            return captured;
+
+        int expectedResistanceCount = ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count;
+        string failedResistance = string.Join(
+            ", ",
+            Resistance.Where(item => !item.Passed).Select(item => $"{item.Name}={item.ResultText}"));
+        string resistanceDetail = string.IsNullOrWhiteSpace(failedResistance)
+            ? $"Resistance {Resistance.Count}/{expectedResistanceCount}"
+            : $"Resistance {Resistance.Count}/{expectedResistanceCount}: {failedResistance}";
+
+        return
+        [
+            new FaultDetail
+            {
+                Type = ProductFaultType.None,
+                Message =
+                    "Điều kiện PASS cuối cùng đã thay đổi trước khi chạy relay. " +
+                    $"Continuity={_engine.ContinuityPassed}; " +
+                    $"Network={PassedNetworkCount}/{ExpectedNetworkCount}; {resistanceDetail}."
+            }
+        ];
+    }
+
     public async Task ReconnectBoardForSettingsAsync()
     {
         _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingProduct);
         CancelCycleOperations();
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
@@ -4520,6 +5651,7 @@ public sealed class TestViewModel : ObservableObject
         }
         _board.ConfigureScanRange(maxIo);
         InvokeUi(RebuildActiveCards);
+        LoadWaterProofProfileForCurrentModel();
         RefreshProductionUiSettings();
         AddLog(
             $"Đã nạp lại cấu hình production: model max IO {maxIo}, LOTNO {Lot}; " +
@@ -4538,6 +5670,7 @@ public sealed class TestViewModel : ObservableObject
             }
         }
 
+        LoadWaterProofProfileForCurrentModel();
         RefreshProductionUiSettings();
         State = ReadyStateForCurrentModel();
         AddLog("Đã áp dụng cấu hình mềm; không restart scan và không reconnect FTDI.");
@@ -4571,6 +5704,7 @@ public sealed class TestViewModel : ObservableObject
 
         _board.ConfigureScanRange(maxIo);
         InvokeUi(RebuildActiveCards);
+        LoadWaterProofProfileForCurrentModel();
         RefreshProductionUiSettings();
 
         if (_model is not null)
@@ -4608,6 +5742,12 @@ public sealed class TestViewModel : ObservableObject
     {
         _historyStore = new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
         Lot = _productionSettings.LotNo.ToString();
+        if (!_productionSettings.UseTestPointer &&
+            ClearInlineProbeContactsState(clearLastSeen: true))
+        {
+            InvokeUi(ClearInlineProbeDisplay);
+        }
+
         Raise(nameof(ItemHeight));
         Raise(nameof(ScrollDelay));
         Raise(nameof(PageDelay));
@@ -4624,10 +5764,17 @@ public sealed class TestViewModel : ObservableObject
         // nhầm sang mã hàng vừa chọn.
         CancelCycleOperations();
         _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingProduct);
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
+        _waterProofEquipmentErrorAwaitingRemoval = false;
+        Interlocked.Exchange(ref _waterProofRunning, 0);
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
+        Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+        Interlocked.Exchange(ref _startupIoInterlockState, 0);
+        _startupIoWarningSignature = string.Empty;
 
         _model = model ??
             throw new ArgumentNullException(nameof(model));
@@ -4661,6 +5808,8 @@ public sealed class TestViewModel : ObservableObject
                 AddLog($"Không lưu được LastThtPath production config: {ex.Message}");
             }
         }
+
+        LoadWaterProofProfileForCurrentModel();
 
         // Đồng bộ model lên MainWindow ngay cả khi model được tự nạp lúc startup.
         // Đồng thời lưu ngay lựa chọn model; không chờ tới lúc bắt đầu test.
@@ -4763,11 +5912,19 @@ public sealed class TestViewModel : ObservableObject
         try
         {
             ModelProductionStatistics stats = _statisticsStore.Get(model);
+            PartCounterEntry partCounter = _partCounterStore.GetOrCreate(
+                model,
+                Math.Max(stats.ProbeCycleCount, stats.Total),
+                _productionSettings.ProbeReplacementThreshold);
             Total = stats.Total;
             Pass = stats.Pass;
             Fail = stats.Fail;
             ApplyExtendedStatistics(stats);
+            ApplyPartCounter(partCounter);
             RaiseTestStatistics();
+
+            if (!string.IsNullOrWhiteSpace(_partCounterStore.LastWarning))
+                AddLog($"PART COUNTER WARNING: {_partCounterStore.LastWarning}");
 
             AddLog(
                 $"Đã nạp sản lượng mã hàng: Tổng {Total}, PASS {Pass}, FAIL {Fail}, " +
@@ -4792,7 +5949,8 @@ public sealed class TestViewModel : ObservableObject
         string resultText,
         ProductModel cycleModel,
         long runtimeGeneration,
-        CancellationToken cycleToken)
+        CancellationToken cycleToken,
+        IReadOnlyList<FaultDetail>? failureDetails = null)
     {
         if (cycleToken.IsCancellationRequested ||
             !ReferenceEquals(_model, cycleModel) ||
@@ -4805,25 +5963,29 @@ public sealed class TestViewModel : ObservableObject
 
         ProductModel model = cycleModel;
 
-        long completedLot = Math.Max(0, _productionSettings.LotNo);
-        bool lotSequencePersisted = TryReserveNextLot(completedLot, out string lotSequenceError);
         DateTime finished = DateTime.Now;
         DateTime started = _cycleStartedAt <= finished ? _cycleStartedAt : finished;
         string cycleId = string.IsNullOrWhiteSpace(_activeCycleId)
             ? Guid.NewGuid().ToString("N")
             : _activeCycleId;
+        long completedLot = ShouldAutoPrintLabel(passed, _productionSettings.AutoPrintLabelOnPass)
+            ? _lotSequence.ReserveForCycle(cycleId)
+            : _lotSequence.NextLot;
 
         IReadOnlyList<FaultDetail> faultDetails = passed
             ? Array.Empty<FaultDetail>()
-            : CaptureFaultDetails();
+            : failureDetails?.ToArray() ?? CaptureFaultDetails();
         FaultDetail? primaryFault = faultDetails
             .OrderBy(fault => FaultTypeCatalog.Priority(fault.Type))
             .FirstOrDefault();
 
         string resultStatus = passed ? "PASS" : "FAIL";
+        string primaryFaultName = primaryFault?.Name ?? string.Empty;
         string failureName = passed
             ? string.Empty
-            : primaryFault?.Name ?? (string.IsNullOrWhiteSpace(resultText) ? "FAIL" : resultText.Trim());
+            : !string.IsNullOrWhiteSpace(primaryFaultName)
+                ? primaryFaultName
+                : string.IsNullOrWhiteSpace(resultText) ? "FAIL" : resultText.Trim();
 
         var completed = new CompletedTestResult
         {
@@ -4869,10 +6031,12 @@ public sealed class TestViewModel : ObservableObject
             Finished = completed.Finished,
             PartName = model.ProductName,
             PartNumber = model.PartNumber,
+            VehicleType = model.VehicleType,
             Eco = model.Eco,
             Nco = model.Nco,
             Alc = model.Alc,
             LotNo = completedLot,
+            ProductionCounter = ProbeCycleCount,
             Result = completed.ResultText,
             Passed = completed.Passed,
             ModelName = model.ModelName,
@@ -4904,20 +6068,33 @@ public sealed class TestViewModel : ObservableObject
         };
 
         LabelPrintRequest? printRequest = null;
+        string labelPreparationError = string.Empty;
         if (passed)
         {
-            printRequest = LabelPrintRequest.Capture(history, _productionSettings.Label);
-            LabelIdentity identity = EplLabelService.BuildIdentity(printRequest.Data);
-            history.LabelSerial = identity.SerialText;
-            history.BarcodeValue = identity.BarcodeValue;
-            history.LabelProfile = printRequest.FormatName;
-            history.Printer = printRequest.Printer;
-            history.LabelCopies = printRequest.Copies;
-
-            if (_productionSettings.AutoPrintLabelOnPass && !lotSequencePersisted)
+            if (TryCapturePassLabel(
+                    history,
+                    model,
+                    _productionSettings.Label,
+                    out printRequest,
+                    out LabelIdentity? identity,
+                    out labelPreparationError))
             {
+                history.LabelSerial = identity!.SerialText;
+                history.BarcodeValue = identity.BarcodeValue;
+                history.LabelProfile = printRequest!.FormatName;
+                history.Printer = printRequest.Printer;
+                history.LabelCopies = printRequest.Copies;
+            }
+            else
+            {
+                // Tem là tác vụ phụ sau khi sản phẩm đã PASS. Cấu hình tem
+                // thiếu/không hợp lệ không được phép ném ngược ra vòng đời
+                // production, đổi PASS thành EquipmentError hoặc làm mất ARM
+                // ProductRemoved. Vẫn lưu history với trạng thái in thất bại.
                 history.PrintStatus = LabelPrintStatus.Failed.ToString();
-                history.PrintMessage = lotSequenceError;
+                history.PrintMessage = $"Label preparation failed: {labelPreparationError}";
+                AddLog($"LABEL PREPARATION FAILED: cycle {cycleId}; {labelPreparationError}. Kết quả sản phẩm vẫn PASS.");
+                InvokeUi(() => LabelStatusText = $"LỖI CẤU HÌNH TEM - LOT {completedLot}: {labelPreparationError}");
             }
         }
 
@@ -4937,6 +6114,22 @@ public sealed class TestViewModel : ObservableObject
             AddLog($"Không thể lưu test history: {ex.Message}");
         }
 
+        try
+        {
+            PartCounterEntry counter = _partCounterStore.GetOrCreate(
+                model,
+                Math.Max(ProbeCycleCount, Total),
+                ProbeReplacementThreshold);
+            string legacyPath = _legacyHistory.AppendProduct(model, completed, counter.Counter);
+            AddLog(
+                $"PHT HISTORY: {resultStatus} counter {counter.Counter:N0} " +
+                $"đã append vào {legacyPath}.");
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể append lịch sử dùng chung C:\\Pass_/C:\\Error_: {ex.Message}");
+        }
+
         if (!passed)
         {
             try
@@ -4950,16 +6143,17 @@ public sealed class TestViewModel : ObservableObject
             }
         }
 
-        if (passed && _productionSettings.AutoPrintLabelOnPass && printRequest is not null)
+        if (ShouldAutoPrintLabel(passed, _productionSettings.AutoPrintLabelOnPass) &&
+            printRequest is null &&
+            !string.IsNullOrWhiteSpace(labelPreparationError))
         {
-            if (!lotSequencePersisted)
-            {
-                AddLog($"LABEL BLOCKED: {lotSequenceError}");
-                ShowLabelWarning(
-                    "Sản phẩm đã PASS nhưng không in tem vì không thể lưu sequence/LOT an toàn.\n\n" +
-                    lotSequenceError);
-            }
-            else if (!historySaved)
+            AddLog(
+                $"LABEL BLOCKED: LOT {completedLot} không in do cấu hình tem không hợp lệ; " +
+                "PASS/ProductRemoved vẫn tiếp tục bình thường.");
+        }
+        else if (ShouldAutoPrintLabel(passed, _productionSettings.AutoPrintLabelOnPass) && printRequest is not null)
+        {
+            if (!historySaved)
             {
                 const string message = "Không thể lưu giao dịch in vào lịch sử; first-print đã bị chặn để tránh mất traceability.";
                 AddLog($"LABEL BLOCKED: {message}");
@@ -4989,12 +6183,49 @@ public sealed class TestViewModel : ObservableObject
         return true;
     }
 
+    private static bool TryCapturePassLabel(
+        TestHistoryRecord history,
+        ProductModel model,
+        LabelSettings settings,
+        out LabelPrintRequest? request,
+        out LabelIdentity? identity,
+        out string error)
+    {
+        try
+        {
+            request = LabelPrintRequest.Capture(history, model, settings);
+            identity = EplLabelService.BuildIdentity(request.Data);
+            if (LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) ==
+                LabelSettings.SmallTemplate)
+            {
+                identity = identity with { BarcodeValue = request.Data.Barcode };
+            }
+            error = string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            request = null;
+            identity = null;
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private static bool ShouldAutoPrintLabel(bool passed, bool autoPrintEnabled) =>
+        passed && autoPrintEnabled;
+
     private void ApplyExtendedStatistics(ModelProductionStatistics stats)
     {
         DailyTestCount = stats.DailyTestCount;
         MonthlyTestCount = stats.MonthlyTestCount;
         LifetimeTestCount = stats.LifetimeTestCount;
-        ProbeCycleCount = stats.ProbeCycleCount;
+    }
+
+    private void ApplyPartCounter(PartCounterEntry entry)
+    {
+        ProbeCycleCount = entry.Counter;
+        _probeReplacementThreshold = Math.Max(1, entry.ReplacementThreshold);
         Raise(nameof(ProbeReplacementThreshold));
         Raise(nameof(ProbeCycleText));
         Raise(nameof(ProbeMaintenanceDue));
@@ -5016,15 +6247,27 @@ public sealed class TestViewModel : ObservableObject
         bool wasDue = ProbeCycleCount >= ProbeReplacementThreshold;
         try
         {
-            ModelProductionStatistics stats = _statisticsStore.RecordProbeCycle(
+            PartCounterEntry counter = _partCounterStore.Increment(
                 model,
+                Math.Max(ProbeCycleCount, Total),
                 ProbeReplacementThreshold);
-            AddLog($"Probe cycle: {stats.ProbeCycleCount:N0}/{ProbeReplacementThreshold:N0} cho {stats.ModelKey}.");
+            try
+            {
+                _statisticsStore.RecordProbeCycle(model, counter.ReplacementThreshold);
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Không thể ghi bản sao ProbeCycleCount vào production.statistics.json: {ex.Message}");
+            }
 
-            bool reachedDue = stats.ProbeCycleCount >= ProbeReplacementThreshold;
+            AddLog(
+                $"PartCnt: {counter.PartNumber} " +
+                $"{counter.Counter:N0}/{counter.ReplacementThreshold:N0} ({_partCounterStore.StoragePath}).");
+
+            bool reachedDue = counter.Counter >= counter.ReplacementThreshold;
             InvokeUi(() =>
             {
-                ApplyExtendedStatistics(stats);
+                ApplyPartCounter(counter);
                 if (!wasDue && reachedDue)
                 {
                     MessageBox.Show(
@@ -5083,49 +6326,33 @@ public sealed class TestViewModel : ObservableObject
 
         try
         {
-            ProbeMaintenanceRecord record = _statisticsStore.ResetProbeCycle(
-                model,
-                ProbeReplacementThreshold,
-                "SETTINGS_ADMIN",
-                _productionSettings.DeviceName);
-            ApplyExtendedStatistics(_statisticsStore.Get(model));
+            long previous = ProbeCycleCount;
+            PartCounterEntry reset = _partCounterStore.Reset(model);
+            try
+            {
+                _statisticsStore.ResetProbeCycle(
+                    model,
+                    reset.ReplacementThreshold,
+                    "SETTINGS_ADMIN",
+                    _productionSettings.DeviceName);
+            }
+            catch (Exception ex)
+            {
+                AddLog($"PartCnt đã reset nhưng không thể ghi lịch sử maintenance JSON: {ex.Message}");
+            }
+
+            ApplyPartCounter(reset);
             Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
-            message = $"PROBE PIN REPLACED đã được lưu. Counter {record.PreviousProbeCycleCount:N0} → 0.";
-            AddLog($"MAINTENANCE: {record.Action}; model={record.ModelKey}; previous={record.PreviousProbeCycleCount}; admin={record.AdminIdentity}.");
+            message = $"Đã lưu thay Probe Pin vào PartCnt.txt. Counter {previous:N0} → 0.";
+            AddLog(
+                $"MAINTENANCE: PROBE PIN REPLACED; part={reset.PartNumber}; " +
+                $"previous={previous}; file={_partCounterStore.StoragePath}; admin=SETTINGS_ADMIN.");
             return true;
         }
         catch (Exception ex)
         {
             message = $"Không thể lưu reset Probe Pin: {ex.Message}";
             return false;
-        }
-    }
-
-    private bool TryReserveNextLot(long completedLot, out string error)
-    {
-        lock (_lotReservationGate)
-        {
-            try
-            {
-                long nextLot = checked(completedLot + 1);
-                _productionSettings.LotNo = nextLot;
-                ProductionConfigService.Save(_productionSettings);
-                Lot = nextLot.ToString();
-                error = string.Empty;
-                return true;
-            }
-            catch (OverflowException)
-            {
-                error = "LOTNO đã đạt giới hạn số nguyên; không thể giữ sequence duy nhất sau restart.";
-                AddLog(error);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                error = $"Không thể lưu LOTNO kế tiếp: {ex.Message}";
-                AddLog(error);
-                return false;
-            }
         }
     }
 
@@ -5142,9 +6369,32 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
+            if (!_lotSequence.IsCommitCandidate(request.CycleId, request.Data.LotNo))
+            {
+                string blocked = $"LOT {request.Data.LotNo} đang chờ LOT trước đó được in/commit; chưa gửi dữ liệu tới máy in.";
+                UpdateLabelPrintOutcomeSafe(
+                    historyStore, historyId, request.CycleId, LabelPrintStatus.Failed, null, blocked);
+                SetFailedLabelContext(new LabelPrintContext(request, historyStore, historyId), blocked);
+                AddLog($"LABEL BLOCKED: cycle {request.CycleId}; {blocked}");
+                return;
+            }
+
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
                 request, _lifetimeCts.Token);
-            LabelPrintStatus status = result.Printed
+
+            bool commitUnknown = false;
+            if (result.Printed &&
+                !_lotSequence.TryCommitSuccessfulPrint(request.CycleId, request.Data.LotNo, out string commitError))
+            {
+                commitUnknown = true;
+                result = new LabelPrintTransportResult(
+                    false,
+                    $"Printer accepted LOT {request.Data.LotNo}, but LOT commit failed: {commitError}");
+            }
+
+            LabelPrintStatus status = commitUnknown
+                ? LabelPrintStatus.Unknown
+                : result.Printed
                 ? LabelPrintStatus.Printed
                 : LabelPrintStatus.Failed;
             DateTime? printedAt = result.Printed ? DateTime.Now : null;
@@ -5152,8 +6402,30 @@ public sealed class TestViewModel : ObservableObject
                 historyStore, historyId, request.CycleId, status, printedAt, result.Message);
             AddLog($"LABEL {status.ToString().ToUpperInvariant()}: cycle {request.CycleId}; {result.Message}");
 
-            if (!result.Printed)
+            if (result.Printed)
+            {
+                InvokeUi(() => Lot = _lotSequence.NextLot.ToString());
+                SetSuccessfulLabelContext(new LabelPrintContext(request, historyStore, historyId));
+                try
+                {
+                    _labelDuplicateGuard.RecordSuccessfulPrint(request, printedAt ?? DateTime.Now);
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"LABEL DUPLICATE STATE ERROR: {ex.Message}");
+                }
+            }
+
+            if (commitUnknown)
+            {
+                SetUnknownLabelStatus(request, result.Message);
+                ShowLabelWarning($"Tem LOT {request.Data.LotNo} có thể đã được in nhưng không thể commit LOT. Không tự retry để tránh in trùng.\n\n{result.Message}");
+            }
+            else if (!result.Printed)
+            {
+                SetFailedLabelContext(new LabelPrintContext(request, historyStore, historyId), result.Message);
                 ShowLabelWarning($"Sản phẩm đã PASS nhưng chưa in được tem.\n\n{result.Message}");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -5161,6 +6433,7 @@ public sealed class TestViewModel : ObservableObject
             UpdateLabelPrintOutcomeSafe(
                 historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
             AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
+            SetUnknownLabelStatus(request, message);
         }
         catch (Exception ex)
         {
@@ -5168,8 +6441,103 @@ public sealed class TestViewModel : ObservableObject
             UpdateLabelPrintOutcomeSafe(
                 historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
             AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
+            SetUnknownLabelStatus(request, message);
             ShowLabelWarning($"Sản phẩm vẫn giữ kết quả PASS nhưng trạng thái in tem chưa xác định.\n\n{message}");
         }
+    }
+
+    private async Task RetryLastFailedLabelAsync()
+    {
+        LabelPrintContext? context;
+        lock (_labelStateGate)
+            context = _failedLabelPrint;
+
+        if (context is null)
+            return;
+
+        if (!_lotSequence.TryRestoreReservation(context.Request.CycleId, context.Request.Data.LotNo))
+        {
+            ShowLabelWarning($"Không thể khôi phục LOT {context.Request.Data.LotNo} cho cycle {context.Request.CycleId}.");
+            return;
+        }
+
+        await PrintPassLabelSafeAsync(context.Request, context.HistoryStore, context.HistoryId);
+    }
+
+    private async Task ReprintLastSuccessfulLabelAsync()
+    {
+        LabelPrintContext? context;
+        lock (_labelStateGate)
+            context = _lastSuccessfulLabelPrint;
+
+        if (context is null)
+            return;
+
+        try
+        {
+            LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
+                context.Request, _lifetimeCts.Token);
+            if (!result.Printed)
+            {
+                InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}: {result.Message}");
+                ShowLabelWarning($"Không thể in lại tem LOT {context.Request.Data.LotNo}.\n\n{result.Message}");
+                return;
+            }
+
+            context.HistoryStore.IncrementLabelReprint(
+                context.HistoryId, context.Request.CycleId, DateTime.Now, result.Message);
+            InvokeUi(() => LabelStatusText = $"TEM: ĐÃ IN LẠI LOT {context.Request.Data.LotNo}");
+            AddLog($"LABEL REPRINTED: cycle {context.Request.CycleId}; LOT {context.Request.Data.LotNo}; không tăng LOT.");
+        }
+        catch (Exception ex)
+        {
+            InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}: {ex.Message}");
+            ShowLabelWarning($"Không thể in lại tem LOT {context.Request.Data.LotNo}.\n\n{ex.Message}");
+        }
+    }
+
+    private void SetFailedLabelContext(LabelPrintContext context, string message)
+    {
+        lock (_labelStateGate)
+            _failedLabelPrint = context;
+
+        InvokeUi(() =>
+        {
+            LabelStatusText = $"LỖI IN TEM - LOT {context.Request.Data.LotNo}: {message}";
+            Raise(nameof(CanRetryLabel));
+            RetryLabelCommand.RaiseCanExecuteChanged();
+        });
+    }
+
+    private void SetSuccessfulLabelContext(LabelPrintContext context)
+    {
+        lock (_labelStateGate)
+        {
+            _failedLabelPrint = null;
+            _lastSuccessfulLabelPrint = context;
+        }
+
+        InvokeUi(() =>
+        {
+            LabelStatusText = $"TEM: ĐÃ IN LOT {context.Request.Data.LotNo}";
+            Raise(nameof(CanRetryLabel));
+            Raise(nameof(CanReprintLabel));
+            RetryLabelCommand.RaiseCanExecuteChanged();
+            ReprintLabelCommand.RaiseCanExecuteChanged();
+        });
+    }
+
+    private void SetUnknownLabelStatus(LabelPrintRequest request, string message)
+    {
+        lock (_labelStateGate)
+            _failedLabelPrint = null;
+
+        InvokeUi(() =>
+        {
+            LabelStatusText = $"TEM CHƯA XÁC ĐỊNH - LOT {request.Data.LotNo}: {message}";
+            Raise(nameof(CanRetryLabel));
+            RetryLabelCommand.RaiseCanExecuteChanged();
+        });
     }
 
     private void UpdateLabelPrintOutcomeSafe(

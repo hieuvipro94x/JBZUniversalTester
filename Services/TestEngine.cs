@@ -110,8 +110,10 @@ public sealed class TestEngine : IDisposable
                 return _model is null ? 0 : ProductionExpectedNetCount(_model);
         }
     }
-    public bool HasResistanceSteps => _model?.ResistanceSteps.Count > 0;
-    public int ResistanceStepCount => _model?.ResistanceSteps.Count ?? 0;
+    public bool HasResistanceSteps => _model is not null && ResistanceStepCount > 0;
+    public int ResistanceStepCount => _model is null
+        ? 0
+        : ResistanceMeasurementPlan.BuildEnabledSteps(_production).Count;
 
     public bool HasWiringFault
     {
@@ -676,7 +678,7 @@ public sealed class TestEngine : IDisposable
         Reset();
     }
 
-    public void ProcessFrame(ScanFrame frame)
+    public void ProcessFrame(ScanFrame frame, bool preserveConfirmedWiringFaults = false)
     {
         if (_disposed)
             return;
@@ -709,6 +711,9 @@ public sealed class TestEngine : IDisposable
             bool previousContactLossTimedOut = _contactLossTimedOut;
             bool previousProductStable = _productStable;
             bool previousReadyToEvaluate = _readyToEvaluateProductFaults;
+            WiringFaultPair[] previousConfirmedWiringFaults = preserveConfirmedWiringFaults
+                ? _wiringFaults.ToArray()
+                : [];
 
             if (!sameActive)
             {
@@ -794,17 +799,49 @@ public sealed class TestEngine : IDisposable
 
             bool hasProductActivity = HasProductActivityUnsafe(model);
             bool hasExpectedSourceCoverage = HasExpectedSourceCoverageUnsafe(model);
+            bool allExpectedConnectionsPresent =
+                _expectedConnectionScratch.Count > 0 &&
+                _expectedConnectionScratch.Values.All(static connected => connected);
             _hasExpectedSourceCoverage = hasExpectedSourceCoverage;
-            _readyToEvaluateProductFaults = hasProductActivity && hasExpectedSourceCoverage;
+            // Một cạnh continuity là hai chiều. Một số bo Htdrv phát đầu THT
+            // canonical ở phía source, trong khi bo khác phát chính cạnh đó theo
+            // chiều ngược lại. Khi toàn bộ mạng kỳ vọng đã hiện diện trong cùng
+            // complete frame, chính các cạnh đó đã chứng minh đủ coverage để PASS;
+            // không được khóa chu kỳ chỉ vì hướng source của firmware khác nhau.
+            // Với topology chưa đủ, vẫn giữ source-coverage gate cũ để không xác
+            // nhận WRONG/SHORT trong lúc người vận hành đang lắp sản phẩm.
+            _readyToEvaluateProductFaults =
+                hasProductActivity &&
+                (hasExpectedSourceCoverage || allExpectedConnectionsPresent);
             _lastFrameValid = true;
             _lastFrameSequence = frame.Sequence;
             _lastFrameUnknownBytes = frame.UnknownBytes;
 
-            bool wiringChanged = UpdateWiringFaults(
+            // Snapshot đã được classifier xác định là đầu dò chỉ dùng để hiển
+            // thị Pin đang chạm. Không cho snapshot này tạo candidate/confirmed
+            // WRONG hoặc SHORT mới; các lỗi thật đã có trước đó vẫn được giữ.
+            bool wiringChanged = !preserveConfirmedWiringFaults && UpdateWiringFaults(
                 model,
                 _expectedConnectionScratch,
                 hasProductActivity,
                 _readyToEvaluateProductFaults);
+
+            if (preserveConfirmedWiringFaults &&
+                previousConfirmedWiringFaults.Length > 0 &&
+                _wiringFaults.Count == 0)
+            {
+                foreach (WiringFaultPair fault in previousConfirmedWiringFaults)
+                    _wiringFaults.Add(fault);
+
+                _unexpectedIo.Clear();
+                foreach (WiringFaultPair fault in _wiringFaults)
+                {
+                    _unexpectedIo.Add(fault.SourceIo);
+                    _unexpectedIo.Add(fault.TargetIo);
+                }
+
+                wiringChanged = true;
+            }
 
             changed =
                 _forceNextFrameChanged ||
@@ -1418,10 +1455,6 @@ public sealed class TestEngine : IDisposable
                     continue;
 
                 bool netPassed = _passedNets.Contains(net.Name);
-                bool hasWiringFault = HasWiringFaultForNet(net);
-                if (netPassed && !hasWiringFault)
-                    continue;
-
                 rows.AddRange(CreateNetworkMappingRows(net, netPassed));
             }
 
@@ -1522,6 +1555,9 @@ public sealed class TestEngine : IDisposable
 
     IReadOnlyList<FaultRow> CreateNetworkMappingRows(WireNet net, bool connected)
     {
+        if (connected)
+            return [];
+
         PinRecord[] pins = net.Pins
             .Where(pin => pin.IoNumber > 0)
             .GroupBy(pin => pin.IoNumber)
@@ -1536,14 +1572,16 @@ public sealed class TestEngine : IDisposable
             .Where(io => io > 0)
             .Distinct()
             .ToHashSet();
-        string wireText = string.IsNullOrWhiteSpace(net.Name)
-            ? pins.FirstOrDefault(pin => !string.IsNullOrWhiteSpace(pin.WireName))?.WireName ?? string.Empty
-            : net.Name;
-        string stateText = connected ? "ĐÃ KẾT NỐI" : "CHỜ KẾT NỐI";
+        int[] relatedIos = endpointIos
+            .OrderBy(io => ResolvePeerOrder(net, io))
+            .ToArray();
 
         return pins
             .Select((pin, endpointIndex) =>
             {
+                bool isSource = pin.IoNumber == net.SourceIo;
+                bool endpointConnected = IsEndpointConnectedWithinNet(net, pin.IoNumber, _currentConnections);
+                bool showAsReference = isSource || endpointConnected || connected;
                 int? firstPeer = endpointIos
                     .Where(io => io != pin.IoNumber)
                     .OrderBy(io => ResolvePeerOrder(net, io))
@@ -1552,23 +1590,90 @@ public sealed class TestEngine : IDisposable
 
                 return new FaultRow
                 {
-                    Kind = connected ? FaultKind.Info : FaultKind.MissingConnection,
+                    Kind = showAsReference ? FaultKind.Info : FaultKind.MissingConnection,
                     ProductFaultType = ProductFaultType.None,
-                    FaultType = connected ? "THÔNG MẠCH" : "CHƯA KẾT NỐI",
+                    FaultType = showAsReference ? "KIỂM TRA" : "HỞ MẠCH",
                     Io = pin.IoNumber,
                     DisplayOrder = ResolveNetworkEndpointDisplayOrder(net, pin, endpointIndex),
                     ExpectedSourceIo = net.SourceIo,
                     ExpectedTargetIo = firstPeer,
+                    RelatedIos = relatedIos,
                     Connector = pin.Connector,
                     Pin = pin.PinNumber,
-                    WireName = string.IsNullOrWhiteSpace(wireText) ? pin.WireName : wireText,
+                    WireName = pin.WireName,
                     Splice = pin.SpliceName,
                     Section = pin.Section,
                     Color = pin.Color,
-                    Status = stateText
+                    Status = showAsReference
+                        ? (endpointConnected ? "ĐÃ KẾT NỐI" : "KIỂM TRA")
+                        : "CHỜ KẾT NỐI"
                 };
             })
             .ToArray();
+    }
+
+    public bool SuppressProbeRelatedWiringFaults(IReadOnlyCollection<int> probeIos)
+    {
+        ArgumentNullException.ThrowIfNull(probeIos);
+        HashSet<int> suppressed = probeIos.Where(io => io > 0).ToHashSet();
+        if (suppressed.Count == 0)
+            return false;
+
+        bool changed;
+        lock (_gate)
+        {
+            changed = _candidateWiringFaults.RemoveWhere(fault =>
+                          suppressed.Contains(fault.SourceIo) || suppressed.Contains(fault.TargetIo)) > 0;
+
+            // Không xóa _wiringFaults đã confirmed: đó có thể là lỗi SHORT/WRONG
+            // thật tồn tại trước khi người vận hành chạm đầu dò vào cùng I/O.
+        }
+
+        if (changed)
+            Changed?.Invoke(this, EventArgs.Empty);
+        return changed;
+    }
+
+    /// <summary>
+    /// Xác nhận connector được chọn cho máy Leak đang thực sự có continuity
+    /// đúng theo topology THT. Không suy diễn kênh Leak từ số I/O/connector.
+    /// </summary>
+    public bool IsConnectorConnected(string? connectorId)
+    {
+        if (string.IsNullOrWhiteSpace(connectorId))
+            return false;
+
+        lock (_gate)
+        {
+            if (_model is null)
+                return false;
+
+            ConnectorDefinition? connector = _model.Connectors.FirstOrDefault(item =>
+                string.Equals(item.ConnectorId, connectorId.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (connector is null)
+                return false;
+
+            WireNet[] requiredNets = _model.Nets
+                .Where(IsEligibleProductionNet)
+                .Where(net => net.Pins.Any(pin =>
+                    string.Equals(pin.Connector, connector.ConnectorId, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+
+            ClipBranch[] requiredClipBranches = _model.Clip?.Branches
+                .Where(branch => IsEligibleClipBranch(_model.Clip, branch))
+                .Where(branch =>
+                    string.Equals(branch.ClipPin.Connector, connector.ConnectorId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(branch.TargetPin?.Connector, connector.ConnectorId, StringComparison.OrdinalIgnoreCase))
+                .ToArray() ?? [];
+
+            int requiredRelationCount = requiredNets.Length + requiredClipBranches.Length;
+            if (requiredRelationCount == 0)
+                return false;
+
+            return requiredNets.All(net => IsWireNetConnected(net, _currentConnections)) &&
+                   requiredClipBranches.All(branch =>
+                       IsClipBranchConnected(_model.Clip!, branch, _currentConnections));
+        }
     }
 
     int ResolveNetworkEndpointDisplayOrder(WireNet net, PinRecord pin, int endpointIndex) =>
@@ -1727,11 +1832,15 @@ public sealed class TestEngine : IDisposable
     /// Dù delay bị hủy hoặc board phát sinh exception, finally vẫn cố đưa toàn bộ relay về OFF.
     /// </summary>
     public Task PulseJigRelayAsync(CancellationToken ct = default)
-        => PulseRelaySafeAsync(JigEjectRelay, _production.Relay1JigPulseMs, "R1 JIG", ct);
+        => _production.JigEjectRelayEnabled
+            ? PulseRelaySafeAsync(JigEjectRelay, _production.Relay1JigPulseMs, "R1 JIG", ct)
+            : SkipDisabledRelayAsync("R1 JIG", ct);
 
     /// <summary>Relay 2 MARKING chỉ được pulse đúng một lần và luôn trả về OFF.</summary>
     public Task PulseMarkingRelayAsync(CancellationToken ct = default)
-        => PulseRelaySafeAsync(MarkingRelay, _production.Relay2MarkingPulseMs, "R2 MARKING", ct);
+        => _production.PassMarkingRelayEnabled
+            ? PulseRelaySafeAsync(MarkingRelay, _production.Relay2MarkingPulseMs, "R2 MARKING", ct)
+            : SkipDisabledRelayAsync("R2 MARKING", ct);
 
     /// <summary>
     /// V12.9.5: eject riêng cho Master Sample. Chỉ Relay 1 JIG được pulse;
@@ -1811,25 +1920,10 @@ public sealed class TestEngine : IDisposable
         throw new InvalidOperationException($"Không thể cưỡng bức ALL RELAYS OFF ({reason}).", last);
     }
 
-    private List<ResistanceStep> ResolveEnabledResistanceSteps(ProductModel model)
+    private async Task SkipDisabledRelayAsync(string relayName, CancellationToken ct)
     {
-        ResistanceChannelSetting[] enabledChannels = _production.ResistanceChannels
-            .Where(channel => channel.Enabled)
-            .ToArray();
-
-        if (enabledChannels.Length == 0)
-            return [];
-
-        return model.ResistanceSteps
-            .Where(step => enabledChannels.Any(channel =>
-                string.Equals(channel.Name, step.Name, StringComparison.OrdinalIgnoreCase)))
-            .OrderBy(step =>
-            {
-                ResistanceChannelSetting? channel = enabledChannels.FirstOrDefault(item =>
-                    string.Equals(item.Name, step.Name, StringComparison.OrdinalIgnoreCase));
-                return channel?.Channel ?? step.Channel;
-            })
-            .ToList();
+        await ForceAllRelaysOffAsync(relayName + " DISABLED", ct);
+        AsyncFileLogService.Current.Test($"RELAY {relayName} SKIPPED - disabled by Production Settings");
     }
 
     public Task<List<ResistanceResult>> MeasureResistanceAsync(CancellationToken ct = default) =>
@@ -1840,10 +1934,24 @@ public sealed class TestEngine : IDisposable
         CancellationToken ct = default)
     {
         ProductModel? model = _model;
-        if (model is null || model.ResistanceSteps.Count == 0)
+        if (model is null)
             return [];
 
-        List<ResistanceStep> enabledSteps = ResolveEnabledResistanceSteps(model);
+        foreach (ResistanceChannelSetting configured in _production.ResistanceChannels)
+        {
+            if (!configured.Enabled)
+            {
+                AsyncFileLogService.Current.Test(
+                    $"[AUTO-R] {configured.Name} disabled -> skipped");
+            }
+            else if (configured.Channel == 0)
+            {
+                AsyncFileLogService.Current.Test(
+                    $"[AUTO-R] {configured.Name} channel=0 -> skipped");
+            }
+        }
+
+        List<ResistanceStep> enabledSteps = ResistanceMeasurementPlan.BuildEnabledSteps(_production);
         if (enabledSteps.Count == 0)
             return [];
 
@@ -1860,40 +1968,17 @@ public sealed class TestEngine : IDisposable
 
         try
         {
-            foreach (ResistanceStep originalStep in enabledSteps)
+            foreach (ResistanceStep step in enabledSteps)
             {
                 ct.ThrowIfCancellationRequested();
 
-                // Cấu hình R1-R5 trong Settings có tác dụng thật: nếu Enabled,
-                // nó ánh xạ tên bước THT sang kênh phần cứng. Min/Max trong THT
-                // vẫn là chuẩn; chỉ dùng Min/Max Settings làm fallback khi THT=0/0.
-                ResistanceChannelSetting? productionChannel = _production.ResistanceChannels
-                    .FirstOrDefault(x => x.Enabled &&
-                        string.Equals(x.Name, originalStep.Name, StringComparison.OrdinalIgnoreCase));
-
-                int channel = productionChannel?.Channel ?? originalStep.Channel;
-                double minOhm = originalStep.MinOhm;
-                double maxOhm = originalStep.MaxOhm;
-                if (productionChannel is not null && minOhm == 0 && maxOhm == 0)
-                {
-                    minOhm = productionChannel.MinOhm;
-                    maxOhm = productionChannel.MaxOhm;
-                }
-
-                ResistanceChannelSettings? route = _settings.Test.ResistanceChannels
-                    .FirstOrDefault(x => x.Channel == channel);
-
-                ResistanceStep step = originalStep with
-                {
-                    Channel = channel,
-                    MinOhm = minOhm,
-                    MaxOhm = maxOhm,
-                    RouteA = string.IsNullOrWhiteSpace(originalStep.RouteA) ? (route?.RouteA ?? string.Empty) : originalStep.RouteA,
-                    RouteB = string.IsNullOrWhiteSpace(originalStep.RouteB) ? (route?.RouteB ?? string.Empty) : originalStep.RouteB
-                };
-
+                // Production Settings là nguồn duy nhất cho danh sách bước,
+                // kênh vật lý và giới hạn Min/Max. Route phần cứng lấy từ
+                // Selector D2XX được dựng canonical trực tiếp từ Channel,
+                // không phụ thuộc block resistance THT hay RouteA/RouteB cũ.
                 AsyncFileLogService.Current.Test(
-                    $"[AUTO-R] CH{step.Channel} select mask=0x{ResistanceChannelMask(step.Channel):X2}");
+                    $"[AUTO-R] {step.Name} enabled=true channel={step.Channel} " +
+                    $"selector=0x{D2xxResistanceRouting.ToResistanceSelector(step.Channel):X2}");
                 await _board.SelectResistanceRouteAsync(step, ct);
 
                 var measuring = new ResistanceResult
@@ -2112,27 +2197,23 @@ public sealed class TestEngine : IDisposable
             : (ordered[middle - 1] + ordered[middle]) / 2.0;
     }
 
-    private static int ResistanceChannelMask(int channel) =>
-        channel <= 0 || channel > 30
-            ? 0
-            : 1 << (channel - 1);
-
     public async Task<bool> CompletePassAsync(
         IReadOnlyList<ResistanceResult> resistance,
         Action? onPassStarted = null,
         bool markingEnabled = true,
+        bool continuityAlreadyValidated = false,
         CancellationToken ct = default)
     {
         ProductModel? model = _model;
         if (model is null)
             return false;
 
-        int expectedResistanceCount = ResolveEnabledResistanceSteps(model).Count;
+        int expectedResistanceCount = ResistanceMeasurementPlan.BuildEnabledSteps(_production).Count;
         bool resistanceOk = expectedResistanceCount == 0 ||
                             (resistance.Count == expectedResistanceCount &&
                              resistance.All(x => x.Passed));
 
-        if (!ContinuityPassed || !resistanceOk)
+        if ((!ContinuityPassed && !continuityAlreadyValidated) || !resistanceOk)
             return false;
 
         if (expectedResistanceCount == 0)
@@ -2161,9 +2242,10 @@ public sealed class TestEngine : IDisposable
         // markingEnabled để KHÔNG đóng dấu lên mẫu master; master chỉ mở JIG.
         await _board.AllRelaysOffAsync(ct);
 
-        if (markingEnabled)
+        bool runMarking = markingEnabled && _production.PassMarkingRelayEnabled;
+        if (runMarking && !_production.PassJigRelayFirst)
         {
-            // Bước 1 production PASS: R2 MARKING pulse đúng một lần rồi OFF.
+            // PASS mặc định: R2 MARKING pulse đúng một lần rồi OFF, sau đó mới R1 JIG.
             onPassStarted?.Invoke();
             await PulseMarkingRelayAsync(ct);
 
@@ -2173,12 +2255,21 @@ public sealed class TestEngine : IDisposable
         }
         else
         {
-            // Master sample: đã đạt nhưng tuyệt đối không kích MARKING.
+            // Master sample, cấu hình tắt MARKING, hoặc cấu hình JIG chạy trước.
             onPassStarted?.Invoke();
         }
 
-        // Bước cuối PASS/MASTER: R1 JIG pulse đúng một lần rồi OFF.
         await PulseJigRelayAsync(ct);
+
+        if (runMarking && _production.PassJigRelayFirst)
+        {
+            int interlockMs = Math.Clamp(_production.PassMarkingToJigDelayMs, 0, 5_000);
+            if (interlockMs > 0)
+                await Task.Delay(interlockMs, ct);
+
+            await PulseMarkingRelayAsync(ct);
+        }
+
         return true;
     }
 

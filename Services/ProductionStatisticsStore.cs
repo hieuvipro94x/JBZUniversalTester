@@ -29,13 +29,16 @@ public sealed class ProductionStatisticsStore
 
         StatisticsFile file = LoadFile();
         _items = (file.Models ?? [])
+            .Select(Migrate)
             .Where(x => !string.IsNullOrWhiteSpace(x.ModelKey))
             .GroupBy(x => x.ModelKey, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
-                group => Migrate(group.Last()),
+                MergeStatistics,
                 StringComparer.OrdinalIgnoreCase);
         _maintenanceRecords = file.MaintenanceRecords ?? [];
+        foreach (ProbeMaintenanceRecord record in _maintenanceRecords)
+            record.ModelKey = BuildModelKey(record.PartNumber, record.ModelName, record.ModelKey);
     }
 
     public string StoragePath => _path;
@@ -212,21 +215,11 @@ public sealed class ProductionStatisticsStore
 
     public static string BuildModelKey(ProductModel model)
     {
-        string part = Normalize(model.PartNumber);
-        string name = Normalize(model.ModelName);
-
-        if (!string.IsNullOrWhiteSpace(part))
-            return $"PN:{part}|MODEL:{name}";
-
-        if (!string.IsNullOrWhiteSpace(name))
-            return $"MODEL:{name}";
-
-        string source = model.SourcePath ?? string.Empty;
-        string file = string.IsNullOrWhiteSpace(source)
-            ? "UNKNOWN"
-            : Normalize(Path.GetFileNameWithoutExtension(source));
-
-        return $"FILE:{file}";
+        ArgumentNullException.ThrowIfNull(model);
+        string sourceKey = string.IsNullOrWhiteSpace(model.SourcePath)
+            ? string.Empty
+            : $"FILE:{Normalize(Path.GetFileNameWithoutExtension(model.SourcePath))}";
+        return BuildModelKey(model.PartNumber, model.ModelName, sourceKey);
     }
 
     private ModelProductionStatistics GetOrCreate(ProductModel model)
@@ -362,8 +355,59 @@ public sealed class ProductionStatisticsStore
 
     private static ModelProductionStatistics Migrate(ModelProductionStatistics item)
     {
+        item.ModelKey = BuildModelKey(item.PartNumber, item.ModelName, item.ModelKey);
         item.LifetimeTestCount = Math.Max(item.LifetimeTestCount, item.Total);
         return item;
+    }
+
+    private static string BuildModelKey(string? partNumber, string? modelName, string? fallbackKey)
+    {
+        string part = Normalize(partNumber);
+        if (part.Length > 0)
+            return $"PN:{part}";
+
+        string name = Normalize(modelName);
+        if (name.Length > 0)
+            return $"MODEL:{name}";
+
+        return string.IsNullOrWhiteSpace(fallbackKey)
+            ? "FILE:UNKNOWN"
+            : Normalize(fallbackKey);
+    }
+
+    private static ModelProductionStatistics MergeStatistics(
+        IGrouping<string, ModelProductionStatistics> group)
+    {
+        ModelProductionStatistics[] items = group.ToArray();
+        ModelProductionStatistics latest = items
+            .OrderByDescending(item => item.LastTestedAt ?? DateTime.MinValue)
+            .First()
+            .Clone();
+
+        latest.ModelKey = group.Key;
+        latest.Total = checked(items.Sum(item => item.Total));
+        latest.Pass = checked(items.Sum(item => item.Pass));
+        latest.Fail = checked(items.Sum(item => item.Fail));
+        latest.LifetimeTestCount = checked(items.Sum(item => Math.Max(item.LifetimeTestCount, item.Total)));
+        latest.ProbeCycleCount = checked(items.Sum(item => item.ProbeCycleCount));
+        latest.ProbeReplacementThreshold = items.Max(item => item.ProbeReplacementThreshold);
+        latest.LastProbeResetAt = items.Max(item => item.LastProbeResetAt);
+
+        string dailyPeriod = items.MaxBy(item => item.DailyPeriod, StringComparer.Ordinal)?.DailyPeriod
+            ?? string.Empty;
+        latest.DailyPeriod = dailyPeriod;
+        latest.DailyTestCount = checked(items
+            .Where(item => string.Equals(item.DailyPeriod, dailyPeriod, StringComparison.Ordinal))
+            .Sum(item => item.DailyTestCount));
+
+        string monthlyPeriod = items.MaxBy(item => item.MonthlyPeriod, StringComparer.Ordinal)?.MonthlyPeriod
+            ?? string.Empty;
+        latest.MonthlyPeriod = monthlyPeriod;
+        latest.MonthlyTestCount = checked(items
+            .Where(item => string.Equals(item.MonthlyPeriod, monthlyPeriod, StringComparison.Ordinal))
+            .Sum(item => item.MonthlyTestCount));
+
+        return latest;
     }
 
     private sealed class StatisticsFile

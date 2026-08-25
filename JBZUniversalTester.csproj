@@ -35,7 +35,8 @@
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
 
     <!-- Giảm dung lượng -->
-    <PublishReadyToRun>false</PublishReadyToRun>
+    <!-- Giảm JIT/cold-start trên máy sản xuất CPU yếu; đổi lại file publish lớn hơn. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
 
     <!-- Không trim ứng dụng WPF -->
     <PublishTrimmed>false</PublishTrimmed>
@@ -79,7 +80,12 @@
 
   <!-- Self-tests là project console riêng, không được compile vào WPF app. -->
   <ItemGroup>
+    <Content Include="Labels\*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
     <Compile Remove="Tests\**\*.cs" />
+    <Compile Remove="HardwareVerification\**\*.cs" />
   </ItemGroup>
 
   <!-- Nhúng âm thanh vào EXE -->

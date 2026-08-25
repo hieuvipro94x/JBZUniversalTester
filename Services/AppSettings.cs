@@ -60,7 +60,6 @@ public sealed class AppSettings
                 ?? new AppSettings();
 
             settings.Normalize();
-            settings.Save();
 
             return settings;
         }

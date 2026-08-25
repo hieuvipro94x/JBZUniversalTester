@@ -14,17 +14,20 @@ function Require-Contains([string]$Path, [string]$Pattern, [string]$Message) {
 $testXaml = Join-Path $ProjectRoot 'Views/TestWindow.xaml'
 $testVm   = Join-Path $ProjectRoot 'ViewModels/TestViewModel.cs'
 $settingsXaml = Join-Path $ProjectRoot 'Views/ProductionSettingsPage.xaml'
-$settingsModel = Join-Path $ProjectRoot 'Models/ProductionSettings.cs'
+$settingsModels = Join-Path $ProjectRoot 'Models'
 $settingsVm = Join-Path $ProjectRoot 'ViewModels/ProductionSettingsViewModel.cs'
 
 # 1) Header information in TestView is display-only and MUST be OneWay.
-$displayOnly = @('PartNumber','ProductName','VehicleType','CustomerCode','Lot')
+$displayOnly = @('PartNumber','ProductName','VehicleType','CustomerCode')
 $testText = Get-Content -Raw -LiteralPath $testXaml
 foreach ($name in $displayOnly) {
     $pattern = 'Text="\{Binding\s+' + [regex]::Escape($name) + ',\s*Mode=OneWay\}"'
     if ($testText -notmatch $pattern) {
         $failures.Add("TestWindow: $name must use explicit Mode=OneWay on TextBox.Text")
     }
+}
+if ($testText -notmatch 'Text="\{Binding\s+ProbeCycleCount,\s*Mode=OneWay\}"') {
+    $failures.Add('TestWindow: PartCnt counter must use explicit Mode=OneWay')
 }
 
 # 2) No implicit TextBox.Text bindings are allowed in TestWindow.
@@ -80,7 +83,8 @@ Require-Contains $testVm 'public\s+int\s+SelectedOperationTabIndex\s*\{[^}]*set\
 
 # 7) Production Settings is the editable surface. All explicit Settings.* TwoWay paths must have public setters.
 $settingsText = Get-Content -Raw -LiteralPath $settingsXaml
-$modelText = Get-Content -Raw -LiteralPath $settingsModel
+$modelText = (Get-ChildItem -LiteralPath $settingsModels -Filter '*.cs' |
+    ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n"
 $settingsVmText = Get-Content -Raw -LiteralPath $settingsVm
 $settingsBindings = [regex]::Matches($settingsText, '\{Binding\s+([^,}\s]+)[^}]*Mode=TwoWay[^}]*\}')
 foreach ($m in $settingsBindings) {

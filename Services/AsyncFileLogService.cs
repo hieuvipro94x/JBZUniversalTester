@@ -1,5 +1,7 @@
 ﻿using System.Threading.Channels;
 using System.IO;
+using System.Diagnostics;
+using System.Text;
 
 namespace JBZUniversalTester.Services;
 
@@ -25,6 +27,9 @@ public enum AppLogLevel
 /// </summary>
 public sealed class AsyncFileLogService : IDisposable
 {
+    private const int MaxWriteBatch = 256;
+    private static readonly TimeSpan BatchWindow = TimeSpan.FromMilliseconds(25);
+
     public static AsyncFileLogService Current { get; } = new();
 
     private readonly Channel<(AppLogCategory Category, DateTime Timestamp, string Message)> _channel =
@@ -83,22 +88,66 @@ public sealed class AsyncFileLogService : IDisposable
     {
         try
         {
-            await foreach (var item in _channel.Reader.ReadAllAsync(_cts.Token))
+            var batch = new List<(AppLogCategory Category, DateTime Timestamp, string Message)>(MaxWriteBatch);
+            var fileBuffers = new Dictionary<string, StringBuilder>(StringComparer.OrdinalIgnoreCase);
+
+            while (await _channel.Reader.WaitToReadAsync(_cts.Token))
             {
-                string category = item.Category.ToString();
-                string directory = Path.Combine(RootDirectory, category);
-                Directory.CreateDirectory(directory);
-                string path = Path.Combine(directory, $"{category}_{item.Timestamp:yyyyMMdd}.log");
-                string line = $"[{item.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] {item.Message}{Environment.NewLine}";
-                await File.AppendAllTextAsync(path, line, new System.Text.UTF8Encoding(false), _cts.Token);
+                batch.Clear();
+                DrainAvailableEntries(batch);
+
+                // Gom các log phát sinh cùng frame/state transition. Scan và UI
+                // chỉ TryWrite nên không phải chờ I/O đĩa của writer này.
+                if (batch.Count < MaxWriteBatch && !_channel.Reader.Completion.IsCompleted)
+                {
+                    await Task.Delay(BatchWindow, _cts.Token);
+                    DrainAvailableEntries(batch);
+                }
+
+                fileBuffers.Clear();
+                foreach (var item in batch)
+                {
+                    string category = item.Category.ToString();
+                    string directory = Path.Combine(RootDirectory, category);
+                    string path = Path.Combine(directory, $"{category}_{item.Timestamp:yyyyMMdd}.log");
+
+                    if (!fileBuffers.TryGetValue(path, out StringBuilder? buffer))
+                    {
+                        Directory.CreateDirectory(directory);
+                        buffer = new StringBuilder();
+                        fileBuffers.Add(path, buffer);
+                    }
+
+                    buffer.Append('[')
+                        .Append(item.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff"))
+                        .Append("] ")
+                        .Append(item.Message)
+                        .AppendLine();
+                }
+
+                foreach ((string path, StringBuilder buffer) in fileBuffers)
+                {
+                    await File.AppendAllTextAsync(
+                        path,
+                        buffer.ToString(),
+                        new UTF8Encoding(false),
+                        _cts.Token);
+                }
+            }
+
+            void DrainAvailableEntries(List<(AppLogCategory Category, DateTime Timestamp, string Message)> destination)
+            {
+                while (destination.Count < MaxWriteBatch && _channel.Reader.TryRead(out var item))
+                    destination.Add(item);
             }
         }
         catch (OperationCanceledException)
         {
         }
-        catch
+        catch (Exception ex)
         {
             // Logging tuyệt đối không được làm process crash.
+            Debug.WriteLine($"AsyncFileLogService writer stopped: {ex}");
         }
     }
 

@@ -175,7 +175,7 @@ Mọi property được JSON load/save tự động. `ProductionConfigService` �
 | ShowTitle | true | Có | TestWindow visibility — đạt |
 | ShowConnector | false | Có | TestWindow visibility — đạt |
 | LastThtPath | rỗng | Chỉ đọc | Startup/model reload — đạt |
-| ResistanceChannels R1-R5 | disabled | Có | Channel mapping; THT Min/Max ưu tiên, settings fallback 0/0 — đạt |
+| ResistanceChannels R1-R5 | disabled | Có | Danh sách bước đo, Channel và Min/Max lấy từ Production Settings; không phụ thuộc block resistance THT — đạt |
 | AutoPrintLabelOnPass | true | Có | PASS label gate — đạt |
 | HistoryDirectory | Data/History | Có | SQLite/bootstrap/export — đạt |
 | Label.PrinterName | rỗng | Có | Windows print path — đạt |

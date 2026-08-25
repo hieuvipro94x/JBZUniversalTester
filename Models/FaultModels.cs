@@ -9,6 +9,7 @@ public enum ProductFaultType
     WrongWiring = 2,
     ShortCircuit = 3,
     ResistanceOutOfRange = 4,
+    WaterProofLeak = 5,
     SystemDeviceError = 100
 }
 
@@ -20,6 +21,7 @@ public static class FaultTypeCatalog
         ProductFaultType.WrongWiring => "WRONG_WIRING",
         ProductFaultType.ShortCircuit => "SHORT_CIRCUIT",
         ProductFaultType.ResistanceOutOfRange => "RESISTANCE_OUT_OF_RANGE",
+        ProductFaultType.WaterProofLeak => "WATERPROOF_LEAK",
         ProductFaultType.SystemDeviceError => "SYSTEM_DEVICE_ERROR",
         _ => "NONE"
     };
@@ -36,6 +38,7 @@ public static class FaultTypeCatalog
         ProductFaultType.WrongWiring => 1,
         ProductFaultType.OpenCircuit => 2,
         ProductFaultType.ResistanceOutOfRange => 3,
+        ProductFaultType.WaterProofLeak => 4,
         _ => 99
     };
 }

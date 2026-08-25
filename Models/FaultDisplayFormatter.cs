@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 
 namespace JBZUniversalTester.Models;
@@ -38,6 +38,7 @@ public static class FaultDisplayFormatter
             "CROSSED_TERMINALS" => "ĐẢO VỊ TRÍ TERMINAL",
             "WRONG_WIRING" or "WRONG_CONNECTION" => "SAI KẾT NỐI",
             "RESISTANCE_OUT_OF_RANGE" => "ĐIỆN TRỞ KHÔNG ĐẠT",
+            "WATERPROOF_LEAK" => "KÍN NƯỚC KHÔNG ĐẠT",
             "VOLTAGE_OUT_OF_RANGE" => "ĐIỆN ÁP KHÔNG ĐẠT",
             "CURRENT_OUT_OF_RANGE" => "DÒNG ĐIỆN KHÔNG ĐẠT",
             "SYSTEM_DEVICE_ERROR" => "LỖI THIẾT BỊ / HỆ THỐNG",
@@ -58,6 +59,7 @@ public static class FaultDisplayFormatter
             "CROSSED_TERMINALS" => "CROSSED TERMINALS",
             "WRONG_WIRING" or "WRONG_CONNECTION" => "INCORRECT CONNECTION",
             "RESISTANCE_OUT_OF_RANGE" => "RESISTANCE OUT OF SPECIFICATION",
+            "WATERPROOF_LEAK" => "WATERPROOF / LEAK TEST FAILURE",
             "VOLTAGE_OUT_OF_RANGE" => "VOLTAGE OUT OF SPECIFICATION",
             "CURRENT_OUT_OF_RANGE" => "CURRENT OUT OF SPECIFICATION",
             "SYSTEM_DEVICE_ERROR" => "TEST SYSTEM ERROR",
@@ -92,6 +94,10 @@ public static class FaultDisplayFormatter
 
             case ProductFaultType.ResistanceOutOfRange:
                 AddResistanceOperatorLines(lines, fault);
+                break;
+
+            case ProductFaultType.WaterProofLeak:
+                Add(lines, "Kết quả kín nước", fault.Message);
                 break;
 
             default:
@@ -153,6 +159,13 @@ public static class FaultDisplayFormatter
                     out assessment);
                 standard = limits;
                 actual = measured;
+                break;
+
+            case ProductFaultType.WaterProofLeak:
+                location = fault.WireName;
+                standard = "WATERPROOF / LEAK SPECIFICATION";
+                actual = fault.Message;
+                assessment = "LEAK TEST FAILED";
                 break;
 
             default:
@@ -245,6 +258,7 @@ public static class FaultDisplayFormatter
             "SHORT_CIRCUIT" => ProductFaultType.ShortCircuit,
             "WRONG_WIRING" or "WRONG_CONNECTION" => ProductFaultType.WrongWiring,
             "RESISTANCE_OUT_OF_RANGE" => ProductFaultType.ResistanceOutOfRange,
+            "WATERPROOF_LEAK" => ProductFaultType.WaterProofLeak,
             "SYSTEM_DEVICE_ERROR" => ProductFaultType.SystemDeviceError,
             _ => ProductFaultType.None
         };
@@ -346,8 +360,14 @@ public static class FaultDisplayFormatter
     private static string FormatResistance(double value, ResistanceScale scale) =>
         (value / scale.Divisor).ToString(scale.Format, CultureInfo.InvariantCulture) + " " + scale.Unit;
 
-    private static string FormatSignedResistance(double value, ResistanceScale scale) =>
-        (value / scale.Divisor).ToString("+" + scale.Format + ";-" + scale.Format + ";0", CultureInfo.InvariantCulture) + " " + scale.Unit;
+    private static string FormatSignedResistance(double value, ResistanceScale scale)
+    {
+        string formatted = (value / scale.Divisor)
+            .ToString("+" + scale.Format + ";-" + scale.Format + ";0", CultureInfo.InvariantCulture);
+        if (formatted.Contains('.', StringComparison.Ordinal))
+            formatted = formatted.TrimEnd('0').TrimEnd('.');
+        return formatted + " " + scale.Unit;
+    }
 
     private static string StandardConnection(FaultDetail fault, bool vietnamese)
     {

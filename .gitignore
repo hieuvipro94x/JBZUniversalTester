@@ -77,3 +77,27 @@ tokens.json
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Runtime data - không đưa lên GitHub
+/Data/
+/Data.zip
+/ALL13.csv
+
+# Published EXE / deployment packages
+/PublishSingle/
+
+# Build
+[Bb]in/
+[Oo]bj/
+.vs/
+
+# Logs
+[Ll]ogs/
+[Ll]og/
+*.log
+
+# Temporary / backup
+*.tmp
+*.bak
+*.backup
+*.old
+*.orig

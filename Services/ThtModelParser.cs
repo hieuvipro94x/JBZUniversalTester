@@ -595,7 +595,7 @@ public sealed class ThtModelParser
 
         if (lines.Length == 0)
         {
-            return new ThtTextTable();
+            return new ThtTextTable { RawText = block };
         }
 
         string[] originalHeaders = SplitColumns(lines[0]);
@@ -649,6 +649,7 @@ public sealed class ThtModelParser
 
         return new ThtTextTable
         {
+            RawText = block,
             Headers = normalizedHeaders,
             Rows = rows
         };
@@ -778,6 +779,9 @@ public sealed class ThtModelParser
         };
 
         ReadPartInformation(tables.Part, model);
+        model.LabelTemplate = new LabelTemplateDefinition(
+            ExtractRawEplTemplate(tables.AllTables),
+            1);
 
         Dictionary<string, WireDefinition> wireDefinitions =
             ParseWireDefinitions(tables.Wires);
@@ -1171,6 +1175,56 @@ public sealed class ThtModelParser
         // Giữ tương thích các binding cũ trên TestWindow.
         model.VehicleType = model.Eco;
         model.CustomerCode = model.Alc;
+
+        foreach ((string name, string value) in row.Values)
+        {
+            string variableName = NormalizeLabelVariableName(name);
+            if (!string.IsNullOrWhiteSpace(variableName) &&
+                !string.IsNullOrWhiteSpace(value))
+            {
+                model.LabelVariables[variableName] = value;
+            }
+        }
+    }
+
+    private static string NormalizeLabelVariableName(string name)
+    {
+        var result = new StringBuilder(name.Length);
+        foreach (char character in name.Normalize(NormalizationForm.FormKC))
+        {
+            if (char.IsLetterOrDigit(character) || character == '_')
+                result.Append(char.ToUpperInvariant(character));
+            else if (result.Length > 0 && result[^1] != '_')
+                result.Append('_');
+        }
+
+        return result.ToString().Trim('_');
+    }
+
+    private static string ExtractRawEplTemplate(IReadOnlyList<ThtTextTable> tables)
+    {
+        foreach (ThtTextTable table in tables)
+        {
+            string candidate = table.RawText
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n')
+                .Trim();
+
+            if (!candidate.StartsWith("N\n", StringComparison.Ordinal) ||
+                !candidate.Contains("\nP1", StringComparison.Ordinal))
+                continue;
+
+            bool hasEplLayoutCommand = candidate
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(line => line.StartsWith("q", StringComparison.Ordinal) ||
+                             line.StartsWith("Q", StringComparison.Ordinal) ||
+                             line.StartsWith("FR\"", StringComparison.Ordinal) ||
+                             line.StartsWith("FK\"", StringComparison.Ordinal));
+            if (hasEplLayoutCommand)
+                return candidate;
+        }
+
+        return string.Empty;
     }
 
     private static Dictionary<string, WireDefinition> ParseWireDefinitions(
@@ -1742,6 +1796,7 @@ public sealed class ThtModelParser
 
     private sealed class ThtTextTable
     {
+        public string RawText { get; init; } = string.Empty;
         public IReadOnlyList<string> Headers { get; init; } = [];
         public IReadOnlyList<ThtTextRow> Rows { get; init; } = [];
     }
@@ -1754,6 +1809,8 @@ public sealed class ThtModelParser
         {
             _values = values;
         }
+
+        public IReadOnlyDictionary<string, string> Values => _values;
 
         public string Get(params string[] names)
         {

@@ -1,4 +1,4 @@
-<UserControl x:Class="JBZUniversalTester.Views.ProductionSettingsPage"
+﻿<UserControl x:Class="JBZUniversalTester.Views.ProductionSettingsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="White"
@@ -146,6 +146,15 @@
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Card m&#7903; r&#7897;ng" Style="{StaticResource FieldLabelStyle}"/>
@@ -168,8 +177,11 @@
                         <TextBlock Grid.Row="4" Text="&#272;&#7897; tr&#7877; USB" Style="{StaticResource FieldLabelStyle}"/>
                         <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Settings.UsbDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="5" Text="LOT" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.LotNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="5" Text="LOTNO bắt đầu" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="5"
+                                 Grid.Column="1"
+                                 Text="{Binding Settings.LotNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="LOTNO của sản phẩm PASS kế tiếp; cùng số này được ghi vào lịch sử test và in trên tem."/>
 
                         <TextBlock Grid.Row="6" Text="T&#234;n thi&#7871;t b&#7883;" Style="{StaticResource FieldLabelStyle}"/>
                         <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.DeviceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
@@ -210,6 +222,115 @@
                                   Grid.Column="1"
                                   IsChecked="{Binding IsManualModeEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                   ToolTip="Chỉ dùng cho bảo trì/kiểm tra thiết bị. Khi Manual ON, Production Test bị khóa."/>
+
+                        <Border Grid.Row="16"
+                                Grid.RowSpan="9"
+                                Grid.ColumnSpan="2"
+                                Margin="0,6,0,0"
+                                Padding="7"
+                                Background="#F3F7FF"
+                                BorderBrush="#9CADCF"
+                                BorderThickness="1"
+                                CornerRadius="3">
+                            <StackPanel>
+                                <TextBlock Text="KIỂM TRA KÍN NƯỚC / TEST LEAK"
+                                           Style="{StaticResource SectionTitleStyle}"
+                                           Margin="0,0,0,2"/>
+                                <Grid Margin="0,0,0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding WaterProofModelKey, StringFormat=Model: {0}}"
+                                               FontSize="11"
+                                               Foreground="{StaticResource TextMuted}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <CheckBox Grid.Column="1"
+                                              Content="BẬT TEST LEAK"
+                                              IsChecked="{Binding WaterProof.Enabled, Mode=TwoWay}"
+                                              Height="26"
+                                              Margin="6,0,0,0"
+                                              FontWeight="Bold"/>
+                                </Grid>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="112"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="68"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="32"/>
+                                        <RowDefinition Height="32"/>
+                                        <RowDefinition Height="32"/>
+                                        <RowDefinition Height="32"/>
+                                        <RowDefinition Height="32"/>
+                                        <RowDefinition Height="32"/>
+                                    </Grid.RowDefinitions>
+
+                                    <TextBlock Text="COM RS232" Style="{StaticResource FieldLabelStyle}"/>
+                                    <ComboBox x:Name="WaterProofComComboBox"
+                                              Grid.Column="1"
+                                              Height="28"
+                                              IsEditable="True"
+                                              Text="{Binding Settings.WaterProofMachine.PortName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <Button Grid.Column="2"
+                                            Content="LÀM MỚI"
+                                            Height="28"
+                                            Margin="3,2,0,2"
+                                            FontSize="9.5"
+                                            Padding="1,0"
+                                            Click="RefreshWaterProofPorts_Click"/>
+
+                                    <TextBlock Grid.Row="1" Text="Baudrate" Style="{StaticResource FieldLabelStyle}"/>
+                                    <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
+                                             Text="{Binding Settings.WaterProofMachine.BaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="2" Text="Kênh / Connector" Style="{StaticResource FieldLabelStyle}"/>
+                                    <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox Content="CH1" Height="28" IsChecked="{Binding WaterProof.Channel1Enabled, Mode=TwoWay}"/>
+                                        <ComboBox Grid.Column="1" Height="28" Margin="2,2,4,2" IsEditable="True"
+                                                  ItemsSource="{Binding WaterProofConnectorOptions}"
+                                                  Text="{Binding WaterProof.Channel1Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <CheckBox Grid.Column="2" Content="CH2" Height="28" IsChecked="{Binding WaterProof.Channel2Enabled, Mode=TwoWay}"/>
+                                        <ComboBox Grid.Column="3" Height="28" Margin="2,2,4,2" IsEditable="True"
+                                                  ItemsSource="{Binding WaterProofConnectorOptions}"
+                                                  Text="{Binding WaterProof.Channel2Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <CheckBox Grid.Column="4" Content="CH3" Height="28" IsChecked="{Binding WaterProof.Channel3Enabled, Mode=TwoWay}"/>
+                                        <ComboBox Grid.Column="5" Height="28" Margin="2,2,0,2" IsEditable="True"
+                                                  ItemsSource="{Binding WaterProofConnectorOptions}"
+                                                  Text="{Binding WaterProof.Channel3Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </Grid>
+
+                                    <TextBlock Grid.Row="3" Text="Áp tối thiểu" Style="{StaticResource FieldLabelStyle}"/>
+                                    <TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
+                                             Text="{Binding WaterProof.PressMin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="4" Text="Độ rò tối đa" Style="{StaticResource FieldLabelStyle}"/>
+                                    <TextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
+                                             Text="{Binding WaterProof.LeakLimit, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                    <TextBlock Grid.Row="5" Text="Tạo / Giữ áp (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                                    <Grid Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="5"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Height="28" Text="{Binding WaterProof.PressTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <TextBox Grid.Column="2" Height="28" Text="{Binding WaterProof.WaitTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </Grid>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                     </Grid>
                 </StackPanel>
             </Border>
@@ -234,10 +355,16 @@
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
+                            <RowDefinition Height="34"/>
+                            <RowDefinition Height="34"/>
+                            <RowDefinition Height="34"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Probe cycle" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Column="1" Text="{Binding Settings.ProbeReplacementThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBox Grid.Column="1"
+                                 Text="PartCnt.txt"
+                                 IsReadOnly="True"
+                                 ToolTip="Ngưỡng thay Pin và counter được quản lý theo từng mã hàng trong PartCnt.txt."/>
 
                         <TextBlock Grid.Row="1" Text="R1 pulse" Style="{StaticResource FieldLabelStyle}"/>
                         <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
@@ -248,26 +375,38 @@
                         <TextBlock Grid.Row="3" Text="PASS R2 - R1" Style="{StaticResource FieldLabelStyle}"/>
                         <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="4" Text="Resistance delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="4" Text="Bật Relay 1 JIG" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding Settings.JigEjectRelayEnabled, Mode=TwoWay}"/>
 
-                        <TextBlock Grid.Row="5" Text="Item height" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="5" Text="Bật Relay 2 PASS" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="5" Grid.Column="1" IsChecked="{Binding Settings.PassMarkingRelayEnabled, Mode=TwoWay}"/>
 
-                        <TextBlock Grid.Row="6" Text="Scroll delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="6" Text="JIG trước MARKING" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="6"
+                                  Grid.Column="1"
+                                  IsChecked="{Binding Settings.PassJigRelayFirst, Mode=TwoWay}"
+                                  ToolTip="Tắt: PASS chạy Relay 2 MARKING trước rồi Relay 1 JIG. Bật: PASS chạy Relay 1 JIG trước rồi Relay 2 MARKING."/>
 
-                        <TextBlock Grid.Row="7" Text="Page delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="7" Text="Resistance delay" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="8" Text="Show title" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="8" Grid.Column="1" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
+                        <TextBlock Grid.Row="8" Text="Item height" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="9" Text="Show connector" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="9" Grid.Column="1" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
+                        <TextBlock Grid.Row="9" Text="Scroll delay" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="10" Text="L&#7895;i t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Settings.MinimumErrorLogValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="10" Text="Page delay" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="11" Text="Show title" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="11" Grid.Column="1" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
+
+                        <TextBlock Grid.Row="12" Text="Show connector" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
+
+                        <TextBlock Grid.Row="13" Text="L&#7895;i t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="13" Grid.Column="1" Text="{Binding Settings.MinimumErrorLogValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                     </Grid>
 
                     <StackPanel Margin="0,14,0,0">
@@ -345,85 +484,91 @@
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
                         </Grid.RowDefinitions>
 
-                        <TextBlock Text="Printer" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Settings.Label.PrinterName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                        <TextBlock Grid.Row="1" Text="COM" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBlock Text="Cổng in" Style="{StaticResource FieldLabelStyle}"/>
                         <ComboBox x:Name="PrinterComComboBox"
-                                  Grid.Row="1"
                                   Grid.Column="1"
                                   Margin="0,2,4,2"
                                   DisplayMemberPath="Display"
                                   SelectedValuePath="PortName"
                                   SelectedValue="{Binding Settings.Label.PrinterCom, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                        <Button Grid.Row="1" Grid.Column="2" Content="L&#192;M M&#7898;I" FontSize="11" Padding="2,0" Click="RefreshPrinterPorts_Click"/>
+                        <Button Grid.Column="2" Content="L&#192;M M&#7898;I" FontSize="11" Padding="2,0" Click="RefreshPrinterPorts_Click"/>
 
-                        <TextBlock Grid.Row="2" Text="Copies" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Text="{Binding Settings.Label.Copies, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="1" Text="Loại tem" Style="{StaticResource FieldLabelStyle}"/>
+                        <ComboBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                  SelectedValuePath="Tag"
+                                  SelectedValue="{Binding Settings.Label.TemplateType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                            <ComboBoxItem Content="TEM TO" Tag="TEM_TO"/>
+                            <ComboBoxItem Content="TEM BÉ" Tag="TEM_BE"/>
+                        </ComboBox>
 
-                        <TextBlock Grid.Row="3" Text="Auto print" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
+                        <TextBlock Grid.Row="2" Text="Tự động in PASS" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
 
-                        <TextBlock Grid.Row="4" Text="Baud / timeout" Style="{StaticResource FieldLabelStyle}"/>
-                        <Grid Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0" Text="{Binding Settings.Label.BaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBox Grid.Column="2" Text="{Binding Settings.Label.WriteTimeoutMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                        </Grid>
-
-                        <TextBlock Grid.Row="5" Text="Tem W / H" Style="{StaticResource FieldLabelStyle}"/>
-                        <Grid Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="8"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0" Text="{Binding Settings.Label.WidthMm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBox Grid.Column="2" Text="{Binding Settings.Label.HeightMm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                        </Grid>
+                        <TextBlock Grid.Row="3" Text="Kết nối máy in" Style="{StaticResource FieldLabelStyle}"/>
+                        <Button x:Name="ConnectPrinterButton"
+                                Grid.Row="3"
+                                Grid.Column="1"
+                                Height="28"
+                                Margin="0,2,4,2"
+                                Content="KẾT NỐI"
+                                Click="ConnectPrinter_Click"/>
+                        <TextBlock x:Name="PrinterConnectionStatusText"
+                                   Grid.Row="3"
+                                   Grid.Column="2"
+                                   VerticalAlignment="Center"
+                                   FontSize="10"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Text="CHƯA KẾT NỐI"/>
                     </Grid>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,4">
+                        <Button Content="CH&#7880;NH TEM" Width="100" Height="30" Click="EditLabelTemplate_Click"/>
+                        <Button Content="XEM TR&#431;&#7898;C" Width="100" Height="30" Margin="6,0,0,0" Click="PreviewLabel_Click"/>
+                        <Button Content="IN TH&#7916;" Width="100" Height="30" Margin="6,0,0,0" Click="TestPrintLabel_Click"/>
+                    </StackPanel>
 
                     <Grid Grid.Row="3" Margin="0,4,0,2">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="44"/>
+                            <ColumnDefinition Width="54"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="1" Text="K&#202;NH" Style="{StaticResource MiniHeaderStyle}"/>
-                        <TextBlock Grid.Column="2" Text="MIN &#937;" Style="{StaticResource MiniHeaderStyle}"/>
-                        <TextBlock Grid.Column="3" Text="MAX &#937;" Style="{StaticResource MiniHeaderStyle}"/>
+                        <TextBlock Grid.Column="1" Text="B&#7852;T" Style="{StaticResource MiniHeaderStyle}"/>
+                        <TextBlock Grid.Column="2" Text="K&#202;NH" Style="{StaticResource MiniHeaderStyle}"/>
+                        <TextBlock Grid.Column="3" Text="MIN &#937;" Style="{StaticResource MiniHeaderStyle}"/>
+                        <TextBlock Grid.Column="4" Text="MAX &#937;" Style="{StaticResource MiniHeaderStyle}"/>
                     </Grid>
 
                     <ItemsControl Grid.Row="4" ItemsSource="{Binding ResistanceChannels}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="0,1">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="44"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Label}" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
-                                    <ComboBox Grid.Column="1"
-                                              ItemsSource="{Binding DataContext.ChannelOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                              DisplayMemberPath="Display"
-                                              SelectedValuePath="Value"
-                                              SelectedValue="{Binding ChannelSelection, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <TextBox Grid.Column="2" Margin="5,2,0,2" Text="{Binding MinOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <TextBox Grid.Column="3" Margin="5,2,0,2" Text="{Binding MaxOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="44"/>
+                                                <ColumnDefinition Width="54"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Label}" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
+                                            <CheckBox Grid.Column="1"
+                                                      HorizontalAlignment="Center"
+                                                      IsChecked="{Binding Enabled, Mode=TwoWay}"/>
+                                            <ComboBox Grid.Column="2"
+                                                      ItemsSource="{Binding DataContext.ChannelOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                      DisplayMemberPath="Display"
+                                                      SelectedValuePath="Value"
+                                                      SelectedValue="{Binding ChannelSelection, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBox Grid.Column="3" Margin="5,2,0,2" Text="{Binding MinOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBox Grid.Column="4" Margin="5,2,0,2" Text="{Binding MaxOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </Grid>
             </Border>

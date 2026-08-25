@@ -14,8 +14,8 @@ public partial class FaultConfirmationWindow : Window
             .ToArray();
 
         SummaryText.Text = displays.Count == 1
-            ? "PHAT HIEN 1 LOI"
-            : $"PHAT HIEN {displays.Count} LOI";
+            ? "ĐÃ SẢY RA LỖI"
+            : $"PHÁT HIỆN {displays.Count} LOI";
         FaultItemsControl.ItemsSource = displays;
         FooterText.Text = footer ?? string.Empty;
     }

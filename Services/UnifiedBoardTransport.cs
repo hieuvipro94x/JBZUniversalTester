@@ -24,6 +24,9 @@ public sealed class UnifiedBoardTransport : IBoardTransport
     public bool IsScanning => _d2xx.IsScanning;
     public BoardScanMode CurrentScanMode => _d2xx.CurrentScanMode;
     public BoardCapacity Capacity => _d2xx.Capacity;
+    public DateTime LastFrameTimestampUtc => _d2xx.LastFrameTimestampUtc;
+    public long LastFrameSequence => _d2xx.LastFrameSequence;
+    public long FramesReceived => _d2xx.FramesReceived;
     public BoardMode ActiveMode { get; private set; } = BoardMode.Auto;
 
     public event EventHandler<ScanFrame>? FrameReceived;

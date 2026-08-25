@@ -50,8 +50,7 @@ public static class ProbeContactClassifier
         BoardCapacity? boardCapacity = null)
     {
         if (maxContacts <= 0 ||
-            frame.Mode != BoardScanMode.Production ||
-            frame.Connections.Count == 0)
+            frame.Mode != BoardScanMode.Production)
         {
             return Array.Empty<Detection>();
         }
@@ -96,6 +95,11 @@ public static class ProbeContactClassifier
                     (mapped ? 16 : 0) +
                     (sourceWordMissing ? 8 : 0);
 
+                bool targetOnlyProbeTouch =
+                    sourceCount == 0 &&
+                    hits > 0 &&
+                    frame.TargetHits.Count <= Math.Max(1, maxContacts);
+
                 bool repeatedTarget =
                     hits >= repeatedThreshold ||
                     fanIn >= repeatedThreshold;
@@ -118,7 +122,7 @@ public static class ProbeContactClassifier
                     mapped,
                     sourceWordMissing,
                     score,
-                    repeatedTarget || diagnosticSweep || dominantTarget);
+                    targetOnlyProbeTouch || repeatedTarget || diagnosticSweep || dominantTarget);
             })
             .Where(candidate => candidate.IsProbeLike)
             .OrderByDescending(candidate => candidate.Score)

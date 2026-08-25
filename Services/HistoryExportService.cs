@@ -9,6 +9,12 @@ namespace JBZUniversalTester.Services;
 
 public static class HistoryExportService
 {
+    private static readonly string[] All13Headers =
+    [
+        "일 자", "시 간", "파 일", "품 명", "품 번", "차 종", "Lot",
+        "결 과", "순 번", "검 사 기 록", "바코드", "200 %", "수입검사", "프로그램"
+    ];
+
     private enum HistoryCellType
     {
         Text,
@@ -64,14 +70,66 @@ public static class HistoryExportService
 
     public static void ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
     {
-        using var writer = new StreamWriter(path, false, new UTF8Encoding(true));
-        writer.WriteLine(string.Join(',', Columns.Select(column => EscapeCsv(column.Header))));
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Encoding cp949 = Encoding.GetEncoding(
+            949,
+            EncoderFallback.ReplacementFallback,
+            DecoderFallback.ReplacementFallback);
+        using var writer = new StreamWriter(path, false, cp949) { NewLine = "\n" };
+        writer.WriteLine(string.Join(',', All13Headers.Select(EscapeCsv)));
 
         foreach (TestHistoryRecord record in records)
+            writer.WriteLine(string.Join(',', BuildAll13Row(record).Select(EscapeCsv)));
+    }
+
+    private static string[] BuildAll13Row(TestHistoryRecord record)
+    {
+        string sequence = record.Passed
+            ? (record.ProductionCounter > 0 ? record.ProductionCounter : record.LotNo)
+                .ToString(CultureInfo.InvariantCulture)
+            : "    ";
+
+        return
+        [
+            record.Started.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            record.Started.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+            Path.GetFileName(record.ModelFile ?? string.Empty),
+            record.PartName ?? string.Empty,
+            record.PartNumber ?? string.Empty,
+            record.VehicleType ?? string.Empty,
+            string.Empty,
+            record.Passed ? "합격" : "불량",
+            sequence,
+            BuildAll13TestLog(record),
+            record.BarcodeValue ?? string.Empty,
+            string.Empty,
+            "     ",
+            record.HtdrvName ?? string.Empty
+        ];
+    }
+
+    private static string BuildAll13TestLog(TestHistoryRecord record)
+    {
+        string started = record.Started.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        string finished = record.Finished.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+        var text = new StringBuilder($"검사시작 {started} 회로검사");
+
+        if (record.Passed)
+            text.Append(":PASS");
+        else
         {
-            writer.WriteLine(string.Join(',', Columns.Select(column =>
-                EscapeCsv(ToCsvValue(column, record)))));
+            if (!string.IsNullOrWhiteSpace(record.FaultSummary))
+                text.Append(' ').Append(record.FaultSummary.Trim());
+            else if (!string.IsNullOrWhiteSpace(record.FaultType))
+                text.Append(' ').Append(record.FaultType.Trim());
+            text.Append(":FAIL");
         }
+
+        if (!string.IsNullOrWhiteSpace(record.Resistance))
+            text.Append(" 저항검사 ").Append(record.Resistance.Trim());
+
+        text.Append(record.Passed ? " 타각 탈거 " : " 탈거 ").Append(finished);
+        return text.ToString();
     }
 
     public static void ExportXlsx(string path, IReadOnlyList<TestHistoryRecord> records)

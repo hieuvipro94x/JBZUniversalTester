@@ -46,6 +46,14 @@ public sealed class FaultRow : ObservableObject
     public string IoText => Io > 0
         ? Io.ToString(CultureInfo.InvariantCulture)
         : string.Empty;
+    public string IoCnPnText => Io > 0
+        ? string.Join("-", new[]
+            {
+                Io.ToString(CultureInfo.InvariantCulture),
+                string.IsNullOrWhiteSpace(Connector) ? null : Connector.Trim(),
+                string.IsNullOrWhiteSpace(Pin) ? null : Pin.Trim()
+            }.Where(value => !string.IsNullOrWhiteSpace(value)))
+        : string.Empty;
     public string WireColorText => WireColorToBrushConverter.ToDisplayCode(Color);
     public Brush WireColorBrush => Color1Brush;
     public Brush Color1Brush => TokenBrush(0);
