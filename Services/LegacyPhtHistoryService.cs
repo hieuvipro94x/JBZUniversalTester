@@ -33,25 +33,25 @@ public sealed class LegacyPhtHistoryService
     public string AppendProduct(
         ProductModel model,
         CompletedTestResult result,
-        long counter)
+        long lotNo)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(result);
         if (!_enabled)
             return string.Empty;
-        counter = Math.Max(0, counter);
+        lotNo = Math.Max(0, lotNo);
 
         string path;
         string record;
         if (result.Passed)
         {
             path = BuildDailyPath(_passRoot, result.Finished, ".dat");
-            record = BuildPassRecord(model, result.Finished, counter, "1");
+            record = BuildPassRecord(model, result.Finished, lotNo, "1");
         }
         else
         {
             path = BuildDailyPath(_errorRoot, result.Finished, ".err");
-            record = BuildErrorRecord(model, result, counter);
+            record = BuildErrorRecord(model, result, lotNo);
         }
 
         Append(path, record);
@@ -91,7 +91,7 @@ public sealed class LegacyPhtHistoryService
     internal static string BuildErrorRecord(
         ProductModel model,
         CompletedTestResult result,
-        long counter)
+        long lotNo)
     {
         string qualifiers = BuildFaultQualifiers(result.Faults);
         string measurement = BuildMeasurementText(result.Resistance);
@@ -99,7 +99,7 @@ public sealed class LegacyPhtHistoryService
             CultureInfo.InvariantCulture,
             $"[정상마스터{qualifiers}] *{CleanField(model.ProductName)}; " +
             $"{CleanField(model.PartNumber)}; {CleanField(model.VehicleType)}; " +
-            $"{CleanField(model.CustomerCode)}; ; ; {counter:D4} " +
+            $"{CleanField(model.CustomerCode)}; ; ; {lotNo:D4} " +
             $"{result.Started:yyyy/MM/dd HH:mm:ss} - {result.Finished:HH:mm:ss}{measurement}|");
 
         var lines = new List<string> { header };

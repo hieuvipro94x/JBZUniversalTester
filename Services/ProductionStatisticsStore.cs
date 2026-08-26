@@ -104,9 +104,15 @@ public sealed class ProductionStatisticsStore
                     item.DailyTestCount++;
                     item.MonthlyTestCount++;
                     if (passed)
+                    {
                         item.Pass++;
+                        item.DailyPassCount++;
+                    }
                     else
+                    {
                         item.Fail++;
+                        item.DailyFailCount++;
+                    }
                 }
 
                 item.LastLotNo = lotNo;
@@ -305,7 +311,7 @@ public sealed class ProductionStatisticsStore
 
         var payload = new StatisticsFile
         {
-            Version = 2,
+            Version = 3,
             Models = _items.Values
                 .OrderBy(x => x.PartNumber, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(x => x.ModelName, StringComparer.OrdinalIgnoreCase)
@@ -345,6 +351,8 @@ public sealed class ProductionStatisticsStore
         {
             item.DailyPeriod = day;
             item.DailyTestCount = 0;
+            item.DailyPassCount = 0;
+            item.DailyFailCount = 0;
         }
         if (!string.Equals(item.MonthlyPeriod, month, StringComparison.Ordinal))
         {
@@ -357,6 +365,25 @@ public sealed class ProductionStatisticsStore
     {
         item.ModelKey = BuildModelKey(item.PartNumber, item.ModelName, item.ModelKey);
         item.LifetimeTestCount = Math.Max(item.LifetimeTestCount, item.Total);
+        if (item.DailyTestCount > 0 &&
+            item.DailyPassCount == 0 &&
+            item.DailyFailCount == 0)
+        {
+            // V2 did not persist the daily PASS/FAIL split. Preserve an exact split
+            // when the saved production counters all belong to the current period.
+            if (item.DailyTestCount == item.Total)
+            {
+                item.DailyPassCount = item.Pass;
+                item.DailyFailCount = item.Fail;
+            }
+            else
+            {
+                // The historic file cannot reconstruct the split. Keep the daily
+                // total internally consistent without altering lifetime counters.
+                item.DailyFailCount = Math.Min(item.DailyTestCount, item.Fail);
+                item.DailyPassCount = item.DailyTestCount - item.DailyFailCount;
+            }
+        }
         return item;
     }
 
@@ -399,6 +426,12 @@ public sealed class ProductionStatisticsStore
         latest.DailyTestCount = checked(items
             .Where(item => string.Equals(item.DailyPeriod, dailyPeriod, StringComparison.Ordinal))
             .Sum(item => item.DailyTestCount));
+        latest.DailyPassCount = checked(items
+            .Where(item => string.Equals(item.DailyPeriod, dailyPeriod, StringComparison.Ordinal))
+            .Sum(item => item.DailyPassCount));
+        latest.DailyFailCount = checked(items
+            .Where(item => string.Equals(item.DailyPeriod, dailyPeriod, StringComparison.Ordinal))
+            .Sum(item => item.DailyFailCount));
 
         string monthlyPeriod = items.MaxBy(item => item.MonthlyPeriod, StringComparer.Ordinal)?.MonthlyPeriod
             ?? string.Empty;
@@ -412,7 +445,7 @@ public sealed class ProductionStatisticsStore
 
     private sealed class StatisticsFile
     {
-        public int Version { get; set; } = 2;
+        public int Version { get; set; } = 3;
         public List<ModelProductionStatistics> Models { get; set; } = new();
         public List<ProbeMaintenanceRecord> MaintenanceRecords { get; set; } = new();
     }
@@ -432,6 +465,8 @@ public sealed class ModelProductionStatistics
     public DateTime? LastTestedAt { get; set; }
     public string DailyPeriod { get; set; } = string.Empty;
     public long DailyTestCount { get; set; }
+    public long DailyPassCount { get; set; }
+    public long DailyFailCount { get; set; }
     public string MonthlyPeriod { get; set; } = string.Empty;
     public long MonthlyTestCount { get; set; }
     public long LifetimeTestCount { get; set; }
@@ -455,6 +490,8 @@ public sealed class ModelProductionStatistics
         LastTestedAt = LastTestedAt,
         DailyPeriod = DailyPeriod,
         DailyTestCount = DailyTestCount,
+        DailyPassCount = DailyPassCount,
+        DailyFailCount = DailyFailCount,
         MonthlyPeriod = MonthlyPeriod,
         MonthlyTestCount = MonthlyTestCount,
         LifetimeTestCount = LifetimeTestCount,

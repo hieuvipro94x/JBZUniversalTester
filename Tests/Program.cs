@@ -1451,10 +1451,23 @@ internal static class Program
             string smallCounterPath = writer.AppendProduct(model, smallCounterPass, 1);
             string smallCounterText = cp949.GetString(File.ReadAllBytes(smallCounterPath));
             Assert(smallCounterText == "|1|..|260701|181709|2607010001|||sssss0001|||||||\r\n",
-                "PHT PASS counter is padded to four digits like the original application");
+                "PHT PASS LOT is padded to four digits like the original application");
+
+            model.PartNumber = "1200020430";
+            var productionLotPass = new CompletedTestResult
+            {
+                Started = new DateTime(2026, 8, 26, 7, 53, 50),
+                Finished = new DateTime(2026, 8, 26, 7, 53, 58),
+                Passed = true,
+                ResultText = "PASS"
+            };
+            string productionLotPath = writer.AppendProduct(model, productionLotPass, 2001);
+            string productionLotText = cp949.GetString(File.ReadAllBytes(productionLotPath));
+            Assert(productionLotText ==
+                   "|1|..|260826|075358|2608262001|||12000204302001|||||||\r\n",
+                "PHT PASS record uses configured production LOT instead of PartCnt counter");
 
             model.ProductName = "BMS EXT";
-            model.PartNumber = "1200020430";
             model.VehicleType = "US4 HEV";
             model.CustomerCode = "12000/20430";
             var failed = new CompletedTestResult
@@ -1525,7 +1538,9 @@ internal static class Program
 
             ModelProductionStatistics a = store.Get(modelA);
             ModelProductionStatistics b = store.Get(modelB);
-            Assert(a.DailyTestCount == 2 && a.MonthlyTestCount == 2 && a.LifetimeTestCount == 2, "Model A production periods/lifetime");
+            Assert(a.DailyTestCount == 2 && a.DailyPassCount == 1 && a.DailyFailCount == 1 &&
+                   a.MonthlyTestCount == 2 && a.LifetimeTestCount == 2,
+                "Model A production periods/lifetime and daily result split");
             Assert(a.ProbeCycleCount == 1 && b.ProbeCycleCount == 0 && b.LifetimeTestCount == 1, "Per-model counter isolation");
 
             ProductModel renamedModelA = Model(("A-RENAMED", new[] { 5, 6 }));
@@ -1541,9 +1556,16 @@ internal static class Program
             Assert(restarted.Get(modelA).ProbeCycleCount == 1 && restarted.Get(modelA).LifetimeTestCount == 3, "Counters persist after restart");
 
             clock.Advance(TimeSpan.FromDays(1));
-            Assert(restarted.Get(modelA).DailyTestCount == 0 && restarted.Get(modelA).MonthlyTestCount == 3, "Daily period rolls without resetting month/probe");
+            ModelProductionStatistics rolledDay = restarted.Get(modelA);
+            Assert(rolledDay.DailyTestCount == 0 && rolledDay.DailyPassCount == 0 &&
+                   rolledDay.DailyFailCount == 0 && rolledDay.MonthlyTestCount == 3 &&
+                   rolledDay.ProbeCycleCount == 1,
+                "Daily production resets without resetting month or cumulative PartCnt mirror");
             restarted.Record(modelA, true, 4, "PASS");
-            Assert(restarted.Get(modelA).DailyTestCount == 1 && restarted.Get(modelA).MonthlyTestCount == 4, "New day increments correct logical period");
+            ModelProductionStatistics newDay = restarted.Get(modelA);
+            Assert(newDay.DailyTestCount == 1 && newDay.DailyPassCount == 1 &&
+                   newDay.DailyFailCount == 0 && newDay.MonthlyTestCount == 4,
+                "New day increments the correct daily production counters");
 
             clock.Advance(TimeSpan.FromDays(24));
             Assert(restarted.Get(modelA).MonthlyTestCount == 0 && restarted.Get(modelA).ProbeCycleCount == 1, "Monthly period rolls without resetting probe");

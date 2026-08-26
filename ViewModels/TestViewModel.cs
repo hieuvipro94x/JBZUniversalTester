@@ -5916,9 +5916,7 @@ public sealed class TestViewModel : ObservableObject
                 model,
                 Math.Max(stats.ProbeCycleCount, stats.Total),
                 _productionSettings.ProbeReplacementThreshold);
-            Total = stats.Total;
-            Pass = stats.Pass;
-            Fail = stats.Fail;
+            ApplyDailyProductionStatistics(stats);
             ApplyExtendedStatistics(stats);
             ApplyPartCounter(partCounter);
             RaiseTestStatistics();
@@ -6001,9 +5999,7 @@ public sealed class TestViewModel : ObservableObject
         {
             ModelProductionStatistics stats = _statisticsStore.Record(
                 model, passed, completedLot, passed ? "PASS" : failureName);
-            Total = stats.Total;
-            Pass = stats.Pass;
-            Fail = stats.Fail;
+            ApplyDailyProductionStatistics(stats);
             ApplyExtendedStatistics(stats);
         }
         catch (Exception ex)
@@ -6116,13 +6112,9 @@ public sealed class TestViewModel : ObservableObject
 
         try
         {
-            PartCounterEntry counter = _partCounterStore.GetOrCreate(
-                model,
-                Math.Max(ProbeCycleCount, Total),
-                ProbeReplacementThreshold);
-            string legacyPath = _legacyHistory.AppendProduct(model, completed, counter.Counter);
+            string legacyPath = _legacyHistory.AppendProduct(model, completed, completedLot);
             AddLog(
-                $"PHT HISTORY: {resultStatus} counter {counter.Counter:N0} " +
+                $"PHT HISTORY: {resultStatus} LOT {completedLot:N0} " +
                 $"đã append vào {legacyPath}.");
         }
         catch (Exception ex)
@@ -6220,6 +6212,13 @@ public sealed class TestViewModel : ObservableObject
         DailyTestCount = stats.DailyTestCount;
         MonthlyTestCount = stats.MonthlyTestCount;
         LifetimeTestCount = stats.LifetimeTestCount;
+    }
+
+    private void ApplyDailyProductionStatistics(ModelProductionStatistics stats)
+    {
+        Total = checked((int)stats.DailyTestCount);
+        Pass = checked((int)stats.DailyPassCount);
+        Fail = checked((int)stats.DailyFailCount);
     }
 
     private void ApplyPartCounter(PartCounterEntry entry)
