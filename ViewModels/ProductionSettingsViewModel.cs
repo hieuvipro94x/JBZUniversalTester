@@ -281,6 +281,18 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
         _manualResistanceRunning = true;
         ManualResistanceResults.Clear();
+        for (int index = 0; index < steps.Count; index++)
+        {
+            ResistanceStep step = steps[index];
+            ManualResistanceResults.Add(new ResistanceResult
+            {
+                Name = step.Name,
+                Channel = step.Channel,
+                MinOhm = step.MinOhm,
+                MaxOhm = step.MaxOhm,
+                MeasurementStatus = index == 0 ? "ĐANG ĐO" : "CHỜ ĐO"
+            });
+        }
         ManualResistanceStatus =
             $"ĐANG ĐO {string.Join(", ", steps.Select(step => $"{step.Name}/CH{step.Channel}"))}...";
         RefreshManualCommands();
@@ -288,9 +300,11 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         try
         {
             IReadOnlyList<ResistanceResult> results =
-                await _test.MeasureManualResistanceAsync(steps);
+                await _test.MeasureManualResistanceAsync(
+                    steps,
+                    UpdateManualResistanceResult);
             foreach (ResistanceResult result in results)
-                ManualResistanceResults.Add(result);
+                UpdateManualResistanceResult(result);
 
             int passed = results.Count(result => result.Passed);
             ManualResistanceStatus =
@@ -298,6 +312,21 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            for (int index = 0; index < ManualResistanceResults.Count; index++)
+            {
+                ResistanceResult current = ManualResistanceResults[index];
+                if (current.ResultText != "ĐANG ĐO")
+                    continue;
+
+                ManualResistanceResults[index] = new ResistanceResult
+                {
+                    Name = current.Name,
+                    Channel = current.Channel,
+                    MinOhm = current.MinOhm,
+                    MaxOhm = current.MaxOhm,
+                    MeasurementStatus = "LỖI"
+                };
+            }
             ManualResistanceStatus = $"LỖI ĐO: {ex.Message}";
             throw;
         }
@@ -306,6 +335,32 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             _manualResistanceRunning = false;
             ManualRuntimeActive = _test.IsManualModeActive;
             RefreshManualCommands();
+        }
+    }
+
+    private void UpdateManualResistanceResult(ResistanceResult update)
+    {
+        int index = -1;
+        for (int candidate = 0; candidate < ManualResistanceResults.Count; candidate++)
+        {
+            ResistanceResult current = ManualResistanceResults[candidate];
+            if (current.Channel == update.Channel &&
+                string.Equals(current.Name, update.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                index = candidate;
+                break;
+            }
+        }
+
+        if (index >= 0)
+            ManualResistanceResults[index] = update;
+        else
+            ManualResistanceResults.Add(update);
+
+        if (update.ResultText == "ĐANG ĐO")
+        {
+            ManualResistanceStatus =
+                $"ĐANG ĐO {update.Name}/CH{update.Channel} • chờ giá trị ổn định...";
         }
     }
 

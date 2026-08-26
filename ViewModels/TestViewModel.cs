@@ -1154,6 +1154,7 @@ public sealed class TestViewModel : ObservableObject
 
     public async Task<IReadOnlyList<ResistanceResult>> MeasureManualResistanceAsync(
         IReadOnlyList<ResistanceStep> steps,
+        Action<ResistanceResult>? onChannelUpdated = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(steps);
@@ -1175,7 +1176,7 @@ public sealed class TestViewModel : ObservableObject
                 string.Join(", ", steps.Select(step => $"{step.Name}/CH{step.Channel}")));
             await EnsureKeysightConnectedAsync();
             List<ResistanceResult> results =
-                await _engine.MeasureResistanceStepsAsync(steps, null, ct);
+                await _engine.MeasureResistanceStepsAsync(steps, onChannelUpdated, ct);
             AddLog(
                 "[MANUAL-R] Hoàn thành: " +
                 string.Join(", ", results.Select(result =>

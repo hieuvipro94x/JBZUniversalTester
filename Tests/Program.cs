@@ -764,7 +764,8 @@ internal static class Program
             Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
         Assert(settingsResistanceXaml.Contains("ManualMeasureResistanceCommand", StringComparison.Ordinal) &&
                settingsResistanceXaml.Contains("ManualResistanceOptions", StringComparison.Ordinal) &&
-               settingsResistanceXaml.Contains("ManualResistanceResults", StringComparison.Ordinal),
+               settingsResistanceXaml.Contains("ManualResistanceResults", StringComparison.Ordinal) &&
+               settingsResistanceXaml.Contains("Value=\"ĐANG ĐO\"", StringComparison.Ordinal),
             "Settings exposes manual ALL/single-CH measurement and returned results");
 
         string cfgPath = Path.Combine(
@@ -890,14 +891,19 @@ internal static class Program
         using (var manualEngine = new TestEngine(manualBoard, manualVisa, fastApp, configured))
         {
             List<ResistanceStep> manualSteps = ResistanceMeasurementPlan.BuildManualSteps(configured, 10);
+            var manualUpdates = new List<ResistanceResult>();
             List<ResistanceResult> manualResults = manualEngine
-                .MeasureResistanceStepsAsync(manualSteps)
+                .MeasureResistanceStepsAsync(manualSteps, manualUpdates.Add)
                 .GetAwaiter()
                 .GetResult();
             Assert(manualResults is [{ Name: "R3", Channel: 10 }] &&
                    manualBoard.ResistanceSteps.Select(step => step.Channel).SequenceEqual(new[] { 10 }) &&
-                   manualVisa.MeasureCallCount == 1,
-                "Manual single CH sends one canonical route and returns one Keysight result");
+                   manualVisa.MeasureCallCount == 1 &&
+                   manualUpdates.Count == 2 &&
+                   manualUpdates[0].ResultText == "ĐANG ĐO" &&
+                   manualUpdates[1].ResultText == "PASS" &&
+                   manualUpdates[1].Display != "—",
+                "Manual single CH immediately reports measuring, then measured value and PASS");
         }
 
         var failureBoard = new FakeBoard();

@@ -677,6 +677,10 @@
                                                             <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource PendingAmber}"/>
                                                             <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
                                                         </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ResultText}" Value="ĐANG ĐO">
+                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource PendingAmber}"/>
+                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
+                                                        </DataTrigger>
                                                     </DataTemplate.Triggers>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
