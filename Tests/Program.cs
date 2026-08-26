@@ -2619,16 +2619,15 @@ internal static class Program
             LabelPrintRequest smallLabel = SmallLabel(1, new DateTime(2026, 8, 25, 8, 9, 10));
             IReadOnlyDictionary<string, string> smallValues =
                 LabelVariableResolver.Resolve(model, smallLabel.Data, labelSettings);
-            const string expectedSmallBarcode = "KL375C1000,SQDZQ8Y0001";
+            const string expectedSmallBarcode = "KL375C1000,SQDZQ8P0001";
             Assert(smallValues["YEAR_CODE"] == "Q" &&
                    smallValues["MONTH_CODE"] == "8" &&
-                   smallValues["DAY_CODE"] == "Y" &&
+                   smallValues["DAY_CODE"] == "P" &&
                    smallValues["LOT_NO"] == "0001",
-                "TEM_BE resolves confirmed 2026/year, non-padded month, day 25 and four-digit LOT codes");
-            Assert(smallLabel.Copies == 1 &&
-                   smallLabel.Payload.Contains(
-                       $"KL375C1000\nAE EV PE\nVOLTAGE_6S\n2608251WH\n{expectedSmallBarcode}\nP1",
-                       StringComparison.Ordinal) &&
+                "TEM_BE resolves 2026/year, month 8, day 25 and four-digit LOT codes");
+            Assert(smallLabel.Copies == 1,
+                "TEM_BE keeps the configured single print copy");
+            Assert(smallLabel.Payload.Contains(expectedSmallBarcode, StringComparison.Ordinal) &&
                    smallLabel.Data.Barcode == expectedSmallBarcode &&
                    smallLabel.Data.BarcodePrint == expectedSmallBarcode,
                 "TEM_BE DATA5 and immutable barcode snapshot use the same SQDZ canonical value from THT data");
@@ -2637,24 +2636,56 @@ internal static class Program
                 "TEM_BE formats LOT 25 as 0025");
             Assert(SmallLabel(7001, new DateTime(2026, 8, 25)).Data.Barcode.EndsWith("7001", StringComparison.Ordinal),
                 "TEM_BE keeps four-digit LOT 7001 unchanged");
-            Assert(SmallLabel(1, new DateTime(2026, 8, 1)).Data.Barcode == "KL375C1000,SQDZQ8A0001",
-                "TEM_BE maps day 1 to A");
-            Assert(SmallLabel(1, new DateTime(2026, 8, 26)).Data.Barcode == "KL375C1000,SQDZQ8Z0001",
-                "TEM_BE maps day 26 to Z");
+            Assert(SmallLabel(1, new DateTime(2026, 8, 1)).Data.Barcode == "KL375C1000,SQDZQ810001",
+                "TEM_BE keeps day 1 as digit 1");
+            Assert(SmallLabel(1, new DateTime(2026, 8, 26)).Data.Barcode == "KL375C1000,SQDZQ8Q0001",
+                "TEM_BE maps day 26 to Q");
 
-            InvalidDataException undefinedDay = AssertThrows<InvalidDataException>(
-                () => SmallLabel(1, new DateTime(2026, 8, 27)),
-                "TEM_BE day 27 must be rejected before creating a print request");
-            Assert(undefinedDay.Message.Contains("LABEL_DATE_CODE_UNDEFINED", StringComparison.Ordinal) &&
-                   undefinedDay.Message.Contains("Day=27", StringComparison.Ordinal),
-                "TEM_BE day 27 reports the undefined date-code marker and exact day");
+            model.PartNumber = "BE331H6000";
+            void AssertSmallDateCode(DateTime date, string expectedDateCode, string expectedBarcode)
+            {
+                LabelPrintRequest request = SmallLabel(7002, date);
+                IReadOnlyDictionary<string, string> values =
+                    LabelVariableResolver.Resolve(model, request.Data, labelSettings);
+                string actualDateCode =
+                    values["YEAR_CODE"] + values["MONTH_CODE"] + values["DAY_CODE"];
+                Assert(actualDateCode == expectedDateCode &&
+                       request.Data.Barcode == expectedBarcode &&
+                       values["SMALL_LABEL_BARCODE"] == expectedBarcode,
+                    $"TEM_BE date {date:dd/MM/yyyy} resolves to {expectedDateCode}");
+            }
+
+            AssertSmallDateCode(
+                new DateTime(2026, 7, 29),
+                "Q7T",
+                "BE331H6000,SQDZQ7T7002");
+            AssertSmallDateCode(
+                new DateTime(2026, 8, 26),
+                "Q8Q",
+                "BE331H6000,SQDZQ8Q7002");
+            AssertSmallDateCode(
+                new DateTime(2026, 8, 31),
+                "Q8V",
+                "BE331H6000,SQDZQ8V7002");
+            AssertSmallDateCode(
+                new DateTime(2026, 10, 10),
+                "QAA",
+                "BE331H6000,SQDZQAA7002");
+            AssertSmallDateCode(
+                new DateTime(2026, 12, 31),
+                "QCV",
+                "BE331H6000,SQDZQCV7002");
+            AssertSmallDateCode(
+                new DateTime(2025, 1, 1),
+                "P11",
+                "BE331H6000,SQDZP117002");
 
             InvalidDataException undefinedYear = AssertThrows<InvalidDataException>(
-                () => SmallLabel(1, new DateTime(2027, 8, 25)),
-                "TEM_BE year 2027 must be rejected before creating a print request");
+                () => SmallLabel(1, new DateTime(2036, 8, 25)),
+                "TEM_BE year 2036 must be rejected before creating a print request");
             Assert(undefinedYear.Message.Contains("LABEL_DATE_CODE_UNDEFINED", StringComparison.Ordinal) &&
-                   undefinedYear.Message.Contains("Year=2027", StringComparison.Ordinal),
-                "TEM_BE year 2027 reports the undefined date-code marker and exact year");
+                   undefinedYear.Message.Contains("Year=2036", StringComparison.Ordinal),
+                "TEM_BE year 2036 reports the undefined date-code marker and exact year");
 
             string smallDuplicatePath = Path.Combine(root, "LastSmallBarcode.txt");
             var smallDuplicateGuard = new LabelDuplicateGuard(smallDuplicatePath);

@@ -8,12 +8,6 @@ public static class LabelVariableResolver
 {
     private const string SmallLabelCustomerPrefix = "SQDZ";
 
-    private static readonly IReadOnlyDictionary<int, string> SmallLabelYearCodes =
-        new Dictionary<int, string>
-        {
-            [2026] = "Q"
-        };
-
     public static IReadOnlyDictionary<string, string> Resolve(
         ProductModel model,
         LabelPrintData data,
@@ -65,7 +59,7 @@ public static class LabelVariableResolver
         if (isSmallLabel)
         {
             string yearCode = ResolveSmallLabelYearCode(data.TestedAt.Year);
-            string monthCode = data.TestedAt.Month.ToString(CultureInfo.InvariantCulture);
+            string monthCode = ResolveSmallLabelMonthCode(data.TestedAt.Month);
             string dayCode = ResolveSmallLabelDayCode(data.TestedAt.Day);
             string smallLabelBarcode =
                 $"{data.PartNumber},{SmallLabelCustomerPrefix}{yearCode}{monthCode}{dayCode}{lot}";
@@ -100,16 +94,30 @@ public static class LabelVariableResolver
 
     private static string ResolveSmallLabelYearCode(int year)
     {
-        if (SmallLabelYearCodes.TryGetValue(year, out string? code))
-            return code;
+        if (year is >= 2010 and <= 2035)
+            return ((char)('A' + year - 2010)).ToString(CultureInfo.InvariantCulture);
 
         throw UndefinedDateCode($"Year={year}");
     }
 
+    private static string ResolveSmallLabelMonthCode(int month)
+    {
+        if (month is >= 1 and <= 9)
+            return month.ToString(CultureInfo.InvariantCulture);
+
+        if (month is >= 10 and <= 12)
+            return ((char)('A' + month - 10)).ToString(CultureInfo.InvariantCulture);
+
+        throw UndefinedDateCode($"Month={month}");
+    }
+
     private static string ResolveSmallLabelDayCode(int day)
     {
-        if (day is >= 1 and <= 26)
-            return ((char)('A' + day - 1)).ToString(CultureInfo.InvariantCulture);
+        if (day is >= 1 and <= 9)
+            return day.ToString(CultureInfo.InvariantCulture);
+
+        if (day is >= 10 and <= 31)
+            return ((char)('A' + day - 10)).ToString(CultureInfo.InvariantCulture);
 
         throw UndefinedDateCode($"Day={day}");
     }
