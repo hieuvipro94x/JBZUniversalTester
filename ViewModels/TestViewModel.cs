@@ -1150,6 +1150,44 @@ public sealed class TestViewModel : ObservableObject
         await ExitManualModeAsync(outputsAlreadyOff: true);
     }
 
+    public async Task<IReadOnlyList<ResistanceResult>> MeasureManualResistanceAsync(
+        IReadOnlyList<ResistanceStep> steps,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+        if (steps.Count == 0)
+            throw new InvalidOperationException("Chưa có kênh điện trở hợp lệ để đo.");
+        if (IsDeviceFault)
+            throw new InvalidOperationException("DeviceFault đang khóa thao tác phần cứng.");
+        if (!EnsureManualBoardReady("đo điện trở bằng tay", requireD2xxRelay: true))
+            return [];
+        if (!IsManualModeActive)
+            await EnterManualModeAsync();
+
+        await _manualRelayGate.WaitAsync(ct);
+        try
+        {
+            State = "ĐO ĐIỆN TRỞ BẰNG TAY";
+            AddLog(
+                "[MANUAL-R] Bắt đầu đo " +
+                string.Join(", ", steps.Select(step => $"{step.Name}/CH{step.Channel}")));
+            await EnsureKeysightConnectedAsync();
+            List<ResistanceResult> results =
+                await _engine.MeasureResistanceStepsAsync(steps, null, ct);
+            AddLog(
+                "[MANUAL-R] Hoàn thành: " +
+                string.Join(", ", results.Select(result =>
+                    $"{result.Name}/CH{result.Channel}={result.Display} {result.ResultText}")));
+            return results;
+        }
+        finally
+        {
+            _manualRelayGate.Release();
+            if (IsManualModeActive)
+                await ExitManualModeAsync();
+        }
+    }
+
     private string ReadyStateForCurrentModel()
     {
         if (IsManualModeActive)

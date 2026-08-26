@@ -544,7 +544,13 @@
                         <TextBlock Grid.Column="4" Text="MAX &#937;" Style="{StaticResource MiniHeaderStyle}"/>
                     </Grid>
 
-                    <ItemsControl Grid.Row="4" ItemsSource="{Binding ResistanceChannels}">
+                    <Grid Grid.Row="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <ItemsControl Grid.Row="0" ItemsSource="{Binding ResistanceChannels}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
                                         <Grid Margin="0,1">
@@ -569,7 +575,73 @@
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        </ItemsControl>
+
+                        <Border Grid.Row="1"
+                                Margin="0,8,0,0"
+                                Padding="8"
+                                Background="#F3F7FF"
+                                BorderBrush="#9CADCF"
+                                BorderThickness="1"
+                                CornerRadius="3">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="36"/>
+                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="110"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Text="ĐO ĐIỆN TRỞ BẰNG TAY"
+                                           Style="{StaticResource SectionTitleStyle}"
+                                           Margin="0,0,0,3"/>
+
+                                <Grid Grid.Row="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="100"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ComboBox ItemsSource="{Binding ManualResistanceOptions}"
+                                              DisplayMemberPath="Display"
+                                              SelectedValuePath="Value"
+                                              SelectedValue="{Binding SelectedManualResistanceChannel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                              ToolTip="TẤT CẢ đo các dòng R đang tích BẬT; chọn CH để đo riêng kênh vật lý đó."/>
+                                    <Button Grid.Column="1"
+                                            Height="30"
+                                            Margin="6,2,0,2"
+                                            Padding="4,0"
+                                            Content="CHẠY ĐO"
+                                            Command="{Binding ManualMeasureResistanceCommand}"
+                                            Background="{StaticResource BrandBlue}"
+                                            Foreground="White"/>
+                                </Grid>
+
+                                <TextBlock Grid.Row="2"
+                                           Text="{Binding ManualResistanceStatus}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextMuted}"
+                                           TextWrapping="Wrap"/>
+
+                                <DataGrid Grid.Row="3"
+                                          ItemsSource="{Binding ManualResistanceResults}"
+                                          AutoGenerateColumns="False"
+                                          IsReadOnly="True"
+                                          CanUserAddRows="False"
+                                          CanUserDeleteRows="False"
+                                          HeadersVisibility="Column"
+                                          RowHeaderWidth="0"
+                                          FontSize="11">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="R" Binding="{Binding Name}" Width="45"/>
+                                        <DataGridTextColumn Header="CH" Binding="{Binding ChannelText}" Width="48"/>
+                                        <DataGridTextColumn Header="GIÁ TRỊ" Binding="{Binding Display}" Width="*"/>
+                                        <DataGridTextColumn Header="KẾT QUẢ" Binding="{Binding ResultText}" Width="75"/>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

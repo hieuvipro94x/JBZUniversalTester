@@ -751,6 +751,21 @@ internal static class Program
             { Name: "R10", Enabled: false, Channel: 10, MinOhm: 0, MaxOhm: 0 },
             "R6-R10 must be added disabled with useful default channels");
 
+        Assert(ResistanceMeasurementPlan.BuildManualSteps(legacyFiveSlots, 0)
+                .Select(step => step.Name)
+                .SequenceEqual(new[] { "R1", "R3", "R4" }),
+            "Manual ALL measures every currently enabled resistance slot");
+        Assert(ResistanceMeasurementPlan.BuildManualSteps(legacyFiveSlots, 5) is
+                [{ Name: "R5", Channel: 5 }],
+            "Manual single CH may measure its configured slot even when automatic measurement is disabled");
+
+        string settingsResistanceXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        Assert(settingsResistanceXaml.Contains("ManualMeasureResistanceCommand", StringComparison.Ordinal) &&
+               settingsResistanceXaml.Contains("ManualResistanceOptions", StringComparison.Ordinal) &&
+               settingsResistanceXaml.Contains("ManualResistanceResults", StringComparison.Ordinal),
+            "Settings exposes manual ALL/single-CH measurement and returned results");
+
         string cfgPath = Path.Combine(
             Path.GetTempPath(),
             $"jbz-resistance-{Guid.NewGuid():N}.cfg");
@@ -867,6 +882,21 @@ internal static class Program
                    fakeBoard.ReleaseResistanceFrames.SequenceEqual(
                        new byte[] { 0x91, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x30 }),
                 "Measurement route is released in finally after the sequence");
+        }
+
+        var manualBoard = new FakeBoard();
+        var manualVisa = new FakeKeysightVisaService(connected: true, measurement: 5.5);
+        using (var manualEngine = new TestEngine(manualBoard, manualVisa, fastApp, configured))
+        {
+            List<ResistanceStep> manualSteps = ResistanceMeasurementPlan.BuildManualSteps(configured, 10);
+            List<ResistanceResult> manualResults = manualEngine
+                .MeasureResistanceStepsAsync(manualSteps)
+                .GetAwaiter()
+                .GetResult();
+            Assert(manualResults is [{ Name: "R3", Channel: 10 }] &&
+                   manualBoard.ResistanceSteps.Select(step => step.Channel).SequenceEqual(new[] { 10 }) &&
+                   manualVisa.MeasureCallCount == 1,
+                "Manual single CH sends one canonical route and returns one Keysight result");
         }
 
         var failureBoard = new FakeBoard();

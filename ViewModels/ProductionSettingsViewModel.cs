@@ -15,9 +15,13 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private string _manualRelay1Status = "OFF";
     private string _manualRelay2Status = "OFF";
     private string _manualStatus = "Manual OFF";
+    private int _selectedManualResistanceChannel;
+    private bool _manualResistanceRunning;
+    private string _manualResistanceStatus = "Chọn TẤT CẢ hoặc một CH để đo";
 
     public ProductionSettings Settings { get; }
     public ObservableCollection<ResistanceChannelEditor> ResistanceChannels { get; }
+    public ObservableCollection<ResistanceResult> ManualResistanceResults { get; } = new();
     public WaterProofModelSettings WaterProof { get; }
     public IReadOnlyList<string> WaterProofConnectorOptions { get; }
     public string WaterProofModelKey =>
@@ -25,6 +29,20 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public IReadOnlyList<ChannelOption> ChannelOptions { get; } =
     [
         new(0, "Không dùng"),
+        new(1, "CH1"),
+        new(2, "CH2"),
+        new(3, "CH3"),
+        new(4, "CH4"),
+        new(5, "CH5"),
+        new(6, "CH6"),
+        new(7, "CH7"),
+        new(8, "CH8"),
+        new(9, "CH9"),
+        new(10, "CH10")
+    ];
+    public IReadOnlyList<ChannelOption> ManualResistanceOptions { get; } =
+    [
+        new(0, "TẤT CẢ CH ĐÃ BẬT"),
         new(1, "CH1"),
         new(2, "CH2"),
         new(3, "CH3"),
@@ -76,11 +94,27 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         private set => Set(ref _manualStatus, value);
     }
 
+    public int SelectedManualResistanceChannel
+    {
+        get => _selectedManualResistanceChannel;
+        set => Set(ref _selectedManualResistanceChannel, Math.Clamp(
+            value,
+            ResistanceMeasurementPlan.DisabledChannel,
+            D2xxResistanceRouting.MaxChannel));
+    }
+
+    public string ManualResistanceStatus
+    {
+        get => _manualResistanceStatus;
+        private set => Set(ref _manualResistanceStatus, value);
+    }
+
     public AsyncRelayCommand ManualRelay1OnCommand { get; }
     public AsyncRelayCommand ManualRelay1OffCommand { get; }
     public AsyncRelayCommand ManualRelay2OnCommand { get; }
     public AsyncRelayCommand ManualRelay2OffCommand { get; }
     public AsyncRelayCommand ManualResetCommand { get; }
+    public AsyncRelayCommand ManualMeasureResistanceCommand { get; }
 
     public ProductionSettingsViewModel(TestViewModel? test = null)
     {
@@ -116,6 +150,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ManualResetCommand = new AsyncRelayCommand(
             RunManualResetAsync,
             CanUseManualControls);
+        ManualMeasureResistanceCommand = new AsyncRelayCommand(
+            RunManualResistanceAsync,
+            CanUseManualResistance);
     }
 
     private static IReadOnlyList<string> LoadWaterProofConnectorOptions(
@@ -161,7 +198,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private bool CanUseManualControls() =>
         _test is not null &&
         !_test.IsDeviceFault &&
+        !_manualResistanceRunning &&
         (_test.IsManualModeActive || _test.CanEnterManualMode);
+
+    private bool CanUseManualResistance() => CanUseManualControls();
 
     private async Task RunManualRelayCommandAsync(int relay, bool turnOn)
     {
@@ -218,6 +258,57 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
     }
 
+    private async Task RunManualResistanceAsync()
+    {
+        if (_test is null)
+            return;
+
+        var snapshot = new ProductionSettings
+        {
+            ResistanceChannels = ResistanceChannels
+                .Select(editor => editor.ToSetting())
+                .ToArray()
+        };
+        List<ResistanceStep> steps = ResistanceMeasurementPlan.BuildManualSteps(
+            snapshot,
+            SelectedManualResistanceChannel);
+        if (steps.Count == 0)
+        {
+            throw new InvalidOperationException(SelectedManualResistanceChannel == 0
+                ? "Chưa bật kênh điện trở nào. Hãy tích BẬT cho ít nhất một dòng R."
+                : $"CH{SelectedManualResistanceChannel} chưa được gán cho dòng R nào.");
+        }
+
+        _manualResistanceRunning = true;
+        ManualResistanceResults.Clear();
+        ManualResistanceStatus =
+            $"ĐANG ĐO {string.Join(", ", steps.Select(step => $"{step.Name}/CH{step.Channel}"))}...";
+        RefreshManualCommands();
+
+        try
+        {
+            IReadOnlyList<ResistanceResult> results =
+                await _test.MeasureManualResistanceAsync(steps);
+            foreach (ResistanceResult result in results)
+                ManualResistanceResults.Add(result);
+
+            int passed = results.Count(result => result.Passed);
+            ManualResistanceStatus =
+                $"HOÀN THÀNH {results.Count} KÊNH • PASS {passed} • FAIL {results.Count - passed}";
+        }
+        catch (Exception ex)
+        {
+            ManualResistanceStatus = $"LỖI ĐO: {ex.Message}";
+            throw;
+        }
+        finally
+        {
+            _manualResistanceRunning = false;
+            ManualRuntimeActive = _test.IsManualModeActive;
+            RefreshManualCommands();
+        }
+    }
+
     public void Save()
     {
         Settings.ExpansionCardCount = Math.Clamp(
@@ -246,6 +337,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ManualRelay2OnCommand?.RaiseCanExecuteChanged();
         ManualRelay2OffCommand?.RaiseCanExecuteChanged();
         ManualResetCommand?.RaiseCanExecuteChanged();
+        ManualMeasureResistanceCommand?.RaiseCanExecuteChanged();
     }
 }
 

@@ -1952,7 +1952,21 @@ public sealed class TestEngine : IDisposable
         }
 
         List<ResistanceStep> enabledSteps = ResistanceMeasurementPlan.BuildEnabledSteps(_production);
-        if (enabledSteps.Count == 0)
+        return await MeasureResistanceStepsAsync(enabledSteps, onChannelUpdated, ct);
+    }
+
+    public async Task<List<ResistanceResult>> MeasureResistanceStepsAsync(
+        IReadOnlyList<ResistanceStep> steps,
+        Action<ResistanceResult>? onChannelUpdated = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(steps);
+
+        ResistanceStep[] enabledSteps = steps
+            .Where(step => step.Channel is >= D2xxResistanceRouting.MinChannel and
+                <= D2xxResistanceRouting.MaxChannel)
+            .ToArray();
+        if (enabledSteps.Length == 0)
             return [];
 
         if (!_visa.IsConnected)

@@ -117,6 +117,41 @@ public static class ResistanceMeasurementPlan
             .ToList();
     }
 
+    /// <summary>
+    /// Manual Settings measurement: 0 measures every enabled slot; CH1-CH10
+    /// measures the first configured slot mapped to that physical channel even
+    /// when that slot is disabled for automatic Production measurement.
+    /// </summary>
+    public static List<ResistanceStep> BuildManualSteps(
+        ProductionSettings settings,
+        int selectedChannel)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (selectedChannel is < DisabledChannel or > D2xxResistanceRouting.MaxChannel)
+            throw new ArgumentOutOfRangeException(nameof(selectedChannel));
+
+        if (selectedChannel == DisabledChannel)
+            return BuildEnabledSteps(settings);
+
+        ResistanceChannelSetting? slot = Normalize(settings.ResistanceChannels)
+            .Where(item => item.Channel == selectedChannel)
+            .OrderByDescending(item => item.Enabled)
+            .FirstOrDefault();
+        if (slot is null)
+            return [];
+
+        return
+        [
+            new ResistanceStep(
+                slot.Name,
+                slot.Channel,
+                slot.MinOhm,
+                slot.MaxOhm,
+                string.Empty,
+                string.Empty)
+        ];
+    }
+
     public static bool TryGetSlotOrdinal(string? name, out int ordinal)
     {
         string value = (name ?? string.Empty).Trim();
