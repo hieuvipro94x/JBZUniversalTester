@@ -53,6 +53,18 @@
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
+
+        <Style x:Key="HistoryCellStyle" TargetType="DataGridCell">
+            <Setter Property="Padding" Value="7,3"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#DCEBFA"/>
+                    <Setter Property="Foreground" Value="#172B3A"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </UserControl.Resources>
 
     <Grid Margin="8">
@@ -85,7 +97,7 @@
                                FontSize="19"
                                FontWeight="Bold"
                                Foreground="#243447"/>
-                    <TextBlock Text="Tra cứu kết quả theo ngày, LOTNO và mã hàng"
+                    <TextBlock Text="Tra cứu nhanh, xem dữ liệu tem và xuất Excel theo mẫu chuẩn"
                                FontSize="10.5"
                                Foreground="#7A8490"
                                Margin="0,1,0,0"/>
@@ -116,11 +128,11 @@
                             Orientation="Horizontal"
                             VerticalAlignment="Center"
                             Margin="10,0,0,0">
-                    <Button Content="XUẤT CSV"
+                    <Button Content="CSV"
                             Width="100"
                             Style="{StaticResource CompactButton}"
                             Click="ExportCsv_Click"/>
-                    <Button Content="XUẤT XLSX"
+                    <Button Content="XUẤT EXCEL"
                             Width="105"
                             Style="{StaticResource CompactButton}"
                             Click="ExportXlsx_Click"
@@ -163,7 +175,7 @@
                     <TextBox x:Name="PartTextBox" Style="{StaticResource FilterTextBox}"/>
                 </StackPanel>
 
-                <StackPanel Width="235" Margin="0,0,10,4">
+                <StackPanel Width="190" Margin="0,0,10,4">
                     <TextBlock Text="Kết quả" Style="{StaticResource FilterLabel}"/>
                     <ComboBox x:Name="ResultComboBox"
                               Height="30"
@@ -218,7 +230,8 @@
                       SelectionUnit="FullRow"
                       AlternatingRowBackground="#F8FAFC"
                       RowBackground="White"
-                      FrozenColumnCount="2"
+                      FrozenColumnCount="4"
+                      CellStyle="{StaticResource HistoryCellStyle}"
                       ColumnHeaderStyle="{StaticResource HistoryHeaderStyle}"
                       EnableRowVirtualization="True"
                       EnableColumnVirtualization="True">
@@ -236,51 +249,66 @@
                 </DataGrid.RowStyle>
 
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Timestamp"
-                                        Binding="{Binding Finished, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
-                                        Width="155"/>
-                    <DataGridTextColumn Header="Part Name" Binding="{Binding PartName}" Width="150" MinWidth="130"/>
-                    <DataGridTextColumn Header="Part Number" Binding="{Binding PartNumber}" Width="150" MinWidth="130"/>
-                    <DataGridTextColumn Header="ECO" Binding="{Binding Eco}" Width="95"/>
-                    <DataGridTextColumn Header="NCO" Binding="{Binding Nco}" Width="90"/>
-                    <DataGridTextColumn Header="ALC" Binding="{Binding Alc}" Width="100"/>
-                    <DataGridTextColumn Header="Lot Number" Binding="{Binding LotNo}" Width="100" MinWidth="95" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Thời gian"
+                                        Binding="{Binding Started, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
+                                        Width="150"/>
+                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="145" MinWidth="125"/>
+                    <DataGridTextColumn Header="Tên hàng" Binding="{Binding PartName}" Width="145" MinWidth="125"/>
+                    <DataGridTextColumn Header="LOTNO" Binding="{Binding LotNo}" Width="82" ElementStyle="{StaticResource CenterCellText}"/>
 
-                    <DataGridTemplateColumn Header="Test Result" Width="115" MinWidth="110">
+                    <DataGridTemplateColumn Header="Kết quả" Width="90">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding PassedText}"
-                                           VerticalAlignment="Center"
-                                           HorizontalAlignment="Center"
-                                           FontWeight="SemiBold">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Foreground" Value="#C62828"/>
+                                <Border CornerRadius="10" Padding="9,3" HorizontalAlignment="Center">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="#FDECEC"/>
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Passed}" Value="True">
-                                                    <Setter Property="Foreground" Value="#15803D"/>
+                                                    <Setter Property="Background" Value="#E5F6EA"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
+                                    </Border.Style>
+                                    <TextBlock Text="{Binding PassedText}" FontWeight="Bold">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="#B42318"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Passed}" Value="True">
+                                                        <Setter Property="Foreground" Value="#147A39"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Border>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
 
-                    <DataGridTextColumn Header="Fault Type" Binding="{Binding CustomerFault.FaultType}" Width="205"/>
-                    <DataGridTextColumn Header="Fault Location" Binding="{Binding CustomerFault.FaultLocation}" Width="210"/>
-                    <DataGridTextColumn Header="Standard" Binding="{Binding CustomerFault.Standard}" Width="280"/>
-                    <DataGridTextColumn Header="Actual" Binding="{Binding CustomerFault.Actual}" Width="210"/>
-                    <DataGridTextColumn Header="Deviation" Binding="{Binding CustomerFault.Deviation}" Width="120"/>
-                    <DataGridTextColumn Header="Assessment" Binding="{Binding CustomerFault.Assessment}" Width="190"/>
-                    <DataGridTextColumn Header="Software Version" Binding="{Binding HtdrvName}" Width="260"/>
-                    <DataGridTextColumn Header="Open Count" Binding="{Binding OpenCount}" Width="105" MinWidth="95" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Incorrect Connection Count" Binding="{Binding WrongCount}" Width="205" MinWidth="185" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Short Circuit Count" Binding="{Binding ShortCount}" Width="155" MinWidth="145" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Resistance" Binding="{Binding Resistance}" Width="180"/>
-                    <DataGridTextColumn Header="Test Station" Binding="{Binding DeviceName}" Width="130"/>
-                    <DataGridTextColumn Header="Model" Binding="{Binding ModelName}" Width="125"/>
+                    <DataGridTextColumn Header="Loại tem" Binding="{Binding LabelTypeText}" Width="100"/>
+                    <DataGridTextColumn Header="Barcode" Binding="{Binding BarcodeValue}" Width="245"/>
+                    <DataGridTextColumn Header="Trạng thái in" Binding="{Binding PrintStatus}" Width="105"/>
+                    <DataGridTemplateColumn Header="Dữ liệu tem xuất" Width="280">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding BarcodeOutputText}"
+                                           ToolTip="{Binding BarcodeOutputText}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+
+                    <DataGridTextColumn Header="File model" Binding="{Binding ModelFile}" Width="220"/>
+                    <DataGridTextColumn Header="ECO" Binding="{Binding Eco}" Width="95"/>
+                    <DataGridTextColumn Header="NCO" Binding="{Binding Nco}" Width="90"/>
+                    <DataGridTextColumn Header="ALC" Binding="{Binding Alc}" Width="100"/>
+                    <DataGridTextColumn Header="Loại lỗi" Binding="{Binding CustomerFault.FaultType}" Width="190"/>
+                    <DataGridTextColumn Header="Chi tiết lỗi" Binding="{Binding FaultSummary}" Width="280"/>
+                    <DataGridTextColumn Header="Điện trở" Binding="{Binding Resistance}" Width="180"/>
+                    <DataGridTextColumn Header="Phiên bản" Binding="{Binding HtdrvName}" Width="220"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>
@@ -300,7 +328,7 @@
                        TextTrimming="CharacterEllipsis"/>
 
             <TextBlock Grid.Column="1"
-                       Text="Enter: tìm kiếm"
+                       Text="Enter: tìm kiếm  •  Có thể kéo giãn và sắp xếp cột"
                        VerticalAlignment="Center"
                        Foreground="#9098A1"
                        FontSize="10"

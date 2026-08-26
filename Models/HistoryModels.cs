@@ -43,6 +43,8 @@ public sealed class TestHistoryRecord
     public string LabelSerial { get; set; } = string.Empty;
     public string BarcodeValue { get; set; } = string.Empty;
     public string LabelProfile { get; set; } = string.Empty;
+    public string LabelTemplateType { get; set; } = string.Empty;
+    public string LabelPayload { get; set; } = string.Empty;
     public string PrintStatus { get; set; } = LabelPrintStatus.NotRequested.ToString();
     public DateTime? PrintTimestamp { get; set; }
     public string Printer { get; set; } = string.Empty;
@@ -53,6 +55,12 @@ public sealed class TestHistoryRecord
     public string DateText => Finished.ToString("yyyy/MM/dd");
     public string TimeText => Finished.ToString("HH:mm:ss");
     public string PassedText => Passed ? "PASS" : "FAIL";
+    public string LabelTypeText => !string.IsNullOrWhiteSpace(LabelTemplateType)
+        ? LabelTemplateType
+        : LabelProfile;
+    public string BarcodeOutputText => !string.IsNullOrWhiteSpace(LabelPayload)
+        ? LabelPayload
+        : BarcodeValue;
     public string ExpectedConnectionText => ExpectedSourceIo is int source && ExpectedTargetIo is int target
         ? $"IO {source} → IO {target}"
         : string.Empty;

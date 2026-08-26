@@ -75,6 +75,8 @@ public sealed class TestHistoryStore
                     LabelSerial TEXT NOT NULL DEFAULT '',
                     BarcodeValue TEXT NOT NULL DEFAULT '',
                     LabelProfile TEXT NOT NULL DEFAULT '',
+                    LabelTemplateType TEXT NOT NULL DEFAULT '',
+                    LabelPayload TEXT NOT NULL DEFAULT '',
                     PrintStatus TEXT NOT NULL DEFAULT 'NotRequested',
                     PrintTimestamp TEXT NULL,
                     Printer TEXT NOT NULL DEFAULT '',
@@ -113,6 +115,8 @@ public sealed class TestHistoryStore
         EnsureColumn(connection, "LabelSerial", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "BarcodeValue", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "LabelProfile", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "LabelTemplateType", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "LabelPayload", "TEXT NOT NULL DEFAULT ''");
         EnsureColumn(connection, "PrintStatus", "TEXT NOT NULL DEFAULT 'NotRequested'");
         EnsureColumn(connection, "PrintTimestamp", "TEXT NULL");
         EnsureColumn(connection, "Printer", "TEXT NOT NULL DEFAULT ''");
@@ -172,7 +176,8 @@ public sealed class TestHistoryStore
                 ActualSourceIo, ActualTargetIo, FaultDetailsJson, FaultSummary,
                 MeasuredResistance, ResistanceMin, ResistanceMax,
                 CycleId, LabelSerial, BarcodeValue, LabelProfile, PrintStatus,
-                PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage
+                PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage,
+                LabelTemplateType, LabelPayload
             )
             VALUES
             (
@@ -184,7 +189,8 @@ public sealed class TestHistoryStore
                 $ActualSourceIo, $ActualTargetIo, $FaultDetailsJson, $FaultSummary,
                 $MeasuredResistance, $ResistanceMin, $ResistanceMax,
                 $CycleId, $LabelSerial, $BarcodeValue, $LabelProfile, $PrintStatus,
-                $PrintTimestamp, $Printer, $LabelCopies, $ReprintCount, $PrintMessage
+                $PrintTimestamp, $Printer, $LabelCopies, $ReprintCount, $PrintMessage,
+                $LabelTemplateType, $LabelPayload
             );
             SELECT last_insert_rowid();
             """;
@@ -248,7 +254,8 @@ public sealed class TestHistoryStore
                 ActualSourceIo, ActualTargetIo, FaultDetailsJson, FaultSummary,
                 MeasuredResistance, ResistanceMin, ResistanceMax,
                 CycleId, LabelSerial, BarcodeValue, LabelProfile, PrintStatus,
-                PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage
+                PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage,
+                LabelTemplateType, LabelPayload
             FROM TestHistory
             {(clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses))}
             ORDER BY Finished DESC, Id DESC
@@ -310,6 +317,8 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$LabelCopies", record.LabelCopies);
         command.Parameters.AddWithValue("$ReprintCount", record.ReprintCount);
         command.Parameters.AddWithValue("$PrintMessage", record.PrintMessage ?? string.Empty);
+        command.Parameters.AddWithValue("$LabelTemplateType", record.LabelTemplateType ?? string.Empty);
+        command.Parameters.AddWithValue("$LabelPayload", record.LabelPayload ?? string.Empty);
     }
 
     private static void AddNullable(SqliteCommand command, string name, object? value) =>
@@ -363,7 +372,9 @@ public sealed class TestHistoryStore
             Printer = reader.GetString(41),
             LabelCopies = reader.GetInt32(42),
             ReprintCount = reader.GetInt32(43),
-            PrintMessage = reader.GetString(44)
+            PrintMessage = reader.GetString(44),
+            LabelTemplateType = reader.GetString(45),
+            LabelPayload = reader.GetString(46)
         };
     }
 

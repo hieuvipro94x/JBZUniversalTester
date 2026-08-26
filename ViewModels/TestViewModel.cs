@@ -6078,6 +6078,9 @@ public sealed class TestViewModel : ObservableObject
                 history.LabelSerial = identity!.SerialText;
                 history.BarcodeValue = identity.BarcodeValue;
                 history.LabelProfile = printRequest!.FormatName;
+                history.LabelTemplateType = LabelProfileResolver.NormalizeTemplateType(
+                    _productionSettings.Label.TemplateType);
+                history.LabelPayload = printRequest.Payload;
                 history.Printer = printRequest.Printer;
                 history.LabelCopies = printRequest.Copies;
             }

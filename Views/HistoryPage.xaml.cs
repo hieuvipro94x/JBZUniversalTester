@@ -124,8 +124,15 @@ public partial class HistoryPage : UserControl
         if (result != true)
             return;
 
-        HistoryExportService.ExportCsv(dialog.FileName, Records.ToArray());
-        ShowMessage("Đã xuất CSV.", "JBZ", MessageBoxImage.Information);
+        try
+        {
+            HistoryExportService.ExportCsv(dialog.FileName, Records.ToArray());
+            ShowMessage($"Đã xuất CSV theo mẫu lịch sử.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Không thể xuất CSV.\n\n{ex.Message}", "Lỗi xuất lịch sử", MessageBoxImage.Error);
+        }
     }
 
     private void ExportXlsx_Click(object sender, RoutedEventArgs e)
@@ -138,7 +145,7 @@ public partial class HistoryPage : UserControl
 
         var dialog = new SaveFileDialog
         {
-            Title = "Xuất lịch sử XLSX",
+            Title = "Xuất lịch sử Excel theo mẫu chuẩn",
             Filter = "Excel Workbook (*.xlsx)|*.xlsx",
             FileName = $"JBZ_TestHistory_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
         };
@@ -147,8 +154,15 @@ public partial class HistoryPage : UserControl
         if (result != true)
             return;
 
-        HistoryExportService.ExportXlsx(dialog.FileName, Records.ToArray());
-        ShowMessage("Đã xuất XLSX.", "JBZ", MessageBoxImage.Information);
+        try
+        {
+            HistoryExportService.ExportXlsx(dialog.FileName, Records.ToArray());
+            ShowMessage($"Đã xuất Excel đúng 18 cột của file mẫu.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Không thể xuất Excel.\n\n{ex.Message}", "Lỗi xuất lịch sử", MessageBoxImage.Error);
+        }
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) =>

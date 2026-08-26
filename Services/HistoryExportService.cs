@@ -9,12 +9,6 @@ namespace JBZUniversalTester.Services;
 
 public static class HistoryExportService
 {
-    private static readonly string[] All13Headers =
-    [
-        "일 자", "시 간", "파 일", "품 명", "품 번", "차 종", "Lot",
-        "결 과", "순 번", "검 사 기 록", "바코드", "200 %", "수입검사", "프로그램"
-    ];
-
     private enum HistoryCellType
     {
         Text,
@@ -26,46 +20,31 @@ public static class HistoryExportService
         string Header,
         double Width,
         HistoryCellType Type,
-        Func<TestHistoryRecord, object?> GetValue);
+        Func<TestHistoryRecord, object?> GetValue,
+        bool Wrap = false);
 
     // Một nguồn định nghĩa duy nhất cho CSV và XLSX: thứ tự, header, width,
     // kiểu Excel và getter không thể lệch nhau khi thêm/sửa cột.
     private static readonly HistoryColumn[] Columns =
     [
-        new("Timestamp", 20, HistoryCellType.DateTime, r => r.Finished),
-        new("Part Name", 18, HistoryCellType.Text, r => r.PartName),
-        new("Part Number", 20, HistoryCellType.Text, r => r.PartNumber),
-        new("ECO", 12, HistoryCellType.Text, r => r.Eco),
-        new("NCO", 12, HistoryCellType.Text, r => r.Nco),
-        new("ALC", 12, HistoryCellType.Text, r => r.Alc),
-        new("Lot Number", 12, HistoryCellType.Number, r => r.LotNo),
-        new("Test Result", 14, HistoryCellType.Text, r => r.PassedText),
-        new("Fault Type", 32, HistoryCellType.Text, r => r.CustomerFault.FaultType),
-        new("Fault Code", 24, HistoryCellType.Text, r => r.FaultCode),
-        new("Standard Source IO", 18, HistoryCellType.Number, r => r.ExpectedSourceIo),
-        new("Standard Target IO", 18, HistoryCellType.Number, r => r.ExpectedTargetIo),
-        new("Actual Source IO", 16, HistoryCellType.Number, r => r.ActualSourceIo),
-        new("Actual Target IO", 16, HistoryCellType.Number, r => r.ActualTargetIo),
-        new("Fault Location", 34, HistoryCellType.Text, r => r.CustomerFault.FaultLocation),
-        new("Standard", 48, HistoryCellType.Text, r => r.CustomerFault.Standard),
-        new("Actual", 34, HistoryCellType.Text, r => r.CustomerFault.Actual),
-        new("Deviation", 18, HistoryCellType.Text, r => r.CustomerFault.Deviation),
-        new("Assessment", 30, HistoryCellType.Text, r => r.CustomerFault.Assessment),
-        new("Fault Details JSON", 60, HistoryCellType.Text, r => r.FaultDetailsJson),
-        new("Software Version", 44, HistoryCellType.Text, r => r.HtdrvName),
-        new("Model Name", 22, HistoryCellType.Text, r => r.ModelName),
-        new("Model File", 42, HistoryCellType.Text, r => r.ModelFile),
-        new("Open Count", 12, HistoryCellType.Number, r => r.OpenCount),
-        new("Incorrect Connection Count", 24, HistoryCellType.Number, r => r.WrongCount),
-        new("Short Circuit Count", 18, HistoryCellType.Number, r => r.ShortCount),
-        new("Resistance", 32, HistoryCellType.Text, r => r.Resistance),
-        new("Measured Resistance", 20, HistoryCellType.Number, r => r.MeasuredResistance),
-        new("Lower Limit", 16, HistoryCellType.Number, r => r.ResistanceMin),
-        new("Upper Limit", 16, HistoryCellType.Number, r => r.ResistanceMax),
-        new("Test Station", 18, HistoryCellType.Text, r => r.DeviceName),
-        new("Station Number", 16, HistoryCellType.Text, r => r.DeviceNumber),
-        new("Operator Company", 24, HistoryCellType.Text, r => r.OperatorCompany),
-        new("Production Line", 22, HistoryCellType.Text, r => r.ProductionLine)
+        new("장착시간", 21, HistoryCellType.DateTime, r => r.Started),
+        new("파일", 34, HistoryCellType.Text, r => Path.GetFileName(r.ModelFile ?? string.Empty)),
+        new("파트명", 20, HistoryCellType.Text, r => r.PartName),
+        new("파트번호", 19, HistoryCellType.Text, r => r.PartNumber),
+        new("Eco", 15, HistoryCellType.Text, r => r.Eco),
+        new("Nco", 13, HistoryCellType.Text, r => r.Nco),
+        new("Alc", 17, HistoryCellType.Text, r => r.Alc),
+        new("Lot", 11, HistoryCellType.Text, _ => string.Empty),
+        new("진도", 10, HistoryCellType.Text, r => r.Passed ? "1/1" : "0/1"),
+        new("결과", 10, HistoryCellType.Text, r => r.Passed ? "합격" : "불량"),
+        new("합격", 11, HistoryCellType.Number, r => r.Passed && r.LotNo > 0 ? r.LotNo : null),
+        new("검사기록", 52, HistoryCellType.Text, BuildSampleTestLog, true),
+        new("바코드입력", 20, HistoryCellType.Text, _ => string.Empty),
+        new("바코드출력", 48, HistoryCellType.Text, r => r.BarcodeOutputText, true),
+        new("측정", 28, HistoryCellType.Text, r => r.Resistance, true),
+        new("HtdrvName", 34, HistoryCellType.Text, r => r.HtdrvName),
+        new("내용", 46, HistoryCellType.Text, BuildContent, true),
+        new("메모", 36, HistoryCellType.Text, r => r.PrintMessage, true)
     ];
 
     public static void ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
@@ -76,39 +55,14 @@ public static class HistoryExportService
             EncoderFallback.ReplacementFallback,
             DecoderFallback.ReplacementFallback);
         using var writer = new StreamWriter(path, false, cp949) { NewLine = "\n" };
-        writer.WriteLine(string.Join(',', All13Headers.Select(EscapeCsv)));
+        writer.WriteLine(string.Join(',', Columns.Select(column => EscapeCsv(column.Header))));
 
         foreach (TestHistoryRecord record in records)
-            writer.WriteLine(string.Join(',', BuildAll13Row(record).Select(EscapeCsv)));
+            writer.WriteLine(string.Join(',', Columns.Select(column =>
+                EscapeCsv(ToCsvValue(column, record)))));
     }
 
-    private static string[] BuildAll13Row(TestHistoryRecord record)
-    {
-        string sequence = record.Passed
-            ? (record.ProductionCounter > 0 ? record.ProductionCounter : record.LotNo)
-                .ToString(CultureInfo.InvariantCulture)
-            : "    ";
-
-        return
-        [
-            record.Started.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            record.Started.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-            Path.GetFileName(record.ModelFile ?? string.Empty),
-            record.PartName ?? string.Empty,
-            record.PartNumber ?? string.Empty,
-            record.VehicleType ?? string.Empty,
-            string.Empty,
-            record.Passed ? "합격" : "불량",
-            sequence,
-            BuildAll13TestLog(record),
-            record.BarcodeValue ?? string.Empty,
-            string.Empty,
-            "     ",
-            record.HtdrvName ?? string.Empty
-        ];
-    }
-
-    private static string BuildAll13TestLog(TestHistoryRecord record)
+    private static string BuildSampleTestLog(TestHistoryRecord record)
     {
         string started = record.Started.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
         string finished = record.Finished.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
@@ -130,6 +84,20 @@ public static class HistoryExportService
 
         text.Append(record.Passed ? " 타각 탈거 " : " 탈거 ").Append(finished);
         return text.ToString();
+    }
+
+    private static string BuildContent(TestHistoryRecord record)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(record.FaultSummary))
+            parts.Add(record.FaultSummary.Trim());
+        if (!string.IsNullOrWhiteSpace(record.LabelTypeText))
+            parts.Add($"[LABEL]{record.LabelTypeText.Trim()}");
+        if (!string.IsNullOrWhiteSpace(record.PrintStatus))
+            parts.Add($"[PRINT]{record.PrintStatus.Trim()}");
+        if (!string.IsNullOrWhiteSpace(record.DeviceName))
+            parts.Add($"[TESTER]{record.DeviceName.Trim()}");
+        return string.Join(' ', parts);
     }
 
     public static void ExportXlsx(string path, IReadOnlyList<TestHistoryRecord> records)
@@ -188,6 +156,7 @@ public static class HistoryExportService
         sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
         sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
         sb.Append("<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>");
+        sb.Append("<sheetFormatPr defaultRowHeight=\"20\"/>");
         sb.Append("<cols>");
         for (int i = 0; i < Columns.Length; i++)
             sb.Append($"<col min=\"{i + 1}\" max=\"{i + 1}\" width=\"{Columns[i].Width.ToString(CultureInfo.InvariantCulture)}\" customWidth=\"1\"/>");
@@ -210,7 +179,7 @@ public static class HistoryExportService
 
     private static void AppendHeaderRow(StringBuilder sb)
     {
-        sb.Append("<row r=\"1\">");
+        sb.Append("<row r=\"1\" ht=\"27\" customHeight=\"1\">");
         for (int i = 0; i < Columns.Length; i++)
         {
             string cell = $"{ColumnName(i + 1)}1";
@@ -221,7 +190,7 @@ public static class HistoryExportService
 
     private static void AppendDataRow(StringBuilder sb, int rowNumber, TestHistoryRecord record)
     {
-        sb.Append($"<row r=\"{rowNumber}\">");
+        sb.Append($"<row r=\"{rowNumber}\" ht=\"30\" customHeight=\"1\">");
         for (int i = 0; i < Columns.Length; i++)
         {
             HistoryColumn column = Columns[i];
@@ -230,7 +199,7 @@ public static class HistoryExportService
 
             if (value is null)
             {
-                sb.Append($"<c r=\"{cell}\"/>");
+                sb.Append($"<c r=\"{cell}\" s=\"0\"/>");
                 continue;
             }
 
@@ -247,7 +216,8 @@ public static class HistoryExportService
             else
             {
                 string text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
-                sb.Append($"<c r=\"{cell}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{Xml(text)}</t></is></c>");
+                string style = column.Wrap ? " s=\"3\"" : string.Empty;
+                sb.Append($"<c r=\"{cell}\" t=\"inlineStr\"{style}><is><t xml:space=\"preserve\">{Xml(text)}</t></is></c>");
             }
         }
         sb.Append("</row>");
@@ -289,7 +259,7 @@ public static class HistoryExportService
     private static string WorkbookXml() => """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-          <sheets><sheet name="TestHistory" sheetId="1" r:id="rId1"/></sheets>
+          <sheets><sheet name="검사" sheetId="1" r:id="rId1"/></sheets>
         </workbook>
         """;
 
@@ -319,10 +289,11 @@ public static class HistoryExportService
             <border><left style="thin"><color rgb="FFD9E2F3"/></left><right style="thin"><color rgb="FFD9E2F3"/></right><top style="thin"><color rgb="FFD9E2F3"/></top><bottom style="thin"><color rgb="FFD9E2F3"/></bottom><diagonal/></border>
           </borders>
           <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-          <cellXfs count="3">
-            <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>
+          <cellXfs count="4">
+            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
             <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFill="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-            <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment vertical="center"/></xf>
+            <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
+            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
           </cellXfs>
           <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
         </styleSheet>

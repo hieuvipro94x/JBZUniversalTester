@@ -2316,6 +2316,11 @@ internal static class Program
                 ModelFile = @"C:\Models\WH322882.setup",
                 HtdrvName = "JBZUniversalTester V15.2.0",
                 OpenCount = 0,
+                BarcodeValue = "NI375C10002608092001",
+                LabelProfile = "KS91",
+                LabelTemplateType = LabelSettings.LargeTemplate,
+                LabelPayload = "N\r\nNI375C10002608092001\r\nP1\r\n",
+                PrintStatus = LabelPrintStatus.Printed.ToString(),
                 MeasuredResistance = 101.5,
                 ResistanceMin = 100,
                 ResistanceMax = 110
@@ -2326,21 +2331,27 @@ internal static class Program
             IReadOnlyList<TestHistoryRecord> found = store.Search(new HistorySearchCriteria(
                 finished.Date, finished.Date.AddDays(1), 2001, "NI375", "PASS"));
             Assert(found.Count == 1 && found[0].PartNumber == "NI375C1000" &&
-                   found[0].VehicleType == "NE N EV" && found[0].ProductionCounter == 321,
-                "SQLite search date/LOT/product/result and ALL13 fields");
+                   found[0].VehicleType == "NE N EV" && found[0].ProductionCounter == 321 &&
+                   found[0].LabelTemplateType == LabelSettings.LargeTemplate &&
+                   found[0].LabelPayload == record.LabelPayload,
+                "SQLite search preserves label type and immutable print payload");
 
             string csv = Path.Combine(root, "history.csv");
             HistoryExportService.ExportCsv(csv, found);
             byte[] csvBytes = File.ReadAllBytes(csv);
             Assert(csvBytes.Length >= 3 && !(csvBytes[0] == 0xEF && csvBytes[1] == 0xBB && csvBytes[2] == 0xBF),
                 "ALL13 CSV uses CP949 without UTF-8 BOM");
-            Assert(!csvBytes.Contains((byte)'\r'), "ALL13 CSV uses LF line endings");
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            string[] csvLines = File.ReadAllLines(csv, Encoding.GetEncoding(949));
-            Assert(csvLines[0] == "일 자,시 간,파 일,품 명,품 번,차 종,Lot,결 과,순 번,검 사 기 록,바코드,200 %,수입검사,프로그램",
-                "ALL13 CSV exact 14-column header");
-            Assert(csvLines[1].StartsWith("2026-08-09,14:07:06,WH322882.setup,PRODUCT,NI375C1000,NE N EV,,합격,321,검사시작 14:07:06 회로검사:PASS", StringComparison.Ordinal),
-                "ALL13 CSV PASS row mapping");
+            string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
+            Assert(csvText.StartsWith(
+                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,진도,결과,합격,검사기록,바코드입력,바코드출력,측정,HtdrvName,내용,메모\n",
+                    StringComparison.Ordinal),
+                "Sample history CSV exact 18-column header");
+            Assert(csvText.Contains(
+                    "2026/08/09 14:07:06,WH322882.setup,PRODUCT,NI375C1000,NE N EV,,NI375/C1000,,1/1,합격,2001,검사시작 14:07:06 회로검사:PASS",
+                    StringComparison.Ordinal) &&
+                   csvText.Contains("NI375C10002608092001", StringComparison.Ordinal),
+                "Sample history CSV PASS, LOT and barcode-output mapping");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -2348,9 +2359,15 @@ internal static class Program
             string sheet = ReadEntry(archive, "xl/worksheets/sheet1.xml");
             string styles = ReadEntry(archive, "xl/styles.xml");
             Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal), "XLSX DateTime native numeric");
-            Assert(sheet.Contains("<c r=\"G2\"><v>2001</v></c>", StringComparison.Ordinal), "XLSX LOT native number");
-            Assert(sheet.Contains("<c r=\"AB2\"><v>101.5</v></c>", StringComparison.Ordinal), "XLSX resistance native number");
-            Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal), "XLSX DateTime number format");
+            Assert(sheet.Contains("<c r=\"K2\"><v>2001</v></c>", StringComparison.Ordinal),
+                "XLSX accepted LOT uses sample 합격 column");
+            Assert(sheet.Contains("바코드출력", StringComparison.Ordinal) &&
+                   sheet.Contains("NI375C10002608092001", StringComparison.Ordinal) &&
+                   sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
+                "XLSX exact sample headers, barcode payload and 18-column filter");
+            Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
+                   styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
+                "XLSX DateTime and wrapped long-text styles");
 
             var failed = new TestHistoryRecord
             {
@@ -2375,8 +2392,8 @@ internal static class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(customerText.Contains(",불량,    ,", StringComparison.Ordinal),
-                "ALL13 CSV FAIL result and blank sequence");
+            Assert(customerText.Contains(",0/1,불량,,", StringComparison.Ordinal),
+                "Sample history CSV FAIL result and blank accepted LOT");
         }
         finally
         {
