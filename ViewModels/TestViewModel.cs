@@ -6617,81 +6617,57 @@ public sealed class TestViewModel : ObservableObject
         {
             // DataGrid production có thể có 100-200+ pin. Clear()+Add() toàn bộ
             // collection ở mỗi thay đổi I/O gây layout lại toàn bảng và làm cảm
-            // giác scan chậm. Đồng bộ vi sai để chỉ thêm/xóa/move các dòng đổi.
-            var desiredKeys = new HashSet<string>(StringComparer.Ordinal);
-            var desiredKeyByRow = new Dictionary<FaultRow, string>(ReferenceEqualityComparer.Instance);
-            foreach (FaultRow row in desiredRows)
-            {
-                string key = RowKey(row);
-                desiredKeys.Add(key);
-                desiredKeyByRow[row] = key;
-            }
-
-            for (int index = Faults.Count - 1; index >= 0; index--)
-            {
-                if (!desiredKeys.Contains(RowKey(Faults[index])))
-                    Faults.RemoveAt(index);
-            }
-
-            var rowByKey = new Dictionary<string, FaultRow>(StringComparer.Ordinal);
-            var indexByKey = new Dictionary<string, int>(StringComparer.Ordinal);
-            RebuildFaultRowIndex(rowByKey, indexByKey);
+            // giác scan chậm. Đồng bộ vi sai theo từng vị trí. Không gom bằng
+            // Dictionary vì nhiều dòng CLIP/WRONG có thể có cùng RowKey; bản cũ
+            // làm mất dòng trùng rồi gọi Move tới index ngoài collection.
 
             for (int desiredIndex = 0; desiredIndex < desiredRows.Count; desiredIndex++)
             {
                 FaultRow desired = desiredRows[desiredIndex];
-                string key = desiredKeyByRow[desired];
+                string desiredKey = RowKey(desired);
 
-                if (!rowByKey.TryGetValue(key, out FaultRow? current))
+                if (desiredIndex < Faults.Count &&
+                    string.Equals(RowKey(Faults[desiredIndex]), desiredKey, StringComparison.Ordinal))
                 {
-                    Faults.Insert(desiredIndex, desired);
-                    RebuildFaultRowIndex(rowByKey, indexByKey, desiredIndex);
+                    Faults[desiredIndex].Status = desired.Status;
                     continue;
                 }
 
-                current.Status = desired.Status;
-
-                int currentIndex = indexByKey[key];
-                if (currentIndex != desiredIndex)
+                int matchingIndex = -1;
+                for (int currentIndex = desiredIndex + 1; currentIndex < Faults.Count; currentIndex++)
                 {
-                    Faults.Move(currentIndex, desiredIndex);
-                    RebuildFaultRowIndex(rowByKey, indexByKey, Math.Min(currentIndex, desiredIndex));
+                    if (string.Equals(RowKey(Faults[currentIndex]), desiredKey, StringComparison.Ordinal))
+                    {
+                        matchingIndex = currentIndex;
+                        break;
+                    }
+                }
+
+                if (matchingIndex >= 0)
+                {
+                    Faults.Move(matchingIndex, desiredIndex);
+                    Faults[desiredIndex].Status = desired.Status;
+                }
+                else
+                {
+                    Faults.Insert(desiredIndex, desired);
                 }
             }
+
+            while (Faults.Count > desiredRows.Count)
+                Faults.RemoveAt(Faults.Count - 1);
         }
         catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            EnterDeviceFault(ex, "SynchronizeFaultRows", desiredRows.Count);
-        }
-    }
-
-    private void RebuildFaultRowIndex(
-        Dictionary<string, FaultRow> rowByKey,
-        Dictionary<string, int> indexByKey,
-        int startIndex = 0)
-    {
-        if (startIndex <= 0)
-        {
-            rowByKey.Clear();
-            indexByKey.Clear();
-        }
-        else
-        {
-            foreach (string key in indexByKey
-                         .Where(pair => pair.Value >= startIndex)
-                         .Select(pair => pair.Key)
-                         .ToArray())
-            {
-                indexByKey.Remove(key);
-                rowByKey.Remove(key);
-            }
-        }
-
-        for (int index = Math.Max(0, startIndex); index < Faults.Count; index++)
-        {
-            string key = RowKey(Faults[index]);
-            rowByKey[key] = Faults[index];
-            indexByKey[key] = index;
+            // Đây là lỗi đồng bộ giao diện, không phải bằng chứng card/IO chập
+            // chờn. Tự dựng lại bảng và tiếp tục scan; không khóa phần cứng và
+            // không yêu cầu operator khởi tạo lại thiết bị.
+            AsyncFileLogService.Current.Error(
+                $"FAULT ROW UI RECOVERY desired={desiredRows.Count} current={Faults.Count}: {ex}");
+            Faults.Clear();
+            foreach (FaultRow row in desiredRows)
+                Faults.Add(row);
+            AddLog("Danh sách lỗi CLIP/I/O đã tự đồng bộ lại; thiết bị tiếp tục chạy, không cần khởi tạo lại.");
         }
     }
 

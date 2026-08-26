@@ -39,6 +39,7 @@ internal static class Program
             ("Standard product picker filter", TestProductPickerFilter),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
+            ("Duplicate CLIP fault rows do not lock hardware", TestDuplicateClipFaultRows),
             ("D2XX resistance selectors and ten-slot configuration", TestD2xxResistanceRouting),
             ("Leak connector mapping and PASS/FAIL presentation", TestWaterProofConfigurationAndPresentation),
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
@@ -645,6 +646,40 @@ internal static class Program
         board.Publish(FrameSeq(101));
         Assert(vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "SẴN SÀNG",
             "A complete clean frame clears the startup interlock and arms Production");
+    }
+
+    private static void TestDuplicateClipFaultRows()
+    {
+        TestViewModel vm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
+        MethodInfo synchronize = typeof(TestViewModel).GetMethod(
+            "SynchronizeFaultRows",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-row synchronizer not found");
+
+        static FaultRow DuplicateRow(string status) => new()
+        {
+            Kind = FaultKind.WrongWiring,
+            ProductFaultType = ProductFaultType.WrongWiring,
+            FaultType = "SAI KẾT NỐI CLIP",
+            Io = 7,
+            ActualSourceIo = 7,
+            ActualTargetIo = 11,
+            Status = status
+        };
+
+        for (int index = 0; index < 7; index++)
+            vm.Faults.Add(DuplicateRow($"old-{index}"));
+
+        FaultRow[] desired = Enumerable.Range(0, 10)
+            .Select(index => DuplicateRow($"new-{index}"))
+            .ToArray();
+        synchronize.Invoke(vm, [desired]);
+
+        Assert(!vm.IsDeviceFault,
+            "Duplicate CLIP display rows are a UI/configuration case, not unstable hardware");
+        Assert(vm.Faults.Count == desired.Length &&
+               vm.Faults.Select(row => row.Status).SequenceEqual(desired.Select(row => row.Status)),
+            "Duplicate CLIP rows synchronize without an out-of-range Move");
     }
 
     private static void TestD2xxResistanceRouting()
