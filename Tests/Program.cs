@@ -3383,6 +3383,18 @@ internal static class Program
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 &&
                    !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
                 "Blank THT observation never commits production or activates a relay");
+
+            board.Publish(FrameSeq(
+                4,
+                Enumerable.Range(10, 20)
+                    .Select(source => (source, new[] { 7 }))
+                    .ToArray()));
+            Assert(AppSoundService.Current.IsTestPointContactSoundActive,
+                "Blank THT Probe TOUCH starts continuous TESTPOINT sound");
+
+            board.Publish(FrameSeq(5));
+            Assert(!AppSoundService.Current.IsTestPointContactSoundActive,
+                "Blank THT Probe RELEASE stops TESTPOINT sound immediately");
         }
         finally
         {

@@ -2436,6 +2436,9 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         _lastIoMappingSignature = signature;
+        // Giống Htdrv: TESTPOINT.wav lặp liên tục từ lúc nhận diện TOUCH cho
+        // tới đúng frame RELEASE. Các cặp thông mạch của sản phẩm không phát âm.
+        _sound.SetTestPointContactSound(rows.Any(row => row.Kind == FaultKind.Probe));
         InvokeUi(() =>
         {
             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
@@ -3673,6 +3676,7 @@ public sealed class TestViewModel : ObservableObject
             _productDetectedThisCycle = false;
             Interlocked.Exchange(ref _postContinuityStarted, 0);
             Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+            _sound.SetTestPointContactSound(false);
             _sound.SetWiringFaultAlarm(false);
             State = ReadyStateForCurrentModel();
             AddLog("Đã rời TestView; scan I/O nền vẫn chạy liên tục.");
@@ -5883,6 +5887,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _startupIoInterlockState, 0);
         _startupIoWarningSignature = string.Empty;
         _lastIoMappingSignature = string.Empty;
+        _sound.SetTestPointContactSound(false);
 
         _model = model ??
             throw new ArgumentNullException(nameof(model));
