@@ -31,6 +31,7 @@ internal static class Program
             ("Continuity/open/wrong/splice engine", TestEngineVectors),
             ("Production PASS gate minimal latency", TestProductionPassGateMinimalLatency),
             ("THT column semantics and string wire topology", TestThtColumnSemantics),
+            ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("ALL6 label data order", TestLabel),
@@ -3291,6 +3292,97 @@ internal static class Program
             string path = Path.Combine(root, "SQDZ-label-source.tht");
             File.WriteAllBytes(path, BuildMinimalThtFile(modelText));
             return new ThtModelParser().Load(path);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void TestBlankThtIoMappingCompatibility()
+    {
+        const string blankModelText =
+            "파트번호\t파트명\n" +
+            "1\tIO MAPPING\n\n" +
+            "번 호\t커넥터\t핀 수\n\n" +
+            "커넥터\t선이름\tI/O\t핀번호\n\n" +
+            "선이름\t선연결\t굵기\t색깔";
+
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZBlankThtTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "blank.tht");
+            File.WriteAllBytes(path, BuildMinimalThtFile(blankModelText));
+            ProductModel model = new ThtModelParser().Load(path);
+
+            Assert(model.IsIoMappingTemplate &&
+                   model.Pins.Count == 0 &&
+                   model.Nets.Count == 0 &&
+                   model.MaxIo == 0,
+                "A structurally valid THT with an empty Pin table loads as IO mapping template");
+
+            string invalidPath = Path.Combine(root, "invalid-pin.tht");
+            File.WriteAllBytes(
+                invalidPath,
+                BuildMinimalThtFile(blankModelText.Replace(
+                    "커넥터\t선이름\tI/O\t핀번호\n\n",
+                    "커넥터\t선이름\tI/O\t핀번호\nCN1\tW1\tNOT_IO\t1\n\n",
+                    StringComparison.Ordinal)));
+            AssertThrows<InvalidDataException>(
+                () => new ThtModelParser().Load(invalidPath),
+                "A non-empty Pin table with invalid IO must not be mistaken for a blank mapping THT");
+
+            string? compatibilityFile = Environment.GetEnvironmentVariable(
+                "JBZ_THT_COMPAT_FILE");
+            if (!string.IsNullOrWhiteSpace(compatibilityFile))
+            {
+                ProductModel compatibilityModel = new ThtModelParser().Load(compatibilityFile);
+                Assert(compatibilityModel.IsIoMappingTemplate,
+                    $"Compatibility THT '{compatibilityFile}' loads as IO mapping template");
+            }
+
+            BoardCapacity capacity = BoardCapacity.Create(1);
+            IReadOnlyList<FaultRow> connectionRows = IoMappingFramePresenter.BuildRows(
+                FrameSeq(1, (2, new[] { 1, 3 }), (1, new[] { 2 })),
+                capacity);
+            Assert(connectionRows.Count == 2 &&
+                   connectionRows.Any(row => row.ActualSourceIo == 1 && row.ActualTargetIo == 2) &&
+                   connectionRows.Any(row => row.ActualSourceIo == 2 && row.ActualTargetIo == 3),
+                "IO mapping canonicalizes duplicate directions and shows every live connection pair");
+
+            IReadOnlyList<FaultRow> probeRows = IoMappingFramePresenter.BuildRows(
+                FrameSeq(
+                    2,
+                    Enumerable.Range(10, 20)
+                        .Select(source => (source, new[] { 7 }))
+                        .ToArray()),
+                capacity);
+            Assert(probeRows.Count == 1 &&
+                   probeRows[0].Kind == FaultKind.Probe &&
+                   probeRows[0].Io == 7,
+                "Probe sweep in blank THT shows the touched IO instead of false wiring pairs");
+
+            var production = new ProductionSettings
+            {
+                MasterFaultRequiredCount = 0,
+                UseTestPointer = true
+            };
+            TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
+            vm.SetModel(model);
+            vm.StartProductionTestAsync().GetAwaiter().GetResult();
+            board.Publish(FrameSeq(3, (4, new[] { 9 })));
+
+            Assert(vm.IsIoMappingMode &&
+                   vm.Faults.Count == 1 &&
+                   vm.Faults[0].ActualSourceIo == 4 &&
+                   vm.Faults[0].ActualTargetIo == 9 &&
+                   vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 &&
+                   !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                "Blank THT observation never commits production or activates a relay");
         }
         finally
         {

@@ -14,6 +14,8 @@
         <SolidColorBrush x:Key="TextMuted" Color="#555555"/>
         <SolidColorBrush x:Key="BrandBlue" Color="#243B8F"/>
         <SolidColorBrush x:Key="PassGreen" Color="#2AA84A"/>
+        <SolidColorBrush x:Key="FailRed" Color="#D9363E"/>
+        <SolidColorBrush x:Key="PendingAmber" Color="#D88400"/>
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -116,9 +118,9 @@
 
         <Grid Grid.Row="1" Margin="8">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.05*"/>
-                <ColumnDefinition Width="1.05*"/>
-                <ColumnDefinition Width="1.2*"/>
+                <ColumnDefinition Width="1*"/>
+                <ColumnDefinition Width="1*"/>
+                <ColumnDefinition Width="1.45*"/>
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0" Style="{StaticResource SettingsPanelStyle}">
@@ -587,9 +589,9 @@
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="42"/>
                                     <RowDefinition Height="36"/>
-                                    <RowDefinition Height="30"/>
-                                    <RowDefinition Height="110"/>
+                                    <RowDefinition Height="220"/>
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Text="ĐO ĐIỆN TRỞ BẰNG TAY"
@@ -618,9 +620,9 @@
 
                                 <TextBlock Grid.Row="2"
                                            Text="{Binding ManualResistanceStatus}"
-                                           FontSize="11"
-                                           FontWeight="SemiBold"
-                                           Foreground="{StaticResource TextMuted}"
+                                           FontSize="12.5"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource BrandBlue}"
                                            TextWrapping="Wrap"/>
 
                                 <DataGrid Grid.Row="3"
@@ -631,12 +633,54 @@
                                           CanUserDeleteRows="False"
                                           HeadersVisibility="Column"
                                           RowHeaderWidth="0"
-                                          FontSize="11">
+                                          GridLinesVisibility="Horizontal"
+                                          HorizontalGridLinesBrush="#D8DEE9"
+                                          AlternatingRowBackground="#F4F7FC"
+                                          RowHeight="34"
+                                          ColumnHeaderHeight="36"
+                                          FontSize="12.5"
+                                          FontWeight="SemiBold"
+                                          SelectionMode="Single"
+                                          EnableRowVirtualization="True">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="R" Binding="{Binding Name}" Width="45"/>
-                                        <DataGridTextColumn Header="CH" Binding="{Binding ChannelText}" Width="48"/>
-                                        <DataGridTextColumn Header="GIÁ TRỊ" Binding="{Binding Display}" Width="*"/>
-                                        <DataGridTextColumn Header="KẾT QUẢ" Binding="{Binding ResultText}" Width="75"/>
+                                        <DataGridTextColumn Header="R" Binding="{Binding Name}" Width="48"/>
+                                        <DataGridTextColumn Header="KÊNH" Binding="{Binding ChannelText}" Width="58"/>
+                                        <DataGridTextColumn Header="GIÁ TRỊ ĐO" Binding="{Binding Display}" Width="1.35*"/>
+                                        <DataGridTextColumn Header="MIN" Binding="{Binding MinDisplayText}" Width="*"/>
+                                        <DataGridTextColumn Header="MAX" Binding="{Binding MaxDisplayText}" Width="*"/>
+                                        <DataGridTextColumn Header="MẪU" Binding="{Binding SampleCount}" Width="54"/>
+                                        <DataGridTextColumn Header="ỔN ĐỊNH (ms)" Binding="{Binding StabilizationTimeMs}" Width="94"/>
+                                        <DataGridTemplateColumn Header="KẾT QUẢ" Width="90">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Border x:Name="ResultBadge"
+                                                            Margin="5,4"
+                                                            Padding="5,1"
+                                                            CornerRadius="3"
+                                                            Background="#E7EBF3">
+                                                        <TextBlock x:Name="ResultTextBlock"
+                                                                   Text="{Binding ResultText}"
+                                                                   HorizontalAlignment="Center"
+                                                                   FontWeight="Bold"
+                                                                   Foreground="{StaticResource TextMuted}"/>
+                                                    </Border>
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding ResultText}" Value="PASS">
+                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource PassGreen}"/>
+                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ResultText}" Value="FAIL">
+                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource FailRed}"/>
+                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ResultText}" Value="UNSTABLE">
+                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource PendingAmber}"/>
+                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
                                     </DataGrid.Columns>
                                 </DataGrid>
                             </Grid>

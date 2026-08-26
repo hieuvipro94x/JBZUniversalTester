@@ -794,7 +794,10 @@ public sealed class ThtModelParser
 
         List<RawPin> rawPins = ParsePins(tables.Pins);
 
-        if (rawPins.Count == 0)
+        // Htdrv chấp nhận một bảng Pin đúng cấu trúc nhưng chưa có dòng dữ
+        // liệu để người vận hành dò I/O và tự dựng THT. Chỉ chấp nhận đúng
+        // bảng rỗng; bảng có dòng nhưng mọi I/O đều sai vẫn là file lỗi.
+        if (rawPins.Count == 0 && tables.Pins.Rows.Count > 0)
         {
             throw new InvalidDataException(
                 "Bảng Pin không có bản ghi I/O hợp lệ.");
@@ -953,7 +956,7 @@ public sealed class ThtModelParser
             }
         }
 
-        if (model.Pins.Count == 0)
+        if (model.Pins.Count == 0 && tables.Pins.Rows.Count > 0)
         {
             throw new InvalidDataException(
                 "File THT không có chân kiểm tra hợp lệ.");
@@ -973,6 +976,13 @@ public sealed class ThtModelParser
         {
             model.ResistanceSteps = ParseResistanceSteps(tables.AllTables);
         }
+
+        model.IsIoMappingTemplate =
+            tables.Pins.Rows.Count == 0 &&
+            model.Pins.Count == 0 &&
+            model.Nets.Count == 0 &&
+            model.Clip is null &&
+            model.ResistanceSteps.Count == 0;
 
         return model;
     }

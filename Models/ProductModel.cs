@@ -128,6 +128,13 @@ public sealed class ProductModel
     /// <summary>Topology cụm CLIP A0/AO + a1/a2/a3... nếu model có khai báo.</summary>
     public ClipTopology? Clip { get; set; }
 
+    /// <summary>
+    /// THT hợp lệ nhưng chưa khai báo bất kỳ chân/topology nào. Htdrv dùng loại
+    /// file này như một màn hình quan sát để tìm I/O bằng đầu dò và dựng model.
+    /// Đây không phải model Production và không được phép tạo PASS/FAIL.
+    /// </summary>
+    public bool IsIoMappingTemplate { get; set; }
+
     public int MaxIo
     {
         get

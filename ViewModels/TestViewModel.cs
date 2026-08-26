@@ -134,6 +134,7 @@ public sealed class TestViewModel : ObservableObject
     private string _lastFaultGateSuppressedSignature = string.Empty;
     private string _lastPassRemainingSignature = string.Empty;
     private string _lastProductDetectSignature = string.Empty;
+    private string _lastIoMappingSignature = string.Empty;
     // V12.10.3: TestEngine.Reset() phát Changed đồng bộ. Trong Master state machine,
     // reset nội bộ không được phép tái nhập OnEngineChanged trước khi state hoàn tất.
     private int _suppressEngineChanged;
@@ -796,6 +797,7 @@ public sealed class TestViewModel : ObservableObject
     }
 
     public bool ProductionEnabled => MasterApproved;
+    public bool IsIoMappingMode => _model?.IsIoMappingTemplate == true;
     public bool IsMasterSequenceActive => _model is not null && !MasterApproved;
     public bool IsMasterBadPhase => MasterState is
         MasterSequenceState.WaitingBadMaster or
@@ -1195,6 +1197,8 @@ public sealed class TestViewModel : ObservableObject
 
         if (_model is null)
             return "CHỜ CHỌN MÃ HÀNG";
+        if (IsIoMappingMode)
+            return "SẴN SÀNG LẬP BẢN ĐỒ IO";
         if (_requireStartupIoClear && Volatile.Read(ref _startupIoInterlockState) != 2)
             return "CHỜ KIỂM TRA IO BAN ĐẦU";
         return MasterApproved
@@ -2315,6 +2319,17 @@ public sealed class TestViewModel : ObservableObject
                     $"FRESH_FRAME_ACCEPTED seq={frame.Sequence} cycleStartSeq={cycleStartSequence}");
             }
 
+            // THT trống là chế độ lập bản đồ I/O tương thích Htdrv. Chỉ dựng
+            // bảng quan sát từ frame hiện tại; tuyệt đối không đưa frame vào
+            // fault engine, Master, PASS/FAIL, counter hay relay production.
+            if (IsIoMappingMode)
+            {
+                ProcessIoMappingFrame(frame, generation);
+                Interlocked.Increment(ref _productionFramesProcessed);
+                LogContinuousScanMetricsIfDue();
+                return;
+            }
+
             if (!HandleStartupIoInterlock(frame, generation))
             {
                 LogContinuousScanMetricsIfDue();
@@ -2406,6 +2421,38 @@ public sealed class TestViewModel : ObservableObject
         {
             EnterDeviceFault(ex, "BoardFrameReceived");
         }
+    }
+
+    private void ProcessIoMappingFrame(ScanFrame frame, long generation)
+    {
+        if (!frame.Complete || frame.UnknownBytes != 0)
+            return;
+
+        IReadOnlyList<FaultRow> rows = IoMappingFramePresenter.BuildRows(
+            frame,
+            _board.Capacity);
+        string signature = string.Join('|', rows.Select(RowKey));
+        if (string.Equals(signature, _lastIoMappingSignature, StringComparison.Ordinal))
+            return;
+
+        _lastIoMappingSignature = signature;
+        InvokeUi(() =>
+        {
+            if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                !IsIoMappingMode)
+            {
+                return;
+            }
+
+            SynchronizeFaultRows(rows);
+            State = rows.Count == 0
+                ? "LẬP BẢN ĐỒ IO • CHƯA CÓ KẾT NỐI"
+                : $"LẬP BẢN ĐỒ IO • {rows.Count} TÍN HIỆU";
+            RaiseTestStatistics();
+        });
+
+        AsyncFileLogService.Current.Test(
+            $"IO_MAPPING frame={frame.Sequence} rows={rows.Count} signature=\"{signature}\"");
     }
 
     private bool HandleStartupIoInterlock(ScanFrame frame, long generation)
@@ -3447,6 +3494,8 @@ public sealed class TestViewModel : ObservableObject
                 "Chưa tải model .tht.");
         }
 
+        bool ioMappingMode = IsIoMappingMode;
+
         if (!_board.IsConnected)
             await InitializeHardwareAsync();
 
@@ -3481,9 +3530,11 @@ public sealed class TestViewModel : ObservableObject
         SaveLastTestedModel();
 
         // Chu kỳ mới bắt đầu với trạng thái cảnh báo sạch.
-        _cycleActive = !_requireStartupIoClear && MasterApproved;
+        _cycleActive = !ioMappingMode && !_requireStartupIoClear && MasterApproved;
         SetProductionPhase(_cycleActive ? ProductionPhase.Continuity : ProductionPhase.WaitingProduct);
-        Interlocked.Exchange(ref _startupIoInterlockState, _requireStartupIoClear ? 0 : 2);
+        Interlocked.Exchange(
+            ref _startupIoInterlockState,
+            !ioMappingMode && _requireStartupIoClear ? 0 : 2);
         _startupIoWarningSignature = string.Empty;
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
@@ -3507,13 +3558,20 @@ public sealed class TestViewModel : ObservableObject
         _lastPassGateSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;
         _lastProductDetectSignature = string.Empty;
+        _lastIoMappingSignature = string.Empty;
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
         _sound.SetWiringFaultAlarm(false);
         // V12.9.5: engine phải chạy cả khi Master Gate đang khóa để state machine
         // tự xác nhận Good/Bad Master. Context Master không được ghi production result.
-        _engine.SetFrameProcessingEnabled(true);
+        _engine.SetFrameProcessingEnabled(!ioMappingMode);
         _engine.Reset();
+        if (ioMappingMode)
+        {
+            MasterApproved = true;
+            MasterState = MasterSequenceState.Completed;
+            MasterStatus = "IO MAPPING MODE • KHÔNG PASS/FAIL";
+        }
         _productDetectedThisCycle = false;
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
@@ -3554,6 +3612,15 @@ public sealed class TestViewModel : ObservableObject
             AsyncFileLogService.Current.Performance("D2XX_START_SCAN_SENT");
         }
         InvokeUi(UpdateCardScanningState);
+
+        if (ioMappingMode)
+        {
+            State = "LẬP BẢN ĐỒ IO • CHƯA CÓ KẾT NỐI";
+            AddLog(
+                "THT trống: đã bật chế độ lập bản đồ IO. Đầu dò và các cặp IO thông nhau " +
+                "chỉ hiển thị trên bảng; không PASS/FAIL, không cộng sản lượng và không kích relay.");
+            return;
+        }
 
         if (_requireStartupIoClear)
         {
@@ -5815,6 +5882,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
         Interlocked.Exchange(ref _startupIoInterlockState, 0);
         _startupIoWarningSignature = string.Empty;
+        _lastIoMappingSignature = string.Empty;
 
         _model = model ??
             throw new ArgumentNullException(nameof(model));
@@ -5865,6 +5933,7 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(Eco));
         Raise(nameof(Nco));
         Raise(nameof(Alc));
+        Raise(nameof(IsIoMappingMode));
 
         LoadStatisticsForModel(model);
         Lot = _productionSettings.LotNo.ToString();
@@ -5874,6 +5943,13 @@ public sealed class TestViewModel : ObservableObject
         // người vận hành cảm giác load THT chậm gấp đôi.
         AddLog($"Đã nạp model {model.ModelName}: {model.Nets.Count} mạng I/O thường, " +
                $"{model.Clip?.Branches.Count ?? 0} nhánh CLIP, {model.ResistanceSteps.Count} bước đo điện trở.");
+
+        if (model.IsIoMappingTemplate)
+        {
+            AddLog(
+                "Model THT trống hợp lệ: dùng để dò chân/lập bản đồ IO; " +
+                "mọi kết nối chỉ hiển thị, không tham gia Production PASS/FAIL.");
+        }
 
         if (model.Clip is not null)
         {
