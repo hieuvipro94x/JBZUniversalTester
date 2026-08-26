@@ -13,6 +13,7 @@ int connectCycles = IntValue("--connect-cycles", 0, 0, 30);
 int scanCycles = IntValue("--scan-cycles", 0, 0, 100);
 int expansionCards = IntValue("--expansion-cards", 2, 1, BoardIoDecoder.MaxExpansionCardCount);
 bool routeResistance = Has("--route-resistance");
+bool measureResistance = Has("--measure-resistance");
 bool verifySupervisor = Has("--verify-supervisor");
 bool verifyVisa = Has("--visa");
 string? tracePath = Value("--trace");
@@ -99,7 +100,8 @@ if (!string.IsNullOrWhiteSpace(modelDirectory))
         return 7;
 }
 
-if (passiveSeconds == 0 && connectCycles == 0 && scanCycles == 0 && !routeResistance && !verifySupervisor)
+if (passiveSeconds == 0 && connectCycles == 0 && scanCycles == 0 &&
+    !routeResistance && !measureResistance && !verifySupervisor)
     return 0;
 
 D2xxDeviceInfo[] targets = devices.Where(IsTargetBoard).ToArray();
@@ -143,7 +145,7 @@ if (connectCycles > 0)
     }
 }
 
-if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || verifySupervisor)
+if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance || verifySupervisor)
 {
     await using var board = new D2xxBoardTransport(targets[0].Serial, production);
     StreamWriter? trace = null;
@@ -253,6 +255,49 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || verifySupervisor)
                 await board.SelectResistanceRouteAsync(step);
                 Console.WriteLine($"RESISTANCE_ROUTE CH{channel} PASS selector=0x{channel:X2}");
             }
+        }
+
+        if (measureResistance)
+        {
+            using var measurementVisa = new KeysightVisaService();
+            string idn = measurementVisa.ConnectAutomatic();
+            Console.WriteLine(
+                $"RESISTANCE_MEASURE VISA_CONNECTED idn=\"{idn}\" resource=\"{measurementVisa.ConnectedResource}\"");
+
+            var measurementSettings = new AppSettings();
+            using var measurementEngine = new TestEngine(
+                board,
+                measurementVisa,
+                measurementSettings,
+                production);
+            ResistanceStep[] steps = Enumerable.Range(1, 10)
+                .Select(channel => new ResistanceStep(
+                    $"R{channel}",
+                    channel,
+                    0,
+                    double.MaxValue))
+                .ToArray();
+            var measurementWatch = Stopwatch.StartNew();
+            List<ResistanceResult> results = await measurementEngine.MeasureResistanceStepsAsync(
+                steps,
+                update =>
+                {
+                    if (update.ResultText == "ĐANG ĐO")
+                    {
+                        Console.WriteLine(
+                            $"RESISTANCE_MEASURE {update.Name}/CH{update.Channel} state=MEASURING elapsedMs={measurementWatch.Elapsed.TotalMilliseconds:0.###}");
+                        return;
+                    }
+
+                    Console.WriteLine(
+                        $"RESISTANCE_MEASURE {update.Name}/CH{update.Channel} value=\"{update.Display}\" " +
+                        $"result={update.ResultText} samples={update.SampleCount} stableMs={update.StabilizationTimeMs} " +
+                        $"elapsedMs={measurementWatch.Elapsed.TotalMilliseconds:0.###} raw=\"{measurementVisa.LastRawResistanceResponse}\"");
+                });
+            measurementWatch.Stop();
+            Console.WriteLine(
+                $"RESISTANCE_MEASURE SUMMARY channels={results.Count} pass={results.Count(result => result.Passed)} " +
+                $"fail={results.Count(result => !result.Passed)} elapsedMs={measurementWatch.Elapsed.TotalMilliseconds:0.###}");
         }
     }
     finally

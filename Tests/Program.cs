@@ -857,7 +857,8 @@ internal static class Program
         var fastApp = new AppSettings();
         fastApp.Test.ResistanceMinimumSettleMs = 0;
         fastApp.Test.ResistanceSampleIntervalMs = 0;
-        fastApp.Test.ResistanceStableSampleCount = 1;
+        // Giá trị legacy 3 không được phép làm engine đọc lặp lại.
+        fastApp.Test.ResistanceStableSampleCount = 3;
         fastApp.Test.ResistanceStabilityTimeoutMs = 100;
         using (var measurementEngine = new TestEngine(fakeBoard, fakeVisa, fastApp, configured))
         {

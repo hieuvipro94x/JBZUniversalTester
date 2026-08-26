@@ -2005,7 +2005,7 @@ public sealed class TestEngine : IDisposable
                 };
                 onChannelUpdated?.Invoke(measuring);
 
-                ResistanceResult result = await MeasureChannelStableAsync(step, ct);
+                ResistanceResult result = await MeasureChannelOnceAsync(step, ct);
                 results.Add(result);
                 onChannelUpdated?.Invoke(result);
             }
@@ -2018,7 +2018,7 @@ public sealed class TestEngine : IDisposable
         return results;
     }
 
-    private async Task<ResistanceResult> MeasureChannelStableAsync(
+    private async Task<ResistanceResult> MeasureChannelOnceAsync(
         ResistanceStep step,
         CancellationToken ct)
     {
@@ -2027,12 +2027,6 @@ public sealed class TestEngine : IDisposable
             Math.Max(
                 Math.Max(0, _production.ResistanceDelayMs),
                 Math.Max(0, _settings.Test.ResistanceMinimumSettleMs)));
-        int sampleIntervalMs = Math.Max(0, _settings.Test.ResistanceSampleIntervalMs);
-        int stableSampleCount = Math.Clamp(_settings.Test.ResistanceStableSampleCount, 1, 20);
-        int timeoutMs = Math.Max(100, _settings.Test.ResistanceStabilityTimeoutMs);
-        double absoluteTolerance = Math.Max(0, _settings.Test.ResistanceStableAbsoluteToleranceOhm);
-        double relativeTolerancePercent = Math.Max(0, _settings.Test.ResistanceStableRelativeTolerancePercent);
-
         AsyncFileLogService.Current.Test(
             $"[AUTO-R] CH{step.Channel} minimum settle start ms={minimumSettleMs}");
         if (minimumSettleMs > 0)
@@ -2040,89 +2034,30 @@ public sealed class TestEngine : IDisposable
         AsyncFileLogService.Current.Test($"[AUTO-R] CH{step.Channel} minimum settle complete");
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var finiteWindow = new Queue<double>();
-        int sampleCount = 0;
-        int openStreak = 0;
+        double sample = await Task.Run(
+            () => _visa.MeasureResistance(_settings.Keysight.Command),
+            ct);
+        bool open = !double.IsFinite(sample) ||
+                    Math.Abs(sample) >= _settings.Test.ResistanceOpenThreshold;
+        bool passed = !open && sample >= step.MinOhm && sample <= step.MaxOhm;
 
-        while (stopwatch.ElapsedMilliseconds < timeoutMs)
-        {
-            ct.ThrowIfCancellationRequested();
-            sampleCount++;
-
-            double sample = await Task.Run(
-                () => _visa.MeasureResistance(_settings.Keysight.Command),
-                ct);
-            bool open = !double.IsFinite(sample) ||
-                        Math.Abs(sample) >= _settings.Test.ResistanceOpenThreshold;
-
-            AsyncFileLogService.Current.Test(open
-                ? $"[AUTO-R] CH{step.Channel} sample#{sampleCount}=OPEN"
-                : $"[AUTO-R] CH{step.Channel} sample#{sampleCount}={sample:0.###}");
-
-            if (open)
-            {
-                openStreak++;
-                finiteWindow.Clear();
-
-                if (openStreak >= stableSampleCount)
-                {
-                    AsyncFileLogService.Current.Test(
-                        $"[AUTO-R] CH{step.Channel} OPEN samples={sampleCount} stable_time={stopwatch.ElapsedMilliseconds}ms");
-                    ResistanceResult result = BuildResistanceResult(
-                        step,
-                        valueOhm: null,
-                        open: true,
-                        stable: true,
-                        status: "FAIL",
-                        sampleCount,
-                        stopwatch.ElapsedMilliseconds);
-                    LogResistanceDiagnostic(result);
-                    return result;
-                }
-            }
-            else
-            {
-                openStreak = 0;
-                finiteWindow.Enqueue(sample);
-                while (finiteWindow.Count > stableSampleCount)
-                    finiteWindow.Dequeue();
-
-                if (finiteWindow.Count >= stableSampleCount &&
-                    IsStableWindow(finiteWindow, absoluteTolerance, relativeTolerancePercent))
-                {
-                    double value = Median(finiteWindow);
-                    bool passed = value >= step.MinOhm && value <= step.MaxOhm;
-                    AsyncFileLogService.Current.Test(
-                        $"[AUTO-R] CH{step.Channel} stable stable_time={stopwatch.ElapsedMilliseconds}ms samples={sampleCount} final={value:0.###} {(passed ? "PASS" : "FAIL")}");
-                    ResistanceResult result = BuildResistanceResult(
-                        step,
-                        value,
-                        open: false,
-                        stable: true,
-                        status: passed ? "PASS" : "FAIL",
-                        sampleCount,
-                        stopwatch.ElapsedMilliseconds);
-                    LogResistanceDiagnostic(result);
-                    return result;
-                }
-            }
-
-            if (sampleIntervalMs > 0)
-                await Task.Delay(sampleIntervalMs, ct);
-        }
-
+        AsyncFileLogService.Current.Test(open
+            ? $"[AUTO-R] CH{step.Channel} sample#1=OPEN"
+            : $"[AUTO-R] CH{step.Channel} sample#1={sample:0.###}");
         AsyncFileLogService.Current.Test(
-            $"[AUTO-R] CH{step.Channel} UNSTABLE timeout_ms={timeoutMs} samples={sampleCount}");
-        ResistanceResult unstableResult = BuildResistanceResult(
+            $"[AUTO-R] CH{step.Channel} single measurement time={stopwatch.ElapsedMilliseconds}ms " +
+            $"result={(passed ? "PASS" : "FAIL")}");
+
+        ResistanceResult result = BuildResistanceResult(
             step,
-            valueOhm: null,
-            open: false,
-            stable: false,
-            status: "UNSTABLE",
-            sampleCount,
+            valueOhm: open ? null : sample,
+            open,
+            stable: true,
+            status: passed ? "PASS" : "FAIL",
+            sampleCount: 1,
             stopwatch.ElapsedMilliseconds);
-        LogResistanceDiagnostic(unstableResult);
-        return unstableResult;
+        LogResistanceDiagnostic(result);
+        return result;
     }
 
     private void LogResistanceDiagnostic(ResistanceResult result)
@@ -2174,41 +2109,6 @@ public sealed class TestEngine : IDisposable
             SampleCount = sampleCount,
             StabilizationTimeMs = stabilizationTimeMs
         };
-    }
-
-    private static bool IsStableWindow(
-        IEnumerable<double> values,
-        double absoluteTolerance,
-        double relativeTolerancePercent)
-    {
-        double[] window = values.ToArray();
-        if (window.Length == 0)
-            return false;
-
-        double min = window.Min();
-        double max = window.Max();
-        double range = max - min;
-        if (range <= absoluteTolerance)
-            return true;
-
-        double representative = Median(window);
-        if (representative == 0 || relativeTolerancePercent <= 0)
-            return false;
-
-        double relative = range / Math.Abs(representative) * 100.0;
-        return relative <= relativeTolerancePercent;
-    }
-
-    private static double Median(IEnumerable<double> values)
-    {
-        double[] ordered = values.OrderBy(value => value).ToArray();
-        if (ordered.Length == 0)
-            return double.NaN;
-
-        int middle = ordered.Length / 2;
-        return ordered.Length % 2 == 1
-            ? ordered[middle]
-            : (ordered[middle - 1] + ordered[middle]) / 2.0;
     }
 
     public async Task<bool> CompletePassAsync(
