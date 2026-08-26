@@ -43,7 +43,7 @@ internal static class Program
             ("D2XX resistance selectors and ten-slot configuration", TestD2xxResistanceRouting),
             ("Leak connector mapping and PASS/FAIL presentation", TestWaterProofConfigurationAndPresentation),
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
-            ("Manual mode relay interlock and production lock", TestManualModeInterlock),
+            ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("Production scan token survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),
@@ -538,24 +538,22 @@ internal static class Program
 
     private static void TestManualModeInterlock()
     {
-        var settings = new ProductionSettings { ManualModeEnabled = true, MasterFaultRequiredCount = 0 };
+        var settings = new ProductionSettings { ManualModeEnabled = false, MasterFaultRequiredCount = 0 };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
         vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
 
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(vm, 1);
-        Assert(vm.CanEnterManualMode, "Background production scan does not lock Manual Relay menu");
-
-        vm.EnterManualModeAsync().GetAwaiter().GetResult();
-        Assert(vm.IsManualModeActive && vm.State == "MANUAL" && !board.IsScanning,
-            "Entering Manual locks production scan and shows MANUAL");
-        Assert(board.Commands.Contains("OFF"), "Entering Manual sends safe relay OFF");
+        Assert(vm.CanEnterManualMode && !vm.IsManualModeActive,
+            "Manual relay menu is ready without a saved ManualModeEnabled setting");
 
         board.Commands.Clear();
         int relay = vm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
-        Assert(relay == 1, "Relay 1 ON state updates only after command completes");
-        Assert(string.Join(",", board.Commands) == "OFF,SET:1",
-            "Relay 1 ON performs all-off before SetRelay(1)");
+        Assert(relay == 1 && vm.IsManualModeActive && vm.State == "MANUAL" && !board.IsScanning,
+            "Relay 1 ON automatically enters temporary Manual runtime");
+        Assert(board.Commands.Count(command => command == "OFF") >= 1 &&
+               board.Commands.Last() == "SET:1",
+            "Direct Relay 1 ON performs safe all-off before SetRelay(1)");
 
         board.Commands.Clear();
         relay = vm.SetManualRelayAsync(2, true).GetAwaiter().GetResult();
@@ -565,27 +563,24 @@ internal static class Program
 
         board.Commands.Clear();
         relay = vm.SetManualRelayAsync(2, false).GetAwaiter().GetResult();
-        Assert(relay == 0 && string.Join(",", board.Commands) == "OFF",
-            "Relay OFF leaves all outputs off");
+        Assert(relay == 0 && !vm.IsManualModeActive &&
+               board.Commands.Contains("OFF") && board.Commands.Contains("START"),
+            "Relay OFF leaves all outputs off and automatically resumes Production scan");
 
         board.Commands.Clear();
         vm.ResetManualOutputsAsync().GetAwaiter().GetResult();
-        Assert(string.Join(",", board.Commands) == "OFF,RESET,OFF",
-            "Manual RESET uses existing reset path and leaves relay OFF");
+        Assert(!vm.IsManualModeActive &&
+               board.Commands.Contains("RESET") &&
+               board.Commands.Contains("OFF") &&
+               board.Commands.Contains("START"),
+            "Direct RESET needs no saved mode, leaves relay OFF, and resumes Production scan");
 
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
-        Assert(vm.State == "MANUAL", "Production start is blocked while Manual is ON");
+        Assert(vm.State != "MANUAL", "Production is no longer locked after direct Relay OFF/RESET");
 
-        settings.ManualModeEnabled = false;
-        board.Commands.Clear();
-        vm.ExitManualModeAsync().GetAwaiter().GetResult();
-        Assert(!vm.IsManualModeActive && board.Commands.Contains("OFF") && board.Commands.Contains("START"),
-            "Exiting Manual sends safe OFF before production background scan can resume");
-
-        var faultSettings = new ProductionSettings { ManualModeEnabled = true, MasterFaultRequiredCount = 0 };
+        var faultSettings = new ProductionSettings { ManualModeEnabled = false, MasterFaultRequiredCount = 0 };
         TestViewModel faultVm = CreateTestViewModel(faultSettings, out FakeBoard faultBoard);
         faultVm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
-        faultVm.EnterManualModeAsync().GetAwaiter().GetResult();
         faultBoard.ThrowOnSetRelay = true;
         try
         {

@@ -314,18 +314,6 @@ public partial class ProductionSettingsPage : UserControl
                 return;
             }
 
-            bool oldManual = _main?.ProductionSettings.ManualModeEnabled ?? false;
-            bool newManual = _vm.IsManualModeEnabled;
-            if (newManual && !oldManual && _main is not null && !_main.Test.CanEnterManualMode)
-            {
-                ShowMessage(
-                    "Không thể bật Manual khi đang kiểm tra. Hãy kết thúc chu kỳ trước.",
-                    "Manual Mode",
-                    MessageBoxImage.Warning);
-                _vm.IsManualModeEnabled = false;
-                return;
-            }
-
             // Đồng bộ CardCount compatibility từ BoardCapacity ngay trước save.
             BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
             _vm.Settings.CardCount = capacity.ScanCardCount;
@@ -346,6 +334,13 @@ public partial class ProductionSettingsPage : UserControl
 
     public void SetManualRuntimeActive(bool active) =>
         _vm.SetManualRuntimeActive(active);
+
+    public async Task ReleaseManualOutputsAsync()
+    {
+        if (_main?.Test.IsManualModeActive == true)
+            await _main.Test.ExitManualModeAsync();
+        _vm.SetManualRuntimeActive(false);
+    }
 
     private bool ValidateSettings(out string error)
     {
@@ -519,8 +514,11 @@ public partial class ProductionSettingsPage : UserControl
         return true;
     }
 
-    private void Cancel_Click(object sender, RoutedEventArgs e) =>
+    private async void Cancel_Click(object sender, RoutedEventArgs e)
+    {
+        await ReleaseManualOutputsAsync();
         RequestClose?.Invoke(this, EventArgs.Empty);
+    }
 
     private void ShowMessage(string message, string title, MessageBoxImage image)
     {

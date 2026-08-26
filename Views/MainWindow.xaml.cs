@@ -93,10 +93,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_viewModel.ProductionSettings.ManualModeEnabled)
+        if (_viewModel.Test.IsManualModeActive)
         {
             MessageBox.Show(
-                "Manual Mode đang bật. Hãy tắt Manual và lưu cài đặt trước khi bắt đầu Production Test.",
+                "Relay tay đang bật. Hãy bấm TẮT hoặc RESET trước khi bắt đầu Production Test.",
                 "Production bị khóa",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -243,8 +243,9 @@ public partial class MainWindow : Window
     {
         try
         {
+            if (_settingsPage is not null)
+                await _settingsPage.ReleaseManualOutputsAsync();
             await _viewModel.ReloadProductionSettingsAsync();
-            _settingsPage?.SetManualRuntimeActive(_viewModel.ProductionSettings.ManualModeEnabled);
         }
         catch (Exception ex)
         {
@@ -257,8 +258,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!_viewModel.ProductionSettings.ManualModeEnabled)
-            CloseInternalPage();
+        CloseInternalPage();
     }
 
     private void OpenHistory_Click(

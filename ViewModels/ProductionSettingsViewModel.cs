@@ -46,21 +46,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         set => Set(ref _masterFaultRequiredCount, Math.Clamp(value, 0, 99));
     }
 
-    public bool IsManualModeEnabled
-    {
-        get => Settings.ManualModeEnabled;
-        set
-        {
-            if (Settings.ManualModeEnabled == value)
-                return;
-
-            Settings.ManualModeEnabled = value;
-            Raise();
-            Raise(nameof(IsManualPanelVisible));
-            RefreshManualCommands();
-        }
-    }
-
     public bool IsManualPanelVisible => true;
 
     public bool ManualRuntimeActive
@@ -104,10 +89,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         _modelPath = test?.CurrentModelPath ?? Settings.LastThtPath;
         if (!string.IsNullOrWhiteSpace(_modelPath))
             Settings.LastThtPath = _modelPath;
-        _manualRuntimeActive = test is not null && Settings.ManualModeEnabled;
-        _manualStatus = Settings.ManualModeEnabled
-            ? "MANUAL - chờ lệnh bảo trì"
-            : "Manual OFF";
+        Settings.ManualModeEnabled = false;
+        _manualRuntimeActive = test?.IsManualModeActive == true;
+        _manualStatus = "Sẵn sàng thao tác tay - không cần lưu cài đặt";
         ResistanceChannels = new ObservableCollection<ResistanceChannelEditor>(
             Settings.ResistanceChannels.Select((setting, index) =>
                 new ResistanceChannelEditor(setting, index + 1)));
@@ -175,7 +159,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
 
     private bool CanUseManualControls() =>
-        ManualRuntimeActive && _test is not null && !_test.IsDeviceFault;
+        _test is not null &&
+        !_test.IsDeviceFault &&
+        (_test.IsManualModeActive || _test.CanEnterManualMode);
 
     private async Task RunManualRelayCommandAsync(int relay, bool turnOn)
     {
@@ -189,6 +175,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         try
         {
             int activeRelay = await _test.SetManualRelayAsync(relay, turnOn);
+            ManualRuntimeActive = _test.IsManualModeActive;
             ManualRelay1Status = activeRelay == 1 ? "ON" : "OFF";
             ManualRelay2Status = activeRelay == 2 ? "ON" : "OFF";
             ManualStatus = activeRelay == 0
@@ -215,6 +202,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         try
         {
             await _test.ResetManualOutputsAsync();
+            ManualRuntimeActive = _test.IsManualModeActive;
             ManualRelay1Status = "OFF";
             ManualRelay2Status = "OFF";
             ManualStatus = "MANUAL - reset complete, relay OFF";
@@ -242,7 +230,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             .Select(editor => editor.ToSetting())
             .ToArray();
         Settings.AutoMasterSequence = true;
-        Settings.ManualModeEnabled = IsManualModeEnabled;
+        // Manual là thao tác runtime tức thời, không phải cấu hình cần lưu.
+        Settings.ManualModeEnabled = false;
         ProductionConfigService.SetMasterFaultRequiredCountForPath(
             Settings, _modelPath, MasterFaultRequiredCount);
         ProductionConfigService.SetWaterProofProfileForPath(

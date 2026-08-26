@@ -217,11 +217,11 @@
                                  ToolTip="{Binding Settings.LastThtPath, Mode=OneWay}"
                                  IsReadOnly="True"/>
 
-                        <TextBlock Grid.Row="15" Text="Manual Mode" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="15"
-                                  Grid.Column="1"
-                                  IsChecked="{Binding IsManualModeEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  ToolTip="Chỉ dùng cho bảo trì/kiểm tra thiết bị. Khi Manual ON, Production Test bị khóa."/>
+                        <TextBlock Grid.Row="15"
+                                   Grid.ColumnSpan="2"
+                                   Text="Relay tay dùng trực tiếp • không cần bật hoặc lưu Manual Mode"
+                                   Foreground="{StaticResource TextMuted}"
+                                   TextWrapping="Wrap"/>
 
                         <Border Grid.Row="16"
                                 Grid.RowSpan="9"

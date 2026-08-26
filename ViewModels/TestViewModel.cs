@@ -104,6 +104,7 @@ public sealed class TestViewModel : ObservableObject
     private int _engineUiUpdateQueued;
     private int _logUiFlushQueued;
     private int _deviceFault;
+    private int _manualModeActive;
     private int _deviceFaultDialogShown;
     private int _deviceFaultTransitionCount;
     private int _deviceFaultDialogCount;
@@ -248,7 +249,7 @@ public sealed class TestViewModel : ObservableObject
     };
 
     public bool IsDeviceFault => Volatile.Read(ref _deviceFault) != 0;
-    public bool IsManualModeActive => _productionSettings.ManualModeEnabled;
+    public bool IsManualModeActive => Volatile.Read(ref _manualModeActive) != 0;
     public bool CanEnterManualMode => !IsDeviceFault && !IsManualForbiddenWorkActive;
     public bool IsMasterBannerVisible => IsMasterSequenceActive && !IsDeviceFault;
     public string DeviceFaultMessage => _deviceFaultMessage;
@@ -993,7 +994,7 @@ public sealed class TestViewModel : ObservableObject
             throw new InvalidOperationException(
                 "Không thể bật Manual khi đang kiểm tra. Hãy kết thúc chu kỳ trước.");
 
-        _productionSettings.ManualModeEnabled = true;
+        Interlocked.Exchange(ref _manualModeActive, 1);
         CancelCycleOperations();
         SwitchRuntimeMode(RuntimeMode.Background);
         Interlocked.Exchange(ref _probeSessionActive, 0);
@@ -1020,19 +1021,18 @@ public sealed class TestViewModel : ObservableObject
         State = "MANUAL";
         Raise(nameof(IsManualModeActive));
         Raise(nameof(CanEnterManualMode));
-        AddLog("MANUAL MODE ON - Production Test bị khóa, tất cả relay OFF.");
+        AddLog("MANUAL TỰ ĐỘNG ON - thao tác relay tay, tất cả relay đã OFF an toàn.");
     }
 
-    public async Task ExitManualModeAsync()
+    public async Task ExitManualModeAsync(bool outputsAlreadyOff = false)
     {
-        _productionSettings.ManualModeEnabled = false;
-
         await _manualRelayGate.WaitAsync();
         try
         {
-            if (_board.IsConnected)
+            if (_board.IsConnected && !outputsAlreadyOff)
                 await _board.AllRelaysOffAsync();
             Volatile.Write(ref _manualActiveRelay, 0);
+            Interlocked.Exchange(ref _manualModeActive, 0);
         }
         finally
         {
@@ -1042,7 +1042,7 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(IsManualModeActive));
         Raise(nameof(CanEnterManualMode));
         State = ReadyStateForCurrentModel();
-        AddLog("MANUAL MODE OFF - relay OFF, Production Test đã mở khóa.");
+        AddLog("MANUAL TỰ ĐỘNG OFF - relay OFF, quét Production tiếp tục.");
 
         if (_board.IsConnected)
             await EnsureContinuousProductionScanAsync();
@@ -1050,19 +1050,20 @@ public sealed class TestViewModel : ObservableObject
 
     public async Task<int> SetManualRelayAsync(int relay, bool turnOn)
     {
-        if (!IsManualModeActive)
-            throw new InvalidOperationException("Manual Mode chưa bật.");
         if (IsDeviceFault)
             throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy khởi tạo lại trước.");
         if (relay is not 1 and not 2)
             throw new ArgumentOutOfRangeException(nameof(relay));
         if (!EnsureManualBoardReady($"manual Relay {relay}", requireD2xxRelay: true))
             return Volatile.Read(ref _manualActiveRelay);
+        if (!IsManualModeActive)
+            await EnterManualModeAsync();
 
         long started = Stopwatch.GetTimestamp();
         AsyncFileLogService.Current.Performance(
             $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=button_click");
 
+        int activeRelay;
         await _manualRelayGate.WaitAsync();
         try
         {
@@ -1085,7 +1086,7 @@ public sealed class TestViewModel : ObservableObject
                 AddLog(turnOn
                     ? $"MANUAL Relay {relay} ON - relay còn lại đã OFF."
                     : $"MANUAL Relay {relay} OFF - tất cả relay OFF.");
-                return Volatile.Read(ref _manualActiveRelay);
+                activeRelay = Volatile.Read(ref _manualActiveRelay);
             }
             catch (Exception ex)
             {
@@ -1100,16 +1101,23 @@ public sealed class TestViewModel : ObservableObject
         {
             _manualRelayGate.Release();
         }
+
+        // Không còn công tắc Manual phải lưu. TẮT relay cũng tự rời Manual
+        // và khôi phục scan nền để Production không bị khóa dai dẳng.
+        if (!turnOn)
+            await ExitManualModeAsync(outputsAlreadyOff: true);
+
+        return activeRelay;
     }
 
     public async Task ResetManualOutputsAsync()
     {
-        if (!IsManualModeActive)
-            throw new InvalidOperationException("Manual Mode chưa bật.");
         if (IsDeviceFault)
             throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy khởi tạo lại trước.");
         if (!EnsureManualBoardReady("manual RESET", requireD2xxRelay: true))
             return;
+        if (!IsManualModeActive)
+            await EnterManualModeAsync();
 
         await _manualRelayGate.WaitAsync();
         try
@@ -1138,6 +1146,8 @@ public sealed class TestViewModel : ObservableObject
         {
             _manualRelayGate.Release();
         }
+
+        await ExitManualModeAsync(outputsAlreadyOff: true);
     }
 
     private string ReadyStateForCurrentModel()
@@ -1636,14 +1646,6 @@ public sealed class TestViewModel : ObservableObject
         }
 
         await Task.WhenAll(boardTask, modelTask);
-
-        if (IsManualModeActive)
-        {
-            await EnterManualModeAsync();
-            _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeCts.Token);
-            StartupPerformanceTrace.Mark("T7 Board READY");
-            return;
-        }
 
         if (_board.IsConnected)
             await EnsureContinuousProductionScanAsync();

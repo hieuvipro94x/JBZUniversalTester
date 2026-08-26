@@ -300,30 +300,21 @@ public sealed class MainViewModel : ObservableObject
             BoardMode = _productionSettings.BoardMode,
             ExpansionCardCount = _productionSettings.ExpansionCardCount,
             StartCardNumber = _productionSettings.StartCardNumber,
-            UsbDelay = _productionSettings.UsbDelay,
-            ManualModeEnabled = _productionSettings.ManualModeEnabled
+            UsbDelay = _productionSettings.UsbDelay
         };
 
         ProductionConfigService.ReloadInto(_productionSettings);
 
         bool boardSelectionChanged = old.BoardMode != _productionSettings.BoardMode;
-        bool manualChanged = old.ManualModeEnabled != _productionSettings.ManualModeEnabled;
         bool scanHardwareChanged =
             old.ExpansionCardCount != _productionSettings.ExpansionCardCount ||
             old.StartCardNumber != _productionSettings.StartCardNumber ||
             old.UsbDelay != _productionSettings.UsbDelay;
 
-        if (manualChanged)
-        {
-            if (_productionSettings.ManualModeEnabled)
-                await Test.EnterManualModeAsync();
-            else
-                await Test.ExitManualModeAsync();
-        }
+        // Manual relay là trạng thái runtime tức thời, không reload từ file.
+        _productionSettings.ManualModeEnabled = false;
 
-        if (_productionSettings.ManualModeEnabled && !boardSelectionChanged)
-            Test.RefreshProductionSettingsOnly();
-        else if (boardSelectionChanged)
+        if (boardSelectionChanged)
             await Test.ReconnectBoardForSettingsAsync();
         else if (scanHardwareChanged)
             await Test.RefreshProductionConfigurationAsync();
