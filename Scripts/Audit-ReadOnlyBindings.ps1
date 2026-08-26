@@ -26,8 +26,8 @@ foreach ($name in $displayOnly) {
         $failures.Add("TestWindow: $name must use explicit Mode=OneWay on TextBox.Text")
     }
 }
-if ($testText -notmatch 'Text="\{Binding\s+ProbeCycleCount,\s*Mode=OneWay\}"') {
-    $failures.Add('TestWindow: PartCnt counter must use explicit Mode=OneWay')
+if ($testText -notmatch 'Text="\{Binding\s+ProbeCycleText,\s*Mode=OneWay\}"') {
+    $failures.Add('TestWindow: PartCnt display must bind ProbeCycleText with explicit Mode=OneWay')
 }
 
 # 2) No implicit TextBox.Text bindings are allowed in TestWindow.

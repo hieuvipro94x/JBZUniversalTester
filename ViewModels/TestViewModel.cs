@@ -1497,8 +1497,6 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task HardwareMonitorLoopAsync(CancellationToken ct)
     {
-        const int scanStallTimeoutMs = 2500;
-
         while (!ct.IsCancellationRequested)
         {
             try
@@ -1521,6 +1519,8 @@ public sealed class TestViewModel : ObservableObject
                         if (lastFrameUtc != DateTime.MinValue)
                         {
                             double ageMs = (DateTime.UtcNow - lastFrameUtc).TotalMilliseconds;
+                            int scanStallTimeoutMs =
+                                ScanSupervisor.ResolveProductionStallTimeoutMs(_board.Capacity);
                             if (ageMs > scanStallTimeoutMs)
                             {
                                 await RecoverProductionScanStallAsync(

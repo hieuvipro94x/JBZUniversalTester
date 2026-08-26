@@ -4,6 +4,9 @@ namespace JBZUniversalTester.Services;
 
 public sealed class ScanSupervisor
 {
+    private const int MinimumFirstFrameTimeoutMs = 1_500;
+    private const int FirstFrameTimeoutPerExpansionModuleMs = 1_500;
+    private const int StallTimeoutMarginMs = 2_500;
     private readonly IBoardTransport _board;
     private readonly Action<string> _log;
     private int _recoveryActive;
@@ -35,10 +38,11 @@ public sealed class ScanSupervisor
         ct.ThrowIfCancellationRequested();
 
         _board.ConfigureScanRange(maxIo);
-        long baseline = _board.LastFrameSequence;
+        long baselineFrameCount = _board.FramesReceived;
         await _board.StartScanAsync(BoardScanMode.Production, ct);
+        int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
 
-        if (await WaitForNextProductionFrameAsync(baseline, 1_200, ct))
+        if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
         {
             _log($"START_SCAN OK sau {reason}: đã nhận frame production mới.");
             return;
@@ -47,11 +51,11 @@ public sealed class ScanSupervisor
         _log($"START_SCAN sau {reason} chưa có frame đầu - tự recovery STOP/START một lần.");
         await _board.StopScanAsync(CancellationToken.None);
 
-        baseline = _board.LastFrameSequence;
+        baselineFrameCount = _board.FramesReceived;
         _board.ConfigureScanRange(maxIo);
         await _board.StartScanAsync(BoardScanMode.Production, ct);
 
-        if (await WaitForNextProductionFrameAsync(baseline, 1_500, ct))
+        if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
         {
             _log($"Recovery scan OK sau {reason}: stream production đã trở lại.");
             return;
@@ -77,12 +81,13 @@ public sealed class ScanSupervisor
             _log(
                 $"[SCAN-WATCHDOG] STALL age={ageMs:0}ms seq={lastSequence} frames={framesReceived}; recovery STOP/START.");
 
-            long baseline = _board.LastFrameSequence;
+            long baselineFrameCount = _board.FramesReceived;
             await _board.StopScanAsync(CancellationToken.None);
             _board.ConfigureScanRange(maxIo);
             await _board.StartScanAsync(BoardScanMode.Production, ct);
 
-            if (await WaitForNextProductionFrameAsync(baseline, 1_500, ct))
+            int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
+            if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
             {
                 _log($"[SCAN-WATCHDOG] recovery success first-frame seq={_board.LastFrameSequence}.");
                 return true;
@@ -92,9 +97,10 @@ public sealed class ScanSupervisor
             await _board.DisconnectAsync();
             await reconnectAsync();
 
-            baseline = _board.LastFrameSequence;
+            baselineFrameCount = _board.FramesReceived;
             await EnsureProductionScanAsync(maxIo, ct);
-            if (await WaitForNextProductionFrameAsync(baseline, 2_000, ct))
+            firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
+            if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
             {
                 _log($"[SCAN-WATCHDOG] reconnect recovery success first-frame seq={_board.LastFrameSequence}.");
                 return true;
@@ -108,8 +114,19 @@ public sealed class ScanSupervisor
         }
     }
 
+    public static int ResolveFirstFrameTimeoutMs(BoardCapacity capacity)
+    {
+        ArgumentNullException.ThrowIfNull(capacity);
+        return Math.Max(
+            MinimumFirstFrameTimeoutMs,
+            checked(capacity.ExpansionModuleCount * FirstFrameTimeoutPerExpansionModuleMs));
+    }
+
+    public static int ResolveProductionStallTimeoutMs(BoardCapacity capacity) =>
+        checked(ResolveFirstFrameTimeoutMs(capacity) + StallTimeoutMarginMs);
+
     private async Task<bool> WaitForNextProductionFrameAsync(
-        long baselineSequence,
+        long baselineFrameCount,
         int timeoutMs,
         CancellationToken ct)
     {
@@ -121,13 +138,16 @@ public sealed class ScanSupervisor
             if (!_board.IsConnected)
                 return false;
 
-            long current = _board.LastFrameSequence;
-            if (current > 0 && current != baselineSequence)
+            // Decoder sequence starts again at 1 for every scan generation.
+            // FramesReceived is transport-wide and monotonic, so it detects the
+            // first real frame after START_SCAN even when its sequence equals the
+            // final frame sequence from the previous generation.
+            if (_board.FramesReceived > baselineFrameCount)
                 return true;
 
             await Task.Delay(25, ct);
         }
 
-        return _board.LastFrameSequence != baselineSequence;
+        return _board.FramesReceived > baselineFrameCount;
     }
 }

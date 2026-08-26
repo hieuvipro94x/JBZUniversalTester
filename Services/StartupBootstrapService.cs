@@ -10,6 +10,22 @@ public static class StartupBootstrapService
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
         {
+            IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateForCurrentVersion();
+            if (migrated.Count > 0)
+            {
+                log.Application(
+                    $"Production data inherited from previous local version: {string.Join(", ", migrated)}");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Migration failure must be visible, but must not prevent the app
+            // from loading production data that already exists in this folder.
+            log.Error($"Production data inheritance failed: {ex}");
+        }
+
+        try
+        {
             _ = AppSettings.Load();
             log.Application($"appsettings.json ready: {AppSettings.SettingsPath}");
 

@@ -537,8 +537,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     public void ConfigureScanRange(int maxIo)
     {
-        ProductionConfigService.ReloadInto(_production);
-
         int requiredExpansion = BoardCapacity.RequiredExpansionModulesForIo(
             maxIo,
             _production.StartCardNumber);

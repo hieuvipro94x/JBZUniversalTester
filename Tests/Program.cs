@@ -20,6 +20,8 @@ internal static class Program
         (string Name, Action Run)[] tests =
         [
             ("Board capacity/address boundaries", TestBoardCapacity),
+            ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
+            ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
@@ -93,6 +95,100 @@ internal static class Program
                 "JBZ THT (*.tht)|*.tht|Mã hàng legacy (*.model)|*.model",
                 StringComparison.Ordinal),
             "Standard dialog filter must prefer .tht first and keep .model as legacy");
+    }
+
+    private static void TestProductionScanFirstFrameAfterSequenceReset()
+    {
+        var board = new FakeBoard();
+        board.Publish(CreateProductionFrame(sequence: 1));
+        board.StartScanCallback = current =>
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(50);
+                current.Publish(CreateProductionFrame(sequence: 1));
+            });
+        };
+
+        var supervisor = new ScanSupervisor(board, _ => { });
+        supervisor.StartProductionScanAndVerifyFrameAsync(
+                BoardCapacity.MaxGlobalIo,
+                CancellationToken.None,
+                "SELF_TEST_10_MODULES")
+            .GetAwaiter()
+            .GetResult();
+
+        Assert(
+            board.Commands.Count(command => command == "START") == 1,
+            "First frame of the new generation must not trigger STOP/START recovery");
+        Assert(
+            ScanSupervisor.ResolveFirstFrameTimeoutMs(BoardCapacity.Create(10)) == 15_000,
+            "Ten-module first-frame watchdog must allow the measured long hardware frame");
+        Assert(
+            ScanSupervisor.ResolveProductionStallTimeoutMs(BoardCapacity.Create(10)) == 17_500,
+            "Ten-module background stall watchdog must not interrupt a valid frame");
+
+        static ScanFrame CreateProductionFrame(long sequence) => new(
+            DateTime.Now,
+            BoardCapacity.MaxExpansionModuleCount,
+            new HashSet<int>(),
+            [],
+            true,
+            0,
+            sequence,
+            new Dictionary<int, IReadOnlySet<int>>(),
+            new Dictionary<int, int>(),
+            BoardScanMode.Production);
+    }
+
+    private static void TestProductionDataUpgrade()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZUpgradeTest_" + Guid.NewGuid().ToString("N"));
+        string older = Path.Combine(root, "V16.0.41");
+        string previous = Path.Combine(root, "V16.0.44");
+        string target = Path.Combine(root, "V16.0.45");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(older, "Data", "History"));
+            Directory.CreateDirectory(Path.Combine(previous, "Data", "History"));
+            Directory.CreateDirectory(target);
+
+            File.WriteAllText(Path.Combine(older, "production.statistics.json"), "older-statistics-with-real-production-data");
+            File.WriteAllText(Path.Combine(older, "production.settings.json"), "{\"LotNo\":3456}");
+            File.WriteAllText(Path.Combine(previous, "production.statistics.json"), "latest-statistics");
+            File.WriteAllText(Path.Combine(previous, "production.settings.json"), "{\"LotNo\":2000}");
+            File.WriteAllText(Path.Combine(previous, "PartCnt.txt"), "PART-A 200000 4321");
+            File.WriteAllBytes(
+                Path.Combine(previous, "Data", "History", "test-history.db"),
+                [1, 2, 3, 4]);
+
+            // A value already created on the destination machine is authoritative.
+            File.WriteAllText(Path.Combine(target, "PartCnt.txt"), "PART-A 200000 5000");
+
+            IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateMissingProductionData(
+                target,
+                [previous, older]);
+
+            Assert(
+                File.ReadAllText(Path.Combine(target, "production.statistics.json")) == "older-statistics-with-real-production-data",
+                "Populated production statistics must win over a newer empty-version file");
+            Assert(
+                File.ReadAllText(Path.Combine(target, "production.settings.json")) == "{\"LotNo\":3456}",
+                "Highest persisted LOT must win over a newer default configuration");
+            Assert(
+                File.ReadAllText(Path.Combine(target, "PartCnt.txt")) == "PART-A 200000 5000",
+                "Existing destination PartCnt must never be overwritten");
+            Assert(
+                File.ReadAllBytes(Path.Combine(target, "Data", "History", "test-history.db"))
+                    .SequenceEqual(new byte[] { 1, 2, 3, 4 }),
+                "SQLite test history must be inherited");
+            Assert(migrated.Count == 3, "Only missing production files must be reported as migrated");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void TestFaultDisplayFormatter()
@@ -3270,6 +3366,7 @@ internal static class Program
         public long LastFrameSequence { get; private set; }
         public long FramesReceived { get; private set; }
         public CancellationToken? LastStartScanToken { get; private set; }
+        public Action<FakeBoard>? StartScanCallback { get; set; }
         private event EventHandler<ScanFrame>? FrameReceivedCore;
         public event EventHandler<ScanFrame>? FrameReceived { add { FrameReceivedCore += value; } remove { FrameReceivedCore -= value; } }
         public event EventHandler<string>? Log { add { } remove { } }
@@ -3285,7 +3382,7 @@ internal static class Program
         public Task HandshakeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ResetClearAsync(CancellationToken ct = default) { Commands.Add("RESET"); return Task.CompletedTask; }
         public void ConfigureScanRange(int maxIo) { }
-        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default) { IsScanning = true; CurrentScanMode = mode; LastStartScanToken = ct; Commands.Add("START"); return Task.CompletedTask; }
+        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default) { IsScanning = true; CurrentScanMode = mode; LastStartScanToken = ct; Commands.Add("START"); StartScanCallback?.Invoke(this); return Task.CompletedTask; }
         public Task StopScanAsync(CancellationToken ct = default) { IsScanning = false; Commands.Add("STOP"); return Task.CompletedTask; }
         public Task EnterIdleAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task SelectResistanceRouteAsync(ResistanceStep step, CancellationToken ct = default)

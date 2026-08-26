@@ -13,8 +13,10 @@ int connectCycles = IntValue("--connect-cycles", 0, 0, 30);
 int scanCycles = IntValue("--scan-cycles", 0, 0, 100);
 int expansionCards = IntValue("--expansion-cards", 2, 1, BoardIoDecoder.MaxExpansionCardCount);
 bool routeResistance = Has("--route-resistance");
+bool verifySupervisor = Has("--verify-supervisor");
 bool verifyVisa = Has("--visa");
 string? tracePath = Value("--trace");
+string? modelDirectory = Value("--model-directory");
 
 Console.WriteLine($"UTC={DateTime.UtcNow:O} Architecture={RuntimeInformation.ProcessArchitecture}");
 uint d2xxVersion;
@@ -60,7 +62,44 @@ if (verifyVisa)
     }
 }
 
-if (passiveSeconds == 0 && connectCycles == 0 && scanCycles == 0 && !routeResistance)
+if (!string.IsNullOrWhiteSpace(modelDirectory))
+{
+    string fullDirectory = Path.GetFullPath(modelDirectory);
+    if (!Directory.Exists(fullDirectory))
+    {
+        Console.Error.WriteLine($"MODEL_DIRECTORY_NOT_FOUND: {fullDirectory}");
+        return 6;
+    }
+
+    var parser = new ThtModelParser();
+    int modelFailures = 0;
+    foreach (string modelPath in Directory.EnumerateFiles(fullDirectory, "*.tht", SearchOption.TopDirectoryOnly)
+                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+    {
+        try
+        {
+            ProductModel model = parser.Load(modelPath);
+            int requiredModules = BoardCapacity.RequiredExpansionModulesForIo(model.MaxIo);
+            Console.WriteLine(
+                $"MODEL_PARSE PASS file=\"{Path.GetFileName(modelPath)}\" part=\"{model.PartNumber}\" " +
+                $"pins={model.Pins.Count} nets={model.Nets.Count} maxIo={model.MaxIo} " +
+                $"requiredModules={requiredModules} warnings={model.TopologyWarnings.Count}");
+            foreach (string warning in model.TopologyWarnings)
+                Console.WriteLine($"MODEL_WARNING file=\"{Path.GetFileName(modelPath)}\" {warning}");
+        }
+        catch (Exception ex)
+        {
+            modelFailures++;
+            Console.Error.WriteLine(
+                $"MODEL_PARSE FAIL file=\"{Path.GetFileName(modelPath)}\" {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    if (modelFailures > 0)
+        return 7;
+}
+
+if (passiveSeconds == 0 && connectCycles == 0 && scanCycles == 0 && !routeResistance && !verifySupervisor)
     return 0;
 
 D2xxDeviceInfo[] targets = devices.Where(IsTargetBoard).ToArray();
@@ -104,7 +143,7 @@ if (connectCycles > 0)
     }
 }
 
-if (scanCycles > 0 || passiveSeconds > 0 || routeResistance)
+if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || verifySupervisor)
 {
     await using var board = new D2xxBoardTransport(targets[0].Serial, production);
     StreamWriter? trace = null;
@@ -157,6 +196,21 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance)
     {
         BoardConnectionInfo connection = await board.ConnectAsync();
         Console.WriteLine($"CONNECTED Description=\"{connection.Description}\" Serial=\"{connection.SerialNumber}\"");
+
+        if (verifySupervisor)
+        {
+            var supervisor = new ScanSupervisor(board, message => Console.WriteLine($"SUPERVISOR {message}"));
+            var verifyWatch = Stopwatch.StartNew();
+            await supervisor.StartProductionScanAndVerifyFrameAsync(
+                BoardCapacity.MaxGlobalIo,
+                CancellationToken.None,
+                "HARDWARE_VERIFY_10_MODULES");
+            verifyWatch.Stop();
+            Console.WriteLine(
+                $"SUPERVISOR_VERIFY PASS elapsedMs={verifyWatch.Elapsed.TotalMilliseconds:0.###} " +
+                $"frames={board.FramesReceived} timeoutMs={ScanSupervisor.ResolveFirstFrameTimeoutMs(board.Capacity)}");
+            await board.StopScanAsync();
+        }
 
         if (scanCycles > 0)
         {

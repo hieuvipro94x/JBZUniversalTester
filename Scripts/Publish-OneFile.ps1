@@ -134,7 +134,7 @@ try {
         throw ("Restore failed. See: " + $logPath)
     }
 
-    Write-Step "Publishing one framework-dependent EXE"
+    Write-Step "Publishing one framework-dependent ReadyToRun EXE"
 
     $publishArguments = @(
         "publish"
@@ -152,7 +152,7 @@ try {
         "-p:UseAppHost=true"
         "-p:EnableCompressionInSingleFile=false"
         "-p:IncludeNativeLibrariesForSelfExtract=true"
-        "-p:PublishReadyToRun=false"
+        "-p:PublishReadyToRun=true"
         "-p:PublishTrimmed=false"
         "-p:DebugType=None"
         "-p:DebugSymbols=false"
