@@ -6370,9 +6370,12 @@ public sealed class TestViewModel : ObservableObject
         try
         {
             request = LabelPrintRequest.Capture(history, model, settings);
-            identity = EplLabelService.BuildIdentity(request.Data);
-            if (LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) ==
-                LabelSettings.SmallTemplate)
+            string templateType = LabelProfileResolver.NormalizeTemplateType(settings.TemplateType);
+            identity = EplLabelService.BuildIdentity(
+                request.Data,
+                includeAlcLotSuffix: templateType == LabelSettings.LargeTemplate);
+            if (templateType == LabelSettings.SmallTemplate ||
+                templateType == LabelSettings.SmallQrTemplate)
             {
                 identity = identity with { BarcodeValue = request.Data.Barcode };
             }

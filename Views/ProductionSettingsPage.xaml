@@ -503,6 +503,7 @@
                                   SelectedValue="{Binding Settings.Label.TemplateType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
                             <ComboBoxItem Content="TEM TO" Tag="TEM_TO"/>
                             <ComboBoxItem Content="TEM BÉ" Tag="TEM_BE"/>
+                            <ComboBoxItem Content="TEM BÉ QR" Tag="TEM_BE_QR"/>
                         </ComboBox>
 
                         <TextBlock Grid.Row="2" Text="Tự động in PASS" Style="{StaticResource FieldLabelStyle}"/>

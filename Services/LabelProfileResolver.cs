@@ -90,10 +90,15 @@ public static class LabelProfileResolver
 
     private static int ResolveCopies(ProductModel model, LabelSettings settings) => 1;
 
-    public static string NormalizeTemplateType(string? value) =>
-        string.Equals(value?.Trim(), LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase)
-            ? LabelSettings.SmallTemplate
-            : LabelSettings.LargeTemplate;
+    public static string NormalizeTemplateType(string? value)
+    {
+        string normalized = value?.Trim() ?? string.Empty;
+        if (string.Equals(normalized, LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase))
+            return LabelSettings.SmallTemplate;
+        if (string.Equals(normalized, LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase))
+            return LabelSettings.SmallQrTemplate;
+        return LabelSettings.LargeTemplate;
+    }
 
     public static string ResolveBuiltInTemplatePath(string? templateType) =>
         Path.Combine(

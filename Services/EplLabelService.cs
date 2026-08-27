@@ -1,4 +1,5 @@
 using System.IO;
+using System.Globalization;
 using System.Text;
 using JBZUniversalTester.Models;
 
@@ -32,12 +33,33 @@ public static class EplLabelService
         return request.Payload;
     }
 
-    public static LabelIdentity BuildIdentity(LabelPrintData data)
+    public static LabelIdentity BuildIdentity(
+        LabelPrintData data,
+        bool includeAlcLotSuffix = true)
     {
         string date = data.TestedAt.ToString("yyMMdd");
+        string lot = FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix);
         return new LabelIdentity(
-            $"{date}{data.LotNo}WH",
-            $"{data.PartNumber}{date}{data.LotNo}");
+            $"{date}{lot}WH",
+            $"{data.PartNumber}{date}{lot}");
+    }
+
+    internal static string FormatLotNo(long lotNo, string? alc, bool includeAlcLotSuffix)
+    {
+        string lot = lotNo.ToString(CultureInfo.InvariantCulture);
+        if (!includeAlcLotSuffix || string.IsNullOrWhiteSpace(alc))
+            return lot;
+
+        string[] parts = alc.Split('/', StringSplitOptions.TrimEntries);
+        if (parts.Length == 3 &&
+            parts[0].Length > 0 &&
+            parts[1].Length > 0 &&
+            (parts[2] == "1" || parts[2] == "2"))
+        {
+            return lot + parts[2];
+        }
+
+        return lot;
     }
 
     public static string Build90x15(

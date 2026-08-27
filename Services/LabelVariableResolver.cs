@@ -42,13 +42,16 @@ public static class LabelVariableResolver
                 values[name.Trim()] = value ?? string.Empty;
         }
 
-        bool isSmallLabel =
-            LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) ==
-            LabelSettings.SmallTemplate;
-        LabelIdentity identity = EplLabelService.BuildIdentity(data);
-        string lot = isSmallLabel
+        string templateType = LabelProfileResolver.NormalizeTemplateType(settings.TemplateType);
+        bool isSmallLabel = templateType == LabelSettings.SmallTemplate;
+        bool isSmallQrLabel = templateType == LabelSettings.SmallQrTemplate;
+        bool usesFourDigitLot = isSmallLabel || isSmallQrLabel;
+        LabelIdentity identity = EplLabelService.BuildIdentity(
+            data,
+            includeAlcLotSuffix: !usesFourDigitLot);
+        string lot = usesFourDigitLot
             ? data.LotNo.ToString("D4", CultureInfo.InvariantCulture)
-            : data.LotNo.ToString(CultureInfo.InvariantCulture);
+            : EplLabelService.FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix: true);
         string barcode = string.IsNullOrWhiteSpace(data.Barcode)
             ? identity.BarcodeValue
             : data.Barcode;
@@ -72,6 +75,15 @@ public static class LabelVariableResolver
             barcode = smallLabelBarcode;
             barcodePrint = smallLabelBarcode;
         }
+        else if (isSmallQrLabel)
+        {
+            string qrBarcode =
+                $"{data.PartNumber},{data.TestedAt.ToString("yyMMdd", CultureInfo.InvariantCulture)}{lot}";
+            values["SMALL_QR_BARCODE"] = qrBarcode;
+            values["PART_NUMBER"] = data.PartNumber;
+            barcode = qrBarcode;
+            barcodePrint = qrBarcode;
+        }
 
         // Highest priority: immutable data captured for the completed cycle.
         values["LOT"] = lot;
@@ -85,7 +97,7 @@ public static class LabelVariableResolver
         values["PRINT_DATE"] = data.TestedAt.ToString("yyMMdd", CultureInfo.InvariantCulture);
         values["CYCLE_ID"] = data.CycleId;
         values["SERIAL_TEXT"] = identity.SerialText;
-        values["BARCODE_VALUE"] = isSmallLabel ? barcode : identity.BarcodeValue;
+        values["BARCODE_VALUE"] = usesFourDigitLot ? barcode : identity.BarcodeValue;
         values["BARCODE"] = barcode;
         values["BARCODE_PRINT"] = barcodePrint;
 

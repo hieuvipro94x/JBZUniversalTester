@@ -300,6 +300,7 @@ public sealed class LabelSettings
 {
     public const string LargeTemplate = "TEM_TO";
     public const string SmallTemplate = "TEM_BE";
+    public const string SmallQrTemplate = "TEM_BE_QR";
 
     /// <summary>
     /// Tên máy in được cài trong Windows.

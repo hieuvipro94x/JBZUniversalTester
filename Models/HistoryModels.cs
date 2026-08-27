@@ -200,17 +200,26 @@ public sealed record LabelPrintRequest(
             model.CustomerCode,
             history.CycleId);
 
-        LabelIdentity identity = JBZUniversalTester.Services.EplLabelService.BuildIdentity(data);
+        string templateType =
+            JBZUniversalTester.Services.LabelProfileResolver.NormalizeTemplateType(settings.TemplateType);
+        bool isSmallLabel = templateType == LabelSettings.SmallTemplate;
+        bool isSmallQrLabel = templateType == LabelSettings.SmallQrTemplate;
+        LabelIdentity identity = JBZUniversalTester.Services.EplLabelService.BuildIdentity(
+            data,
+            includeAlcLotSuffix: !isSmallLabel && !isSmallQrLabel);
         data = data with { Barcode = identity.BarcodeValue, BarcodePrint = identity.BarcodeValue };
         IReadOnlyDictionary<string, string> variables =
             JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
 
-        bool isSmallLabel =
-            JBZUniversalTester.Services.LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) ==
-            LabelSettings.SmallTemplate;
         if (isSmallLabel)
         {
             string barcode = variables["SMALL_LABEL_BARCODE"];
+            data = data with { Barcode = barcode, BarcodePrint = barcode };
+            variables = JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
+        }
+        else if (isSmallQrLabel)
+        {
+            string barcode = variables["SMALL_QR_BARCODE"];
             data = data with { Barcode = barcode, BarcodePrint = barcode };
             variables = JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
         }
@@ -236,6 +245,13 @@ public sealed record LabelPrintRequest(
                 $"[LABEL] Type={LabelSettings.SmallTemplate} PartNumber={data.PartNumber} " +
                 $"YearCode={variables["YEAR_CODE"]} MonthCode={variables["MONTH_CODE"]} " +
                 $"DayCode={variables["DAY_CODE"]} Lot={variables["LOT_NO"]} Barcode={data.Barcode}",
+                JBZUniversalTester.Services.AppLogLevel.Diagnostic);
+        }
+        else if (isSmallQrLabel)
+        {
+            JBZUniversalTester.Services.AsyncFileLogService.Current.Application(
+                $"[LABEL] Type={LabelSettings.SmallQrTemplate} PartNumber={data.PartNumber} " +
+                $"Date={variables["DATE_YYMMDD"]} Lot={variables["LOT_NO"]} QR={data.Barcode}",
                 JBZUniversalTester.Services.AppLogLevel.Diagnostic);
         }
 

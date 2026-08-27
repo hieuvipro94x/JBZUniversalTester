@@ -519,6 +519,8 @@ internal static class Program
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
+        Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
+            "Production settings exposes the dedicated TEM BE QR selection");
 
         string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
         string soundSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
@@ -2909,7 +2911,48 @@ internal static class Program
                 () => LabelPrintRequest.Capture(history, model, labelSettings),
                 "KETQU without original template/trace is marked NEEDS_ORIGINAL_TRACE");
 
-            model = ParseThtLabelModelText();
+            model = ParseThtLabelModelText("12000/20430/1");
+            history.LotNo = 2001;
+            history.Finished = new DateTime(2026, 8, 27, 8, 9, 10);
+            labelSettings.TemplateType = LabelSettings.LargeTemplate;
+            LabelPrintRequest largeSuffix1 = LabelPrintRequest.Capture(history, model, labelSettings);
+            Assert(model.Alc == "12000/20430/1" &&
+                   largeSuffix1.Data.Barcode == "KL375C100026082720011" &&
+                   largeSuffix1.Payload.Contains("26082720011WH", StringComparison.Ordinal) &&
+                   largeSuffix1.Payload.Contains("KL375C100026082720011", StringComparison.Ordinal),
+                "TEM_TO reads ALC /1 from THT and appends 1 immediately after LOTNO");
+
+            LabelPrintData suffix2Data = largeSuffix1.Data with { Alc = "12000/20430/2" };
+            LabelIdentity suffix2Identity = EplLabelService.BuildIdentity(suffix2Data);
+            LabelIdentity noSuffixIdentity = EplLabelService.BuildIdentity(
+                suffix2Data with { Alc = "12000/20430" });
+            Assert(suffix2Identity.SerialText == "26082720012WH" &&
+                   suffix2Identity.BarcodeValue == "KL375C100026082720012" &&
+                   noSuffixIdentity.SerialText == "2608272001WH" &&
+                   noSuffixIdentity.BarcodeValue == "KL375C10002608272001",
+                "TEM_TO supports ALC /2 and keeps legacy output when ALC has no suffix");
+
+            ProductModel qrModel = ParseThtLabelModelText("12000/20430");
+            qrModel.PartNumber = "K32000-22402";
+            history.LotNo = 1;
+            history.Finished = new DateTime(2026, 8, 27, 8, 9, 10);
+            labelSettings.TemplateType = LabelSettings.SmallQrTemplate;
+            LabelPrintRequest qrLabel = LabelPrintRequest.Capture(history, qrModel, labelSettings);
+            IReadOnlyDictionary<string, string> qrValues =
+                LabelVariableResolver.Resolve(qrModel, qrLabel.Data, labelSettings);
+            Assert(LabelProfileResolver.NormalizeTemplateType("TEM_BE_QR") == LabelSettings.SmallQrTemplate &&
+                   qrLabel.Profile.Id == LabelSettings.SmallQrTemplate &&
+                   qrValues["LOT_NO"] == "0001" &&
+                   qrValues["SMALL_QR_BARCODE"] == "K32000-22402,2608270001" &&
+                   qrLabel.Data.Barcode == "K32000-22402,2608270001" &&
+                   qrLabel.Data.BarcodePrint == "K32000-22402,2608270001" &&
+                   qrLabel.Payload.Contains("b200,13,Q,S3,V00\",\"V05V06", StringComparison.Ordinal) &&
+                   qrLabel.Payload.Contains(
+                       "?\nK32000-22402\nAE EV PE\nVOLTAGE_6S\nAE EV PE\n12000/20430\n" +
+                       "260827\n0001\nNCO-7\n12000/20430\nVOLTAGE_6S\nAE EV PE\n",
+                       StringComparison.Ordinal),
+                "TEM_BE_QR follows 60-15 EPL, reads product fields from THT and encodes PartNumber,yyMMddLOT4");
+
             labelSettings.TemplateType = LabelSettings.SmallTemplate;
 
             LabelPrintRequest SmallLabel(long lot, DateTime date)
@@ -3000,6 +3043,8 @@ internal static class Program
             model.ProductName = "BMS EXT";
             model.Eco = "US4 HEV";
             model.VehicleType = model.Eco;
+            model.Alc = "12000/20430";
+            model.CustomerCode = model.Alc;
             model.LabelVariables.Clear();
             history.LotNo = 7001;
             history.Finished = new DateTime(2026, 7, 31, 8, 9, 10);
@@ -3137,6 +3182,39 @@ internal static class Program
                captureArguments[5] is string captureError &&
                captureError.Contains("NEEDS_ORIGINAL_TRACE", StringComparison.Ordinal),
             "Unresolved KS91 label configuration is contained as a print failure and cannot escape into PASS/ProductRemoved lifecycle");
+
+        var qrHistory = new TestHistoryRecord
+        {
+            Finished = finished,
+            PartName = "QR PRODUCT",
+            PartNumber = "K32000-22402",
+            Alc = "12000/20430/2",
+            LotNo = 1,
+            Result = "PASS",
+            Passed = true,
+            ModelName = "QR MODEL",
+            ModelFile = "QR.model.tht",
+            CycleId = "cycle-qr"
+        };
+        var qrModel = new ProductModel
+        {
+            ProductName = qrHistory.PartName,
+            PartNumber = qrHistory.PartNumber,
+            Eco = "HE EV",
+            VehicleType = "HE EV",
+            Alc = qrHistory.Alc,
+            CustomerCode = qrHistory.Alc
+        };
+        var qrSettings = new LabelSettings { TemplateType = LabelSettings.SmallQrTemplate };
+        object?[] qrCaptureArguments = [qrHistory, qrModel, qrSettings, null, null, null];
+        bool qrCaptured = (bool)(tryCapturePassLabel.Invoke(null, qrCaptureArguments) ?? false);
+        Assert(qrCaptured &&
+               qrCaptureArguments[3] is LabelPrintRequest capturedQrRequest &&
+               capturedQrRequest.Data.Barcode == "K32000-22402,2608100001" &&
+               qrCaptureArguments[4] is LabelIdentity capturedQrIdentity &&
+               capturedQrIdentity.SerialText == "2608101WH" &&
+               capturedQrIdentity.BarcodeValue == "K32000-22402,2608100001",
+            "TEM_BE_QR PASS history keeps QR barcode and does not apply TEM_TO ALC suffix");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -3401,11 +3479,11 @@ internal static class Program
         throw new InvalidOperationException(message);
     }
 
-    private static ProductModel ParseThtLabelModelText()
+    private static ProductModel ParseThtLabelModelText(string alc = "ALC-FROM-THT")
     {
-        const string modelText =
+        string modelText =
             "파트번호\t파트명\tECO\tNCO\tALC\n" +
-            "KL375C1000\tVOLTAGE_6S\tAE EV PE\tNCO-7\tALC-FROM-THT\n\n" +
+            $"KL375C1000\tVOLTAGE_6S\tAE EV PE\tNCO-7\t{alc}\n\n" +
             "번 호\t커넥터\t핀 수\n" +
             "1\tCN1\t2\n\n" +
             "커넥터\t선이름\tI/O\t핀번호\n" +
