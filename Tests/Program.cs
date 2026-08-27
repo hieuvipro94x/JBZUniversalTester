@@ -47,6 +47,7 @@ internal static class Program
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("Production scan token survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
+            ("Incomplete product full release resets normal and CLIP cycle", TestIncompleteProductFullReleaseResetsClipCycle),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),
             ("Original PHT20 PASS/ERR history compatibility", TestLegacyPhtHistory),
             ("Per-model production/probe maintenance counters", TestProductionCounters)
@@ -1560,6 +1561,74 @@ internal static class Program
                reloaded.ProductSettleTimeMs == ProductionTimingPolicy.DefaultProductSettleTimeMs &&
                reloaded.JigContactUnstableWindowMs == ProductionTimingPolicy.DefaultJigContactUnstableWindowMs,
             "Legacy timing settings load but normalize to internal runtime defaults");
+    }
+
+    private static void TestIncompleteProductFullReleaseResetsClipCycle()
+    {
+        const string referenceThtPath = @"C:\ITEM\WH322244.tht";
+        if (File.Exists(referenceThtPath))
+        {
+            ProductModel parsedReference = new ThtModelParser().Load(referenceThtPath);
+            Assert(parsedReference.Clip is not null &&
+                   parsedReference.Clip.CommonIo == 201 &&
+                   parsedReference.Clip.Branches.Any(branch => branch.Name == "a1" && branch.TargetIo == 202) &&
+                   parsedReference.Clip.Branches.Any(branch => branch.Name == "a2" && branch.TargetIo == 203) &&
+                   parsedReference.Clip.Branches.Any(branch => branch.Name == "a3" && branch.TargetIo == 204),
+                "WH322244 actual THT parses AO=IO201 and a1/a2/a3 from their configured IO columns");
+        }
+
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            ProductSettleTimeMs = 0,
+            WrongConnectionConfirmMs = 0,
+            ShortCircuitConfirmMs = 0
+        };
+        TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
+
+        // Tham chiếu C:\ITEM\WH322244.tht: AO common dùng IO201;
+        // a1/a2/a3 lấy IO thật từ cột I/O lần lượt 202/203/204.
+        ProductModel model = Model(("NORMAL", new[] { 1, 18 }));
+        var common = new PinRecord("CLIP", "AO", 201, "AO", PinType: "AO");
+        var a1 = new PinRecord("CLIP", "a1", 202, "a1", PinType: "a1");
+        var a2 = new PinRecord("CLIP", "a2", 203, "a2", PinType: "a2");
+        var a3 = new PinRecord("CLIP", "a3", 204, "a3", PinType: "a3");
+        model.Pins.AddRange([common, a1, a2, a3]);
+        model.Clip = new ClipTopology(
+            common,
+            [
+                new ClipBranch("a1", 1, 202, a1, null),
+                new ClipBranch("a2", 2, 203, a2, null),
+                new ClipBranch("a3", 3, 204, a3, null)
+            ]);
+
+        vm.SetModel(model);
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+
+        // Lắp dở: một dây thường và hai nhánh CLIP đã nối.
+        board.Publish(FrameSeq(
+            1,
+            (1, new[] { 18 }),
+            (201, new[] { 202, 203 })));
+        Assert(vm.PassedNetworkCount == 3 && vm.State != "SẴN SÀNG",
+            "Normal wire and connected AO-aN branches are latched in the incomplete cycle");
+
+        // Tháo dây thường nhưng AO-a1 vẫn còn: tuyệt đối chưa reset.
+        board.Publish(FrameSeq(2, (201, new[] { 202 })));
+        Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
+        board.Publish(FrameSeq(3, (201, new[] { 202 })));
+        Assert(vm.PassedNetworkCount > 0 && vm.State != "SẴN SÀNG",
+            "One remaining AO-a1 connection prevents cycle reset");
+
+        // Chỉ khi không còn bất kỳ cặp dây thường/CLIP nào và trạng thái rỗng
+        // ổn định hết cửa sổ chống chập chờn thì mới xóa toàn bộ latch.
+        board.Publish(FrameSeq(4));
+        Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
+        board.Publish(FrameSeq(5));
+        Assert(vm.PassedNetworkCount == 0 &&
+               vm.State == "SẴN SÀNG" &&
+               vm.ResultStatusText == "SẴN SÀNG",
+            "Full stable release clears normal/CLIP latches and returns the cycle to ready");
     }
 
     private static void TestPartCounterStore()

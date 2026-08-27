@@ -46,6 +46,8 @@
     <DebugSymbols Condition="'$(Configuration)' == 'Release'">false</DebugSymbols>
 
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <Platforms>AnyCPU;x86</Platforms>
   </PropertyGroup>
 
   <!-- V12.9: chan build neu Version.props bi cap nhat lech. -->
@@ -56,14 +58,10 @@
     <Error Condition="'$(Version)' == ''" Text="Version.props: Version khong duoc de trong." />
     <Error Condition="'$(AssemblyVersion)' == ''" Text="Version.props: AssemblyVersion khong duoc de trong." />
     <Error Condition="'$(FileVersion)' == ''" Text="Version.props: FileVersion khong duoc de trong." />
-    <Error Condition="'$(AssemblyVersion)' != '$(Version).0'"
-           Text="Version.props khong dong bo: AssemblyVersion=$(AssemblyVersion), can la $(Version).0." />
-    <Error Condition="'$(FileVersion)' != '$(Version).0'"
-           Text="Version.props khong dong bo: FileVersion=$(FileVersion), can la $(Version).0." />
-    <Error Condition="'$(InformationalVersion)' != '$(Version)'"
-           Text="Version.props khong dong bo: InformationalVersion=$(InformationalVersion), can la $(Version)." />
-    <Error Condition="'$(VersionFileTag)' != '$(ExpectedVersionFileTag)'"
-           Text="Version.props khong dong bo: VersionFileTag=$(VersionFileTag), can la $(ExpectedVersionFileTag)." />
+    <Error Condition="'$(AssemblyVersion)' != '$(Version).0'" Text="Version.props khong dong bo: AssemblyVersion=$(AssemblyVersion), can la $(Version).0." />
+    <Error Condition="'$(FileVersion)' != '$(Version).0'" Text="Version.props khong dong bo: FileVersion=$(FileVersion), can la $(Version).0." />
+    <Error Condition="'$(InformationalVersion)' != '$(Version)'" Text="Version.props khong dong bo: InformationalVersion=$(InformationalVersion), can la $(Version)." />
+    <Error Condition="'$(VersionFileTag)' != '$(ExpectedVersionFileTag)'" Text="Version.props khong dong bo: VersionFileTag=$(VersionFileTag), can la $(ExpectedVersionFileTag)." />
   </Target>
 
   <!-- Icon -->

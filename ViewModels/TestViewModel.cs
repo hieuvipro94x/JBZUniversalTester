@@ -2131,11 +2131,14 @@ public sealed class TestViewModel : ObservableObject
 
                 if (_engine.ContactLossTimedOut && _productDetectedThisCycle)
                 {
-                    // Mất contact kéo dài được xem là ranh giới cơ khí bị hủy,
-                    // không phải FAIL. Lần lắp/contact tiếp theo là một Probe cycle mới.
-                    _productDetectedThisCycle = false;
-                    Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
-                    AddLog("JIG CONTACT WARNING: mất toàn bộ contact quá cửa sổ; không ghi product FAIL.");
+                    // Sản phẩm đang lắp dở nhưng đã mất TOÀN BỘ cạnh điện đủ lâu:
+                    // đây là thao tác tháo để lắp lại từ đầu, không phải OPEN/FAIL.
+                    // ResetProductCycle phải xóa cả latch WireNet và CLIP AO/A0-aN.
+                    // Nếu còn dù chỉ một cạnh dây thường hoặc CLIP thì
+                    // HasProductActivity vẫn true và tuyệt đối không vào nhánh này.
+                    ResetFullCycleAfterProductRemoved();
+                    State = "SẴN SÀNG";
+                    AddLog("Đã tháo hoàn toàn sản phẩm đang lắp dở; reset dây thường và toàn bộ nhánh CLIP để lắp lại từ đầu.");
                 }
                 else if (_engine.HasProductActivity && !_productDetectedThisCycle)
                 {
