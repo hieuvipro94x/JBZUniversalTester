@@ -66,7 +66,7 @@ public sealed class TestHistoryRecord
     public string LabelTypeText => !string.IsNullOrWhiteSpace(LabelTemplateType)
         ? LabelTemplateType
         : LabelProfile;
-    // BarcodeValue là giá trị đã chốt theo đúng TEM BÉ/TEM TO tại thời điểm PASS.
+    // BarcodeValue chỉ được chốt sau khi sản phẩm PASS và máy in xác nhận thành công.
     // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
     public string BarcodeOutputText => BarcodeValue ?? string.Empty;
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
@@ -78,12 +78,12 @@ public sealed class TestHistoryRecord
     public long? ExportAcceptedLotNo => !IsMasterRecord && Passed && LotNo > 0 ? LotNo : null;
     public long? ExportSequenceNo => ExportAcceptedLotNo;
     public string ExportBarcodeInputText => string.Empty;
-    public string ExportBarcodeText => InspectionType switch
-    {
-        HistoryInspectionType.MasterGood => "양품 마스터 검사",
-        HistoryInspectionType.MasterBad => "불량 마스터 검사",
-        _ => BarcodeOutputText
-    };
+    public string ExportBarcodeText =>
+        !IsMasterRecord &&
+        Passed &&
+        string.Equals(PrintStatus, LabelPrintStatus.Printed.ToString(), StringComparison.OrdinalIgnoreCase)
+            ? BarcodeOutputText
+            : string.Empty;
     public string ExportPercentText => string.Empty;
     public string ExportIncomingInspectionText => string.Empty;
     public string ExportResistanceText => KoreanHistoryFormatter.FormatResistanceSummary(Resistance);

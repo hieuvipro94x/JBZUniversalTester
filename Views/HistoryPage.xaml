@@ -264,7 +264,12 @@
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       CanUserAddRows="False"
+                      CanUserResizeColumns="False"
                       CanUserResizeRows="False"
+                      CanUserReorderColumns="False"
+                      CanUserSortColumns="False"
+                      ScrollViewer.HorizontalScrollBarVisibility="Visible"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
                       RowHeight="28"
@@ -295,16 +300,16 @@
                 </DataGrid.RowStyle>
 
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="92"/>
-                    <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="72"/>
+                    <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="100"/>
+                    <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="90"/>
                     <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180"/>
-                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="135"/>
-                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="135"/>
-                    <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="105"/>
-                    <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="105"/>
-                    <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding ExportSequenceNo}" Width="78" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTemplateColumn Header="Hồ sơ kiểm tra" Width="500">
+                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150"/>
+                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150"/>
+                    <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115"/>
+                    <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110"/>
+                    <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding ExportSequenceNo}" Width="100" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTemplateColumn Header="Hồ sơ kiểm tra" Width="1200">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportTestLogText}"
@@ -314,7 +319,7 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="Mã vạch" Width="230">
+                    <DataGridTemplateColumn Header="Mã vạch" Width="260">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportBarcodeText}"
@@ -324,9 +329,9 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="200 %" Binding="{Binding ExportPercentText}" Width="70"/>
-                    <DataGridTextColumn Header="Kiểm tra đầu vào" Binding="{Binding ExportIncomingInspectionText}" Width="110"/>
-                    <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="190"/>
+                    <DataGridTextColumn Header="200 %" Binding="{Binding ExportPercentText}" Width="80"/>
+                    <DataGridTextColumn Header="Kiểm tra đầu vào" Binding="{Binding ExportIncomingInspectionText}" Width="130"/>
+                    <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="220"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>

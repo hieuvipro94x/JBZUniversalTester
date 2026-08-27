@@ -69,18 +69,7 @@ public partial class HistoryPage : UserControl
     {
         try
         {
-            DateTime? from = FromDatePicker.SelectedDate?.Date;
-            DateTime? to = ToDatePicker.SelectedDate?.Date.AddDays(1).AddTicks(-1);
-            long? lot = long.TryParse(LotTextBox.Text?.Trim(), out long n) ? n : null;
-            string result = (ResultComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "ALL";
-
-            IReadOnlyList<TestHistoryRecord> rows = _store.Search(new HistorySearchCriteria(
-                from,
-                to,
-                lot,
-                PartTextBox.Text?.Trim() ?? string.Empty,
-                result,
-                20_000));
+            IReadOnlyList<TestHistoryRecord> rows = _store.Search(CreateSearchCriteria(20_000));
 
             Records.Clear();
             foreach (TestHistoryRecord row in rows)
@@ -109,7 +98,22 @@ public partial class HistoryPage : UserControl
         }
     }
 
-    private void ExportCsv_Click(object sender, RoutedEventArgs e)
+    private HistorySearchCriteria CreateSearchCriteria(int maxRows)
+    {
+        DateTime? from = FromDatePicker.SelectedDate?.Date;
+        DateTime? to = ToDatePicker.SelectedDate?.Date.AddDays(1).AddTicks(-1);
+        long? lot = long.TryParse(LotTextBox.Text?.Trim(), out long n) ? n : null;
+        string result = (ResultComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "ALL";
+        return new HistorySearchCriteria(
+            from,
+            to,
+            lot,
+            PartTextBox.Text?.Trim() ?? string.Empty,
+            result,
+            maxRows);
+    }
+
+    private async void ExportCsv_Click(object sender, RoutedEventArgs e)
     {
         if (Records.Count == 0)
         {
@@ -128,10 +132,19 @@ public partial class HistoryPage : UserControl
         if (result != true)
             return;
 
+        HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
         try
         {
-            HistoryExportService.ExportCsv(dialog.FileName, Records.ToArray());
-            ShowMessage($"Đã xuất CSV theo mẫu lịch sử.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
+            int exportedCount = await Task.Run(() =>
+            {
+                IReadOnlyList<TestHistoryRecord> rows = _store.SearchForExport(criteria);
+                HistoryExportService.ExportCsv(dialog.FileName, rows);
+                return rows.Count;
+            });
+            ShowMessage(
+                $"Đã xuất toàn bộ {exportedCount:N0} bản ghi theo mã hàng và ngày/giờ.\n\n{dialog.FileName}",
+                "JBZ",
+                MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
@@ -139,7 +152,7 @@ public partial class HistoryPage : UserControl
         }
     }
 
-    private void ExportXlsx_Click(object sender, RoutedEventArgs e)
+    private async void ExportXlsx_Click(object sender, RoutedEventArgs e)
     {
         if (Records.Count == 0)
         {
@@ -158,10 +171,19 @@ public partial class HistoryPage : UserControl
         if (result != true)
             return;
 
+        HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
         try
         {
-            HistoryExportService.ExportXlsx(dialog.FileName, Records.ToArray());
-            ShowMessage($"Đã xuất Excel đúng 14 cột mẫu gốc; chi tiết chu kỳ nằm trong cột 검 사 기 록.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
+            int exportedCount = await Task.Run(() =>
+            {
+                IReadOnlyList<TestHistoryRecord> rows = _store.SearchForExport(criteria);
+                HistoryExportService.ExportXlsx(dialog.FileName, rows);
+                return rows.Count;
+            });
+            ShowMessage(
+                $"Đã xuất toàn bộ {exportedCount:N0} bản ghi theo mã hàng và ngày/giờ.\n\n{dialog.FileName}",
+                "JBZ",
+                MessageBoxImage.Information);
         }
         catch (Exception ex)
         {

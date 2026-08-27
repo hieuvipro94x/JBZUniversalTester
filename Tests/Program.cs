@@ -2651,7 +2651,7 @@ internal static class Program
                 Result = "PASS",
                 Passed = true,
                 ModelName = "MODEL-A",
-                ModelFile = @"C:\Models\WH322882.setup",
+                ModelFile = @"C:\Models\A.tht",
                 HtdrvName = "JBZUniversalTester V15.2.0",
                 LotText = "VOLVO Radio",
                 InspectionTrace =
@@ -2705,7 +2705,7 @@ internal static class Program
                     StringComparison.Ordinal),
                 "History CSV preserves the exact original 14-column Korean header");
             Assert(csvText.Contains(
-                    "2026-08-09,14:07:05,WH322882.setup,PRODUCT,NI375C1000,NE N EV,VOLVO Radio,합격,2001",
+                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,VOLVO Radio,합격,2001",
                     StringComparison.Ordinal) &&
                    csvText.Contains("장착 14:07:03~14:07:05(2.000초) 14:07:05 검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
@@ -2749,6 +2749,12 @@ internal static class Program
                 Assert(headerIndex > previousHeader, $"History UI Vietnamese 14-column order: {header}");
                 previousHeader = headerIndex;
             }
+            Assert(historyXaml.Contains("CanUserResizeColumns=\"False\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("CanUserReorderColumns=\"False\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("CanUserSortColumns=\"False\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Visible\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Header=\"Hồ sơ kiểm tra\" Width=\"1200\"", StringComparison.Ordinal),
+                "History UI locks column layout and keeps the inspection record widest with horizontal scrolling");
 
             var failed = new TestHistoryRecord
             {
@@ -2793,7 +2799,7 @@ internal static class Program
             Assert(masterBad.IsMasterRecord &&
                    masterBad.ExportAcceptedLotNo is null &&
                    masterBad.ExportResultText == "합격" &&
-                   masterBad.ExportBarcodeText == "불량 마스터 검사" &&
+                   masterBad.ExportBarcodeText.Length == 0 &&
                    masterBad.ExportTestLogText.Contains("회로검사:FAIL", StringComparison.Ordinal) &&
                    masterBad.ExportTestLogText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal),
                 "MASTER BAD history is separate from production and preserves Korean fault evidence");
@@ -2856,6 +2862,58 @@ internal static class Program
                 KoreanHistoryFormatter.FormatFault(resistanceFault) ==
                 "저항불량 R-CH1 115.25Ω 기준 100~110Ω",
                 "Resistance history keeps measured value and limits in concise Korean");
+
+            var exportStore = new TestHistoryStore(Path.Combine(root, "history-export.db"));
+            DateTime monthStart = new(2026, 8, 1, 0, 0, 0, DateTimeKind.Local);
+            exportStore.Add(new TestHistoryRecord
+            {
+                Started = monthStart.AddDays(2),
+                Finished = monthStart.AddDays(2).AddSeconds(1),
+                PartNumber = "PART-A",
+                ModelFile = @"D:\Models\C.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "export-part-a"
+            });
+            exportStore.Add(new TestHistoryRecord
+            {
+                Started = monthStart.AddDays(1),
+                Finished = monthStart.AddDays(1).AddSeconds(1),
+                PartNumber = "PART-Z",
+                ModelFile = @"D:\Models\B.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "export-part-z-b"
+            });
+            exportStore.Add(new TestHistoryRecord
+            {
+                Started = monthStart,
+                Finished = monthStart.AddSeconds(1),
+                PartNumber = "PART-Z",
+                ModelFile = @"D:\Models\A.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "export-part-z-a"
+            });
+
+            var monthlyCriteria = new HistorySearchCriteria(
+                monthStart,
+                monthStart.AddMonths(1).AddTicks(-1),
+                null,
+                string.Empty,
+                "ALL",
+                MaxRows: 1);
+            IReadOnlyList<TestHistoryRecord> limitedRows = exportStore.Search(monthlyCriteria);
+            IReadOnlyList<TestHistoryRecord> allExportRows = exportStore.SearchForExport(monthlyCriteria);
+            Assert(limitedRows.Count == 1 && allExportRows.Count == 3,
+                "History export is independent from the DataGrid row limit");
+            Assert(allExportRows[0].PartNumber == "PART-A" &&
+                   allExportRows[1].CycleId == "export-part-z-a" &&
+                   allExportRows[2].CycleId == "export-part-z-b",
+                "History export sorts by part number, test start time and stable Id");
+            Assert(allExportRows[1].ExportModelFileName == "A.tht" &&
+                   allExportRows[2].ExportModelFileName == "B.tht",
+                "Changing A.tht to B.tht snapshots B.tht only for the new cycle");
         }
         finally
         {
@@ -3318,9 +3376,14 @@ internal static class Program
         LabelIdentity identity = EplLabelService.BuildIdentity(request.Data);
         history.LabelSerial = identity.SerialText;
         history.BarcodeValue = identity.BarcodeValue;
+        Assert(history.ExportBarcodeText.Length == 0,
+            "Auto-print disabled/not requested hides any prepared barcode from history export");
+        history.BarcodeValue = string.Empty;
         history.LabelProfile = request.FormatName;
         history.Printer = request.Printer;
         history.LabelCopies = request.Copies;
+        Assert(history.ExportBarcodeText.Length == 0,
+            "PASS history keeps barcode blank before the printer confirms success");
 
         // UI/current model changes after PASS must not mutate the queued label.
         history.PartNumber = "PART-B";
@@ -3412,6 +3475,10 @@ internal static class Program
                 LabelPrintStatus.Failed,
                 null,
                 "printer offline");
+            TestHistoryRecord failedPrint = store.Search(new HistorySearchCriteria(
+                null, null, 31415, "PART-A", "PASS", 10)).Single();
+            Assert(failedPrint.BarcodeValue.Length == 0 && failedPrint.ExportBarcodeText.Length == 0,
+                "Failed or disabled printing never writes barcode into history");
             Assert(store.TryBeginFirstPrint(id, request.CycleId), "Explicit retry reuses the failed cycle/LOT transaction");
             Assert(!store.TryBeginFirstPrint(id, request.CycleId), "Concurrent retry callback is blocked while Pending");
             store.UpdateLabelPrintOutcome(
@@ -3419,7 +3486,8 @@ internal static class Program
                 request.CycleId,
                 LabelPrintStatus.Printed,
                 finished.AddMilliseconds(250),
-                "software-test");
+                "software-test",
+                identity.BarcodeValue);
             store.IncrementLabelReprint(
                 id,
                 request.CycleId,

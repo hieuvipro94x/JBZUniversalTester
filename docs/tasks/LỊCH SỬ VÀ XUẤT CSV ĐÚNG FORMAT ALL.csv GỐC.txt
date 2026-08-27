@@ -1,0 +1,1795 @@
+# CODEX TASK — HOÀN THIỆN LỊCH SỬ KIỂM TRA + TÌM KIẾM + XUẤT CSV GIỐNG `ALL.csv`
+
+Làm việc trực tiếp trên project `JBZUniversalTester`.
+
+## 1. MỤC TIÊU
+
+Phân tích và sửa hoàn chỉnh luồng:
+
+```text
+TEST
+→ LƯU LỊCH SỬ
+→ TÌM KIẾM LỊCH SỬ
+→ HIỂN THỊ 14 CỘT TIẾNG VIỆT
+→ XUẤT CSV 14 CỘT TIẾNG HÀN
+```
+
+File tham chiếu là:
+
+```text
+ALL.csv
+```
+
+Task này chỉ tập trung vào:
+
+```text
+History
+History database
+History search/filter
+History UI
+History snapshot
+CSV export
+```
+
+Không sửa logic phần cứng, relay, Keysight, leak device, continuity protocol, printer protocol hoặc PASS/FAIL cốt lõi trừ khi cần đọc kết quả để lưu History.
+
+---
+
+# 2. PROJECT NÀY DÙNG FILE CẤU HÌNH `.tht`
+
+Project hiện tại dùng:
+
+```text
+*.tht
+```
+
+làm file cấu hình sản phẩm.
+
+Không sử dụng `.model` cho History của project này.
+
+Phải trace source thật:
+
+```text
+Mở .tht
+→ parse .tht
+→ current product configuration
+→ chạy test
+→ hoàn thành cycle
+→ lưu History
+```
+
+Search toàn repository trước khi sửa:
+
+```text
+.tht
+Tht
+ThtPath
+CurrentTht
+Configuration
+Setup
+ProductConfig
+History
+```
+
+Không giả định tên class/property.
+
+---
+
+# 3. FILE `.tht` CHỈ XÁC ĐỊNH SẢN PHẨM / CẤU HÌNH CƠ BẢN
+
+Không được hard-code workflow theo từng mã hàng.
+
+Các chức năng sau do **Cài đặt phần mềm hiện tại** quyết định:
+
+```text
+TEST LEAK        ON/OFF
+TEST ĐIỆN TRỞ    ON/OFF
+TỰ ĐỘNG IN TEM   ON/OFF
+```
+
+Cùng một file `.tht`, người vận hành có thể bật/tắt các chức năng này khác nhau giữa hai lần chạy.
+
+Không viết kiểu:
+
+```text
+mã này luôn leak
+mã này không leak
+mã này luôn in tem
+mã này không in tem
+```
+
+---
+
+# 4. WORKFLOW PHẢI THEO CÀI ĐẶT
+
+Luồng tổng quát:
+
+```text
+LOAD .THT
+   ↓
+TEST THÔNG MẠCH / TEST CHÍNH
+   ↓
+Leak Enabled?
+   ├─ YES → chạy Leak
+   └─ NO  → bỏ qua
+   ↓
+Resistance Enabled?
+   ├─ YES → chạy những R slot đang Enabled
+   └─ NO  → bỏ qua toàn bộ điện trở
+   ↓
+XÁC ĐỊNH PASS / FAIL
+   ↓
+Auto Print Enabled?
+   ├─ YES + đủ điều kiện → thực hiện in tem
+   └─ NO hoặc không đủ điều kiện → không in
+   ↓
+LƯU HISTORY
+```
+
+---
+
+# 5. HISTORY PHẢI LƯU THỰC TẾ ĐÃ CHẠY
+
+Phải phân biệt:
+
+```text
+Configured
+```
+
+và:
+
+```text
+Executed
+```
+
+Ví dụ:
+
+```text
+AutoPrintEnabled = true
+```
+
+nhưng sản phẩm FAIL trước bước in.
+
+Thực tế:
+
+```text
+PrintExecuted = false
+```
+
+History không được ghi đã in tem.
+
+Tương tự:
+
+```text
+LeakEnabled = true
+```
+
+nhưng workflow dừng trước khi chạy Leak.
+
+History không được tự sinh kết quả Leak.
+
+---
+
+# 6. MỘT CYCLE = MỘT DÒNG HISTORY
+
+Một sản phẩm hoàn thành một cycle chỉ tạo **một History Record**.
+
+Dù cycle chỉ chạy:
+
+```text
+Thông mạch
+```
+
+hay:
+
+```text
+Thông mạch + Leak + Điện trở + In tem
+```
+
+vẫn chỉ một row.
+
+Không tạo row riêng cho từng công đoạn.
+
+---
+
+# 7. CÁC WORKFLOW PHẢI HỖ TRỢ
+
+## Case A — chỉ thông mạch
+
+Settings:
+
+```text
+Leak OFF
+Resistance OFF
+Auto Print OFF
+```
+
+History chỉ chứa:
+
+```text
+검사시작 ...
+회로검사:PASS/FAIL
+탈거 ...
+```
+
+Không có:
+
+```text
+기밀검사
+저항검사
+타각
+온도검사
+```
+
+---
+
+## Case B — thông mạch + tự động in tem
+
+Settings:
+
+```text
+Leak OFF
+Resistance OFF
+Auto Print ON
+```
+
+Nếu test PASS và in thật sự thành công:
+
+```text
+검사시작 ...
+회로검사:PASS
+타각
+탈거 ...
+```
+
+Nếu test FAIL:
+
+```text
+회로검사:FAIL
+```
+
+Không có `타각`.
+
+Barcode phải rỗng nếu không in.
+
+---
+
+## Case C — thông mạch + leak
+
+Settings:
+
+```text
+Leak ON
+Resistance OFF
+Auto Print OFF
+```
+
+History:
+
+```text
+검사시작 ...
+회로검사:PASS
+기밀검사 ...
+탈거 ...
+```
+
+Không có:
+
+```text
+저항검사
+타각
+```
+
+---
+
+## Case D — thông mạch + leak + in tem
+
+Nếu:
+
+```text
+Leak ON
+Resistance OFF
+Auto Print ON
+```
+
+và mọi bước PASS + in thành công:
+
+```text
+검사시작 ...
+회로검사:PASS
+기밀검사 ... :PASS
+타각
+탈거 ...
+```
+
+---
+
+## Case E — thông mạch + điện trở + in tem
+
+Nếu:
+
+```text
+Leak OFF
+Resistance ON
+Auto Print ON
+```
+
+và chỉ các slot sau được bật:
+
+```text
+R1
+R3
+R6
+```
+
+History chỉ ghi:
+
+```text
+저항검사 R1 ... / R3 ... / R6 ...
+```
+
+Không tự tạo:
+
+```text
+R2
+R4
+R5
+```
+
+---
+
+## Case F — bật tất cả
+
+Nếu thực tế chạy đủ:
+
+```text
+Thông mạch
+Leak
+Điện trở
+In tem
+```
+
+History phải chứa đủ các phần tương ứng.
+
+---
+
+# 8. HISTORY ĐIỆN TRỞ
+
+Task này không sửa mapping relay.
+
+History chỉ lấy kết quả điện trở đã có từ TestEngine.
+
+Nếu Resistance OFF:
+
+```text
+không có 저항검사
+```
+
+Nếu Resistance ON:
+
+chỉ ghi những R thực sự đã đo.
+
+Ví dụ:
+
+```text
+R1 PASS
+R4 PASS
+R7 FAIL
+```
+
+History:
+
+```text
+저항검사 R1: MIN < VALUE < MAX :PASS/R4: MIN < VALUE < MAX :PASS/R7: MIN < VALUE < MAX :FAIL
+```
+
+Không ghi Channel/Relay vật lý vào CSV.
+
+History vẫn dùng tên test slot:
+
+```text
+R1
+R4
+R7
+```
+
+---
+
+# 9. HISTORY LEAK
+
+Nếu Leak không chạy:
+
+```text
+không có 기밀검사
+```
+
+Nếu Leak chạy, lưu đúng dữ liệu thật.
+
+Nếu có:
+
+```text
+Min
+Measured
+Max
+Passed
+```
+
+thì có thể format:
+
+```text
+기밀검사 MIN < VALUE < MAX :PASS/FAIL
+```
+
+Nếu project có format leak riêng thì dùng dữ liệu thật của project.
+
+Không tự bịa số.
+
+---
+
+# 10. HISTORY THÔNG MẠCH
+
+Nếu thông mạch PASS:
+
+```text
+회로검사:PASS
+```
+
+Nếu FAIL:
+
+```text
+회로검사:FAIL
+```
+
+Nếu source hiện có chi tiết:
+
+```text
+Open
+Short
+Miswire
+Pin
+Connector
+```
+
+thì có thể giữ summary chi tiết.
+
+Không làm mất fault detail hiện đang lưu.
+
+---
+
+# 11. AUTO PRINT
+
+`Auto Print = ON` chỉ nghĩa là workflow được phép tự in khi đủ điều kiện.
+
+Không đồng nghĩa chắc chắn đã in.
+
+History phải phân biệt trạng thái tương đương:
+
+```text
+AutoPrintEnabled
+PrintExecuted
+PrintSucceeded
+BarcodeValue
+```
+
+Chỉ ghi:
+
+```text
+타각
+```
+
+khi:
+
+```text
+PrintExecuted == true
+AND PrintSucceeded == true
+```
+
+Không được ghi `타각` chỉ vì Auto Print đang bật.
+
+---
+
+# 12. BARCODE
+
+Barcode phải là barcode thực tế của cycle.
+
+Nếu không in:
+
+```text
+바코드 = blank
+```
+
+Không tự generate barcode lúc export.
+
+Không lấy barcode hiện tại của UI.
+
+Phải dùng snapshot trong History.
+
+---
+
+# 13. BỎ HOÀN TOÀN NHIỆT ĐỘ KHỎI CSV
+
+Legacy CSV không được chứa:
+
+```text
+온도검사
+Temperature
+Nhiệt độ
+TemperatureTolerance
+```
+
+Không đưa nhiệt độ vào:
+
+```text
+header
+검 사 기 록
+cột riêng
+```
+
+Nhưng không xóa logic nhiệt độ khỏi chương trình nếu chức năng khác đang dùng.
+
+Chỉ bỏ khỏi History CSV legacy.
+
+---
+
+# 14. HISTORY UI PHẢI CÓ ĐÚNG 14 CỘT TIẾNG VIỆT
+
+Trang:
+
+```text
+LỊCH SỬ KIỂM TRA
+```
+
+phải hiển thị đúng 14 cột theo thứ tự:
+
+```text
+1. Ngày
+2. Thời gian
+3. File cấu hình
+4. Tên sản phẩm
+5. Mã sản phẩm
+6. Dòng xe
+7. LOT
+8. Kết quả
+9. Số thứ tự
+10. Nội dung kiểm tra
+11. Mã vạch
+12. 200 %
+13. Kiểm tra đầu vào
+14. Chương trình
+```
+
+Header DataGrid phải là tiếng Việt.
+
+Không dùng header tiếng Hàn trên giao diện.
+
+---
+
+# 15. CSV XUẤT RA PHẢI CÓ 14 HEADER TIẾNG HÀN
+
+Khi bấm:
+
+```text
+XUẤT CSV
+```
+
+header bắt buộc:
+
+```text
+일 자,시 간,파 일,품 명,품 번,차 종,Lot,결 과,순 번,검 사 기 록,바코드,200 %,수입검사,프로그램
+```
+
+Thứ tự phải đúng tuyệt đối.
+
+Không dùng header tiếng Việt trong file CSV.
+
+---
+
+# 16. UI VÀ CSV DÙNG CÙNG DỮ LIỆU
+
+Không tạo hai database model riêng.
+
+Ví dụ cùng một field:
+
+```text
+Started
+```
+
+trên UI:
+
+```text
+Ngày
+Thời gian
+```
+
+nhưng CSV:
+
+```text
+일 자
+시 간
+```
+
+Cùng field:
+
+```text
+ThtFileName
+```
+
+UI:
+
+```text
+File cấu hình
+```
+
+CSV:
+
+```text
+파 일
+```
+
+Cùng field:
+
+```text
+LegacyTestLog
+```
+
+UI:
+
+```text
+Nội dung kiểm tra
+```
+
+CSV:
+
+```text
+검 사 기 록
+```
+
+---
+
+# 17. MAPPING 14 CỘT
+
+## 1 — Ngày / 일 자
+
+Nguồn:
+
+```text
+Started
+```
+
+Format:
+
+```text
+yyyy-MM-dd
+```
+
+---
+
+## 2 — Thời gian / 시 간
+
+Nguồn:
+
+```text
+Started
+```
+
+Format:
+
+```text
+HH:mm:ss
+```
+
+---
+
+## 3 — File cấu hình / 파 일
+
+Tên file `.tht` đã dùng khi test.
+
+Ví dụ:
+
+```text
+D:\JBZ\Config\ABC123.tht
+```
+
+History/CSV chỉ lưu:
+
+```text
+ABC123.tht
+```
+
+Không full path.
+
+Không `.model`.
+
+---
+
+## 4 — Tên sản phẩm / 품 명
+
+Snapshot PartName.
+
+---
+
+## 5 — Mã sản phẩm / 품 번
+
+Snapshot PartNumber.
+
+Giữ nguyên chuỗi.
+
+---
+
+## 6 — Dòng xe / 차 종
+
+Snapshot VehicleType nếu dữ liệu `.tht`/product configuration có field này.
+
+---
+
+## 7 — LOT / Lot
+
+Snapshot LOT tại thời điểm test.
+
+---
+
+## 8 — Kết quả / 결 과
+
+Trên UI:
+
+ưu tiên hiển thị:
+
+```text
+ĐẠT
+KHÔNG ĐẠT
+```
+
+hoặc style tiếng Việt phù hợp project.
+
+CSV:
+
+PASS:
+
+```text
+합격
+```
+
+FAIL:
+
+```text
+불량
+```
+
+---
+
+## 9 — Số thứ tự / 순 번
+
+Production serial/sequence thực tế.
+
+Không tự sinh lúc export.
+
+---
+
+## 10 — Nội dung kiểm tra / 검 사 기 록
+
+Summary động của các bước thực tế đã chạy.
+
+---
+
+## 11 — Mã vạch / 바코드
+
+Barcode snapshot.
+
+Không in thì blank.
+
+---
+
+## 12 — 200 % / 200 %
+
+Giữ cột compatibility.
+
+Nếu không có dữ liệu tương ứng thì blank.
+
+---
+
+## 13 — Kiểm tra đầu vào / 수입검사
+
+Giữ cột compatibility.
+
+Nếu không có dữ liệu thì blank hoặc placeholder legacy phù hợp.
+
+---
+
+## 14 — Chương trình / 프로그램
+
+Snapshot tên/version chương trình tại thời điểm test.
+
+Không hard-code version.
+
+---
+
+# 18. TÊN FILE `.tht` PHẢI SNAPSHOT LÚC TEST
+
+Không được lúc export mới lấy:
+
+```text
+currentThtPath
+```
+
+Sai:
+
+```text
+history record cũ
+→ lấy file .tht hiện tại
+```
+
+Đúng:
+
+```text
+cycle bắt đầu/hoàn thành
+→ snapshot filename .tht
+→ lưu History DB
+```
+
+Ví dụ:
+
+Ngày 1:
+
+```text
+A.tht
+```
+
+Ngày 2 operator mở:
+
+```text
+B.tht
+```
+
+Khi export record ngày 1 vẫn phải:
+
+```text
+A.tht
+```
+
+---
+
+# 19. SNAPSHOT METADATA
+
+History phải đủ dữ liệu để export mà không cần mở lại `.tht`.
+
+Tối thiểu có dữ liệu tương đương:
+
+```text
+ThtFileName
+PartName
+PartNumber
+VehicleType
+Lot
+Started
+Finished
+Passed
+ProgramVersion
+Sequence
+Barcode
+```
+
+Không bắt buộc dùng đúng tên property.
+
+Reuse field có sẵn nếu có.
+
+---
+
+# 20. SNAPSHOT KẾT QUẢ CÁC CÔNG ĐOẠN
+
+History cần biết các bước đã thực sự chạy.
+
+Có thể là các field tương đương:
+
+```text
+ContinuityExecuted
+ContinuityPassed
+ContinuitySummary
+
+LeakExecuted
+LeakPassed
+LeakSummary
+
+ResistanceExecuted
+ResistanceResults
+
+PrintExecuted
+PrintSucceeded
+Barcode
+```
+
+Nếu project đã có result objects thì reuse.
+
+Không tạo duplicate data không cần thiết.
+
+---
+
+# 21. NÊN LƯU `LegacyTestLog` NGAY KHI CYCLE KẾT THÚC
+
+Ưu tiên thêm field:
+
+```text
+LegacyTestLog
+```
+
+hoặc tên tương đương.
+
+Ví dụ:
+
+```text
+검사시작 10:20:01 회로검사:PASS 기밀검사 0.00 < 0.18 < 0.50 :PASS 저항검사 R1: 8.00 < 8.52 < 9.00 :PASS 타각 탈거 10:20:12
+```
+
+Chuỗi này build ngay khi cycle hoàn tất.
+
+Lưu vào SQLite.
+
+Khi export:
+
+```text
+검 사 기 록 = LegacyTestLog
+```
+
+Không xây lại dựa trên settings hiện tại.
+
+---
+
+# 22. LEGACY TEST LOG PHẢI DYNAMIC
+
+Không dùng template cố định.
+
+Pseudo:
+
+```csharp
+Append("검사시작 HH:mm:ss");
+
+if (continuity actually executed)
+    AppendContinuity();
+
+if (leak actually executed)
+    AppendLeak();
+
+if (resistance actually executed)
+    AppendResistance();
+
+if (print actually executed successfully)
+    Append("타각");
+
+Append("탈거 HH:mm:ss");
+```
+
+Không append temperature.
+
+---
+
+# 23. FAIL PHẢI GIỮ ĐÚNG NHỮNG GÌ ĐÃ CHẠY
+
+Ví dụ:
+
+```text
+Continuity PASS
+Leak PASS
+R1 PASS
+R2 FAIL
+Print không chạy
+```
+
+History:
+
+```text
+검사시작 ...
+회로검사:PASS
+기밀검사 ... :PASS
+저항검사 R1: ... :PASS/R2: ... :FAIL
+탈거 ...
+```
+
+Không có:
+
+```text
+타각
+```
+
+Barcode blank.
+
+Kết quả:
+
+```text
+불량
+```
+
+---
+
+# 24. CÙNG MỘT `.tht` CÓ THỂ TẠO HISTORY KHÁC NHAU
+
+Ví dụ cùng:
+
+```text
+ABC.tht
+```
+
+Cycle 1:
+
+```text
+Leak OFF
+Resistance OFF
+Auto Print OFF
+```
+
+History chỉ thông mạch.
+
+Cycle 2:
+
+```text
+Leak ON
+Resistance OFF
+Auto Print ON
+```
+
+History có thông mạch + Leak + Print nếu thành công.
+
+Cycle 3:
+
+```text
+Leak OFF
+Resistance ON
+Auto Print ON
+```
+
+History có thông mạch + Resistance + Print nếu thành công.
+
+Đây là behavior đúng.
+
+---
+
+# 25. HISTORY SEARCH KHÔNG PHỤ THUỘC `.tht` ĐANG MỞ
+
+Người dùng đang mở:
+
+```text
+B.tht
+```
+
+vẫn tìm được record cũ của:
+
+```text
+A.tht
+```
+
+History search phải dựa trên database snapshot.
+
+---
+
+# 26. EXPORT CSV PHẢI XUẤT TOÀN BỘ KẾT QUẢ TÌM KIẾM
+
+Kiểm tra code hiện tại có giới hạn như:
+
+```text
+20,000
+50,000
+```
+
+hay không.
+
+Nếu giới hạn chỉ phục vụ DataGrid thì có thể giữ cho UI.
+
+Nhưng khi bấm:
+
+```text
+XUẤT CSV
+```
+
+phải export toàn bộ record matching filter.
+
+Không được chỉ:
+
+```csharp
+Records.ToArray()
+```
+
+nếu Records đã bị giới hạn.
+
+---
+
+# 27. SEARCH FILTER VÀ EXPORT FILTER PHẢI GIỐNG NHAU
+
+Nếu UI đang lọc theo:
+
+```text
+Từ ngày
+Đến ngày
+LOT
+Part
+Kết quả
+```
+
+CSV phải xuất toàn bộ record thỏa đúng bộ lọc đó.
+
+Không export toàn database nếu đang filter.
+
+---
+
+# 28. TÁCH QUERY UI VÀ QUERY EXPORT
+
+Có thể giữ API có limit cho UI.
+
+Nhưng cần API riêng:
+
+```text
+SearchForExport(criteria)
+```
+
+hoặc paging/streaming tương đương.
+
+Export không clamp 20k/50k.
+
+Phải xử lý ổn định hàng chục nghìn đến hàng trăm nghìn bản ghi.
+
+---
+
+# 29. SORT CSV
+
+CSV legacy phải sắp xếp:
+
+```text
+Started ASC
+Id ASC
+```
+
+tức:
+
+```text
+cũ nhất
+→ mới nhất
+```
+
+History DataGrid có thể tiếp tục hiển thị mới nhất trước.
+
+---
+
+# 30. ENCODING CSV
+
+Phân tích file `ALL.csv` mẫu.
+
+Nếu xác nhận dùng Korean CP949/EUC-KR thì Legacy CSV dùng:
+
+```text
+CP949
+No BOM
+Delimiter ,
+```
+
+Trong .NET nếu cần:
+
+```csharp
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+Encoding.GetEncoding(949);
+```
+
+Không dùng UTF-8 BOM cho Legacy CSV nếu mục tiêu là giống file gốc.
+
+---
+
+# 31. CSV ESCAPING
+
+Phải escape đúng chuẩn CSV.
+
+Nếu field chứa:
+
+```text
+,
+"
+CR
+LF
+```
+
+thì quote đúng chuẩn.
+
+Dấu `"` bên trong phải double.
+
+Mỗi row vẫn phải parse được đúng 14 cột.
+
+---
+
+# 32. DATABASE MIGRATION
+
+Không xóa database History cũ.
+
+Không recreate DB.
+
+Không drop table.
+
+Nếu cần thêm:
+
+```text
+ThtFileName
+VehicleType
+LotText
+LegacyTestLog
+```
+
+thì migration additive.
+
+Ví dụ:
+
+```text
+ALTER TABLE ADD COLUMN ...
+```
+
+hoặc helper `EnsureColumn` hiện có.
+
+Record cũ vẫn phải mở được.
+
+---
+
+# 33. RECORD CŨ
+
+Nếu record cũ thiếu field mới:
+
+```text
+ThtFileName = ""
+VehicleType = ""
+LegacyTestLog = ""
+```
+
+Exporter không được crash.
+
+Nếu LegacyTestLog rỗng, chỉ build fallback từ dữ liệu đã tồn tại trong record cũ.
+
+Không:
+
+```text
+đọc .tht hiện tại
+đọc settings hiện tại
+bịa Leak
+bịa Resistance
+bịa Print
+thêm Temperature
+```
+
+---
+
+# 34. KHÔNG ĐỌC LẠI `.tht` KHI EXPORT
+
+Tuyệt đối không:
+
+```text
+History row
+→ tìm file .tht
+→ parse lại .tht
+```
+
+File có thể đã:
+
+```text
+bị sửa
+đổi tên
+xóa
+```
+
+History phải standalone.
+
+---
+
+# 35. UI HISTORY GIỮ TIẾNG VIỆT
+
+Trang lịch sử phải có 14 cột:
+
+```text
+Ngày
+Thời gian
+File cấu hình
+Tên sản phẩm
+Mã sản phẩm
+Dòng xe
+LOT
+Kết quả
+Số thứ tự
+Nội dung kiểm tra
+Mã vạch
+200 %
+Kiểm tra đầu vào
+Chương trình
+```
+
+Không dùng Korean header trong DataGrid.
+
+---
+
+# 36. CSV DÙNG KOREAN HEADER
+
+Exporter phải có header riêng, ví dụ:
+
+```csharp
+private static readonly string[] LegacyCsvHeaders =
+{
+    "일 자",
+    "시 간",
+    "파 일",
+    "품 명",
+    "품 번",
+    "차 종",
+    "Lot",
+    "결 과",
+    "순 번",
+    "검 사 기 록",
+    "바코드",
+    "200 %",
+    "수입검사",
+    "프로그램"
+};
+```
+
+Không lấy `DataGridColumn.Header` làm CSV header.
+
+---
+
+# 37. KHÔNG REDESIGN UI
+
+Giữ bố cục hiện tại nếu đang có:
+
+```text
+Từ ngày
+Đến ngày
+LOT
+Part
+Kết quả
+TÌM KIẾM
+XÓA LỌC
+XUẤT CSV
+XUẤT XLSX
+```
+
+Chỉ sửa DataGrid về đúng 14 cột tiếng Việt và backend cần thiết.
+
+---
+
+# 38. CSV VÀ XLSX
+
+Nút:
+
+```text
+XUẤT CSV
+```
+
+→ xuất Legacy CSV 14 cột Korean.
+
+Nếu:
+
+```text
+XUẤT XLSX
+```
+
+hiện đang dùng format chi tiết khác và đúng, giữ nguyên.
+
+Không phá XLSX chỉ vì sửa CSV.
+
+---
+
+# 39. SELF TEST BẮT BUỘC
+
+## Test 1 — UI header
+
+Phải có đúng 14 header:
+
+```text
+Ngày
+Thời gian
+File cấu hình
+Tên sản phẩm
+Mã sản phẩm
+Dòng xe
+LOT
+Kết quả
+Số thứ tự
+Nội dung kiểm tra
+Mã vạch
+200 %
+Kiểm tra đầu vào
+Chương trình
+```
+
+---
+
+## Test 2 — CSV header
+
+Phải đúng:
+
+```text
+일 자
+시 간
+파 일
+품 명
+품 번
+차 종
+Lot
+결 과
+순 번
+검 사 기 록
+바코드
+200 %
+수입검사
+프로그램
+```
+
+UI header và CSV header khác ngôn ngữ nhưng cùng mapping dữ liệu.
+
+---
+
+## Test 3 — Continuity only
+
+```text
+Continuity PASS
+Leak not executed
+Resistance not executed
+Print not executed
+```
+
+CSV log:
+
+```text
+có 회로검사:PASS
+không 기밀검사
+không 저항검사
+không 타각
+không 온도검사
+```
+
+---
+
+## Test 4 — Continuity + print
+
+```text
+Continuity PASS
+PrintExecuted true
+PrintSucceeded true
+```
+
+CSV:
+
+```text
+có 회로검사
+có 타각
+có barcode
+```
+
+---
+
+## Test 5 — Auto Print ON nhưng test FAIL
+
+```text
+AutoPrintEnabled=true
+Continuity FAIL
+PrintExecuted=false
+```
+
+CSV:
+
+```text
+회로검사:FAIL
+không 타각
+barcode blank
+결 과 = 불량
+```
+
+---
+
+## Test 6 — Leak executed
+
+CSV phải có:
+
+```text
+기밀검사
+```
+
+---
+
+## Test 7 — Leak not executed
+
+CSV không có:
+
+```text
+기밀검사
+```
+
+---
+
+## Test 8 — Resistance R1/R3/R6
+
+CSV chỉ có:
+
+```text
+R1
+R3
+R6
+```
+
+Không tự sinh R2/R4/R5.
+
+---
+
+## Test 9 — Resistance OFF
+
+Không có:
+
+```text
+저항검사
+```
+
+---
+
+## Test 10 — Combined
+
+```text
+Continuity PASS
+Leak PASS
+R1 PASS
+R4 PASS
+Print SUCCESS
+```
+
+CSV có:
+
+```text
+회로검사
+기밀검사
+저항검사 R1/R4
+타각
+```
+
+---
+
+## Test 11 — Temperature forbidden
+
+Mọi CSV:
+
+```csharp
+Contains("온도검사") == false
+Contains("Temperature") == false
+Contains("Nhiệt độ") == false
+```
+
+---
+
+## Test 12 — `.tht` snapshot
+
+Test bằng:
+
+```text
+A.tht
+```
+
+sau đó current file đổi:
+
+```text
+B.tht
+```
+
+Export record cũ vẫn là:
+
+```text
+A.tht
+```
+
+---
+
+## Test 13 — > UI limit
+
+Tạo dataset lớn hơn UI limit.
+
+Export vẫn phải đủ toàn bộ matching rows.
+
+---
+
+## Test 14 — 14 columns
+
+Header = 14 cột.
+
+Mọi data row parse lại = 14 cột.
+
+---
+
+# 40. FILE CẦN PHÂN TÍCH
+
+Đọc `AGENTS.md` nếu có.
+
+Search và kiểm tra các class/file tương đương:
+
+```text
+HistoryModels
+TestHistoryRecord
+TestHistoryStore
+HistoryExportService
+HistoryPage.xaml
+HistoryPage.xaml.cs
+HistoryPageViewModel
+TestViewModel
+TestEngine
+ProductionSettings
+AppSettings
+Tht parser
+Current Tht service
+Leak results
+Resistance results
+Print results
+Tests
+```
+
+Không sửa theo tên đoán.
+
+Trace data flow thật trước.
+
+---
+
+# 41. KHÔNG SỬA NHỮNG PHẦN KHÔNG LIÊN QUAN
+
+Không chỉnh:
+
+```text
+Relay mapping
+D2XX selector
+Keysight commands
+Leak device communication
+Continuity algorithm
+Printer communication
+Barcode algorithm
+PASS/FAIL business rules
+```
+
+Task History chỉ đọc result cuối cùng.
+
+Không:
+
+```text
+git clean
+git reset --hard
+```
+
+Không revert thay đổi khác của người dùng.
+
+---
+
+# 42. BUILD / VERIFY
+
+Sau khi sửa:
+
+```powershell
+dotnet clean
+dotnet restore
+dotnet build -c Release
+```
+
+Sau đó chạy self-tests/test project thật.
+
+Ví dụ:
+
+```powershell
+dotnet run --project .\Tests\JBZUniversalTester.SelfTests.csproj -c Release
+```
+
+hoặc:
+
+```powershell
+dotnet test -c Release
+```
+
+theo repository.
+
+Sau đó:
+
+```powershell
+git diff --check
+git diff
+git status --short
+```
+
+Không báo hoàn thành nếu build hoặc test fail.
+
+---
+
+# 43. TIÊU CHÍ HOÀN THÀNH
+
+Task chỉ hoàn tất khi:
+
+```text
+History dùng .tht, không dùng .model.
+
+Tên .tht snapshot lúc test.
+
+Leak ON/OFF do Cài đặt quyết định.
+
+Resistance ON/OFF do Cài đặt quyết định.
+
+Auto Print ON/OFF do Cài đặt quyết định.
+
+Không hard-code workflow theo mã hàng.
+
+History ghi những công đoạn thực tế đã chạy.
+
+Leak không chạy → không có 기밀검사.
+
+Resistance không chạy → không có 저항검사.
+
+Chỉ những R đã đo mới được ghi.
+
+Print không thực sự thành công → không có 타각.
+
+Không in → barcode blank.
+
+Một cycle = một row.
+
+Nội dung kiểm tra build dynamic.
+
+Không có Temperature.
+
+History UI có đúng 14 cột tiếng Việt.
+
+CSV có đúng 14 cột tiếng Hàn.
+
+UI và CSV dùng cùng schema dữ liệu.
+
+CSV xuất toàn bộ record phù hợp filter.
+
+Không bị limit bởi DataGrid.
+
+Export không đọc lại .tht.
+
+Export không dùng settings hiện tại để tái tạo record cũ.
+
+DB cũ migrate an toàn.
+
+CSV đúng encoding legacy.
+
+XLSX hiện tại không bị phá.
+
+Build PASS.
+
+Self-tests PASS.
+
+git diff --check PASS.
+```
+
+---
+
+# 44. BÁO CÁO CUỐI
+
+Sau khi sửa xong, báo cáo:
+
+1. Data flow History cũ.
+2. Root cause các điểm sai.
+3. Danh sách file đã sửa.
+4. 14 cột UI tiếng Việt.
+5. 14 cột CSV tiếng Hàn.
+6. Mapping giữa UI và CSV.
+7. Cách snapshot `.tht`.
+8. Cách Leak ON/OFF ảnh hưởng History.
+9. Cách Resistance ON/OFF ảnh hưởng History.
+10. Cách Auto Print ON/OFF ảnh hưởng History.
+11. Điều kiện để ghi `타각`.
+12. Cách barcode được lưu.
+13. Cách tạo `검 사 기 록`.
+14. Xác nhận không có nhiệt độ.
+15. Cách export vượt UI limit.
+16. Database migration.
+17. Encoding CSV.
+18. Kết quả build.
+19. Kết quả self-tests.
+20. `git diff --stat`.
+
+Không chỉ phân tích.
+
+Hãy trực tiếp:
+
+```text
+đọc source
+→ trace workflow
+→ sửa History snapshot
+→ sửa DB migration
+→ sửa History UI 14 cột tiếng Việt
+→ sửa Search
+→ sửa CSV exporter 14 cột tiếng Hàn
+→ thêm regression tests
+→ build
+→ test
+→ review diff
+→ báo cáo
+```

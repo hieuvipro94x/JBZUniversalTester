@@ -101,6 +101,8 @@ public sealed class TestHistoryStore
                     ON TestHistory(PartNumber);
                 CREATE INDEX IF NOT EXISTS IX_TestHistory_PartName
                     ON TestHistory(PartName);
+                CREATE INDEX IF NOT EXISTS IX_TestHistory_ExportOrder
+                    ON TestHistory(PartNumber, Started, Id);
                 """;
             command.ExecuteNonQuery();
         }
@@ -222,7 +224,15 @@ public sealed class TestHistoryStore
         return id;
     }
 
-    public IReadOnlyList<TestHistoryRecord> Search(HistorySearchCriteria criteria)
+    public IReadOnlyList<TestHistoryRecord> Search(HistorySearchCriteria criteria) =>
+        SearchCore(criteria, exportAll: false);
+
+    public IReadOnlyList<TestHistoryRecord> SearchForExport(HistorySearchCriteria criteria) =>
+        SearchCore(criteria, exportAll: true);
+
+    private IReadOnlyList<TestHistoryRecord> SearchCore(
+        HistorySearchCriteria criteria,
+        bool exportAll)
     {
         ArgumentNullException.ThrowIfNull(criteria);
 
@@ -234,13 +244,13 @@ public sealed class TestHistoryStore
 
         if (criteria.From is DateTime from)
         {
-            clauses.Add("Finished >= $From");
+            clauses.Add("Started >= $From");
             command.Parameters.AddWithValue("$From", from.ToString("O"));
         }
 
         if (criteria.To is DateTime to)
         {
-            clauses.Add("Finished <= $To");
+            clauses.Add("Started <= $To");
             command.Parameters.AddWithValue("$To", to.ToString("O"));
         }
 
@@ -263,7 +273,17 @@ public sealed class TestHistoryStore
             command.Parameters.AddWithValue("$Result", $"%{criteria.Result.Trim()}%");
         }
 
-        int limit = Math.Clamp(criteria.MaxRows, 1, 50_000);
+        string orderAndLimit;
+        if (exportAll)
+        {
+            orderAndLimit = "ORDER BY PartNumber COLLATE NOCASE ASC, Started ASC, Id ASC";
+        }
+        else
+        {
+            int limit = Math.Clamp(criteria.MaxRows, 1, 50_000);
+            orderAndLimit = $"ORDER BY Finished DESC, Id DESC LIMIT {limit}";
+        }
+
         command.CommandText = $"""
             SELECT
                 Id, Started, Finished, PartName, PartNumber, VehicleType, Eco, Nco, Alc,
@@ -280,8 +300,7 @@ public sealed class TestHistoryStore
                 InspectionType, LotText, InspectionTrace
             FROM TestHistory
             {(clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses))}
-            ORDER BY Finished DESC, Id DESC
-            LIMIT {limit};
+            {orderAndLimit};
             """;
 
         using SqliteDataReader reader = command.ExecuteReader();
@@ -462,7 +481,8 @@ public sealed class TestHistoryStore
         command.CommandText = """
             UPDATE TestHistory
             SET PrintStatus = $Pending,
-                PrintMessage = ''
+                PrintMessage = '',
+                BarcodeValue = ''
             WHERE Id = $Id
               AND CycleId = $CycleId
               AND PrintStatus IN ($NotRequested, $Failed);
@@ -502,7 +522,8 @@ public sealed class TestHistoryStore
         string cycleId,
         LabelPrintStatus status,
         DateTime? printTimestamp,
-        string message)
+        string message,
+        string? printedBarcode = null)
     {
         if (historyId <= 0 || string.IsNullOrWhiteSpace(cycleId))
             return;
@@ -514,11 +535,17 @@ public sealed class TestHistoryStore
             UPDATE TestHistory
             SET PrintStatus = $Status,
                 PrintTimestamp = $PrintTimestamp,
-                PrintMessage = $PrintMessage
+                PrintMessage = $PrintMessage,
+                BarcodeValue = CASE
+                    WHEN $Status = $Printed AND $BarcodeValue <> '' THEN $BarcodeValue
+                    ELSE ''
+                END
             WHERE Id = $Id
               AND CycleId = $CycleId;
             """;
         command.Parameters.AddWithValue("$Status", status.ToString());
+        command.Parameters.AddWithValue("$Printed", LabelPrintStatus.Printed.ToString());
+        command.Parameters.AddWithValue("$BarcodeValue", printedBarcode?.Trim() ?? string.Empty);
         AddNullable(command, "$PrintTimestamp", printTimestamp?.ToString("O"));
         command.Parameters.AddWithValue("$PrintMessage", message ?? string.Empty);
         command.Parameters.AddWithValue("$Id", historyId);

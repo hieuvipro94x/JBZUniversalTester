@@ -6695,7 +6695,10 @@ public sealed class TestViewModel : ObservableObject
         string cycleId = string.IsNullOrWhiteSpace(_activeCycleId)
             ? Guid.NewGuid().ToString("N")
             : _activeCycleId;
-        long completedLot = ShouldAutoPrintLabel(passed, _productionSettings.AutoPrintLabelOnPass)
+        bool shouldAutoPrint = ShouldAutoPrintLabel(
+            passed,
+            _productionSettings.AutoPrintLabelOnPass);
+        long completedLot = shouldAutoPrint
             ? _lotSequence.ReserveForCycle(cycleId)
             : _lotSequence.NextLot;
 
@@ -6803,7 +6806,7 @@ public sealed class TestViewModel : ObservableObject
 
         LabelPrintRequest? printRequest = null;
         string labelPreparationError = string.Empty;
-        if (passed)
+        if (shouldAutoPrint)
         {
             if (TryCapturePassLabel(
                     history,
@@ -6814,7 +6817,6 @@ public sealed class TestViewModel : ObservableObject
                     out labelPreparationError))
             {
                 history.LabelSerial = identity!.SerialText;
-                history.BarcodeValue = identity.BarcodeValue;
                 history.LabelProfile = printRequest!.FormatName;
                 history.LabelTemplateType = LabelProfileResolver.NormalizeTemplateType(
                     _productionSettings.Label.TemplateType);
@@ -6878,7 +6880,7 @@ public sealed class TestViewModel : ObservableObject
             }
         }
 
-        if (ShouldAutoPrintLabel(passed, _productionSettings.AutoPrintLabelOnPass) &&
+        if (shouldAutoPrint &&
             printRequest is null &&
             !string.IsNullOrWhiteSpace(labelPreparationError))
         {
@@ -6886,7 +6888,7 @@ public sealed class TestViewModel : ObservableObject
                 $"LABEL BLOCKED: LOT {completedLot} không in do cấu hình tem không hợp lệ; " +
                 "PASS/ProductRemoved vẫn tiếp tục bình thường.");
         }
-        else if (ShouldAutoPrintLabel(passed, _productionSettings.AutoPrintLabelOnPass) && printRequest is not null)
+        else if (shouldAutoPrint && printRequest is not null)
         {
             if (!historySaved)
             {
@@ -7137,7 +7139,13 @@ public sealed class TestViewModel : ObservableObject
                 : LabelPrintStatus.Failed;
             DateTime? printedAt = result.Printed ? DateTime.Now : null;
             UpdateLabelPrintOutcomeSafe(
-                historyStore, historyId, request.CycleId, status, printedAt, result.Message);
+                historyStore,
+                historyId,
+                request.CycleId,
+                status,
+                printedAt,
+                result.Message,
+                status == LabelPrintStatus.Printed ? request.Data.Barcode : null);
             AddLog($"LABEL {status.ToString().ToUpperInvariant()}: cycle {request.CycleId}; {result.Message}");
 
             if (result.Printed)
@@ -7284,12 +7292,13 @@ public sealed class TestViewModel : ObservableObject
         string cycleId,
         LabelPrintStatus status,
         DateTime? printTimestamp,
-        string message)
+        string message,
+        string? printedBarcode = null)
     {
         try
         {
             historyStore.UpdateLabelPrintOutcome(
-                historyId, cycleId, status, printTimestamp, message);
+                historyId, cycleId, status, printTimestamp, message, printedBarcode);
         }
         catch (Exception ex)
         {
