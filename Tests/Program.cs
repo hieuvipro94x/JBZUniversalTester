@@ -1713,8 +1713,15 @@ internal static class Program
             ProductModel modelB = Model(("B", new[] { 3, 4 }));
             modelB.PartNumber = "M030076100";
             PartCounterEntry b = store.GetOrCreate(modelB);
-            Assert(b.Counter == 0 && store.GetOrCreate(modelA).Counter == 0,
+            for (int cycle = 0; cycle < 4; cycle++)
+                b = store.Increment(modelB);
+
+            Assert(b.Counter == 4 && store.GetOrCreate(modelA).Counter == 0,
                 "PartCnt counters remain isolated by part number");
+            Assert(
+                File.ReadAllText(path, Encoding.UTF8) ==
+                "M030066900 10 0\r\nM030076100 200000 4\r\nDONG_KHONG_HOP_LE\r\n",
+                "PartCnt persists one independent row per part number");
         }
         finally
         {

@@ -21,10 +21,25 @@
         <Style x:Key="FilterTextBox"
                TargetType="TextBox"
                BasedOn="{StaticResource {x:Type TextBox}}">
-            <Setter Property="Height" Value="32"/>
+            <Setter Property="Height" Value="46"/>
             <Setter Property="MinWidth" Value="90"/>
             <Setter Property="Padding" Value="8,3"/>
             <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="FilterDatePicker"
+               TargetType="DatePicker">
+            <Setter Property="Height" Value="46"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="FilterComboBox"
+               TargetType="ComboBox">
+            <Setter Property="Height" Value="46"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="FilterLabel" TargetType="TextBlock">
@@ -184,12 +199,12 @@
 
                 <StackPanel Grid.Column="0" VerticalAlignment="Top">
                     <TextBlock Text="Từ ngày" Style="{StaticResource FilterLabel}"/>
-                    <DatePicker x:Name="FromDatePicker" Height="32" FontSize="12" VerticalContentAlignment="Center"/>
+                    <DatePicker x:Name="FromDatePicker" Style="{StaticResource FilterDatePicker}"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" VerticalAlignment="Top">
                     <TextBlock Text="Đến ngày" Style="{StaticResource FilterLabel}"/>
-                    <DatePicker x:Name="ToDatePicker" Height="32" FontSize="12" VerticalContentAlignment="Center"/>
+                    <DatePicker x:Name="ToDatePicker" Style="{StaticResource FilterDatePicker}"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="4" VerticalAlignment="Top">
@@ -205,9 +220,7 @@
                 <StackPanel Grid.Column="8" VerticalAlignment="Top">
                     <TextBlock Text="Kết quả" Style="{StaticResource FilterLabel}"/>
                     <ComboBox x:Name="ResultComboBox"
-                              Height="32"
-                              FontSize="12"
-                              VerticalContentAlignment="Center"
+                              Style="{StaticResource FilterComboBox}"
                               SelectedIndex="0">
                         <ComboBoxItem Content="ALL"/>
                         <ComboBoxItem Content="PASS"/>

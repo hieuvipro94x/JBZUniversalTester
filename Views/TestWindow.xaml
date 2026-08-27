@@ -1,7 +1,6 @@
 ﻿<Window x:Class="JBZUniversalTester.Views.TestWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:converters="clr-namespace:JBZUniversalTester.Converters"
         Title="UniversalTester - Man hinh kiem tra"
         WindowState="Maximized"
         WindowStyle="None"
@@ -38,7 +37,6 @@
         <SolidColorBrush x:Key="PiStopButtonBrush" Color="#F1B8B8"/>
         <SolidColorBrush x:Key="PiMaintenanceButtonBrush" Color="#F6D38B"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
-        <converters:IntEqualsToVisibilityConverter x:Key="IntEqualsToVisibilityConverter"/>
 
         <Style x:Key="PiButtonStyle" TargetType="Button">
             <Setter Property="Height" Value="38"/>
@@ -228,6 +226,39 @@
                     </Style>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <Style x:Key="FaultOperationGridStyle"
+               TargetType="DataGrid"
+               BasedOn="{StaticResource PiFaultGridStyle}">
+            <Setter Property="Visibility" Value="Collapsed"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SelectedOperationTabIndex}" Value="0">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="ResistanceOperationGridStyle"
+               TargetType="DataGrid"
+               BasedOn="{StaticResource PiFaultGridStyle}">
+            <Setter Property="Visibility" Value="Collapsed"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SelectedOperationTabIndex}" Value="1">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="WaterProofOperationGridStyle"
+               TargetType="DataGrid"
+               BasedOn="{StaticResource PiFaultGridStyle}">
+            <Setter Property="Visibility" Value="Collapsed"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SelectedOperationTabIndex}" Value="3">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="IndustrialGridCellStyle" TargetType="DataGridCell">
@@ -776,8 +807,7 @@
                       ItemsSource="{Binding Faults}"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
-                      Visibility="{Binding SelectedOperationTabIndex, Converter={StaticResource IntEqualsToVisibilityConverter}, ConverterParameter=0}"
-                      Style="{StaticResource PiFaultGridStyle}">
+                      Style="{StaticResource FaultOperationGridStyle}">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Lo&#7841;i" Binding="{Binding FaultType}" Width="1.20*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
                     <DataGridTextColumn Header="IO-CN-PN" Binding="{Binding IoCnPnText}" Width="1.20*" MinWidth="120" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
@@ -802,8 +832,7 @@
                       ItemsSource="{Binding Resistance}"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
-                      Visibility="{Binding SelectedOperationTabIndex, Converter={StaticResource IntEqualsToVisibilityConverter}, ConverterParameter=1}"
-                      Style="{StaticResource PiFaultGridStyle}"
+                      Style="{StaticResource ResistanceOperationGridStyle}"
                       RowHeight="36">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="LO&#7840;I" Binding="{Binding Name}" Width="2*" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
@@ -819,8 +848,7 @@
                       ItemsSource="{Binding WaterProofChannels}"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
-                      Visibility="{Binding SelectedOperationTabIndex, Converter={StaticResource IntEqualsToVisibilityConverter}, ConverterParameter=3}"
-                      Style="{StaticResource PiFaultGridStyle}"
+                      Style="{StaticResource WaterProofOperationGridStyle}"
                       RowHeight="36">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="K&#202;NH / CONNECTOR" Binding="{Binding ChannelText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
