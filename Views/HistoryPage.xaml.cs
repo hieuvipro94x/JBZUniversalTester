@@ -161,7 +161,7 @@ public partial class HistoryPage : UserControl
         try
         {
             HistoryExportService.ExportXlsx(dialog.FileName, Records.ToArray());
-            ShowMessage($"Đã xuất Excel đúng 18 cột mẫu gốc; chi tiết chu kỳ nằm trong cột 검사기록.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
+            ShowMessage($"Đã xuất Excel đúng 14 cột mẫu gốc; chi tiết chu kỳ nằm trong cột 검 사 기 록.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
         }
         catch (Exception ex)
         {

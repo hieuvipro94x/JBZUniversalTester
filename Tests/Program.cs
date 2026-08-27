@@ -2621,6 +2621,11 @@ internal static class Program
 
     private static void TestHistory()
     {
+        Assert(
+            ProgramIdentityService.BuildHtdrvName() ==
+            $"JBZUniversalTesterV{ProgramIdentityService.VersionText}",
+            "HtdrvName is exactly the current software name and release version");
+
         string root = Path.Combine(Path.GetTempPath(), "JBZSelfTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -2648,6 +2653,9 @@ internal static class Program
                 ModelName = "MODEL-A",
                 ModelFile = @"C:\Models\WH322882.setup",
                 HtdrvName = "JBZUniversalTester V15.2.0",
+                LotText = "VOLVO Radio",
+                InspectionTrace =
+                    "14:07:08 회로검사:PASS 14:07:08~14:07:08 저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]",
                 OpenCount = 0,
                 BarcodeValue = "NI375C10002608092001",
                 LabelProfile = "KS91",
@@ -2680,8 +2688,10 @@ internal static class Program
                    found[0].RemovalDurationSeconds == 2 &&
                    found[0].RemovalStartedAt == removalStarted &&
                    found[0].RemovedAt == removedAt &&
+                   found[0].LotText == "VOLVO Radio" &&
+                   found[0].InspectionTrace.Contains("저항검사", StringComparison.Ordinal) &&
                    found[0].LabelPayload == record.LabelPayload,
-                "SQLite search preserves phase timing, label type and immutable print payload");
+                "SQLite search preserves 14-column values, phase trace and immutable print payload");
 
             string csv = Path.Combine(root, "history.csv");
             HistoryExportService.ExportCsv(csv, found);
@@ -2691,47 +2701,52 @@ internal static class Program
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
             Assert(csvText.StartsWith(
-                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,진도,결과,합격,검사기록,바코드입력,바코드출력,측정,HtdrvName,내용,메모\n",
+                    "일 자,시 간,파 일,품 명,품 번,차 종,Lot,결 과,순 번,검 사 기 록,바코드,200 %,수입검사,프로그램\n",
                     StringComparison.Ordinal),
-                "History CSV preserves the exact original 18-column header");
+                "History CSV preserves the exact original 14-column Korean header");
             Assert(csvText.Contains(
-                    "2026/08/09 14:07:03,WH322882.setup,PRODUCT,NI375C1000",
+                    "2026-08-09,14:07:05,WH322882.setup,PRODUCT,NI375C1000,NE N EV,VOLVO Radio,합격,2001",
                     StringComparison.Ordinal) &&
-                   csvText.Contains("장착 14:07:03.000~14:07:05.000(2.000초) | 검사 14:07:05.000~14:07:08.000(3.000초) 합격", StringComparison.Ordinal) &&
-                   csvText.Contains("| 저항 CH1=101.5 Ω(합격) | 탈거 14:07:08.250~14:07:10.250(2.000초)", StringComparison.Ordinal) &&
-                   csvText.Contains(",,NI375C10002608092001,", StringComparison.Ordinal) &&
+                   csvText.Contains("장착 14:07:03~14:07:05(2.000초) 14:07:05 검사시작", StringComparison.Ordinal) &&
+                   csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
+                   csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
+                   csvText.Contains(",NI375C10002608092001,,,JBZUniversalTester V15.2.0", StringComparison.Ordinal) &&
                    !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV PASS, LOT and barcode-output value without raw EPL payload");
+                "Sample history CSV keeps three test phases, sequence and barcode without raw EPL payload");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
             using ZipArchive archive = ZipFile.OpenRead(xlsx);
             string sheet = ReadEntry(archive, "xl/worksheets/sheet1.xml");
             string styles = ReadEntry(archive, "xl/styles.xml");
-            Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal), "XLSX DateTime native numeric");
-            Assert(sheet.Contains("<c r=\"K2\"><v>2001</v></c>", StringComparison.Ordinal),
-                "XLSX accepted LOT uses sample 합격 column");
-            Assert(sheet.Contains("바코드출력", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"N2\" t=\"inlineStr\" s=\"3\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
+            Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"B2\" s=\"4\"><v>", StringComparison.Ordinal),
+                "XLSX date and time use separate native numeric cells");
+            Assert(sheet.Contains("<c r=\"I2\"><v>2001</v></c>", StringComparison.Ordinal),
+                "XLSX sequence uses the PASS LOT number");
+            Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
                    !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
-                   sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
-                "XLSX preserves original headers, barcode value and 18-column filter");
+                   sheet.Contains("autoFilter ref=\"A1:N2\"", StringComparison.Ordinal),
+                "XLSX preserves Korean headers, barcode value and 14-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
+                   styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
                    styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
-                "XLSX DateTime and wrapped long-text styles");
+                "XLSX date, time and wrapped test-log styles");
 
             string historyXaml = File.ReadAllText(
                 Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
             string[] sampleHeaders =
             [
-                "장착시간", "파일", "파트명", "파트번호", "Eco", "Nco", "Alc", "Lot", "진도",
-                "결과", "합격", "검사기록", "바코드입력", "바코드출력", "측정", "HtdrvName", "내용", "메모"
+                "Ngày", "Thời gian", "File", "Tên sản phẩm", "Mã hàng", "Loại xe", "LOT",
+                "Kết quả", "Số thứ tự", "Hồ sơ kiểm tra", "Mã vạch", "200 %",
+                "Kiểm tra đầu vào", "Chương trình"
             ];
             int previousHeader = -1;
             foreach (string header in sampleHeaders)
             {
                 int headerIndex = historyXaml.IndexOf($"Header=\"{header}\"", previousHeader + 1, StringComparison.Ordinal);
-                Assert(headerIndex > previousHeader, $"History UI sample column order: {header}");
+                Assert(headerIndex > previousHeader, $"History UI Vietnamese 14-column order: {header}");
                 previousHeader = headerIndex;
             }
 
@@ -2758,7 +2773,7 @@ internal static class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(customerText.Contains(",0/1,불량,,", StringComparison.Ordinal) &&
+            Assert(customerText.Contains(",불량,,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
                 "History CSV FAIL uses concise Korean fault detail and blank accepted LOT");
@@ -2772,14 +2787,44 @@ internal static class Program
                 ResultAt = finished.AddSeconds(1),
                 InspectionType = HistoryInspectionType.MasterBad,
                 Passed = true,
+                InspectionTrace = "14:07:09 회로검사:FAIL",
                 FaultDetailsJson = failed.FaultDetailsJson
             };
             Assert(masterBad.IsMasterRecord &&
                    masterBad.ExportAcceptedLotNo is null &&
-                   masterBad.ExportResultText == "마스터 불량 확인" &&
-                   masterBad.ExportTestLogText.Contains("[마스터 불량품]", StringComparison.Ordinal) &&
+                   masterBad.ExportResultText == "합격" &&
+                   masterBad.ExportBarcodeText == "불량 마스터 검사" &&
+                   masterBad.ExportTestLogText.Contains("회로검사:FAIL", StringComparison.Ordinal) &&
                    masterBad.ExportTestLogText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal),
                 "MASTER BAD history is separate from production and preserves Korean fault evidence");
+
+            var normalProduct = new TestHistoryRecord
+            {
+                Started = finished,
+                Finished = finished.AddSeconds(1),
+                TestStartedAt = finished,
+                ResultAt = finished.AddSeconds(1),
+                Passed = true,
+                InspectionTrace = "14:07:09 회로검사:PASS"
+            };
+            var leakProduct = new TestHistoryRecord
+            {
+                Started = finished,
+                Finished = finished.AddSeconds(6),
+                TestStartedAt = finished,
+                ResultAt = finished.AddSeconds(6),
+                Passed = true,
+                InspectionTrace =
+                    "14:07:09 회로검사:PASS 14:07:10~14:07:14 기밀검사 " +
+                    "[CH1/CN1: 92.3→92 Δ0.3≤20:PASS]"
+            };
+            Assert(normalProduct.ExportTestLogText.Contains("회로검사:PASS", StringComparison.Ordinal) &&
+                   !normalProduct.ExportTestLogText.Contains("저항검사", StringComparison.Ordinal) &&
+                   !normalProduct.ExportTestLogText.Contains("기밀검사", StringComparison.Ordinal) &&
+                   record.ExportTestLogText.Contains("저항검사", StringComparison.Ordinal) &&
+                   leakProduct.ExportTestLogText.Contains("기밀검사", StringComparison.Ordinal) &&
+                   leakProduct.ExportTestLogText.Contains("CH1/CN1", StringComparison.Ordinal),
+                "Normal, resistance and Leak products share one concise Korean inspection-record column");
 
             var wrongWiring = new FaultDetail
             {

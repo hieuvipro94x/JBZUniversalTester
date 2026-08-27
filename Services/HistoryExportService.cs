@@ -13,7 +13,8 @@ public static class HistoryExportService
     {
         Text,
         Number,
-        DateTime
+        Date,
+        Time
     }
 
     private sealed record HistoryColumn(
@@ -23,28 +24,24 @@ public static class HistoryExportService
         Func<TestHistoryRecord, object?> GetValue,
         bool Wrap = false);
 
-    // Một nguồn định nghĩa duy nhất cho CSV và XLSX: thứ tự, header, width,
-    // kiểu Excel và getter không thể lệch nhau khi thêm/sửa cột.
+    // Mẫu ALL gốc có đúng 14 cột. CSV, XLSX và HistoryPage phải giữ cùng
+    // thứ tự này; chi tiết các công đoạn chỉ nằm trong cột 검 사 기 록.
     private static readonly HistoryColumn[] Columns =
     [
-        new("장착시간", 21, HistoryCellType.DateTime, r => r.EffectiveInstallStartedAt),
-        new("파일", 34, HistoryCellType.Text, r => r.ExportModelFileName),
-        new("파트명", 20, HistoryCellType.Text, r => r.PartName),
-        new("파트번호", 19, HistoryCellType.Text, r => r.PartNumber),
-        new("Eco", 15, HistoryCellType.Text, r => r.Eco),
-        new("Nco", 13, HistoryCellType.Text, r => r.Nco),
-        new("Alc", 17, HistoryCellType.Text, r => r.Alc),
-        new("Lot", 11, HistoryCellType.Text, r => r.ExportLotText),
-        new("진도", 10, HistoryCellType.Text, r => r.ExportProgressText),
-        new("결과", 10, HistoryCellType.Text, r => r.ExportResultText),
-        new("합격", 11, HistoryCellType.Number, r => r.ExportAcceptedLotNo),
-        new("검사기록", 52, HistoryCellType.Text, r => r.ExportTestLogText, true),
-        new("바코드입력", 20, HistoryCellType.Text, r => r.ExportBarcodeInputText),
-        new("바코드출력", 48, HistoryCellType.Text, r => r.BarcodeOutputText, true),
-        new("측정", 28, HistoryCellType.Text, r => r.ExportResistanceText, true),
-        new("HtdrvName", 34, HistoryCellType.Text, r => r.HtdrvName),
-        new("내용", 46, HistoryCellType.Text, r => r.ExportContentText, true),
-        new("메모", 36, HistoryCellType.Text, r => r.PrintMessage, true)
+        new("일 자", 12, HistoryCellType.Date, r => r.EffectiveTestStartedAt),
+        new("시 간", 11, HistoryCellType.Time, r => r.EffectiveTestStartedAt),
+        new("파 일", 28, HistoryCellType.Text, r => r.ExportModelFileName),
+        new("품 명", 20, HistoryCellType.Text, r => r.PartName),
+        new("품 번", 20, HistoryCellType.Text, r => r.PartNumber),
+        new("차 종", 18, HistoryCellType.Text, r => r.VehicleType),
+        new("Lot", 16, HistoryCellType.Text, r => r.ExportLotText),
+        new("결 과", 10, HistoryCellType.Text, r => r.ExportResultText),
+        new("순 번", 11, HistoryCellType.Number, r => r.ExportSequenceNo),
+        new("검 사 기 록", 80, HistoryCellType.Text, r => r.ExportTestLogText, true),
+        new("바코드", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
+        new("200 %", 10, HistoryCellType.Text, r => r.ExportPercentText),
+        new("수입검사", 14, HistoryCellType.Text, r => r.ExportIncomingInspectionText),
+        new("프로그램", 30, HistoryCellType.Text, r => r.HtdrvName)
     ];
 
     public static void ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
@@ -90,7 +87,8 @@ public static class HistoryExportService
 
         return column.Type switch
         {
-            HistoryCellType.DateTime => ((DateTime)value).ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture),
+            HistoryCellType.Date => ((DateTime)value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            HistoryCellType.Time => ((DateTime)value).ToString("HH:mm:ss", CultureInfo.InvariantCulture),
             HistoryCellType.Number => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
             _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
         };
@@ -165,10 +163,15 @@ public static class HistoryExportService
                 continue;
             }
 
-            if (column.Type == HistoryCellType.DateTime)
+            if (column.Type == HistoryCellType.Date)
             {
-                double serial = ((DateTime)value).ToOADate();
+                double serial = ((DateTime)value).Date.ToOADate();
                 sb.Append($"<c r=\"{cell}\" s=\"2\"><v>{serial.ToString("0.###############", CultureInfo.InvariantCulture)}</v></c>");
+            }
+            else if (column.Type == HistoryCellType.Time)
+            {
+                double serial = ((DateTime)value).TimeOfDay.TotalDays;
+                sb.Append($"<c r=\"{cell}\" s=\"4\"><v>{serial.ToString("0.###############", CultureInfo.InvariantCulture)}</v></c>");
             }
             else if (column.Type == HistoryCellType.Number)
             {
@@ -236,7 +239,10 @@ public static class HistoryExportService
     private static string StylesXml() => """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy/mm/dd hh:mm:ss"/></numFmts>
+          <numFmts count="2">
+            <numFmt numFmtId="164" formatCode="yyyy-mm-dd"/>
+            <numFmt numFmtId="165" formatCode="hh:mm:ss"/>
+          </numFmts>
           <fonts count="2">
             <font><sz val="10"/><name val="Calibri"/></font>
             <font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Calibri"/></font>
@@ -251,11 +257,12 @@ public static class HistoryExportService
             <border><left style="thin"><color rgb="FFD9E2F3"/></left><right style="thin"><color rgb="FFD9E2F3"/></right><top style="thin"><color rgb="FFD9E2F3"/></top><bottom style="thin"><color rgb="FFD9E2F3"/></bottom><diagonal/></border>
           </borders>
           <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-          <cellXfs count="4">
+          <cellXfs count="5">
             <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
             <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFill="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
             <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
             <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+            <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
           </cellXfs>
           <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
         </styleSheet>

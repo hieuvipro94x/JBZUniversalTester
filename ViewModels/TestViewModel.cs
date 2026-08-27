@@ -147,6 +147,12 @@ public sealed class TestViewModel : ObservableObject
     private DateTime _cycleStartedAt = DateTime.Now;
     private DateTime? _cycleTestStartedAt;
     private DateTime? _cycleRemovalStartedAt;
+    private DateTime? _cycleContinuityCompletedAt;
+    private DateTime? _cycleResistanceStartedAt;
+    private DateTime? _cycleResistanceCompletedAt;
+    private DateTime? _cycleWaterProofStartedAt;
+    private DateTime? _cycleWaterProofCompletedAt;
+    private string _cycleWaterProofSummary = string.Empty;
     private string _activeCycleId = Guid.NewGuid().ToString("N");
     private string _recordedHistoryCycleId = string.Empty;
     private TestHistoryStore? _recordedHistoryStore;
@@ -2310,6 +2316,16 @@ public sealed class TestViewModel : ObservableObject
         return timestamp;
     }
 
+    private void ResetCycleInspectionTrace()
+    {
+        _cycleContinuityCompletedAt = null;
+        _cycleResistanceStartedAt = null;
+        _cycleResistanceCompletedAt = null;
+        _cycleWaterProofStartedAt = null;
+        _cycleWaterProofCompletedAt = null;
+        _cycleWaterProofSummary = string.Empty;
+    }
+
     private void ResetFullCycleAfterProductRemoved()
     {
         _engine.ResetProductCycle();
@@ -2332,6 +2348,7 @@ public sealed class TestViewModel : ObservableObject
         _cycleStartedAt = DateTime.Now;
         _cycleTestStartedAt = null;
         _cycleRemovalStartedAt = null;
+        ResetCycleInspectionTrace();
         _recordedHistoryCycleId = string.Empty;
         _recordedHistoryStore = null;
         Lot = _productionSettings.LotNo.ToString();
@@ -3811,6 +3828,7 @@ public sealed class TestViewModel : ObservableObject
         _cycleStartedAt = DateTime.Now;
         _cycleTestStartedAt = null;
         _cycleRemovalStartedAt = null;
+        ResetCycleInspectionTrace();
         _recordedHistoryCycleId = string.Empty;
         _recordedHistoryStore = null;
         Lot = _productionSettings.LotNo.ToString();
@@ -5114,7 +5132,12 @@ public sealed class TestViewModel : ObservableObject
             Passed = passed,
             ModelName = model.ModelName,
             ModelFile = model.SourcePath,
-            HtdrvName = ProgramIdentityService.BuildHtdrvName(_productionSettings),
+            HtdrvName = ProgramIdentityService.BuildHtdrvName(),
+            LotText = _productionSettings.Lot,
+            InspectionTrace = $"{resultAt:HH:mm:ss} 회로검사:{(
+                inspectionType == HistoryInspectionType.MasterBad
+                    ? (passed ? "FAIL" : "PASS")
+                    : (passed ? "PASS" : "FAIL"))}",
             OpenCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.OpenCircuit),
             WrongCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.WrongWiring),
             ShortCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.ShortCircuit),
@@ -5574,6 +5597,24 @@ public sealed class TestViewModel : ObservableObject
                   $"yêu cầu áp >= {_waterProofProfile.PressMin:0.###}, độ sụt <= {_waterProofProfile.LeakLimit:0.###}"
     };
 
+    private string BuildWaterProofHistorySummary(WaterProofRunResult run)
+    {
+        string F(double value) => value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+        return string.Join('/', run.Channels
+            .Where(channel => channel.Enabled)
+            .OrderBy(channel => channel.Channel)
+            .Select(channel =>
+            {
+                string connector = _waterProofProfile.ConnectorForChannel(channel.Channel).Trim();
+                string name = connector.Length == 0
+                    ? $"CH{channel.Channel}"
+                    : $"CH{channel.Channel}/{connector}";
+                return $"[{name}: {F(channel.FirstPressure)}→{F(channel.SecondPressure)} " +
+                       $"Δ{F(channel.Leak)}≤{F(_waterProofProfile.LeakLimit)}:{(channel.Passed ? "PASS" : "FAIL")}]";
+            }));
+    }
+
     private async Task<bool> RunAutomaticWaterProofAsync(
         ProductModel cycleModel,
         long generation,
@@ -5593,6 +5634,7 @@ public sealed class TestViewModel : ObservableObject
             if (_waterProofProfile.EnabledChannelCount == 0)
                 throw new InvalidOperationException("Model bật kiểm tra kín nước nhưng chưa chọn CH1/CH2/CH3.");
 
+            _cycleWaterProofStartedAt ??= DateTime.Now;
             State = "ĐANG TEST LEAK";
             SetWaterProofStage(WaterProofStage.Connecting, "ĐANG KẾT NỐI", "---");
             AddLog(
@@ -5610,6 +5652,8 @@ public sealed class TestViewModel : ObservableObject
                     _waterProofProfile,
                     ApplyWaterProofProgress,
                     ct);
+                _cycleWaterProofCompletedAt = DateTime.Now;
+                _cycleWaterProofSummary = BuildWaterProofHistorySummary(run);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -5764,6 +5808,7 @@ public sealed class TestViewModel : ObservableObject
 
             AsyncFileLogService.Current.Performance(
                 $"PASS_LATENCY T_POST_CONTINUITY_TASK_START cycle={_activeCycleId}");
+            _cycleContinuityCompletedAt ??= DateTime.Now;
             AddLog("Toàn bộ mạng I/O đã đạt theo model THT.");
             AddLog($"[AUTO-R] Continuity complete = {_engine.ContinuityPassed}");
             AddLog($"[AUTO-R] Continuity passed = {_engine.ContinuityPassed}");
@@ -5786,6 +5831,7 @@ public sealed class TestViewModel : ObservableObject
                     return;
                 }
 
+                _cycleResistanceStartedAt ??= DateTime.Now;
                 SetProductionPhase(ProductionPhase.Resistance);
                 State = "KIỂM TRA ĐIỆN TRỞ";
                 AddLog("[AUTO-R] Trigger automatic resistance = YES");
@@ -5807,6 +5853,7 @@ public sealed class TestViewModel : ObservableObject
                         ct);
 
                 UpdateResistanceRows(results);
+                _cycleResistanceCompletedAt = DateTime.Now;
 
                 AddLog(
                     $"Hoàn thành {Resistance.Count}/{configuredResistanceSteps.Count} " +
@@ -6588,6 +6635,41 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    private string BuildProductInspectionTrace(DateTime resultAt)
+    {
+        var stages = new List<string>();
+        DateTime continuityAt = _cycleContinuityCompletedAt ?? resultAt;
+        stages.Add($"{continuityAt:HH:mm:ss} 회로검사:{(_cycleContinuityCompletedAt.HasValue ? "PASS" : "FAIL")}");
+
+        if (_cycleResistanceStartedAt is DateTime resistanceStarted)
+        {
+            DateTime resistanceCompleted = _cycleResistanceCompletedAt ?? resultAt;
+            string resistanceSummary = string.Join('/', Resistance.Select(item =>
+            {
+                string name = !string.IsNullOrWhiteSpace(item.Name)
+                    ? item.Name.Trim()
+                    : item.ChannelText;
+                string value = item.IsOpen ? "OPEN" : item.Display;
+                return $"[{name}: {item.MinDisplayText} < {value} < {item.MaxDisplayText} :{item.ResultText}]";
+            }));
+            stages.Add(
+                $"{resistanceStarted:HH:mm:ss}~{resistanceCompleted:HH:mm:ss} 저항검사" +
+                (resistanceSummary.Length == 0 ? ":FAIL" : $" {resistanceSummary}"));
+        }
+
+        if (_cycleWaterProofStartedAt is DateTime waterProofStarted)
+        {
+            DateTime waterProofCompleted = _cycleWaterProofCompletedAt ?? resultAt;
+            stages.Add(
+                $"{waterProofStarted:HH:mm:ss}~{waterProofCompleted:HH:mm:ss} 기밀검사" +
+                (string.IsNullOrWhiteSpace(_cycleWaterProofSummary)
+                    ? ":FAIL"
+                    : $" {_cycleWaterProofSummary}"));
+        }
+
+        return string.Join(' ', stages);
+    }
+
     private bool RecordCompletedProduct(
         bool passed,
         string resultText,
@@ -6691,7 +6773,9 @@ public sealed class TestViewModel : ObservableObject
             Passed = completed.Passed,
             ModelName = model.ModelName,
             ModelFile = model.SourcePath,
-            HtdrvName = ProgramIdentityService.BuildHtdrvName(_productionSettings),
+            HtdrvName = ProgramIdentityService.BuildHtdrvName(),
+            LotText = _productionSettings.Lot,
+            InspectionTrace = BuildProductInspectionTrace(finished),
             OpenCount = openCount,
             WrongCount = wrongOnly,
             ShortCount = shortOnly,

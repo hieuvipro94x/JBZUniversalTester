@@ -15,15 +15,7 @@ public static class ProgramIdentityService
 
     public static string InformationalVersionText => AppVersion.InformationalVersion;
 
-    public static string BuildHtdrvName(ProductionSettings settings)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-
-        return $"{ProgramName} V{VersionText} " +
-               $"[Card Count]{settings.ExpansionCardCount} " +
-               $"[USB Delay]{settings.UsbDelay} " +
-               $"[R1 JIG]{settings.Relay1JigPulseMs}ms " +
-               $"[R2 MARKING]{settings.Relay2MarkingPulseMs}ms " +
-               $"[R2->R1]{settings.PassMarkingToJigDelayMs}ms";
-    }
+    // HtdrvName trong lịch sử là danh tính phần mềm tạo kết quả. Cấu hình
+    // Card/USB/Relay không được ghép vào cột tên phần mềm của mẫu gốc.
+    public static string BuildHtdrvName() => $"{ProgramName}V{VersionText}";
 }

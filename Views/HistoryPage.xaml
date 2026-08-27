@@ -295,20 +295,16 @@
                 </DataGrid.RowStyle>
 
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="장착시간"
-                                        Binding="{Binding EffectiveInstallStartedAt, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
-                                        Width="150"/>
-                    <DataGridTextColumn Header="파일" Binding="{Binding ExportModelFileName}" Width="180"/>
-                    <DataGridTextColumn Header="파트명" Binding="{Binding PartName}" Width="135"/>
-                    <DataGridTextColumn Header="파트번호" Binding="{Binding PartNumber}" Width="135"/>
-                    <DataGridTextColumn Header="Eco" Binding="{Binding Eco}" Width="100"/>
-                    <DataGridTextColumn Header="Nco" Binding="{Binding Nco}" Width="90"/>
-                    <DataGridTextColumn Header="Alc" Binding="{Binding Alc}" Width="105"/>
-                    <DataGridTextColumn Header="Lot" Binding="{Binding ExportLotText}" Width="72"/>
-                    <DataGridTextColumn Header="진도" Binding="{Binding ExportProgressText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="결과" Binding="{Binding ExportResultText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="합격" Binding="{Binding ExportAcceptedLotNo}" Width="78" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTemplateColumn Header="검사기록" Width="500">
+                    <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="92"/>
+                    <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="72"/>
+                    <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180"/>
+                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="135"/>
+                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="135"/>
+                    <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="105"/>
+                    <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="105"/>
+                    <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding ExportSequenceNo}" Width="78" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTemplateColumn Header="Hồ sơ kiểm tra" Width="500">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportTestLogText}"
@@ -318,29 +314,19 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="바코드입력" Binding="{Binding ExportBarcodeInputText}" Width="105"/>
-                    <DataGridTemplateColumn Header="바코드출력" Width="230">
+                    <DataGridTemplateColumn Header="Mã vạch" Width="230">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding BarcodeOutputText}"
-                                           ToolTip="{Binding BarcodeOutputText}"
+                                <TextBlock Text="{Binding ExportBarcodeText}"
+                                           ToolTip="{Binding ExportBarcodeText}"
                                            TextTrimming="CharacterEllipsis"
                                            TextWrapping="NoWrap"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="측정" Binding="{Binding ExportResistanceText}" Width="160"/>
-                    <DataGridTextColumn Header="HtdrvName" Binding="{Binding HtdrvName}" Width="190"/>
-                    <DataGridTemplateColumn Header="내용" Width="240">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding ExportContentText}"
-                                           ToolTip="{Binding ExportContentText}"
-                                           TextTrimming="CharacterEllipsis"/>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="메모" Binding="{Binding PrintMessage}" Width="190"/>
+                    <DataGridTextColumn Header="200 %" Binding="{Binding ExportPercentText}" Width="70"/>
+                    <DataGridTextColumn Header="Kiểm tra đầu vào" Binding="{Binding ExportIncomingInspectionText}" Width="110"/>
+                    <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="190"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>

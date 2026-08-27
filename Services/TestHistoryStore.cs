@@ -88,7 +88,9 @@ public sealed class TestHistoryStore
                     ResultAt TEXT NULL,
                     RemovalStartedAt TEXT NULL,
                     RemovedAt TEXT NULL,
-                    InspectionType TEXT NOT NULL DEFAULT 'PRODUCT'
+                    InspectionType TEXT NOT NULL DEFAULT 'PRODUCT',
+                    LotText TEXT NOT NULL DEFAULT '',
+                    InspectionTrace TEXT NOT NULL DEFAULT ''
                 );
 
                 CREATE INDEX IF NOT EXISTS IX_TestHistory_Finished
@@ -135,6 +137,8 @@ public sealed class TestHistoryStore
         EnsureColumn(connection, "RemovalStartedAt", "TEXT NULL");
         EnsureColumn(connection, "RemovedAt", "TEXT NULL");
         EnsureColumn(connection, "InspectionType", "TEXT NOT NULL DEFAULT 'PRODUCT'");
+        EnsureColumn(connection, "LotText", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "InspectionTrace", "TEXT NOT NULL DEFAULT ''");
 
         using SqliteCommand cycleIndex = connection.CreateCommand();
         cycleIndex.CommandText = """
@@ -191,7 +195,7 @@ public sealed class TestHistoryStore
                 PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage,
                 LabelTemplateType, LabelPayload,
                 InstallStartedAt, TestStartedAt, ResultAt, RemovalStartedAt, RemovedAt,
-                InspectionType
+                InspectionType, LotText, InspectionTrace
             )
             VALUES
             (
@@ -206,7 +210,7 @@ public sealed class TestHistoryStore
                 $PrintTimestamp, $Printer, $LabelCopies, $ReprintCount, $PrintMessage,
                 $LabelTemplateType, $LabelPayload,
                 $InstallStartedAt, $TestStartedAt, $ResultAt, $RemovalStartedAt, $RemovedAt,
-                $InspectionType
+                $InspectionType, $LotText, $InspectionTrace
             );
             SELECT last_insert_rowid();
             """;
@@ -273,7 +277,7 @@ public sealed class TestHistoryStore
                 PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage,
                 LabelTemplateType, LabelPayload,
                 InstallStartedAt, TestStartedAt, ResultAt, RemovalStartedAt, RemovedAt,
-                InspectionType
+                InspectionType, LotText, InspectionTrace
             FROM TestHistory
             {(clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses))}
             ORDER BY Finished DESC, Id DESC
@@ -347,6 +351,8 @@ public sealed class TestHistoryStore
             string.IsNullOrWhiteSpace(record.InspectionType)
                 ? HistoryInspectionType.Product
                 : record.InspectionType.Trim());
+        command.Parameters.AddWithValue("$LotText", record.LotText ?? string.Empty);
+        command.Parameters.AddWithValue("$InspectionTrace", record.InspectionTrace ?? string.Empty);
     }
 
     private static void AddNullable(SqliteCommand command, string name, object? value) =>
@@ -408,7 +414,9 @@ public sealed class TestHistoryStore
             ResultAt = GetNullableDate(reader, 49),
             RemovalStartedAt = GetNullableDate(reader, 50),
             RemovedAt = GetNullableDate(reader, 51),
-            InspectionType = reader.GetString(52)
+            InspectionType = reader.GetString(52),
+            LotText = reader.GetString(53),
+            InspectionTrace = reader.GetString(54)
         };
     }
 

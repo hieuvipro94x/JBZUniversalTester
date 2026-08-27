@@ -26,6 +26,8 @@ public sealed class TestHistoryRecord
     public string ModelName { get; set; } = string.Empty;
     public string ModelFile { get; set; } = string.Empty;
     public string HtdrvName { get; set; } = string.Empty;
+    public string LotText { get; set; } = string.Empty;
+    public string InspectionTrace { get; set; } = string.Empty;
     public int OpenCount { get; set; }
     public int WrongCount { get; set; }
     public int ShortCount { get; set; }
@@ -58,8 +60,8 @@ public sealed class TestHistoryRecord
     public int ReprintCount { get; set; }
     public string PrintMessage { get; set; } = string.Empty;
 
-    public string DateText => Finished.ToString("yyyy/MM/dd");
-    public string TimeText => Finished.ToString("HH:mm:ss");
+    public string DateText => EffectiveTestStartedAt.ToString("yyyy/MM/dd");
+    public string TimeText => EffectiveTestStartedAt.ToString("HH:mm:ss");
     public string PassedText => Passed ? "PASS" : "FAIL";
     public string LabelTypeText => !string.IsNullOrWhiteSpace(LabelTemplateType)
         ? LabelTemplateType
@@ -68,20 +70,25 @@ public sealed class TestHistoryRecord
     // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
     public string BarcodeOutputText => BarcodeValue ?? string.Empty;
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
-    public string ExportLotText => string.Empty;
+    public string ExportLotText => LotText ?? string.Empty;
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
     public string InspectionTypeText => HistoryInspectionType.KoreanName(InspectionType);
     public string ExportProgressText => Passed ? "1/1" : "0/1";
-    public string ExportResultText => InspectionType switch
-    {
-        HistoryInspectionType.MasterGood => Passed ? "마스터 합격" : "마스터 불량",
-        HistoryInspectionType.MasterBad => Passed ? "마스터 불량 확인" : "마스터 확인 실패",
-        _ => Passed ? "합격" : "불량"
-    };
+    public string ExportResultText => Passed ? "합격" : "불량";
     public long? ExportAcceptedLotNo => !IsMasterRecord && Passed && LotNo > 0 ? LotNo : null;
+    public long? ExportSequenceNo => ExportAcceptedLotNo;
     public string ExportBarcodeInputText => string.Empty;
+    public string ExportBarcodeText => InspectionType switch
+    {
+        HistoryInspectionType.MasterGood => "양품 마스터 검사",
+        HistoryInspectionType.MasterBad => "불량 마스터 검사",
+        _ => BarcodeOutputText
+    };
+    public string ExportPercentText => string.Empty;
+    public string ExportIncomingInspectionText => string.Empty;
     public string ExportResistanceText => KoreanHistoryFormatter.FormatResistanceSummary(Resistance);
     public DateTime EffectiveInstallStartedAt => InstallStartedAt ?? Started;
+    public DateTime EffectiveTestStartedAt => TestStartedAt ?? Started;
     public DateTime EffectiveResultAt => ResultAt ?? Finished;
     public double? InstallDurationSeconds => DurationSeconds(EffectiveInstallStartedAt, TestStartedAt);
     public double? TestDurationSeconds => DurationSeconds(TestStartedAt, EffectiveResultAt);
@@ -94,34 +101,56 @@ public sealed class TestHistoryRecord
         get
         {
             var text = new System.Text.StringBuilder();
-            AppendPhase(text, "장착", EffectiveInstallStartedAt, TestStartedAt, InstallDurationSeconds);
-            AppendPhase(text, "검사", TestStartedAt, EffectiveResultAt, TestDurationSeconds);
-            text.Append(' ').Append(ExportResultText);
+            if (InstallDurationSeconds is double installSeconds)
+            {
+                text.Append("장착 ")
+                    .Append(EffectiveInstallStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append('~')
+                    .Append(EffectiveTestStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append('(')
+                    .Append(installSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append("초) ");
+            }
+
+            text.Append(EffectiveTestStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                .Append(" 검사시작 ");
+
+            string trace = InspectionTrace?.Trim() ?? string.Empty;
+            if (trace.Length == 0)
+            {
+                bool continuityPassed = Passed ||
+                    FaultCode?.Contains("RESISTANCE", StringComparison.OrdinalIgnoreCase) == true ||
+                    FaultCode?.Contains("WATERPROOF", StringComparison.OrdinalIgnoreCase) == true ||
+                    FaultType?.Contains("ĐIỆN TRỞ", StringComparison.OrdinalIgnoreCase) == true ||
+                    FaultType?.Contains("KÍN NƯỚC", StringComparison.OrdinalIgnoreCase) == true;
+                trace = $"{EffectiveResultAt:HH:mm:ss} 회로검사:{(continuityPassed ? "PASS" : "FAIL")}";
+            }
+            text.Append(trace);
 
             if (!Passed || InspectionType == HistoryInspectionType.MasterBad)
             {
                 string fault = KoreanHistoryFormatter.FormatFaults(this);
                 if (!string.IsNullOrWhiteSpace(fault))
-                    text.Append(" | ").Append(fault);
+                    text.Append(" [").Append(fault).Append(']');
             }
-
-            if (!string.IsNullOrWhiteSpace(Resistance))
-                text.Append(" | 저항 ").Append(ExportResistanceText);
 
             if (RemovalStartedAt is DateTime removalStarted)
             {
-                AppendPhase(text, "탈거", removalStarted, RemovedAt, RemovalDurationSeconds);
-                if (RemovedAt is null)
-                    text.Append(" 미확인");
-            }
-            else
-            {
-                text.Append(" | 탈거 기록 없음");
+                text.Append(" 탈거 ")
+                    .Append(removalStarted.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append('~')
+                    .Append(RemovedAt is DateTime removed
+                        ? removed.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)
+                        : "미확인");
+                if (RemovalDurationSeconds is double removalSeconds)
+                {
+                    text.Append('(')
+                        .Append(removalSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
+                        .Append("초)");
+                }
             }
 
-            return IsMasterRecord
-                ? $"[{InspectionTypeText}] {text}"
-                : text.ToString();
+            return text.ToString();
         }
     }
     public string ExportContentText
@@ -174,34 +203,6 @@ public sealed class TestHistoryRecord
         _ => "상태불명"
     };
 
-    private static void AppendPhase(
-        System.Text.StringBuilder text,
-        string name,
-        DateTime? start,
-        DateTime? end,
-        double? durationSeconds)
-    {
-        if (text.Length > 0)
-            text.Append(" | ");
-
-        text.Append(name).Append(' ');
-        if (start is not DateTime from)
-        {
-            text.Append("기록 없음");
-            return;
-        }
-
-        text.Append(from.ToString("HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture));
-        if (end is DateTime to)
-            text.Append('~').Append(to.ToString("HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture));
-
-        if (durationSeconds is double seconds)
-        {
-            text.Append('(')
-                .Append(seconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
-                .Append("초)");
-        }
-    }
 }
 
 public static class HistoryInspectionType
