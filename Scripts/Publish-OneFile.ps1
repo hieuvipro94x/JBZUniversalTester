@@ -104,19 +104,13 @@ try {
     Get-Process -Name $appName -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
 
-    Write-Step "Removing old build output"
+    Write-Step "Removing the current publish output"
 
-    # Chi xoa output cua version hien tai. Cac thu muc PublishSingle\Vxx.x.x cu duoc giu lai.
-    $foldersToDelete = @(
-        (Join-Path $projectDir "bin"),
-        (Join-Path $projectDir "obj"),
-        $publishDir
-    )
-
-    foreach ($folder in $foldersToDelete) {
-        if (Test-Path -LiteralPath $folder) {
-            Remove-Item -LiteralPath $folder -Recurse -Force
-        }
+    # Khong xoa bin/obj: Visual Studio XAML Designer dang dung output Debug trong
+    # cac thu muc nay. Xoa chung khi Designer dang mo co the lam shadow-copy bi loi.
+    # dotnet publish tu cap nhat output Release; chi can lam sach thu muc publish hien tai.
+    if (Test-Path -LiteralPath $publishDir) {
+        Remove-Item -LiteralPath $publishDir -Recurse -Force
     }
 
     if (Test-Path -LiteralPath $logPath) {
