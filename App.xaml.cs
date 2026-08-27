@@ -22,9 +22,7 @@ public partial class App : Application
         base.OnStartup(e);
 
         AppSoundService.Current.Initialize();
-        Dispatcher.BeginInvoke(
-            new Action(AppSoundService.Current.PlayStartup),
-            DispatcherPriority.ApplicationIdle);
+        AppSoundService.Current.PlayStartup();
     }
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

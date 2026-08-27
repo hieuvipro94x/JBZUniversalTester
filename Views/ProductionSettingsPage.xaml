@@ -116,14 +116,13 @@
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" Margin="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1*"/>
-                <ColumnDefinition Width="1*"/>
-                <ColumnDefinition Width="1.45*"/>
-            </Grid.ColumnDefinitions>
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      CanContentScroll="False">
+        <WrapPanel Margin="8" Orientation="Horizontal">
 
-            <Border Grid.Column="0" Style="{StaticResource SettingsPanelStyle}">
+            <Border Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <StackPanel>
                     <TextBlock Text="I/O / PRODUCTION" Style="{StaticResource SectionTitleStyle}"/>
                     <Grid>
@@ -337,7 +336,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Column="1" Style="{StaticResource SettingsPanelStyle}">
+            <Border Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <StackPanel>
                     <TextBlock Text="RELAY / B&#7842;O TR&#204;" Style="{StaticResource SectionTitleStyle}"/>
                     <Grid>
@@ -463,12 +462,12 @@
                 </StackPanel>
             </Border>
 
-            <Border Grid.Column="2" Style="{StaticResource SettingsPanelStyle}">
+            <Border Width="540" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="10"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
@@ -692,7 +691,8 @@
                     </Grid>
                 </Grid>
             </Border>
-        </Grid>
+        </WrapPanel>
+        </ScrollViewer>
 
         <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0">
             <Grid Margin="12,7">

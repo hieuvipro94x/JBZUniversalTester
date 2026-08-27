@@ -187,6 +187,8 @@
             <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
             <Setter Property="VirtualizingPanel.VirtualizationMode" Value="Recycling"/>
             <Setter Property="ScrollViewer.CanContentScroll" Value="True"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto"/>
             <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource PiGridBrush}"/>
             <Setter Property="VerticalGridLinesBrush" Value="{StaticResource PiGridBrush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource PiBorderBrush}"/>
@@ -358,7 +360,13 @@
         </Grid.RowDefinitions>
 
         <TextBlock x:Name="TestAppVersionText" Visibility="Collapsed"/>
-        <Grid Grid.Row="0" Margin="0,0,0,6">
+        <Viewbox Grid.Row="0"
+                 Margin="0,0,0,6"
+                 Stretch="Uniform"
+                 StretchDirection="DownOnly"
+                 HorizontalAlignment="Stretch"
+                 VerticalAlignment="Top">
+        <Grid Width="1344" Height="234">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="250"/>
                 <ColumnDefinition Width="*"/>
@@ -436,17 +444,19 @@
                         <ColumnDefinition Width="194"/>
                     </Grid.ColumnDefinitions>
 
-                    <TextBlock x:Name="ModelTitleText"
-                               Grid.Column="0"
-                               Text="{Binding ModelName, Mode=OneWay}"
-                               ToolTip="{Binding ModelName, Mode=OneWay}"
-                               Foreground="{StaticResource PiIndustrialTextBrush}"
-                               FontSize="31"
-                               FontWeight="SemiBold"
-                               HorizontalAlignment="Stretch"
-                               VerticalAlignment="Center"
-                               TextAlignment="Center"
-                               TextTrimming="CharacterEllipsis"/>
+                    <Viewbox Grid.Column="0"
+                             Margin="4"
+                             Stretch="Uniform"
+                             StretchDirection="DownOnly">
+                        <TextBlock x:Name="ModelTitleText"
+                                   Text="{Binding ModelName, Mode=OneWay}"
+                                   ToolTip="{Binding ModelName, Mode=OneWay}"
+                                   Foreground="{StaticResource PiIndustrialTextBrush}"
+                                   FontSize="31"
+                                   FontWeight="SemiBold"
+                                   TextAlignment="Center"
+                                   TextWrapping="NoWrap"/>
+                    </Viewbox>
 
                     <Border Grid.Column="1"
                             Height="86"
@@ -680,6 +690,7 @@
                 </Grid>
             </Grid>
         </Grid>
+        </Viewbox>
 
         <Grid Grid.Row="1">
             <Border Height="54"
@@ -756,13 +767,13 @@
                       Visibility="{Binding SelectedOperationTabIndex, Converter={StaticResource IntEqualsToVisibilityConverter}, ConverterParameter=0}"
                       Style="{StaticResource PiFaultGridStyle}">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Lo&#7841;i" Binding="{Binding FaultType}" Width="1.20*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
-                    <DataGridTextColumn Header="IO-CN-PN" Binding="{Binding IoCnPnText}" Width="1.20*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
-                    <DataGridTextColumn x:Name="ConnectorColumn" Header="CONNECTOR" Binding="{Binding Connector}" Width="0.80*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
-                    <DataGridTextColumn Header="Ch&#226;n" Binding="{Binding Pin}" Width="0.80*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
-                    <DataGridTextColumn Header="T&#234;n d&#226;y" Binding="{Binding WireName}" Width="1.25*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
-                    <DataGridTextColumn Header="C&#7905; d&#226;y" Binding="{Binding Section}" Width="0.85*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
-                    <DataGridTextColumn Header="M&#224;u" Binding="{Binding WireColorText}" Width="0.90*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
+                    <DataGridTextColumn Header="Lo&#7841;i" Binding="{Binding FaultType}" Width="1.20*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
+                    <DataGridTextColumn Header="IO-CN-PN" Binding="{Binding IoCnPnText}" Width="1.20*" MinWidth="120" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
+                    <DataGridTextColumn x:Name="ConnectorColumn" Header="CONNECTOR" Binding="{Binding Connector}" Width="0.80*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
+                    <DataGridTextColumn Header="Ch&#226;n" Binding="{Binding Pin}" Width="0.80*" MinWidth="70" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
+                    <DataGridTextColumn Header="T&#234;n d&#226;y" Binding="{Binding WireName}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
+                    <DataGridTextColumn Header="C&#7905; d&#226;y" Binding="{Binding Section}" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
+                    <DataGridTextColumn Header="M&#224;u" Binding="{Binding WireColorText}" Width="0.90*" MinWidth="85" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
                     <DataGridTemplateColumn Header="#1" Width="54" MinWidth="54" MaxWidth="54" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiColor1CellStyle}" CellTemplate="{StaticResource Color1SquareTemplate}">
                     </DataGridTemplateColumn>
                     <DataGridTemplateColumn Header="#2" Width="54" MinWidth="54" MaxWidth="54" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiColor2CellStyle}" CellTemplate="{StaticResource Color2SquareTemplate}">
@@ -771,7 +782,7 @@
                     </DataGridTemplateColumn>
                     <DataGridTemplateColumn Header="#4" Width="54" MinWidth="54" MaxWidth="54" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiColor4CellStyle}" CellTemplate="{StaticResource Color4SquareTemplate}">
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="Tr&#7841;ng th&#225;i" Binding="{Binding Status}" Width="1.30*" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
+                    <DataGridTextColumn Header="Tr&#7841;ng th&#225;i" Binding="{Binding Status}" Width="1.30*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>
 

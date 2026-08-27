@@ -41,6 +41,7 @@ public sealed class AppSoundService : IDisposable
 
     private int _globalButtonHandlerRegistered;
     private int _startupPlayed;
+    private int _startupPlaybackActive;
 
     public static AppSoundService Current => LazyInstance.Value;
 
@@ -114,12 +115,37 @@ public sealed class AppSoundService : IDisposable
             return;
         }
 
-        SafePlay(_startupPlayer);
+        SoundPlayer? player = _startupPlayer;
+        if (player is null)
+        {
+            AsyncFileLogService.Current.Error("STARTUP_SOUND resource START.wav is unavailable");
+            return;
+        }
+
+        // SoundPlayer dùng chung thiết bị PlaySound của Windows. Một Stop() từ
+        // luồng reset Probe lúc nạp model có thể cắt START.wav. PlaySync trên
+        // worker đánh dấu một khoảng bảo vệ, không khóa Dispatcher/UI.
+        _ = Task.Run(() =>
+        {
+            Interlocked.Exchange(ref _startupPlaybackActive, 1);
+            try
+            {
+                AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_BEGIN");
+                SafePlaySync(player);
+                AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_END");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _startupPlaybackActive, 0);
+            }
+        });
     }
 
     public void PlayClick()
     {
         EnsureInitialized();
+        if (Volatile.Read(ref _startupPlaybackActive) != 0)
+            return;
         SafePlay(_clickPlayer);
     }
 
@@ -165,7 +191,7 @@ public sealed class AppSoundService : IDisposable
             {
                 if (active)
                     _testPointContactPlayer?.PlayLooping();
-                else
+                else if (Volatile.Read(ref _startupPlaybackActive) == 0)
                     _testPointContactPlayer?.Stop();
             }
             catch (Exception ex)
@@ -312,6 +338,19 @@ public sealed class AppSoundService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"Không thể phát âm thanh: {ex}");
+        }
+    }
+
+    private static void SafePlaySync(SoundPlayer? player)
+    {
+        try
+        {
+            player?.PlaySync();
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Không thể phát hết âm thanh: {ex}");
+            AsyncFileLogService.Current.Error($"STARTUP_SOUND PLAY_FAILED: {ex.Message}");
         }
     }
 
