@@ -93,7 +93,7 @@
                     <ColumnDefinition Width="92"/>
                     <ColumnDefinition Width="92"/>
                     <ColumnDefinition Width="92"/>
-                    <ColumnDefinition Width="292"/>
+                    <ColumnDefinition Width="300"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
@@ -131,7 +131,8 @@
                 <StackPanel Grid.Column="4"
                             Orientation="Horizontal"
                             VerticalAlignment="Center"
-                            Margin="10,0,0,0">
+                            HorizontalAlignment="Right"
+                            Margin="0">
                     <Button Content="CSV"
                             Width="78"
                             Style="{StaticResource CompactButton}"
@@ -145,6 +146,8 @@
                     <Button Content="ĐÓNG"
                             Width="78"
                             Style="{StaticResource CompactButton}"
+                            BorderBrush="#7F8790"
+                            BorderThickness="1"
                             Click="Close_Click"/>
                 </StackPanel>
             </Grid>
