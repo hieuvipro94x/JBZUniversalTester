@@ -42,6 +42,34 @@ public partial class ProductionSettingsPage : UserControl
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
 
+    private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (IoSettingsPanel is null || RelaySettingsPanel is null || LabelSettingsPanel is null)
+        {
+            return;
+        }
+
+        // 1920x1080 là bố cục chính: ba panel dùng toàn bộ chiều rộng theo
+        // tỷ lệ 28/28/44. Khi hẹp hơn 1240px, hai panel nhỏ nằm trên và panel
+        // TEM/ĐIỆN TRỞ xuống hàng để chữ và control không bị ép mất.
+        double available = Math.Max(760, e.NewSize.Width - 34);
+        if (available >= 1240)
+        {
+            double content = available - 30;
+            IoSettingsPanel.Width = Math.Floor(content * 0.28);
+            RelaySettingsPanel.Width = Math.Floor(content * 0.28);
+            LabelSettingsPanel.Width = Math.Max(
+                500,
+                content - IoSettingsPanel.Width - RelaySettingsPanel.Width);
+            return;
+        }
+
+        double halfPanel = Math.Max(360, Math.Floor((available - 20) / 2));
+        IoSettingsPanel.Width = halfPanel;
+        RelaySettingsPanel.Width = halfPanel;
+        LabelSettingsPanel.Width = Math.Max(540, available - 10);
+    }
+
     private void InitializeComboBoxItems()
     {
         CardIoComboBox.ItemsSource = Enumerable

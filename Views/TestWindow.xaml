@@ -12,6 +12,7 @@
         SnapsToDevicePixels="True"
         TextOptions.TextFormattingMode="Display"
         Loaded="TestWindow_Loaded"
+        SizeChanged="TestWindow_SizeChanged"
         Closing="TestWindow_Closing">
 
     <Window.Resources>
@@ -366,7 +367,7 @@
                  StretchDirection="DownOnly"
                  HorizontalAlignment="Stretch"
                  VerticalAlignment="Top">
-        <Grid Width="1344" Height="234">
+        <Grid x:Name="TestHeaderSurface" Width="1344" Height="234">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="250"/>
                 <ColumnDefinition Width="*"/>

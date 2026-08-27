@@ -504,13 +504,13 @@ internal static class Program
                settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
             "Production settings exposes reconnectable printer control and connection status");
-        Assert(xaml.Contains("<Grid Width=\"1344\" Height=\"234\">", StringComparison.Ordinal) &&
+        Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"234\"", StringComparison.Ordinal) &&
                xaml.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto\"", StringComparison.Ordinal) &&
                xaml.Contains("MinWidth=\"125\"", StringComparison.Ordinal),
             "TestView scales its fixed header and preserves table text at 1024/1368 widths");
         Assert(settingsXaml.Contains("<ScrollViewer Grid.Row=\"1\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<WrapPanel Margin=\"8\" Orientation=\"Horizontal\">", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<Border Width=\"540\" VerticalAlignment=\"Top\"", StringComparison.Ordinal),
+               settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
 
         string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));

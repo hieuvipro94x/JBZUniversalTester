@@ -2,7 +2,8 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="White"
-             FontFamily="Segoe UI">
+             FontFamily="Segoe UI"
+             SizeChanged="Page_SizeChanged">
 
     <UserControl.Resources>
         <SolidColorBrush x:Key="PageBackground" Color="#FFFFFF"/>
@@ -120,9 +121,9 @@
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Disabled"
                       CanContentScroll="False">
-        <WrapPanel Margin="8" Orientation="Horizontal">
+        <WrapPanel x:Name="SettingsPanelsHost" Margin="8" Orientation="Horizontal">
 
-            <Border Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
+            <Border x:Name="IoSettingsPanel" Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <StackPanel>
                     <TextBlock Text="I/O / PRODUCTION" Style="{StaticResource SectionTitleStyle}"/>
                     <Grid>
@@ -336,7 +337,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
+            <Border x:Name="RelaySettingsPanel" Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <StackPanel>
                     <TextBlock Text="RELAY / B&#7842;O TR&#204;" Style="{StaticResource SectionTitleStyle}"/>
                     <Grid>
@@ -462,7 +463,7 @@
                 </StackPanel>
             </Border>
 
-            <Border Width="540" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
+            <Border x:Name="LabelSettingsPanel" Width="540" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>

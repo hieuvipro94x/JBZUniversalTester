@@ -48,6 +48,18 @@ public partial class TestWindow : Window
 
     private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("yyyy/MM/dd  HH:mm:ss");
 
+    private void TestWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (TestHeaderSurface is null)
+        {
+            return;
+        }
+
+        // Ở 1920x1080 header giãn ra dùng toàn bộ màn hình. Chỉ khi viewport
+        // nhỏ hơn thiết kế 1344px (ví dụ 1024x768), Viewbox mới scale xuống.
+        TestHeaderSurface.Width = Math.Max(1344, e.NewSize.Width - 16);
+    }
+
     private async void TestWindow_Loaded(object sender, RoutedEventArgs e)
     {
         if (_initializationStarted)
