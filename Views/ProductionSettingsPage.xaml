@@ -203,30 +203,27 @@
                                  Text="{Binding MasterFaultRequiredCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  ToolTip="0 = b&#7887; ki&#7875;m tra Master. 1 tr&#7903; l&#234;n = s&#7889; l&#7895;i Master t&#7889;i thi&#7875;u c&#7847;n x&#225;c nh&#7853;n."/>
 
-                        <TextBlock Grid.Row="11" Text="M&#7853;t kh&#7849;u" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="11" Grid.Column="1" Text="{Binding Settings.Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="11" Text="Test pointer" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="11" Grid.Column="1" IsChecked="{Binding Settings.UseTestPointer, Mode=TwoWay}"/>
 
-                        <TextBlock Grid.Row="12" Text="Test pointer" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.UseTestPointer, Mode=TwoWay}"/>
+                        <TextBlock Grid.Row="12" Text="T&#7921; l&#432;u l&#7895;i" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.AutoSaveErrors, Mode=TwoWay}"/>
 
-                        <TextBlock Grid.Row="13" Text="T&#7921; l&#432;u l&#7895;i" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="13" Grid.Column="1" IsChecked="{Binding Settings.AutoSaveErrors, Mode=TwoWay}"/>
-
-                        <TextBlock Grid.Row="14" Text="Model g&#7847;n nh&#7845;t" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="14"
+                        <TextBlock Grid.Row="13" Text="Model g&#7847;n nh&#7845;t" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="13"
                                  Grid.Column="1"
                                  Text="{Binding Settings.LastThtPath, Mode=OneWay}"
                                  ToolTip="{Binding Settings.LastThtPath, Mode=OneWay}"
                                  IsReadOnly="True"/>
 
-                        <TextBlock Grid.Row="15"
+                        <TextBlock Grid.Row="14"
                                    Grid.ColumnSpan="2"
                                    Text="Relay tay dùng trực tiếp • không cần bật hoặc lưu Manual Mode"
                                    Foreground="{StaticResource TextMuted}"
                                    TextWrapping="Wrap"/>
 
-                        <Border Grid.Row="16"
-                                Grid.RowSpan="9"
+                        <Border Grid.Row="15"
+                                Grid.RowSpan="10"
                                 Grid.ColumnSpan="2"
                                 Margin="0,6,0,0"
                                 Padding="7"
@@ -470,18 +467,66 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
                     <TextBlock Text="TEM / &#272;I&#7878;N TR&#7902;" Style="{StaticResource SectionTitleStyle}"/>
 
-                    <Grid Grid.Row="1">
+                    <Border x:Name="LabelSettingsLockPanel"
+                            Grid.Row="1"
+                            Margin="0,0,0,6"
+                            Padding="8"
+                            Background="#FFF4D6"
+                            BorderBrush="#D69E2E"
+                            BorderThickness="1"
+                            CornerRadius="3"
+                            Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="145"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="96"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="34"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="MỞ KHÓA IN TEM"
+                                       FontWeight="Bold"
+                                       Foreground="#8A5A00"/>
+                            <PasswordBox x:Name="LabelUnlockPasswordBox"
+                                         Grid.Column="1"
+                                         Height="30"
+                                         Margin="0,2,4,2"
+                                         Padding="6,2"
+                                         FontSize="13"
+                                         KeyDown="LabelUnlockPasswordBox_KeyDown"/>
+                            <Button Grid.Column="2"
+                                    Height="30"
+                                    Margin="0,2"
+                                    Padding="4,1"
+                                    Content="MỞ KHÓA"
+                                    Click="UnlockLabelSettings_Click"/>
+                            <TextBlock x:Name="LabelUnlockErrorText"
+                                       Grid.Row="1"
+                                       Grid.Column="1"
+                                       Grid.ColumnSpan="2"
+                                       Margin="0,3,0,0"
+                                       Foreground="{StaticResource FailRed}"
+                                       Text="Mật khẩu khóa cài đặt in tem không đúng."
+                                       Visibility="Collapsed"/>
+                        </Grid>
+                    </Border>
+
+                    <Grid x:Name="LabelPrintSettingsForm" Grid.Row="2">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="130"/>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="84"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
@@ -525,15 +570,29 @@
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    Text="CHƯA KẾT NỐI"/>
+
+                        <TextBlock Grid.Row="4"
+                                   Text="Mật khẩu khóa tem"
+                                   Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox x:Name="LabelSettingsPasswordTextBox"
+                                 Grid.Row="4"
+                                 Grid.Column="1"
+                                 Grid.ColumnSpan="2"
+                                 Text="{Binding Settings.Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Để trống nếu không khóa; mật khẩu này chỉ bảo vệ phần cài đặt in tem."/>
                     </Grid>
 
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,4">
+                    <StackPanel x:Name="LabelPrintActionsPanel"
+                                Grid.Row="3"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,6,0,4">
                         <Button Content="CH&#7880;NH TEM" Width="100" Height="30" Click="EditLabelTemplate_Click"/>
                         <Button Content="XEM TR&#431;&#7898;C" Width="100" Height="30" Margin="6,0,0,0" Click="PreviewLabel_Click"/>
                         <Button Content="IN TH&#7916;" Width="100" Height="30" Margin="6,0,0,0" Click="TestPrintLabel_Click"/>
                     </StackPanel>
 
-                    <Grid Grid.Row="3" Margin="0,4,0,2">
+                    <Grid Grid.Row="4" Margin="0,4,0,2">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="44"/>
                             <ColumnDefinition Width="54"/>
@@ -547,7 +606,7 @@
                         <TextBlock Grid.Column="4" Text="MAX &#937;" Style="{StaticResource MiniHeaderStyle}"/>
                     </Grid>
 
-                    <Grid Grid.Row="4">
+                    <Grid Grid.Row="5">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>

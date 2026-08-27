@@ -1905,6 +1905,10 @@ internal static class Program
             Assert(!AdminAuthenticationService.Verify(string.Empty, string.Empty), "Empty admin password cannot authorize reset");
             Assert(!AdminAuthenticationService.Verify("admin-secret", "wrong"), "Wrong admin password rejected");
             Assert(AdminAuthenticationService.Verify("admin-secret", "admin-secret"), "Configured admin password accepted");
+            Assert(!AdminAuthenticationService.VerifyProbeMaintenance("wrong"),
+                "Probe maintenance rejects a wrong independent password");
+            Assert(AdminAuthenticationService.VerifyProbeMaintenance("admin"),
+                "Probe maintenance uses the independent admin password");
         }
         finally
         {

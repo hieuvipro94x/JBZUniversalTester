@@ -197,16 +197,6 @@ public partial class MainWindow : Window
     {
         try
         {
-            string password = _viewModel.ProductionSettings.Password ?? string.Empty;
-            if (!string.IsNullOrEmpty(password))
-            {
-                SettingsPasswordBox.Password = string.Empty;
-                SettingsPasswordErrorText.Visibility = Visibility.Collapsed;
-                SettingsPasswordGate.Visibility = Visibility.Visible;
-                SettingsPasswordBox.Focus();
-                return;
-            }
-
             ShowSettingsPage();
         }
         catch (Exception ex)
@@ -218,42 +208,6 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
-    }
-
-    private void ConfirmSettingsPassword_Click(object sender, RoutedEventArgs e) =>
-        ConfirmSettingsPassword();
-
-    private void SettingsPasswordBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-
-        ConfirmSettingsPassword();
-        e.Handled = true;
-    }
-
-    private void ConfirmSettingsPassword()
-    {
-        string expected = _viewModel.ProductionSettings.Password ?? string.Empty;
-        if (!string.Equals(SettingsPasswordBox.Password, expected, StringComparison.Ordinal))
-        {
-            SettingsPasswordErrorText.Visibility = Visibility.Visible;
-            SettingsPasswordBox.SelectAll();
-            SettingsPasswordBox.Focus();
-            return;
-        }
-
-        SettingsPasswordGate.Visibility = Visibility.Collapsed;
-        SettingsPasswordBox.Password = string.Empty;
-        SettingsPasswordErrorText.Visibility = Visibility.Collapsed;
-        ShowSettingsPage();
-    }
-
-    private void CancelSettingsPassword_Click(object sender, RoutedEventArgs e)
-    {
-        SettingsPasswordGate.Visibility = Visibility.Collapsed;
-        SettingsPasswordBox.Password = string.Empty;
-        SettingsPasswordErrorText.Visibility = Visibility.Collapsed;
     }
 
     private void ShowSettingsPage()

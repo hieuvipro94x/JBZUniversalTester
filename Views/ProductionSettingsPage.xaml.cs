@@ -5,6 +5,7 @@ using System.Text;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
@@ -19,6 +20,7 @@ public partial class ProductionSettingsPage : UserControl
 {
     private readonly MainViewModel? _main;
     private readonly ProductionSettingsViewModel _vm;
+    private readonly string _labelSettingsPasswordAtOpen;
 
     public event EventHandler? SettingsSaved;
     public event EventHandler? RequestClose;
@@ -32,15 +34,57 @@ public partial class ProductionSettingsPage : UserControl
     {
         _main = main;
         _vm = new ProductionSettingsViewModel(main?.Test);
+        _labelSettingsPasswordAtOpen = _vm.Settings.Password ?? string.Empty;
         InitializeComponent();
         DataContext = _vm;
         InitializeComboBoxItems();
         RefreshPrinterPorts();
         RefreshWaterProofPorts();
         RefreshPrinterConnectionStatus();
+        SetLabelSettingsUnlocked(string.IsNullOrEmpty(_labelSettingsPasswordAtOpen));
     }
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
+
+    private void UnlockLabelSettings_Click(object sender, RoutedEventArgs e) =>
+        TryUnlockLabelSettings();
+
+    private void LabelUnlockPasswordBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+            return;
+
+        TryUnlockLabelSettings();
+        e.Handled = true;
+    }
+
+    private void TryUnlockLabelSettings()
+    {
+        if (!AdminAuthenticationService.Verify(
+                _labelSettingsPasswordAtOpen,
+                LabelUnlockPasswordBox.Password))
+        {
+            LabelUnlockErrorText.Visibility = Visibility.Visible;
+            LabelUnlockPasswordBox.SelectAll();
+            LabelUnlockPasswordBox.Focus();
+            return;
+        }
+
+        LabelUnlockPasswordBox.Password = string.Empty;
+        LabelUnlockErrorText.Visibility = Visibility.Collapsed;
+        SetLabelSettingsUnlocked(true);
+        LabelSettingsPasswordTextBox.Focus();
+    }
+
+    private void SetLabelSettingsUnlocked(bool unlocked)
+    {
+        bool locked = !unlocked && !string.IsNullOrEmpty(_labelSettingsPasswordAtOpen);
+        LabelSettingsLockPanel.Visibility = locked ? Visibility.Visible : Visibility.Collapsed;
+        LabelPrintSettingsForm.IsEnabled = !locked;
+        LabelPrintActionsPanel.IsEnabled = !locked;
+        if (locked)
+            LabelUnlockPasswordBox.Focus();
+    }
 
     private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
     {

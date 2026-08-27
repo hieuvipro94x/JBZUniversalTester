@@ -5,6 +5,11 @@ namespace JBZUniversalTester.Services;
 
 public static class AdminAuthenticationService
 {
+    private const string ProbeMaintenancePassword = "admin";
+
+    public static bool VerifyProbeMaintenance(string? suppliedPassword) =>
+        Verify(ProbeMaintenancePassword, suppliedPassword);
+
     public static bool Verify(string? configuredPassword, string? suppliedPassword)
     {
         if (string.IsNullOrEmpty(configuredPassword))

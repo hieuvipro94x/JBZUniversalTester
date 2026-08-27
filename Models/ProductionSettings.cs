@@ -156,6 +156,10 @@ public sealed class ProductionSettings
 
     public int ResistanceDelayMs { get; set; }
 
+    /// <summary>
+    /// Mật khẩu chỉ bảo vệ nhóm cài đặt in tem. Không dùng để mở trang Cài đặt
+    /// và không dùng cho thao tác reset chu kỳ thay Probe Pin.
+    /// </summary>
     public string Password { get; set; } = string.Empty;
 
     // ============================================================

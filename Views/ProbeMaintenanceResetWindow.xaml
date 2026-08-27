@@ -26,13 +26,13 @@
                    FontSize="15" TextWrapping="Wrap"/>
 
         <StackPanel Grid.Row="3" Margin="0,18,0,0">
-            <TextBlock Text="Mật khẩu quản trị" FontWeight="SemiBold"/>
+            <TextBlock Text="M&#7853;t kh&#7849;u reset Probe Pin" FontWeight="SemiBold"/>
             <PasswordBox x:Name="AdminPasswordBox" Height="38" Margin="0,6,0,0"
                          FontSize="17" KeyDown="AdminPasswordBox_KeyDown"/>
         </StackPanel>
 
         <TextBlock Grid.Row="4" Margin="0,12,0,0" Foreground="#B91C1C"
-                   Text="Liên hệ kỹ thuật để reset."
+                   Text="M&#7853;t kh&#7849;u ri&#234;ng do qu&#7843;n tr&#7883; vi&#234;n qu&#7843;n l&#253;."
                    TextWrapping="Wrap"/>
 
         <Grid Grid.Row="5">

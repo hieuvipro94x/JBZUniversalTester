@@ -6616,16 +6616,9 @@ public sealed class TestViewModel : ObservableObject
             return false;
         }
 
-        string expected = _productionSettings.Password ?? string.Empty;
-        if (string.IsNullOrEmpty(expected))
+        if (!AdminAuthenticationService.VerifyProbeMaintenance(password))
         {
-            message = "Chưa cấu hình mật khẩu quản trị. Reset Probe Pin bị từ chối.";
-            return false;
-        }
-
-        if (!AdminAuthenticationService.Verify(expected, password))
-        {
-            message = "Xác thực quản trị không đúng.";
+            message = "Mật khẩu quản trị thay Probe Pin không đúng.";
             return false;
         }
 
@@ -6638,7 +6631,7 @@ public sealed class TestViewModel : ObservableObject
                 _statisticsStore.ResetProbeCycle(
                     model,
                     reset.ReplacementThreshold,
-                    "SETTINGS_ADMIN",
+                    "PROBE_ADMIN",
                     _productionSettings.DeviceName);
             }
             catch (Exception ex)
@@ -6651,7 +6644,7 @@ public sealed class TestViewModel : ObservableObject
             message = $"Đã lưu thay Probe Pin vào PartCnt.txt. Counter {previous:N0} → 0.";
             AddLog(
                 $"MAINTENANCE: PROBE PIN REPLACED; part={reset.PartNumber}; " +
-                $"previous={previous}; file={_partCounterStore.StoragePath}; admin=SETTINGS_ADMIN.");
+                $"previous={previous}; file={_partCounterStore.StoragePath}; admin=PROBE_ADMIN.");
             return true;
         }
         catch (Exception ex)
