@@ -17,5 +17,5 @@ public static class ProgramIdentityService
 
     // HtdrvName trong lịch sử là danh tính phần mềm tạo kết quả. Cấu hình
     // Card/USB/Relay không được ghép vào cột tên phần mềm của mẫu gốc.
-    public static string BuildHtdrvName() => $"{ProgramName}V{VersionText}";
+    public static string BuildHtdrvName() => $"{ProgramName} V{VersionText}";
 }

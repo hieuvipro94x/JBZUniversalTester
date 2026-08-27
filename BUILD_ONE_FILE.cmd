@@ -1,10 +1,11 @@
 @echo off
 setlocal EnableExtensions
 chcp 65001 >nul
-title JBZUniversalTester - Build + Version + GitHub
+title JBZUniversalTester - Build + Smart Version + GitHub
 
 set "ROOT=%~dp0"
 set "PS_SCRIPT=%ROOT%Scripts\Publish-OneFile.ps1"
+set "VERSION_RESOLVER=%ROOT%Scripts\Resolve-BuildVersion.ps1"
 set "VERSION_FILE=%ROOT%Version.props"
 
 pushd "%ROOT%" >nul 2>&1
@@ -16,7 +17,7 @@ if errorlevel 1 (
 )
 
 echo ============================================================
-echo JBZUniversalTester - BUILD + TỰ TĂNG VERSION + GITHUB
+echo JBZUniversalTester - BUILD + KIỂM TRA VERSION + GITHUB
 echo ============================================================
 echo.
 
@@ -29,6 +30,12 @@ if not exist "%PS_SCRIPT%" (
 if not exist "%VERSION_FILE%" (
     echo [LỖI] Không tìm thấy:
     echo %VERSION_FILE%
+    goto :FAIL
+)
+
+if not exist "%VERSION_RESOLVER%" (
+    echo [LOI] Khong tim thay:
+    echo %VERSION_RESOLVER%
     goto :FAIL
 )
 
@@ -70,10 +77,10 @@ echo [GIT] Mọi file được stage sẽ tuân theo .gitignore.
 echo.
 
 rem ============================================================
-rem B1 - TANG VERSION
+rem B1 - XAC NHAN VERSION, CHI TU TANG KHI SOURCE DOI MA VERSION CHUA TANG
 rem ============================================================
 echo ============================================================
-echo BƯỚC 1/3 - TỰ TĂNG PHIÊN BẢN
+echo BUOC 1/3 - KIEM TRA PHIEN BAN
 echo ============================================================
 
 set "VERSION_BACKUP=%TEMP%\JBZUniversalTester_Version_%RANDOM%_%RANDOM%.props"
@@ -84,35 +91,28 @@ if errorlevel 1 (
 )
 
 set "NEW_VERSION="
+set "VERSION_ACTION="
 
-for /f "usebackq delims=" %%V in (`powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
- "$ErrorActionPreference='Stop';" ^
- "$p=$env:VERSION_FILE;" ^
- "[xml]$x=Get-Content -LiteralPath $p -Raw;" ^
- "$g=@($x.Project.PropertyGroup)[0];" ^
- "$current=[string]$g.Version;" ^
- "if([string]::IsNullOrWhiteSpace($current)){throw 'Version empty'};" ^
- "$v=[Version]$current;" ^
- "$patch=if($v.Build -lt 0){0}else{$v.Build};" ^
- "$n=('{0}.{1}.{2}' -f $v.Major,$v.Minor,($patch+1));" ^
- "$tag=$n.Replace('.','_');" ^
- "$g.VersionPrefix=$n;" ^
- "$g.Version=$n;" ^
- "$g.AssemblyVersion=($n+'.0');" ^
- "$g.FileVersion=($n+'.0');" ^
- "$g.InformationalVersion=$n;" ^
- "$g.VersionFileTag=$tag;" ^
- "$g.AssemblyTitle=('JBZUniversalTester V'+$n);" ^
- "$settings=New-Object System.Xml.XmlWriterSettings;" ^
- "$settings.Indent=$true;" ^
- "$settings.Encoding=New-Object System.Text.UTF8Encoding($true);" ^
- "$writer=[System.Xml.XmlWriter]::Create($p,$settings);" ^
- "$x.Save($writer);" ^
- "$writer.Close();" ^
- "Write-Output $n"`) do set "NEW_VERSION=%%V"
+for /f "tokens=1,2 delims=|" %%V in ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%VERSION_RESOLVER%"') do (
+    set "NEW_VERSION=%%V"
+    set "VERSION_ACTION=%%W"
+)
 
 if not defined NEW_VERSION (
-    echo [LỖI VERSION] Không thể tang Version.props.
+    echo [LOI VERSION] Khong the xac nhan Version.props.
+    copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
+    del /Q "%VERSION_BACKUP%" >nul 2>&1
+    goto :FAIL
+)
+
+if /I "%VERSION_ACTION%"=="AUTO_INCREMENTED" (
+    echo [VERSION] Source da thay doi va version chua tang: da tu tang mot lan.
+) else if /I "%VERSION_ACTION%"=="ALREADY_INCREMENTED" (
+    echo [VERSION] Version da duoc tang khi sua source: giu nguyen, khong tang tiep.
+) else if /I "%VERSION_ACTION%"=="UNCHANGED_REBUILD" (
+    echo [VERSION] Source khong doi: build lai dung version hien tai.
+) else (
+    echo [LOI VERSION] Trang thai khong hop le: %VERSION_ACTION%
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
     goto :FAIL
@@ -121,7 +121,7 @@ if not defined NEW_VERSION (
 set "VERSION_TAG=%NEW_VERSION:.=_%"
 set "EXPECTED_EXE=%ROOT%PublishSingle\V%NEW_VERSION%\JBZUniversalTester_V%VERSION_TAG%.exe"
 
-echo Phiên bản mới : V%NEW_VERSION%
+echo Phiên bản build: V%NEW_VERSION%
 echo File EXE       : JBZUniversalTester_V%VERSION_TAG%.exe
 echo Thư mục        : PublishSingle\V%NEW_VERSION%\
 echo.

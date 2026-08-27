@@ -2623,7 +2623,7 @@ internal static class Program
     {
         Assert(
             ProgramIdentityService.BuildHtdrvName() ==
-            $"JBZUniversalTesterV{ProgramIdentityService.VersionText}",
+            $"JBZUniversalTester V{ProgramIdentityService.VersionText}",
             "HtdrvName is exactly the current software name and release version");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZSelfTests", Guid.NewGuid().ToString("N"));
