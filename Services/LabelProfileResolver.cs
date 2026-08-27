@@ -113,6 +113,10 @@ public static class LabelProfileResolver
 
         string[] candidates =
         [
+            // A THT file may explicitly name one of the verified built-in profiles
+            // (for example TEM_BE_QR). Resolve that exact profile beside the EXE
+            // before falling back to legacy/custom profile directories.
+            Path.Combine(AppContext.BaseDirectory, "Labels", profileId + ".txt"),
             Path.Combine(AppContext.BaseDirectory, "BarForm", profileId + ".txt"),
             Path.Combine(AppContext.BaseDirectory, "Labels", "Legacy", profileId + ".epl"),
             Path.Combine(AppContext.BaseDirectory, "Labels", "Legacy", profileId + ".zpl"),

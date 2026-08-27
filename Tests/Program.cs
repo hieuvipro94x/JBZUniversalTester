@@ -2912,6 +2912,9 @@ internal static class Program
                 "KETQU without original template/trace is marked NEEDS_ORIGINAL_TRACE");
 
             model = ParseThtLabelModelText("12000/20430/1");
+            labelSettings.ExternalHelperPath = string.Empty;
+            labelSettings.ExternalHelperArgument = string.Empty;
+            labelSettings.ExternalPrintFile = "print.txt";
             history.LotNo = 2001;
             history.Finished = new DateTime(2026, 8, 27, 8, 9, 10);
             labelSettings.TemplateType = LabelSettings.LargeTemplate;
@@ -2934,6 +2937,7 @@ internal static class Program
 
             ProductModel qrModel = ParseThtLabelModelText("12000/20430");
             qrModel.PartNumber = "K32000-22402";
+            qrModel.LabelTemplate = new LabelTemplateDefinition(ProfileId: LabelSettings.SmallQrTemplate);
             history.LotNo = 1;
             history.Finished = new DateTime(2026, 8, 27, 8, 9, 10);
             labelSettings.TemplateType = LabelSettings.SmallQrTemplate;
@@ -2942,6 +2946,7 @@ internal static class Program
                 LabelVariableResolver.Resolve(qrModel, qrLabel.Data, labelSettings);
             Assert(LabelProfileResolver.NormalizeTemplateType("TEM_BE_QR") == LabelSettings.SmallQrTemplate &&
                    qrLabel.Profile.Id == LabelSettings.SmallQrTemplate &&
+                   qrLabel.Profile.Mode == LabelPrintMode.ExternalTemplate &&
                    qrValues["LOT_NO"] == "0001" &&
                    qrValues["SMALL_QR_BARCODE"] == "K32000-22402,2608270001" &&
                    qrLabel.Data.Barcode == "K32000-22402,2608270001" &&
