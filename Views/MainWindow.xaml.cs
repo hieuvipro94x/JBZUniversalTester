@@ -31,6 +31,7 @@ public partial class MainWindow : Window
         _viewModel.Test.PropertyChanged += TestViewModel_PropertyChanged;
         DataContext = _viewModel;
         ContentRendered += MainWindow_ContentRendered;
+        UpdateProductRemovalGate();
     }
 
     private void MainWindow_ContentRendered(object? sender, EventArgs e)
@@ -53,6 +54,8 @@ public partial class MainWindow : Window
             return;
 
         _startupStarted = true;
+        StartTestButton.IsEnabled = false;
+        SelectModelButton.IsEnabled = false;
 
         try
         {
@@ -73,6 +76,10 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
+        finally
+        {
+            UpdateProductRemovalGate();
+        }
     }
 
     private void OpenTestWindow_Click(
@@ -84,9 +91,9 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
-        if (_viewModel.Test.IsPassProductRemovalPending)
+        if (_viewModel.Test.IsProductRemovalPending)
         {
-            UpdatePassRemovalGate();
+            UpdateProductRemovalGate();
             return;
         }
 
@@ -165,21 +172,21 @@ public partial class MainWindow : Window
 
         Show();
         WindowState = WindowState.Maximized;
-        UpdatePassRemovalGate();
+        UpdateProductRemovalGate();
         Activate();
         Focus();
     }
 
     private void TestViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TestViewModel.IsPassProductRemovalPending))
-            Dispatcher.BeginInvoke(UpdatePassRemovalGate);
+        if (e.PropertyName == nameof(TestViewModel.IsProductRemovalPending))
+            Dispatcher.BeginInvoke(UpdateProductRemovalGate);
     }
 
-    private void UpdatePassRemovalGate()
+    private void UpdateProductRemovalGate()
     {
-        bool blocked = _viewModel.Test.IsPassProductRemovalPending;
-        PassRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
+        bool blocked = _viewModel.Test.IsProductRemovalPending;
+        ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
         StartTestButton.IsEnabled = !blocked;
         SelectModelButton.IsEnabled = !blocked;
     }

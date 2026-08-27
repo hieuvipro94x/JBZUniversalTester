@@ -197,7 +197,7 @@
                     Content="KẾT THÚC"/>
         </Grid>
 
-        <Border x:Name="PassRemovalNotice"
+        <Border x:Name="ProductRemovalNotice"
                 Grid.Row="1"
                 Panel.ZIndex="10"
                 Visibility="Collapsed"

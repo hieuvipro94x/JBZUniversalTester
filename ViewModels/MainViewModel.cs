@@ -236,7 +236,7 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task<ProductModel?> LoadModelAsync(string path)
     {
-        if (Test.IsPassProductRemovalPending)
+        if (Test.IsProductRemovalPending)
             throw new InvalidOperationException("VUI LÒNG THÁO SẢN PHẨM");
 
         Status = "ĐANG NẠP MÃ HÀNG...";

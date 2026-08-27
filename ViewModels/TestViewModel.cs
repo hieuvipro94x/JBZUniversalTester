@@ -88,8 +88,9 @@ public sealed class TestViewModel : ObservableObject
     private int _fail;
     private bool _cycleActive;
     private bool _waitForProductRelease;
-    private int _passProductRemovalPending;
-    private int _passRemovalMonitoringFromMain;
+    private int _rearmAfterProductRemoval = 1;
+    private int _productRemovalPending;
+    private int _removalMonitoringFromMain;
     private bool _waitForFaultProductRemoval;
     private bool _waterProofEquipmentErrorAwaitingRemoval;
     private int _postContinuityStarted;
@@ -303,6 +304,9 @@ public sealed class TestViewModel : ObservableObject
             if (!value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
                 value.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
                 return "VUI LÒNG THÁO SẢN PHẨM";
+
+            if (value.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
+                return "THÁO SẢN PHẨM";
 
             if (value.Contains("KIỂM TRA IO BAN ĐẦU", StringComparison.OrdinalIgnoreCase))
                 return "KIỂM TRA IO";
@@ -1032,14 +1036,14 @@ public sealed class TestViewModel : ObservableObject
         AddLog("MANUAL TỰ ĐỘNG ON - thao tác relay tay, tất cả relay đã OFF an toàn.");
     }
 
-    public bool IsPassProductRemovalPending =>
-        Volatile.Read(ref _passProductRemovalPending) != 0;
+    public bool IsProductRemovalPending =>
+        Volatile.Read(ref _productRemovalPending) != 0;
 
-    private void SetPassProductRemovalPending(bool pending)
+    private void SetProductRemovalPending(bool pending)
     {
         int next = pending ? 1 : 0;
-        if (Interlocked.Exchange(ref _passProductRemovalPending, next) != next)
-            Raise(nameof(IsPassProductRemovalPending));
+        if (Interlocked.Exchange(ref _productRemovalPending, next) != next)
+            Raise(nameof(IsProductRemovalPending));
     }
 
     public async Task ExitManualModeAsync(bool outputsAlreadyOff = false)
@@ -1209,6 +1213,9 @@ public sealed class TestViewModel : ObservableObject
 
     private string ReadyStateForCurrentModel()
     {
+        if (IsProductRemovalPending)
+            return "VUI LÒNG THÁO SẢN PHẨM";
+
         if (IsManualModeActive)
             return "MANUAL";
 
@@ -2052,7 +2059,17 @@ public sealed class TestViewModel : ObservableObject
                 if (_engine.IsProductReleased)
                 {
                     _waitForFaultProductRemoval = false;
+                    SetProductRemovalPending(false);
+                    bool returnedToMain =
+                        Interlocked.Exchange(ref _removalMonitoringFromMain, 0) != 0;
                     ResetFullCycleAfterProductRemoved();
+                    if (returnedToMain)
+                    {
+                        _cycleActive = false;
+                        SetProductionPhase(ProductionPhase.WaitingProduct);
+                        SwitchRuntimeMode(RuntimeMode.Background);
+                        _engine.SetFrameProcessingEnabled(false);
+                    }
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog("Đã tháo sản phẩm lỗi - chờ lắp sản phẩm lại.");
                 }
@@ -2070,20 +2087,25 @@ public sealed class TestViewModel : ObservableObject
                 if (_engine.IsProductReleased)
                 {
                     _waitForProductRelease = false;
-                    SetPassProductRemovalPending(false);
+                    SetProductRemovalPending(false);
                     bool returnedToMain =
-                        Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 0) != 0;
+                        Interlocked.Exchange(ref _removalMonitoringFromMain, 0) != 0;
+                    bool rearmAfterRemoval =
+                        Interlocked.Exchange(ref _rearmAfterProductRemoval, 1) != 0;
                     bool wasWaterProofEquipmentRecovery = _waterProofEquipmentErrorAwaitingRemoval;
                     _waterProofEquipmentErrorAwaitingRemoval = false;
                     ResetFullCycleAfterProductRemoved();
-                    if (returnedToMain)
+                    if (returnedToMain || !rearmAfterRemoval)
                     {
                         _cycleActive = false;
                         SetProductionPhase(ProductionPhase.WaitingProduct);
-                        SwitchRuntimeMode(RuntimeMode.Background);
                         _engine.SetFrameProcessingEnabled(false);
+                        if (returnedToMain)
+                            SwitchRuntimeMode(RuntimeMode.Background);
                     }
-                    State = "CHỜ LẮP SẢN PHẨM";
+                    State = rearmAfterRemoval && !returnedToMain
+                        ? "CHỜ LẮP SẢN PHẨM"
+                        : "SẴN SÀNG";
                     AddLog(wasWaterProofEquipmentRecovery
                         ? "Đã tháo sản phẩm sau lỗi thiết bị leak - ARM lại chu kỳ, leak COM sẽ reconnect ở lần chạy kế tiếp."
                         : "PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
@@ -2273,6 +2295,15 @@ public sealed class TestViewModel : ObservableObject
             frame.Sequence > 0)
         {
             Volatile.Write(ref _lastObservedProductionFrameSequence, frame.Sequence);
+        }
+
+        // MainWindow vẫn giữ scan D2XX chạy nền. Dùng snapshot hoàn chỉnh này
+        // để khóa chọn mã/START nếu còn bất kỳ tiếp điểm sản phẩm hoặc pin kẹt,
+        // nhưng tuyệt đối không đưa frame nền vào fault engine hay relay flow.
+        if (mode == RuntimeMode.Background && frame.Mode == BoardScanMode.Production)
+        {
+            HandleBackgroundProductRemovalInterlock(frame, generation);
+            return;
         }
 
         // V12.9.2: router duy nhất + cập nhật Probe theo snapshot/event hiện tại.
@@ -2502,6 +2533,7 @@ public sealed class TestViewModel : ObservableObject
         IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(frame);
         if (pairs.Count > 0)
         {
+            SetProductRemovalPending(true);
             string signature = string.Join('|', pairs.Select(pair => $"{pair.FirstIo}-{pair.SecondIo}"));
             if (!string.Equals(signature, _startupIoWarningSignature, StringComparison.Ordinal))
             {
@@ -2571,7 +2603,23 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
+        Interlocked.Exchange(ref _startupIoInterlockState, 2);
+        SetProductRemovalPending(false);
+        bool returnedToMain =
+            Interlocked.Exchange(ref _removalMonitoringFromMain, 0) != 0;
+
         RefreshFaults();
+        if (returnedToMain)
+        {
+            _cycleActive = false;
+            SetProductionPhase(ProductionPhase.WaitingProduct);
+            SwitchRuntimeMode(RuntimeMode.Background);
+            _engine.SetFrameProcessingEnabled(false);
+            State = ReadyStateForCurrentModel();
+            AddLog("STARTUP IO INTERLOCK: đã tháo hết sản phẩm; mở khóa màn hình chính.");
+            return;
+        }
+
         if (MasterApproved)
         {
             _cycleActive = true;
@@ -2586,7 +2634,49 @@ public sealed class TestViewModel : ObservableObject
             _ = StartAutomaticMasterSequenceAsync();
         }
 
+    }
+
+    private void HandleBackgroundProductRemovalInterlock(ScanFrame frame, long generation)
+    {
+        if (!IsRuntimeContext(RuntimeMode.Background, generation) ||
+            !frame.Complete ||
+            frame.UnknownBytes > 0 ||
+            _waitForProductRelease ||
+            _waitForFaultProductRemoval)
+        {
+            return;
+        }
+
+        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(frame);
+        if (pairs.Count > 0)
+        {
+            Interlocked.Exchange(ref _startupIoInterlockState, 0);
+            SetProductRemovalPending(true);
+
+            string signature = string.Join('|', pairs.Select(pair => $"{pair.FirstIo}-{pair.SecondIo}"));
+            if (!string.Equals(signature, _startupIoWarningSignature, StringComparison.Ordinal))
+            {
+                _startupIoWarningSignature = signature;
+                AddLog(
+                    "MAIN IO INTERLOCK: khóa chọn mã và START vì đang có kết nối " +
+                    string.Join(", ", pairs.Select(pair => $"IO{pair.FirstIo}<->IO{pair.SecondIo}")));
+            }
+
+            State = "VUI LÒNG THÁO SẢN PHẨM";
+            return;
+        }
+
+        bool wasBlocked = IsProductRemovalPending ||
+                          Volatile.Read(ref _startupIoInterlockState) != 2;
         Interlocked.Exchange(ref _startupIoInterlockState, 2);
+        _startupIoWarningSignature = string.Empty;
+        SetProductRemovalPending(false);
+
+        if (wasBlocked)
+        {
+            State = ReadyStateForCurrentModel();
+            AddLog("MAIN IO INTERLOCK: frame sạch, đã mở khóa chọn mã và START.");
+        }
     }
 
     private static string FormatStartupIoEndpoint(int io, PinRecord? pin)
@@ -3505,10 +3595,10 @@ public sealed class TestViewModel : ObservableObject
     {
         AsyncFileLogService.Current.Performance("TEST_START_REQUEST");
 
-        if (IsPassProductRemovalPending)
+        if (IsProductRemovalPending)
         {
-            State = "PASS - VUI LÒNG THÁO SẢN PHẨM";
-            AddLog("BLOCKED: chưa thể bắt đầu kiểm tra vì sản phẩm PASS chưa được tháo khỏi JIG.");
+            State = "VUI LÒNG THÁO SẢN PHẨM";
+            AddLog("BLOCKED: chưa thể bắt đầu kiểm tra vì sản phẩm chưa được tháo hoàn toàn khỏi JIG.");
             return;
         }
 
@@ -3687,12 +3777,30 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task StopTestAsync()
     {
-        // Khóa/cancel workflow TRƯỚC khi gửi lệnh board. Nếu PASS task đang chờ
-        // relay/interlock, nó phải dừng trước để không gửi command sau khi view đóng.
-        if (IsPassProductRemovalPending)
+        // Nếu người vận hành quay về Main khi sản phẩm đang lắp dở, chuyển sang
+        // cùng removal gate với PASS/FAIL. Reset snapshot để frame mới xác nhận
+        // việc tháo hoàn toàn; không suy diễn một cạnh vừa mất là ProductRemoved.
+        if (!IsProductRemovalPending && _engine.HasProductActivity)
         {
+            ResetEngineWithoutChangedReentry();
+            _engine.SetFrameProcessingEnabled(true);
+            _waitForProductRelease = true;
+            SetProductRemovalPending(true);
+        }
+
+        // Khóa/cancel workflow TRƯỚC khi gửi lệnh board. Mọi trạng thái đang
+        // chờ tháo phải tiếp tục được giám sát sau khi TestWindow đã đóng.
+        if (IsProductRemovalPending)
+        {
+            if (!_waitForProductRelease && !_waitForFaultProductRemoval)
+            {
+                ResetEngineWithoutChangedReentry();
+                _engine.SetFrameProcessingEnabled(true);
+                _waitForProductRelease = true;
+            }
+
             CancelCycleOperations();
-            Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 1);
+            Interlocked.Exchange(ref _removalMonitoringFromMain, 1);
             _cycleActive = true;
             SetProductionPhase(ProductionPhase.WaitingProductRemoval);
             _engine.SetFrameProcessingEnabled(true);
@@ -3700,17 +3808,17 @@ public sealed class TestViewModel : ObservableObject
             Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
             _sound.SetTestPointContactSound(false);
             _sound.SetWiringFaultAlarm(false);
-            State = "PASS - VUI LÒNG THÁO SẢN PHẨM";
+            State = "VUI LÒNG THÁO SẢN PHẨM";
 
             if (_board.IsConnected && !_board.IsScanning)
                 await EnsureContinuousProductionScanAsync();
 
-            AddLog("Đã về màn hình chính nhưng vẫn giữ khóa PASS/ProductRemoved và tiếp tục giám sát IO.");
+            AddLog("Đã về màn hình chính nhưng vẫn giữ khóa ProductRemoved và tiếp tục giám sát IO.");
             return;
         }
 
         _cycleActive = false;
-        Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 0);
+        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         SetProductionPhase(ProductionPhase.WaitingProduct);
         SwitchRuntimeMode(RuntimeMode.Background);
         CancelCycleOperations();
@@ -3728,6 +3836,7 @@ public sealed class TestViewModel : ObservableObject
         {
             _waitForProductRelease = false;
             _waitForFaultProductRemoval = false;
+            SetProductRemovalPending(false);
             _productDetectedThisCycle = false;
             Interlocked.Exchange(ref _postContinuityStarted, 0);
             Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
@@ -3901,6 +4010,8 @@ public sealed class TestViewModel : ObservableObject
             AddLog($"Lỗi đã xác nhận: R1 JIG pulse đúng 1 lần ({_productionSettings.Relay1JigPulseMs} ms) rồi OFF; R2 MARKING luôn OFF.");
 
             _waitForFaultProductRemoval = true;
+            SetProductRemovalPending(true);
+            Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
             SetProductionPhase(ProductionPhase.WaitingProductRemoval);
             await StartProductionScanAndVerifyFrameAsync(
                 CurrentCycleToken(),
@@ -5023,6 +5134,8 @@ public sealed class TestViewModel : ObservableObject
         ResetEngineWithoutChangedReentry();
         _engine.SetFrameProcessingEnabled(true);
         _waitForFaultProductRemoval = true;
+        SetProductRemovalPending(true);
+        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         SetProductionPhase(ProductionPhase.WaitingProductRemoval);
         // Giữ bảng kết quả Leak trong suốt thời gian sản phẩm còn nối với
         // bất kỳ I/O nào. ResetFullCycleAfterProductRemoved() là nơi duy nhất
@@ -5035,6 +5148,8 @@ public sealed class TestViewModel : ObservableObject
         _engine.SetFrameProcessingEnabled(true);
         _waterProofEquipmentErrorAwaitingRemoval = true;
         _waitForProductRelease = true;
+        SetProductRemovalPending(true);
+        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         Interlocked.Exchange(ref _postContinuityStarted, 0);
         SetProductionPhase(ProductionPhase.EquipmentError);
         SelectedOperationTabIndex = 0;
@@ -5064,14 +5179,14 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _postContinuityStarted, 0);
         _waterProofEquipmentErrorAwaitingRemoval = false;
         _waitForProductRelease = true;
-        SetPassProductRemovalPending(true);
-        Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 0);
+        SetProductRemovalPending(true);
+        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         _cycleActive = true;
         SetProductionPhase(ProductionPhase.WaitingProductRemoval);
         // Không ẩn bảng kết quả ngay khi PASS. Người vận hành phải còn nhìn
         // thấy kết quả cho tới khi D2XX xác nhận toàn bộ continuity đã mất.
         // ResetFullCycleAfterProductRemoved() sẽ chuyển tab về 0.
-        State = "PASS - CHỜ THÁO SẢN PHẨM";
+        State = "PASS - THÁO SẢN PHẨM";
     }
 
     private bool TryValidateWaterProofConnectorGate(
@@ -5404,6 +5519,8 @@ public sealed class TestViewModel : ObservableObject
                         AddLog("Resistance FAIL đã xác nhận: chỉ R1 JIG pulse rồi OFF; R2 MARKING luôn OFF.");
 
                         _waitForFaultProductRemoval = true;
+                        SetProductRemovalPending(true);
+                        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
                         SetProductionPhase(ProductionPhase.WaitingProductRemoval);
                         await StartProductionScanAndVerifyFrameAsync(
                             CurrentCycleToken(),
@@ -5545,14 +5662,12 @@ public sealed class TestViewModel : ObservableObject
             AddLog("Chuỗi PASS hoàn tất: " + PassRelaySequenceText() + " -> tất cả relay OFF.");
             RaiseTestStatistics();
 
-            if (!ShouldRestartAfterPass(
-                    _settings.Test.AutoRestartAfterPass,
-                    waterProofCompleted))
-            {
-                _cycleActive = false;
+            bool rearmAfterRemoval = ShouldRestartAfterPass(
+                _settings.Test.AutoRestartAfterPass,
+                waterProofCompleted);
+            Interlocked.Exchange(ref _rearmAfterProductRemoval, rearmAfterRemoval ? 1 : 0);
+            if (!rearmAfterRemoval)
                 SelectedOperationTabIndex = 0;
-                return;
-            }
 
             // CompletePassAsync đã đưa relay về OFF. ARM chờ tháo ngay trước
             // mọi I/O tiếp theo để lỗi restart scan không thể đổi PASS thành đỏ
@@ -5579,7 +5694,7 @@ public sealed class TestViewModel : ObservableObject
                 AddLog($"PASS đã lưu; restart scan chờ tháo chưa thành công: {ex.Message}");
                 await EnsureContinuousProductionScanAsync();
                 if (_waitForProductRelease)
-                    State = "PASS - CHỜ THÁO SẢN PHẨM";
+                    State = "PASS - THÁO SẢN PHẨM";
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -5679,6 +5794,8 @@ public sealed class TestViewModel : ObservableObject
             AddLog("Final PASS rejection đã xác nhận: chỉ R1 JIG pulse rồi OFF; R2 MARKING luôn OFF.");
 
             _waitForFaultProductRemoval = true;
+            SetProductRemovalPending(true);
+            Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
             SetProductionPhase(ProductionPhase.WaitingProductRemoval);
             await StartProductionScanAndVerifyFrameAsync(
                 CurrentCycleToken(),
@@ -5728,6 +5845,8 @@ public sealed class TestViewModel : ObservableObject
         // không được nằm vĩnh viễn ở KHÔNG ĐẠT: scan lại và bắt buộc xác nhận
         // tháo toàn bộ sản phẩm trước khi ResetFullCycleAfterProductRemoved().
         _waitForProductRelease = true;
+        SetProductRemovalPending(true);
+        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         _cycleActive = true;
         SetProductionPhase(ProductionPhase.WaitingProductRemoval);
         State = "CHỜ THÁO SẢN PHẨM";
@@ -5927,7 +6046,7 @@ public sealed class TestViewModel : ObservableObject
 
     public void SetModel(ProductModel model)
     {
-        if (IsPassProductRemovalPending)
+        if (IsProductRemovalPending)
             throw new InvalidOperationException("VUI LÒNG THÁO SẢN PHẨM");
 
         // Đổi mã hàng phải hủy sạch chu trình cũ trước khi thay _model; nếu

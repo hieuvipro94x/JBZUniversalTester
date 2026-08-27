@@ -411,9 +411,9 @@ internal static class Program
         statusVm.State = "PASS";
         Assert(statusVm.ResultStatusText == "ĐẠT" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
             "PASS status mapping");
-        statusVm.State = "PASS - CHỜ THÁO SẢN PHẨM";
-        Assert(statusVm.ResultStatusText == "ĐẠT" && statusVm.StateBackground == "#2AA84A",
-            "Committed PASS remains green until ProductRemoved returns the UI to ready");
+        statusVm.State = "PASS - THÁO SẢN PHẨM";
+        Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" && statusVm.StateBackground == "#2AA84A",
+            "Committed PASS explicitly asks for product removal until ProductRemoved returns the UI to ready");
         statusVm.State = "ĐANG TEST LEAK";
         Assert(statusVm.ResultStatusText == "ĐANG TEST LEAK" &&
                statusVm.StateBackground == "#FFF3A0",
@@ -422,7 +422,7 @@ internal static class Program
         Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
             "FAIL status mapping");
         statusVm.State = "CHỜ THÁO SẢN PHẨM";
-        Assert(statusVm.ResultStatusText == "CHỜ THÁO" &&
+        Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" &&
                statusVm.StateBackground == "#FFF3A0" &&
                statusVm.StateForeground == "#222222",
             "Removal interlock must not be presented as SẴN SÀNG");
@@ -644,6 +644,23 @@ internal static class Program
             out FakeBoard board,
             requireStartupIoClear: true);
         vm.SetModel(Model(("PAIR", new[] { 1, 18 })));
+
+        board.Publish(duplicatedDirections);
+        Assert(vm.IsProductRemovalPending &&
+               vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM",
+            "Background startup scan locks product selection and START while a product or stuck pin remains");
+        AssertThrows<InvalidOperationException>(
+            () => vm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
+            "Product model cannot change while the startup removal gate is locked");
+        int commandsBeforeBlockedStart = board.Commands.Count;
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(board.Commands.Count == commandsBeforeBlockedStart && vm.IsProductRemovalPending,
+            "START cannot arm production while the startup removal gate is locked");
+
+        board.Publish(FrameSeq(101));
+        Assert(!vm.IsProductRemovalPending && vm.ResultStatusText == "SẴN SÀNG",
+            "A complete clean background frame unlocks product selection and START");
+
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         int totalBeforeWarning = vm.Total;
         int passBeforeWarning = vm.Pass;
@@ -652,8 +669,9 @@ internal static class Program
         Assert(vm.State.Contains("KIỂM TRA IO BAN ĐẦU", StringComparison.Ordinal),
             "Production does not present READY before receiving a clean baseline frame");
 
-        board.Publish(duplicatedDirections);
+        board.Publish(FrameSeq(102, (1, new[] { 18 }), (18, new[] { 1 })));
         Assert(vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM" &&
+               vm.IsProductRemovalPending &&
                vm.Faults.Count == 1 &&
                vm.Faults[0].Kind == FaultKind.Info &&
                vm.Faults[0].ProductFaultType == ProductFaultType.None &&
@@ -666,8 +684,9 @@ internal static class Program
                !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
             "Startup IO warning cannot commit production or activate a relay");
 
-        board.Publish(FrameSeq(101));
-        Assert(vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "SẴN SÀNG",
+        board.Publish(FrameSeq(103));
+        Assert(!vm.IsProductRemovalPending &&
+               vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "SẴN SÀNG",
             "A complete clean frame clears the startup interlock and arms Production");
     }
 
@@ -1092,6 +1111,32 @@ internal static class Program
                removalVm.SelectedOperationTabIndex == 0,
             "Fresh empty frame after Leak FAIL resets the cycle instead of hanging on results");
 
+        TestViewModel faultMainVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard faultMainBoard);
+        faultMainVm.LoadPreparedModelAsync(Model(("FAIL-PAIR", new[] { 1, 18 })))
+            .GetAwaiter()
+            .GetResult();
+        typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(faultMainVm, 1);
+        TestEngine faultMainEngine =
+            (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(faultMainVm) ?? throw new InvalidOperationException("FAIL MainWindow TestEngine not found"));
+        faultMainEngine.SetFrameProcessingEnabled(true);
+        armRemoval.Invoke(faultMainVm, null);
+        faultMainBoard.Publish(FrameSeq(20, (1, new[] { 18 })));
+        faultMainVm.StopViewAsync().GetAwaiter().GetResult();
+        Assert(faultMainVm.IsProductRemovalPending &&
+               faultMainVm.State == "VUI LÒNG THÁO SẢN PHẨM",
+            "Returning to MainWindow during FAIL removal preserves the shared removal lock and warning");
+        faultMainBoard.Publish(FrameSeq(21, (1, new[] { 18 })));
+        Assert(faultMainVm.IsProductRemovalPending,
+            "FAIL MainWindow removal lock remains while any product connection is present");
+        faultMainBoard.Publish(FrameSeq(22));
+        Assert(!faultMainVm.IsProductRemovalPending &&
+               faultMainVm.ResultStatusText == "SẴN SÀNG",
+            "FAIL MainWindow removal lock clears only after a complete empty frame");
+
         FieldInfo cycleActiveAfterLeakFail = typeof(TestViewModel).GetField(
             "_cycleActive",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -1120,20 +1165,20 @@ internal static class Program
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS removal wait flag not found");
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.IsPassProductRemovalPending &&
+               removalVm.IsProductRemovalPending &&
                removalVm.SelectedOperationTabIndex == 3 &&
-               removalVm.ResultStatusText == "ĐẠT" &&
+               removalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
                removalVm.StateBackground == "#2AA84A",
-            "Committed Leak PASS keeps the result table, stays green, and arms ProductRemoved before scan restart");
+            "Committed Leak PASS keeps the result table, stays green, and explicitly requests ProductRemoved before scan restart");
         removalVm.StopViewAsync().GetAwaiter().GetResult();
-        Assert(removalVm.IsPassProductRemovalPending &&
+        Assert(removalVm.IsProductRemovalPending &&
                removalVm.State.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.Ordinal),
             "Returning to MainWindow preserves the committed PASS removal lock and background IO monitoring");
         removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.IsPassProductRemovalPending &&
+               removalVm.IsProductRemovalPending &&
                removalVm.SelectedOperationTabIndex == 3 &&
-               removalVm.ResultStatusText == "ĐẠT",
+               removalVm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM",
             "Leak PASS result table remains visible while any product IO is still connected");
         removalBoard.Publish(FrameSeq(4));
         FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
@@ -1141,7 +1186,7 @@ internal static class Program
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS main-screen cycle-active flag not found");
         Assert(!(bool)(waitForPassRemoval.GetValue(removalVm) ?? true) &&
-               !removalVm.IsPassProductRemovalPending &&
+               !removalVm.IsProductRemovalPending &&
                !(bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? true) &&
                removalVm.ResultStatusText == "SẴN SÀNG" &&
                removalVm.SelectedOperationTabIndex == 0,
@@ -2002,7 +2047,7 @@ internal static class Program
         vm.SetModel(twoWireModel);
         Assert(vm.ProductionEnabled, "MasterMinimum=0 leaves production enabled for two-wire PASS flow");
 
-        board.Publish(FrameSeq(10, (1, new[] { 86 }), (2, new[] { 87 })));
+        board.Publish(FrameSeq(10));
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         board.Publish(FrameSeq(10, (1, new[] { 86 }), (2, new[] { 87 })));
         Assert(vm.PassedNetworkCount == 0, "Reused background scan rejects stale pre-cycle complete frame");
