@@ -145,7 +145,11 @@ public sealed class TestViewModel : ObservableObject
     private int _resultRecordedThisCycle;
     private int _probeCycleRecordedThisCycle;
     private DateTime _cycleStartedAt = DateTime.Now;
+    private DateTime? _cycleTestStartedAt;
+    private DateTime? _cycleRemovalStartedAt;
     private string _activeCycleId = Guid.NewGuid().ToString("N");
+    private string _recordedHistoryCycleId = string.Empty;
+    private TestHistoryStore? _recordedHistoryStore;
     private string _lastFaultRejectSignature = string.Empty;
     private long _dailyTestCount;
     private long _monthlyTestCount;
@@ -191,6 +195,12 @@ public sealed class TestViewModel : ObservableObject
     private int _legacyGoodMasterRecorded;
     private int _legacyBadMasterRecorded;
     private long _masterBadCollectNotBeforeUtcTicks;
+    private DateTime? _masterInstallStartedAt;
+    private DateTime? _masterTestStartedAt;
+    private DateTime? _masterRemovalStartedAt;
+    private string _masterHistoryCycleId = string.Empty;
+    private string _masterHistoryInspectionType = string.Empty;
+    private TestHistoryStore? _masterRecordedHistoryStore;
     private const int MasterBadSettleMs = 120;
     private string _masterStatus = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
 
@@ -1041,6 +1051,9 @@ public sealed class TestViewModel : ObservableObject
 
     private void SetProductRemovalPending(bool pending)
     {
+        if (pending && Volatile.Read(ref _resultRecordedThisCycle) != 0)
+            MarkProductRemovalStarted();
+
         int next = pending ? 1 : 0;
         if (Interlocked.Exchange(ref _productRemovalPending, next) != next)
             Raise(nameof(IsProductRemovalPending));
@@ -2058,6 +2071,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 if (_engine.IsProductReleased)
                 {
+                    MarkProductRemoved();
                     _waitForFaultProductRemoval = false;
                     SetProductRemovalPending(false);
                     bool returnedToMain =
@@ -2086,6 +2100,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 if (_engine.IsProductReleased)
                 {
+                    MarkProductRemoved();
                     _waitForProductRelease = false;
                     SetProductRemovalPending(false);
                     bool returnedToMain =
@@ -2117,6 +2132,14 @@ public sealed class TestViewModel : ObservableObject
             // Chỉ product fault đã qua monotonic confirmation gate mới được
             // dừng scan/popup/ghi FAIL. Candidate raw không đi vào lifecycle FAIL.
             ProductionPhase phase = CurrentProductionPhase;
+            if (_cycleActive &&
+                phase == ProductionPhase.Continuity &&
+                _engine.ReadyToEvaluateProductFaults &&
+                _engine.HasProductActivity)
+            {
+                CaptureProductTestStartedAt();
+            }
+
             if (_cycleActive &&
                 phase == ProductionPhase.Continuity &&
                 _engine.ReadyToEvaluateProductFaults &&
@@ -2210,6 +2233,83 @@ public sealed class TestViewModel : ObservableObject
             }
     }
 
+    private void CaptureProductTestStartedAt()
+    {
+        if (_cycleTestStartedAt.HasValue)
+            return;
+
+        DateTime now = DateTime.Now;
+        if (!_productDetectedThisCycle)
+        {
+            _cycleStartedAt = now;
+            _productDetectedThisCycle = true;
+            RecordProbeCycleStarted();
+        }
+
+        _cycleTestStartedAt = now < _cycleStartedAt ? _cycleStartedAt : now;
+    }
+
+    private void MarkProductRemovalStarted()
+    {
+        DateTime removalStarted = _cycleRemovalStartedAt ?? DateTime.Now;
+        _cycleRemovalStartedAt = removalStarted;
+
+        TestHistoryStore? store = _recordedHistoryStore;
+        string cycleId = _recordedHistoryCycleId;
+        if (store is null || string.IsNullOrWhiteSpace(cycleId))
+            return;
+
+        long timestamp = Stopwatch.GetTimestamp();
+        try
+        {
+            if (store.UpdateRemovalTiming(cycleId, removalStarted, null))
+            {
+                double durationMs = Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds;
+                AsyncFileLogService.Current.Performance(
+                    $"HISTORY_REMOVAL_START cycle={cycleId} db_ms={durationMs:0.###}");
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể lưu thời điểm bắt đầu tháo cho cycle {cycleId}: {ex.Message}");
+        }
+    }
+
+    private void MarkProductRemoved()
+    {
+        TestHistoryStore? store = _recordedHistoryStore;
+        string cycleId = _recordedHistoryCycleId;
+        if (store is null || string.IsNullOrWhiteSpace(cycleId))
+            return;
+
+        DateTime removedAt = DateTime.Now;
+        DateTime removalStarted = _cycleRemovalStartedAt ?? removedAt;
+        _cycleRemovalStartedAt = removalStarted;
+
+        long timestamp = Stopwatch.GetTimestamp();
+        try
+        {
+            if (store.UpdateRemovalTiming(cycleId, removalStarted, removedAt))
+            {
+                double durationMs = Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds;
+                AsyncFileLogService.Current.Performance(
+                    $"HISTORY_REMOVAL_COMPLETE cycle={cycleId} db_ms={durationMs:0.###}");
+                AddLog($"History: cycle {cycleId} đã lưu xác nhận tháo toàn bộ sản phẩm.");
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể lưu thời điểm tháo hoàn tất cho cycle {cycleId}: {ex.Message}");
+        }
+    }
+
+    private static DateTime? NormalizeCycleTimestamp(DateTime? value, DateTime lower, DateTime upper)
+    {
+        if (value is not DateTime timestamp || timestamp < lower || timestamp > upper)
+            return null;
+        return timestamp;
+    }
+
     private void ResetFullCycleAfterProductRemoved()
     {
         _engine.ResetProductCycle();
@@ -2230,6 +2330,10 @@ public sealed class TestViewModel : ObservableObject
         _lastProductDetectSignature = string.Empty;
         _activeCycleId = Guid.NewGuid().ToString("N");
         _cycleStartedAt = DateTime.Now;
+        _cycleTestStartedAt = null;
+        _cycleRemovalStartedAt = null;
+        _recordedHistoryCycleId = string.Empty;
+        _recordedHistoryStore = null;
         Lot = _productionSettings.LotNo.ToString();
         Resistance.Clear();
         ResetWaterProofDisplay();
@@ -3705,6 +3809,10 @@ public sealed class TestViewModel : ObservableObject
         _activeCycleId = Guid.NewGuid().ToString("N");
         _lastFaultRejectSignature = string.Empty;
         _cycleStartedAt = DateTime.Now;
+        _cycleTestStartedAt = null;
+        _cycleRemovalStartedAt = null;
+        _recordedHistoryCycleId = string.Empty;
+        _recordedHistoryStore = null;
         Lot = _productionSettings.LotNo.ToString();
 
         Resistance.Clear();
@@ -4248,6 +4356,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _legacyGoodMasterRecorded, 0);
         Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
+        ResetMasterHistoryTracking();
 
         if (_masterRequiredFaultCount <= 0)
         {
@@ -4321,6 +4430,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _legacyGoodMasterRecorded, 0);
         Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
+        ResetMasterHistoryTracking();
 
         _engine.SetFrameProcessingEnabled(true);
         ResetEngineWithoutChangedReentry();
@@ -4368,6 +4478,7 @@ public sealed class TestViewModel : ObservableObject
             case MasterSequenceState.WaitingGoodMaster:
                 if (_engine.HasProductActivity)
                 {
+                    BeginMasterHistoryCycle(HistoryInspectionType.MasterGood);
                     MasterState = MasterSequenceState.TestingGoodMaster;
                     State = "ĐANG KIỂM TRA MẪU MASTER ĐẠT";
                     MasterStatus = "ĐANG KIỂM TRA TOÀN BỘ CONTINUITY / ĐIỆN TRỞ";
@@ -4378,6 +4489,7 @@ public sealed class TestViewModel : ObservableObject
             case MasterSequenceState.TestingGoodMaster:
                 if (_engine.IsProductReleased)
                 {
+                    MarkMasterRemoved();
                     Interlocked.Exchange(ref _masterPostStarted, 0);
                     MasterState = MasterSequenceState.WaitingGoodMaster;
                     ResetEngineWithoutChangedReentry();
@@ -4393,24 +4505,38 @@ public sealed class TestViewModel : ObservableObject
                     MasterStatus = "MẪU MASTER ĐẠT ĐANG CÓ LỖI DÂY - KIỂM TRA / THÁO MẪU";
                     // Không alarm/eject theo logic Product FAIL. Good master chỉ được eject sau PASS thật.
                     _sound.SetWiringFaultAlarm(false);
+                    if (Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
+                    {
+                        CaptureMasterTestStartedAt();
+                        RecordMasterHistory(
+                            HistoryInspectionType.MasterGood,
+                            passed: false,
+                            CaptureFaultDetails());
+                        MarkMasterRemovalStarted();
+                    }
                     break;
                 }
 
                 if (_engine.ContinuityPassed &&
                     Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
                 {
+                    CaptureMasterTestStartedAt();
                     _ = CompleteGoodMasterAsync(generation);
                 }
                 break;
 
             case MasterSequenceState.EjectingGoodMaster:
-                if (_engine.IsPassReleaseStarted)
+                if (_engine.IsProductReleased)
+                {
+                    MarkMasterRemoved();
                     TransitionToBadMaster();
+                }
                 break;
 
             case MasterSequenceState.WaitingBadMaster:
                 if (_engine.HasProductActivity)
                 {
+                    BeginMasterHistoryCycle(HistoryInspectionType.MasterBad);
                     MasterState = MasterSequenceState.TestingBadMaster;
                     State = "ĐANG KIỂM TRA MẪU SAI DÂY";
                     MasterStatus = $"ĐANG XÁC NHẬN LỖI MASTER: {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
@@ -4442,7 +4568,10 @@ public sealed class TestViewModel : ObservableObject
 
             case MasterSequenceState.EjectingBadMaster:
                 if (_engine.IsProductReleased)
+                {
+                    MarkMasterRemoved();
                     CompleteMasterValidation();
+                }
                 break;
         }
     }
@@ -4474,6 +4603,8 @@ public sealed class TestViewModel : ObservableObject
         long notBeforeTicks = Interlocked.Read(ref _masterBadCollectNotBeforeUtcTicks);
         if (notBeforeTicks > 0 && DateTime.UtcNow.Ticks < notBeforeTicks)
             return;
+
+        CaptureMasterTestStartedAt();
 
         FaultDetail[] candidates = CaptureFaultDetails()
             .Where(fault => fault.Type is
@@ -4523,6 +4654,10 @@ public sealed class TestViewModel : ObservableObject
             {
                 _masterFaultCollectionLocked = true;
                 _masterBadVerified = true;
+                RecordMasterHistory(
+                    HistoryInspectionType.MasterBad,
+                    passed: true,
+                    _masterDetectedFaultDetails.Values.ToArray());
                 _ = EjectValidatedBadMasterAsync(generation);
                 break;
             }
@@ -4710,6 +4845,7 @@ public sealed class TestViewModel : ObservableObject
         {
             Resistance.Clear();
             bool resistancePassed = true;
+            DateTime? masterPassAt = null;
 
             if (IsResistanceEnabledForModel(_model))
             {
@@ -4725,6 +4861,14 @@ public sealed class TestViewModel : ObservableObject
                 State = "MASTER ĐẠT - FAIL";
                 MasterStatus = "MASTER ĐẠT: ĐIỆN TRỞ KHÔNG ĐẠT - KHÔNG MỞ PRODUCTION";
                 AddLog("MASTER GOOD FAIL - resistance out of range; không eject tự động.");
+                RecordMasterHistory(
+                    HistoryInspectionType.MasterGood,
+                    passed: false,
+                    Resistance
+                        .Where(item => !item.Passed)
+                        .Select(CreateResistanceFaultDetail)
+                        .ToArray());
+                MarkMasterRemovalStarted();
                 return;
             }
 
@@ -4734,6 +4878,11 @@ public sealed class TestViewModel : ObservableObject
                 State = "MASTER ĐẠT - FAIL";
                 MasterStatus = "MASTER ĐẠT MẤT ĐIỀU KIỆN PASS - KIỂM TRA LẠI";
                 AddLog("MASTER GOOD FAIL - continuity không còn PASS trước relay.");
+                RecordMasterHistory(
+                    HistoryInspectionType.MasterGood,
+                    passed: false,
+                    CaptureFaultDetails());
+                MarkMasterRemovalStarted();
                 return;
             }
 
@@ -4741,6 +4890,7 @@ public sealed class TestViewModel : ObservableObject
                 Resistance,
                 onPassStarted: () =>
                 {
+                    masterPassAt ??= DateTime.Now;
                     State = "MASTER ĐẠT - PASS\nĐANG ĐẨY MẪU RA";
                     MasterStatus = "MASTER GOOD PASS • RELAY JIG TỰ ĐỘNG";
                     _sound.PlayTestOk();
@@ -4753,10 +4903,21 @@ public sealed class TestViewModel : ObservableObject
                 State = "MASTER ĐẠT - FAIL";
                 MasterStatus = "MASTER ĐẠT KHÔNG HOÀN THÀNH PASS - KIỂM TRA LẠI";
                 AddLog("MASTER GOOD FAIL - CompletePassAsync trả false.");
+                RecordMasterHistory(
+                    HistoryInspectionType.MasterGood,
+                    passed: false,
+                    CaptureFaultDetails());
+                MarkMasterRemovalStarted();
                 return;
             }
 
             _masterGoodVerified = true;
+            RecordMasterHistory(
+                HistoryInspectionType.MasterGood,
+                passed: true,
+                [],
+                masterPassAt);
+            MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: true);
             MasterState = MasterSequenceState.EjectingGoodMaster;
             State = "MASTER ĐẠT - PASS\nĐANG ĐẨY MẪU RA";
@@ -4834,6 +4995,7 @@ public sealed class TestViewModel : ObservableObject
 
             // MASTER BAD fault là EXPECTED evidence: chỉ eject JIG sau N/N, không dùng Product FAIL behavior.
             await _engine.EjectMasterSampleAsync(ct);
+            MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: false);
             AddLog("MASTER BAD EJECT - Relay 1 JIG tự động; không tăng FAIL/LOT.");
 
@@ -4856,6 +5018,182 @@ public sealed class TestViewModel : ObservableObject
         finally
         {
             RaiseMasterState();
+        }
+    }
+
+    private void BeginMasterHistoryCycle(string inspectionType)
+    {
+        DateTime now = DateTime.Now;
+        _masterInstallStartedAt = now;
+        _masterTestStartedAt = null;
+        _masterRemovalStartedAt = null;
+        _masterHistoryCycleId = Guid.NewGuid().ToString("N");
+        _masterHistoryInspectionType = inspectionType;
+        _masterRecordedHistoryStore = null;
+
+        if (inspectionType == HistoryInspectionType.MasterBad)
+            Resistance.Clear();
+    }
+
+    private void ResetMasterHistoryTracking()
+    {
+        _masterInstallStartedAt = null;
+        _masterTestStartedAt = null;
+        _masterRemovalStartedAt = null;
+        _masterHistoryCycleId = string.Empty;
+        _masterHistoryInspectionType = string.Empty;
+        _masterRecordedHistoryStore = null;
+    }
+
+    private void CaptureMasterTestStartedAt()
+    {
+        DateTime now = DateTime.Now;
+        _masterInstallStartedAt ??= now;
+        _masterTestStartedAt ??= now < _masterInstallStartedAt.Value
+            ? _masterInstallStartedAt.Value
+            : now;
+    }
+
+    private void RecordMasterHistory(
+        string inspectionType,
+        bool passed,
+        IReadOnlyList<FaultDetail> faults,
+        DateTime? resultAtOverride = null)
+    {
+        ProductModel? model = _model;
+        if (model is null ||
+            !string.Equals(_masterHistoryInspectionType, inspectionType, StringComparison.Ordinal) ||
+            _masterRecordedHistoryStore is not null)
+        {
+            return;
+        }
+
+        DateTime resultAt = resultAtOverride ?? DateTime.Now;
+        DateTime installStarted = _masterInstallStartedAt ?? resultAt;
+        DateTime testStarted = _masterTestStartedAt ?? resultAt;
+        if (testStarted < installStarted || testStarted > resultAt)
+            testStarted = resultAt;
+
+        string cycleId = string.IsNullOrWhiteSpace(_masterHistoryCycleId)
+            ? Guid.NewGuid().ToString("N")
+            : _masterHistoryCycleId;
+        FaultDetail[] faultSnapshot = faults
+            .OrderBy(fault => FaultTypeCatalog.Priority(fault.Type))
+            .ToArray();
+        FaultDetail? primaryFault = faultSnapshot.FirstOrDefault();
+        CustomerFaultDisplay? customerFault = primaryFault is null
+            ? null
+            : FaultDisplayFormatter.FormatCustomer(primaryFault);
+        string resistanceText = string.Join(
+            "; ",
+            Resistance.Select(item => $"{item.Name}={item.Display}({item.ResultText})"));
+
+        var history = new TestHistoryRecord
+        {
+            Started = installStarted,
+            Finished = resultAt,
+            InstallStartedAt = installStarted,
+            TestStartedAt = testStarted,
+            ResultAt = resultAt,
+            InspectionType = inspectionType,
+            PartName = model.ProductName,
+            PartNumber = model.PartNumber,
+            VehicleType = model.VehicleType,
+            Eco = model.Eco,
+            Nco = model.Nco,
+            Alc = model.Alc,
+            LotNo = 0,
+            ProductionCounter = ProbeCycleCount,
+            Result = inspectionType switch
+            {
+                HistoryInspectionType.MasterGood when passed => "MASTER_GOOD_PASS",
+                HistoryInspectionType.MasterGood => "MASTER_GOOD_FAIL",
+                HistoryInspectionType.MasterBad when passed => "MASTER_BAD_CONFIRMED",
+                _ => "MASTER_BAD_FAIL"
+            },
+            Passed = passed,
+            ModelName = model.ModelName,
+            ModelFile = model.SourcePath,
+            HtdrvName = ProgramIdentityService.BuildHtdrvName(_productionSettings),
+            OpenCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.OpenCircuit),
+            WrongCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.WrongWiring),
+            ShortCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.ShortCircuit),
+            Resistance = resistanceText,
+            DeviceName = _productionSettings.DeviceName,
+            DeviceNumber = _productionSettings.DeviceNumber,
+            OperatorCompany = _productionSettings.OperatorCompany,
+            ProductionLine = _productionSettings.ProductionLine,
+            FaultType = customerFault?.FaultType ?? string.Empty,
+            FaultCode = primaryFault?.Code ?? string.Empty,
+            ExpectedSourceIo = primaryFault?.ExpectedSourceIo,
+            ExpectedTargetIo = primaryFault?.ExpectedTargetIo,
+            ActualSourceIo = primaryFault?.ActualSourceIo,
+            ActualTargetIo = primaryFault?.ActualTargetIo,
+            FaultDetailsJson = System.Text.Json.JsonSerializer.Serialize(faultSnapshot),
+            FaultSummary = customerFault is null
+                ? string.Empty
+                : FaultDisplayFormatter.CustomerSummary(customerFault),
+            MeasuredResistance = primaryFault?.MeasuredResistance,
+            ResistanceMin = primaryFault?.ResistanceMin,
+            ResistanceMax = primaryFault?.ResistanceMax,
+            CycleId = cycleId,
+            PrintStatus = LabelPrintStatus.NotRequested.ToString()
+        };
+
+        try
+        {
+            TestHistoryStore store = _historyStore;
+            store.Add(history);
+            _masterRecordedHistoryStore = store;
+            _masterHistoryCycleId = cycleId;
+            AddLog(
+                $"History: {inspectionType} cycle {cycleId} đã lưu; " +
+                "không tăng LOT/sản lượng/Probe counter.");
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể lưu lịch sử {inspectionType}: {ex.Message}");
+        }
+    }
+
+    private void MarkMasterRemovalStarted()
+    {
+        DateTime removalStarted = _masterRemovalStartedAt ?? DateTime.Now;
+        _masterRemovalStartedAt = removalStarted;
+        UpdateMasterRemovalHistory(removalStarted, null);
+    }
+
+    private void MarkMasterRemoved()
+    {
+        if (_masterRecordedHistoryStore is null || string.IsNullOrWhiteSpace(_masterHistoryCycleId))
+            return;
+
+        DateTime removedAt = DateTime.Now;
+        DateTime removalStarted = _masterRemovalStartedAt ?? removedAt;
+        _masterRemovalStartedAt = removalStarted;
+        UpdateMasterRemovalHistory(removalStarted, removedAt);
+    }
+
+    private void UpdateMasterRemovalHistory(DateTime removalStarted, DateTime? removedAt)
+    {
+        TestHistoryStore? store = _masterRecordedHistoryStore;
+        string cycleId = _masterHistoryCycleId;
+        if (store is null || string.IsNullOrWhiteSpace(cycleId))
+            return;
+
+        long timestamp = Stopwatch.GetTimestamp();
+        try
+        {
+            if (store.UpdateRemovalTiming(cycleId, removalStarted, removedAt))
+            {
+                double durationMs = Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds;
+                AsyncFileLogService.Current.Performance(
+                    $"HISTORY_MASTER_REMOVAL cycle={cycleId} complete={removedAt.HasValue} db_ms={durationMs:0.###}");
+            }
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể cập nhật thời gian tháo MASTER cycle {cycleId}: {ex.Message}");
         }
     }
 
@@ -5590,6 +5928,7 @@ public sealed class TestViewModel : ObservableObject
             await PauseProductionScanForFinalPassAsync(ct);
             bool passUiTriggered = false;
             long passUiTimestamp = 0;
+            DateTime? passResultAt = null;
             void TriggerPassUi()
             {
                 if (passUiTriggered)
@@ -5597,6 +5936,7 @@ public sealed class TestViewModel : ObservableObject
 
                 passUiTriggered = true;
                 passUiTimestamp = Stopwatch.GetTimestamp();
+                passResultAt = DateTime.Now;
                 State = "PASS";
                 AsyncFileLogService.Current.Performance(
                     $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
@@ -5647,7 +5987,13 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            bool passCommitted = RecordCompletedProduct(true, "PASS", cycleModel, generation, ct);
+            bool passCommitted = RecordCompletedProduct(
+                true,
+                "PASS",
+                cycleModel,
+                generation,
+                ct,
+                resultAtOverride: passResultAt);
             if (!passCommitted)
             {
                 Interlocked.Exchange(ref _postContinuityStarted, 0);
@@ -6248,7 +6594,8 @@ public sealed class TestViewModel : ObservableObject
         ProductModel cycleModel,
         long runtimeGeneration,
         CancellationToken cycleToken,
-        IReadOnlyList<FaultDetail>? failureDetails = null)
+        IReadOnlyList<FaultDetail>? failureDetails = null,
+        DateTime? resultAtOverride = null)
     {
         if (cycleToken.IsCancellationRequested ||
             !ReferenceEquals(_model, cycleModel) ||
@@ -6261,7 +6608,7 @@ public sealed class TestViewModel : ObservableObject
 
         ProductModel model = cycleModel;
 
-        DateTime finished = DateTime.Now;
+        DateTime finished = resultAtOverride ?? DateTime.Now;
         DateTime started = _cycleStartedAt <= finished ? _cycleStartedAt : finished;
         string cycleId = string.IsNullOrWhiteSpace(_activeCycleId)
             ? Guid.NewGuid().ToString("N")
@@ -6325,6 +6672,13 @@ public sealed class TestViewModel : ObservableObject
         {
             Started = completed.Started,
             Finished = completed.Finished,
+            InstallStartedAt = completed.Started,
+            TestStartedAt = NormalizeCycleTimestamp(
+                _cycleTestStartedAt,
+                completed.Started,
+                completed.Finished),
+            ResultAt = completed.Finished,
+            InspectionType = HistoryInspectionType.Product,
             PartName = model.ProductName,
             PartNumber = model.PartNumber,
             VehicleType = model.VehicleType,
@@ -6403,6 +6757,8 @@ public sealed class TestViewModel : ObservableObject
         {
             historyStore.Add(history);
             historySaved = true;
+            _recordedHistoryCycleId = cycleId;
+            _recordedHistoryStore = historyStore;
             AsyncFileLogService.Current.Performance(
                 $"PASS_LATENCY T_HISTORY_COMMIT cycle={cycleId} result={resultStatus}");
             string historyFault = passed ? string.Empty : $" - {failureName}";

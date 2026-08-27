@@ -296,7 +296,7 @@
 
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="장착시간"
-                                        Binding="{Binding Started, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
+                                        Binding="{Binding EffectiveInstallStartedAt, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
                                         Width="150"/>
                     <DataGridTextColumn Header="파일" Binding="{Binding ExportModelFileName}" Width="180"/>
                     <DataGridTextColumn Header="파트명" Binding="{Binding PartName}" Width="135"/>
@@ -308,7 +308,7 @@
                     <DataGridTextColumn Header="진도" Binding="{Binding ExportProgressText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="결과" Binding="{Binding ExportResultText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="합격" Binding="{Binding ExportAcceptedLotNo}" Width="78" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTemplateColumn Header="검사기록" Width="280">
+                    <DataGridTemplateColumn Header="검사기록" Width="500">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportTestLogText}"
@@ -329,7 +329,7 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="측정" Binding="{Binding Resistance}" Width="160"/>
+                    <DataGridTextColumn Header="측정" Binding="{Binding ExportResistanceText}" Width="160"/>
                     <DataGridTextColumn Header="HtdrvName" Binding="{Binding HtdrvName}" Width="190"/>
                     <DataGridTemplateColumn Header="내용" Width="240">
                         <DataGridTemplateColumn.CellTemplate>

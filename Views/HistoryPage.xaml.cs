@@ -86,14 +86,18 @@ public partial class HistoryPage : UserControl
             foreach (TestHistoryRecord row in rows)
                 Records.Add(row);
 
-            int pass = rows.Count(x => x.Passed);
-            int fail = rows.Count - pass;
+            TestHistoryRecord[] products = rows.Where(row => !row.IsMasterRecord).ToArray();
+            int pass = products.Count(row => row.Passed);
+            int fail = products.Length - pass;
+            int master = rows.Count(row => row.IsMasterRecord);
 
-            TotalCountText.Text = rows.Count.ToString("N0");
+            TotalCountText.Text = products.Length.ToString("N0");
             PassCountText.Text = pass.ToString("N0");
             FailCountText.Text = fail.ToString("N0");
 
-            SummaryText.Text = $"{rows.Count:N0} bản ghi  |  PASS {pass:N0}  |  FAIL {fail:N0}  |  DB: {_store.DatabasePath}";
+            SummaryText.Text =
+                $"{rows.Count:N0} bản ghi | SẢN PHẨM {products.Length:N0} " +
+                $"(PASS {pass:N0} / FAIL {fail:N0}) | MASTER {master:N0} | DB: {_store.DatabasePath}";
         }
         catch (Exception ex)
         {
@@ -157,7 +161,7 @@ public partial class HistoryPage : UserControl
         try
         {
             HistoryExportService.ExportXlsx(dialog.FileName, Records.ToArray());
-            ShowMessage($"Đã xuất Excel đúng 18 cột của file mẫu.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
+            ShowMessage($"Đã xuất Excel đúng 18 cột mẫu gốc; chi tiết chu kỳ nằm trong cột 검사기록.\n\n{dialog.FileName}", "JBZ", MessageBoxImage.Information);
         }
         catch (Exception ex)
         {

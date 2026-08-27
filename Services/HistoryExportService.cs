@@ -27,7 +27,7 @@ public static class HistoryExportService
     // kiểu Excel và getter không thể lệch nhau khi thêm/sửa cột.
     private static readonly HistoryColumn[] Columns =
     [
-        new("장착시간", 21, HistoryCellType.DateTime, r => r.Started),
+        new("장착시간", 21, HistoryCellType.DateTime, r => r.EffectiveInstallStartedAt),
         new("파일", 34, HistoryCellType.Text, r => r.ExportModelFileName),
         new("파트명", 20, HistoryCellType.Text, r => r.PartName),
         new("파트번호", 19, HistoryCellType.Text, r => r.PartNumber),
@@ -41,7 +41,7 @@ public static class HistoryExportService
         new("검사기록", 52, HistoryCellType.Text, r => r.ExportTestLogText, true),
         new("바코드입력", 20, HistoryCellType.Text, r => r.ExportBarcodeInputText),
         new("바코드출력", 48, HistoryCellType.Text, r => r.BarcodeOutputText, true),
-        new("측정", 28, HistoryCellType.Text, r => r.Resistance, true),
+        new("측정", 28, HistoryCellType.Text, r => r.ExportResistanceText, true),
         new("HtdrvName", 34, HistoryCellType.Text, r => r.HtdrvName),
         new("내용", 46, HistoryCellType.Text, r => r.ExportContentText, true),
         new("메모", 36, HistoryCellType.Text, r => r.PrintMessage, true)

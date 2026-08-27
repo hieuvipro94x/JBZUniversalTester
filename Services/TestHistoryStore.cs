@@ -82,7 +82,13 @@ public sealed class TestHistoryStore
                     Printer TEXT NOT NULL DEFAULT '',
                     LabelCopies INTEGER NOT NULL DEFAULT 0,
                     ReprintCount INTEGER NOT NULL DEFAULT 0,
-                    PrintMessage TEXT NOT NULL DEFAULT ''
+                    PrintMessage TEXT NOT NULL DEFAULT '',
+                    InstallStartedAt TEXT NULL,
+                    TestStartedAt TEXT NULL,
+                    ResultAt TEXT NULL,
+                    RemovalStartedAt TEXT NULL,
+                    RemovedAt TEXT NULL,
+                    InspectionType TEXT NOT NULL DEFAULT 'PRODUCT'
                 );
 
                 CREATE INDEX IF NOT EXISTS IX_TestHistory_Finished
@@ -123,6 +129,12 @@ public sealed class TestHistoryStore
         EnsureColumn(connection, "LabelCopies", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "ReprintCount", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn(connection, "PrintMessage", "TEXT NOT NULL DEFAULT ''");
+        EnsureColumn(connection, "InstallStartedAt", "TEXT NULL");
+        EnsureColumn(connection, "TestStartedAt", "TEXT NULL");
+        EnsureColumn(connection, "ResultAt", "TEXT NULL");
+        EnsureColumn(connection, "RemovalStartedAt", "TEXT NULL");
+        EnsureColumn(connection, "RemovedAt", "TEXT NULL");
+        EnsureColumn(connection, "InspectionType", "TEXT NOT NULL DEFAULT 'PRODUCT'");
 
         using SqliteCommand cycleIndex = connection.CreateCommand();
         cycleIndex.CommandText = """
@@ -177,7 +189,9 @@ public sealed class TestHistoryStore
                 MeasuredResistance, ResistanceMin, ResistanceMax,
                 CycleId, LabelSerial, BarcodeValue, LabelProfile, PrintStatus,
                 PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage,
-                LabelTemplateType, LabelPayload
+                LabelTemplateType, LabelPayload,
+                InstallStartedAt, TestStartedAt, ResultAt, RemovalStartedAt, RemovedAt,
+                InspectionType
             )
             VALUES
             (
@@ -190,7 +204,9 @@ public sealed class TestHistoryStore
                 $MeasuredResistance, $ResistanceMin, $ResistanceMax,
                 $CycleId, $LabelSerial, $BarcodeValue, $LabelProfile, $PrintStatus,
                 $PrintTimestamp, $Printer, $LabelCopies, $ReprintCount, $PrintMessage,
-                $LabelTemplateType, $LabelPayload
+                $LabelTemplateType, $LabelPayload,
+                $InstallStartedAt, $TestStartedAt, $ResultAt, $RemovalStartedAt, $RemovedAt,
+                $InspectionType
             );
             SELECT last_insert_rowid();
             """;
@@ -255,7 +271,9 @@ public sealed class TestHistoryStore
                 MeasuredResistance, ResistanceMin, ResistanceMax,
                 CycleId, LabelSerial, BarcodeValue, LabelProfile, PrintStatus,
                 PrintTimestamp, Printer, LabelCopies, ReprintCount, PrintMessage,
-                LabelTemplateType, LabelPayload
+                LabelTemplateType, LabelPayload,
+                InstallStartedAt, TestStartedAt, ResultAt, RemovalStartedAt, RemovedAt,
+                InspectionType
             FROM TestHistory
             {(clauses.Count == 0 ? string.Empty : "WHERE " + string.Join(" AND ", clauses))}
             ORDER BY Finished DESC, Id DESC
@@ -319,6 +337,16 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$PrintMessage", record.PrintMessage ?? string.Empty);
         command.Parameters.AddWithValue("$LabelTemplateType", record.LabelTemplateType ?? string.Empty);
         command.Parameters.AddWithValue("$LabelPayload", record.LabelPayload ?? string.Empty);
+        AddNullable(command, "$InstallStartedAt", record.InstallStartedAt?.ToString("O"));
+        AddNullable(command, "$TestStartedAt", record.TestStartedAt?.ToString("O"));
+        AddNullable(command, "$ResultAt", record.ResultAt?.ToString("O"));
+        AddNullable(command, "$RemovalStartedAt", record.RemovalStartedAt?.ToString("O"));
+        AddNullable(command, "$RemovedAt", record.RemovedAt?.ToString("O"));
+        command.Parameters.AddWithValue(
+            "$InspectionType",
+            string.IsNullOrWhiteSpace(record.InspectionType)
+                ? HistoryInspectionType.Product
+                : record.InspectionType.Trim());
     }
 
     private static void AddNullable(SqliteCommand command, string name, object? value) =>
@@ -374,8 +402,41 @@ public sealed class TestHistoryStore
             ReprintCount = reader.GetInt32(43),
             PrintMessage = reader.GetString(44),
             LabelTemplateType = reader.GetString(45),
-            LabelPayload = reader.GetString(46)
+            LabelPayload = reader.GetString(46),
+            InstallStartedAt = GetNullableDate(reader, 47),
+            TestStartedAt = GetNullableDate(reader, 48),
+            ResultAt = GetNullableDate(reader, 49),
+            RemovalStartedAt = GetNullableDate(reader, 50),
+            RemovedAt = GetNullableDate(reader, 51),
+            InspectionType = reader.GetString(52)
         };
+    }
+
+    /// <summary>
+    /// Persists the removal interval for one immutable production cycle. COALESCE
+    /// protects the first observed timestamps from duplicate/stale callbacks.
+    /// </summary>
+    public bool UpdateRemovalTiming(string cycleId, DateTime removalStartedAt, DateTime? removedAt)
+    {
+        if (string.IsNullOrWhiteSpace(cycleId))
+            return false;
+
+        using SqliteConnection connection = Open();
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE TestHistory
+            SET RemovalStartedAt = COALESCE(RemovalStartedAt, $RemovalStartedAt),
+                RemovedAt = CASE
+                    WHEN $RemovedAt IS NULL THEN RemovedAt
+                    ELSE COALESCE(RemovedAt, $RemovedAt)
+                END
+            WHERE CycleId = $CycleId;
+            """;
+        command.Parameters.AddWithValue("$RemovalStartedAt", removalStartedAt.ToString("O"));
+        AddNullable(command, "$RemovedAt", removedAt?.ToString("O"));
+        command.Parameters.AddWithValue("$CycleId", cycleId.Trim());
+        return command.ExecuteNonQuery() == 1;
     }
 
     /// <summary>
@@ -462,6 +523,9 @@ public sealed class TestHistoryStore
 
     private static double? GetNullableDouble(SqliteDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : reader.GetDouble(ordinal);
+
+    private static DateTime? GetNullableDate(SqliteDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : ParseDate(reader.GetString(ordinal));
 
     private static DateTime ParseDate(string value) =>
         DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out DateTime parsed)

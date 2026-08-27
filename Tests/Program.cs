@@ -2628,8 +2628,14 @@ internal static class Program
             DateTime finished = new(2026, 8, 9, 14, 7, 8, DateTimeKind.Local);
             var record = new TestHistoryRecord
             {
-                Started = finished.AddSeconds(-2),
+                Started = finished.AddSeconds(-5),
                 Finished = finished,
+                InstallStartedAt = finished.AddSeconds(-5),
+                TestStartedAt = finished.AddSeconds(-3),
+                ResultAt = finished,
+                RemovalStartedAt = null,
+                RemovedAt = null,
+                InspectionType = HistoryInspectionType.Product,
                 PartName = "PRODUCT",
                 PartNumber = "NI375C1000",
                 VehicleType = "NE N EV",
@@ -2648,6 +2654,8 @@ internal static class Program
                 LabelTemplateType = LabelSettings.LargeTemplate,
                 LabelPayload = "N\r\nNI375C10002608092001\r\nP1\r\n",
                 PrintStatus = LabelPrintStatus.Printed.ToString(),
+                CycleId = "history-cycle",
+                Resistance = "CH1=101.5 Ω(PASS)",
                 MeasuredResistance = 101.5,
                 ResistanceMin = 100,
                 ResistanceMax = 110
@@ -2655,13 +2663,25 @@ internal static class Program
 
             var store = new TestHistoryStore(Path.Combine(root, "history.db"));
             store.Add(record);
+            DateTime removalStarted = finished.AddMilliseconds(250);
+            DateTime removedAt = removalStarted.AddSeconds(2);
+            Assert(store.UpdateRemovalTiming(record.CycleId, removalStarted, null),
+                "History removal start updates the immutable cycle row");
+            Assert(store.UpdateRemovalTiming(record.CycleId, removalStarted.AddSeconds(1), removedAt),
+                "History removal completion updates the immutable cycle row");
             IReadOnlyList<TestHistoryRecord> found = store.Search(new HistorySearchCriteria(
                 finished.Date, finished.Date.AddDays(1), 2001, "NI375", "PASS"));
             Assert(found.Count == 1 && found[0].PartNumber == "NI375C1000" &&
                    found[0].VehicleType == "NE N EV" && found[0].ProductionCounter == 321 &&
                    found[0].LabelTemplateType == LabelSettings.LargeTemplate &&
+                   found[0].InspectionType == HistoryInspectionType.Product &&
+                   found[0].InstallDurationSeconds == 2 &&
+                   found[0].TestDurationSeconds == 3 &&
+                   found[0].RemovalDurationSeconds == 2 &&
+                   found[0].RemovalStartedAt == removalStarted &&
+                   found[0].RemovedAt == removedAt &&
                    found[0].LabelPayload == record.LabelPayload,
-                "SQLite search preserves label type and immutable print payload");
+                "SQLite search preserves phase timing, label type and immutable print payload");
 
             string csv = Path.Combine(root, "history.csv");
             HistoryExportService.ExportCsv(csv, found);
@@ -2673,10 +2693,12 @@ internal static class Program
             Assert(csvText.StartsWith(
                     "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,진도,결과,합격,검사기록,바코드입력,바코드출력,측정,HtdrvName,내용,메모\n",
                     StringComparison.Ordinal),
-                "Sample history CSV exact 18-column header");
+                "History CSV preserves the exact original 18-column header");
             Assert(csvText.Contains(
-                    "2026/08/09 14:07:06,WH322882.setup,PRODUCT,NI375C1000,NE N EV,,NI375/C1000,,1/1,합격,2001,검사시작 14:07:06 회로검사:PASS",
+                    "2026/08/09 14:07:03,WH322882.setup,PRODUCT,NI375C1000",
                     StringComparison.Ordinal) &&
+                   csvText.Contains("장착 14:07:03.000~14:07:05.000(2.000초) | 검사 14:07:05.000~14:07:08.000(3.000초) 합격", StringComparison.Ordinal) &&
+                   csvText.Contains("| 저항 CH1=101.5 Ω(합격) | 탈거 14:07:08.250~14:07:10.250(2.000초)", StringComparison.Ordinal) &&
                    csvText.Contains(",,NI375C10002608092001,", StringComparison.Ordinal) &&
                    !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
                 "Sample history CSV PASS, LOT and barcode-output value without raw EPL payload");
@@ -2693,7 +2715,7 @@ internal static class Program
                    sheet.Contains("<c r=\"N2\" t=\"inlineStr\" s=\"3\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
                    !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
                    sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
-                "XLSX exact sample headers, barcode value and 18-column filter");
+                "XLSX preserves original headers, barcode value and 18-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
                 "XLSX DateTime and wrapped long-text styles");
@@ -2736,8 +2758,59 @@ internal static class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(customerText.Contains(",0/1,불량,,", StringComparison.Ordinal),
-                "Sample history CSV FAIL result and blank accepted LOT");
+            Assert(customerText.Contains(",0/1,불량,,", StringComparison.Ordinal) &&
+                   customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
+                   !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
+                "History CSV FAIL uses concise Korean fault detail and blank accepted LOT");
+
+            var masterBad = new TestHistoryRecord
+            {
+                Started = finished,
+                Finished = finished.AddSeconds(1),
+                InstallStartedAt = finished,
+                TestStartedAt = finished.AddMilliseconds(250),
+                ResultAt = finished.AddSeconds(1),
+                InspectionType = HistoryInspectionType.MasterBad,
+                Passed = true,
+                FaultDetailsJson = failed.FaultDetailsJson
+            };
+            Assert(masterBad.IsMasterRecord &&
+                   masterBad.ExportAcceptedLotNo is null &&
+                   masterBad.ExportResultText == "마스터 불량 확인" &&
+                   masterBad.ExportTestLogText.Contains("[마스터 불량품]", StringComparison.Ordinal) &&
+                   masterBad.ExportTestLogText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal),
+                "MASTER BAD history is separate from production and preserves Korean fault evidence");
+
+            var wrongWiring = new FaultDetail
+            {
+                Type = ProductFaultType.WrongWiring,
+                WireName = "W1",
+                ConnectorFrom = "CN1",
+                PinFrom = "03",
+                ConnectorTo = "CN2",
+                PinTo = "07",
+                ActualConnectorFrom = "CN1",
+                ActualPinFrom = "03",
+                ActualConnectorTo = "CN3",
+                ActualPinTo = "02"
+            };
+            Assert(
+                KoreanHistoryFormatter.FormatFault(wrongWiring) ==
+                "오배선 W1 정상 CN1-03↔CN2-07 실제 CN1-03↔CN3-02",
+                "Wrong-wiring history names the expected and actual connector/pin in concise Korean");
+
+            var resistanceFault = new FaultDetail
+            {
+                Type = ProductFaultType.ResistanceOutOfRange,
+                WireName = "R-CH1",
+                MeasuredResistance = 115.25,
+                ResistanceMin = 100,
+                ResistanceMax = 110
+            };
+            Assert(
+                KoreanHistoryFormatter.FormatFault(resistanceFault) ==
+                "저항불량 R-CH1 115.25Ω 기준 100~110Ω",
+                "Resistance history keeps measured value and limits in concise Korean");
         }
         finally
         {
