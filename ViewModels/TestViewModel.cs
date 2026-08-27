@@ -88,6 +88,8 @@ public sealed class TestViewModel : ObservableObject
     private int _fail;
     private bool _cycleActive;
     private bool _waitForProductRelease;
+    private int _passProductRemovalPending;
+    private int _passRemovalMonitoringFromMain;
     private bool _waitForFaultProductRemoval;
     private bool _waterProofEquipmentErrorAwaitingRemoval;
     private int _postContinuityStarted;
@@ -150,7 +152,7 @@ public sealed class TestViewModel : ObservableObject
     private long _probeCycleCount;
     private long _probeReplacementThreshold = PartCounterStore.DefaultReplacementThreshold;
     private string _deviceFaultMessage =
-        "Phát hiện trạng thái dữ liệu I/O không ổn định. Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.";
+        "Hệ thống không nhận được tín hiệu ổn định từ bo kiểm tra. Máy đã dừng để tránh kết quả sai.";
     private LabelPrintContext? _failedLabelPrint;
     private LabelPrintContext? _lastSuccessfulLabelPrint;
     private string _labelStatusText = "TEM: SẴN SÀNG";
@@ -298,8 +300,9 @@ public sealed class TestViewModel : ObservableObject
             if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
                 return "MANUAL";
 
-            if (value.StartsWith("CẢNH BÁO IO", StringComparison.OrdinalIgnoreCase))
-                return "CẢNH BÁO IO";
+            if (!value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
+                value.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
+                return "VUI LÒNG THÁO SẢN PHẨM";
 
             if (value.Contains("KIỂM TRA IO BAN ĐẦU", StringComparison.OrdinalIgnoreCase))
                 return "KIỂM TRA IO";
@@ -367,7 +370,8 @@ public sealed class TestViewModel : ObservableObject
             if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
                 return "#FFF3A0";
 
-            if (value.StartsWith("CẢNH BÁO IO", StringComparison.OrdinalIgnoreCase))
+            if (!value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
+                value.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
                 return "#E65100";
 
             if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
@@ -522,7 +526,9 @@ public sealed class TestViewModel : ObservableObject
                 return "PASS";
 
             FaultDetail? fault = GetVisiblePrimaryFault();
-            return fault?.Name ?? State;
+            return fault is null
+                ? State
+                : FaultDisplayFormatter.OperatorInstruction(fault.Type);
         }
     }
 
@@ -1026,6 +1032,16 @@ public sealed class TestViewModel : ObservableObject
         AddLog("MANUAL TỰ ĐỘNG ON - thao tác relay tay, tất cả relay đã OFF an toàn.");
     }
 
+    public bool IsPassProductRemovalPending =>
+        Volatile.Read(ref _passProductRemovalPending) != 0;
+
+    private void SetPassProductRemovalPending(bool pending)
+    {
+        int next = pending ? 1 : 0;
+        if (Interlocked.Exchange(ref _passProductRemovalPending, next) != next)
+            Raise(nameof(IsPassProductRemovalPending));
+    }
+
     public async Task ExitManualModeAsync(bool outputsAlreadyOff = false)
     {
         await _manualRelayGate.WaitAsync();
@@ -1261,7 +1277,7 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         _deviceFaultMessage =
-            "Phát hiện trạng thái dữ liệu I/O không ổn định. Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.";
+            "Hệ thống không nhận được tín hiệu ổn định từ bo kiểm tra. Máy đã dừng để tránh kết quả sai.";
         _cycleActive = false;
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
@@ -1312,15 +1328,15 @@ public sealed class TestViewModel : ObservableObject
         dispatcher.BeginInvoke(new Action(() =>
         {
             MessageBox.Show(
-                "Phát hiện trạng thái dữ liệu I/O không ổn định.\n\n" +
-                "Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.\n\n" +
+                "Tín hiệu từ bo kiểm tra không ổn định.\n\n" +
+                "Máy đã dừng chu kỳ hiện tại để tránh kết quả sai.\n\n" +
                 "Hãy kiểm tra:\n" +
-                "- kết nối USB/FTDI;\n" +
-                "- nguồn bo;\n" +
-                "- socket/jig;\n" +
-                "- cáp tín hiệu.\n\n" +
+                "- cáp USB nối với bo;\n" +
+                "- nguồn điện cấp cho bo;\n" +
+                "- đầu gá/JIG;\n" +
+                "- các dây kết nối.\n\n" +
                 "Sau khi kiểm tra, bấm KHỞI TẠO LẠI trên màn hình Test.",
-                "LỖI THIẾT BỊ / DỮ LIỆU I/O",
+                "LỖI HỆ THỐNG KIỂM TRA",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }));
@@ -1372,7 +1388,7 @@ public sealed class TestViewModel : ObservableObject
             Interlocked.Exchange(ref _deviceFault, 0);
             Interlocked.Exchange(ref _deviceFaultDialogShown, 0);
             _deviceFaultMessage =
-                "Phát hiện trạng thái dữ liệu I/O không ổn định. Chu kỳ kiểm tra đã được khóa để tránh kết quả sai.";
+                "Hệ thống không nhận được tín hiệu ổn định từ bo kiểm tra. Máy đã dừng để tránh kết quả sai.";
             State = ReadyStateForCurrentModel();
             RaiseDeviceFaultState();
             await EnsureContinuousProductionScanAsync();
@@ -2054,9 +2070,19 @@ public sealed class TestViewModel : ObservableObject
                 if (_engine.IsProductReleased)
                 {
                     _waitForProductRelease = false;
+                    SetPassProductRemovalPending(false);
+                    bool returnedToMain =
+                        Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 0) != 0;
                     bool wasWaterProofEquipmentRecovery = _waterProofEquipmentErrorAwaitingRemoval;
                     _waterProofEquipmentErrorAwaitingRemoval = false;
                     ResetFullCycleAfterProductRemoved();
+                    if (returnedToMain)
+                    {
+                        _cycleActive = false;
+                        SetProductionPhase(ProductionPhase.WaitingProduct);
+                        SwitchRuntimeMode(RuntimeMode.Background);
+                        _engine.SetFrameProcessingEnabled(false);
+                    }
                     State = "CHỜ LẮP SẢN PHẨM";
                     AddLog(wasWaterProofEquipmentRecovery
                         ? "Đã tháo sản phẩm sau lỗi thiết bị leak - ARM lại chu kỳ, leak COM sẽ reconnect ở lần chạy kế tiếp."
@@ -2512,15 +2538,12 @@ public sealed class TestViewModel : ObservableObject
         foreach (StartupIoContactPair pair in pairs)
         {
             PinRecord? first = FindPinByIo(pair.FirstIo);
-            PinRecord? second = FindPinByIo(pair.SecondIo);
-            string firstText = FormatStartupIoEndpoint(pair.FirstIo, first);
-            string secondText = FormatStartupIoEndpoint(pair.SecondIo, second);
 
             Faults.Add(new FaultRow
             {
-                Kind = FaultKind.Short,
-                ProductFaultType = ProductFaultType.ShortCircuit,
-                FaultType = "IO ĐANG NỐI/CHẬP TRƯỚC KHI TEST",
+                Kind = FaultKind.Info,
+                ProductFaultType = ProductFaultType.None,
+                FaultType = "CHỜ THÁO SẢN PHẨM",
                 Io = pair.FirstIo,
                 ActualSourceIo = pair.FirstIo,
                 ActualTargetIo = pair.SecondIo,
@@ -2530,11 +2553,11 @@ public sealed class TestViewModel : ObservableObject
                 WireName = first?.WireName ?? string.Empty,
                 Section = first?.Section ?? string.Empty,
                 Color = first?.Color ?? string.Empty,
-                Status = $"{firstText} ĐANG NỐI VỚI {secondText} — HÃY THÁO SẢN PHẨM HOẶC SỬA CHẬP"
+                Status = "SẢN PHẨM VẪN ĐANG LẮP — VUI LÒNG THÁO SẢN PHẨM"
             });
         }
 
-        State = $"CẢNH BÁO IO\n{pairs.Count} CẶP ĐANG NỐI/CHẬP";
+        State = "VUI LÒNG THÁO SẢN PHẨM";
     }
 
     private void CompleteStartupIoInterlock(long generation)
@@ -3479,6 +3502,13 @@ public sealed class TestViewModel : ObservableObject
     {
         AsyncFileLogService.Current.Performance("TEST_START_REQUEST");
 
+        if (IsPassProductRemovalPending)
+        {
+            State = "PASS - VUI LÒNG THÁO SẢN PHẨM";
+            AddLog("BLOCKED: chưa thể bắt đầu kiểm tra vì sản phẩm PASS chưa được tháo khỏi JIG.");
+            return;
+        }
+
         if (IsDeviceFault)
         {
             AddLog("Không thể bắt đầu chu kỳ mới vì TestWindow đang khóa DeviceFault.");
@@ -3656,7 +3686,28 @@ public sealed class TestViewModel : ObservableObject
     {
         // Khóa/cancel workflow TRƯỚC khi gửi lệnh board. Nếu PASS task đang chờ
         // relay/interlock, nó phải dừng trước để không gửi command sau khi view đóng.
+        if (IsPassProductRemovalPending)
+        {
+            CancelCycleOperations();
+            Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 1);
+            _cycleActive = true;
+            SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+            _engine.SetFrameProcessingEnabled(true);
+            Interlocked.Exchange(ref _postContinuityStarted, 0);
+            Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+            _sound.SetTestPointContactSound(false);
+            _sound.SetWiringFaultAlarm(false);
+            State = "PASS - VUI LÒNG THÁO SẢN PHẨM";
+
+            if (_board.IsConnected && !_board.IsScanning)
+                await EnsureContinuousProductionScanAsync();
+
+            AddLog("Đã về màn hình chính nhưng vẫn giữ khóa PASS/ProductRemoved và tiếp tục giám sát IO.");
+            return;
+        }
+
         _cycleActive = false;
+        Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 0);
         SetProductionPhase(ProductionPhase.WaitingProduct);
         SwitchRuntimeMode(RuntimeMode.Background);
         CancelCycleOperations();
@@ -3793,7 +3844,7 @@ public sealed class TestViewModel : ObservableObject
             .OrderBy(FaultTypeCatalog.Priority)
             .First();
         string primaryName = FaultTypeCatalog.DisplayName(primaryType);
-        State = primaryName;
+        State = FaultDisplayFormatter.OperatorInstruction(primaryType);
 
         AddLog(
             $"DỪNG TEST do {primaryName}: " +
@@ -3831,7 +3882,7 @@ public sealed class TestViewModel : ObservableObject
 
         var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             dialogFaults,
-            "Sau khi XÁC NHẬN: JIG sẽ được đưa về trạng thái tháo hàng an toàn; MARKING luôn OFF khi FAIL.");
+            "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
         faultDialog.Owner = Application.Current?.MainWindow;
         faultDialog.ShowDialog();
         SelectedOperationTabIndex = 0;
@@ -5010,6 +5061,8 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _postContinuityStarted, 0);
         _waterProofEquipmentErrorAwaitingRemoval = false;
         _waitForProductRelease = true;
+        SetPassProductRemovalPending(true);
+        Interlocked.Exchange(ref _passRemovalMonitoringFromMain, 0);
         _cycleActive = true;
         SetProductionPhase(ProductionPhase.WaitingProductRemoval);
         // Không ẩn bảng kết quả ngay khi PASS. Người vận hành phải còn nhìn
@@ -5172,7 +5225,7 @@ public sealed class TestViewModel : ObservableObject
                 return false;
             }
 
-            State = FaultTypeCatalog.DisplayName(ProductFaultType.WaterProofLeak);
+            State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.WaterProofLeak);
             RaiseTestStatistics();
             FaultDetail[] faults = WaterProofChannels
                 .Where(item => item.Enabled && item.IsMeasured && !item.Passed)
@@ -5183,7 +5236,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
                     faults,
-                    "Kiểm tra kín nước không đạt. Xác nhận để mở JIG và tháo toàn bộ sản phẩm.");
+                    "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
                 dialog.Owner = Application.Current?.MainWindow;
                 dialog.ShowDialog();
             });
@@ -5326,7 +5379,7 @@ public sealed class TestViewModel : ObservableObject
                         return;
                     }
 
-                    State = FaultTypeCatalog.DisplayName(ProductFaultType.ResistanceOutOfRange);
+                    State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.ResistanceOutOfRange);
                     RaiseTestStatistics();
                     AddLog("Điện trở không đạt. Không chạy relay PASS.");
 
@@ -5336,7 +5389,7 @@ public sealed class TestViewModel : ObservableObject
                         .ToArray();
                     var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
                         resistanceFaults,
-                        "Không chạy relay PASS. Hãy xử lý sản phẩm không đạt theo quy trình vận hành.");
+                        "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
                     faultDialog.Owner = Application.Current?.MainWindow;
                     faultDialog.ShowDialog();
                     SelectedOperationTabIndex = 0;
@@ -5612,7 +5665,7 @@ public sealed class TestViewModel : ObservableObject
 
         var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             faults,
-            "Không chạy relay PASS. Sau khi XÁC NHẬN: chỉ JIG được mở; MARKING luôn OFF khi FAIL.");
+            "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
         faultDialog.Owner = Application.Current?.MainWindow;
         faultDialog.ShowDialog();
 
@@ -5871,6 +5924,9 @@ public sealed class TestViewModel : ObservableObject
 
     public void SetModel(ProductModel model)
     {
+        if (IsPassProductRemovalPending)
+            throw new InvalidOperationException("VUI LÒNG THÁO SẢN PHẨM");
+
         // Đổi mã hàng phải hủy sạch chu trình cũ trước khi thay _model; nếu
         // không một task PASS/FAIL cũ hoàn thành muộn có thể cộng sản lượng
         // nhầm sang mã hàng vừa chọn.

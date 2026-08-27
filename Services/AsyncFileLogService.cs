@@ -50,8 +50,15 @@ public sealed class AsyncFileLogService : IDisposable
 
     public AppLogLevel Level { get; set; } = AppLogLevel.Normal;
 
+    // Log chẩn đoán Data/Logs được tắt trong bản Production. Lịch sử kiểm tra,
+    // sản lượng và dữ liệu tem dùng kho riêng nên không bị ảnh hưởng.
+    public bool FileLoggingEnabled { get; set; }
+
     public void Initialize(string? rootDirectory = null)
     {
+        if (!FileLoggingEnabled)
+            return;
+
         if (Interlocked.Exchange(ref _started, 1) != 0)
             return;
 

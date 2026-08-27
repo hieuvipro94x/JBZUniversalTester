@@ -13,9 +13,9 @@ public partial class FaultConfirmationWindow : Window
             .Select(FaultDisplayFormatter.FormatOperator)
             .ToArray();
 
-        SummaryText.Text = displays.Count == 1
-            ? "ĐÃ SẢY RA LỖI"
-            : $"PHÁT HIỆN {displays.Count} LOI";
+        SummaryText.Text = displays.Count == 0
+            ? "KIỂM TRA SẢN PHẨM"
+            : displays[0].Title;
         FaultItemsControl.ItemsSource = displays;
         FooterText.Text = footer ?? string.Empty;
     }

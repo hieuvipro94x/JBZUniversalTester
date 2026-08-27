@@ -236,6 +236,9 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task<ProductModel?> LoadModelAsync(string path)
     {
+        if (Test.IsPassProductRemovalPending)
+            throw new InvalidOperationException("VUI LÒNG THÁO SẢN PHẨM");
+
         Status = "ĐANG NẠP MÃ HÀNG...";
         string full = Path.GetFullPath(path);
         if (!File.Exists(full)) throw new FileNotFoundException("Không tìm thấy file mã hàng.", full);

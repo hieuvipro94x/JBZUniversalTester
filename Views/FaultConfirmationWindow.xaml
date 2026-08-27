@@ -1,7 +1,7 @@
 <Window x:Class="JBZUniversalTester.Views.FaultConfirmationWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Xử lý hàng không đạt"
+        Title="Sản phẩm không đạt"
         Width="520" Height="330"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -18,7 +18,7 @@
         <Border Background="#23D9D9"
                 BorderBrush="#333333"
                 BorderThickness="2">
-            <TextBlock Text="X&#7916; L&#221; H&#192;NG KH&#212;NG &#272;&#7840;T"
+            <TextBlock Text="S&#7842;N PH&#7848;M KH&#212;NG &#272;&#7840;T"
                        Foreground="#333333"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
@@ -29,13 +29,13 @@
         <StackPanel Grid.Row="1"
                     VerticalAlignment="Center"
                     HorizontalAlignment="Center">
-            <TextBlock Text="KI&#7874;M TRA M&#7840;CH KH&#212;NG &#272;&#7840;T."
+            <TextBlock Text="H&#195;Y KI&#7874;M TRA V&#192; S&#7916;A S&#7842;N PH&#7848;M"
                        Foreground="#FFE000"
                        HorizontalAlignment="Center"
                        TextAlignment="Center"
                        FontSize="19"
                        FontWeight="Bold"/>
-            <TextBlock Text="H&#195;Y X&#7916; L&#221; S&#7842;N PH&#7848;M L&#7894;I."
+            <TextBlock Text="XEM V&#7882; TR&#205; L&#7894;I TR&#202;N M&#192;N H&#204;NH"
                        Foreground="#FFE000"
                        HorizontalAlignment="Center"
                        TextAlignment="Center"

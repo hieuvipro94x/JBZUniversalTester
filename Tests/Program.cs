@@ -206,7 +206,7 @@ internal static class Program
         };
         OperatorFaultDisplay openOperator = FaultDisplayFormatter.FormatOperator(open);
         CustomerFaultDisplay openCustomer = FaultDisplayFormatter.FormatCustomer(open);
-        Assert(openOperator.Title == "HỞ MẠCH", "Open operator title");
+        Assert(openOperator.Title == "KIỂM TRA LỖI HỞ MẠCH", "Open operator instruction");
         Assert(openOperator.Lines.Any(line => line.Value.Contains("CN1 - Chân 4 ↔ CN3 - Chân 6", StringComparison.Ordinal)), "Open standard connection");
         Assert(openOperator.Lines.Any(line => line.Label == "Màu dây tiêu chuẩn" && line.Value == "TRẮNG"), "Open standard color");
         Assert(openOperator.Lines.Any(line => line.Value == "KHÔNG CÓ KẾT NỐI"), "Open actual condition");
@@ -227,7 +227,7 @@ internal static class Program
             ActualPinTo = "5"
         };
         OperatorFaultDisplay wrongOperator = FaultDisplayFormatter.FormatOperator(wrong);
-        Assert(wrongOperator.Title == "SAI KẾT NỐI", "Wrong connection operator title");
+        Assert(wrongOperator.Title == "KIỂM TRA LỖI SAI DÂY", "Wrong connection operator instruction");
         Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí tiêu chuẩn"), "Wrong standard position");
         Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí thực tế"), "Wrong actual position");
         Assert(FaultDisplayFormatter.FormatCustomer(wrong).FaultType == "INCORRECT CONNECTION", "Wrong customer mapping");
@@ -241,7 +241,7 @@ internal static class Program
             ActualPinTo = "9"
         };
         OperatorFaultDisplay shortOperator = FaultDisplayFormatter.FormatOperator(shortFault);
-        Assert(shortOperator.Title == "CHẬP MẠCH", "Short operator title");
+        Assert(shortOperator.Title == "KIỂM TRA LỖI CHẬP MẠCH", "Short operator instruction");
         Assert(shortOperator.Lines.Any(line => line.Value.Contains("CN4 - Chân 2 ↔ CN6 - Chân 9", StringComparison.Ordinal)), "Short actual connection");
         Assert(FaultDisplayFormatter.FormatCustomer(shortFault).FaultType == "SHORT CIRCUIT", "Short customer mapping");
 
@@ -256,6 +256,7 @@ internal static class Program
         OperatorFaultDisplay resistanceHighOperator = FaultDisplayFormatter.FormatOperator(resistanceHigh);
         CustomerFaultDisplay resistanceHighCustomer = FaultDisplayFormatter.FormatCustomer(resistanceHigh);
         Assert(resistanceHighOperator.Lines.Any(line => line.Value == "CAO HƠN GIỚI HẠN"), "Resistance high assessment");
+        Assert(resistanceHighOperator.Title == "KIỂM TRA LỖI ĐIỆN TRỞ", "Resistance operator instruction");
         Assert(resistanceHighCustomer.Assessment == "ABOVE UPPER LIMIT", "Resistance high customer assessment");
         Assert(resistanceHighCustomer.Deviation == "+0.32 kΩ", "Resistance high deviation");
 
@@ -277,6 +278,9 @@ internal static class Program
 
     private static void TestUiPerformanceGuards()
     {
+        Assert(!AsyncFileLogService.Current.FileLoggingEnabled,
+            "Production startup keeps Data/Logs diagnostic file writing disabled");
+
         var red1 = WireColorToBrushConverter.ToBrush("R");
         var red2 = WireColorToBrushConverter.ToBrush("R");
         var stripe1 = WireColorToBrushConverter.ToBrush("W/B");
@@ -505,6 +509,8 @@ internal static class Program
                settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
             "Production settings exposes reconnectable printer control and connection status");
         Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"234\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Name=\"TestAppVersionText\"", StringComparison.Ordinal) &&
+               xaml.Contains("Grid.Row=\"8\"", StringComparison.Ordinal) &&
                xaml.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto\"", StringComparison.Ordinal) &&
                xaml.Contains("MinWidth=\"125\"", StringComparison.Ordinal),
             "TestView scales its fixed header and preserves table text at 1024/1368 widths");
@@ -644,11 +650,13 @@ internal static class Program
             "Production does not present READY before receiving a clean baseline frame");
 
         board.Publish(duplicatedDirections);
-        Assert(vm.ResultStatusText == "CẢNH BÁO IO" &&
+        Assert(vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM" &&
                vm.Faults.Count == 1 &&
-               vm.Faults[0].Status.Contains("IO1", StringComparison.Ordinal) &&
-               vm.Faults[0].Status.Contains("IO18", StringComparison.Ordinal),
-            "Connected startup pins block READY and identify the exact IO pair");
+               vm.Faults[0].Kind == FaultKind.Info &&
+               vm.Faults[0].ProductFaultType == ProductFaultType.None &&
+               vm.Faults[0].ActualSourceIo == 1 &&
+               vm.Faults[0].ActualTargetIo == 18,
+            "A product left on the jig asks for removal without reporting a false IO fault");
         Assert(vm.Total == totalBeforeWarning &&
                vm.Pass == passBeforeWarning &&
                vm.Fail == failBeforeWarning &&
@@ -1109,20 +1117,32 @@ internal static class Program
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS removal wait flag not found");
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
+               removalVm.IsPassProductRemovalPending &&
                removalVm.SelectedOperationTabIndex == 3 &&
                removalVm.ResultStatusText == "ĐẠT" &&
                removalVm.StateBackground == "#2AA84A",
             "Committed Leak PASS keeps the result table, stays green, and arms ProductRemoved before scan restart");
+        removalVm.StopViewAsync().GetAwaiter().GetResult();
+        Assert(removalVm.IsPassProductRemovalPending &&
+               removalVm.State.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.Ordinal),
+            "Returning to MainWindow preserves the committed PASS removal lock and background IO monitoring");
         removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
+               removalVm.IsPassProductRemovalPending &&
                removalVm.SelectedOperationTabIndex == 3 &&
                removalVm.ResultStatusText == "ĐẠT",
             "Leak PASS result table remains visible while any product IO is still connected");
         removalBoard.Publish(FrameSeq(4));
+        FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
+            "_cycleActive",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("PASS main-screen cycle-active flag not found");
         Assert(!(bool)(waitForPassRemoval.GetValue(removalVm) ?? true) &&
+               !removalVm.IsPassProductRemovalPending &&
+               !(bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? true) &&
                removalVm.ResultStatusText == "SẴN SÀNG" &&
                removalVm.SelectedOperationTabIndex == 0,
-            "After committed Leak PASS, a fresh empty frame confirms removal and returns to ready");
+            "After committed Leak PASS, a fresh empty frame clears the MainWindow lock without auto-arming a new test");
 
         TestViewModel pauseVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },

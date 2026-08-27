@@ -36,10 +36,10 @@ public partial class App : Application
         try
         {
             MessageBox.Show(
-                "Phần mềm vừa chặn một lỗi để tránh bị thoát.\n\n" +
-                "Trạng thái phần cứng có thể chưa sẵn sàng. Hãy kiểm tra kết nối bo và thử lại.\n\n" +
+                "Ứng dụng gặp lỗi hệ thống và đã dừng thao tác hiện tại.\n\n" +
+                "Hãy kiểm tra nguồn điện, bo mạch và cáp USB trước khi thử lại.\n\n" +
                 $"Chi tiết: {e.Exception.Message}",
-                "JBZ - Đã chặn lỗi",
+                "JBZ - LỖI HỆ THỐNG",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }

@@ -28,6 +28,7 @@ public partial class MainWindow : Window
 
         _viewModel = new MainViewModel();
         _viewModel.ExplicitModelLoaded += ViewModel_ExplicitModelLoaded;
+        _viewModel.Test.PropertyChanged += TestViewModel_PropertyChanged;
         DataContext = _viewModel;
         ContentRendered += MainWindow_ContentRendered;
     }
@@ -83,6 +84,12 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
+        if (_viewModel.Test.IsPassProductRemovalPending)
+        {
+            UpdatePassRemovalGate();
+            return;
+        }
+
         if (_viewModel.Model is null)
         {
             MessageBox.Show(
@@ -158,8 +165,23 @@ public partial class MainWindow : Window
 
         Show();
         WindowState = WindowState.Maximized;
+        UpdatePassRemovalGate();
         Activate();
         Focus();
+    }
+
+    private void TestViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TestViewModel.IsPassProductRemovalPending))
+            Dispatcher.BeginInvoke(UpdatePassRemovalGate);
+    }
+
+    private void UpdatePassRemovalGate()
+    {
+        bool blocked = _viewModel.Test.IsPassProductRemovalPending;
+        PassRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
+        StartTestButton.IsEnabled = !blocked;
+        SelectModelButton.IsEnabled = !blocked;
     }
 
     private void OpenSettings_Click(
@@ -325,6 +347,7 @@ public partial class MainWindow : Window
 
         try
         {
+            _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
             await _viewModel.ShutdownAsync();
         }
         finally

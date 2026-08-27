@@ -167,7 +167,8 @@
                 <ColumnDefinition Width="120"/>
             </Grid.ColumnDefinitions>
 
-            <Button Grid.Column="0"
+            <Button x:Name="StartTestButton"
+                    Grid.Column="0"
                     Click="OpenTestWindow_Click"
                     Style="{StaticResource PrimaryButton}"
                     Content="BẮT ĐẦU KIỂM TRA"/>
@@ -184,7 +185,8 @@
                     Style="{StaticResource FlatButton}"
                     Content="CÀI ĐẶT"/>
 
-            <Button Grid.Column="3"
+            <Button x:Name="SelectModelButton"
+                    Grid.Column="3"
                     Command="{Binding Home.LoadModelCommand}"
                     Style="{StaticResource FlatButton}"
                     Content="CHỌN MÃ HÀNG"/>
@@ -194,6 +196,32 @@
                     Style="{StaticResource FlatButton}"
                     Content="KẾT THÚC"/>
         </Grid>
+
+        <Border x:Name="PassRemovalNotice"
+                Grid.Row="1"
+                Panel.ZIndex="10"
+                Visibility="Collapsed"
+                IsHitTestVisible="False"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Padding="36,22"
+                Background="#FFF2A8"
+                BorderBrush="#C89000"
+                BorderThickness="2"
+                CornerRadius="6">
+            <StackPanel>
+                <TextBlock Text="VUI LÒNG THÁO SẢN PHẨM"
+                           FontSize="30"
+                           FontWeight="Bold"
+                           Foreground="#8A3B00"
+                           TextAlignment="Center"/>
+                <TextBlock Text="Chọn mã hàng và bắt đầu kiểm tra đang bị khóa. Thông báo sẽ tự mất khi sản phẩm đã được tháo hoàn toàn."
+                           Margin="0,8,0,0"
+                           FontSize="15"
+                           Foreground="#5C4200"
+                           TextAlignment="Center"/>
+            </StackPanel>
+        </Border>
     
 
         <!-- ====================================================== -->

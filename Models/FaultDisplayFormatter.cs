@@ -24,6 +24,17 @@ public sealed record CustomerFaultDisplay(
 /// </summary>
 public static class FaultDisplayFormatter
 {
+    public static string OperatorInstruction(ProductFaultType type) => type switch
+    {
+        ProductFaultType.OpenCircuit => "KIỂM TRA LỖI HỞ MẠCH",
+        ProductFaultType.WrongWiring => "KIỂM TRA LỖI SAI DÂY",
+        ProductFaultType.ShortCircuit => "KIỂM TRA LỖI CHẬP MẠCH",
+        ProductFaultType.ResistanceOutOfRange => "KIỂM TRA LỖI ĐIỆN TRỞ",
+        ProductFaultType.WaterProofLeak => "KIỂM TRA LỖI KÍN NƯỚC",
+        ProductFaultType.SystemDeviceError => "LỖI HỆ THỐNG KIỂM TRA",
+        _ => "KIỂM TRA SẢN PHẨM"
+    };
+
     public static string OperatorFaultType(ProductFaultType type) =>
         OperatorFaultType(FaultTypeCatalog.Code(type));
 
@@ -109,7 +120,7 @@ public static class FaultDisplayFormatter
         if (lines.Count == 0)
             Add(lines, "Chi tiết", string.IsNullOrWhiteSpace(fault.Message) ? "KHÔNG CÓ DỮ LIỆU CHI TIẾT" : fault.Message);
 
-        return new OperatorFaultDisplay(OperatorFaultType(fault.Type), lines);
+        return new OperatorFaultDisplay(OperatorInstruction(fault.Type), lines);
     }
 
     public static CustomerFaultDisplay FormatCustomer(FaultDetail fault)
