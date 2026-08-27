@@ -28,22 +28,22 @@ public static class HistoryExportService
     private static readonly HistoryColumn[] Columns =
     [
         new("장착시간", 21, HistoryCellType.DateTime, r => r.Started),
-        new("파일", 34, HistoryCellType.Text, r => Path.GetFileName(r.ModelFile ?? string.Empty)),
+        new("파일", 34, HistoryCellType.Text, r => r.ExportModelFileName),
         new("파트명", 20, HistoryCellType.Text, r => r.PartName),
         new("파트번호", 19, HistoryCellType.Text, r => r.PartNumber),
         new("Eco", 15, HistoryCellType.Text, r => r.Eco),
         new("Nco", 13, HistoryCellType.Text, r => r.Nco),
         new("Alc", 17, HistoryCellType.Text, r => r.Alc),
-        new("Lot", 11, HistoryCellType.Text, _ => string.Empty),
-        new("진도", 10, HistoryCellType.Text, r => r.Passed ? "1/1" : "0/1"),
-        new("결과", 10, HistoryCellType.Text, r => r.Passed ? "합격" : "불량"),
-        new("합격", 11, HistoryCellType.Number, r => r.Passed && r.LotNo > 0 ? r.LotNo : null),
-        new("검사기록", 52, HistoryCellType.Text, BuildSampleTestLog, true),
-        new("바코드입력", 20, HistoryCellType.Text, _ => string.Empty),
+        new("Lot", 11, HistoryCellType.Text, r => r.ExportLotText),
+        new("진도", 10, HistoryCellType.Text, r => r.ExportProgressText),
+        new("결과", 10, HistoryCellType.Text, r => r.ExportResultText),
+        new("합격", 11, HistoryCellType.Number, r => r.ExportAcceptedLotNo),
+        new("검사기록", 52, HistoryCellType.Text, r => r.ExportTestLogText, true),
+        new("바코드입력", 20, HistoryCellType.Text, r => r.ExportBarcodeInputText),
         new("바코드출력", 48, HistoryCellType.Text, r => r.BarcodeOutputText, true),
         new("측정", 28, HistoryCellType.Text, r => r.Resistance, true),
         new("HtdrvName", 34, HistoryCellType.Text, r => r.HtdrvName),
-        new("내용", 46, HistoryCellType.Text, BuildContent, true),
+        new("내용", 46, HistoryCellType.Text, r => r.ExportContentText, true),
         new("메모", 36, HistoryCellType.Text, r => r.PrintMessage, true)
     ];
 
@@ -60,44 +60,6 @@ public static class HistoryExportService
         foreach (TestHistoryRecord record in records)
             writer.WriteLine(string.Join(',', Columns.Select(column =>
                 EscapeCsv(ToCsvValue(column, record)))));
-    }
-
-    private static string BuildSampleTestLog(TestHistoryRecord record)
-    {
-        string started = record.Started.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
-        string finished = record.Finished.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
-        var text = new StringBuilder($"검사시작 {started} 회로검사");
-
-        if (record.Passed)
-            text.Append(":PASS");
-        else
-        {
-            if (!string.IsNullOrWhiteSpace(record.FaultSummary))
-                text.Append(' ').Append(record.FaultSummary.Trim());
-            else if (!string.IsNullOrWhiteSpace(record.FaultType))
-                text.Append(' ').Append(record.FaultType.Trim());
-            text.Append(":FAIL");
-        }
-
-        if (!string.IsNullOrWhiteSpace(record.Resistance))
-            text.Append(" 저항검사 ").Append(record.Resistance.Trim());
-
-        text.Append(record.Passed ? " 타각 탈거 " : " 탈거 ").Append(finished);
-        return text.ToString();
-    }
-
-    private static string BuildContent(TestHistoryRecord record)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(record.FaultSummary))
-            parts.Add(record.FaultSummary.Trim());
-        if (!string.IsNullOrWhiteSpace(record.LabelTypeText))
-            parts.Add($"[LABEL]{record.LabelTypeText.Trim()}");
-        if (!string.IsNullOrWhiteSpace(record.PrintStatus))
-            parts.Add($"[PRINT]{record.PrintStatus.Trim()}");
-        if (!string.IsNullOrWhiteSpace(record.DeviceName))
-            parts.Add($"[TESTER]{record.DeviceName.Trim()}");
-        return string.Join(' ', parts);
     }
 
     public static void ExportXlsx(string path, IReadOnlyList<TestHistoryRecord> records)

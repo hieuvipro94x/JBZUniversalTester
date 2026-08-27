@@ -8,17 +8,17 @@
         <Style x:Key="CompactButton"
                TargetType="Button"
                BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="MinHeight" Value="34"/>
-            <Setter Property="MinWidth" Value="86"/>
-            <Setter Property="Padding" Value="14,5"/>
-            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="MinHeight" Value="30"/>
+            <Setter Property="MinWidth" Value="78"/>
+            <Setter Property="Padding" Value="11,4"/>
+            <Setter Property="Margin" Value="3,0"/>
             <Setter Property="FontSize" Value="12"/>
         </Style>
 
         <Style x:Key="FilterTextBox"
                TargetType="TextBox"
                BasedOn="{StaticResource {x:Type TextBox}}">
-            <Setter Property="MinHeight" Value="32"/>
+            <Setter Property="MinHeight" Value="29"/>
             <Setter Property="MinWidth" Value="90"/>
             <Setter Property="Padding" Value="8,3"/>
             <Setter Property="FontSize" Value="12"/>
@@ -67,12 +67,12 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="8">
+    <Grid Margin="6">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="36"/>
+            <RowDefinition Height="28"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
@@ -81,20 +81,20 @@
                 BorderBrush="#D2D8DF"
                 BorderThickness="1"
                 CornerRadius="3"
-                Padding="12,8"
-                Margin="0,0,0,6">
+                Padding="10,6"
+                Margin="0,0,0,4">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="115"/>
-                    <ColumnDefinition Width="115"/>
-                    <ColumnDefinition Width="115"/>
-                    <ColumnDefinition Width="310"/>
+                    <ColumnDefinition Width="92"/>
+                    <ColumnDefinition Width="92"/>
+                    <ColumnDefinition Width="92"/>
+                    <ColumnDefinition Width="292"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                     <TextBlock Text="LỊCH SỬ KIỂM TRA"
-                               FontSize="19"
+                               FontSize="18"
                                FontWeight="Bold"
                                Foreground="#243447"/>
                     <TextBlock Text="Tra cứu nhanh, xem dữ liệu tem và xuất Excel theo mẫu chuẩn"
@@ -129,17 +129,17 @@
                             VerticalAlignment="Center"
                             Margin="10,0,0,0">
                     <Button Content="CSV"
-                            Width="100"
+                            Width="78"
                             Style="{StaticResource CompactButton}"
                             Click="ExportCsv_Click"/>
                     <Button Content="XUẤT EXCEL"
-                            Width="105"
+                            Width="112"
                             Style="{StaticResource CompactButton}"
                             Click="ExportXlsx_Click"
                             Background="#DDEFD9"
                             BorderBrush="#8AB681"/>
                     <Button Content="ĐÓNG"
-                            Width="82"
+                            Width="78"
                             Style="{StaticResource CompactButton}"
                             Click="Close_Click"/>
                 </StackPanel>
@@ -152,33 +152,33 @@
                 BorderBrush="#D2D8DF"
                 BorderThickness="1"
                 CornerRadius="3"
-                Padding="9,7"
-                Margin="0,0,0,6">
-            <WrapPanel VerticalAlignment="Center" ItemHeight="58">
-                <StackPanel Width="150" Margin="0,0,10,4">
+                Padding="8,5"
+                Margin="0,0,0,4">
+            <WrapPanel VerticalAlignment="Center" ItemHeight="50">
+                <StackPanel Width="142" Margin="0,0,8,2">
                     <TextBlock Text="Từ ngày" Style="{StaticResource FilterLabel}"/>
-                    <DatePicker x:Name="FromDatePicker" Height="30" FontSize="12"/>
+                    <DatePicker x:Name="FromDatePicker" Height="29" FontSize="12"/>
                 </StackPanel>
 
-                <StackPanel Width="150" Margin="0,0,10,4">
+                <StackPanel Width="142" Margin="0,0,8,2">
                     <TextBlock Text="Đến ngày" Style="{StaticResource FilterLabel}"/>
-                    <DatePicker x:Name="ToDatePicker" Height="30" FontSize="12"/>
+                    <DatePicker x:Name="ToDatePicker" Height="29" FontSize="12"/>
                 </StackPanel>
 
-                <StackPanel Width="115" Margin="0,0,10,4">
+                <StackPanel Width="105" Margin="0,0,8,2">
                     <TextBlock Text="LOTNO" Style="{StaticResource FilterLabel}"/>
                     <TextBox x:Name="LotTextBox" Style="{StaticResource FilterTextBox}"/>
                 </StackPanel>
 
-                <StackPanel Width="245" Margin="0,0,10,4">
+                <StackPanel Width="220" Margin="0,0,8,2">
                     <TextBlock Text="Mã hàng / tên hàng" Style="{StaticResource FilterLabel}"/>
                     <TextBox x:Name="PartTextBox" Style="{StaticResource FilterTextBox}"/>
                 </StackPanel>
 
-                <StackPanel Width="190" Margin="0,0,10,4">
+                <StackPanel Width="175" Margin="0,0,8,2">
                     <TextBlock Text="Kết quả" Style="{StaticResource FilterLabel}"/>
                     <ComboBox x:Name="ResultComboBox"
-                              Height="30"
+                              Height="29"
                               FontSize="12"
                               SelectedIndex="0">
                         <ComboBoxItem Content="ALL"/>
@@ -191,7 +191,7 @@
                     </ComboBox>
                 </StackPanel>
 
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="2,17,0,4">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Bottom" Margin="2,14,0,2">
                     <Button Content="TÌM KIẾM"
                             Width="106"
                             Style="{StaticResource CompactButton}"
@@ -221,9 +221,9 @@
                       CanUserResizeRows="False"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      RowHeight="32"
-                      ColumnHeaderHeight="40"
-                      FontSize="11.5"
+                      RowHeight="28"
+                      ColumnHeaderHeight="36"
+                      FontSize="11"
                       Background="White"
                       BorderThickness="0"
                       SelectionMode="Extended"
@@ -249,48 +249,31 @@
                 </DataGrid.RowStyle>
 
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Thời gian"
+                    <DataGridTextColumn Header="장착시간"
                                         Binding="{Binding Started, StringFormat={}{0:yyyy/MM/dd HH:mm:ss}}"
                                         Width="150"/>
-                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="145" MinWidth="125"/>
-                    <DataGridTextColumn Header="Tên hàng" Binding="{Binding PartName}" Width="145" MinWidth="125"/>
-                    <DataGridTextColumn Header="LOTNO" Binding="{Binding LotNo}" Width="82" ElementStyle="{StaticResource CenterCellText}"/>
-
-                    <DataGridTemplateColumn Header="Kết quả" Width="90">
+                    <DataGridTextColumn Header="파일" Binding="{Binding ExportModelFileName}" Width="180"/>
+                    <DataGridTextColumn Header="파트명" Binding="{Binding PartName}" Width="135"/>
+                    <DataGridTextColumn Header="파트번호" Binding="{Binding PartNumber}" Width="135"/>
+                    <DataGridTextColumn Header="Eco" Binding="{Binding Eco}" Width="100"/>
+                    <DataGridTextColumn Header="Nco" Binding="{Binding Nco}" Width="90"/>
+                    <DataGridTextColumn Header="Alc" Binding="{Binding Alc}" Width="105"/>
+                    <DataGridTextColumn Header="Lot" Binding="{Binding ExportLotText}" Width="72"/>
+                    <DataGridTextColumn Header="진도" Binding="{Binding ExportProgressText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="결과" Binding="{Binding ExportResultText}" Width="66" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="합격" Binding="{Binding ExportAcceptedLotNo}" Width="78" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTemplateColumn Header="검사기록" Width="280">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <Border CornerRadius="10" Padding="9,3" HorizontalAlignment="Center">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Background" Value="#FDECEC"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Passed}" Value="True">
-                                                    <Setter Property="Background" Value="#E5F6EA"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <TextBlock Text="{Binding PassedText}" FontWeight="Bold">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Foreground" Value="#B42318"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Passed}" Value="True">
-                                                        <Setter Property="Foreground" Value="#147A39"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </Border>
+                                <TextBlock Text="{Binding ExportTestLogText}"
+                                           ToolTip="{Binding ExportTestLogText}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-
-                    <DataGridTextColumn Header="Loại tem" Binding="{Binding LabelTypeText}" Width="100"/>
-                    <DataGridTextColumn Header="Barcode" Binding="{Binding BarcodeValue}" Width="245"/>
-                    <DataGridTextColumn Header="Trạng thái in" Binding="{Binding PrintStatus}" Width="105"/>
-                    <DataGridTemplateColumn Header="Dữ liệu tem xuất" Width="280">
+                    <DataGridTextColumn Header="바코드입력" Binding="{Binding ExportBarcodeInputText}" Width="105"/>
+                    <DataGridTemplateColumn Header="바코드출력" Width="230">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding BarcodeOutputText}"
@@ -300,15 +283,18 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-
-                    <DataGridTextColumn Header="File model" Binding="{Binding ModelFile}" Width="220"/>
-                    <DataGridTextColumn Header="ECO" Binding="{Binding Eco}" Width="95"/>
-                    <DataGridTextColumn Header="NCO" Binding="{Binding Nco}" Width="90"/>
-                    <DataGridTextColumn Header="ALC" Binding="{Binding Alc}" Width="100"/>
-                    <DataGridTextColumn Header="Loại lỗi" Binding="{Binding CustomerFault.FaultType}" Width="190"/>
-                    <DataGridTextColumn Header="Chi tiết lỗi" Binding="{Binding FaultSummary}" Width="280"/>
-                    <DataGridTextColumn Header="Điện trở" Binding="{Binding Resistance}" Width="180"/>
-                    <DataGridTextColumn Header="Phiên bản" Binding="{Binding HtdrvName}" Width="220"/>
+                    <DataGridTextColumn Header="측정" Binding="{Binding Resistance}" Width="160"/>
+                    <DataGridTextColumn Header="HtdrvName" Binding="{Binding HtdrvName}" Width="190"/>
+                    <DataGridTemplateColumn Header="내용" Width="240">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding ExportContentText}"
+                                           ToolTip="{Binding ExportContentText}"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="메모" Binding="{Binding PrintMessage}" Width="190"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>

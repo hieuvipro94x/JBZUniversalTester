@@ -58,9 +58,57 @@ public sealed class TestHistoryRecord
     public string LabelTypeText => !string.IsNullOrWhiteSpace(LabelTemplateType)
         ? LabelTemplateType
         : LabelProfile;
-    public string BarcodeOutputText => !string.IsNullOrWhiteSpace(LabelPayload)
-        ? LabelPayload
-        : BarcodeValue;
+    // BarcodeValue là giá trị đã chốt theo đúng TEM BÉ/TEM TO tại thời điểm PASS.
+    // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
+    public string BarcodeOutputText => BarcodeValue ?? string.Empty;
+    public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
+    public string ExportLotText => string.Empty;
+    public string ExportProgressText => Passed ? "1/1" : "0/1";
+    public string ExportResultText => Passed ? "합격" : "불량";
+    public long? ExportAcceptedLotNo => Passed && LotNo > 0 ? LotNo : null;
+    public string ExportBarcodeInputText => string.Empty;
+    public string ExportTestLogText
+    {
+        get
+        {
+            string started = Started.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+            string finished = Finished.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+            var text = new System.Text.StringBuilder($"검사시작 {started} 회로검사");
+
+            if (Passed)
+                text.Append(":PASS");
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(FaultSummary))
+                    text.Append(' ').Append(FaultSummary.Trim());
+                else if (!string.IsNullOrWhiteSpace(FaultType))
+                    text.Append(' ').Append(FaultType.Trim());
+                text.Append(":FAIL");
+            }
+
+            if (!string.IsNullOrWhiteSpace(Resistance))
+                text.Append(" 저항검사 ").Append(Resistance.Trim());
+
+            text.Append(Passed ? " 타각 탈거 " : " 탈거 ").Append(finished);
+            return text.ToString();
+        }
+    }
+    public string ExportContentText
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(FaultSummary))
+                parts.Add(FaultSummary.Trim());
+            if (!string.IsNullOrWhiteSpace(LabelTypeText))
+                parts.Add($"[LABEL]{LabelTypeText.Trim()}");
+            if (!string.IsNullOrWhiteSpace(PrintStatus))
+                parts.Add($"[PRINT]{PrintStatus.Trim()}");
+            if (!string.IsNullOrWhiteSpace(DeviceName))
+                parts.Add($"[TESTER]{DeviceName.Trim()}");
+            return string.Join(' ', parts);
+        }
+    }
     public string ExpectedConnectionText => ExpectedSourceIo is int source && ExpectedTargetIo is int target
         ? $"IO {source} → IO {target}"
         : string.Empty;

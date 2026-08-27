@@ -2514,8 +2514,9 @@ internal static class Program
             Assert(csvText.Contains(
                     "2026/08/09 14:07:06,WH322882.setup,PRODUCT,NI375C1000,NE N EV,,NI375/C1000,,1/1,합격,2001,검사시작 14:07:06 회로검사:PASS",
                     StringComparison.Ordinal) &&
-                   csvText.Contains("NI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV PASS, LOT and barcode-output mapping");
+                   csvText.Contains(",,NI375C10002608092001,", StringComparison.Ordinal) &&
+                   !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
+                "Sample history CSV PASS, LOT and barcode-output value without raw EPL payload");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -2526,12 +2527,28 @@ internal static class Program
             Assert(sheet.Contains("<c r=\"K2\"><v>2001</v></c>", StringComparison.Ordinal),
                 "XLSX accepted LOT uses sample 합격 column");
             Assert(sheet.Contains("바코드출력", StringComparison.Ordinal) &&
-                   sheet.Contains("NI375C10002608092001", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"N2\" t=\"inlineStr\" s=\"3\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
+                   !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
                    sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
-                "XLSX exact sample headers, barcode payload and 18-column filter");
+                "XLSX exact sample headers, barcode value and 18-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
                 "XLSX DateTime and wrapped long-text styles");
+
+            string historyXaml = File.ReadAllText(
+                Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
+            string[] sampleHeaders =
+            [
+                "장착시간", "파일", "파트명", "파트번호", "Eco", "Nco", "Alc", "Lot", "진도",
+                "결과", "합격", "검사기록", "바코드입력", "바코드출력", "측정", "HtdrvName", "내용", "메모"
+            ];
+            int previousHeader = -1;
+            foreach (string header in sampleHeaders)
+            {
+                int headerIndex = historyXaml.IndexOf($"Header=\"{header}\"", previousHeader + 1, StringComparison.Ordinal);
+                Assert(headerIndex > previousHeader, $"History UI sample column order: {header}");
+                previousHeader = headerIndex;
+            }
 
             var failed = new TestHistoryRecord
             {
