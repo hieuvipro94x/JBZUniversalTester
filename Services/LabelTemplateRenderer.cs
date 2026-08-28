@@ -73,6 +73,23 @@ public static partial class LabelTemplateRenderer
         return rendered;
     }
 
+    public static string NormalizeEplJob(string payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+
+        string normalized = payload
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n');
+
+        string[] commandLines = normalized
+            .Split('\n')
+            .Where(line => !line.TrimStart().StartsWith("'", StringComparison.Ordinal))
+            .ToArray();
+
+        string job = string.Join("\r\n", commandLines).Trim('\r', '\n');
+        return job + "\r\n";
+    }
+
     private static string Resolve(
         Match match,
         string tokenName,

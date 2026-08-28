@@ -46,11 +46,14 @@ public static class LabelVariableResolver
         bool isSmallLabel = templateType == LabelSettings.SmallTemplate;
         bool isSmallQrLabel = templateType == LabelSettings.SmallQrTemplate;
         bool usesFourDigitLot = isSmallLabel || isSmallQrLabel;
+        long labelLotNo = isSmallQrLabel
+            ? ResolveSmallQrSequence(data.LotNo)
+            : data.LotNo;
         LabelIdentity identity = EplLabelService.BuildIdentity(
             data,
             includeAlcLotSuffix: !usesFourDigitLot);
         string lot = usesFourDigitLot
-            ? data.LotNo.ToString("D4", CultureInfo.InvariantCulture)
+            ? labelLotNo.ToString("D4", CultureInfo.InvariantCulture)
             : EplLabelService.FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix: true);
         string barcode = string.IsNullOrWhiteSpace(data.Barcode)
             ? identity.BarcodeValue
@@ -88,7 +91,7 @@ public static class LabelVariableResolver
         // Highest priority: immutable data captured for the completed cycle.
         values["LOT"] = lot;
         values["LOT_NO"] = lot;
-        values["LOT_NO_3"] = data.LotNo.ToString("D3", CultureInfo.InvariantCulture);
+        values["LOT_NO_3"] = labelLotNo.ToString("D3", CultureInfo.InvariantCulture);
         values["SEQUENCE"] = lot;
         values["MODEL_FILE_NAME"] = Path.GetFileName(model.SourcePath ?? string.Empty);
         values["LABEL_MARK"] = "Q";
@@ -107,6 +110,15 @@ public static class LabelVariableResolver
         values["BARCODE_PRINT"] = barcodePrint;
 
         return values;
+    }
+
+    private static long ResolveSmallQrSequence(long lotNo)
+    {
+        // Máy dùng dải LOT nội bộ 2001..2999 để bảo toàn lịch sử sản lượng,
+        // nhưng tem QR gốc in số thứ tự ngày 0001..0999 như ảnh thực tế.
+        return lotNo is >= 2000 and < 3000
+            ? lotNo - 2000
+            : lotNo;
     }
 
     private static string ResolveSmallLabelYearCode(int year)

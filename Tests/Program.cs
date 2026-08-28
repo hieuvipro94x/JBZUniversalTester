@@ -1560,6 +1560,31 @@ internal static class Program
         Assert(engine.BuildRows().Any(row => row.Kind == FaultKind.MissingConnection),
             "Removing a completed connection re-adds display-only pending row");
 
+        ProductModel sharedCrimp = Model(
+            ("BE31", new[] { 31, 518 }),
+            ("BE32", new[] { 32, 518 }),
+            ("BE33", new[] { 33, 518 }),
+            ("BC13", new[] { 90, 518 }),
+            ("BC14", new[] { 91, 518 }),
+            ("IC03", new[] { 230, 518 }));
+        engine.SetModel(sharedCrimp);
+        engine.ProcessFrame(Frame((31, new[] { 32, 33, 90, 91, 230, 518 })));
+        Assert(engine.ContinuityPassed &&
+               !engine.HasWiringFault &&
+               engine.PassedNets.Count == 6 &&
+               !engine.BuildRows().Any(row =>
+                   row.WireName is "BE31" or "BE32" or "BE33" or "BC13" or "BC14" or "IC03"),
+            "Shared crimp IO518 passes all six nets and removes connector 29 rows when firmware reports one electrical component");
+
+        engine.SetModel(sharedCrimp);
+        engine.ProcessFrame(Frame((31, new[] { 32, 33, 90, 91, 518 })));
+        Assert(!engine.ContinuityPassed &&
+               engine.PassedNets.Count == 5 &&
+               engine.BuildRows().Any(row => row.WireName == "IC03") &&
+               !engine.BuildRows().Any(row =>
+                   row.WireName is "BE31" or "BE32" or "BE33" or "BC13" or "BC14"),
+            "Shared crimp keeps only the missing IC03 branch visible when IO230 is absent");
+
         engine.SetModel(pair);
         engine.ProcessFrame(new ScanFrame(
             DateTime.Now, 1, new HashSet<int> { 1, 40 }, [], true, 0, 1,
@@ -3293,6 +3318,12 @@ internal static class Program
             IReadOnlyDictionary<string, string> qrValues =
                 LabelVariableResolver.Resolve(qrModel, qrLabel.Data, labelSettings);
             string normalizedQrPayload = qrLabel.Payload.Replace("\r\n", "\n", StringComparison.Ordinal);
+            byte[] qrPayloadBytes = Encoding.ASCII.GetBytes(qrLabel.Payload);
+            int qrCrLfCount = qrLabel.Payload.Count(character => character == '\n');
+            int qrBareLfCount = qrPayloadBytes
+                .Select((value, index) => (value, index))
+                .Count(item => item.value == (byte)'\n' &&
+                               (item.index == 0 || qrPayloadBytes[item.index - 1] != (byte)'\r'));
             Assert(LabelProfileResolver.NormalizeTemplateType("TEM_BE_QR") == LabelSettings.SmallQrTemplate &&
                    qrLabel.Profile.Id == LabelSettings.SmallQrTemplate &&
                    qrLabel.Profile.Mode == LabelPrintMode.ExternalTemplate &&
@@ -3308,6 +3339,24 @@ internal static class Program
                        "K32000-22401R-260224.tht\n260827\n0004\n004\nQ\n8\n27\nP1",
                        StringComparison.Ordinal),
                 "TEM_BE_QR follows 60-15 EPL, reads product fields from THT and encodes PartNumber,yyMMddLOT4");
+            Assert(qrCrLfCount > 0 && qrBareLfCount == 0 &&
+                   qrLabel.Payload.EndsWith("P1\r\n", StringComparison.Ordinal) &&
+                   !qrLabel.Payload.Contains("X180,0,4,620,100", StringComparison.Ordinal) &&
+                   qrLabel.Payload.Contains("A450,72,0,2,1,1,N,V05\"-\"V06", StringComparison.Ordinal) &&
+                   qrLabel.Payload.Contains("b200,13,Q,S3,V00\",\"V05V06", StringComparison.Ordinal),
+                "TEM_BE_QR matches the original helper's stored-form variables, removes comment lines and terminates P1 with CRLF");
+
+            history.LotNo = 2001;
+            LabelPrintRequest qrLot2001 = LabelPrintRequest.Capture(history, qrModel, labelSettings);
+            IReadOnlyDictionary<string, string> qrLot2001Values =
+                LabelVariableResolver.Resolve(qrModel, qrLot2001.Data, labelSettings);
+            Assert(qrLot2001Values["LOT_NO"] == "0001" &&
+                   qrLot2001Values["LOT_NO_3"] == "001" &&
+                   qrLot2001.Data.Barcode == "K32000-22402,2608270001" &&
+                   qrLot2001.Payload.Contains(
+                       "260827\r\n0001\r\n001\r\nQ\r\n8\r\n27\r\nP1\r\n",
+                       StringComparison.Ordinal),
+                "TEM_BE_QR converts internal LOT 2001 to original-label daily sequence 0001/001");
 
             labelSettings.TemplateType = LabelSettings.SmallTemplate;
 

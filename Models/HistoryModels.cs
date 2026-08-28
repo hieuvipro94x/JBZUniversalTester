@@ -342,6 +342,15 @@ public sealed record LabelPrintRequest(
         string payload = JBZUniversalTester.Services.LabelTemplateRenderer.Render(
             profile, template, variables, model.PartNumber);
 
+        // Máy in EPL đời cũ có thể nhận byte (đèn COM nháy) nhưng vẫn giữ job
+        // trong bộ đệm nếu phần dữ liệu biến/P1 chỉ kết thúc bằng LF. File mẫu
+        // 60-15 của Htdrv dùng CRLF đồng nhất. P1 cũng phải có CRLF kết thúc;
+        // nếu thiếu, máy in giữ job QR đến khi job kế tiếp gửi thêm byte.
+        // Chỉ chuẩn hóa profile QR đã xác minh bị trộn CRLF/LF; không thay đổi
+        // payload của TEM_BE, TEM_TO hoặc template tùy chỉnh khác.
+        if (isSmallQrLabel)
+            payload = JBZUniversalTester.Services.LabelTemplateRenderer.NormalizeEplJob(payload);
+
         if (isSmallLabel)
         {
             JBZUniversalTester.Services.AsyncFileLogService.Current.Application(

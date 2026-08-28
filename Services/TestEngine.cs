@@ -70,6 +70,7 @@ public sealed class TestEngine : IDisposable
     readonly HashSet<string> _latchedClipKeys = new(StringComparer.OrdinalIgnoreCase);
     readonly HashSet<(int SourceIo, int TargetIo)> _unexpectedPairScratch = [];
     Dictionary<int, int> _componentByIo = [];
+    Dictionary<int, int> _actualComponentByIo = [];
     Dictionary<PinRecord, WireNet[]> _netsByPin = new(ReferenceEqualityComparer.Instance);
     Dictionary<WireNet, string> _confirmationKeyByNet = new(ReferenceEqualityComparer.Instance);
     Dictionary<ClipBranch, string> _confirmationKeyByClip = new(ReferenceEqualityComparer.Instance);
@@ -647,6 +648,7 @@ public sealed class TestEngine : IDisposable
             _stableCounters.Clear();
             _currentActive.Clear();
             _currentConnections.Clear();
+            _actualComponentByIo.Clear();
             _unexpectedIo.Clear();
             _wiringFaults.Clear();
             _candidateWiringFaults.Clear();
@@ -727,6 +729,13 @@ public sealed class TestEngine : IDisposable
                 _currentConnections.Clear();
                 foreach (var pair in frame.Connections)
                     _currentConnections[pair.Key] = pair.Value.ToHashSet();
+
+                // Một điểm dập chung có thể được firmware phát dưới dạng một
+                // source với nhiều target. Các target không nhất thiết có cạnh
+                // trực tiếp với nhau dù chúng thuộc cùng một cụm điện thật.
+                // Dựng component thực tế một lần khi frame đổi để mọi WireNet
+                // dùng chung I/O (ví dụ nhiều dây về IO518) được đánh giá đúng.
+                _actualComponentByIo = BuildActualComponents(_currentConnections);
             }
 
             // Frame của bo thường lặp lại nguyên trạng nhiều lần. Chỉ dựng lại
@@ -1205,7 +1214,7 @@ public sealed class TestEngine : IDisposable
                (connections.TryGetValue(b, out HashSet<int>? fromB) && fromB.Contains(a));
     }
 
-    private static bool IsWireNetConnected(
+    private bool IsWireNetConnected(
         WireNet net,
         IReadOnlyDictionary<int, HashSet<int>> connections)
     {
@@ -1219,7 +1228,7 @@ public sealed class TestEngine : IDisposable
             .All(reachable.Contains);
     }
 
-    private static bool IsEndpointConnectedWithinNet(
+    private bool IsEndpointConnectedWithinNet(
         WireNet net,
         int endpoint,
         IReadOnlyDictionary<int, HashSet<int>> connections)
@@ -1230,7 +1239,7 @@ public sealed class TestEngine : IDisposable
         return BuildReachableNetEndpoints(net, connections).Contains(endpoint);
     }
 
-    private static int CountDisconnectedEndpoints(
+    private int CountDisconnectedEndpoints(
         WireNet net,
         IReadOnlyDictionary<int, HashSet<int>> connections)
     {
@@ -1241,7 +1250,7 @@ public sealed class TestEngine : IDisposable
         return net.ExpectedActiveIo.Count(io => !reachable.Contains(io));
     }
 
-    private static HashSet<int> BuildReachableNetEndpoints(
+    private HashSet<int> BuildReachableNetEndpoints(
         WireNet net,
         IReadOnlyDictionary<int, HashSet<int>> connections)
     {
@@ -1253,28 +1262,56 @@ public sealed class TestEngine : IDisposable
         if (net.SourceIo <= 0 || !endpoints.Contains(net.SourceIo))
             return reachable;
 
-        var queue = new Queue<int>();
-        reachable.Add(net.SourceIo);
-        queue.Enqueue(net.SourceIo);
+        if (!_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent))
+            return reachable;
 
-        while (queue.Count > 0)
+        foreach (int endpoint in endpoints)
         {
-            int current = queue.Dequeue();
-            foreach (int candidate in endpoints)
-            {
-                if (candidate == current ||
-                    reachable.Contains(candidate) ||
-                    !HasElectricalEdge(connections, current, candidate))
-                {
-                    continue;
-                }
-
-                reachable.Add(candidate);
-                queue.Enqueue(candidate);
-            }
+            if (_actualComponentByIo.TryGetValue(endpoint, out int component) &&
+                component == sourceComponent)
+                reachable.Add(endpoint);
         }
 
         return reachable;
+    }
+
+    private static Dictionary<int, int> BuildActualComponents(
+        IReadOnlyDictionary<int, HashSet<int>> connections)
+    {
+        var parent = new Dictionary<int, int>();
+
+        int Find(int value)
+        {
+            if (!parent.TryGetValue(value, out int current))
+            {
+                parent[value] = value;
+                return value;
+            }
+
+            if (current == value)
+                return value;
+
+            int root = Find(current);
+            parent[value] = root;
+            return root;
+        }
+
+        void Union(int a, int b)
+        {
+            int rootA = Find(a);
+            int rootB = Find(b);
+            if (rootA != rootB)
+                parent[rootB] = rootA;
+        }
+
+        foreach ((int source, HashSet<int> targets) in connections)
+        {
+            Find(source);
+            foreach (int target in targets)
+                Union(source, target);
+        }
+
+        return parent.Keys.ToDictionary(io => io, Find);
     }
 
     static Dictionary<int, int> BuildExpectedComponents(ProductModel model)
