@@ -144,6 +144,12 @@ public sealed class ProductionSettings
     /// <summary>PASS sequence: false = MARKING trước JIG; true = JIG trước MARKING.</summary>
     public bool PassJigRelayFirst { get; set; }
 
+    /// <summary>
+    /// Relay vật lý thực sự mở JIG sau khi người vận hành xác nhận sản phẩm lỗi.
+    /// Một số máy đấu ngược R1/R2 nên giá trị này phải được xác nhận bằng nút thử relay.
+    /// </summary>
+    public int FaultJigRelayNumber { get; set; } = 1;
+
     /// <summary>Khoảng chờ an toàn sau khi R2 MARKING OFF trước khi R1 JIG ON trong chu trình PASS.</summary>
     public int PassMarkingToJigDelayMs { get; set; } = 430;
 

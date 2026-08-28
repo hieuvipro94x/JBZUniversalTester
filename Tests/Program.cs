@@ -539,6 +539,9 @@ internal static class Program
                settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
             "Production settings exposes reconnectable printer control and connection status");
+        Assert(settingsXaml.Contains("x:Name=\"FaultJigRelayComboBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Settings.FaultJigRelayNumber", StringComparison.Ordinal),
+            "Production settings exposes the tested physical relay used to eject confirmed FAIL products");
         Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"234\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Name=\"TestAppVersionText\"", StringComparison.Ordinal) &&
                xaml.Contains("Grid.Row=\"8\"", StringComparison.Ordinal) &&
@@ -799,6 +802,7 @@ internal static class Program
 
         var legacyFiveSlots = new ProductionSettings
         {
+            FaultJigRelayNumber = 2,
             ResistanceChannels =
             [
                 new() { Enabled = true, Name = "R1", Channel = 8, MinOhm = 9, MaxOhm = 11 },
@@ -864,6 +868,8 @@ internal static class Program
                 loaded.ResistanceChannels[2] is
                 { Name: "R3", Enabled: true, Channel: 10, MinOhm: 95, MaxOhm: 105 },
                 "Save/load must preserve Enabled, Channel, MinOhm and MaxOhm");
+            Assert(loaded.FaultJigRelayNumber == 2,
+                "Save/load must preserve the physical relay selected to eject confirmed FAIL products");
         }
         finally
         {
@@ -2662,6 +2668,23 @@ internal static class Program
         Assert(!noMarkingBoard.Commands.Contains("SET:2") &&
                noMarkingBoard.Commands.Count(command => command == "SET:1") == 1,
             "Disabled PASS marking skips R2 and still opens JIG once");
+
+        var reversedFaultJigProduction = new ProductionSettings
+        {
+            Relay1JigPulseMs = 50,
+            Relay2MarkingPulseMs = 50,
+            FaultJigRelayNumber = 2,
+            JigEjectRelayEnabled = true,
+            PassMarkingRelayEnabled = true
+        };
+        using TestEngine reversedFaultJigEngine = CreateEngine(
+            out FakeBoard reversedFaultJigBoard,
+            reversedFaultJigProduction);
+        reversedFaultJigEngine.EjectFaultProductAsync().GetAwaiter().GetResult();
+        Assert(reversedFaultJigBoard.Commands.Count(command => command == "SET:2") == 1 &&
+               !reversedFaultJigBoard.Commands.Contains("SET:1") &&
+               reversedFaultJigBoard.Commands.Last() == "OFF",
+            "FAIL confirmation pulses only the configured physical JIG relay and never runs the PASS sequence");
 
         var jigFirstProduction = new ProductionSettings
         {

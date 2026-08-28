@@ -139,6 +139,7 @@ public partial class ProductionSettingsPage : UserControl
 
         IoConfirm1ComboBox.ItemsSource = Enumerable.Range(0, 128).ToArray();
         IoConfirmNComboBox.ItemsSource = Enumerable.Range(0, 32).ToArray();
+        FaultJigRelayComboBox.ItemsSource = new[] { 1, 2 };
     }
 
     private void RefreshPrinterPorts_Click(object sender, RoutedEventArgs e) => RefreshPrinterPorts();
@@ -478,6 +479,12 @@ public partial class ProductionSettingsPage : UserControl
         if (_vm.Settings.PassMarkingToJigDelayMs is < 0 or > 5000)
         {
             error = "Delay PASS từ R2 sang R1 phải từ 0 đến 5000 ms.";
+            return false;
+        }
+
+        if (_vm.Settings.FaultJigRelayNumber is < 1 or > 2)
+        {
+            error = "Hãy chọn Relay 1 hoặc Relay 2 thực sự mở JIG khi xác nhận lỗi.";
             return false;
         }
 

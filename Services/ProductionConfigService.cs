@@ -166,6 +166,7 @@ public static class ProductionConfigService
             $"[JigEjectRelayEnabled]{Bool(settings.JigEjectRelayEnabled)}",
             $"[PassMarkingRelayEnabled]{Bool(settings.PassMarkingRelayEnabled)}",
             $"[PassJigRelayFirst]{Bool(settings.PassJigRelayFirst)}",
+            $"[FaultJigRelayNumber]{settings.FaultJigRelayNumber}",
             $"[PassMarkingToJigDelayMs]{settings.PassMarkingToJigDelayMs}",
             $"[StampDelayMs]{settings.Relay1JigPulseMs},{settings.Relay2MarkingPulseMs}", // compatibility
             $"[OversizeWaitSeconds]{settings.OversizeWaitSeconds}",
@@ -418,6 +419,7 @@ public static class ProductionConfigService
         settings.JigEjectRelayEnabled = B(map, "JigEjectRelayEnabled", settings.JigEjectRelayEnabled);
         settings.PassMarkingRelayEnabled = B(map, "PassMarkingRelayEnabled", settings.PassMarkingRelayEnabled);
         settings.PassJigRelayFirst = B(map, "PassJigRelayFirst", settings.PassJigRelayFirst);
+        settings.FaultJigRelayNumber = I(map, "FaultJigRelayNumber", settings.FaultJigRelayNumber);
         settings.OversizeWaitSeconds = I(map, "OversizeWaitSeconds", settings.OversizeWaitSeconds);
         settings.ShieldDelay = I(map, "ShieldDelayMs", settings.ShieldDelay);
         settings.ResistanceDelayMs = I(map, "ResistanceDelayMs", settings.ResistanceDelayMs);
@@ -576,6 +578,7 @@ public static class ProductionConfigService
         // V15.2: ba thông số relay độc lập. 50..5000 ms tránh pulse bằng 0 hoặc giữ relay quá lâu do nhập nhầm.
         settings.Relay1JigPulseMs = Math.Clamp(settings.Relay1JigPulseMs, 50, 5_000);
         settings.Relay2MarkingPulseMs = Math.Clamp(settings.Relay2MarkingPulseMs, 50, 5_000);
+        settings.FaultJigRelayNumber = Math.Clamp(settings.FaultJigRelayNumber, 1, 2);
         settings.PassMarkingToJigDelayMs = Math.Clamp(settings.PassMarkingToJigDelayMs, 0, 5_000);
         settings.StampDelay = $"{settings.Relay1JigPulseMs},{settings.Relay2MarkingPulseMs}"; // compatibility only
 

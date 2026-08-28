@@ -1266,6 +1266,15 @@ public sealed class TestViewModel : ObservableObject
             : "Relay 2 MARKING -> Relay 1 mở JIG";
     }
 
+    private string FaultJigRelayText()
+    {
+        int relay = _productionSettings.FaultJigRelayNumber == 2 ? 2 : 1;
+        int pulseMs = relay == 2
+            ? _productionSettings.Relay2MarkingPulseMs
+            : _productionSettings.Relay1JigPulseMs;
+        return $"Relay {relay} mở JIG ({pulseMs} ms)";
+    }
+
     private void ReportDeviceFaultForTest(Exception exception, int desiredRowsCount = -1) =>
         EnterDeviceFault(exception, "SELF-TEST", desiredRowsCount);
 
@@ -4128,15 +4137,15 @@ public sealed class TestViewModel : ObservableObject
         faultDialog.ShowDialog();
         SelectedOperationTabIndex = 0;
 
-        // V13.0: sau xác nhận FAIL chỉ Relay 1 JIG được pulse. Relay 2 MARKING
-        // luôn OFF; Probe không bao giờ được phép đi vào handler này.
+        // Sau xác nhận FAIL chỉ relay đã được người cài đặt thử và chọn là
+        // relay mở JIG được pulse. Không chạy chuỗi MARKING của PASS.
         _sound.SetWiringFaultAlarm(false);
 
         try
         {
             State = "ĐANG MỞ JIG HÀNG LỖI";
             await _engine.EjectFaultProductAsync();
-            AddLog($"Lỗi đã xác nhận: R1 JIG pulse đúng 1 lần ({_productionSettings.Relay1JigPulseMs} ms) rồi OFF; R2 MARKING luôn OFF.");
+            AddLog($"Lỗi đã xác nhận: {FaultJigRelayText()} pulse đúng 1 lần rồi OFF; không chạy MARKING PASS.");
 
             _waitForFaultProductRemoval = true;
             SetProductRemovalPending(true);
@@ -4156,7 +4165,7 @@ public sealed class TestViewModel : ObservableObject
             State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
             AddLog($"Không thể eject/restart scan sau lỗi: {ex.Message}");
             MessageBox.Show(
-                $"Không thể mở JIG hoặc khởi động lại scan sau lỗi.\nRelay 2 MARKING vẫn OFF.\n\n{ex.Message}",
+                $"Không thể mở JIG hoặc khởi động lại scan sau lỗi.\nKhông chạy MARKING PASS.\n\n{ex.Message}",
                 "Lỗi thiết bị",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -5904,7 +5913,7 @@ public sealed class TestViewModel : ObservableObject
                     {
                         State = "ĐANG MỞ JIG HÀNG LỖI";
                         await _engine.EjectFaultProductAsync();
-                        AddLog("Resistance FAIL đã xác nhận: chỉ R1 JIG pulse rồi OFF; R2 MARKING luôn OFF.");
+                        AddLog($"Resistance FAIL đã xác nhận: {FaultJigRelayText()} pulse rồi OFF; không chạy MARKING PASS.");
 
                         _waitForFaultProductRemoval = true;
                         SetProductRemovalPending(true);
@@ -5927,7 +5936,7 @@ public sealed class TestViewModel : ObservableObject
                         State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
                         AddLog($"Không thể eject/restart scan sau lỗi điện trở: {ex.Message}");
                         MessageBox.Show(
-                            $"Không thể mở JIG hoặc khởi động lại scan sau lỗi điện trở.\nRelay 2 MARKING vẫn OFF.\n\n{ex.Message}",
+                            $"Không thể mở JIG hoặc khởi động lại scan sau lỗi điện trở.\nKhông chạy MARKING PASS.\n\n{ex.Message}",
                             "Lỗi thiết bị",
                             MessageBoxButton.OK,
                             MessageBoxImage.Error);
@@ -6187,7 +6196,7 @@ public sealed class TestViewModel : ObservableObject
         {
             State = "ĐANG MỞ JIG HÀNG LỖI";
             await _engine.EjectFaultProductAsync();
-            AddLog("Final PASS rejection đã xác nhận: chỉ R1 JIG pulse rồi OFF; R2 MARKING luôn OFF.");
+            AddLog($"Final PASS rejection đã xác nhận: {FaultJigRelayText()} pulse rồi OFF; không chạy MARKING PASS.");
 
             _waitForFaultProductRemoval = true;
             SetProductRemovalPending(true);
@@ -6205,7 +6214,7 @@ public sealed class TestViewModel : ObservableObject
             State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
             AddLog($"Không thể eject/restart scan sau NG cuối chu kỳ: {ex.Message}");
             MessageBox.Show(
-                $"Không thể mở JIG hoặc khởi động lại scan sau NG cuối chu kỳ.\nRelay 2 MARKING vẫn OFF.\n\n{ex.Message}",
+                $"Không thể mở JIG hoặc khởi động lại scan sau NG cuối chu kỳ.\nKhông chạy MARKING PASS.\n\n{ex.Message}",
                 "Lỗi thiết bị",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);

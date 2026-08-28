@@ -1832,12 +1832,22 @@ public sealed class TestEngine : IDisposable
     }
 
     /// <summary>
-    /// V13.0: sau khi người vận hành XÁC NHẬN hàng lỗi, chỉ Relay 1 (JIG)
-    /// được pulse để đẩy/mở jig. Relay 2 MARKING bị cấm tuyệt đối trên FAIL.
-    /// Việc gọi method này nằm sau hộp xác nhận, không bao giờ từ Probe.
+    /// Sau khi người vận hành XÁC NHẬN hàng lỗi, chỉ relay đã được cài là
+    /// relay MỞ JIG LỖI được pulse. Không chạy chuỗi MARKING của PASS.
+    /// Một số máy đấu ngược R1/R2 nên số relay được chọn sau khi thử tay.
     /// </summary>
     public Task EjectFaultProductAsync(CancellationToken ct = default)
-        => PulseJigRelayAsync(ct);
+    {
+        int relay = _production.FaultJigRelayNumber == 2 ? 2 : 1;
+        int pulseMs = relay == 2
+            ? _production.Relay2MarkingPulseMs
+            : _production.Relay1JigPulseMs;
+        string relayName = $"R{relay} FAIL JIG";
+
+        return _production.JigEjectRelayEnabled
+            ? PulseRelaySafeAsync(relay, pulseMs, relayName, ct)
+            : SkipDisabledRelayAsync(relayName, ct);
+    }
 
     /// <summary>
     /// Manual/production helper V15.2: Relay 1 JIG chỉ được pulse đúng một lần.

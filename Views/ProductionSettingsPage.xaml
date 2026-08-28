@@ -357,6 +357,7 @@
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
+                            <RowDefinition Height="34"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Probe cycle" Style="{StaticResource FieldLabelStyle}"/>
@@ -386,26 +387,33 @@
                                   IsChecked="{Binding Settings.PassJigRelayFirst, Mode=TwoWay}"
                                   ToolTip="Tắt: PASS chạy Relay 2 MARKING trước rồi Relay 1 JIG. Bật: PASS chạy Relay 1 JIG trước rồi Relay 2 MARKING."/>
 
-                        <TextBlock Grid.Row="7" Text="Resistance delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="7" Text="Relay JIG khi lỗi" Style="{StaticResource FieldLabelStyle}"/>
+                        <ComboBox x:Name="FaultJigRelayComboBox"
+                                  Grid.Row="7"
+                                  Grid.Column="1"
+                                  SelectedItem="{Binding Settings.FaultJigRelayNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  ToolTip="Dùng nút thử Relay 1/Relay 2 bên dưới, sau đó chọn đúng relay thực tế mở JIG. Khi xác nhận lỗi phần mềm chỉ bật relay này, không chạy MARKING PASS."/>
 
-                        <TextBlock Grid.Row="8" Text="Item height" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="8" Text="Resistance delay" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="9" Text="Scroll delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="9" Text="Item height" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="10" Text="Page delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="10" Text="Scroll delay" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="11" Text="Show title" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="11" Grid.Column="1" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
+                        <TextBlock Grid.Row="11" Text="Page delay" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="11" Grid.Column="1" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="12" Text="Show connector" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
+                        <TextBlock Grid.Row="12" Text="Show title" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
 
-                        <TextBlock Grid.Row="13" Text="L&#7895;i t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="13" Grid.Column="1" Text="{Binding Settings.MinimumErrorLogValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="13" Text="Show connector" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="13" Grid.Column="1" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
+
+                        <TextBlock Grid.Row="14" Text="L&#7895;i t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="14" Grid.Column="1" Text="{Binding Settings.MinimumErrorLogValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                     </Grid>
 
                     <StackPanel Margin="0,14,0,0">
