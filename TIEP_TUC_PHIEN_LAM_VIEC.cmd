@@ -16,7 +16,7 @@ echo ============================================================
 echo JBZUniversalTester - BAN GIAO PHIEN LAM VIEC 2026-08-28
 echo ============================================================
 echo.
-echo PHIEN BAN BAN GIAO: V16.0.110
+echo PHIEN BAN BAN GIAO: V16.0.112
 echo NHANH GIT          : main
 echo REMOTE             : origin/main
 echo.
@@ -44,8 +44,9 @@ echo.
 echo [2] KIEM TRA DA THUC HIEN
 echo ------------------------------------------------------------
 echo - Build Release: 0 loi, 0 canh bao.
-echo - Self-test: 31/32 PASS.
-echo - Loi con lai: TEM_BE_QR follows 60-15 EPL.
+echo - Self-test: 32/32 PASS.
+echo - TEM_BE_QR da dung thu tu V00..V10 cua 60-15 va QR
+echo   PartNumber,yyMMddLOT4; da co golden test theo trace may in goc.
 echo - Chua kiem tra bang may in va JIG vat ly.
 echo.
 

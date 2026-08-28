@@ -215,7 +215,7 @@
                            FontWeight="Bold"
                            Foreground="#8A3B00"
                            TextAlignment="Center"/>
-                <TextBlock Text="Chọn mã hàng và bắt đầu kiểm tra đang bị khóa. Thông báo sẽ tự mất khi sản phẩm đã được tháo hoàn toàn."
+                <TextBlock Text="Chọn mã hàng đang bị khóa. Bạn vẫn có thể mở màn hình kiểm tra để theo dõi; thông báo sẽ tự mất khi sản phẩm đã được tháo hoàn toàn."
                            Margin="0,8,0,0"
                            FontSize="15"
                            Foreground="#5C4200"

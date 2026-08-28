@@ -91,12 +91,6 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
-        if (_viewModel.Test.IsProductRemovalPending)
-        {
-            UpdateProductRemovalGate();
-            return;
-        }
-
         if (_viewModel.Model is null)
         {
             MessageBox.Show(
@@ -187,7 +181,9 @@ public partial class MainWindow : Window
     {
         bool blocked = _viewModel.Test.IsProductRemovalPending;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
-        StartTestButton.IsEnabled = !blocked;
+        // Cho phép quay lại màn hình kiểm tra để quan sát trạng thái tháo.
+        // TestViewModel vẫn không ARM chu kỳ mới cho tới khi ProductRemoved.
+        StartTestButton.IsEnabled = true;
         SelectModelButton.IsEnabled = !blocked;
     }
 

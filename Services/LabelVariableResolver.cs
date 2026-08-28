@@ -88,7 +88,12 @@ public static class LabelVariableResolver
         // Highest priority: immutable data captured for the completed cycle.
         values["LOT"] = lot;
         values["LOT_NO"] = lot;
+        values["LOT_NO_3"] = data.LotNo.ToString("D3", CultureInfo.InvariantCulture);
         values["SEQUENCE"] = lot;
+        values["MODEL_FILE_NAME"] = Path.GetFileName(model.SourcePath ?? string.Empty);
+        values["LABEL_MARK"] = "Q";
+        values["MONTH_NUMBER"] = data.TestedAt.Month.ToString(CultureInfo.InvariantCulture);
+        values["DAY_NUMBER"] = data.TestedAt.Day.ToString(CultureInfo.InvariantCulture);
         values["TEST_DATE"] = data.TestedAt.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
         values["TEST_TIME"] = data.TestedAt.ToString("HHmmss", CultureInfo.InvariantCulture);
         values["DATE_YYMMDD"] = data.TestedAt.ToString("yyMMdd", CultureInfo.InvariantCulture);

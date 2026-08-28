@@ -502,7 +502,13 @@ internal static class Program
                !xaml.Contains(
                    "Text=\"{Binding ProbeCycleCount, Mode=OneWay}\" Style=\"{StaticResource PiCounterTextStyle}\"",
                    StringComparison.Ordinal),
-            "TestView Số LOT must display configured starting LOT, never the probe maintenance counter");
+            "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
+
+        string mainWindowSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
+        Assert(mainWindowSource.Contains("StartTestButton.IsEnabled = true;", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("SelectModelButton.IsEnabled = !blocked;", StringComparison.Ordinal),
+            "Pending product removal locks only product selection, not opening the test screen");
 
         string settingsXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
         Assert(settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
@@ -1890,6 +1896,28 @@ internal static class Program
                    newDay.DailyFailCount == 0 && newDay.MonthlyTestCount == 4,
                 "New day increments the correct daily production counters");
 
+            TestViewModel lotDisplayVm = CreateTestViewModel(
+                new ProductionSettings { LotNo = 2002, MasterFaultRequiredCount = 0 });
+            MethodInfo applyDailyStatistics = typeof(TestViewModel).GetMethod(
+                "ApplyDailyProductionStatistics",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("Daily production UI method not found");
+            applyDailyStatistics.Invoke(lotDisplayVm,
+            [
+                new ModelProductionStatistics
+                {
+                    DailyTestCount = 3,
+                    DailyPassCount = 2,
+                    DailyFailCount = 1
+                }
+            ]);
+            Assert(lotDisplayVm.Lot == "2" && lotDisplayVm.Total == 3 &&
+                   lotDisplayVm.Pass == 2 && lotDisplayVm.Fail == 1,
+                "LOT 2002 displays daily accepted quantity 2, not serial base 2000");
+            applyDailyStatistics.Invoke(lotDisplayVm, [new ModelProductionStatistics()]);
+            Assert(lotDisplayVm.Lot == "0" && lotDisplayVm.Total == 0,
+                "New daily period displays LOT quantity zero");
+
             clock.Advance(TimeSpan.FromDays(24));
             Assert(restarted.Get(modelA).MonthlyTestCount == 0 && restarted.Get(modelA).ProbeCycleCount == 1, "Monthly period rolls without resetting probe");
 
@@ -3167,26 +3195,39 @@ internal static class Program
                    noSuffixIdentity.BarcodeValue == "KL375C10002608272001",
                 "TEM_TO supports ALC /2 and keeps legacy output when ALC has no suffix");
 
-            ProductModel qrModel = ParseThtLabelModelText("12000/20430");
-            qrModel.PartNumber = "K32000-22402";
-            qrModel.LabelTemplate = new LabelTemplateDefinition(ProfileId: LabelSettings.SmallQrTemplate);
-            history.LotNo = 1;
+            var qrModel = new ProductModel
+            {
+                ModelName = "K32000-22401R-260224",
+                PartNumber = "K32000-22402",
+                ProductName = "WIRING ASSY-MAIN",
+                Alc = "HE EV",
+                Eco = "HE EV",
+                VehicleType = "HE EV",
+                SourcePath = Path.Combine(
+                    Path.GetTempPath(),
+                    "K32000-22401R-260224.tht"),
+                LabelTemplate = new LabelTemplateDefinition(ProfileId: LabelSettings.SmallQrTemplate)
+            };
+            history.LotNo = 4;
             history.Finished = new DateTime(2026, 8, 27, 8, 9, 10);
             labelSettings.TemplateType = LabelSettings.SmallQrTemplate;
             LabelPrintRequest qrLabel = LabelPrintRequest.Capture(history, qrModel, labelSettings);
             IReadOnlyDictionary<string, string> qrValues =
                 LabelVariableResolver.Resolve(qrModel, qrLabel.Data, labelSettings);
+            string normalizedQrPayload = qrLabel.Payload.Replace("\r\n", "\n", StringComparison.Ordinal);
             Assert(LabelProfileResolver.NormalizeTemplateType("TEM_BE_QR") == LabelSettings.SmallQrTemplate &&
                    qrLabel.Profile.Id == LabelSettings.SmallQrTemplate &&
                    qrLabel.Profile.Mode == LabelPrintMode.ExternalTemplate &&
-                   qrValues["LOT_NO"] == "0001" &&
-                   qrValues["SMALL_QR_BARCODE"] == "K32000-22402,2608270001" &&
-                   qrLabel.Data.Barcode == "K32000-22402,2608270001" &&
-                   qrLabel.Data.BarcodePrint == "K32000-22402,2608270001" &&
-                   qrLabel.Payload.Contains("b200,13,Q,S3,V00\",\"V05V06", StringComparison.Ordinal) &&
-                   qrLabel.Payload.Contains(
-                       "?\nK32000-22402\nAE EV PE\nVOLTAGE_6S\nAE EV PE\n12000/20430\n" +
-                       "260827\n0001\nNCO-7\n12000/20430\nVOLTAGE_6S\nAE EV PE\n",
+                   qrValues["LOT_NO"] == "0004" &&
+                   qrValues["LOT_NO_3"] == "004" &&
+                   qrValues["MODEL_FILE_NAME"] == "K32000-22401R-260224.tht" &&
+                   qrValues["SMALL_QR_BARCODE"] == "K32000-22402,2608270004" &&
+                   qrLabel.Data.Barcode == "K32000-22402,2608270004" &&
+                   qrLabel.Data.BarcodePrint == "K32000-22402,2608270004" &&
+                   normalizedQrPayload.Contains("b200,13,Q,S3,V00\",\"V05V06", StringComparison.Ordinal) &&
+                   normalizedQrPayload.Contains(
+                       "?\nK32000-22402\nWIRING ASSY-MAIN\nHE EV\nHE EV\n" +
+                       "K32000-22401R-260224.tht\n260827\n0004\n004\nQ\n8\n27\nP1",
                        StringComparison.Ordinal),
                 "TEM_BE_QR follows 60-15 EPL, reads product fields from THT and encodes PartNumber,yyMMddLOT4");
 

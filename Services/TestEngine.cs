@@ -678,10 +678,10 @@ public sealed class TestEngine : IDisposable
         Reset();
     }
 
-    public void ProcessFrame(ScanFrame frame, bool preserveConfirmedWiringFaults = false)
+    public bool ProcessFrame(ScanFrame frame, bool preserveConfirmedWiringFaults = false)
     {
         if (_disposed)
-            return;
+            return false;
 
         ProductModel? model = _model;
         // Tuyệt đối không cho snapshot TestPin đi vào logic production.
@@ -691,7 +691,7 @@ public sealed class TestEngine : IDisposable
             model is null ||
             !frame.Complete ||
             frame.UnknownBytes > 0)
-            return;
+            return false;
 
         Interlocked.Increment(ref _framesProcessed);
         bool changed;
@@ -702,7 +702,7 @@ public sealed class TestEngine : IDisposable
             // ngoài nhưng trước khi callback lấy được lock. Kiểm tra lại để
             // frame production cũ không tạo lỗi đúng lúc chuyển sang TestPin.
             if (!_frameProcessingEnabled || frame.Mode != BoardScanMode.Production)
-                return;
+                return false;
 
             bool sameActive = _currentActive.SetEquals(frame.ActiveIo);
             bool sameConnections = ConnectionsEqual(_currentConnections, frame.Connections);
@@ -729,71 +729,81 @@ public sealed class TestEngine : IDisposable
                     _currentConnections[pair.Key] = pair.Value.ToHashSet();
             }
 
-            // Continuity vật lý là cạnh điện hai chiều. Htdrv có thể thấy
-            // IO1->IO2 hoặc IO2->IO1 cho cùng một dây hai chân; cả hai đều
-            // phải được tính là đúng network, không phải OPEN/missing.
-            _expectedConnectionScratch.Clear();
-            foreach (WireNet net in model.Nets)
+            // Frame của bo thường lặp lại nguyên trạng nhiều lần. Chỉ dựng lại
+            // topology continuity khi các cạnh thực sự đổi; fault debounce theo
+            // thời gian bên dưới vẫn được Observe trên mọi complete frame.
+            bool evaluateConnections =
+                _forceNextFrameChanged ||
+                !sameConnections ||
+                _expectedConnectionScratch.Count == 0;
+            if (evaluateConnections)
             {
-                if (!IsEligibleProductionNet(net))
-                    continue;
-
-                bool connected = IsWireNetConnected(net, _currentConnections);
-                _expectedConnectionScratch[_confirmationKeyByNet[net]] = connected;
-
-                if (!connected)
+                // Continuity vật lý là cạnh điện hai chiều. Htdrv có thể thấy
+                // IO1->IO2 hoặc IO2->IO1 cho cùng một dây hai chân; cả hai đều
+                // phải được tính là đúng network, không phải OPEN/missing.
+                _expectedConnectionScratch.Clear();
+                foreach (WireNet net in model.Nets)
                 {
-                    _stableCounters[net.Name] = 0;
-                    passedChanged |= _passedNets.Remove(net.Name);
-                    continue;
-                }
-
-                int stable = _stableCounters.GetValueOrDefault(net.Name) + 1;
-                _stableCounters[net.Name] = stable;
-
-                // Kết nối đúng được chấp nhận ngay trên một complete board snapshot.
-                // IoConfirm*/RequiredStableFrames chỉ còn thuộc đường xác nhận lỗi
-                // đấu sai/chập, không được làm chậm PASS sạch.
-                passedChanged |= _passedNets.Add(net.Name);
-            }
-
-            // CLIP không phải WireNet thường. A0/AO là common, còn aN là
-            // tên nhánh; đầu còn lại phải tới đúng I/O ghi trên row aN. Kiểm
-            // tra hai chiều để không phụ thuộc source/target mà firmware
-            // chọn khi phát frame.
-            if (model.Clip is not null)
-            {
-                foreach (ClipBranch branch in model.Clip.Branches)
-                {
-                    if (!IsEligibleClipBranch(model.Clip, branch))
+                    if (!IsEligibleProductionNet(net))
                         continue;
 
-                    string clipKey = ClipConfirmationKey(branch.NetName);
-                    if (_latchedClipKeys.Contains(clipKey))
-                    {
-                        _expectedConnectionScratch[_confirmationKeyByClip[branch]] = true;
-                        passedChanged |= _passedNets.Add(branch.NetName);
-                        continue;
-                    }
-
-                    bool connected = IsClipBranchConnected(
-                        model.Clip,
-                        branch,
-                        _currentConnections);
-                    _expectedConnectionScratch[_confirmationKeyByClip[branch]] = connected;
+                    bool connected = IsWireNetConnected(net, _currentConnections);
+                    _expectedConnectionScratch[_confirmationKeyByNet[net]] = connected;
 
                     if (!connected)
                     {
-                        _stableCounters[branch.NetName] = 0;
-                        passedChanged |= _passedNets.Remove(branch.NetName);
+                        _stableCounters[net.Name] = 0;
+                        passedChanged |= _passedNets.Remove(net.Name);
                         continue;
                     }
 
-                    int stable = _stableCounters.GetValueOrDefault(branch.NetName) + 1;
-                    _stableCounters[branch.NetName] = stable;
+                    int stable = _stableCounters.GetValueOrDefault(net.Name) + 1;
+                    _stableCounters[net.Name] = stable;
 
-                    passedChanged |= _latchedClipKeys.Add(clipKey);
-                    passedChanged |= _passedNets.Add(branch.NetName);
+                    // Kết nối đúng được chấp nhận ngay trên một complete board snapshot.
+                    // IoConfirm*/RequiredStableFrames chỉ còn thuộc đường xác nhận lỗi
+                    // đấu sai/chập, không được làm chậm PASS sạch.
+                    passedChanged |= _passedNets.Add(net.Name);
+                }
+
+                // CLIP không phải WireNet thường. A0/AO là common, còn aN là
+                // tên nhánh; đầu còn lại phải tới đúng I/O ghi trên row aN. Kiểm
+                // tra hai chiều để không phụ thuộc source/target mà firmware
+                // chọn khi phát frame.
+                if (model.Clip is not null)
+                {
+                    foreach (ClipBranch branch in model.Clip.Branches)
+                    {
+                        if (!IsEligibleClipBranch(model.Clip, branch))
+                            continue;
+
+                        string clipKey = ClipConfirmationKey(branch.NetName);
+                        if (_latchedClipKeys.Contains(clipKey))
+                        {
+                            _expectedConnectionScratch[_confirmationKeyByClip[branch]] = true;
+                            passedChanged |= _passedNets.Add(branch.NetName);
+                            continue;
+                        }
+
+                        bool connected = IsClipBranchConnected(
+                            model.Clip,
+                            branch,
+                            _currentConnections);
+                        _expectedConnectionScratch[_confirmationKeyByClip[branch]] = connected;
+
+                        if (!connected)
+                        {
+                            _stableCounters[branch.NetName] = 0;
+                            passedChanged |= _passedNets.Remove(branch.NetName);
+                            continue;
+                        }
+
+                        int stable = _stableCounters.GetValueOrDefault(branch.NetName) + 1;
+                        _stableCounters[branch.NetName] = stable;
+
+                        passedChanged |= _latchedClipKeys.Add(clipKey);
+                        passedChanged |= _passedNets.Add(branch.NetName);
+                    }
                 }
             }
 
@@ -860,6 +870,8 @@ public sealed class TestEngine : IDisposable
         // Không block worker D2XX. TestViewModel sẽ marshal async sang UI.
         if (changed)
             Changed?.Invoke(this, EventArgs.Empty);
+
+        return changed;
     }
 
     bool UpdateWiringFaults(

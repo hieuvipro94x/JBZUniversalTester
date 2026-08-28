@@ -920,7 +920,7 @@ public sealed class TestViewModel : ObservableObject
         _requireStartupIoClear = requireStartupIoClear;
         _lotSequence = new LotSequenceService(_productionSettings);
         _historyStore = new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
-        Lot = _productionSettings.LotNo.ToString();
+        UpdateDailyLotDisplay();
         _sound.Initialize();
         if (!string.IsNullOrWhiteSpace(_statisticsStore.RecoveryNotice))
             AddLog($"COUNTER RECOVERY: {_statisticsStore.RecoveryNotice}");
@@ -2351,7 +2351,7 @@ public sealed class TestViewModel : ObservableObject
         ResetCycleInspectionTrace();
         _recordedHistoryCycleId = string.Empty;
         _recordedHistoryStore = null;
-        Lot = _productionSettings.LotNo.ToString();
+        UpdateDailyLotDisplay();
         Resistance.Clear();
         ResetWaterProofDisplay();
         SelectedOperationTabIndex = 0;
@@ -2582,10 +2582,13 @@ public sealed class TestViewModel : ObservableObject
             }
 
             long processStarted = Stopwatch.GetTimestamp();
-            _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
+            bool engineChanged = _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
             Interlocked.Increment(ref _productionFramesProcessed);
             double processMs = Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
-            LogPassGateAfterProductionFrame(frame, processMs);
+            // Diagnostic topology có thể lớn hàng trăm network. Chỉ dựng khi
+            // trạng thái logic đổi; frame giống hệt vẫn đi qua debounce engine.
+            if (engineChanged)
+                LogPassGateAfterProductionFrame(frame, processMs);
             LogContinuousScanMetricsIfDue();
             if (processMs > 50)
                 AsyncFileLogService.Current.Performance(
@@ -3831,7 +3834,7 @@ public sealed class TestViewModel : ObservableObject
         ResetCycleInspectionTrace();
         _recordedHistoryCycleId = string.Empty;
         _recordedHistoryStore = null;
-        Lot = _productionSettings.LotNo.ToString();
+        UpdateDailyLotDisplay();
 
         Resistance.Clear();
         RefreshFaults();
@@ -6421,7 +6424,7 @@ public sealed class TestViewModel : ObservableObject
     private void RefreshProductionUiSettings()
     {
         _historyStore = new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
-        Lot = _productionSettings.LotNo.ToString();
+        UpdateDailyLotDisplay();
         if (!_productionSettings.UseTestPointer &&
             ClearInlineProbeContactsState(clearLastSeen: true))
         {
@@ -6513,7 +6516,7 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(IsIoMappingMode));
 
         LoadStatisticsForModel(model);
-        Lot = _productionSettings.LotNo.ToString();
+        UpdateDailyLotDisplay();
 
         // _engine.SetModel() -> Reset() đã phát Changed và dựng bảng một lần.
         // Không RefreshFaults() lần hai vì model lớn có hàng trăm pin sẽ làm
@@ -6630,6 +6633,7 @@ public sealed class TestViewModel : ObservableObject
             MonthlyTestCount = 0;
             LifetimeTestCount = 0;
             ProbeCycleCount = 0;
+            UpdateDailyLotDisplay();
             RaiseTestStatistics();
             AddLog($"Không thể nạp lịch sử sản lượng: {ex.Message}");
         }
@@ -6738,6 +6742,7 @@ public sealed class TestViewModel : ObservableObject
         {
             Total++;
             if (passed) Pass++; else Fail++;
+            UpdateDailyLotDisplay();
             AddLog($"Không thể lưu production.statistics.json: {ex.Message}");
         }
 
@@ -6967,6 +6972,15 @@ public sealed class TestViewModel : ObservableObject
         Total = checked((int)stats.DailyTestCount);
         Pass = checked((int)stats.DailyPassCount);
         Fail = checked((int)stats.DailyFailCount);
+        UpdateDailyLotDisplay();
+    }
+
+    private void UpdateDailyLotDisplay()
+    {
+        // Số LOT trên màn hình là sản lượng PASS trong ngày, không phải số
+        // serial tuyệt đối. Ví dụ serial/LOT thực 2002 sau hai sản phẩm thì
+        // màn hình hiển thị 2; sang ngày mới DailyPassCount trả về 0.
+        Lot = Math.Max(0, Pass).ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void ApplyPartCounter(PartCounterEntry entry)
