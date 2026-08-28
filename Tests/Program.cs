@@ -314,9 +314,13 @@ internal static class Program
 
         var openGreenRow = new FaultRow { Kind = FaultKind.MissingConnection, Color = "G" };
         var openBlueRow = new FaultRow { Kind = FaultKind.Open, Color = "L" };
+        var normalCheckRow = new FaultRow { Kind = FaultKind.Start, Status = "KIỂM TRA" };
         Assert(BrushHex(openGreenRow.RowForegroundBrush) == "#0026D9" &&
                BrushHex(openBlueRow.RowForegroundBrush) == "#0026D9",
             "Open/missing rows use the original Htdrv blue text");
+        Assert(BrushHex(normalCheckRow.RowForegroundBrush) == "#555555" &&
+               normalCheckRow.Status == "KIỂM TRA",
+            "Normal KIỂM TRA row and status use the original dark operator text");
         Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
                BrushHex(openGreenRow.WireColorForegroundBrush) == "#333333" &&
                BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
@@ -520,13 +524,22 @@ internal static class Program
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
-               xaml.Contains("FontSize=\"20\"", StringComparison.Ordinal) &&
+               xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
+               xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\" Width=\"0.60*\" MinWidth=\"64\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#1\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
-            "TestView uses larger bold wiring text and a narrow original-style Màu column without #1..#4");
+            "TestView uses responsive bold wiring text and a narrow original-style Màu column without #1..#4");
+
+        string testWindowSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml.cs"));
+        Assert(testWindowSource.Contains("ApplyResponsiveTestGridLayout", StringComparison.Ordinal) &&
+               testWindowSource.Contains("Math.Min(widthScale, heightScale)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("TestGridMaximumScale = 1.25", StringComparison.Ordinal) &&
+               testWindowSource.Contains("Resources[\"TestFaultGridFontSize\"]", StringComparison.Ordinal),
+            "TestView keeps large 1280x768 text and scales grid typography/row spacing uniformly through Full HD");
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));

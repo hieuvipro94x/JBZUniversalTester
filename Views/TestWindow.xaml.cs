@@ -11,6 +11,9 @@ namespace JBZUniversalTester.Views;
 
 public partial class TestWindow : Window
 {
+    private const double TestGridReferenceWidth = 1366;
+    private const double TestGridReferenceHeight = 768;
+    private const double TestGridMaximumScale = 1.25;
     private bool _allowClose;
     private bool _initializationStarted;
     private bool _closeInProgress;
@@ -58,7 +61,31 @@ public partial class TestWindow : Window
         // Ở 1920x1080 header giãn ra dùng toàn bộ màn hình. Chỉ khi viewport
         // nhỏ hơn thiết kế 1344px (ví dụ 1024x768), Viewbox mới scale xuống.
         TestHeaderSurface.Width = Math.Max(1344, e.NewSize.Width - 16);
+        ApplyResponsiveTestGridLayout(e.NewSize.Width, e.NewSize.Height);
     }
+
+    private void ApplyResponsiveTestGridLayout(double viewportWidth, double viewportHeight)
+    {
+        // 1280x768 vẫn giữ cỡ chữ lớn, dễ đọc. Từ mốc 1366x768 trở lên,
+        // chữ, chiều cao dòng và header tăng cùng một tỷ lệ; cột DataGrid dùng
+        // Star Width nên tự nhận phần chiều rộng tăng thêm một cách đồng đều.
+        double widthScale = Math.Max(1, viewportWidth) / TestGridReferenceWidth;
+        double heightScale = Math.Max(1, viewportHeight) / TestGridReferenceHeight;
+        double scale = Math.Clamp(
+            Math.Min(widthScale, heightScale),
+            1.0,
+            TestGridMaximumScale);
+
+        Resources["TestGridBaseFontSize"] = ResponsiveValue(18, scale);
+        Resources["TestFaultGridFontSize"] = ResponsiveValue(20, scale);
+        Resources["TestGridHeaderFontSize"] = ResponsiveValue(18, scale);
+        Resources["TestFaultGridHeaderFontSize"] = ResponsiveValue(20, scale);
+        Resources["TestGridRowHeight"] = ResponsiveValue(34, scale);
+        Resources["TestGridColumnHeaderHeight"] = ResponsiveValue(40, scale);
+    }
+
+    private static double ResponsiveValue(double baseline, double scale) =>
+        Math.Round(baseline * scale * 2, MidpointRounding.AwayFromZero) / 2;
 
     private async void TestWindow_Loaded(object sender, RoutedEventArgs e)
     {
