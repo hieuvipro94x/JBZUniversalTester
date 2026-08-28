@@ -166,6 +166,7 @@ public static class ProductionConfigService
             $"[JigEjectRelayEnabled]{Bool(settings.JigEjectRelayEnabled)}",
             $"[PassMarkingRelayEnabled]{Bool(settings.PassMarkingRelayEnabled)}",
             $"[PassJigRelayFirst]{Bool(settings.PassJigRelayFirst)}",
+            $"[RelayWiringMode]{settings.RelayWiringMode}",
             $"[FaultJigRelayNumber]{settings.FaultJigRelayNumber}",
             $"[PassMarkingToJigDelayMs]{settings.PassMarkingToJigDelayMs}",
             $"[StampDelayMs]{settings.Relay1JigPulseMs},{settings.Relay2MarkingPulseMs}", // compatibility
@@ -420,6 +421,11 @@ public static class ProductionConfigService
         settings.PassMarkingRelayEnabled = B(map, "PassMarkingRelayEnabled", settings.PassMarkingRelayEnabled);
         settings.PassJigRelayFirst = B(map, "PassJigRelayFirst", settings.PassJigRelayFirst);
         settings.FaultJigRelayNumber = I(map, "FaultJigRelayNumber", settings.FaultJigRelayNumber);
+        settings.RelayWiringMode = map.ContainsKey("RelayWiringMode")
+            ? I(map, "RelayWiringMode", settings.RelayWiringMode)
+            : settings.PassJigRelayFirst || settings.FaultJigRelayNumber == 2
+                ? 1
+                : 0;
         settings.OversizeWaitSeconds = I(map, "OversizeWaitSeconds", settings.OversizeWaitSeconds);
         settings.ShieldDelay = I(map, "ShieldDelayMs", settings.ShieldDelay);
         settings.ResistanceDelayMs = I(map, "ResistanceDelayMs", settings.ResistanceDelayMs);
@@ -578,7 +584,10 @@ public static class ProductionConfigService
         // V15.2: ba thông số relay độc lập. 50..5000 ms tránh pulse bằng 0 hoặc giữ relay quá lâu do nhập nhầm.
         settings.Relay1JigPulseMs = Math.Clamp(settings.Relay1JigPulseMs, 50, 5_000);
         settings.Relay2MarkingPulseMs = Math.Clamp(settings.Relay2MarkingPulseMs, 50, 5_000);
-        settings.FaultJigRelayNumber = Math.Clamp(settings.FaultJigRelayNumber, 1, 2);
+        settings.RelayWiringMode = Math.Clamp(settings.RelayWiringMode, 0, 1);
+        // Hai khóa cũ tiếp tục được ghi để bản cũ đọc cấu hình mới an toàn.
+        settings.PassJigRelayFirst = settings.RelayWiringMode == 1;
+        settings.FaultJigRelayNumber = settings.RelayWiringMode == 1 ? 2 : 1;
         settings.PassMarkingToJigDelayMs = Math.Clamp(settings.PassMarkingToJigDelayMs, 0, 5_000);
         settings.StampDelay = $"{settings.Relay1JigPulseMs},{settings.Relay2MarkingPulseMs}"; // compatibility only
 

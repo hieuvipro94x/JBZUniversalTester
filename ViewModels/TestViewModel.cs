@@ -953,24 +953,24 @@ public sealed class TestViewModel : ObservableObject
         Relay1Command =
             new AsyncRelayCommand(async () =>
             {
-                if (!EnsureManualBoardReady("bật Relay 1 - MỞ/THÁO JIG", requireD2xxRelay: true))
+                if (!EnsureManualBoardReady("thử Relay 1", requireD2xxRelay: true))
                     return;
 
                 int relay1Ms = _productionSettings.Relay1JigPulseMs;
-                AddLog($"TEST Relay 1 - MỞ/THÁO JIG: pulse 1 lần ({relay1Ms} ms)");
-                await _engine.PulseJigRelayAsync();
+                AddLog($"THỬ RELAY 1 vật lý: pulse 1 lần ({relay1Ms} ms)");
+                await _engine.PulsePhysicalRelayAsync(1);
                 AddLog("Relay 1 OFF - đã cưỡng bức về trạng thái chờ.");
             });
 
         Relay2Command =
             new AsyncRelayCommand(async () =>
             {
-                if (!EnsureManualBoardReady("bật Relay 2 - MARKING", requireD2xxRelay: true))
+                if (!EnsureManualBoardReady("thử Relay 2", requireD2xxRelay: true))
                     return;
 
                 int relay2Ms = _productionSettings.Relay2MarkingPulseMs;
-                AddLog($"TEST Relay 2 - MARKING: pulse 1 lần ({relay2Ms} ms)");
-                await _engine.PulseMarkingRelayAsync();
+                AddLog($"THỬ RELAY 2 vật lý: pulse 1 lần ({relay2Ms} ms)");
+                await _engine.PulsePhysicalRelayAsync(2);
                 AddLog("Relay 2 OFF - đã cưỡng bức về trạng thái chờ.");
             });
 
@@ -1253,22 +1253,22 @@ public sealed class TestViewModel : ObservableObject
     {
         bool jigEnabled = _productionSettings.JigEjectRelayEnabled;
         bool markingEnabled = _productionSettings.PassMarkingRelayEnabled;
+        int jigRelay = _productionSettings.RelayWiringMode == 1 ? 2 : 1;
+        int markingRelay = _productionSettings.RelayWiringMode == 1 ? 1 : 2;
 
         if (!jigEnabled && !markingEnabled)
             return "PASS không kích relay theo cấu hình";
         if (!jigEnabled)
-            return "Relay 2 MARKING";
+            return $"Relay {markingRelay} MARKING";
         if (!markingEnabled)
-            return "Relay 1 mở JIG";
+            return $"Relay {jigRelay} mở JIG";
 
-        return _productionSettings.PassJigRelayFirst
-            ? "Relay 1 mở JIG -> Relay 2 MARKING"
-            : "Relay 2 MARKING -> Relay 1 mở JIG";
+        return $"Relay {markingRelay} MARKING -> Relay {jigRelay} mở JIG";
     }
 
     private string FaultJigRelayText()
     {
-        int relay = _productionSettings.FaultJigRelayNumber == 2 ? 2 : 1;
+        int relay = _productionSettings.RelayWiringMode == 1 ? 2 : 1;
         int pulseMs = relay == 2
             ? _productionSettings.Relay2MarkingPulseMs
             : _productionSettings.Relay1JigPulseMs;

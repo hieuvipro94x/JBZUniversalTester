@@ -16,7 +16,7 @@ echo ============================================================
 echo JBZUniversalTester - BAN GIAO PHIEN LAM VIEC 2026-08-28
 echo ============================================================
 echo.
-echo PHIEN BAN BAN GIAO: V16.0.116
+echo PHIEN BAN BAN GIAO: V16.0.117
 echo NHANH GIT          : main
 echo REMOTE             : origin/main
 echo.
@@ -52,6 +52,7 @@ echo   dong ho/thieu ket noi theo giao dien Htdrv goc.
 echo - Bang day dung chu 20 dam ro; cot Mau da thu hep theo Htdrv goc.
 echo - Mau kep chia 50/50, giu dung thu tu trong THT va chu luon de doc.
 echo - Xac nhan FAIL chi pulse relay mo JIG da thu/chon: Relay 1 hoac 2.
+echo - Mot tuy chon kieu dau: R2 MARK-R1 JIG hoac R1 MARK-R2 JIG.
 echo - Chua kiem tra bang may in va JIG vat ly.
 echo.
 

@@ -145,6 +145,12 @@ public sealed class ProductionSettings
     public bool PassJigRelayFirst { get; set; }
 
     /// <summary>
+    /// 0: R1 mở JIG, R2 MARKING. 1: R1 MARKING, R2 mở JIG.
+    /// PASS luôn MARKING trước rồi mới mở JIG; FAIL chỉ bật relay mở JIG.
+    /// </summary>
+    public int RelayWiringMode { get; set; }
+
+    /// <summary>
     /// Relay vật lý thực sự mở JIG sau khi người vận hành xác nhận sản phẩm lỗi.
     /// Một số máy đấu ngược R1/R2 nên giá trị này phải được xác nhận bằng nút thử relay.
     /// </summary>

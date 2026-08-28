@@ -139,7 +139,11 @@ public partial class ProductionSettingsPage : UserControl
 
         IoConfirm1ComboBox.ItemsSource = Enumerable.Range(0, 128).ToArray();
         IoConfirmNComboBox.ItemsSource = Enumerable.Range(0, 32).ToArray();
-        FaultJigRelayComboBox.ItemsSource = new[] { 1, 2 };
+        RelayWiringModeComboBox.ItemsSource = new[]
+        {
+            new RelayWiringOption(0, "R2 MARK → R1 JIG • FAIL R1"),
+            new RelayWiringOption(1, "R1 MARK → R2 JIG • FAIL R2")
+        };
     }
 
     private void RefreshPrinterPorts_Click(object sender, RoutedEventArgs e) => RefreshPrinterPorts();
@@ -482,9 +486,9 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         }
 
-        if (_vm.Settings.FaultJigRelayNumber is < 1 or > 2)
+        if (_vm.Settings.RelayWiringMode is < 0 or > 1)
         {
-            error = "Hãy chọn Relay 1 hoặc Relay 2 thực sự mở JIG khi xác nhận lỗi.";
+            error = "Hãy chọn đúng kiểu đấu Relay MARKING và Relay mở JIG của máy.";
             return false;
         }
 
@@ -610,4 +614,5 @@ public partial class ProductionSettingsPage : UserControl
 
     private sealed record CardIoOption(int ExpansionCardCount, string Display);
     private sealed record ComPortOption(string PortName, string Display);
+    private sealed record RelayWiringOption(int Mode, string Display);
 }

@@ -539,9 +539,9 @@ internal static class Program
                settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
             "Production settings exposes reconnectable printer control and connection status");
-        Assert(settingsXaml.Contains("x:Name=\"FaultJigRelayComboBox\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Settings.FaultJigRelayNumber", StringComparison.Ordinal),
-            "Production settings exposes the tested physical relay used to eject confirmed FAIL products");
+        Assert(settingsXaml.Contains("x:Name=\"RelayWiringModeComboBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Settings.RelayWiringMode", StringComparison.Ordinal),
+            "Production settings exposes one physical relay-role mapping and states FAIL behavior clearly");
         Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"234\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Name=\"TestAppVersionText\"", StringComparison.Ordinal) &&
                xaml.Contains("Grid.Row=\"8\"", StringComparison.Ordinal) &&
@@ -802,7 +802,7 @@ internal static class Program
 
         var legacyFiveSlots = new ProductionSettings
         {
-            FaultJigRelayNumber = 2,
+            RelayWiringMode = 1,
             ResistanceChannels =
             [
                 new() { Enabled = true, Name = "R1", Channel = 8, MinOhm = 9, MaxOhm = 11 },
@@ -868,8 +868,8 @@ internal static class Program
                 loaded.ResistanceChannels[2] is
                 { Name: "R3", Enabled: true, Channel: 10, MinOhm: 95, MaxOhm: 105 },
                 "Save/load must preserve Enabled, Channel, MinOhm and MaxOhm");
-            Assert(loaded.FaultJigRelayNumber == 2,
-                "Save/load must preserve the physical relay selected to eject confirmed FAIL products");
+            Assert(loaded.RelayWiringMode == 1 && loaded.FaultJigRelayNumber == 2,
+                "Save/load must preserve reversed R1 MARKING / R2 JIG wiring and its FAIL eject relay");
         }
         finally
         {
@@ -2673,7 +2673,7 @@ internal static class Program
         {
             Relay1JigPulseMs = 50,
             Relay2MarkingPulseMs = 50,
-            FaultJigRelayNumber = 2,
+            RelayWiringMode = 1,
             JigEjectRelayEnabled = true,
             PassMarkingRelayEnabled = true
         };
@@ -2685,26 +2685,31 @@ internal static class Program
                !reversedFaultJigBoard.Commands.Contains("SET:1") &&
                reversedFaultJigBoard.Commands.Last() == "OFF",
             "FAIL confirmation pulses only the configured physical JIG relay and never runs the PASS sequence");
+        reversedFaultJigBoard.Commands.Clear();
+        reversedFaultJigEngine.EjectMasterSampleAsync().GetAwaiter().GetResult();
+        Assert(reversedFaultJigBoard.Commands.Count(command => command == "SET:2") == 1 &&
+               !reversedFaultJigBoard.Commands.Contains("SET:1"),
+            "Reversed machine ejects Master on physical JIG R2 without pulsing physical MARKING R1");
 
-        var jigFirstProduction = new ProductionSettings
+        var reversedRelayProduction = new ProductionSettings
         {
             Relay1JigPulseMs = 50,
             Relay2MarkingPulseMs = 50,
             PassMarkingToJigDelayMs = 0,
             ProductSettleTimeMs = 0,
-            PassJigRelayFirst = true
+            RelayWiringMode = 1
         };
-        using TestEngine jigFirstEngine = CreateEngine(out FakeBoard jigFirstBoard, jigFirstProduction);
-        jigFirstEngine.SetModel(Model(("PAIR", new[] { 1, 18 })));
-        jigFirstEngine.ProcessFrame(passFrame);
+        using TestEngine reversedRelayEngine = CreateEngine(out FakeBoard reversedRelayBoard, reversedRelayProduction);
+        reversedRelayEngine.SetModel(Model(("PAIR", new[] { 1, 18 })));
+        reversedRelayEngine.ProcessFrame(passFrame);
         Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
-        jigFirstEngine.ProcessFrame(passFrame);
-        bool jigFirstOk = jigFirstEngine.CompletePassAsync([]).GetAwaiter().GetResult();
-        Assert(jigFirstOk, "PASS relay workflow accepts JIG-first option");
-        Assert(jigFirstBoard.Commands.IndexOf("SET:1") >= 0 &&
-               jigFirstBoard.Commands.IndexOf("SET:2") >= 0 &&
-               jigFirstBoard.Commands.IndexOf("SET:1") < jigFirstBoard.Commands.IndexOf("SET:2"),
-            "JIG-first option runs R1 before R2");
+        reversedRelayEngine.ProcessFrame(passFrame);
+        bool reversedRelayOk = reversedRelayEngine.CompletePassAsync([]).GetAwaiter().GetResult();
+        Assert(reversedRelayOk, "PASS relay workflow accepts reversed R1 MARKING / R2 JIG wiring");
+        Assert(reversedRelayBoard.Commands.IndexOf("SET:1") >= 0 &&
+               reversedRelayBoard.Commands.IndexOf("SET:2") >= 0 &&
+               reversedRelayBoard.Commands.IndexOf("SET:1") < reversedRelayBoard.Commands.IndexOf("SET:2"),
+            "Reversed machine still MARKS on R1 before opening JIG on R2");
     }
 
     private static void TestHistory()

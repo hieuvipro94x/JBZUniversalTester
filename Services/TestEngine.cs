@@ -1837,32 +1837,45 @@ public sealed class TestEngine : IDisposable
     /// Một số máy đấu ngược R1/R2 nên số relay được chọn sau khi thử tay.
     /// </summary>
     public Task EjectFaultProductAsync(CancellationToken ct = default)
-    {
-        int relay = _production.FaultJigRelayNumber == 2 ? 2 : 1;
-        int pulseMs = relay == 2
-            ? _production.Relay2MarkingPulseMs
-            : _production.Relay1JigPulseMs;
-        string relayName = $"R{relay} FAIL JIG";
-
-        return _production.JigEjectRelayEnabled
-            ? PulseRelaySafeAsync(relay, pulseMs, relayName, ct)
-            : SkipDisabledRelayAsync(relayName, ct);
-    }
+        => PulseJigRelayAsync(ct);
 
     /// <summary>
     /// Manual/production helper V15.2: Relay 1 JIG chỉ được pulse đúng một lần.
     /// Dù delay bị hủy hoặc board phát sinh exception, finally vẫn cố đưa toàn bộ relay về OFF.
     /// </summary>
     public Task PulseJigRelayAsync(CancellationToken ct = default)
-        => _production.JigEjectRelayEnabled
-            ? PulseRelaySafeAsync(JigEjectRelay, _production.Relay1JigPulseMs, "R1 JIG", ct)
-            : SkipDisabledRelayAsync("R1 JIG", ct);
+    {
+        int relay = ConfiguredJigRelay;
+        string relayName = $"R{relay} JIG";
+        return _production.JigEjectRelayEnabled
+            ? PulseRelaySafeAsync(relay, PulseDurationForRelay(relay), relayName, ct)
+            : SkipDisabledRelayAsync(relayName, ct);
+    }
 
-    /// <summary>Relay 2 MARKING chỉ được pulse đúng một lần và luôn trả về OFF.</summary>
+    /// <summary>Relay MARKING theo kiểu đấu máy chỉ được pulse đúng một lần và luôn trả về OFF.</summary>
     public Task PulseMarkingRelayAsync(CancellationToken ct = default)
-        => _production.PassMarkingRelayEnabled
-            ? PulseRelaySafeAsync(MarkingRelay, _production.Relay2MarkingPulseMs, "R2 MARKING", ct)
-            : SkipDisabledRelayAsync("R2 MARKING", ct);
+    {
+        int relay = ConfiguredMarkingRelay;
+        string relayName = $"R{relay} MARKING";
+        return _production.PassMarkingRelayEnabled
+            ? PulseRelaySafeAsync(relay, PulseDurationForRelay(relay), relayName, ct)
+            : SkipDisabledRelayAsync(relayName, ct);
+    }
+
+    /// <summary>Thử đúng relay vật lý theo số, không áp dụng ánh xạ vai trò production.</summary>
+    public Task PulsePhysicalRelayAsync(int relay, CancellationToken ct = default)
+    {
+        if (relay is < 1 or > 2)
+            throw new ArgumentOutOfRangeException(nameof(relay), relay, "Relay vật lý phải là 1 hoặc 2.");
+
+        return PulseRelaySafeAsync(relay, PulseDurationForRelay(relay), $"R{relay} MANUAL", ct);
+    }
+
+    private int ConfiguredJigRelay => _production.RelayWiringMode == 1 ? 2 : 1;
+    private int ConfiguredMarkingRelay => _production.RelayWiringMode == 1 ? 1 : 2;
+    private int PulseDurationForRelay(int relay) => relay == 2
+        ? _production.Relay2MarkingPulseMs
+        : _production.Relay1JigPulseMs;
 
     /// <summary>
     /// V12.9.5: eject riêng cho Master Sample. Chỉ Relay 1 JIG được pulse;
@@ -2170,18 +2183,14 @@ public sealed class TestEngine : IDisposable
         if (relayStartDelayMs > 0)
             await Task.Delay(relayStartDelayMs, ct);
 
-        // V12.4 - vai trò relay cố định:
-        //   Relay 2 = MARKING
-        //   Relay 1 = MỞ/THÁO JIG
-        // Trạng thái chờ luôn OFF. Sản phẩm production PASS phải MARKING trước,
-        // sau đó mới được mở JIG. Master OK dùng cùng xác nhận PASS nhưng tắt
-        // markingEnabled để KHÔNG đóng dấu lên mẫu master; master chỉ mở JIG.
+        // Vai trò relay lấy từ kiểu đấu của từng máy. Dù R1/R2 bị đảo vật lý,
+        // production PASS luôn MARKING trước rồi mới mở JIG. Master/FAIL chỉ
+        // gọi relay mở JIG và không đi vào chuỗi MARKING.
         await _board.AllRelaysOffAsync(ct);
 
         bool runMarking = markingEnabled && _production.PassMarkingRelayEnabled;
-        if (runMarking && !_production.PassJigRelayFirst)
+        if (runMarking)
         {
-            // PASS mặc định: R2 MARKING pulse đúng một lần rồi OFF, sau đó mới R1 JIG.
             onPassStarted?.Invoke();
             await PulseMarkingRelayAsync(ct);
 
@@ -2196,15 +2205,6 @@ public sealed class TestEngine : IDisposable
         }
 
         await PulseJigRelayAsync(ct);
-
-        if (runMarking && _production.PassJigRelayFirst)
-        {
-            int interlockMs = Math.Clamp(_production.PassMarkingToJigDelayMs, 0, 5_000);
-            if (interlockMs > 0)
-                await Task.Delay(interlockMs, ct);
-
-            await PulseMarkingRelayAsync(ct);
-        }
 
         return true;
     }
