@@ -131,7 +131,12 @@ namespace JBZUniversalTester.Converters
                 .ToArray();
 
             if (parts.Length >= 1 && TryGetColor(parts[0], out Color baseColor))
+            {
+                if (parts.Length >= 2 && TryGetColor(parts[1], out Color stripeColor))
+                    return CreateStripedBrush(baseColor, stripeColor);
+
                 return CreateSolidBrush(baseColor);
+            }
 
             return CreateSolidBrush(Color.FromRgb(224, 224, 224));
         }

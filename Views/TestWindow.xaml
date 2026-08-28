@@ -297,86 +297,20 @@
             </Style.Triggers>
         </Style>
 
-        <Style x:Key="PiColor1CellStyle" TargetType="DataGridCell" BasedOn="{StaticResource PiCellStyle}">
-            <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="PiColor2CellStyle" TargetType="DataGridCell" BasedOn="{StaticResource PiCellStyle}">
-            <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="PiColor3CellStyle" TargetType="DataGridCell" BasedOn="{StaticResource PiCellStyle}">
-            <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style x:Key="PiColor4CellStyle" TargetType="DataGridCell" BasedOn="{StaticResource PiCellStyle}">
-            <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <DataTemplate x:Key="Color1SquareTemplate">
-            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Border Width="52"
-                        Height="28"
-                        Margin="0"
-                        Background="{Binding Color1Brush}"
-                        BorderBrush="#B0B0B0"
-                        BorderThickness="1"
-                        CornerRadius="0"
-                        Visibility="{Binding HasColor1, Converter={StaticResource BoolToVisibilityConverter}}"/>
-            </Grid>
-        </DataTemplate>
-        <DataTemplate x:Key="Color2SquareTemplate">
-            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Border Width="52"
-                        Height="28"
-                        Margin="0"
-                        Background="{Binding Color2Brush}"
-                        BorderBrush="#B0B0B0"
-                        BorderThickness="1"
-                        CornerRadius="0"
-                        Visibility="{Binding HasColor2, Converter={StaticResource BoolToVisibilityConverter}}"/>
-            </Grid>
-        </DataTemplate>
-        <DataTemplate x:Key="Color3SquareTemplate">
-            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Border Width="52"
-                        Height="28"
-                        Margin="0"
-                        Background="{Binding Color3Brush}"
-                        BorderBrush="#B0B0B0"
-                        BorderThickness="1"
-                        CornerRadius="0"
-                        Visibility="{Binding HasColor3, Converter={StaticResource BoolToVisibilityConverter}}"/>
-            </Grid>
-        </DataTemplate>
-        <DataTemplate x:Key="Color4SquareTemplate">
-            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Border Width="52"
-                        Height="28"
-                        Margin="0"
-                        Background="{Binding Color4Brush}"
-                        BorderBrush="#B0B0B0"
-                        BorderThickness="1"
-                        CornerRadius="0"
-                        Visibility="{Binding HasColor4, Converter={StaticResource BoolToVisibilityConverter}}"/>
-            </Grid>
+        <DataTemplate x:Key="WireColorCellTemplate">
+            <Border Background="{Binding WireColorBrush}"
+                    BorderThickness="0"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch">
+                <TextBlock Text="{Binding WireColorText}"
+                           Foreground="{Binding WireColorForegroundBrush}"
+                           FontFamily="Malgun Gothic"
+                           FontSize="18"
+                           FontWeight="Normal"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           TextAlignment="Center"/>
+            </Border>
         </DataTemplate>
     </Window.Resources>
 
@@ -815,15 +749,7 @@
                     <DataGridTextColumn Header="Ch&#226;n" Binding="{Binding Pin}" Width="0.80*" MinWidth="70" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
                     <DataGridTextColumn Header="T&#234;n d&#226;y" Binding="{Binding WireName}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
                     <DataGridTextColumn Header="C&#7905; d&#226;y" Binding="{Binding Section}" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
-                    <DataGridTextColumn Header="M&#224;u" Binding="{Binding WireColorText}" Width="0.90*" MinWidth="85" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
-                    <DataGridTemplateColumn Header="#1" Width="54" MinWidth="54" MaxWidth="54" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiColor1CellStyle}" CellTemplate="{StaticResource Color1SquareTemplate}">
-                    </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="#2" Width="54" MinWidth="54" MaxWidth="54" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiColor2CellStyle}" CellTemplate="{StaticResource Color2SquareTemplate}">
-                    </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="#3" Width="54" MinWidth="54" MaxWidth="54" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiColor3CellStyle}" CellTemplate="{StaticResource Color3SquareTemplate}">
-                    </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="#4" Width="54" MinWidth="54" MaxWidth="54" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiColor4CellStyle}" CellTemplate="{StaticResource Color4SquareTemplate}">
-                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="M&#224;u" Width="0.90*" MinWidth="85" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" CellTemplate="{StaticResource WireColorCellTemplate}"/>
                     <DataGridTextColumn Header="Tr&#7841;ng th&#225;i" Binding="{Binding Status}" Width="1.30*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridStrongTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>

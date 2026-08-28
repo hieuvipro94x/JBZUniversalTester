@@ -310,6 +310,19 @@ internal static class Program
         Assert(BrushHex(probeRow.Color1Brush) == "#101010" && BrushHex(probeRow.Color2Brush) == "#0077FF",
             "Probe row color cells override probe background");
 
+        var openGreenRow = new FaultRow { Kind = FaultKind.MissingConnection, Color = "G" };
+        var openBlueRow = new FaultRow { Kind = FaultKind.Open, Color = "L" };
+        Assert(BrushHex(openGreenRow.RowForegroundBrush) == "#0026D9" &&
+               BrushHex(openBlueRow.RowForegroundBrush) == "#0026D9",
+            "Open/missing rows use the original Htdrv blue text");
+        Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
+               BrushHex(openGreenRow.WireColorForegroundBrush) == "#333333" &&
+               BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
+               BrushHex(openBlueRow.WireColorForegroundBrush) == "#FFFFFF",
+            "Single Màu cell matches original green/blue background and readable text");
+        Assert(new FaultRow { Color = "B/G" }.WireColorBrush is LinearGradientBrush,
+            "Multi-color wire is combined into one striped Màu cell");
+
         var disabled = new ResistanceChannelEditor(
             new ResistanceChannelSetting { Enabled = true, Name = "R3", Channel = 3, MinOhm = 1, MaxOhm = 2 },
             3)
@@ -503,6 +516,12 @@ internal static class Program
                    "Text=\"{Binding ProbeCycleCount, Mode=OneWay}\" Style=\"{StaticResource PiCounterTextStyle}\"",
                    StringComparison.Ordinal),
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
+        Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Header=\"#1\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
+            "TestView combines wire color into one original-style Màu column without #1..#4");
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
