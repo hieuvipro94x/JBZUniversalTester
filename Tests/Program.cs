@@ -517,11 +517,14 @@ internal static class Program
                    StringComparison.Ordinal),
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
+               xaml.Contains("FontSize=\"20\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"M&#224;u\" Width=\"0.60*\" MinWidth=\"64\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#1\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
-            "TestView combines wire color into one original-style Màu column without #1..#4");
+            "TestView uses larger bold wiring text and a narrow original-style Màu column without #1..#4");
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
