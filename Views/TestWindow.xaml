@@ -325,7 +325,14 @@
                            FontWeight="SemiBold"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
-                           TextAlignment="Center"/>
+                           TextAlignment="Center">
+                    <TextBlock.Effect>
+                        <DropShadowEffect Color="#000000"
+                                          BlurRadius="1"
+                                          ShadowDepth="0"
+                                          Opacity="0.85"/>
+                    </TextBlock.Effect>
+                </TextBlock>
             </Border>
         </DataTemplate>
     </Window.Resources>

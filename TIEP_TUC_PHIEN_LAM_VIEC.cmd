@@ -16,7 +16,7 @@ echo ============================================================
 echo JBZUniversalTester - BAN GIAO PHIEN LAM VIEC 2026-08-28
 echo ============================================================
 echo.
-echo PHIEN BAN BAN GIAO: V16.0.114
+echo PHIEN BAN BAN GIAO: V16.0.115
 echo NHANH GIT          : main
 echo REMOTE             : origin/main
 echo.
@@ -50,6 +50,7 @@ echo   PartNumber,yyMMddLOT4; da co golden test theo trace may in goc.
 echo - Bang Test da gop mau vao mot cot Mau, bo #1..#4 va dung mau
 echo   dong ho/thieu ket noi theo giao dien Htdrv goc.
 echo - Bang day dung chu 20 dam ro; cot Mau da thu hep theo Htdrv goc.
+echo - Mau kep chia 50/50, giu dung thu tu trong THT va chu luon de doc.
 echo - Chua kiem tra bang may in va JIG vat ly.
 echo.
 

@@ -223,7 +223,7 @@ namespace JBZUniversalTester.Converters
             return brush;
         }
 
-        private static LinearGradientBrush CreateStripedBrush(Color baseColor, Color stripeColor)
+        private static LinearGradientBrush CreateStripedBrush(Color firstColor, Color secondColor)
         {
             LinearGradientBrush brush = new LinearGradientBrush
             {
@@ -231,12 +231,12 @@ namespace JBZUniversalTester.Converters
                 EndPoint = new Point(1, 0.5)
             };
 
-            brush.GradientStops.Add(new GradientStop(baseColor, 0.00));
-            brush.GradientStops.Add(new GradientStop(baseColor, 0.62));
-            brush.GradientStops.Add(new GradientStop(stripeColor, 0.62));
-            brush.GradientStops.Add(new GradientStop(stripeColor, 0.82));
-            brush.GradientStops.Add(new GradientStop(baseColor, 0.82));
-            brush.GradientStops.Add(new GradientStop(baseColor, 1.00));
+            // Màu kép được chia đúng hai nửa. Màu đứng trước trong THT luôn ở bên trái,
+            // màu đứng sau luôn ở bên phải (R/W khác W/R).
+            brush.GradientStops.Add(new GradientStop(firstColor, 0.00));
+            brush.GradientStops.Add(new GradientStop(firstColor, 0.50));
+            brush.GradientStops.Add(new GradientStop(secondColor, 0.50));
+            brush.GradientStops.Add(new GradientStop(secondColor, 1.00));
             brush.Freeze();
 
             return brush;

@@ -288,6 +288,8 @@ internal static class Program
         var stripe2 = WireColorToBrushConverter.ToBrush("W/B");
         Assert(ReferenceEquals(red1, red2) && red1.IsFrozen, "Single wire color brush is cached and frozen");
         Assert(ReferenceEquals(stripe1, stripe2) && stripe1.IsFrozen, "Composite wire color brush is cached and frozen");
+        AssertBalancedTwoColorBrush("R/W", "#ED0000", "#FFFFFF");
+        AssertBalancedTwoColorBrush("W/R", "#FFFFFF", "#ED0000");
 
         AssertWireColorCells("B", "#101010", "#F8F8F6", "#F8F8F6", "#F8F8F6");
         AssertWireColorCells("B/G", "#101010", "#00D000", "#F8F8F6", "#F8F8F6");
@@ -1327,6 +1329,19 @@ internal static class Program
         Assert(BrushHex(row.Color2Brush) == two, $"Color #2 for '{code}'");
         Assert(BrushHex(row.Color3Brush) == three, $"Color #3 for '{code}'");
         Assert(BrushHex(row.Color4Brush) == four, $"Color #4 for '{code}'");
+    }
+
+    private static void AssertBalancedTwoColorBrush(string code, string first, string second)
+    {
+        Assert(WireColorToBrushConverter.ToBrush(code) is LinearGradientBrush brush &&
+               brush.GradientStops.Count == 4 &&
+               brush.GradientStops[0].Offset == 0.0 &&
+               brush.GradientStops[1].Offset == 0.5 &&
+               brush.GradientStops[2].Offset == 0.5 &&
+               brush.GradientStops[3].Offset == 1.0 &&
+               $"#{brush.GradientStops[0].Color.R:X2}{brush.GradientStops[0].Color.G:X2}{brush.GradientStops[0].Color.B:X2}" == first &&
+               $"#{brush.GradientStops[3].Color.R:X2}{brush.GradientStops[3].Color.G:X2}{brush.GradientStops[3].Color.B:X2}" == second,
+            $"Two-color wire '{code}' keeps THT order and uses an exact 50/50 split");
     }
 
     private static string BrushHex(Brush brush)
