@@ -43,21 +43,22 @@ public static class LabelProfileResolver
         if (string.IsNullOrWhiteSpace(model.LabelTemplate.ProfileId))
         {
             string builtInTemplate = ResolveBuiltInTemplatePath(templateType);
-            if (File.Exists(builtInTemplate))
-            {
-                return new LabelProfile(
-                    templateType,
-                    LabelPrintMode.ExternalTemplate,
-                    TemplatePath: builtInTemplate,
-                    EncodingName: encoding,
-                    Copies: 1);
-            }
+            return new LabelProfile(
+                templateType,
+                LabelPrintMode.ExternalTemplate,
+                TemplatePath: builtInTemplate,
+                EncodingName: encoding,
+                Copies: 1,
+                InlineTemplate: BuiltInLabelTemplateStore.LoadOverride(settings, templateType));
         }
 
         string discovered = FindExactProfileTemplate(profileId);
         if (!string.IsNullOrWhiteSpace(discovered))
         {
             string helper = ResolvePath(settings.ExternalHelperPath);
+            string inlineTemplate = BuiltInLabelTemplateStore.IsReference(discovered)
+                ? BuiltInLabelTemplateStore.LoadOverride(settings, profileId)
+                : string.Empty;
             return new LabelProfile(
                 profileId,
                 string.IsNullOrWhiteSpace(helper) ? LabelPrintMode.ExternalTemplate : LabelPrintMode.ExternalHelper,
@@ -66,7 +67,8 @@ public static class LabelProfileResolver
                 ExternalHelperArgument: settings.ExternalHelperArgument ?? string.Empty,
                 ExternalPrintFile: settings.ExternalPrintFile ?? string.Empty,
                 EncodingName: encoding,
-                Copies: ResolveCopies(model, settings));
+                Copies: ResolveCopies(model, settings),
+                InlineTemplate: inlineTemplate);
         }
 
         return new LabelProfile(
@@ -101,15 +103,15 @@ public static class LabelProfileResolver
     }
 
     public static string ResolveBuiltInTemplatePath(string? templateType) =>
-        Path.Combine(
-            AppContext.BaseDirectory,
-            "Labels",
-            NormalizeTemplateType(templateType) + ".txt");
+        BuiltInLabelTemplateStore.ReferenceFor(templateType);
 
     private static string FindExactProfileTemplate(string profileId)
     {
         if (string.IsNullOrWhiteSpace(profileId))
             return string.Empty;
+
+        if (BuiltInLabelTemplateStore.TryReferenceForProfile(profileId, out string builtInReference))
+            return builtInReference;
 
         string[] candidates =
         [

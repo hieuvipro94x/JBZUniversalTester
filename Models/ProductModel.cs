@@ -177,7 +177,8 @@ public sealed record LabelProfile(
     string ExternalPrintFile = "",
     string EncodingName = "us-ascii",
     int Copies = 1,
-    string VerificationStatus = "VERIFIED");
+    string VerificationStatus = "VERIFIED",
+    string InlineTemplate = "");
 
 public sealed record ResistanceStep(
     string Name,

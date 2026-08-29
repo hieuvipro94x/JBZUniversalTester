@@ -213,6 +213,9 @@ public static class ProductionConfigService
             $"[LabelCopies]{settings.Label.Copies}",
             $"[LabelTemplateType]{settings.Label.TemplateType}",
             $"[LabelTemplatePath]{settings.Label.TemplatePath}",
+            $"[LabelTemplateTEMTOBase64]{settings.Label.LargeTemplateOverrideBase64}",
+            $"[LabelTemplateTEMBEBase64]{settings.Label.SmallTemplateOverrideBase64}",
+            $"[LabelTemplateTEMBEQRBase64]{settings.Label.SmallQrTemplateOverrideBase64}",
             $"[LabelEncodingName]{settings.Label.EncodingName}",
             $"[LabelRawDestination]{settings.Label.RawDestination}",
             $"[LabelExternalHelperPath]{settings.Label.ExternalHelperPath}",
@@ -557,6 +560,9 @@ public static class ProductionConfigService
         settings.Label.Copies = I(map, "LabelCopies", settings.Label.Copies);
         settings.Label.TemplateType = S(map, "LabelTemplateType", settings.Label.TemplateType);
         settings.Label.TemplatePath = S(map, "LabelTemplatePath", settings.Label.TemplatePath);
+        settings.Label.LargeTemplateOverrideBase64 = S(map, "LabelTemplateTEMTOBase64", settings.Label.LargeTemplateOverrideBase64);
+        settings.Label.SmallTemplateOverrideBase64 = S(map, "LabelTemplateTEMBEBase64", settings.Label.SmallTemplateOverrideBase64);
+        settings.Label.SmallQrTemplateOverrideBase64 = S(map, "LabelTemplateTEMBEQRBase64", settings.Label.SmallQrTemplateOverrideBase64);
         settings.Label.EncodingName = S(map, "LabelEncodingName", settings.Label.EncodingName);
         settings.Label.RawDestination = S(map, "LabelRawDestination", settings.Label.RawDestination);
         settings.Label.ExternalHelperPath = S(map, "LabelExternalHelperPath", settings.Label.ExternalHelperPath);
@@ -736,6 +742,9 @@ public static class ProductionConfigService
         settings.Label.Copies = 1;
         settings.Label.TemplateType = LabelProfileResolver.NormalizeTemplateType(settings.Label.TemplateType);
         settings.Label.TemplatePath = (settings.Label.TemplatePath ?? string.Empty).Trim();
+        settings.Label.LargeTemplateOverrideBase64 = (settings.Label.LargeTemplateOverrideBase64 ?? string.Empty).Trim();
+        settings.Label.SmallTemplateOverrideBase64 = (settings.Label.SmallTemplateOverrideBase64 ?? string.Empty).Trim();
+        settings.Label.SmallQrTemplateOverrideBase64 = (settings.Label.SmallQrTemplateOverrideBase64 ?? string.Empty).Trim();
         settings.Label.EncodingName = string.IsNullOrWhiteSpace(settings.Label.EncodingName)
             ? "us-ascii"
             : settings.Label.EncodingName.Trim();

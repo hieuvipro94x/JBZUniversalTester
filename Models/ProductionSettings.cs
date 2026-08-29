@@ -367,11 +367,16 @@ public sealed class LabelSettings
 
     public int Copies { get; set; } = 1;
 
-    /// <summary>Chọn file mẫu lệnh in dạng TXT trong thư mục Labels cạnh EXE.</summary>
+    /// <summary>Chọn một trong ba mẫu lệnh in tích hợp trong EXE.</summary>
     public string TemplateType { get; set; } = LargeTemplate;
 
     /// <summary>Explicit profile/template selection. No part-number inference is allowed.</summary>
     public string TemplatePath { get; set; } = string.Empty;
+
+    /// <summary>UTF-8/Base64 overrides stored in the single canonical CFG.</summary>
+    public string LargeTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string SmallTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string SmallQrTemplateOverrideBase64 { get; set; } = string.Empty;
 
     public string EncodingName { get; set; } = "us-ascii";
 

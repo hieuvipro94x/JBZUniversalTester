@@ -18,8 +18,14 @@ public static class LabelTemplateProvider
         if (!string.IsNullOrWhiteSpace(embeddedTemplate))
             return embeddedTemplate;
 
+        if (!string.IsNullOrWhiteSpace(profile.InlineTemplate))
+            return profile.InlineTemplate;
+
         if (profile.Mode == LabelPrintMode.NeedsOriginalTrace)
             return string.Empty;
+
+        if (BuiltInLabelTemplateStore.IsReference(profile.TemplatePath))
+            return BuiltInLabelTemplateStore.Load(profile.TemplatePath);
 
         if (string.IsNullOrWhiteSpace(profile.TemplatePath))
             throw new InvalidDataException($"Profile '{profile.Id}' has no template source.");

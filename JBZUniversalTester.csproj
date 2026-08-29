@@ -78,12 +78,21 @@
 
   <!-- Self-tests là project console riêng, không được compile vào WPF app. -->
   <ItemGroup>
-    <Content Include="Labels\*.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
     <Compile Remove="Tests\**\*.cs" />
     <Compile Remove="HardwareVerification\**\*.cs" />
+  </ItemGroup>
+
+  <!-- Built-in label templates stay inside the single EXE. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Labels\TEM_TO.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_TO.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Labels\TEM_BE.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_BE.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Labels\TEM_BE_QR.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_BE_QR.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!-- Nhúng âm thanh vào EXE -->

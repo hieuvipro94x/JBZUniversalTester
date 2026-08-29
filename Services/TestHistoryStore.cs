@@ -79,15 +79,20 @@ public sealed class TestHistoryStore
         if (!File.Exists(_path) || new FileInfo(_path).Length == 0)
             return;
 
-        using SqliteCommand probe = source.CreateCommand();
-        probe.CommandText = """
-            SELECT CASE
-                WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchemaInfo')
-                THEN COALESCE((SELECT MAX(SchemaVersion) FROM SchemaInfo), 0)
-                ELSE 0
-            END;
-            """;
-        int version = Convert.ToInt32(probe.ExecuteScalar() ?? 0, CultureInfo.InvariantCulture);
+        int version = 0;
+        using (SqliteCommand tableProbe = source.CreateCommand())
+        {
+            tableProbe.CommandText =
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchemaInfo' LIMIT 1;";
+            if (tableProbe.ExecuteScalar() is not null)
+            {
+                using SqliteCommand versionProbe = source.CreateCommand();
+                versionProbe.CommandText = "SELECT COALESCE(MAX(SchemaVersion), 0) FROM SchemaInfo;";
+                version = Convert.ToInt32(
+                    versionProbe.ExecuteScalar() ?? 0,
+                    CultureInfo.InvariantCulture);
+            }
+        }
         if (version >= CurrentSchemaVersion)
             return;
 

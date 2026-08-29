@@ -34,6 +34,7 @@ internal static class Program
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
+            ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
             ("Canonical runtime paths and SQLite PartCnt authority", TestCanonicalRuntimePersistence),
             ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
@@ -189,17 +190,19 @@ internal static class Program
         string target = Path.Combine(root, "V16.0.45");
         try
         {
-            Directory.CreateDirectory(Path.Combine(older, "Data", "History"));
-            Directory.CreateDirectory(Path.Combine(previous, "Data", "History"));
+            Directory.CreateDirectory(Path.Combine(older, "Data"));
+            Directory.CreateDirectory(Path.Combine(previous, "Data"));
             Directory.CreateDirectory(target);
 
             File.WriteAllText(Path.Combine(older, "production.statistics.json"), "older-statistics-with-real-production-data");
             File.WriteAllText(Path.Combine(older, "production.settings.json"), "{\"LotNo\":3456}");
             File.WriteAllText(Path.Combine(previous, "production.statistics.json"), "latest-statistics");
             File.WriteAllText(Path.Combine(previous, "production.settings.json"), "{\"LotNo\":2000}");
+            File.WriteAllText(Path.Combine(previous, "JBZUniversalTester.cfg"), "[LotNo]3456\r\n");
+            File.WriteAllText(Path.Combine(previous, "JBZUniversalTester.log"), "canonical-log");
             File.WriteAllText(Path.Combine(previous, "PartCnt.txt"), "PART-A 200000 4321");
             File.WriteAllBytes(
-                Path.Combine(previous, "Data", "History", "test-history.db"),
+                Path.Combine(previous, "Data", "JBZUniversalTester.db"),
                 [1, 2, 3, 4]);
 
             // A value already created on the destination machine is authoritative.
@@ -210,18 +213,19 @@ internal static class Program
                 [previous, older]);
 
             Assert(
-                File.ReadAllText(Path.Combine(target, "production.statistics.json")) == "older-statistics-with-real-production-data",
-                "Populated production statistics must win over a newer empty-version file");
+                !File.Exists(Path.Combine(target, "production.statistics.json")) &&
+                !File.Exists(Path.Combine(target, "production.settings.json")),
+                "Legacy JSON files must not be copied into the canonical runtime directory");
             Assert(
-                File.ReadAllText(Path.Combine(target, "production.settings.json")) == "{\"LotNo\":3456}",
-                "Highest persisted LOT must win over a newer default configuration");
+                File.ReadAllText(Path.Combine(target, "JBZUniversalTester.cfg")) == "[LotNo]3456\r\n",
+                "Canonical CFG must be inherited");
             Assert(
                 File.ReadAllText(Path.Combine(target, "PartCnt.txt")) == "PART-A 200000 5000",
                 "Existing destination PartCnt must never be overwritten");
             Assert(
-                File.ReadAllBytes(Path.Combine(target, "Data", "History", "test-history.db"))
+                File.ReadAllBytes(Path.Combine(target, "Data", "JBZUniversalTester.db"))
                     .SequenceEqual(new byte[] { 1, 2, 3, 4 }),
-                "SQLite test history must be inherited");
+                "Canonical SQLite database must be inherited");
             Assert(migrated.Count == 3, "Only missing production files must be reported as migrated");
         }
         finally
@@ -1420,6 +1424,50 @@ internal static class Program
         Assert(BrushHex(row.Color2Brush) == two, $"Color #2 for '{code}'");
         Assert(BrushHex(row.Color3Brush) == three, $"Color #3 for '{code}'");
         Assert(BrushHex(row.Color4Brush) == four, $"Color #4 for '{code}'");
+    }
+
+    private static void TestLegacyDatabaseWithoutSchemaInfo()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZLegacyDatabaseWithoutSchemaInfo",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        string backupPath = dbPath + $".pre-schema-v{TestHistoryStore.CurrentSchemaVersion}.backup";
+        try
+        {
+            Directory.CreateDirectory(root);
+            using (var legacy = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                legacy.Open();
+                using SqliteCommand create = legacy.CreateCommand();
+                create.CommandText = "CREATE TABLE LegacyMarker(Value TEXT NOT NULL); " +
+                                     "INSERT INTO LegacyMarker(Value) VALUES ('KEEP');";
+                create.ExecuteNonQuery();
+            }
+
+            var store = new TestHistoryStore(dbPath);
+            Assert(store.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "Legacy database initializes the current relational schema");
+            Assert(File.Exists(backupPath),
+                "Legacy database is backed up before schema migration");
+
+            using var verify = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            verify.Open();
+            using SqliteCommand probe = verify.CreateCommand();
+            probe.CommandText = "SELECT " +
+                                "(SELECT COUNT(*) FROM SchemaInfo), " +
+                                "(SELECT COUNT(*) FROM LegacyMarker WHERE Value='KEEP');";
+            using SqliteDataReader reader = probe.ExecuteReader();
+            Assert(reader.Read() && reader.GetInt32(0) == 1 && reader.GetInt32(1) == 1,
+                "Schema initialization preserves tables from a database without SchemaInfo");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
     }
 
     private static void TestCanonicalRuntimePersistence()
@@ -3671,6 +3719,17 @@ internal static class Program
                    largeSuffix1.Payload.Contains("26082720011WH", StringComparison.Ordinal) &&
                    largeSuffix1.Payload.Contains("KL375C100026082720011", StringComparison.Ordinal),
                 "TEM_TO reads ALC /1 from THT and appends 1 immediately after LOTNO");
+
+            const string editedLargeTemplate = "N\nEDITED={PART_NUMBER}\nP1\n";
+            BuiltInLabelTemplateStore.SaveOverride(
+                labelSettings,
+                LabelSettings.LargeTemplate,
+                editedLargeTemplate);
+            LabelPrintRequest editedLarge = LabelPrintRequest.Capture(history, model, labelSettings);
+            Assert(editedLarge.Payload == "N\nEDITED=KL375C1000\nP1\n" &&
+                   BuiltInLabelTemplateStore.LoadOverride(labelSettings, LabelSettings.LargeTemplate) == editedLargeTemplate,
+                "Built-in label editor override is Base64-backed and used without a Labels directory");
+            BuiltInLabelTemplateStore.ClearOverride(labelSettings, LabelSettings.LargeTemplate);
 
             LabelPrintData suffix2Data = largeSuffix1.Data with { Alc = "12000/20430/2" };
             LabelIdentity suffix2Identity = EplLabelService.BuildIdentity(suffix2Data);

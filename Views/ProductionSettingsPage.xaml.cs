@@ -246,13 +246,106 @@ public partial class ProductionSettingsPage : UserControl
     {
         try
         {
-            string path = ResolveConfiguredLabelTemplatePath();
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            string configured = _vm.Settings.Label.TemplatePath?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                string path = ResolveConfiguredLabelTemplatePath();
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                return;
+            }
+
+            EditBuiltInLabelTemplate();
         }
         catch (Exception ex)
         {
             ShowMessage(ex.Message, "CHỈNH TEM", MessageBoxImage.Warning);
         }
+    }
+
+    private void EditBuiltInLabelTemplate()
+    {
+        string templateType = LabelProfileResolver.NormalizeTemplateType(_vm.Settings.Label.TemplateType);
+        string reference = BuiltInLabelTemplateStore.ReferenceFor(templateType);
+        string defaultTemplate = BuiltInLabelTemplateStore.Load(reference);
+        string savedOverride = BuiltInLabelTemplateStore.LoadOverride(_vm.Settings.Label, templateType);
+
+        var editor = new Window
+        {
+            Title = $"CHỈNH TEM {templateType} - lưu trong JBZUniversalTester.cfg",
+            Owner = HostWindow,
+            Width = 900,
+            Height = 680,
+            MinWidth = 640,
+            MinHeight = 420,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        var layout = new Grid { Margin = new Thickness(12) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var note = new TextBlock
+        {
+            Text = "Nội dung sửa sẽ được lưu trong CFG, không tạo file Labels. Dùng KHÔI PHỤC MẶC ĐỊNH để bỏ bản tùy chỉnh.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 8)
+        };
+        Grid.SetRow(note, 0);
+        layout.Children.Add(note);
+
+        var textBox = new TextBox
+        {
+            Text = string.IsNullOrEmpty(savedOverride) ? defaultTemplate : savedOverride,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            TextWrapping = TextWrapping.NoWrap,
+            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+            FontSize = 14
+        };
+        Grid.SetRow(textBox, 1);
+        layout.Children.Add(textBox);
+
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 10, 0, 0)
+        };
+        var resetButton = new Button { Content = "KHÔI PHỤC MẶC ĐỊNH", MinWidth = 170, Margin = new Thickness(4) };
+        var cancelButton = new Button { Content = "HỦY", MinWidth = 90, Margin = new Thickness(4), IsCancel = true };
+        var saveButton = new Button { Content = "ÁP DỤNG", MinWidth = 110, Margin = new Thickness(4), IsDefault = true };
+        resetButton.Click += (_, _) => textBox.Text = defaultTemplate;
+        cancelButton.Click += (_, _) => editor.DialogResult = false;
+        saveButton.Click += (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                MessageBox.Show(editor, "Template không được để trống.", "CHỈNH TEM", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            editor.DialogResult = true;
+        };
+        buttons.Children.Add(resetButton);
+        buttons.Children.Add(cancelButton);
+        buttons.Children.Add(saveButton);
+        Grid.SetRow(buttons, 2);
+        layout.Children.Add(buttons);
+        editor.Content = layout;
+
+        if (editor.ShowDialog() != true)
+            return;
+
+        if (string.Equals(textBox.Text, defaultTemplate, StringComparison.Ordinal))
+            BuiltInLabelTemplateStore.ClearOverride(_vm.Settings.Label, templateType);
+        else
+            BuiltInLabelTemplateStore.SaveOverride(_vm.Settings.Label, templateType, textBox.Text);
+
+        ShowMessage(
+            $"Đã áp dụng template {templateType}. Bấm LƯU CÀI ĐẶT để ghi vào JBZUniversalTester.cfg.",
+            "CHỈNH TEM",
+            MessageBoxImage.Information);
     }
 
     private void PreviewLabel_Click(object sender, RoutedEventArgs e)
@@ -324,11 +417,12 @@ public partial class ProductionSettingsPage : UserControl
     private string ResolveConfiguredLabelTemplatePath()
     {
         string configured = _vm.Settings.Label.TemplatePath?.Trim() ?? string.Empty;
-        string path = string.IsNullOrWhiteSpace(configured)
-            ? LabelProfileResolver.ResolveBuiltInTemplatePath(_vm.Settings.Label.TemplateType)
-            : Path.GetFullPath(Path.IsPathRooted(configured)
-                ? configured
-                : Path.Combine(AppContext.BaseDirectory, configured));
+        if (string.IsNullOrWhiteSpace(configured))
+            throw new InvalidOperationException("Template tích hợp phải được chỉnh bằng trình soạn thảo trong ứng dụng.");
+
+        string path = Path.GetFullPath(Path.IsPathRooted(configured)
+            ? configured
+            : Path.Combine(AppContext.BaseDirectory, configured));
         if (!File.Exists(path))
             throw new FileNotFoundException("Không tìm thấy file template label.", path);
         return path;
