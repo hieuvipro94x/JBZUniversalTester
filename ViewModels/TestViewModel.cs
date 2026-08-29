@@ -52,6 +52,10 @@ public sealed class TestViewModel : ObservableObject
     private readonly ProductionStatisticsStore _statisticsStore = new();
     private readonly PartCounterStore _partCounterStore = new();
     private readonly LegacyPhtHistoryService _legacyHistory;
+    private readonly LegacyPhtHistoryReader _legacyHistoryReader = new();
+    private readonly List<FileSystemWatcher> _sharedProductionWatchers = [];
+    private readonly Timer _sharedProductionSyncTimer;
+    private int _sharedProductionSyncRunning;
     private readonly bool _requireStartupIoClear;
     private TestHistoryStore _historyStore;
     private readonly LabelPrintService _labelPrintService = new();
@@ -917,6 +921,11 @@ public sealed class TestViewModel : ObservableObject
         _settings = settings;
         _productionSettings = productionSettings;
         _legacyHistory = legacyHistory ?? new LegacyPhtHistoryService();
+        _sharedProductionSyncTimer = new Timer(
+            _ => RefreshSharedProductionState(),
+            null,
+            Timeout.Infinite,
+            Timeout.Infinite);
         _requireStartupIoClear = requireStartupIoClear;
         _lotSequence = new LotSequenceService(_productionSettings);
         _historyStore = new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
@@ -932,6 +941,8 @@ public sealed class TestViewModel : ObservableObject
         _board.Log += OnBoardLog;
         _board.FrameReceived += OnBoardFrameReceived;
         _waterProof.Log += OnWaterProofLog;
+
+        StartSharedProductionWatchers();
 
         RebuildActiveCards();
 
@@ -1721,25 +1732,29 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task InitializeCoreAsync()
     {
-        AddLog("Khởi tạo ứng dụng: tự kết nối bo và tự nạp mã gần nhất.");
+        AddLog("Khởi tạo ứng dụng: kết nối bo trước, sau đó mới nạp mã gần nhất.");
 
-        // Chạy song song để MainWindow sẵn sàng nhanh hơn. Việc đọc THT không
-        // phụ thuộc FTDI; ConfigureScanRange chỉ cập nhật cấu hình transport.
-        Task boardTask = InitializeHardwareAsync();
-        Task modelTask;
+        // SetModel mở gate kiểm tra IO nền. Vì vậy phải chờ D2XX Connect/handshake
+        // hoàn tất trước khi nạp THT, tránh kích hoạt gate bằng frame trong giai
+        // đoạn transport còn đang khởi tạo.
+        await InitializeHardwareAsync();
 
-        if (_model is null)
+        if (_board.IsConnected)
         {
-            modelTask = LoadLastTestedModelAsync();
+            if (_model is null)
+            {
+                await LoadLastTestedModelAsync();
+            }
+            else
+            {
+                CurrentModelPath = ResolveOptionalModelPath(_model.SourcePath);
+                AddLog($"Giữ model đang chọn: {ModelName}");
+            }
         }
         else
         {
-            CurrentModelPath = ResolveOptionalModelPath(_model.SourcePath);
-            AddLog($"Giữ model đang chọn: {ModelName}");
-            modelTask = Task.CompletedTask;
+            AddLog("Chưa nạp mã hàng vì bo chưa kết nối; auto-reconnect vẫn tiếp tục chạy nền.");
         }
-
-        await Task.WhenAll(boardTask, modelTask);
 
         if (_board.IsConnected)
             await EnsureContinuousProductionScanAsync();
@@ -3566,6 +3581,10 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         SwitchRuntimeMode(RuntimeMode.ShuttingDown);
+        foreach (FileSystemWatcher watcher in _sharedProductionWatchers)
+            watcher.Dispose();
+        _sharedProductionWatchers.Clear();
+        _sharedProductionSyncTimer.Dispose();
         _lifetimeCts.Cancel();
         CancelCycleOperations();
 
@@ -6621,8 +6640,13 @@ public sealed class TestViewModel : ObservableObject
                 model,
                 Math.Max(stats.ProbeCycleCount, stats.Total),
                 _productionSettings.ProbeReplacementThreshold);
-            ApplyDailyProductionStatistics(stats);
-            ApplyExtendedStatistics(stats);
+            if (_legacyHistoryReader.HasSharedHistory)
+                ApplySharedProductionStatistics(_legacyHistoryReader.GetProductionSnapshot(model, DateTime.Now));
+            else
+            {
+                ApplyDailyProductionStatistics(stats);
+                ApplyExtendedStatistics(stats);
+            }
             ApplyPartCounter(partCounter);
             RaiseTestStatistics();
 
@@ -6875,6 +6899,8 @@ public sealed class TestViewModel : ObservableObject
             AddLog(
                 $"PHT HISTORY: {resultStatus} LOT {completedLot:N0} " +
                 $"đã append vào {legacyPath}.");
+            if (_legacyHistoryReader.HasSharedHistory)
+                ApplySharedProductionStatistics(_legacyHistoryReader.GetProductionSnapshot(model, DateTime.Now));
         }
         catch (Exception ex)
         {
@@ -6981,6 +7007,103 @@ public sealed class TestViewModel : ObservableObject
         Total = checked((int)stats.DailyTestCount);
         Pass = checked((int)stats.DailyPassCount);
         Fail = checked((int)stats.DailyFailCount);
+        UpdateDailyLotDisplay();
+    }
+
+    private void StartSharedProductionWatchers()
+    {
+        AddSharedProductionWatcher(_legacyHistoryReader.PassRoot, "Day*.dat", includeSubdirectories: true);
+        AddSharedProductionWatcher(_legacyHistoryReader.ErrorRoot, "Day*.err", includeSubdirectories: true);
+
+        string? partCounterDirectory = Path.GetDirectoryName(_partCounterStore.StoragePath);
+        if (!string.IsNullOrWhiteSpace(partCounterDirectory))
+            AddSharedProductionWatcher(
+                partCounterDirectory,
+                Path.GetFileName(_partCounterStore.StoragePath),
+                includeSubdirectories: false);
+    }
+
+    private void AddSharedProductionWatcher(string directory, string filter, bool includeSubdirectories)
+    {
+        if (!Directory.Exists(directory))
+            return;
+
+        var watcher = new FileSystemWatcher(directory, filter)
+        {
+            IncludeSubdirectories = includeSubdirectories,
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
+        };
+        FileSystemEventHandler changed = (_, _) => ScheduleSharedProductionRefresh();
+        RenamedEventHandler renamed = (_, _) => ScheduleSharedProductionRefresh();
+        watcher.Changed += changed;
+        watcher.Created += changed;
+        watcher.Renamed += renamed;
+        watcher.EnableRaisingEvents = true;
+        _sharedProductionWatchers.Add(watcher);
+    }
+
+    private void ScheduleSharedProductionRefresh()
+    {
+        if (Volatile.Read(ref _shutdownStarted) != 0)
+            return;
+        try
+        {
+            // One append/replace can raise several events. Wait until the writer
+            // has closed the shared file and perform only one refresh.
+            _sharedProductionSyncTimer.Change(300, Timeout.Infinite);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void RefreshSharedProductionState()
+    {
+        ProductModel? model = _model;
+        if (model is null ||
+            Volatile.Read(ref _shutdownStarted) != 0 ||
+            Interlocked.CompareExchange(ref _sharedProductionSyncRunning, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            LegacyProductionSnapshot? snapshot = _legacyHistoryReader.HasSharedHistory
+                ? _legacyHistoryReader.GetProductionSnapshot(model, DateTime.Now)
+                : null;
+            PartCounterEntry partCounter = _partCounterStore.GetOrCreate(
+                model,
+                Math.Max(ProbeCycleCount, Total),
+                _productionSettings.ProbeReplacementThreshold);
+            InvokeUi(() =>
+            {
+                if (!ReferenceEquals(_model, model))
+                    return;
+                if (snapshot is not null)
+                    ApplySharedProductionStatistics(snapshot);
+                ApplyPartCounter(partCounter);
+                RaiseTestStatistics();
+            });
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể đồng bộ sản lượng dùng chung PHT20: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _sharedProductionSyncRunning, 0);
+        }
+    }
+
+    private void ApplySharedProductionStatistics(LegacyProductionSnapshot snapshot)
+    {
+        Total = checked((int)snapshot.DailyTotal);
+        Pass = checked((int)snapshot.DailyPass);
+        Fail = checked((int)snapshot.DailyFail);
+        DailyTestCount = snapshot.DailyTotal;
+        MonthlyTestCount = snapshot.MonthlyTotal;
+        LifetimeTestCount = snapshot.LifetimeTotal;
         UpdateDailyLotDisplay();
     }
 

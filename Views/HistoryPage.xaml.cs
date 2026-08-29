@@ -15,6 +15,7 @@ namespace JBZUniversalTester.Views;
 public partial class HistoryPage : UserControl
 {
     private readonly TestHistoryStore _store;
+    private readonly LegacyPhtHistoryReader _legacyReader = new();
     public ObservableCollection<TestHistoryRecord> Records { get; } = new();
 
     public event EventHandler? RequestClose;
@@ -69,7 +70,13 @@ public partial class HistoryPage : UserControl
     {
         try
         {
-            IReadOnlyList<TestHistoryRecord> rows = _store.Search(CreateSearchCriteria(20_000));
+            HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
+            IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
+                _store.Search(criteria),
+                _legacyReader.Search(criteria),
+                exportOrder: false)
+                .Take(criteria.MaxRows)
+                .ToArray();
 
             Records.Clear();
             foreach (TestHistoryRecord row in rows)
@@ -137,7 +144,10 @@ public partial class HistoryPage : UserControl
         {
             int exportedCount = await Task.Run(() =>
             {
-                IReadOnlyList<TestHistoryRecord> rows = _store.SearchForExport(criteria);
+                IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
+                    _store.SearchForExport(criteria),
+                    _legacyReader.SearchForExport(criteria),
+                    exportOrder: true);
                 HistoryExportService.ExportCsv(dialog.FileName, rows);
                 return rows.Count;
             });
@@ -176,7 +186,10 @@ public partial class HistoryPage : UserControl
         {
             int exportedCount = await Task.Run(() =>
             {
-                IReadOnlyList<TestHistoryRecord> rows = _store.SearchForExport(criteria);
+                IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
+                    _store.SearchForExport(criteria),
+                    _legacyReader.SearchForExport(criteria),
+                    exportOrder: true);
                 HistoryExportService.ExportXlsx(dialog.FileName, rows);
                 return rows.Count;
             });

@@ -236,6 +236,10 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task<ProductModel?> LoadModelAsync(string path)
     {
+        if (!Test.IsBoardConnected)
+            throw new InvalidOperationException(
+                "Chưa kết nối bo JBZ. Chỉ được chọn mã hàng sau khi bo kết nối thành công.");
+
         if (Test.IsProductRemovalPending)
             throw new InvalidOperationException("VUI LÒNG THÁO SẢN PHẨM");
 

@@ -24,7 +24,7 @@ public sealed class PartCounterStore
     public PartCounterStore(string? path = null)
     {
         _path = string.IsNullOrWhiteSpace(path)
-            ? Path.Combine(AppContext.BaseDirectory, "PartCnt.txt")
+            ? ResolveDefaultPath()
             : Path.GetFullPath(path);
     }
 
@@ -182,6 +182,17 @@ public sealed class PartCounterStore
 
     private static long NormalizeThreshold(long threshold) =>
         threshold > 0 ? threshold : DefaultReplacementThreshold;
+
+    private static string ResolveDefaultPath()
+    {
+        // PHT20 keeps this file beside its executable. Both applications must
+        // use that exact file when the original installation exists; otherwise
+        // each version folder would maintain a different probe counter.
+        const string originalPath = @"C:\PHT20\PartCnt.txt";
+        return File.Exists(originalPath)
+            ? originalPath
+            : Path.Combine(AppContext.BaseDirectory, "PartCnt.txt");
+    }
 
     private sealed class PartCounterFile
     {

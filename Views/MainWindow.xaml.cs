@@ -91,6 +91,17 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
+        if (!_viewModel.Test.IsBoardConnected)
+        {
+            MessageBox.Show(
+                "Bo JBZ chưa kết nối thành công. Phần mềm sẽ tự thử kết nối lại; " +
+                "chỉ có thể bắt đầu kiểm tra khi bo đã sẵn sàng.",
+                "Bo chưa kết nối",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
         if (_viewModel.Model is null)
         {
             MessageBox.Show(
@@ -173,18 +184,21 @@ public partial class MainWindow : Window
 
     private void TestViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TestViewModel.IsProductRemovalPending))
+        if (e.PropertyName is nameof(TestViewModel.IsProductRemovalPending) or
+            nameof(TestViewModel.IsBoardConnected))
             Dispatcher.BeginInvoke(UpdateProductRemovalGate);
     }
 
     private void UpdateProductRemovalGate()
     {
         bool blocked = _viewModel.Test.IsProductRemovalPending;
+        bool boardConnected = _viewModel.Test.IsBoardConnected;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
-        // Cho phép quay lại màn hình kiểm tra để quan sát trạng thái tháo.
-        // TestViewModel vẫn không ARM chu kỳ mới cho tới khi ProductRemoved.
-        StartTestButton.IsEnabled = true;
-        SelectModelButton.IsEnabled = !blocked;
+        // Không cho nạp model/đi vào Production khi D2XX chưa hoàn tất kết nối.
+        // Khi đang chờ tháo vẫn cho mở lại TestView để quan sát, nhưng không
+        // cho đổi mã hàng cho tới khi nhận ProductRemoved đầy đủ.
+        StartTestButton.IsEnabled = boardConnected && _viewModel.Model is not null;
+        SelectModelButton.IsEnabled = boardConnected && !blocked;
     }
 
     private void OpenSettings_Click(

@@ -543,9 +543,25 @@ internal static class Program
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
-        Assert(mainWindowSource.Contains("StartTestButton.IsEnabled = true;", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("SelectModelButton.IsEnabled = !blocked;", StringComparison.Ordinal),
-            "Pending product removal locks only product selection, not opening the test screen");
+        Assert(mainWindowSource.Contains(
+                   "StartTestButton.IsEnabled = boardConnected && _viewModel.Model is not null;",
+                   StringComparison.Ordinal) &&
+               mainWindowSource.Contains(
+                   "SelectModelButton.IsEnabled = boardConnected && !blocked;",
+                   StringComparison.Ordinal) &&
+               mainWindowSource.Contains("nameof(TestViewModel.IsBoardConnected)", StringComparison.Ordinal),
+            "Main actions unlock only after board connection; removal still locks only product selection");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        int initializeHardwareIndex = testViewModelSource.IndexOf(
+            "await InitializeHardwareAsync();",
+            StringComparison.Ordinal);
+        int loadLastModelIndex = testViewModelSource.IndexOf(
+            "await LoadLastTestedModelAsync();",
+            StringComparison.Ordinal);
+        Assert(initializeHardwareIndex >= 0 && loadLastModelIndex > initializeHardwareIndex,
+            "Startup connects the board before loading the last product model");
 
         string settingsXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
         Assert(settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
@@ -1918,6 +1934,40 @@ internal static class Program
                 "PHT ERR header, Korean IO detail and CRLF record separator match original format");
             Assert(errorBytes.Length > 4 && !(errorBytes[0] == 0xEF && errorBytes[1] == 0xBB && errorBytes[2] == 0xBF),
                 "PHT shared files use CP949 without UTF-8 BOM");
+
+            var reader = new LegacyPhtHistoryReader(passRoot, errorRoot);
+            LegacyProductionSnapshot shared = reader.GetProductionSnapshot(
+                model,
+                new DateTime(2026, 8, 26, 12, 0, 0));
+            Assert(shared.DailyTotal == 1 && shared.DailyPass == 1 && shared.DailyFail == 0 &&
+                   shared.MonthlyTotal == 2 && shared.LifetimeTotal == 2,
+                "Shared production counters include original PASS/ERR files and exclude MASTER rows");
+
+            HistorySearchCriteria allCriteria = new(null, null, null, string.Empty, "ALL", 100);
+            IReadOnlyList<TestHistoryRecord> legacyRows = reader.Search(allCriteria);
+            Assert(legacyRows.Count == 4 && legacyRows.Count(row => row.Passed) == 3 &&
+                   legacyRows.Count(row => !row.Passed) == 1,
+                "Original PHT history reader returns every product record from both shared roots");
+            Assert(reader.SearchForExport(allCriteria with { MaxRows = 1 }).Count == 4,
+                "Original PHT export returns all matching rows instead of the screen row limit");
+
+            TestHistoryRecord duplicateDetailed = legacyRows.Single(row =>
+                row.Passed && row.PartNumber == "1200020430" && row.LotNo == 2001);
+            duplicateDetailed = new TestHistoryRecord
+            {
+                Id = 123,
+                Started = duplicateDetailed.Started,
+                Finished = duplicateDetailed.Finished,
+                PartNumber = duplicateDetailed.PartNumber,
+                LotNo = duplicateDetailed.LotNo,
+                Result = "PASS",
+                Passed = true,
+                CycleId = "NEW-APP-CYCLE"
+            };
+            IReadOnlyList<TestHistoryRecord> merged = LegacyPhtHistoryReader.MergeWithoutDuplicates(
+                [duplicateDetailed], legacyRows, exportOrder: false);
+            Assert(merged.Count == 4 && merged.Count(row => row.Id == 123) == 1,
+                "Shared history merge keeps detailed new-app row and removes its compatible PHT duplicate");
         }
         finally
         {
