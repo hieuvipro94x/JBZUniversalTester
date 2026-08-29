@@ -1,0 +1,11 @@
+﻿TASK ĐANG DỞ:
+Chuẩn hóa runtime structure giống HTDRV.
+
+Branch: wip-codex-20260829
+
+Codex dừng do hết usage limit khi đang phân tích TestViewModel InitializeCoreAsync/InitializeAsync.
+
+Yêu cầu:
+- Không rollback thay đổi hiện tại.
+- Tiếp tục audit toàn solution.
+- Build sau khi hoàn tất.
