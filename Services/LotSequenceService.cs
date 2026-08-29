@@ -9,7 +9,8 @@ public sealed class LotSequenceService
     private readonly ProductionSettings _settings;
     private readonly Action<ProductionSettings> _persist;
     private readonly Func<DateTime> _now;
-    private readonly Dictionary<string, long> _reservations = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, LotReservation> _reservations = new(StringComparer.Ordinal);
+    private string _activeProductKey = "DEFAULT";
 
     public LotSequenceService(
         ProductionSettings settings,
@@ -21,7 +22,38 @@ public sealed class LotSequenceService
         _now = now ?? (() => DateTime.Now);
 
         lock (_gate)
-            EnsureCurrentProductionDateLocked();
+        {
+            ProductionConfigService.GetOrCreateProductLot(
+                _settings, _activeProductKey, migrateCurrentLot: true);
+            EnsureCurrentProductionDateLocked(_activeProductKey);
+        }
+    }
+
+    public void SelectProduct(string productKey, bool migrateCurrentLotIfMissing)
+    {
+        lock (_gate)
+        {
+            string key = NormalizeProductKey(productKey);
+            bool existed = _settings.LotSettingsByProduct.ContainsKey(key);
+            ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
+                _settings, key, migrateCurrentLotIfMissing);
+            _activeProductKey = key;
+            SyncCompatibilityFieldsLocked(lot);
+            bool dateChanged = EnsureCurrentProductionDateLocked(key);
+            if (!existed && !dateChanged)
+                TryPersistNewProductLocked(key);
+        }
+    }
+
+    public void RefreshActiveProduct()
+    {
+        lock (_gate)
+        {
+            ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
+                _settings, _activeProductKey, migrateCurrentLot: true);
+            SyncCompatibilityFieldsLocked(lot);
+            EnsureCurrentProductionDateLocked(_activeProductKey);
+        }
     }
 
     public long NextLot
@@ -30,8 +62,8 @@ public sealed class LotSequenceService
         {
             lock (_gate)
             {
-                EnsureCurrentProductionDateLocked();
-                return Math.Max(0, _settings.LotNo);
+                EnsureCurrentProductionDateLocked(_activeProductKey);
+                return ActiveLotLocked().LotNo;
             }
         }
     }
@@ -43,13 +75,18 @@ public sealed class LotSequenceService
 
         lock (_gate)
         {
-            if (_reservations.TryGetValue(cycleId, out long existing))
-                return existing;
+            if (_reservations.TryGetValue(cycleId, out LotReservation existing))
+                return existing.LotNo;
 
-            EnsureCurrentProductionDateLocked();
-
-            long reserved = checked(Math.Max(0, _settings.LotNo) + _reservations.Values.Distinct().Count());
-            _reservations[cycleId] = reserved;
+            EnsureCurrentProductionDateLocked(_activeProductKey);
+            ProductLotSettings lot = ActiveLotLocked();
+            int pendingForProduct = _reservations.Values
+                .Where(item => string.Equals(item.ProductKey, _activeProductKey, StringComparison.OrdinalIgnoreCase))
+                .Select(item => item.LotNo)
+                .Distinct()
+                .Count();
+            long reserved = checked(lot.LotNo + pendingForProduct);
+            _reservations[cycleId] = new LotReservation(_activeProductKey, reserved);
             return reserved;
         }
     }
@@ -58,13 +95,16 @@ public sealed class LotSequenceService
     {
         lock (_gate)
         {
-            if (!_reservations.TryGetValue(cycleId, out long reserved) || reserved != printedLot)
+            if (!_reservations.TryGetValue(cycleId, out LotReservation reservation) ||
+                reservation.LotNo != printedLot)
             {
                 error = $"LOT reservation mismatch for cycle {cycleId}.";
                 return false;
             }
 
-            long current = Math.Max(0, _settings.LotNo);
+            ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
+                _settings, reservation.ProductKey, migrateCurrentLot: false);
+            long current = Math.Max(0, lot.LotNo);
             if (printedLot != current)
             {
                 error = $"Cannot commit LOT {printedLot}; next persisted LOT is {current}.";
@@ -73,16 +113,20 @@ public sealed class LotSequenceService
 
             try
             {
-                _settings.LotNo = checked(printedLot + 1);
+                lot.LotNo = checked(printedLot + 1);
+                if (IsActiveProduct(reservation.ProductKey))
+                    SyncCompatibilityFieldsLocked(lot);
                 _persist(_settings);
                 _reservations.Remove(cycleId);
-                EnsureCurrentProductionDateLocked();
+                EnsureCurrentProductionDateLocked(reservation.ProductKey);
                 error = string.Empty;
                 return true;
             }
             catch (Exception ex)
             {
-                _settings.LotNo = current;
+                lot.LotNo = current;
+                if (IsActiveProduct(reservation.ProductKey))
+                    SyncCompatibilityFieldsLocked(lot);
                 error = $"Cannot persist next LOT: {ex.Message}";
                 return false;
             }
@@ -93,9 +137,14 @@ public sealed class LotSequenceService
     {
         lock (_gate)
         {
-            return _reservations.TryGetValue(cycleId, out long reserved) &&
-                   reserved == lotNo &&
-                   Math.Max(0, _settings.LotNo) == lotNo;
+            if (!_reservations.TryGetValue(cycleId, out LotReservation reservation) ||
+                reservation.LotNo != lotNo)
+            {
+                return false;
+            }
+            ProductLotSettings current = ProductionConfigService.GetOrCreateProductLot(
+                _settings, reservation.ProductKey, migrateCurrentLot: false);
+            return current.LotNo == lotNo;
         }
     }
 
@@ -106,14 +155,17 @@ public sealed class LotSequenceService
 
         lock (_gate)
         {
-            if (_reservations.TryGetValue(cycleId, out long existing))
-                return existing == lotNo;
+            if (_reservations.TryGetValue(cycleId, out LotReservation existing))
+                return existing.LotNo == lotNo && IsActiveProduct(existing.ProductKey);
 
-            if (lotNo < Math.Max(0, _settings.LotNo) ||
-                _reservations.Values.Contains(lotNo))
+            ProductLotSettings current = ActiveLotLocked();
+            if (lotNo < current.LotNo || _reservations.Values.Any(item =>
+                    IsActiveProduct(item.ProductKey) && item.LotNo == lotNo))
+            {
                 return false;
+            }
 
-            _reservations[cycleId] = lotNo;
+            _reservations[cycleId] = new LotReservation(_activeProductKey, lotNo);
             return true;
         }
     }
@@ -122,57 +174,95 @@ public sealed class LotSequenceService
     {
         lock (_gate)
         {
-            if (_reservations.TryGetValue(cycleId, out long lot))
-                return lot;
-
-            EnsureCurrentProductionDateLocked();
-            return Math.Max(0, _settings.LotNo);
+            if (_reservations.TryGetValue(cycleId, out LotReservation reservation))
+                return reservation.LotNo;
+            EnsureCurrentProductionDateLocked(_activeProductKey);
+            return ActiveLotLocked().LotNo;
         }
     }
 
-    private void EnsureCurrentProductionDateLocked()
+    private bool EnsureCurrentProductionDateLocked(string productKey)
     {
-        // Không đổi ngày khi còn LOT đã cấp cho một chu kỳ chưa in/commit.
-        // Sau khi reservation cuối cùng hoàn tất, ngày mới được áp dụng ngay.
-        if (_reservations.Count > 0)
-            return;
-
-        string today = _now().Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        string storedDate = (_settings.LotNoDate ?? string.Empty).Trim();
-        if (string.Equals(storedDate, today, StringComparison.Ordinal))
-            return;
-
-        long previousLot = _settings.LotNo;
-        string previousDate = _settings.LotNoDate ?? string.Empty;
-
-        // Migration an toàn: lần đầu nâng cấp chỉ đóng dấu ngày hiện tại, không
-        // làm mất số LOT đang sản xuất. Chỉ ngày đã lưu khác hôm nay mới reset.
-        if (DateOnly.TryParseExact(
-                storedDate,
-                "yyyy-MM-dd",
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out _))
+        if (_reservations.Values.Any(item =>
+                string.Equals(item.ProductKey, productKey, StringComparison.OrdinalIgnoreCase)))
         {
-            _settings.LotNo = 0;
+            return false;
         }
-        _settings.LotNoDate = today;
+
+        ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
+            _settings, productKey, migrateCurrentLot: false);
+        string today = _now().Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        string storedDate = (lot.LotNoDate ?? string.Empty).Trim();
+        if (string.Equals(storedDate, today, StringComparison.Ordinal))
+        {
+            if (IsActiveProduct(productKey))
+                SyncCompatibilityFieldsLocked(lot);
+            return false;
+        }
+
+        long previousLot = lot.LotNo;
+        string previousDate = lot.LotNoDate ?? string.Empty;
+        if (DateOnly.TryParseExact(
+                storedDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out _))
+        {
+            lot.LotNo = 0;
+        }
+        lot.LotNoDate = today;
+        if (IsActiveProduct(productKey))
+            SyncCompatibilityFieldsLocked(lot);
 
         try
         {
             _persist(_settings);
-            if (previousLot != _settings.LotNo)
+            if (previousLot != lot.LotNo)
             {
                 AsyncFileLogService.Current.Test(
-                    $"LOTNO DAILY RESET date={today} previous={previousLot} next=0");
+                    $"LOTNO DAILY RESET product={productKey} date={today} previous={previousLot} next=0");
             }
+            return true;
         }
         catch (Exception ex)
         {
-            _settings.LotNo = previousLot;
-            _settings.LotNoDate = previousDate;
+            lot.LotNo = previousLot;
+            lot.LotNoDate = previousDate;
+            if (IsActiveProduct(productKey))
+                SyncCompatibilityFieldsLocked(lot);
             AsyncFileLogService.Current.Error(
-                $"Không thể lưu ngày/reset LOTNO tự động: {ex.Message}");
+                $"Không thể lưu ngày/reset LOTNO tự động cho {productKey}: {ex.Message}");
+            return false;
         }
     }
+
+    private void TryPersistNewProductLocked(string productKey)
+    {
+        try
+        {
+            _persist(_settings);
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error(
+                $"Không thể lưu LOTNO ban đầu cho {productKey}: {ex.Message}");
+        }
+    }
+
+    private ProductLotSettings ActiveLotLocked() =>
+        ProductionConfigService.GetOrCreateProductLot(
+            _settings, _activeProductKey, migrateCurrentLot: true);
+
+    private void SyncCompatibilityFieldsLocked(ProductLotSettings lot)
+    {
+        lot.LotNo = Math.Max(0, lot.LotNo);
+        _settings.LotNo = lot.LotNo;
+        _settings.LotNoDate = lot.LotNoDate ?? string.Empty;
+    }
+
+    private bool IsActiveProduct(string productKey) =>
+        string.Equals(productKey, _activeProductKey, StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeProductKey(string? productKey) =>
+        string.IsNullOrWhiteSpace(productKey) ? "DEFAULT" : productKey.Trim();
+
+    private readonly record struct LotReservation(string ProductKey, long LotNo);
 }

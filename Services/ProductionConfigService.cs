@@ -211,6 +211,13 @@ public static class ProductionConfigService
             lines.Add($"[MasterFault.{encodedKey}]{requiredCount}");
         }
 
+        foreach ((string productKey, ProductLotSettings lot) in settings.LotSettingsByProduct
+                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            string encodedKey = Uri.EscapeDataString(productKey);
+            lines.Add($"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate}");
+        }
+
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
         {
@@ -248,6 +255,57 @@ public static class ProductionConfigService
         if (!string.IsNullOrWhiteSpace(model.ModelName))
             return model.ModelName.Trim();
         return GetMasterModelKeyFromPath(model.SourcePath);
+    }
+
+    public static string GetLotProductKey(ProductModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return GetLotProductKey(model.PartNumber, model.SourcePath, model.ModelName);
+    }
+
+    public static string GetLotProductKey(
+        string? partNumber,
+        string? sourcePath,
+        string? modelName = null)
+    {
+        if (!string.IsNullOrWhiteSpace(partNumber))
+            return partNumber.Trim();
+        if (!string.IsNullOrWhiteSpace(modelName))
+            return modelName.Trim();
+        return GetMasterModelKeyFromPath(sourcePath);
+    }
+
+    public static ProductLotSettings GetOrCreateProductLot(
+        ProductionSettings settings,
+        string productKey,
+        bool migrateCurrentLot)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Normalize(settings);
+        string key = string.IsNullOrWhiteSpace(productKey) ? "DEFAULT" : productKey.Trim();
+        if (!settings.LotSettingsByProduct.TryGetValue(key, out ProductLotSettings? lot))
+        {
+            lot = new ProductLotSettings
+            {
+                LotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
+                LotNoDate = migrateCurrentLot ? settings.LotNoDate : string.Empty
+            };
+            settings.LotSettingsByProduct[key] = lot;
+        }
+        return lot;
+    }
+
+    public static void SetProductLot(
+        ProductionSettings settings,
+        string productKey,
+        long lotNo,
+        string lotNoDate)
+    {
+        ProductLotSettings lot = GetOrCreateProductLot(settings, productKey, migrateCurrentLot: false);
+        lot.LotNo = Math.Max(0, lotNo);
+        lot.LotNoDate = (lotNoDate ?? string.Empty).Trim();
+        settings.LotNo = lot.LotNo;
+        settings.LotNoDate = lot.LotNoDate;
     }
 
     public static string GetMasterModelKeyFromPath(string? path)
@@ -388,6 +446,27 @@ public static class ProductionConfigService
                 settings.MasterFaultCountsByModel[modelKey] = count;
         }
 
+        foreach ((string key, string value) in map)
+        {
+            const string prefix = "ProductLot.";
+            if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string productKey = Uri.UnescapeDataString(key[prefix.Length..]);
+            string[] parts = value.Split(';');
+            if (string.IsNullOrWhiteSpace(productKey) || parts.Length == 0 ||
+                !long.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out long lotNo))
+            {
+                continue;
+            }
+
+            settings.LotSettingsByProduct[productKey] = new ProductLotSettings
+            {
+                LotNo = Math.Max(0, lotNo),
+                LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty
+            };
+        }
+
         settings.LotNo = L(map, "LotNo", settings.LotNo);
         settings.LotNoDate = S(map, "LotNoDate", settings.LotNoDate);
         settings.Lot = S(map, "Lot", settings.Lot);
@@ -515,6 +594,7 @@ public static class ProductionConfigService
         settings.WaterProofMachine ??= new WaterProofMachineSettings();
         settings.WaterProofProfilesByModel ??= new Dictionary<string, WaterProofModelSettings>(StringComparer.OrdinalIgnoreCase);
         settings.MasterFaultCountsByModel ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        settings.LotSettingsByProduct ??= new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase);
         if (settings.MasterFaultCountsByModel.Comparer != StringComparer.OrdinalIgnoreCase)
         {
             settings.MasterFaultCountsByModel = new Dictionary<string, int>(
@@ -525,6 +605,12 @@ public static class ProductionConfigService
         {
             settings.WaterProofProfilesByModel = new Dictionary<string, WaterProofModelSettings>(
                 settings.WaterProofProfilesByModel,
+                StringComparer.OrdinalIgnoreCase);
+        }
+        if (settings.LotSettingsByProduct.Comparer != StringComparer.OrdinalIgnoreCase)
+        {
+            settings.LotSettingsByProduct = new Dictionary<string, ProductLotSettings>(
+                settings.LotSettingsByProduct,
                 StringComparer.OrdinalIgnoreCase);
         }
 
@@ -544,6 +630,17 @@ public static class ProductionConfigService
 
         if (settings.LotNo < 0) settings.LotNo = 0;
         settings.LotNoDate = (settings.LotNoDate ?? string.Empty).Trim();
+        foreach (string key in settings.LotSettingsByProduct.Keys.ToArray())
+        {
+            ProductLotSettings? lot = settings.LotSettingsByProduct[key];
+            if (string.IsNullOrWhiteSpace(key) || lot is null)
+            {
+                settings.LotSettingsByProduct.Remove(key);
+                continue;
+            }
+            lot.LotNo = Math.Max(0, lot.LotNo);
+            lot.LotNoDate = (lot.LotNoDate ?? string.Empty).Trim();
+        }
         ProductionTimingPolicy.Normalize(settings);
         settings.UsbDelay = Math.Clamp(settings.UsbDelay, 1, 16);
         settings.IoConfirm1 = Math.Clamp(settings.IoConfirm1, 0, 127);

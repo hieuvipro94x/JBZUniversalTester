@@ -6,8 +6,9 @@ using JBZUniversalTester.Models;
 namespace JBZUniversalTester.Services;
 
 /// <summary>
-/// Appends records compatible with the original PHT20 CP949 history files.
-/// Existing files are never truncated or rewritten.
+/// Appends records compatible with the original PHT20 history files. PASS uses
+/// the verified UTF-8 pipe layout; ERR keeps the legacy CP949 layout. Existing
+/// files are never truncated or rewritten.
 /// </summary>
 public sealed class LegacyPhtHistoryService
 {
@@ -15,6 +16,7 @@ public sealed class LegacyPhtHistoryService
     private const int AppendRetryDelayMs = 25;
     private static readonly object AppendGate = new();
     private static readonly Encoding KoreanEncoding = CreateKoreanEncoding();
+    private static readonly Encoding PassEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private readonly string _passRoot;
     private readonly string _errorRoot;
@@ -54,7 +56,7 @@ public sealed class LegacyPhtHistoryService
             record = BuildErrorRecord(model, result, lotNo);
         }
 
-        Append(path, record);
+        Append(path, record, result.Passed ? PassEncoding : KoreanEncoding);
         return path;
     }
 
@@ -69,7 +71,7 @@ public sealed class LegacyPhtHistoryService
             return string.Empty;
         string path = BuildDailyPath(_passRoot, finished, ".dat");
         string status = goodMaster ? "[정상마스터]101" : "[불량마스터]201";
-        Append(path, BuildPassRecord(model, finished, Math.Max(0, counter), status));
+        Append(path, BuildPassRecord(model, finished, Math.Max(0, counter), status), PassEncoding);
         return path;
     }
 
@@ -83,9 +85,13 @@ public sealed class LegacyPhtHistoryService
         string time = finished.ToString("HHmmss", CultureInfo.InvariantCulture);
         string part = ResolvePartNumber(model);
         string counterText = counter.ToString("D4", CultureInfo.InvariantCulture);
+        string productName = CleanField(model.ProductName);
+        string vehicleType = CleanField(model.VehicleType);
+        string eco = CleanField(model.Eco);
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"|{status}|..|{date}|{time}|{date}{counterText}|||{part}{counterText}|||||||\r\n");
+            $"|{status}|..|{date}|{time}|{date}{counterText}|||{part}{counterText}|" +
+            $"{productName}|{vehicleType}|{eco}||||\r\n");
     }
 
     internal static string BuildErrorRecord(
@@ -233,9 +239,9 @@ public sealed class LegacyPhtHistoryService
                 .Replace(";", " ", StringComparison.Ordinal)
                 .Trim();
 
-    private static void Append(string path, string text)
+    private static void Append(string path, string text, Encoding encoding)
     {
-        byte[] payload = KoreanEncoding.GetBytes(text);
+        byte[] payload = encoding.GetBytes(text);
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);

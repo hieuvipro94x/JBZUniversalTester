@@ -6481,6 +6481,7 @@ public sealed class TestViewModel : ObservableObject
 
     private void RefreshProductionUiSettings()
     {
+        _lotSequence.RefreshActiveProduct();
         _historyStore = new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
         UpdateDailyLotDisplay();
         if (!_productionSettings.UseTestPointer &&
@@ -6522,8 +6523,14 @@ public sealed class TestViewModel : ObservableObject
         _lastIoMappingSignature = string.Empty;
         _sound.SetTestPointContactSound(false);
 
+        bool migrateLegacyLot = !_productionSettings.LotSettingsByProduct.Keys.Any(key =>
+            !string.Equals(key, "DEFAULT", StringComparison.OrdinalIgnoreCase));
+
         _model = model ??
             throw new ArgumentNullException(nameof(model));
+        _lotSequence.SelectProduct(
+            ProductionConfigService.GetLotProductKey(_model),
+            migrateLegacyLot);
         _pinsByIoLookup = _model.Pins.ToLookup(pin => pin.IoNumber);
 
         _sound.SetWiringFaultAlarm(false);

@@ -89,6 +89,14 @@ public sealed class ProductionSettings
     // kế tiếp LOTNO tự trở về 0.
     public string LotNoDate { get; set; } = string.Empty;
 
+    /// <summary>
+    /// LOT kế tiếp và ngày sản xuất được lưu riêng theo mã hàng. Key ưu tiên
+    /// PartNumber; LotNo/LotNoDate phía trên chỉ là giá trị tương thích đang
+    /// hiển thị cho mã hàng được chọn.
+    /// </summary>
+    public Dictionary<string, ProductLotSettings> LotSettingsByProduct { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // Giữ trường cũ để đọc các file cấu hình V11.4 trở về trước.
     public string Lot { get; set; } = string.Empty;
 
@@ -308,6 +316,13 @@ public sealed class ProductionSettings
     // ============================================================
 
     public LabelSettings Label { get; set; } = new();
+}
+
+public sealed class ProductLotSettings
+{
+    public long LotNo { get; set; }
+
+    public string LotNoDate { get; set; } = string.Empty;
 }
 
 public sealed class ResistanceChannelSetting

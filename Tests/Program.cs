@@ -1865,6 +1865,13 @@ internal static class Program
 
     private static void TestPartCounterStore()
     {
+        Assert(
+            string.Equals(
+                new PartCounterStore().StoragePath,
+                Path.Combine(AppContext.BaseDirectory, "PartCnt.txt"),
+                StringComparison.OrdinalIgnoreCase),
+            "Default PartCnt path is only the file beside the running EXE");
+
         string root = Path.Combine(Path.GetTempPath(), "JBZSelfTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -1924,9 +1931,13 @@ internal static class Program
         {
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             Encoding cp949 = Encoding.GetEncoding(949);
+            Encoding utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
             var writer = new LegacyPhtHistoryService(passRoot, errorRoot);
             ProductModel model = Model(("PAIR", new[] { 1, 2 }));
             model.PartNumber = "sssss";
+            model.ProductName = "VOLTAGE_6S";
+            model.VehicleType = "AE EV PE";
+            model.Eco = "AE EV PE";
 
             DateTime masterTime = new(2026, 8, 7, 16, 25, 39);
             string masterPath = writer.AppendMaster(model, masterTime, 7000, goodMaster: true);
@@ -1938,16 +1949,16 @@ internal static class Program
                 ResultText = "PASS"
             };
             string passPath = writer.AppendProduct(model, pass, 7001);
-            string passText = cp949.GetString(File.ReadAllBytes(passPath));
+            string passText = utf8.GetString(File.ReadAllBytes(passPath));
             string expectedPass =
-                "|[정상마스터]101|..|260807|162539|2608077000|||sssss7000|||||||\r\n" +
-                "|1|..|260807|162547|2608077001|||sssss7001|||||||\r\n";
+                "|[정상마스터]101|..|260807|162539|2608077000|||sssss7000|VOLTAGE_6S|AE EV PE|AE EV PE||||\r\n" +
+                "|1|..|260807|162547|2608077001|||sssss7001|VOLTAGE_6S|AE EV PE|AE EV PE||||\r\n";
             Assert(masterPath == passPath && passPath.EndsWith(
                     Path.Combine("Year2026", "Month08", "Day07.dat"),
                     StringComparison.OrdinalIgnoreCase),
                 "PHT PASS path uses original Year/Month/Day.dat hierarchy");
             Assert(passText == expectedPass,
-                "PHT PASS/master records match original CP949 pipe format and append without truncation");
+                "PHT PASS/master records match the supplied UTF-8 pipe format and append without truncation");
 
             var smallCounterPass = new CompletedTestResult
             {
@@ -1957,8 +1968,8 @@ internal static class Program
                 ResultText = "PASS"
             };
             string smallCounterPath = writer.AppendProduct(model, smallCounterPass, 1);
-            string smallCounterText = cp949.GetString(File.ReadAllBytes(smallCounterPath));
-            Assert(smallCounterText == "|1|..|260701|181709|2607010001|||sssss0001|||||||\r\n",
+            string smallCounterText = utf8.GetString(File.ReadAllBytes(smallCounterPath));
+            Assert(smallCounterText == "|1|..|260701|181709|2607010001|||sssss0001|VOLTAGE_6S|AE EV PE|AE EV PE||||\r\n",
                 "PHT PASS LOT is padded to four digits like the original application");
 
             model.PartNumber = "1200020430";
@@ -1970,9 +1981,9 @@ internal static class Program
                 ResultText = "PASS"
             };
             string productionLotPath = writer.AppendProduct(model, productionLotPass, 2001);
-            string productionLotText = cp949.GetString(File.ReadAllBytes(productionLotPath));
+            string productionLotText = utf8.GetString(File.ReadAllBytes(productionLotPath));
             Assert(productionLotText ==
-                   "|1|..|260826|075358|2608262001|||12000204302001|||||||\r\n",
+                   "|1|..|260826|075358|2608262001|||12000204302001|VOLTAGE_6S|AE EV PE|AE EV PE||||\r\n",
                 "PHT PASS record uses configured production LOT instead of PartCnt counter");
 
             model.ProductName = "BMS EXT";
@@ -3326,6 +3337,32 @@ internal static class Program
             migratedSettings.LotNoDate == "2026-08-30" &&
             migrationPersistCount == 1,
             "First upgrade stamps LOTNO date without discarding the current sequence");
+
+        var perProductSettings = new ProductionSettings
+        {
+            LotNoDate = "2026-08-30",
+            LotSettingsByProduct = new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["PART-2000"] = new() { LotNo = 2000, LotNoDate = "2026-08-30" },
+                ["PART-7000"] = new() { LotNo = 7000, LotNoDate = "2026-08-30" },
+                ["PART-5000"] = new() { LotNo = 5000, LotNoDate = "2026-08-30" }
+            }
+        };
+        var perProductLots = new LotSequenceService(perProductSettings, _ => { }, () => lotClock);
+        perProductLots.SelectProduct("PART-2000", migrateCurrentLotIfMissing: false);
+        Assert(perProductLots.NextLot == 2000, "PART-2000 loads its own starting LOT");
+        Assert(perProductLots.TryCommitSuccessfulPrint(
+                "part-2000-cycle",
+                perProductLots.ReserveForCycle("part-2000-cycle"),
+                out _),
+            "PART-2000 commits its own LOT");
+        perProductLots.SelectProduct("PART-7000", migrateCurrentLotIfMissing: false);
+        Assert(perProductLots.NextLot == 7000, "PART-7000 loads its own starting LOT");
+        perProductLots.SelectProduct("PART-5000", migrateCurrentLotIfMissing: false);
+        Assert(perProductLots.NextLot == 5000, "PART-5000 loads its own starting LOT");
+        perProductLots.SelectProduct("PART-2000", migrateCurrentLotIfMissing: false);
+        Assert(perProductLots.NextLot == 2001,
+            "Switching back restores the previously advanced LOT for that product");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelProfileTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);

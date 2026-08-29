@@ -243,7 +243,17 @@ public sealed partial class LegacyPhtHistoryReader
 
     private static IEnumerable<string> ReadLines(string path)
     {
-        string text = KoreanEncoding.GetString(ReadSharedBytes(path));
+        byte[] bytes = ReadSharedBytes(path);
+        string text;
+        try
+        {
+            text = new UTF8Encoding(false, true).GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            // Đọc được cả lịch sử CP949 do các phiên bản cũ đã ghi.
+            text = KoreanEncoding.GetString(bytes);
+        }
         return text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries);
     }
 

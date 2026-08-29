@@ -11,6 +11,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private int _masterFaultRequiredCount;
     private readonly TestViewModel? _test;
     private readonly string _modelPath;
+    private readonly string _lotProductKey;
     private bool _manualRuntimeActive;
     private string _manualRelay1Status = "OFF";
     private string _manualRelay2Status = "OFF";
@@ -121,6 +122,16 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         _test = test;
         Settings = ProductionConfigService.Load();
         _modelPath = test?.CurrentModelPath ?? Settings.LastThtPath;
+        _lotProductKey = ProductionConfigService.GetLotProductKey(
+            test?.PartNumber,
+            _modelPath,
+            test?.ModelName);
+        ProductLotSettings productLot = ProductionConfigService.GetOrCreateProductLot(
+            Settings,
+            _lotProductKey,
+            migrateCurrentLot: true);
+        Settings.LotNo = productLot.LotNo;
+        Settings.LotNoDate = productLot.LotNoDate;
         if (!string.IsNullOrWhiteSpace(_modelPath))
             Settings.LastThtPath = _modelPath;
         Settings.ManualModeEnabled = false;
@@ -382,6 +393,11 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             Settings, _modelPath, MasterFaultRequiredCount);
         ProductionConfigService.SetWaterProofProfileForPath(
             Settings, _modelPath, WaterProof);
+        ProductionConfigService.SetProductLot(
+            Settings,
+            _lotProductKey,
+            Settings.LotNo,
+            DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
         ProductionConfigService.Save(Settings);
     }
 
