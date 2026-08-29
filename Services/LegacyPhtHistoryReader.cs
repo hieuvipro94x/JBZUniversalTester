@@ -14,9 +14,8 @@ public sealed record LegacyProductionSnapshot(
     long LifetimeTotal);
 
 /// <summary>
-/// Reads the original PHT20 CP949 history. C:\Pass_ and C:\Error_ are the
-/// shared source written by both applications, so switching applications does
-/// not make production completed by the other application disappear.
+/// Reads DAT/ERR history for explicit compatibility import. Runtime production
+/// counters and history are always queried from SQLite.
 /// </summary>
 public sealed partial class LegacyPhtHistoryReader
 {
@@ -28,8 +27,8 @@ public sealed partial class LegacyPhtHistoryReader
 
     public LegacyPhtHistoryReader(string? passRoot = null, string? errorRoot = null)
     {
-        _passRoot = string.IsNullOrWhiteSpace(passRoot) ? @"C:\Pass_" : Path.GetFullPath(passRoot);
-        _errorRoot = string.IsNullOrWhiteSpace(errorRoot) ? @"C:\Error_" : Path.GetFullPath(errorRoot);
+        _passRoot = string.IsNullOrWhiteSpace(passRoot) ? RuntimePaths.PassRoot : Path.GetFullPath(passRoot);
+        _errorRoot = string.IsNullOrWhiteSpace(errorRoot) ? RuntimePaths.ErrorRoot : Path.GetFullPath(errorRoot);
     }
 
     public bool HasSharedHistory => Directory.Exists(_passRoot) || Directory.Exists(_errorRoot);

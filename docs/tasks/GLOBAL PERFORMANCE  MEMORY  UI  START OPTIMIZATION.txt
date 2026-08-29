@@ -1,0 +1,1073 @@
+# CODEX TASK 1 — GLOBAL PERFORMANCE / MEMORY / UI / START OPTIMIZATION
+
+# JBZUniversalTester
+
+# TUYỆT ĐỐI KHÔNG REFACTOR DATABASE TRONG TASK NÀY
+
+## MỤC TIÊU
+
+Phân tích TOÀN BỘ solution JBZUniversalTester hiện tại và tối ưu triệt để:
+
+* Startup
+* MainWindow
+* TestWindow
+* ProductionSettingsPage
+* History UI
+* Model selection
+* START TEST
+* D2XX lifecycle
+* Scan worker
+* TestEngine → UI pipeline
+* Dispatcher
+* ObservableCollection/DataGrid
+* Logging
+* FileSystemWatcher
+* Timer
+* ResourceDictionary
+* Memory leak
+* OutOfMemoryException
+* Low RAM / low CPU machines
+* Shutdown/recovery
+
+Mục tiêu:
+
+* chạy ổn trên máy cấu hình thấp;
+* RAM 4GB vẫn production lâu dài;
+* UI không freeze;
+* không OutOfMemory;
+* mở Settings nhiều lần không tăng RAM tuyến tính;
+* TestWindow mở/đóng nhiều lần không leak;
+* bấm START gần như tức thì;
+* hardware realtime không bị giảm độ nhạy.
+
+==================================================
+A. KHÔNG ĐỤNG DATABASE
+======================
+
+DATABASE HIỆN ĐANG ĐƯỢC REFACTOR Ở TASK KHÁC.
+
+KHÔNG sửa kiến trúc/database schema trong task này.
+
+Không redesign:
+
+* Tests
+* TestFaults
+* Parts
+* Models
+* ConfigSnapshots
+* ProductionRuns
+* SQLite schema
+* migration
+* source-of-truth architecture.
+
+Không đổi:
+
+TestHistoryStore
+ProductionStatisticsStore
+PartCounterStore
+LegacyPhtHistoryReader
+LegacyPhtHistoryService
+
+trừ khi bắt buộc để sửa compile do code hiện tại.
+
+Nếu buộc phải sửa:
+chỉ minimal compile fix,
+không thay semantics persistence.
+
+Không thay đổi database path/schema.
+
+Ghi database vào:
+
+EXCLUDED — DATABASE REFACTOR IN PROGRESS.
+
+==================================================
+B. ROOT CAUSE MỚI: OUT OF MEMORY KHI MỞ SETTINGS
+================================================
+
+Đã ghi nhận exception:
+
+System.OutOfMemoryException
+
+stack:
+
+System.Collections.Generic.List<T>.ctor
+System.Xaml.XamlNodeList.Initialize
+Baml2006Reader
+ResourceDictionary
+FrameworkElement.FindImplicitStyleResource
+XamlReader.LoadBaml
+Application.LoadComponent
+ProductionSettingsPage.InitializeComponent
+ProductionSettingsPage..ctor
+MainWindow.ShowSettingsPage
+MainWindow.OpenSettings_Click
+
+Đây là WPF/XAML/resource/memory problem.
+
+KHÔNG coi đây là lỗi:
+
+* USB
+* D2XX
+* board
+* database.
+
+Phải audit riêng ProductionSettingsPage.
+
+==================================================
+C. KIỂM TRA TARGET PLATFORM
+===========================
+
+Audit:
+
+.csproj
+Directory.Build.props
+publish profile
+RuntimeIdentifier
+PlatformTarget
+Prefer32Bit.
+
+Production Windows 64-bit phải ưu tiên:
+
+x64
+
+hoặc AnyCPU chạy 64-bit.
+
+Không để:
+
+Prefer32Bit=true
+
+nếu khiến app chạy 32-bit.
+
+Report:
+
+BUILD_PLATFORM
+PROCESS_BITNESS
+PREFER32BIT
+
+Không đổi sang x64 mù quáng nếu dependency native bắt buộc x86.
+
+Kiểm tra:
+
+FTD2XX
+printer driver
+VISA
+other native DLLs.
+
+Nếu tất cả hỗ trợ x64:
+build production x64.
+
+==================================================
+D. MEMORY TARGET
+================
+
+Mục tiêu tham khảo:
+
+Startup/MainWindow:
+< khoảng 150–200 MB private memory nếu thực tế cho phép.
+
+Normal production:
+cố giữ < 250–300 MB.
+
+Settings/History mở:
+không tăng vô hạn.
+
+Quan trọng hơn con số tuyệt đối:
+
+MEMORY PHẢI PLATEAU.
+
+Không tăng theo:
+
+* số test cycle;
+* số lần mở Settings;
+* số lần mở TestWindow;
+* số lần đổi model.
+
+==================================================
+E. PRODUCTIONSETTINGSPAGE MEMORY AUDIT
+======================================
+
+Audit:
+
+ProductionSettingsPage.xaml
+ProductionSettingsPage.xaml.cs
+related ViewModel
+resources/styles/templates.
+
+Search:
+
++=
+PropertyChanged +=
+CollectionChanged +=
+FrameReceived +=
+Log +=
+Timer
+DispatcherTimer
+System.Threading.Timer
+FileSystemWatcher
+static event
+Loaded
+Unloaded.
+
+Mọi subscription page-owned phải có lifecycle rõ:
+
+Attach
+Detach
+Dispose
+
+hoặc WeakEvent pattern phù hợp.
+
+Khi page bị đóng:
+không còn reference chain giữ page sống.
+
+==================================================
+F. TEST MEMORY LEAK SETTINGS
+============================
+
+Stress:
+
+open Settings
+close Settings
+
+100 lần.
+
+Theo dõi:
+
+PrivateMemory
+WorkingSet
+GC heap
+Handles
+Thread count.
+
+Sau GC bình thường:
+memory phải plateau.
+
+Không tăng tuyến tính mỗi lần mở.
+
+==================================================
+G. CACHE HOẶC RECREATE SETTINGS ĐÚNG CÁCH
+=========================================
+
+Chọn một trong hai kiến trúc sau dựa trên audit:
+
+OPTION A:
+cache đúng một ProductionSettingsPage instance
+và reuse.
+
+Hoặc:
+
+OPTION B:
+recreate page nhưng page bắt buộc Dispose/Detach hoàn chỉnh.
+
+Không vừa recreate mỗi lần vừa để event giữ page cũ.
+
+==================================================
+H. RESOURCE DICTIONARY
+======================
+
+Audit:
+
+App.xaml
+ProductionSettingsPage.xaml
+TestWindow.xaml
+HistoryPage.xaml
+shared dictionaries.
+
+Không duplicate hàng trăm:
+
+Style
+ControlTemplate
+DataTemplate
+Brush
+Converter
+Geometry
+Effect
+
+trong mỗi page nếu có thể shared.
+
+Common resources:
+đưa application/shared dictionary.
+
+Không merge cùng ResourceDictionary nhiều lần vô ích.
+
+==================================================
+I. HEAVY EFFECTS
+================
+
+Audit:
+
+DropShadowEffect
+BlurEffect
+Opacity animation
+large gradients
+BitmapEffect
+large image resources.
+
+Production UI không cần hiệu ứng nặng.
+
+Giảm hoặc bỏ các effect không cần thiết.
+
+Không thay layout/appearance mạnh nếu không cần.
+
+==================================================
+J. STATIC/FROZEN WPF RESOURCES
+==============================
+
+Các resource immutable có thể share/freeze thì dùng shared/frozen resource phù hợp.
+
+Không recreate Brush/Geometry hàng nghìn lần nếu static.
+
+==================================================
+K. FIRST RENDER
+===============
+
+MainWindow phải render trước:
+
+* D2XX initialization dài;
+* printer probe;
+* history;
+* watcher;
+* audio;
+* model diagnostics.
+
+Flow:
+
+App
+→ MainWindow
+→ Show
+→ ContentRendered
+→ deferred initialization.
+
+Không heavy constructor.
+
+==================================================
+L. CONSTRUCTOR AUDIT
+====================
+
+Audit constructor của:
+
+MainViewModel
+TestViewModel
+ProductionSettingsPage
+HistoryPage
+services.
+
+Constructor chỉ nên:
+
+assign
+subscribe lightweight
+create commands/state.
+
+Không heavy:
+
+disk
+DB
+COM
+D2XX
+directory scan
+resource generation.
+
+DATABASE RELATED I/O:
+KHÔNG sửa trong task này,
+chỉ report nếu phát hiện.
+
+==================================================
+M. D2XX ARCHITECTURE
+====================
+
+Giữ kiến trúc:
+
+ONE D2XX OWNER
+ONE CONNECTION
+ONE RX WORKER.
+
+D2xxBoardTransport là native owner duy nhất.
+
+Search:
+
+FT_Open
+FT_OpenEx
+FT_Close
+FT_Read
+FT_Write
+FT_GetQueueStatus.
+
+Không duplicate hardware lifecycle.
+
+==================================================
+N. EVENT-DRIVEN RX
+==================
+
+D2XX sử dụng:
+
+FT_EVENT_RXCHAR
+Wait/Event
+GetQueueStatus
+Read available block.
+
+Không busy polling.
+
+Không làm:
+
+while(true)
+GetQueueStatus()
+
+khi RX empty.
+
+==================================================
+O. START TEST
+=============
+
+START không có nghĩa là START HARDWARE.
+
+Healthy board:
+
+Connected
++
+Production scan alive
++
+capacity unchanged
+
+thì:
+
+START
+→ reset logical cycle
+→ capture fresh-frame sequence
+→ ARM
+→ return.
+
+Không:
+
+reload config
+reconnect
+STOP
+INIT
+START_SCAN
+
+mỗi cycle.
+
+==================================================
+P. TESTWINDOW
+=============
+
+TestWindow constructor/Loaded phải nhẹ.
+
+Không InitializeHardware lần thứ hai nếu Main startup đã làm.
+
+Opening TestWindow:
+không restart scan khỏe.
+
+Closing TestWindow:
+không dispose D2XX connection.
+
+==================================================
+Q. SCAN WORKER LIFETIME
+=======================
+
+Reader worker sống lâu.
+
+Không create/destroy mỗi TestWindow.
+
+Expected:
+
+D2XX_READER_COUNT = 1
+
+trong toàn runtime bình thường.
+
+==================================================
+R. CONFIGURESCANRANGE
+=====================
+
+Không native FTDI call synchronous trên UI thread.
+
+Không:
+
+_ioLock.Wait()
+
+trong method sync gọi từ UI.
+
+Nếu native setting cần update:
+serialized async hardware operation.
+
+Nếu setting không đổi:
+return ngay.
+
+==================================================
+S. UI KHÔNG XỬ LÝ RAW FRAME
+===========================
+
+Pipeline:
+
+FTDI
+→ decoder
+→ TestEngine
+→ logical state
+→ UI.
+
+Không:
+
+FTDI
+→ Dispatcher
+→ UI.
+
+TestEngine xử lý mọi frame.
+
+UI chỉ update khi state đổi.
+
+==================================================
+T. UI COALESCING
+================
+
+Không Dispatcher.BeginInvoke hàng loạt mỗi frame.
+
+Implement/verify:
+
+latest pending state
++
+one scheduled UI flush.
+
+Nếu callback pending:
+không schedule callback thứ hai.
+
+==================================================
+U. OBSERVABLE COLLECTION
+========================
+
+Audit:
+
+Faults
+ProbeContacts
+Cards
+Logs
+MasterFaults
+Resistance
+Waterproof
+History rows.
+
+Không Clear/Add toàn bộ mỗi frame.
+
+Diff theo stable key.
+
+Không update collection nếu state giống nhau.
+
+==================================================
+V. LOG UI
+=========
+
+UI log giữ khoảng:
+
+100–300 lines.
+
+Raw log ghi file/diagnostic worker.
+
+Không giữ hàng chục nghìn log objects trong WPF ObservableCollection.
+
+==================================================
+W. HISTORY UI
+=============
+
+KHÔNG redesign database/query schema.
+
+Nhưng UI History phải:
+
+* không giữ 20.000+ WPF row objects vô ích;
+* bật virtualization;
+* batch/snapshot binding;
+* không Add từng row nếu dữ liệu đã được query.
+
+Database access internals giữ nguyên task đang dở.
+
+==================================================
+X. DATAGRID VIRTUALIZATION
+==========================
+
+Audit DataGrid/ListView:
+
+EnableRowVirtualization
+EnableColumnVirtualization
+VirtualizingPanel.IsVirtualizing
+VirtualizationMode=Recycling
+
+nếu phù hợp.
+
+Không đặt DataGrid trong ScrollViewer ngoài khiến virtualization bị vô hiệu.
+
+==================================================
+Y. MODEL SELECTION
+==================
+
+Parse THT ngoài Dispatcher.
+
+Build topology/lookup ngoài UI nếu nặng.
+
+Atomic commit model vào engine.
+
+UI chỉ apply snapshot nhỏ.
+
+Không build large diagnostics string trên Dispatcher.
+
+DATABASE statistics part:
+không sửa trong task này.
+
+==================================================
+Z. LOGEXPECTEDNETBUILD
+======================
+
+Nếu diagnostic method duyệt toàn topology và build string lớn:
+background hoặc diagnostics-only.
+
+Không giữ model selection chờ logging.
+
+==================================================
+AA. FILESYSTEMWATCHER / TIMER
+=============================
+
+Một owner duy nhất.
+
+Không tạo watcher/timer mỗi lần mở page.
+
+Dispose/unsubscribe rõ ràng.
+
+Debounce callback.
+
+DATABASE watcher behavior:
+không redesign, chỉ memory/threading cleanup.
+
+==================================================
+AB. AUDIO
+=========
+
+Initialize một lần.
+
+Không preload multiple sound players ở page constructors.
+
+Không audio I/O trong hardware frame callback.
+
+==================================================
+AC. PRINTER
+===========
+
+Printer connection không block first render.
+
+Không printer probe synchronous trên UI.
+
+Không đổi print business logic.
+
+==================================================
+AD. OUTOFMEMORY GLOBAL HANDLER
+==============================
+
+Audit:
+
+DispatcherUnhandledException.
+
+Không được coi:
+
+OutOfMemoryException
+
+là recoverable ordinary exception rồi:
+
+e.Handled = true
+
+và tiếp tục UI nửa khởi tạo.
+
+Phân loại exception:
+
+Recoverable UI/operator error:
+có thể handled.
+
+Fatal/resource corruption:
+OutOfMemoryException
+StackOverflowException nếu bắt được ở tầng phù hợp
+serious corruption
+
+→ write crash diagnostics
+→ safe hardware best effort
+→ controlled shutdown/restart guidance.
+
+Không popup "kiểm tra USB/bo" cho OutOfMemoryException.
+
+==================================================
+AE. ERROR CLASSIFICATION
+========================
+
+Tách:
+
+Hardware error
+Configuration error
+UI/resource error
+Memory error
+Persistence error
+Printer error.
+
+Không gom tất cả thành:
+
+"LỖI HỆ THỐNG – kiểm tra USB".
+
+==================================================
+AF. MEMORY TELEMETRY
+====================
+
+Thêm lightweight diagnostics.
+
+Mỗi khoảng 5–10 giây khi diagnostic enabled:
+
+MEM
+PrivateMB
+WorkingSetMB
+GCHeapMB
+Handles
+Threads.
+
+Events:
+
+MEM STARTUP
+MEM BEFORE_SETTINGS
+MEM AFTER_SETTINGS_OPEN
+MEM SETTINGS_CLOSE
+MEM TESTWINDOW_OPEN/CLOSE.
+
+Không spam normal log.
+
+==================================================
+AG. UI STALL WATCHDOG
+=====================
+
+Diagnostics mode:
+
+Dispatcher heartbeat ~250ms.
+
+Nếu delay >100ms:
+
+UI_STALL duration_ms=...
+
+Không popup.
+
+==================================================
+AH. LOW RESOURCE MODE
+=====================
+
+Thêm optional setting:
+
+LowResourceMode
+
+nếu phù hợp project.
+
+Khi bật chỉ giảm UI/diagnostic cost:
+
+* disable nonessential animation;
+* disable expensive shadows;
+* UI Logs max ~100;
+* smaller History display batch/page;
+* no preload Settings;
+* no preload History;
+* raw D2XX trace OFF;
+* reduce decorative effects.
+
+TUYỆT ĐỐI KHÔNG:
+
+* giảm frame processing;
+* tăng fault confirmation;
+* drop frames;
+* delay SHORT/WRONG/Probe.
+
+==================================================
+AI. HARDWARE REALTIME MUST REMAIN
+=================================
+
+Không throttle:
+
+BoardIoDecoder
+TestEngine.ProcessFrame
+Wrong/Short
+Probe
+CLIP.
+
+Every complete hardware frame vẫn được xử lý.
+
+Chỉ throttle/coalesce PRESENTATION.
+
+==================================================
+AJ. MEMORY ALLOCATION HOT PATH
+==============================
+
+Audit hot methods:
+
+BoardIoDecoder
+ProcessFrame
+Probe classifier
+fault signatures.
+
+Search:
+
+ToArray
+ToList
+ToHashSet
+ToDictionary
+OrderBy
+GroupBy
+string.Join
+new Dictionary
+new HashSet
+
+trong every-frame path.
+
+Chỉ tối ưu khi thực sự hot.
+
+Không rewrite mù quáng.
+
+==================================================
+AK. NO TASK.RUN PER FRAME
+=========================
+
+Không:
+
+Task.Run(() => ProcessFrame(...))
+
+mỗi frame.
+
+Một worker/event pipeline ổn định.
+
+==================================================
+AL. LOCK/DEADLOCK
+=================
+
+Audit:
+
+SemaphoreSlim
+lock
+Dispatcher
+_ioLock
+_connectLock
+_scanSwitchLock.
+
+Không:
+
+hardware lock held
+→ Dispatcher.Invoke.
+
+Không sync wait trên Dispatcher.
+
+==================================================
+AM. SHUTDOWN
+============
+
+Idempotent.
+
+Không double:
+
+Disconnect
+Dispose
+FT_Close.
+
+Reader cancel/await trước close handle.
+
+Không page/window giữ worker alive sau shutdown.
+
+==================================================
+AN. STRESS TESTS
+================
+
+Test ít nhất:
+
+1. Open/close Settings 100 lần.
+2. Open/close TestWindow 100 lần.
+3. Change model 100 lần.
+4. Production simulation 500 cycles nếu có.
+5. Open History repeatedly.
+6. Device reconnect several times.
+
+Measure:
+
+Private memory
+Working set
+GC heap
+Handles
+Threads
+D2XX reader count.
+
+Expected:
+plateau.
+
+==================================================
+AO. MACHINE COMPATIBILITY
+=========================
+
+Test/configure target cho:
+
+Windows 64-bit
+4GB RAM
+low-end CPU.
+
+Nếu app cần minimum RAM:
+report rõ.
+
+Không giả định máy production mạnh.
+
+==================================================
+AP. STATIC SEARCH
+=================
+
+Sau refactor search:
+
+Thread.Sleep
+.Result
+.Wait()
+GetAwaiter().GetResult()
+Dispatcher.Invoke
+Task.Run
+new ProductionSettingsPage
+new TestWindow
+DispatcherTimer
+FileSystemWatcher
++=
+StartScanAsync
+StopScanAsync
+ConfigureScanRange.
+
+Explain important hits.
+
+==================================================
+AQ. TRƯỚC KHI EDIT
+==================
+
+Report:
+
+PERFORMANCE / MEMORY AUDIT
+
+Startup blockers:
+...
+
+Settings memory risks:
+...
+
+TestWindow memory risks:
+...
+
+WPF resource risks:
+...
+
+D2XX lifecycle:
+...
+
+Dispatcher hot paths:
+...
+
+Collection hot paths:
+...
+
+Timer/watcher ownership:
+...
+
+Exception handling problems:
+...
+
+Files to modify:
+...
+
+DATABASE:
+EXCLUDED — REFACTOR IN PROGRESS.
+
+Sau đó mới edit.
+
+==================================================
+AR. SAU EDIT
+============
+
+Report:
+
+FILES MODIFIED
+
+STARTUP BEFORE/AFTER
+
+SETTINGS BEFORE/AFTER
+
+START TEST BEFORE/AFTER
+
+MEMORY LIFETIME BEFORE/AFTER
+
+D2XX THREAD MODEL
+
+UI UPDATE MODEL
+
+OUTOFMEMORY HANDLING
+
+LOW RESOURCE MODE
+
+STRESS TEST RESULTS
+
+BUILD RESULT
+
+DATABASE:
+UNCHANGED.
+
+==================================================
+AS. BUILD
+=========
+
+Clean
+delete bin/obj
+Restore
+Build Release
+
+Nếu dependencies cho phép:
+verify x64 production build.
+
+Fix compile errors do task.
+
+==================================================
+AT. REGRESSION
+==============
+
+Không làm hỏng:
+
+Board Connect
+Background Scan
+Correct Wiring
+Wrong Wiring
+Short
+Probe
+CLIP
+Master
+Resistance
+Leak
+Relay
+Label
+Product Removal
+Manual.
+
+DATABASE regression:
+không thay đổi kiến trúc trong task này.
+
+==================================================
+AU. NGUYÊN TẮC CUỐI
+===================
+
+Tối ưu để app chạy tốt trên máy yếu bằng cách giảm:
+
+UI allocations
+duplicate page instances
+ResourceDictionary instances
+logs
+DataGrid rows
+Dispatcher callbacks
+unnecessary workers
+memory leaks
+hardware lifecycle churn.
+
+KHÔNG giảm:
+
+hardware acquisition
+fault detection sensitivity
+frame processing.
+
+Mục tiêu cuối:
+
+LOW RAM
++
+LOW CPU
++
+REALTIME HARDWARE
++
+RESPONSIVE UI
++
+NO MEMORY LEAK.

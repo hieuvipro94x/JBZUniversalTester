@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Threading;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.Versioning;
+using JBZUniversalTester.ViewModels;
 
 namespace JBZUniversalTester;
 
@@ -44,9 +45,45 @@ public partial class App : Application
             DispatcherPriority.ApplicationIdle);
     }
 
-    private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    private static async void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        CrashReportService.Write(e.Exception, "DispatcherUnhandledException", BuildRuntimeContext());
         AsyncFileLogService.Current.Error($"DispatcherUnhandledException: {e.Exception}");
+
+        if (e.Exception is OutOfMemoryException)
+        {
+            // Không tiếp tục một visual tree nửa khởi tạo sau OOM. Ghi crash report
+            // ở trên, đưa hardware về safe state best-effort rồi shutdown có kiểm soát.
+            e.Handled = true;
+            try
+            {
+                if (Current?.MainWindow?.DataContext is MainViewModel viewModel)
+                    await viewModel.ShutdownAsync();
+            }
+            catch (Exception shutdownException)
+            {
+                CrashReportService.Write(
+                    shutdownException,
+                    "OutOfMemory.SafeShutdown",
+                    BuildRuntimeContext());
+            }
+
+            try
+            {
+                MessageBox.Show(
+                    "Ứng dụng đã hết bộ nhớ và phải đóng để bảo đảm trạng thái phần cứng. " +
+                    "Vui lòng mở lại ứng dụng; báo cáo lỗi đã được ghi trong thư mục Crash.",
+                    "JBZ - LỖI BỘ NHỚ",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            catch
+            {
+            }
+
+            Current?.Shutdown(-1);
+            return;
+        }
 
         // V15.1 SAFE OFFLINE MODE - lớp bảo vệ cuối cùng cho lỗi UI/async event.
         // Các thao tác phần cứng dự kiến phải được catch ở ViewModel/Command trước;
@@ -56,7 +93,7 @@ public partial class App : Application
         {
             MessageBox.Show(
                 "Ứng dụng gặp lỗi hệ thống và đã dừng thao tác hiện tại.\n\n" +
-                "Hãy kiểm tra nguồn điện, bo mạch và cáp USB trước khi thử lại.\n\n" +
+                "Thao tác hiện tại đã dừng. Vui lòng xem log để xác định lỗi cấu hình, giao diện, thiết bị hoặc dữ liệu.\n\n" +
                 $"Chi tiết: {e.Exception.Message}",
                 "JBZ - LỖI HỆ THỐNG",
                 MessageBoxButton.OK,
@@ -67,8 +104,13 @@ public partial class App : Application
         }
     }
 
-    private static void OnUnhandledException(object? sender, UnhandledExceptionEventArgs e) =>
+    private static void OnUnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        Exception exception = e.ExceptionObject as Exception
+            ?? new InvalidOperationException(e.ExceptionObject?.ToString() ?? "Unknown fatal exception");
+        CrashReportService.Write(exception, "AppDomain.UnhandledException", BuildRuntimeContext());
         AsyncFileLogService.Current.Error($"AppDomain UnhandledException: {e.ExceptionObject}");
+    }
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
@@ -87,5 +129,22 @@ public partial class App : Application
 
         AsyncFileLogService.Current.Dispose();
         base.OnExit(e);
+    }
+
+    private static string BuildRuntimeContext()
+    {
+        try
+        {
+            if (Current?.MainWindow?.DataContext is not MainViewModel viewModel)
+                return "MainViewModel unavailable";
+
+            return $"Model={viewModel.Model?.ModelName ?? "(none)"}; " +
+                   $"Part={viewModel.Model?.PartNumber ?? "(none)"}; " +
+                   $"AppState={viewModel.Status}; TestState={viewModel.Test.State}";
+        }
+        catch
+        {
+            return "Runtime context unavailable";
+        }
     }
 }

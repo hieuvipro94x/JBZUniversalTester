@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -40,6 +41,7 @@ public partial class MainWindow : Window
     {
         ContentRendered -= MainWindow_ContentRendered;
         StartupPerformanceTrace.Mark("T2 MainWindow first ContentRendered");
+        LogMemory("MEM STARTUP");
         _uiStallWatchdog = new UiStallWatchdog(Dispatcher);
 
         // Quan trọng: không khởi tạo FTDI/model/printer trong Loaded.
@@ -162,6 +164,7 @@ public partial class MainWindow : Window
             // Faults đã được SetModel/BuildRows trước khi Show(), vì vậy DataGrid
             // có cấu hình THT ngay frame render đầu tiên của TestWindow.
             _testWindow.Show();
+            LogMemory("MEM TESTWINDOW_OPEN");
             Hide();
         }
         catch (Exception ex)
@@ -191,6 +194,7 @@ public partial class MainWindow : Window
         }
 
         Show();
+        LogMemory("MEM TESTWINDOW_CLOSE");
         WindowState = WindowState.Maximized;
         UpdateProductRemovalGate();
         Activate();
@@ -216,13 +220,13 @@ public partial class MainWindow : Window
         SelectModelButton.IsEnabled = boardConnected && !blocked;
     }
 
-    private void OpenSettings_Click(
+    private async void OpenSettings_Click(
         object sender,
         RoutedEventArgs e)
     {
         try
         {
-            ShowSettingsPage();
+            await ShowSettingsPageAsync();
         }
         catch (Exception ex)
         {
@@ -235,16 +239,22 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowSettingsPage()
+    private async Task ShowSettingsPageAsync()
     {
         CloseInternalPage();
+        LogMemory("MEM BEFORE_SETTINGS");
 
-        _settingsPage = new ProductionSettingsPage(_viewModel);
+        // Config/THT preparation có disk/parse work; tạo ViewModel ngoài
+        // Dispatcher để BAML của page được cấp phát sau khi UI đã rảnh.
+        ProductionSettingsViewModel settingsViewModel = await Task.Run(
+            () => new ProductionSettingsViewModel(_viewModel.Test));
+        _settingsPage = new ProductionSettingsPage(_viewModel, settingsViewModel);
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
 
         InternalPageHost.Content = _settingsPage;
         InternalPageHost.Visibility = Visibility.Visible;
+        LogMemory("MEM AFTER_SETTINGS_OPEN");
     }
 
     private async void SettingsPage_SettingsSaved(object? sender, EventArgs e)
@@ -303,17 +313,30 @@ public partial class MainWindow : Window
         {
             _settingsPage.RequestClose -= InternalPage_RequestClose;
             _settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
+            _settingsPage.ReleasePageResources();
             _settingsPage = null;
+            LogMemory("MEM SETTINGS_CLOSE");
         }
 
         if (_historyPage is not null)
         {
             _historyPage.RequestClose -= InternalPage_RequestClose;
+            _historyPage.ReleasePageResources();
             _historyPage = null;
         }
 
         InternalPageHost.Content = null;
         InternalPageHost.Visibility = Visibility.Collapsed;
+    }
+
+    private static void LogMemory(string marker)
+    {
+        using Process process = Process.GetCurrentProcess();
+        AsyncFileLogService.Current.Performance(
+            $"{marker} private_mb={process.PrivateMemorySize64 / 1048576d:0.###} " +
+            $"working_set_mb={process.WorkingSet64 / 1048576d:0.###} " +
+            $"gc_heap_mb={GC.GetTotalMemory(false) / 1048576d:0.###} " +
+            $"handles={process.HandleCount} threads={process.Threads.Count}");
     }
 
     private async void MainWindow_Closing(
@@ -333,6 +356,7 @@ public partial class MainWindow : Window
 
         try
         {
+            CloseInternalPage();
             _uiStallWatchdog?.Dispose();
             _uiStallWatchdog = null;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;

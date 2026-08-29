@@ -81,18 +81,9 @@ public sealed class LabelPrintService : IAsyncDisposable
             $"Copies={request.Copies} CycleId={request.CycleId}");
         Encoding encoding = ResolveEncoding(request.Profile.EncodingName);
         byte[] payload = EncodeStrict(request.Payload, encoding);
-        string previewDirectory = Path.Combine(AppContext.BaseDirectory, "Data", "Labels");
-        Directory.CreateDirectory(previewDirectory);
-        string extension = ResolvePreviewExtension(request);
-        string previewPath = Path.Combine(
-            previewDirectory,
-            $"{request.Data.TestedAt:yyyyMMdd_HHmmssfff}_{SafeFilePart(request.Data.PartNumber)}_LOT{request.Data.LotNo}_{SafeFilePart(request.Profile.Id)}_{SafeFilePart(request.CycleId)}{extension}");
-        await File.WriteAllBytesAsync(previewPath, payload, ct);
-        AsyncFileLogService.Current.Application(
-            $"[LABEL] Preview={previewPath} Bytes={payload.Length} CycleId={request.CycleId}");
 
         if (request.Profile.Mode == LabelPrintMode.ExternalHelper)
-            return await PrintWithExternalHelperAsync(request, payload, previewPath, ct);
+            return await PrintWithExternalHelperAsync(request, payload, ct);
 
         if (!string.IsNullOrWhiteSpace(request.PrinterCom))
         {
@@ -105,7 +96,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             await WriteToConnectedComAsync(payload, request.Copies, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via {request.PrinterCom}. Preview: {previewPath}");
+                $"Printed {request.Copies} label(s) via {request.PrinterCom}.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.PrinterName))
@@ -120,7 +111,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             }, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via Windows printer '{request.PrinterName}'. Preview: {previewPath}");
+                $"Printed {request.Copies} label(s) via Windows printer '{request.PrinterName}'.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.RawDestination))
@@ -128,12 +119,12 @@ public sealed class LabelPrintService : IAsyncDisposable
             await PrintToRawDestinationAsync(request.RawDestination, payload, request.Copies, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via raw destination '{request.RawDestination}'. Preview: {previewPath}");
+                $"Printed {request.Copies} label(s) via raw destination '{request.RawDestination}'.");
         }
 
         return new LabelPrintTransportResult(
             false,
-            $"No printer transport configured. Preview saved: {previewPath}");
+            "No printer transport configured.");
     }
 
     private async Task EnsureComConnectedAsync(
@@ -252,7 +243,6 @@ public sealed class LabelPrintService : IAsyncDisposable
     private static async Task<LabelPrintTransportResult> PrintWithExternalHelperAsync(
         LabelPrintRequest request,
         byte[] payload,
-        string previewPath,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.ExternalHelperPath) ||
@@ -290,7 +280,7 @@ public sealed class LabelPrintService : IAsyncDisposable
                 return new LabelPrintTransportResult(false, $"External label helper exited with code {process.ExitCode}.");
         }
 
-        return new LabelPrintTransportResult(true, $"External helper completed. Preview: {previewPath}");
+        return new LabelPrintTransportResult(true, $"External helper completed. Print file: {printFile}");
     }
 
     private static string SafeFilePart(string? value)

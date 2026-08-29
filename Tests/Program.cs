@@ -34,6 +34,7 @@ internal static class Program
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
+            ("Canonical runtime paths and SQLite PartCnt authority", TestCanonicalRuntimePersistence),
             ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
             ("THT label renderer and LOT lifecycle", TestThtLabelAndLotLifecycle),
@@ -105,6 +106,7 @@ internal static class Program
     {
         var board = new FakeBoard();
         board.Publish(CreateProductionFrame(sequence: 1));
+        board.SetAppliedScanCapacityForTest(1);
         board.StartScanCallback = current =>
         {
             _ = Task.Run(async () =>
@@ -124,7 +126,41 @@ internal static class Program
 
         Assert(
             board.Commands.Count(command => command == "START") == 1,
-            "First frame of the new generation must not trigger STOP/START recovery");
+            "Changing active capacity restarts firmware scan exactly once");
+
+        var sameCapacityBoard = new FakeBoard();
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(50);
+            sameCapacityBoard.Publish(CreateProductionFrame(sequence: 2));
+        });
+        new ScanSupervisor(sameCapacityBoard, _ => { })
+            .StartProductionScanAndVerifyFrameAsync(
+                BoardCapacity.MaxGlobalIo,
+                CancellationToken.None,
+                "SELF_TEST_SAME_CAPACITY")
+            .GetAwaiter()
+            .GetResult();
+        Assert(
+            sameCapacityBoard.Commands.All(command => command is not "START" and not "STOP"),
+            "Same active capacity reuses the healthy scan without STOP/START");
+
+        // Regression cho call path thật của TestViewModel: stream có thể đang chạy
+        // active=1 từ lúc Connect, sau đó model được nạp và requested đổi thành 8.
+        // EnsureContinuousProductionScanAsync không được return sớm chỉ vì IsScanning.
+        TestViewModel vm = CreateTestViewModel(new ProductionSettings(), out FakeBoard vmBoard);
+        vmBoard.SetRequestedScanCapacityForTest(8);
+        vmBoard.SetAppliedScanCapacityForTest(1);
+        MethodInfo ensureContinuous = typeof(TestViewModel).GetMethod(
+            "EnsureContinuousProductionScanAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("EnsureContinuousProductionScanAsync method not found.");
+        ((Task)ensureContinuous.Invoke(vm, [])!).GetAwaiter().GetResult();
+        Assert(
+            vmBoard.Commands.Count(command => command == "START") == 1 &&
+            vmBoard.AppliedScanCapacity?.StartScanParameter == 8,
+            "Running active=1 stream is reconciled to requested active=8 instead of returning early");
+
         Assert(
             ScanSupervisor.ResolveFirstFrameTimeoutMs(BoardCapacity.Create(10)) == 15_000,
             "Ten-module first-frame watchdog must allow the measured long hardware frame");
@@ -572,7 +608,8 @@ internal static class Program
         Assert(settingsXaml.Contains("<ColumnDefinition Width=\"110\"/>", StringComparison.Ordinal) &&
                settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Width=\"115\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Grid.Row=\"2\"\n                                    Grid.Column=\"2\"", StringComparison.Ordinal),
+               settingsXaml.Contains("Grid.Row=\"2\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Grid.Column=\"2\"", StringComparison.Ordinal),
             "Label printer controls use a compact three-row layout so manual resistance stays visible");
         Assert(settingsXaml.Contains("x:Name=\"RelayWiringModeComboBox\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Settings.RelayWiringMode", StringComparison.Ordinal),
@@ -1385,6 +1422,78 @@ internal static class Program
         Assert(BrushHex(row.Color4Brush) == four, $"Color #4 for '{code}'");
     }
 
+    private static void TestCanonicalRuntimePersistence()
+    {
+        Assert(Path.GetFileName(RuntimePaths.ConfigFile) == "JBZUniversalTester.cfg",
+            "Canonical config filename");
+        Assert(Path.GetFileName(RuntimePaths.PartCounterFile) == "PartCnt.txt",
+            "Canonical PartCnt filename");
+        Assert(Path.GetFileName(RuntimePaths.LogFile) == "JBZUniversalTester.log",
+            "Canonical log filename");
+        Assert(Path.GetFileName(RuntimePaths.DatabaseFile) == "JBZUniversalTester.db" &&
+               string.Equals(Path.GetFileName(Path.GetDirectoryName(RuntimePaths.DatabaseFile)), "Data", StringComparison.OrdinalIgnoreCase),
+            "Canonical database path");
+        Assert(Path.GetFileName(RuntimePaths.CrashReportFile) == "JBZUniversalTester.RPT" &&
+               string.Equals(Path.GetFileName(Path.GetDirectoryName(RuntimePaths.CrashReportFile)), "Crash", StringComparison.OrdinalIgnoreCase),
+            "Canonical lazy crash-report path");
+        Assert(RuntimePaths.PassRoot == @"C:\Pass" && RuntimePaths.ErrorRoot == @"C:\Error" &&
+               RuntimePaths.ItemDirectory == @"C:\ITEM",
+            "Canonical external ITEM/Pass/Error roots");
+
+        bool crashDirectoryExisted = Directory.Exists(RuntimePaths.CrashDirectory);
+        bool crashReportExisted = File.Exists(RuntimePaths.CrashReportFile);
+        if (!crashReportExisted)
+        {
+            CrashReportService.Write(
+                new InvalidOperationException("SIMULATED_CRASH_REPORT_TEST"),
+                "SELF-TEST",
+                "Model=TEST; Cycle=TEST-CYCLE");
+            string report = File.ReadAllText(RuntimePaths.CrashReportFile, Encoding.UTF8);
+            Assert(report.Contains("SIMULATED_CRASH_REPORT_TEST", StringComparison.Ordinal) &&
+                   report.Contains("Model=TEST; Cycle=TEST-CYCLE", StringComparison.Ordinal) &&
+                   report.Contains("AppVersion:", StringComparison.Ordinal),
+                "Crash RPT is created lazily with exception and runtime context");
+            File.Delete(RuntimePaths.CrashReportFile);
+            if (!crashDirectoryExisted && Directory.Exists(RuntimePaths.CrashDirectory) &&
+                !Directory.EnumerateFileSystemEntries(RuntimePaths.CrashDirectory).Any())
+            {
+                Directory.Delete(RuntimePaths.CrashDirectory);
+            }
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "JBZCanonicalPersistenceTests", Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "Data", "JBZUniversalTester.db");
+        string counterPath = Path.Combine(root, "PartCnt.txt");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(counterPath, "PART-A 50000 42\r\n", new UTF8Encoding(false));
+            var repository = new TestHistoryStore(dbPath);
+            var mirror = new PartCounterStore(counterPath);
+            Assert(repository.ImportPartCountersOnce(mirror.ReadAll(), counterPath) == 1,
+                "Existing PartCnt is imported only as initial migration input");
+            ProbeCounterSnapshot imported = repository.GetAllProbeCounters().Single();
+            Assert(imported.PartNumber == "PART-A" && imported.Counter == 42 && imported.ReplacementThreshold == 50000,
+                "SQLite receives initial PartCnt counter and threshold");
+
+            File.WriteAllText(counterPath, "PART-A 50000 999\r\n", new UTF8Encoding(false));
+            Assert(repository.ImportPartCountersOnce(mirror.ReadAll(), counterPath) == 0 &&
+                   repository.GetAllProbeCounters().Single().Counter == 42,
+                "Later PartCnt edits cannot overwrite authoritative SQLite state");
+
+            File.Delete(counterPath);
+            mirror.MirrorAll(repository.GetAllProbeCounters());
+            Assert(File.ReadAllText(counterPath, Encoding.UTF8) == "PART-A 50000 42\r\n",
+                "Missing PartCnt mirror is rebuilt from SQLite");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static void TestSystemLogMasterSwitch()
     {
         string root = Path.Combine(
@@ -1399,9 +1508,9 @@ internal static class Program
             try
             {
                 logger.Configure(enabled: false, rootDirectory: logsRoot);
-                logger.Application("MUST_NOT_CREATE_LOG_DIRECTORY");
-                Assert(!Directory.Exists(logsRoot),
-                    "Disabled system logging does not create Data/Logs");
+                logger.Application("NORMAL_LIFECYCLE_RECORD");
+                Assert(logger.FileLoggingEnabled && logger.Level == AppLogLevel.Normal,
+                    "Normal production keeps the single lifecycle log enabled");
 
                 logger.Configure(enabled: true);
                 Assert(logger.FileLoggingEnabled && logger.Level == AppLogLevel.ProtocolTrace,
@@ -1409,26 +1518,21 @@ internal static class Program
                 logger.Board("ENABLED_PROTOCOL_TRACE", AppLogLevel.ProtocolTrace);
 
                 logger.Configure(enabled: false);
-                logger.Error("MUST_NOT_BE_WRITTEN_AFTER_DISABLE");
+                logger.Error("NORMAL_ERROR_AFTER_DIAGNOSTIC_DISABLE");
             }
             finally
             {
                 logger.Dispose();
             }
 
-            string boardLog = Directory.EnumerateFiles(
-                    Path.Combine(logsRoot, AppLogCategory.Board.ToString()),
-                    "*.log")
-                .Single();
-            Assert(File.ReadAllText(boardLog).Contains(
-                    "ENABLED_PROTOCOL_TRACE",
-                    StringComparison.Ordinal),
-                "Enabled system logging writes Board protocol trace");
-            Assert(!Directory.EnumerateFiles(
-                    Path.Combine(logsRoot, AppLogCategory.Error.ToString()),
-                    "*.log")
-                .Any(),
-                "Disabling the master switch stops subsequent Error log writes");
+            string[] logFiles = Directory.EnumerateFiles(logsRoot, "*.log").ToArray();
+            Assert(logFiles.Length == 1 && Path.GetFileName(logFiles[0]) == "JBZUniversalTester.log",
+                "Runtime writes one canonical main log instead of category/day files");
+            string logText = File.ReadAllText(logFiles[0]);
+            Assert(logText.Contains("NORMAL_LIFECYCLE_RECORD", StringComparison.Ordinal) &&
+                   logText.Contains("ENABLED_PROTOCOL_TRACE", StringComparison.Ordinal) &&
+                   logText.Contains("NORMAL_ERROR_AFTER_DIAGNOSTIC_DISABLE", StringComparison.Ordinal),
+                "Main log preserves normal lifecycle/errors and explicitly enabled protocol trace");
 
             string historyPath = Path.Combine(root, "History", "test-history.db");
             var history = new TestHistoryStore(historyPath);
@@ -1504,37 +1608,78 @@ internal static class Program
     private static void TestDecoderModes()
     {
         var decoder = new BoardIoDecoder();
-        decoder.ConfigureCapacity(BoardCapacity.Create(2));
+        decoder.ConfigureCapacity(BoardCapacity.Create(1));
         decoder.ConfigureMode(BoardScanMode.Production);
-        ScanFrame production = decoder.Feed([0x80, 0x00, 0xA0, 0x11, 0xC0, 0x00]).Single();
+        byte[] smallRaw = BuildProductionScanFrame(1, 0x00, (1, 18));
+        ScanFrame production = decoder.Feed(smallRaw).Single();
         Assert(production.Complete && production.Mode == BoardScanMode.Production, "Production complete");
         Assert(production.Connections.TryGetValue(1, out IReadOnlySet<int>? targets) && targets.SetEquals([18]), "IO1->IO18");
+        Assert(production.SourceCount == 64 && production.ExpectedIoCount == 64 &&
+               production.EndMarkerCode == 0x00 && production.UnknownBytes == 0,
+            "Small production frame has strict coverage and C0 00 metadata");
 
         decoder.Reset();
-        Assert(decoder.Feed([0x80]).Count == 0, "Partial source byte is buffered");
-        ScanFrame splitFrame = decoder.Feed([0x00, 0xA0, 0x11, 0xC0, 0x00]).Single();
+        Assert(decoder.Feed(smallRaw.AsSpan(0, smallRaw.Length - 1)).Count == 0,
+            "Partial terminator is buffered");
+        ScanFrame splitFrame = decoder.Feed(smallRaw.AsSpan(smallRaw.Length - 1)).Single();
         Assert(splitFrame.Connections.TryGetValue(1, out IReadOnlySet<int>? splitTargets) &&
-               splitTargets.SetEquals([18]), "Frame split across reads is reconstructed");
+               splitTargets.SetEquals([18]) && splitFrame.Complete,
+            "Frame split across reads is reconstructed");
 
         decoder.Reset();
-        IReadOnlyList<ScanFrame> multiple = decoder.Feed([
-            0x80, 0x00, 0xA0, 0x11, 0xC0, 0x00,
-            0x80, 0x01, 0xA0, 0x07, 0xC0, 0x00
-        ]);
+        byte[] secondRaw = BuildProductionScanFrame(1, 0x00, (2, 8));
+        IReadOnlyList<ScanFrame> multiple = decoder.Feed(smallRaw.Concat(secondRaw).ToArray());
         Assert(multiple.Count == 2 &&
                multiple[0].Connections[1].SetEquals([18]) &&
                multiple[1].Connections[2].SetEquals([8]),
             "Multiple complete frames in one read are decoded");
 
         decoder.Reset();
-        Assert(decoder.Feed([0x80, 0x00, 0xA0, 0x11]).Count == 0, "Incomplete frame does not publish");
-        ScanFrame completedAfterTail = decoder.Feed([0xC0, 0x00]).Single();
-        Assert(completedAfterTail.Connections[1].SetEquals([18]), "Incomplete frame completes after tail read");
+        byte[] partialLarge = BuildProductionScanFrame(8, 0x01)
+            .Take(300 * 2)
+            .Concat(new byte[] { 0xC0, 0x01 })
+            .ToArray();
+        decoder.ConfigureCapacity(BoardCapacity.Create(8));
+        ScanFrame incomplete = decoder.Feed(partialLarge).Single();
+        Assert(!incomplete.Complete && incomplete.SourceCount == 300 &&
+               incomplete.ExpectedIoCount == 512 && incomplete.EndMarkerCode == 0x01,
+            "Partial 300/512 frame is diagnostic incomplete and cannot ARM");
 
         decoder.Reset();
-        ScanFrame resynced = decoder.Feed([0x55, 0x80, 0x00, 0xA0, 0x11, 0xC0, 0x00]).Single();
-        Assert(resynced.UnknownBytes == 1 &&
-               resynced.Connections[1].SetEquals([18]), "Unknown byte is skipped and decoder resyncs");
+        byte[] largeRaw = BuildProductionScanFrame(8, 0x01);
+        ScanFrame large = decoder.Feed(largeRaw).Single();
+        Assert(large.Complete && large.SourceCount == 512 && large.ExpectedIoCount == 512 &&
+               large.EndMarkerCode == 0x01 && large.UnknownBytes == 0,
+            "Trace-sized 512-source frame accepts C0 01 without unknown bytes");
+
+        decoder.Reset();
+        Assert(decoder.Feed(largeRaw.AsSpan(0, largeRaw.Length - 1)).Count == 0,
+            "Large C0 byte remains buffered across RX boundary");
+        ScanFrame splitLarge = decoder.Feed([0x01]).Single();
+        Assert(splitLarge.Complete && splitLarge.EndMarkerCode == 0x01,
+            "Split C0/01 terminator is recognized");
+
+        decoder.Reset();
+        byte[] unknownEnd = BuildProductionScanFrame(8, 0x02);
+        ScanFrame unknownTerminator = decoder.Feed(unknownEnd).Single();
+        Assert(!unknownTerminator.Complete && !unknownTerminator.TerminatorKnown &&
+               unknownTerminator.EndMarkerCode == 0x02,
+            "C0 02 is diagnostic only, not guessed as a valid terminator");
+
+        BoardScanCapacity active8 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10, StartCardNumber = 1 },
+            512);
+        Assert(active8.InstalledScanUnits == 10 && active8.RequiredScanUnits == 8 &&
+               active8.ActiveScanUnits == 8 && active8.StartScanParameter == 8 &&
+               active8.ActiveIoCapacity == 512 && active8.IsModelWithinInstalledCapacity,
+            "Installed 10 / required 8 selects active 8 and START_SCAN parameter 8");
+
+        BoardScanCapacity insufficient = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 4, StartCardNumber = 1 },
+            512);
+        Assert(insufficient.InstalledScanUnits == 4 && insufficient.RequiredScanUnits == 8 &&
+               !insufficient.IsModelWithinInstalledCapacity,
+            "Installed 4 / required 8 is an explicit capacity mismatch");
 
         Assert(BoardCapacity.Create(2).StartScanParameter == 2 &&
                BoardCapacity.Create(4).StartScanParameter == 4,
@@ -1550,8 +1695,36 @@ internal static class Program
 
         // ConfigureMode phải reset source còn dở của decoder trước đó.
         decoder.ConfigureMode(BoardScanMode.Production);
-        ScanFrame noStaleSource = decoder.Feed([0xA0, 0x11, 0xC0, 0x00]).Single();
-        Assert(noStaleSource.Connections.Count == 0, "No stale source after mode switch");
+        decoder.ConfigureCapacity(BoardCapacity.Create(1));
+        ScanFrame noStaleSource = decoder.Feed(BuildProductionScanFrame(1, 0x00)).Single();
+        Assert(noStaleSource.Connections.Values.All(targetsAfterSwitch => targetsAfterSwitch.Count == 0),
+            "No stale source/target edge after mode switch");
+    }
+
+    private static byte[] BuildProductionScanFrame(
+        int scanUnits,
+        byte terminatorCode,
+        (int Source, int Target)? connection = null)
+    {
+        int ioCount = scanUnits * BoardCapacity.IoPerExpansionModule;
+        var bytes = new List<byte>((ioCount * 2) + 4);
+        for (int io = 1; io <= ioCount; io++)
+        {
+            int zeroBased = io - 1;
+            bytes.Add(checked((byte)(BoardIoDecoder.SourceBase + zeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            bytes.Add(checked((byte)(zeroBased % BoardAddressMapper.IoPerProtocolBank)));
+
+            if (connection is { } edge && edge.Source == io)
+            {
+                int targetZeroBased = edge.Target - 1;
+                bytes.Add(checked((byte)(BoardIoDecoder.TargetBase + targetZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+                bytes.Add(checked((byte)(targetZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+            }
+        }
+
+        bytes.Add(BoardIoDecoder.WordEnd1);
+        bytes.Add(terminatorCode);
+        return bytes.ToArray();
     }
 
     private static void TestEngineVectors()
@@ -4358,10 +4531,24 @@ internal static class Program
         public bool IsConnected => true;
         public bool IsScanning { get; private set; } = true;
         public BoardScanMode CurrentScanMode { get; private set; } = BoardScanMode.Production;
+        public BoardCapacity InstalledCapacity { get; private set; } = BoardCapacity.Create(10);
         public BoardCapacity Capacity { get; private set; } = BoardCapacity.Create(10);
+        public BoardCapacity? AppliedScanCapacity { get; private set; } = BoardCapacity.Create(10);
+        public BoardScanCapacity ScanCapacity { get; private set; } = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            640);
         public DateTime LastFrameTimestampUtc { get; private set; } = DateTime.UtcNow;
         public long LastFrameSequence { get; private set; }
+        public long LastCompleteFrameSequence { get; private set; }
         public long FramesReceived { get; private set; }
+        public long CompleteFramesReceived { get; private set; }
+        public int LastFrameSourceCount { get; private set; }
+        public byte? LastFrameEndMarkerCode { get; private set; }
+        public int LastFrameUnknownBytes { get; private set; }
+        public void SetAppliedScanCapacityForTest(int scanUnits) =>
+            AppliedScanCapacity = BoardCapacity.Create(scanUnits);
+        public void SetRequestedScanCapacityForTest(int scanUnits) =>
+            Capacity = BoardCapacity.Create(scanUnits);
         public CancellationToken? LastStartScanToken { get; private set; }
         public Action<FakeBoard>? StartScanCallback { get; set; }
         private event EventHandler<ScanFrame>? FrameReceivedCore;
@@ -4372,14 +4559,23 @@ internal static class Program
             LastFrameTimestampUtc = DateTime.UtcNow;
             LastFrameSequence = frame.Sequence;
             FramesReceived++;
+            LastFrameSourceCount = frame.SourceCount;
+            LastFrameEndMarkerCode = frame.EndMarkerCode;
+            LastFrameUnknownBytes = frame.UnknownBytes;
+            if (frame.Mode == BoardScanMode.Production &&
+                frame.Complete && frame.UnknownBytes == 0 && frame.TerminatorKnown)
+            {
+                LastCompleteFrameSequence = frame.Sequence;
+                CompleteFramesReceived++;
+            }
             FrameReceivedCore?.Invoke(this, frame);
         }
         public Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default) => Task.FromResult(new BoardConnectionInfo("Fake", "Fake"));
         public Task DisconnectAsync() { IsScanning = false; return Task.CompletedTask; }
         public Task HandshakeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ResetClearAsync(CancellationToken ct = default) { Commands.Add("RESET"); return Task.CompletedTask; }
-        public void ConfigureScanRange(int maxIo) { }
-        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default) { IsScanning = true; CurrentScanMode = mode; LastStartScanToken = ct; Commands.Add("START"); StartScanCallback?.Invoke(this); return Task.CompletedTask; }
+        public void ConfigureActiveScanRange(int maxIo) { }
+        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default) { IsScanning = true; CurrentScanMode = mode; AppliedScanCapacity = Capacity; LastStartScanToken = ct; Commands.Add("START"); StartScanCallback?.Invoke(this); return Task.CompletedTask; }
         public Task StopScanAsync(CancellationToken ct = default) { IsScanning = false; Commands.Add("STOP"); return Task.CompletedTask; }
         public Task EnterIdleAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task SelectResistanceRouteAsync(ResistanceStep step, CancellationToken ct = default)

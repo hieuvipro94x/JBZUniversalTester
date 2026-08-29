@@ -80,7 +80,7 @@ if (!string.IsNullOrWhiteSpace(modelDirectory))
         try
         {
             ProductModel model = parser.Load(modelPath);
-            int requiredModules = BoardCapacity.RequiredExpansionModulesForIo(model.MaxIo);
+            int requiredModules = BoardCapacity.RequiredScanUnitsForIo(model.MaxIo);
             Console.WriteLine(
                 $"MODEL_PARSE PASS file=\"{Path.GetFileName(modelPath)}\" part=\"{model.PartNumber}\" " +
                 $"pins={model.Pins.Count} nets={model.Nets.Count} maxIo={model.MaxIo} " +
@@ -199,14 +199,20 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
         BoardConnectionInfo connection = await board.ConnectAsync();
         Console.WriteLine($"CONNECTED Description=\"{connection.Description}\" Serial=\"{connection.SerialNumber}\"");
 
+        // HardwareVerification không có model THT bắt buộc. --expansion-cards
+        // vì vậy chính là active range cần thử; nếu không configure, transport
+        // mới mặc định active=1 dù máy được khai báo 10 scan units.
+        int verificationMaxIo = checked(expansionCards * BoardCapacity.IoPerExpansionModule);
+        board.ConfigureActiveScanRange(verificationMaxIo);
+
         if (verifySupervisor)
         {
             var supervisor = new ScanSupervisor(board, message => Console.WriteLine($"SUPERVISOR {message}"));
             var verifyWatch = Stopwatch.StartNew();
             await supervisor.StartProductionScanAndVerifyFrameAsync(
-                BoardCapacity.MaxGlobalIo,
+                verificationMaxIo,
                 CancellationToken.None,
-                "HARDWARE_VERIFY_10_MODULES");
+                $"HARDWARE_VERIFY_{expansionCards}_MODULES");
             verifyWatch.Stop();
             Console.WriteLine(
                 $"SUPERVISOR_VERIFY PASS elapsedMs={verifyWatch.Elapsed.TotalMilliseconds:0.###} " +

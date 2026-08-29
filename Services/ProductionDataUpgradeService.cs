@@ -13,18 +13,22 @@ public static class ProductionDataUpgradeService
 {
     private static readonly string[] ProductionFiles =
     [
+        "JBZUniversalTester.cfg",
+        Path.Combine("Data", "JBZUniversalTester.db"),
+        "JBZUniversalTester.log",
+        "PartCnt.txt",
+        // Read-only migration inputs for deployments upgraded from pre-canonical builds.
         "appsettings.json",
         "production.settings.json",
         "UniversalTester.cfg",
         "production.statistics.json",
         "production.statistics.json.bak",
-        "PartCnt.txt",
-        Path.Combine("Data", "History", "test-history.db"),
-        Path.Combine("Data", "LastBarcode.txt")
+        Path.Combine("Data", "History", "test-history.db")
     ];
 
     private static readonly string[] FastConfigurationFiles =
     [
+        "JBZUniversalTester.cfg",
         "appsettings.json",
         "production.settings.json",
         "UniversalTester.cfg"

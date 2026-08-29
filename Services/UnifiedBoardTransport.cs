@@ -25,10 +25,18 @@ public sealed class UnifiedBoardTransport : IBoardTransport
     public BoardConnectionState ConnectionState => _d2xx.ConnectionState;
     public bool IsScanning => _d2xx.IsScanning;
     public BoardScanMode CurrentScanMode => _d2xx.CurrentScanMode;
+    public BoardCapacity InstalledCapacity => _d2xx.InstalledCapacity;
     public BoardCapacity Capacity => _d2xx.Capacity;
+    public BoardCapacity? AppliedScanCapacity => _d2xx.AppliedScanCapacity;
+    public BoardScanCapacity ScanCapacity => _d2xx.ScanCapacity;
     public DateTime LastFrameTimestampUtc => _d2xx.LastFrameTimestampUtc;
     public long LastFrameSequence => _d2xx.LastFrameSequence;
+    public long LastCompleteFrameSequence => _d2xx.LastCompleteFrameSequence;
     public long FramesReceived => _d2xx.FramesReceived;
+    public long CompleteFramesReceived => _d2xx.CompleteFramesReceived;
+    public int LastFrameSourceCount => _d2xx.LastFrameSourceCount;
+    public byte? LastFrameEndMarkerCode => _d2xx.LastFrameEndMarkerCode;
+    public int LastFrameUnknownBytes => _d2xx.LastFrameUnknownBytes;
     public BoardMode ActiveMode { get; private set; } = BoardMode.Auto;
 
     public event EventHandler<ScanFrame>? FrameReceived;
@@ -48,7 +56,7 @@ public sealed class UnifiedBoardTransport : IBoardTransport
             {
                 BoardConnectionInfo info = await _d2xx.ConnectAsync(ct);
                 ActiveMode = BoardMode.D2xx;
-                ConfigureScanRange(0);
+                ConfigureActiveScanRange(0);
                 Log?.Invoke(this, "BOARD SELECTED: JBZ D2XX");
                 return info with { Description = $"JBZ D2XX - {info.Description}" };
             }
@@ -82,7 +90,7 @@ public sealed class UnifiedBoardTransport : IBoardTransport
 
     public Task HandshakeAsync(CancellationToken ct = default) => _d2xx.HandshakeAsync(ct);
     public Task ResetClearAsync(CancellationToken ct = default) => _d2xx.ResetClearAsync(ct);
-    public void ConfigureScanRange(int maxIo) => _d2xx.ConfigureScanRange(maxIo);
+    public void ConfigureActiveScanRange(int maxIo) => _d2xx.ConfigureActiveScanRange(maxIo);
     public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default) => _d2xx.StartScanAsync(mode, ct);
     public Task StopScanAsync(CancellationToken ct = default) => _d2xx.StopScanAsync(ct);
     public Task EnterIdleAsync(CancellationToken ct = default) => _d2xx.EnterIdleAsync(ct);

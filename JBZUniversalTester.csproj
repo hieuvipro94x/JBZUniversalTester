@@ -10,9 +10,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- V12.10.2: namespace code giu nguyen, ten EXE/assembly co version de khong ghi de ban cu -->
+    <!-- Canonical portable runtime keeps one stable executable name. -->
     <RootNamespace>JBZUniversalTester</RootNamespace>
-    <AssemblyName>JBZUniversalTester_V$(VersionFileTag)</AssemblyName>
+    <AssemblyName>JBZUniversalTester</AssemblyName>
 
     <!-- Phần mềm 32-bit -->
     <PlatformTarget>x86</PlatformTarget>

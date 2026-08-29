@@ -37,7 +37,7 @@ public partial class TestWindow : Window
         {
             Interval = TimeSpan.FromSeconds(1)
         };
-        _clockTimer.Tick += (_, _) => UpdateClock();
+        _clockTimer.Tick += ClockTimer_Tick;
 
         UpdateClock();
         ContentRendered += TestWindow_ContentRendered;
@@ -50,6 +50,8 @@ public partial class TestWindow : Window
     }
 
     private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("yyyy/MM/dd  HH:mm:ss");
+
+    private void ClockTimer_Tick(object? sender, EventArgs e) => UpdateClock();
 
     private void TestWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -219,6 +221,7 @@ public partial class TestWindow : Window
     private void CleanupUiHandlers()
     {
         _clockTimer.Stop();
+        _clockTimer.Tick -= ClockTimer_Tick;
         _scrollCts?.Cancel();
         _scrollCts?.Dispose();
         _scrollCts = null;

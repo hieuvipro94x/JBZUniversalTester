@@ -31,17 +31,38 @@ public partial class ProductionSettingsPage : UserControl
     }
 
     public ProductionSettingsPage(MainViewModel? main)
+        : this(main, new ProductionSettingsViewModel(main?.Test))
+    {
+    }
+
+    public ProductionSettingsPage(
+        MainViewModel? main,
+        ProductionSettingsViewModel viewModel)
     {
         _main = main;
-        _vm = new ProductionSettingsViewModel(main?.Test);
+        _vm = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _labelSettingsPasswordAtOpen = _vm.Settings.Password ?? string.Empty;
         InitializeComponent();
         DataContext = _vm;
         InitializeComboBoxItems();
+        SetLabelSettingsUnlocked(string.IsNullOrEmpty(_labelSettingsPasswordAtOpen));
+        Loaded += ProductionSettingsPage_Loaded;
+    }
+
+    private async void ProductionSettingsPage_Loaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= ProductionSettingsPage_Loaded;
+        await System.Windows.Threading.Dispatcher.Yield(
+            System.Windows.Threading.DispatcherPriority.ContextIdle);
         RefreshPrinterPorts();
         RefreshWaterProofPorts();
         RefreshPrinterConnectionStatus();
-        SetLabelSettingsUnlocked(string.IsNullOrEmpty(_labelSettingsPasswordAtOpen));
+    }
+
+    public void ReleasePageResources()
+    {
+        Loaded -= ProductionSettingsPage_Loaded;
+        DataContext = null;
     }
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
@@ -230,7 +251,7 @@ public partial class ProductionSettingsPage : UserControl
                 EncoderFallback.ExceptionFallback,
                 DecoderFallback.ExceptionFallback);
             string extension = request.Profile.Mode == LabelPrintMode.RawZpl ? ".zpl" : ".txt";
-            string directory = Path.Combine(AppContext.BaseDirectory, "Data", "Labels");
+            string directory = Path.Combine(Path.GetTempPath(), "JBZUniversalTester", "LabelPreview");
             Directory.CreateDirectory(directory);
             string path = Path.Combine(directory, $"PREVIEW_{SafeFileName(request.Profile.Id)}_LOT{request.Data.LotNo}{extension}");
             File.WriteAllBytes(path, encoding.GetBytes(request.Payload));

@@ -115,8 +115,8 @@ public sealed class ProductionSettings
     public bool AutoSaveErrors { get; set; }
 
     /// <summary>
-    /// Khóa tổng cho Data/Logs và Data/ErrorLogs. History dùng kho riêng và
-    /// luôn được ghi độc lập với tùy chọn này.
+    /// Enables diagnostic/protocol detail in the main log. Normal lifecycle
+    /// and error records are always written.
     /// </summary>
     public bool EnableSystemLogs { get; set; }
 
@@ -309,7 +309,7 @@ public sealed class ProductionSettings
     public bool AutoPrintLabelOnPass { get; set; } = true;
 
     /// <summary>Thư mục tương đối chứa DB/export lịch sử.</summary>
-    public string HistoryDirectory { get; set; } = "Data/History";
+    public string HistoryDirectory { get; set; } = "Data";
 
     // ============================================================
     // MÁY IN TEM

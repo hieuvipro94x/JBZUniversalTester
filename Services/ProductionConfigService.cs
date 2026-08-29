@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using JBZUniversalTester.Models;
+using JBZUniversalTester.Versioning;
 
 namespace JBZUniversalTester.Services;
 
@@ -25,9 +26,10 @@ public static class ProductionConfigService
         WriteIndented = true
     };
 
-    public static string ConfigDirectory => AppContext.BaseDirectory;
-    public static string JsonPath => Path.Combine(ConfigDirectory, "production.settings.json");
-    public static string LegacyCfgPath => Path.Combine(ConfigDirectory, "UniversalTester.cfg");
+    public static string ConfigDirectory => RuntimePaths.AppDirectory;
+    public static string ConfigPath => RuntimePaths.ConfigFile;
+    public static string JsonPath => RuntimePaths.LegacyProductionJson;
+    public static string LegacyCfgPath => RuntimePaths.LegacyConfigFile;
 
     public static ProductionSettings Load()
     {
@@ -36,7 +38,11 @@ public static class ProductionConfigService
 
         try
         {
-            if (File.Exists(JsonPath))
+            if (File.Exists(ConfigPath))
+            {
+                settings = LoadEnglishCfg(ConfigPath);
+            }
+            else if (File.Exists(JsonPath))
             {
                 string json = File.ReadAllText(JsonPath, Encoding.UTF8);
                 settings = JsonSerializer.Deserialize<ProductionSettings>(json, JsonOptions)
@@ -105,12 +111,21 @@ public static class ProductionConfigService
         Directory.CreateDirectory(ConfigDirectory);
         Normalize(settings);
 
-        string json = SerializeSettingsForSave(settings);
-        AtomicWrite(JsonPath, json);
-        // Preserve compatibility on upgraded machines without creating a
-        // duplicate configuration file on a fresh installation.
-        if (File.Exists(LegacyCfgPath))
-            SaveLegacyCfg(settings, LegacyCfgPath);
+        SaveLegacyCfg(settings, ConfigPath);
+    }
+
+    public static void SaveAppSettings(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Directory.CreateDirectory(ConfigDirectory);
+
+        List<string> lines = File.Exists(ConfigPath)
+            ? File.ReadAllLines(ConfigPath, Encoding.UTF8)
+                .Where(line => !ParseCfgLine(line).Key.StartsWith("App.", StringComparison.OrdinalIgnoreCase))
+                .ToList()
+            : [];
+        lines.AddRange(settings.ToCfgLines());
+        AtomicWrite(ConfigPath, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
     private static string SerializeSettingsForSave(ProductionSettings settings)
@@ -133,6 +148,7 @@ public static class ProductionConfigService
         Normalize(settings);
         var lines = new List<string>
         {
+            $"[Version]{AppVersion.ProductVersion}",
             $"[BoardMode]{settings.BoardMode}",
             $"[CardCount]{settings.CardCount}",
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
@@ -243,6 +259,13 @@ public static class ProductionConfigService
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
+
+        if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(ConfigPath), StringComparison.OrdinalIgnoreCase) &&
+            File.Exists(ConfigPath))
+        {
+            lines.AddRange(File.ReadAllLines(ConfigPath, Encoding.UTF8)
+                .Where(line => ParseCfgLine(line).Key.StartsWith("App.", StringComparison.OrdinalIgnoreCase)));
+        }
 
         AtomicWrite(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
@@ -387,7 +410,7 @@ public static class ProductionConfigService
     {
         try
         {
-            if (!File.Exists(JsonPath))
+            if (!File.Exists(ConfigPath))
                 Save(settings);
         }
         catch { /* startup không được treo chỉ vì thư mục readonly */ }
@@ -396,7 +419,7 @@ public static class ProductionConfigService
     private static ProductionSettings LoadEnglishCfg(string path)
     {
         var settings = new ProductionSettings();
-        var map = File.ReadLines(path, Encoding.UTF8)
+        var map = ReadCfgLines(path)
             .Select(ParseCfgLine)
             .Where(x => x.Key.Length > 0)
             .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
@@ -702,7 +725,7 @@ public static class ProductionConfigService
         settings.MinimumErrorLogValue = Math.Max(0, settings.MinimumErrorLogValue);
 
         settings.HistoryDirectory = string.IsNullOrWhiteSpace(settings.HistoryDirectory)
-            ? "Data/History"
+            ? "Data"
             : settings.HistoryDirectory.Trim();
 
         settings.Label.WidthMm = Math.Clamp(settings.Label.WidthMm, 20, 200);
@@ -798,15 +821,52 @@ public static class ProductionConfigService
     private static void AtomicWrite(string path, string text)
     {
         string tmp = path + ".tmp";
-        File.WriteAllText(tmp, text, new UTF8Encoding(false));
-        if (File.Exists(path))
+        try
         {
-            try { File.Replace(tmp, path, path + ".bak", true); }
-            catch { File.Copy(tmp, path, true); File.Delete(tmp); }
+            using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            {
+                writer.Write(text);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(path))
+            {
+                try { File.Replace(tmp, path, null, true); }
+                catch (PlatformNotSupportedException) { File.Move(tmp, path, overwrite: true); }
+                catch (IOException) { File.Move(tmp, path, overwrite: true); }
+            }
+            else
+            {
+                File.Move(tmp, path);
+            }
         }
-        else
+        finally
         {
-            File.Move(tmp, path);
+            if (File.Exists(tmp))
+                File.Delete(tmp);
         }
+    }
+
+    internal static string[] ReadCfgLines(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        string text;
+        try
+        {
+            text = new UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false,
+                throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            text = Encoding.GetEncoding(949).GetString(bytes);
+        }
+
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
     }
 }

@@ -78,6 +78,16 @@ public sealed record BoardCapacity
     }
 
     public static int RequiredExpansionModulesForIo(int maxGlobalIo, int startCardNumber = 1)
+        => Math.Clamp(
+            RequiredScanUnitsForIo(maxGlobalIo, startCardNumber),
+            1,
+            MaxExpansionModuleCount);
+
+    /// <summary>
+    /// Số scan-unit 64 I/O mà model thực sự yêu cầu. Giá trị này cố ý không
+    /// clamp theo phần cứng đã cài để caller có thể phát hiện capacity mismatch.
+    /// </summary>
+    public static int RequiredScanUnitsForIo(int maxGlobalIo, int startCardNumber = 1)
     {
         if (maxGlobalIo <= 0)
             return 1;
@@ -87,10 +97,9 @@ public sealed record BoardCapacity
             return 1;
 
         int requiredIoSpan = maxGlobalIo - first + 1;
-        return Math.Clamp(
-            (int)Math.Ceiling(requiredIoSpan / (double)IoPerExpansionModule),
+        return Math.Max(
             1,
-            MaxExpansionModuleCount);
+            (int)Math.Ceiling(requiredIoSpan / (double)IoPerExpansionModule));
     }
 
     public bool ContainsGlobalIo(int globalIo) =>
@@ -102,6 +111,63 @@ public sealed record BoardCapacity
     public override string ToString() =>
         $"Expansion={ExpansionModuleCount}; Physical={PhysicalCardCount}; Scan={ScanCardCount}; " +
         $"IO={FirstGlobalIo}-{LastGlobalIo}; START_SCAN xx={StartScanParameter}";
+}
+
+/// <summary>
+/// Tách capacity phần cứng đã cài, capacity model yêu cầu và dải firmware đang
+/// được yêu cầu quét. BoardCapacity bên trong vẫn mô tả một dải địa chỉ cụ thể.
+/// </summary>
+public sealed record BoardScanCapacity
+{
+    public required BoardCapacity Installed { get; init; }
+    public required BoardCapacity Active { get; init; }
+    public required int RequiredScanUnits { get; init; }
+    public required int ModelMaxIo { get; init; }
+    public required bool IsModelWithinInstalledCapacity { get; init; }
+
+    public int InstalledScanUnits => Installed.ScanCardCount;
+    public int ActiveScanUnits => Active.ScanCardCount;
+    public int ActiveIoCapacity => Active.TotalIoCapacity;
+    public int StartScanParameter => Active.StartScanParameter;
+
+    public static BoardScanCapacity Create(ProductionSettings settings, int maxGlobalIo)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        BoardCapacity installed = BoardCapacity.FromSettings(settings);
+        int required = BoardCapacity.RequiredScanUnitsForIo(
+            maxGlobalIo,
+            installed.StartCardNumber);
+        bool fits = installed.IsRangeWithinSystem &&
+                    maxGlobalIo <= BoardCapacity.MaxGlobalIo &&
+                    required <= installed.ScanCardCount;
+
+        // Chưa có model thì dùng dải tối thiểu đã được firmware chấp nhận.
+        // Khi model vượt capacity, giữ dải active trong giới hạn phần cứng;
+        // transport sẽ từ chối START production thay vì gửi tham số sai.
+        int activeUnits = maxGlobalIo <= 0
+            ? 1
+            : Math.Min(required, installed.ScanCardCount);
+        BoardCapacity active = BoardCapacity.Create(activeUnits, installed.StartCardNumber);
+
+        return new BoardScanCapacity
+        {
+            Installed = installed,
+            Active = active,
+            RequiredScanUnits = required,
+            ModelMaxIo = Math.Max(0, maxGlobalIo),
+            IsModelWithinInstalledCapacity = fits
+        };
+    }
+
+    public string CapacityErrorMessage =>
+        $"MODEL_CAPACITY_EXCEEDED: Model yêu cầu {RequiredScanUnits} scan units / " +
+        $"IO tối đa {ModelMaxIo}, máy chỉ cấu hình {InstalledScanUnits} scan units / " +
+        $"{Installed.TotalIoCapacity} IO.";
+
+    public override string ToString() =>
+        $"installed={InstalledScanUnits} required={RequiredScanUnits} " +
+        $"active={ActiveScanUnits} io={ActiveIoCapacity}";
 }
 
 public sealed record BoardCardAddress(

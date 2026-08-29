@@ -13,6 +13,7 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 public partial class HistoryPage : UserControl
 {
+    private const int UiRowLimit = 2_000;
     private readonly string _historyPath;
     private readonly object _storeGate = new();
     private TestHistoryStore? _store;
@@ -26,17 +27,25 @@ public partial class HistoryPage : UserControl
         InitializeComponent();
         DataContext = this;
 
-        string directory = string.IsNullOrWhiteSpace(settings.HistoryDirectory)
-            ? "Data/History"
-            : settings.HistoryDirectory.Trim();
-
-        if (!Path.IsPathRooted(directory))
-            directory = Path.Combine(AppContext.BaseDirectory, directory);
-
-        _historyPath = Path.Combine(directory, "test-history.db");
+        _historyPath = RuntimePaths.DatabaseFile;
 
         SetDefaultFilters();
-        Loaded += (_, _) => Reload();
+        Loaded += HistoryPage_Loaded;
+    }
+
+    private void HistoryPage_Loaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= HistoryPage_Loaded;
+        Reload();
+    }
+
+    public void ReleasePageResources()
+    {
+        Loaded -= HistoryPage_Loaded;
+        Interlocked.Increment(ref _reloadGeneration);
+        HistoryGrid.ItemsSource = null;
+        _records = [];
+        DataContext = null;
     }
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
@@ -78,7 +87,7 @@ public partial class HistoryPage : UserControl
         int generation = Interlocked.Increment(ref _reloadGeneration);
         try
         {
-            HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
+            HistorySearchCriteria criteria = CreateSearchCriteria(UiRowLimit);
             IReadOnlyList<TestHistoryRecord> rows = await Task.Run(() =>
                 GetStore().Search(criteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
@@ -87,17 +96,17 @@ public partial class HistoryPage : UserControl
             _records = rows;
             HistoryGrid.ItemsSource = rows;
 
-            TestHistoryRecord[] products = rows.Where(row => !row.IsMasterRecord).ToArray();
-            int pass = products.Count(row => row.Passed);
-            int fail = products.Length - pass;
+            int productCount = rows.Count(row => !row.IsMasterRecord);
+            int pass = rows.Count(row => !row.IsMasterRecord && row.Passed);
+            int fail = productCount - pass;
             int master = rows.Count(row => row.IsMasterRecord);
 
-            TotalCountText.Text = products.Length.ToString("N0");
+            TotalCountText.Text = productCount.ToString("N0");
             PassCountText.Text = pass.ToString("N0");
             FailCountText.Text = fail.ToString("N0");
 
             SummaryText.Text =
-                $"{rows.Count:N0} bản ghi | SẢN PHẨM {products.Length:N0} " +
+                $"{rows.Count:N0} bản ghi hiển thị (tối đa {UiRowLimit:N0}) | SẢN PHẨM {productCount:N0} " +
                 $"(PASS {pass:N0} / FAIL {fail:N0}) | MASTER {master:N0} | DB: {_historyPath}";
         }
         catch (Exception ex)

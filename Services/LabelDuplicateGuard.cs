@@ -5,16 +5,19 @@ using JBZUniversalTester.Models;
 
 namespace JBZUniversalTester.Services;
 
+/// <summary>
+/// Explicit legacy-file helper retained for migration tests. Runtime label
+/// print state is persisted in SQLite and never creates LastBarcode.txt.
+/// </summary>
 public sealed class LabelDuplicateGuard
 {
     private readonly object _gate = new();
     private readonly string _path;
 
-    public LabelDuplicateGuard(string? path = null)
+    public LabelDuplicateGuard(string path)
     {
-        _path = string.IsNullOrWhiteSpace(path)
-            ? Path.Combine(AppContext.BaseDirectory, "Data", "LastBarcode.txt")
-            : Path.GetFullPath(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        _path = Path.GetFullPath(path);
     }
 
     public LabelDuplicateRecord? LoadLast()

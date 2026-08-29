@@ -46,38 +46,42 @@ public sealed class AsyncFileLogService : IDisposable
     private int _disposed;
     private int _fileLoggingEnabled;
 
-    public string RootDirectory { get; private set; } =
-        Path.Combine(AppContext.BaseDirectory, "Data", "Logs");
+    public string LogFilePath { get; private set; } = RuntimePaths.LogFile;
+
+    public string RootDirectory =>
+        Path.GetDirectoryName(LogFilePath) ?? RuntimePaths.AppDirectory;
 
     public AppLogLevel Level { get; private set; } = AppLogLevel.Normal;
 
-    // Data/Logs được điều khiển bởi ProductionSettings.EnableSystemLogs.
-    // History, production counter và dữ liệu tem dùng kho riêng.
+    // Main log is always active. EnableSystemLogs controls diagnostic detail,
+    // not whether lifecycle/fault records are persisted.
     public bool FileLoggingEnabled => Volatile.Read(ref _fileLoggingEnabled) != 0;
 
     public void Configure(bool enabled, string? rootDirectory = null)
     {
         if (!string.IsNullOrWhiteSpace(rootDirectory) && Volatile.Read(ref _started) == 0)
         {
-            RootDirectory = Path.IsPathRooted(rootDirectory)
+            string root = Path.IsPathRooted(rootDirectory)
                 ? rootDirectory
                 : Path.Combine(AppContext.BaseDirectory, rootDirectory);
+            LogFilePath = Path.Combine(root, "JBZUniversalTester.log");
         }
 
-        // Khi bật khóa tổng, ghi đủ cả Normal/Diagnostic/ProtocolTrace.
+        // When enabled, include diagnostic/protocol details in the same main
+        // file. Normal production still records important state transitions.
         Level = enabled ? AppLogLevel.ProtocolTrace : AppLogLevel.Normal;
-        Volatile.Write(ref _fileLoggingEnabled, enabled ? 1 : 0);
-        if (enabled)
-            Initialize();
+        Volatile.Write(ref _fileLoggingEnabled, 1);
+        Initialize();
     }
 
     public void Initialize(string? rootDirectory = null)
     {
         if (!string.IsNullOrWhiteSpace(rootDirectory) && Volatile.Read(ref _started) == 0)
         {
-            RootDirectory = Path.IsPathRooted(rootDirectory)
+            string root = Path.IsPathRooted(rootDirectory)
                 ? rootDirectory
                 : Path.Combine(AppContext.BaseDirectory, rootDirectory);
+            LogFilePath = Path.Combine(root, "JBZUniversalTester.log");
         }
 
         if (!FileLoggingEnabled)
@@ -88,11 +92,12 @@ public sealed class AsyncFileLogService : IDisposable
 
         try
         {
-            foreach (string name in Enum.GetNames<AppLogCategory>())
-                Directory.CreateDirectory(Path.Combine(RootDirectory, name));
+            string? directory = Path.GetDirectoryName(LogFilePath);
+            if (!string.IsNullOrWhiteSpace(directory))
+                Directory.CreateDirectory(directory);
 
             _writerTask = Task.Run(WriterLoopAsync);
-            Write(AppLogCategory.Application, $"Log service initialized. Root={RootDirectory}");
+            Write(AppLogCategory.Application, $"Log service initialized. File={LogFilePath}");
         }
         catch (Exception ex)
         {
@@ -117,7 +122,7 @@ public sealed class AsyncFileLogService : IDisposable
     public void Application(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Application, message, level);
     public void Board(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Board, message, level);
     public void Test(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Test, message, level);
-    public void Performance(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Performance, message, level);
+    public void Performance(string message, AppLogLevel level = AppLogLevel.Diagnostic) => Write(AppLogCategory.Performance, message, level);
     public void Error(string message) => Write(AppLogCategory.Error, message, AppLogLevel.Normal);
 
     private async Task WriterLoopAsync()
@@ -125,7 +130,7 @@ public sealed class AsyncFileLogService : IDisposable
         try
         {
             var batch = new List<(AppLogCategory Category, DateTime Timestamp, string Message)>(MaxWriteBatch);
-            var fileBuffers = new Dictionary<string, StringBuilder>(StringComparer.OrdinalIgnoreCase);
+            var buffer = new StringBuilder();
 
             while (await _channel.Reader.WaitToReadAsync(_cts.Token))
             {
@@ -140,35 +145,23 @@ public sealed class AsyncFileLogService : IDisposable
                     DrainAvailableEntries(batch);
                 }
 
-                fileBuffers.Clear();
+                buffer.Clear();
                 foreach (var item in batch)
                 {
-                    string category = item.Category.ToString();
-                    string directory = Path.Combine(RootDirectory, category);
-                    string path = Path.Combine(directory, $"{category}_{item.Timestamp:yyyyMMdd}.log");
-
-                    if (!fileBuffers.TryGetValue(path, out StringBuilder? buffer))
-                    {
-                        Directory.CreateDirectory(directory);
-                        buffer = new StringBuilder();
-                        fileBuffers.Add(path, buffer);
-                    }
-
                     buffer.Append('[')
                         .Append(item.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff"))
+                        .Append("] [")
+                        .Append(item.Category)
                         .Append("] ")
                         .Append(item.Message)
                         .AppendLine();
                 }
 
-                foreach ((string path, StringBuilder buffer) in fileBuffers)
-                {
-                    await File.AppendAllTextAsync(
-                        path,
-                        buffer.ToString(),
-                        new UTF8Encoding(false),
-                        _cts.Token);
-                }
+                await File.AppendAllTextAsync(
+                    LogFilePath,
+                    buffer.ToString(),
+                    new UTF8Encoding(false),
+                    _cts.Token);
             }
 
             void DrainAvailableEntries(List<(AppLogCategory Category, DateTime Timestamp, string Message)> destination)

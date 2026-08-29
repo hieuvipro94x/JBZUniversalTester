@@ -13,14 +13,14 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class TestHistoryStore
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     private static readonly object SchemaGate = new();
     private readonly string _path;
 
     public TestHistoryStore(string? path = null)
     {
         _path = string.IsNullOrWhiteSpace(path)
-            ? Path.Combine(AppContext.BaseDirectory, "Data", "History", "test-history.db")
+            ? RuntimePaths.DatabaseFile
             : Path.GetFullPath(path);
         string? directory = Path.GetDirectoryName(_path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -341,6 +341,13 @@ public sealed class TestHistoryStore
                 ContentHash TEXT NOT NULL DEFAULT '',
                 ImportedAt TEXT NOT NULL,
                 RecordCount INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS RuntimeMigrationState
+            (
+                MigrationKey TEXT PRIMARY KEY,
+                CompletedAt TEXT NOT NULL,
+                Details TEXT NOT NULL DEFAULT ''
             );
 
             CREATE INDEX IF NOT EXISTS IX_Models_PartId ON Models(PartId);
@@ -1182,6 +1189,126 @@ public sealed class TestHistoryStore
         ProbeCounterSnapshot result = QueryProbeCounter(connection, transaction, partId);
         transaction.Commit();
         return result;
+    }
+
+    public IReadOnlyList<ProbeCounterSnapshot> GetAllProbeCounters()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                CASE WHEN PartNumber<>'' THEN PartNumber
+                     WHEN PartName<>'' THEN PartName
+                     ELSE REPLACE(PartKey,'PN:','') END,
+                ProbeReplacementThreshold,
+                ProbeCounter
+            FROM Parts
+            ORDER BY PartNumber COLLATE NOCASE,PartName COLLATE NOCASE,PartKey COLLATE NOCASE;
+            """;
+        using SqliteDataReader reader = command.ExecuteReader();
+        var result = new List<ProbeCounterSnapshot>();
+        while (reader.Read())
+        {
+            result.Add(new ProbeCounterSnapshot(
+                reader.GetString(0),
+                reader.GetInt64(1),
+                reader.GetInt64(2)));
+        }
+        return result;
+    }
+
+    public int ImportPartCountersOnce(IReadOnlyList<PartCounterEntry> entries, string sourcePath)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        const string migrationKey = "PARTCNT_INITIAL_IMPORT_V1";
+        using SqliteConnection connection = Open();
+        using SqliteTransaction transaction = connection.BeginTransaction();
+
+        using (SqliteCommand check = connection.CreateCommand())
+        {
+            check.Transaction = transaction;
+            check.CommandText = "SELECT 1 FROM RuntimeMigrationState WHERE MigrationKey=$Key LIMIT 1;";
+            check.Parameters.AddWithValue("$Key", migrationKey);
+            if (check.ExecuteScalar() is not null)
+            {
+                transaction.Commit();
+                return 0;
+            }
+        }
+
+        int imported = 0;
+        foreach (PartCounterEntry entry in entries)
+        {
+            string partNumber = entry.PartNumber.Trim();
+            if (partNumber.Length == 0)
+                continue;
+
+            using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO Parts
+                    (PartKey,PartNumber,PartName,ProbeCounter,ProbeReplacementThreshold,
+                     FirstUseAt,LastUseAt,CreatedAt,UpdatedAt)
+                VALUES ($Key,$Number,'',$Counter,$Threshold,$At,$At,$At,$At)
+                ON CONFLICT(PartKey) DO UPDATE SET
+                    ProbeCounter=CASE WHEN Parts.ProbeCounter=0 THEN excluded.ProbeCounter ELSE Parts.ProbeCounter END,
+                    ProbeReplacementThreshold=CASE
+                        WHEN Parts.ProbeCounter=0 OR Parts.ProbeReplacementThreshold<=0
+                        THEN excluded.ProbeReplacementThreshold
+                        ELSE Parts.ProbeReplacementThreshold END,
+                    UpdatedAt=excluded.UpdatedAt;
+                """;
+            command.Parameters.AddWithValue("$Key", "PN:" + PartIdentitySnapshot.NormalizeKey(partNumber));
+            command.Parameters.AddWithValue("$Number", partNumber);
+            command.Parameters.AddWithValue("$Counter", Math.Max(0, entry.Counter));
+            command.Parameters.AddWithValue("$Threshold", Math.Max(1, entry.ReplacementThreshold));
+            command.Parameters.AddWithValue("$At", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
+            command.ExecuteNonQuery();
+            imported++;
+        }
+
+        using (SqliteCommand state = connection.CreateCommand())
+        {
+            state.Transaction = transaction;
+            state.CommandText = """
+                INSERT INTO RuntimeMigrationState (MigrationKey,CompletedAt,Details)
+                VALUES ($Key,$At,$Details);
+                """;
+            state.Parameters.AddWithValue("$Key", migrationKey);
+            state.Parameters.AddWithValue("$At", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
+            state.Parameters.AddWithValue("$Details", $"source={sourcePath}; rows={imported}");
+            state.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return imported;
+    }
+
+    public bool IsRuntimeMigrationCompleted(string migrationKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(migrationKey);
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM RuntimeMigrationState WHERE MigrationKey=$Key LIMIT 1;";
+        command.Parameters.AddWithValue("$Key", migrationKey);
+        return command.ExecuteScalar() is not null;
+    }
+
+    public void CompleteRuntimeMigration(string migrationKey, string details)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(migrationKey);
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO RuntimeMigrationState (MigrationKey,CompletedAt,Details)
+            VALUES ($Key,$At,$Details)
+            ON CONFLICT(MigrationKey) DO UPDATE SET
+                CompletedAt=excluded.CompletedAt,Details=excluded.Details;
+            """;
+        command.Parameters.AddWithValue("$Key", migrationKey);
+        command.Parameters.AddWithValue("$At", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$Details", details ?? string.Empty);
+        command.ExecuteNonQuery();
     }
 
     public ProbeCounterSnapshot IncrementProbeCounter(PartIdentitySnapshot part, long threshold)

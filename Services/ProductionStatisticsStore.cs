@@ -20,11 +20,10 @@ public sealed class ProductionStatisticsStore
     private Dictionary<string, ModelProductionStatistics> _items;
     private List<ProbeMaintenanceRecord> _maintenanceRecords;
 
-    public ProductionStatisticsStore(string? path = null, TimeProvider? timeProvider = null)
+    public ProductionStatisticsStore(string path, TimeProvider? timeProvider = null)
     {
-        _path = string.IsNullOrWhiteSpace(path)
-            ? Path.Combine(AppContext.BaseDirectory, "production.statistics.json")
-            : path;
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        _path = Path.GetFullPath(path);
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         StatisticsFile file = LoadFile();

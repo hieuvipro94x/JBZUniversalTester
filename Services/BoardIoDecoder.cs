@@ -10,7 +10,7 @@ namespace JBZUniversalTester.Services;
 /// Production continuity:
 ///   80/81 nn = SOURCE đang được kích/quét
 ///   A0/A1 nn = TARGET đang thông với SOURCE gần nhất
-///   C0 00    = kết thúc vòng quét
+///   C0 00/01 = kết thúc vòng quét (đã xác nhận bằng trace nhỏ/lớn)
 ///
 /// TestPin / đầu dò GND (xác nhận bằng trace 2026-08-07 14:55):
 ///   80/81 nn = chính I/O nn đang NORMAL
@@ -36,6 +36,7 @@ public sealed class BoardIoDecoder
     public const byte SourceBase = 0x80;
     public const byte TargetBase = 0xA0;
     public const byte WordEnd1 = 0xC0;
+    // Compatibility constant. Decoder không còn hard-code duy nhất C0 00.
     public const byte WordEnd2 = 0x00;
 
     readonly List<byte> _buffer = [];
@@ -75,7 +76,7 @@ public sealed class BoardIoDecoder
         NormalizeScanCardCount(scanCardCount);
 
     public static int RequiredExpansionCardCountForIo(int maxIo) =>
-        BoardCapacity.RequiredExpansionModulesForIo(maxIo);
+        BoardCapacity.RequiredScanUnitsForIo(maxIo);
 
     public static int RequiredCardCountForIo(int maxIo) =>
         RequiredExpansionCardCountForIo(maxIo);
@@ -194,16 +195,28 @@ public sealed class BoardIoDecoder
                 continue;
             }
 
-            if (first == WordEnd1 && second == WordEnd2)
+            if (TryDecodeFrameTerminator(first, second, out FrameTerminator terminator))
             {
+                bool hasActiveFrameData = _sourcesSeen.Count > 0 ||
+                                          _activeTargets.Count > 0 ||
+                                          _unknownBytes > 0;
                 AppendRaw(first, second);
                 _bufferOffset += 2;
+
+                // Không biến C0 xx trôi nổi giữa garbage/biên purge thành một
+                // frame. Production chỉ kết thúc khi decoder thực sự đã nhận data.
+                if (!hasActiveFrameData)
+                {
+                    ResetFrameState();
+                    continue;
+                }
+
                 _sequence++;
 
-                // Transport PURGE RX/TX ngay trước START_SCAN, nên vòng đầu tiên
-                // sau lệnh START đã ở biên sạch. Chấp nhận ngay frame đầu để không
-                // mất thêm gần một chu kỳ quét khi cần báo đấu sai/PASS tức thời.
-                bool complete = _sourcesSeen.Count > 0;
+                // Production scan phải phủ đúng toàn bộ active capacity. Frame
+                // thiếu source vẫn được phát để diagnostic nhưng không thể ARM.
+                bool complete = terminator.IsKnown &&
+                                _sourcesSeen.Count == ExpectedIoCount;
 
                 frames.Add(new ScanFrame(
                     DateTime.Now,
@@ -217,7 +230,12 @@ public sealed class BoardIoDecoder
                         pair => pair.Key,
                         pair => (IReadOnlySet<int>)pair.Value.ToHashSet()),
                     _targetHitCounts.ToDictionary(pair => pair.Key, pair => pair.Value),
-                    BoardScanMode.Production));
+                    BoardScanMode.Production,
+                    ExpectedIoCount,
+                    _sourcesSeen.Count,
+                    terminator.RawCode,
+                    CardCount,
+                    terminator.IsKnown));
 
                 ResetFrameState();
                 continue;
@@ -271,7 +289,8 @@ public sealed class BoardIoDecoder
                 continue;
             }
 
-            if (first == WordEnd1 && second == WordEnd2)
+            if (TryDecodeFrameTerminator(first, second, out FrameTerminator terminator) &&
+                terminator.IsKnown)
             {
                 AppendRaw(first, second);
                 _bufferOffset += 2;
@@ -292,7 +311,12 @@ public sealed class BoardIoDecoder
                     _sequence,
                     new Dictionary<int, IReadOnlySet<int>>(),
                     snapshot.ToDictionary(value => value, _ => 1),
-                    BoardScanMode.Probe));
+                    BoardScanMode.Probe,
+                    ExpectedIoCount,
+                    _sourcesSeen.Count,
+                    terminator.RawCode,
+                    CardCount,
+                    true));
 
                 ResetFrameState();
                 continue;
@@ -326,6 +350,28 @@ public sealed class BoardIoDecoder
 
     bool TryDecodeTarget(byte first, byte second, out int io) =>
         _addressMapper.TryDecode(first, TargetBase, second, out io);
+
+    /// <summary>
+    /// Terminator protocol đã có bằng chứng cho code 00 và 01. C0 với code khác
+    /// vẫn được nhận diện là terminator candidate để phát diagnostic incomplete,
+    /// nhưng tuyệt đối không được đánh dấu complete.
+    /// </summary>
+    public static bool TryDecodeFrameTerminator(
+        byte first,
+        byte second,
+        out FrameTerminator terminator)
+    {
+        if (first != WordEnd1)
+        {
+            terminator = default;
+            return false;
+        }
+
+        terminator = new FrameTerminator(
+            second,
+            second is 0x00 or 0x01);
+        return true;
+    }
 
     bool TryDecodeProbeState(byte first, byte second, out int io, out bool active)
     {
@@ -372,3 +418,5 @@ public sealed class BoardIoDecoder
         }
     }
 }
+
+public readonly record struct FrameTerminator(byte RawCode, bool IsKnown);

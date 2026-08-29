@@ -22,10 +22,16 @@ public sealed class ScanSupervisor
         if (!_board.IsConnected)
             return false;
 
-        if (_board.IsScanning && _board.CurrentScanMode == BoardScanMode.Production)
+        _board.ConfigureActiveScanRange(maxIo);
+        BoardCapacity requestedCapacity = _board.Capacity;
+        bool capacityChanged = _board.AppliedScanCapacity is not BoardCapacity appliedCapacity ||
+                               !HasSameActiveRange(appliedCapacity, requestedCapacity);
+
+        if (!capacityChanged &&
+            _board.IsScanning &&
+            _board.CurrentScanMode == BoardScanMode.Production)
             return false;
 
-        _board.ConfigureScanRange(maxIo);
         await _board.StartScanAsync(BoardScanMode.Production, ct);
         return true;
     }
@@ -37,15 +43,12 @@ public sealed class ScanSupervisor
     {
         ct.ThrowIfCancellationRequested();
 
-        BoardCapacity previousCapacity = _board.Capacity;
-        _board.ConfigureScanRange(maxIo);
+        _board.ConfigureActiveScanRange(maxIo);
         BoardCapacity configuredCapacity = _board.Capacity;
         int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(configuredCapacity);
 
-        bool capacityChanged =
-            previousCapacity.ExpansionModuleCount != configuredCapacity.ExpansionModuleCount ||
-            previousCapacity.StartCardNumber != configuredCapacity.StartCardNumber ||
-            previousCapacity.TotalIoCapacity != configuredCapacity.TotalIoCapacity;
+        bool capacityChanged = _board.AppliedScanCapacity is not BoardCapacity appliedCapacity ||
+                               !HasSameActiveRange(appliedCapacity, configuredCapacity);
 
         // App đã chạy Production scan nền ngay sau khi kết nối. Khi người dùng
         // mở TestView với cùng capacity, không STOP/START stream khỏe chỉ để
@@ -55,7 +58,7 @@ public sealed class ScanSupervisor
             _board.IsScanning &&
             _board.CurrentScanMode == BoardScanMode.Production)
         {
-            long healthyBaseline = _board.FramesReceived;
+            long healthyBaseline = _board.CompleteFramesReceived;
             if (await WaitForNextProductionFrameAsync(
                     healthyBaseline,
                     firstFrameTimeoutMs,
@@ -68,7 +71,7 @@ public sealed class ScanSupervisor
             _log($"SCAN KEEP-ALIVE sau {reason} không có frame mới - chuyển sang recovery STOP/START.");
         }
 
-        long baselineFrameCount = _board.FramesReceived;
+        long baselineFrameCount = _board.CompleteFramesReceived;
         await _board.StartScanAsync(BoardScanMode.Production, ct);
 
         if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
@@ -80,8 +83,8 @@ public sealed class ScanSupervisor
         _log($"START_SCAN sau {reason} chưa có frame đầu - tự recovery STOP/START một lần.");
         await _board.StopScanAsync(CancellationToken.None);
 
-        baselineFrameCount = _board.FramesReceived;
-        _board.ConfigureScanRange(maxIo);
+        baselineFrameCount = _board.CompleteFramesReceived;
+        _board.ConfigureActiveScanRange(maxIo);
         await _board.StartScanAsync(BoardScanMode.Production, ct);
 
         if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
@@ -90,8 +93,7 @@ public sealed class ScanSupervisor
             return;
         }
 
-        throw new InvalidOperationException(
-            $"START_SCAN sau {reason} không trả frame production trong thời gian watchdog.");
+        throw new InvalidOperationException(BuildFrameTimeoutDiagnostic(reason));
     }
 
     public async Task<bool> RecoverProductionScanStallAsync(
@@ -110,9 +112,9 @@ public sealed class ScanSupervisor
             _log(
                 $"[SCAN-WATCHDOG] STALL age={ageMs:0}ms seq={lastSequence} frames={framesReceived}; recovery STOP/START.");
 
-            long baselineFrameCount = _board.FramesReceived;
+            long baselineFrameCount = _board.CompleteFramesReceived;
             await _board.StopScanAsync(CancellationToken.None);
-            _board.ConfigureScanRange(maxIo);
+            _board.ConfigureActiveScanRange(maxIo);
             await _board.StartScanAsync(BoardScanMode.Production, ct);
 
             int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
@@ -126,7 +128,7 @@ public sealed class ScanSupervisor
             await _board.DisconnectAsync();
             await reconnectAsync();
 
-            baselineFrameCount = _board.FramesReceived;
+            baselineFrameCount = _board.CompleteFramesReceived;
             await EnsureProductionScanAsync(maxIo, ct);
             firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
             if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
@@ -154,12 +156,30 @@ public sealed class ScanSupervisor
     public static int ResolveProductionStallTimeoutMs(BoardCapacity capacity) =>
         checked(ResolveFirstFrameTimeoutMs(capacity) + StallTimeoutMarginMs);
 
+    private static bool HasSameActiveRange(BoardCapacity left, BoardCapacity right) =>
+        left.StartScanParameter == right.StartScanParameter &&
+        left.StartCardNumber == right.StartCardNumber &&
+        left.TotalIoCapacity == right.TotalIoCapacity;
+
+    private string BuildFrameTimeoutDiagnostic(string reason)
+    {
+        BoardScanCapacity scan = _board.ScanCapacity;
+        string endMarker = _board.LastFrameEndMarkerCode is byte code
+            ? $"C0 {code:X2}"
+            : "NONE";
+        return
+            $"BOARD_SCAN_STALLED after {reason}: ACTIVE_SCAN_UNITS={scan.ActiveScanUnits}; " +
+            $"EXPECTED_IO={scan.ActiveIoCapacity}; LAST_SOURCE_COUNT={_board.LastFrameSourceCount}; " +
+            $"LAST_END_MARKER={endMarker}; UNKNOWN_BYTES={_board.LastFrameUnknownBytes}; " +
+            $"FRAMES_RECEIVED={_board.FramesReceived}.";
+    }
+
     private async Task<bool> WaitForNextProductionFrameAsync(
         long baselineFrameCount,
         int timeoutMs,
         CancellationToken ct)
     {
-        if (_board.FramesReceived > baselineFrameCount)
+        if (_board.CompleteFramesReceived > baselineFrameCount)
             return true;
 
         var frameArrived = new TaskCompletionSource<bool>(
@@ -168,7 +188,10 @@ public sealed class ScanSupervisor
         void OnFrameReceived(object? sender, ScanFrame frame)
         {
             if (frame.Mode == BoardScanMode.Production &&
-                _board.FramesReceived > baselineFrameCount)
+                frame.Complete &&
+                frame.UnknownBytes == 0 &&
+                frame.TerminatorKnown &&
+                _board.CompleteFramesReceived > baselineFrameCount)
             {
                 frameArrived.TrySetResult(true);
             }
@@ -179,7 +202,7 @@ public sealed class ScanSupervisor
         {
             // Recheck after subscribing so a frame arriving across the
             // subscription boundary cannot be lost.
-            if (_board.FramesReceived > baselineFrameCount)
+            if (_board.CompleteFramesReceived > baselineFrameCount)
                 return true;
 
             using CancellationTokenRegistration registration = ct.Register(

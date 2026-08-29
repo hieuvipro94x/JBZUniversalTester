@@ -273,7 +273,12 @@ public sealed record ScanFrame(
     long Sequence = 0,
     IReadOnlyDictionary<int, IReadOnlySet<int>>? ConnectionsBySource = null,
     IReadOnlyDictionary<int, int>? TargetHitCounts = null,
-    BoardScanMode Mode = BoardScanMode.Production)
+    BoardScanMode Mode = BoardScanMode.Production,
+    int ExpectedIoCount = 0,
+    int SourceCount = 0,
+    byte? EndMarkerCode = null,
+    int ScanUnitCount = 0,
+    bool TerminatorKnown = true)
 {
     public IReadOnlyDictionary<int, IReadOnlySet<int>> Connections =>
         ConnectionsBySource ?? new Dictionary<int, IReadOnlySet<int>>();

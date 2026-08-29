@@ -2,6 +2,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using JBZUniversalTester.Core;
+using JBZUniversalTester.Services;
 using JBZUniversalTester.Views;
 using Microsoft.Win32;
 
@@ -61,6 +62,8 @@ public sealed class HomeViewModel : ObservableObject
         string? initialDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
         if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
             dialog.InitialDirectory = initialDirectory;
+        else if (Directory.Exists(RuntimePaths.ItemDirectory))
+            dialog.InitialDirectory = RuntimePaths.ItemDirectory;
 
         Window? owner = Application.Current?.MainWindow;
         bool? accepted;

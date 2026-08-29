@@ -31,6 +31,14 @@ public sealed class PartCounterStore
     public string StoragePath => _path;
     public string LastWarning { get; private set; } = string.Empty;
 
+    public IReadOnlyList<PartCounterEntry> ReadAll()
+    {
+        lock (_gate)
+            return Load().Items.Values
+                .OrderBy(item => item.PartNumber, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+    }
+
     public PartCounterEntry GetOrCreate(
         ProductModel model,
         long initialCounter = 0,
@@ -123,6 +131,26 @@ public sealed class PartCounterStore
         }
     }
 
+    public void MirrorAll(IEnumerable<ProbeCounterSnapshot> snapshots)
+    {
+        ArgumentNullException.ThrowIfNull(snapshots);
+        lock (_gate)
+        {
+            PartCounterFile file = Load();
+            file.Items.Clear();
+            foreach (ProbeCounterSnapshot snapshot in snapshots)
+            {
+                string partNumber = NormalizePartNumber(
+                    string.IsNullOrWhiteSpace(snapshot.PartNumber) ? "UNKNOWN" : snapshot.PartNumber);
+                file.Items[partNumber] = new PartCounterEntry(
+                    partNumber,
+                    NormalizeThreshold(snapshot.ReplacementThreshold),
+                    Math.Max(0, snapshot.Counter));
+            }
+            Save(file);
+        }
+    }
+
     private PartCounterFile Load()
     {
         var result = new PartCounterFile();
@@ -175,12 +203,25 @@ public sealed class PartCounterStore
             ? string.Empty
             : string.Join("\r\n", lines) + "\r\n";
         string temp = _path + ".tmp";
-        string backup = _path + ".bak";
-        File.WriteAllText(temp, text, new UTF8Encoding(false));
-        if (File.Exists(_path))
-            File.Replace(temp, _path, backup, ignoreMetadataErrors: true);
-        else
-            File.Move(temp, _path);
+        try
+        {
+            File.WriteAllText(temp, text, new UTF8Encoding(false));
+            if (File.Exists(_path))
+            {
+                try { File.Replace(temp, _path, null, ignoreMetadataErrors: true); }
+                catch (PlatformNotSupportedException) { File.Move(temp, _path, overwrite: true); }
+                catch (IOException) { File.Move(temp, _path, overwrite: true); }
+            }
+            else
+            {
+                File.Move(temp, _path);
+            }
+        }
+        finally
+        {
+            if (File.Exists(temp))
+                File.Delete(temp);
+        }
     }
 
     private static string ResolvePartNumber(ProductModel model)
@@ -206,7 +247,7 @@ public sealed class PartCounterStore
         threshold > 0 ? threshold : DefaultReplacementThreshold;
 
     private static string ResolveDefaultPath()
-        => Path.Combine(AppContext.BaseDirectory, "PartCnt.txt");
+        => RuntimePaths.PartCounterFile;
 
     private sealed class PartCounterFile
     {

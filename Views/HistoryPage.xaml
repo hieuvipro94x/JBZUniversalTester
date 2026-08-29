@@ -284,7 +284,9 @@
                       CellStyle="{StaticResource HistoryCellStyle}"
                       ColumnHeaderStyle="{StaticResource HistoryHeaderStyle}"
                       EnableRowVirtualization="True"
-                      EnableColumnVirtualization="True">
+                      EnableColumnVirtualization="True"
+                      VirtualizingPanel.IsVirtualizing="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling">
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
                         <Setter Property="BorderBrush" Value="#E1E6EB"/>

@@ -119,10 +119,10 @@ if /I "%VERSION_ACTION%"=="AUTO_INCREMENTED" (
 )
 
 set "VERSION_TAG=%NEW_VERSION:.=_%"
-set "EXPECTED_EXE=%ROOT%PublishSingle\V%NEW_VERSION%\JBZUniversalTester_V%VERSION_TAG%.exe"
+set "EXPECTED_EXE=%ROOT%PublishSingle\V%NEW_VERSION%\JBZUniversalTester.exe"
 
 echo Phiên bản build: V%NEW_VERSION%
-echo File EXE       : JBZUniversalTester_V%VERSION_TAG%.exe
+echo File EXE       : JBZUniversalTester.exe
 echo Thư mục        : PublishSingle\V%NEW_VERSION%\
 echo.
 

@@ -57,7 +57,7 @@ public sealed class MainViewModel : ObservableObject
     public int RequiredCardCount =>
         Model is null
             ? 1
-            : BoardCapacity.RequiredExpansionModulesForIo(
+            : BoardCapacity.RequiredScanUnitsForIo(
                 Model.MaxIo,
                 _productionSettings.StartCardNumber);
 
@@ -339,7 +339,8 @@ public sealed class MainViewModel : ObservableObject
         if (boardSelectionChanged)
             await Test.ReconnectBoardForSettingsAsync();
         else if (scanHardwareChanged)
-            await Test.RefreshProductionConfigurationAsync();
+            await Test.RefreshProductionConfigurationAsync(
+                forceNativeRestart: old.UsbDelay != _productionSettings.UsbDelay);
         else
             Test.RefreshProductionSettingsOnly();
 

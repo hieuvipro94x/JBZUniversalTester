@@ -49,14 +49,8 @@ public sealed class TestViewModel : ObservableObject
     private readonly AppSettings _settings;
     private readonly ProductionSettings _productionSettings;
     private readonly LotSequenceService _lotSequence;
-    private readonly Lazy<ProductionStatisticsStore> _statisticsStore = new(() => new ProductionStatisticsStore());
     private readonly Lazy<PartCounterStore> _partCounterStore = new(() => new PartCounterStore());
     private readonly LegacyPhtHistoryService _legacyHistory;
-    private readonly LegacyPhtHistoryReader _legacyHistoryReader = new();
-    private readonly List<FileSystemWatcher> _sharedProductionWatchers = [];
-    private readonly Timer _sharedProductionSyncTimer;
-    private int _sharedProductionSyncRunning;
-    private int _sharedProductionWatchersStarted;
     private readonly SemaphoreSlim _statisticsLoadGate = new(1, 1);
     private readonly SemaphoreSlim _productionPersistenceGate = new(1, 1);
     private readonly SemaphoreSlim _removalPersistenceGate = new(1, 1);
@@ -72,7 +66,6 @@ public sealed class TestViewModel : ObservableObject
     private TestHistoryStore? _historyStore;
     private ProductionPersistenceService? _productionPersistence;
     private readonly LabelPrintService _labelPrintService = new();
-    private readonly LabelDuplicateGuard _labelDuplicateGuard = new();
     private readonly AppSoundService _sound = AppSoundService.Current;
     private readonly ThtModelParser _modelParser = new();
     private readonly object _initializationGate = new();
@@ -936,11 +929,6 @@ public sealed class TestViewModel : ObservableObject
         _settings = settings;
         _productionSettings = productionSettings;
         _legacyHistory = legacyHistory ?? new LegacyPhtHistoryService();
-        _sharedProductionSyncTimer = new Timer(
-            _ => RefreshSharedProductionState(),
-            null,
-            Timeout.Infinite,
-            Timeout.Infinite);
         _requireStartupIoClear = requireStartupIoClear;
         _lotSequence = new LotSequenceService(_productionSettings);
         UpdateDailyLotDisplay();
@@ -1462,17 +1450,9 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    private static string ResolveHistoryDatabasePath(ProductionSettings settings)
-    {
-        string directory = string.IsNullOrWhiteSpace(settings.HistoryDirectory)
-            ? "Data/History"
-            : settings.HistoryDirectory.Trim();
-        if (!Path.IsPathRooted(directory))
-            directory = Path.Combine(AppContext.BaseDirectory, directory);
-        return Path.Combine(directory, "test-history.db");
-    }
+    private static string ResolveHistoryDatabasePath(ProductionSettings settings) =>
+        RuntimePaths.DatabaseFile;
 
-    private ProductionStatisticsStore StatisticsStore => _statisticsStore.Value;
     private PartCounterStore PartCounterStore => _partCounterStore.Value;
 
     private TestHistoryStore HistoryStore
@@ -1612,9 +1592,10 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        if (_board.IsScanning)
-            return;
-
+        // Không return chỉ vì firmware đang scan. Model có thể vừa đổi từ
+        // active=1 sang active=8 trong khi stream cũ vẫn đang chạy. ScanSupervisor
+        // so AppliedScanCapacity với requested capacity và chỉ STOP/START khi dải
+        // firmware thực sự cần đổi; cùng dải thì hoàn toàn reuse, không gửi lệnh.
         try
         {
             bool backgroundOnly = CurrentRuntimeMode == RuntimeMode.Background &&
@@ -1828,22 +1809,6 @@ public sealed class TestViewModel : ObservableObject
         if (_board.IsConnected)
             await EnsureContinuousProductionScanAsync();
 
-        // Watcher C:\Pass_/C:\Error_ là dịch vụ phụ. Directory/FileSystemWatcher
-        // initialization có thể chạm filesystem nên tuyệt đối không chạy trong
-        // constructor/UI first-render path.
-        try
-        {
-            await Task.Run(StartSharedProductionWatchers, _lifetimeCts.Token);
-        }
-        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
-        {
-            return;
-        }
-        catch (Exception ex)
-        {
-            AddLog($"Không thể khởi tạo watcher sản lượng dùng chung: {ex.Message}");
-        }
-
         // Theo dõi nhẹ: nếu USB/D2XX rơi, tự mở lại và khởi động scan nền.
         _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeCts.Token);
 
@@ -1903,6 +1868,11 @@ public sealed class TestViewModel : ObservableObject
             return null;
 
         SetModel(model, preparedEngineModel);
+        // SetModel chỉ đổi requested active range. Nếu firmware đang chạy dải của
+        // model trước, reconcile ngay tại đường load async trước khi MainWindow tự
+        // mở TestView. Healthy same-capacity stream được supervisor giữ nguyên.
+        if (_board.IsConnected)
+            await EnsureContinuousProductionScanAsync();
         StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
         State = _board.IsConnected ? ReadyStateForCurrentModel() : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
         return model;
@@ -1919,6 +1889,8 @@ public sealed class TestViewModel : ObservableObject
             return _engine.PrepareModel(model);
         });
         SetModel(model, prepared);
+        if (_board.IsConnected)
+            await EnsureContinuousProductionScanAsync();
         State = _board.IsConnected ? ReadyStateForCurrentModel() : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
         return model;
     }
@@ -1931,7 +1903,7 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task LoadLastTestedModelAsync()
     {
-        var savedPath = _settings.Storage.LastTestedModelFile;
+        var savedPath = _productionSettings.LastThtPath;
 
         if (string.IsNullOrWhiteSpace(savedPath))
         {
@@ -2014,21 +1986,21 @@ public sealed class TestViewModel : ObservableObject
         {
             var fullPath = ResolveModelPath(sourcePath);
             if (string.Equals(
-                    ResolveOptionalModelPath(_settings.Storage.LastTestedModelFile),
+                    ResolveOptionalModelPath(_productionSettings.LastThtPath),
                     fullPath,
                     StringComparison.OrdinalIgnoreCase))
             {
                 CurrentModelPath = fullPath;
                 return;
             }
-            _settings.Storage.LastTestedModelFile = fullPath;
-            _settings.Save();
+            _productionSettings.LastThtPath = fullPath;
+            ProductionConfigService.Save(_productionSettings);
             CurrentModelPath = fullPath;
             AddLog($"Đã lưu model kiểm tra gần nhất: {Path.GetFileName(fullPath)}");
         }
         catch (Exception ex)
         {
-            // Không làm gián đoạn chu kỳ kiểm tra chỉ vì không ghi được appsettings.json.
+            // Không làm gián đoạn chu kỳ kiểm tra chỉ vì không ghi được CFG.
             AddLog($"Không thể lưu model gần nhất: {ex.Message}");
         }
     }
@@ -3705,10 +3677,6 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         SwitchRuntimeMode(RuntimeMode.ShuttingDown);
-        foreach (FileSystemWatcher watcher in _sharedProductionWatchers)
-            watcher.Dispose();
-        _sharedProductionWatchers.Clear();
-        _sharedProductionSyncTimer.Dispose();
         Interlocked.Increment(ref _statisticsLoadGeneration);
         _lifetimeCts.Cancel();
         CancelCycleOperations();
@@ -6532,7 +6500,7 @@ public sealed class TestViewModel : ObservableObject
             if (configuredMasterFaults != _masterRequiredFaultCount)
                 ResetMasterGateForModel();
         }
-        _board.ConfigureScanRange(maxIo);
+        _board.ConfigureActiveScanRange(maxIo);
         InvokeUi(RebuildActiveCards);
         LoadWaterProofProfileForCurrentModel();
         RefreshProductionUiSettings();
@@ -6565,7 +6533,7 @@ public sealed class TestViewModel : ObservableObject
     /// decoder/card UI được dựng lại rồi scan nền được khởi động lại.
     /// Không đóng/mở FTDI.
     /// </summary>
-    public async Task RefreshProductionConfigurationAsync()
+    public async Task RefreshProductionConfigurationAsync(bool forceNativeRestart = false)
     {
         int maxIo = _model?.MaxIo ?? 0;
         bool wasScanning = _board.IsScanning;
@@ -6574,18 +6542,26 @@ public sealed class TestViewModel : ObservableObject
             ? BoardScanMode.Probe
             : BoardScanMode.Production;
 
+        _board.ConfigureActiveScanRange(maxIo);
+        BoardCapacity requestedActiveCapacity = _board.Capacity;
+        BoardCapacity? appliedActiveCapacity = _board.AppliedScanCapacity;
+        bool activeCapacityChanged = appliedActiveCapacity is null ||
+            appliedActiveCapacity.StartScanParameter != requestedActiveCapacity.StartScanParameter ||
+            appliedActiveCapacity.StartCardNumber != requestedActiveCapacity.StartCardNumber ||
+            appliedActiveCapacity.TotalIoCapacity != requestedActiveCapacity.TotalIoCapacity;
+        bool restartRequired = activeCapacityChanged || forceNativeRestart;
+
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
         _sound.SetWiringFaultAlarm(false);
         _engine.ClearTransientWiringFaults();
 
-        if (_board.IsConnected && wasScanning)
+        if (_board.IsConnected && wasScanning && restartRequired)
         {
             await _board.StopScanAsync();
             await _board.AllRelaysOffAsync();
         }
 
-        _board.ConfigureScanRange(maxIo);
         InvokeUi(RebuildActiveCards);
         LoadWaterProofProfileForCurrentModel();
         RefreshProductionUiSettings();
@@ -6600,7 +6576,8 @@ public sealed class TestViewModel : ObservableObject
             }
         }
 
-        if (_board.IsConnected && wasScanning)
+        if (_board.IsConnected && wasScanning && restartRequired &&
+            _board.ScanCapacity.IsModelWithinInstalledCapacity)
         {
             if (resumeMode == BoardScanMode.Production)
                 await StartProductionScanAndVerifyFrameAsync(
@@ -6618,7 +6595,7 @@ public sealed class TestViewModel : ObservableObject
 
         AddLog(
             $"Đã reconfigure card runtime không đóng FTDI: {_board.Capacity}; " +
-            $"resume={resumeMode}, wasScanning={wasScanning}.");
+            $"resume={resumeMode}, wasScanning={wasScanning}, restart={restartRequired}.");
     }
 
     private void RefreshProductionUiSettings()
@@ -6691,7 +6668,7 @@ public sealed class TestViewModel : ObservableObject
 
         // Chỉ áp dụng SỐ CARD ĐÃ CẤU HÌNH. Không tự nâng theo model.
         // MainWindow sẽ chặn test nếu max IO của THT vượt dung lượng card.
-        _board.ConfigureScanRange(model.MaxIo);
+        _board.ConfigureActiveScanRange(model.MaxIo);
         InvokeUi(RebuildActiveCards);
 
         CurrentModelPath = ResolveOptionalModelPath(model.SourcePath);
@@ -6810,8 +6787,8 @@ public sealed class TestViewModel : ObservableObject
         StartupPerformanceTrace.Mark("T11 STATS_BACKGROUND");
 
         // Giữ reference task để exception luôn được observe trong method bên dưới.
-        // Gate serialize các lần đổi model nhanh, tránh nhiều thread cùng quét toàn
-        // bộ C:\Pass_/C:\Error_ một lúc.
+        // Gate serializes fast model changes so stale SQLite queries cannot
+        // overwrite statistics for the newly selected model.
         _statisticsLoadTask = LoadStatisticsForModelAsync(model, generation);
     }
 
@@ -7147,34 +7124,19 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AddLog($"LEGACY_EXPORT_FAILED C:\\Pass_/C:\\Error_: {ex.Message}");
+            AddLog($"LEGACY_{(passed ? "PASS" : "ERROR")}_EXPORT_FAILED: {ex.Message}");
         }
 
         try
         {
             ProductionCommitResult committed = databaseResult!;
-            await Task.Run(() =>
-            {
-                PartCounterStore.Mirror(model, committed.ProbeCounter);
-                StatisticsStore.Mirror(model, committed.Statistics, committed.ProbeCounter);
-            }, cycleToken);
+            await Task.Run(
+                () => PartCounterStore.Mirror(model, committed.ProbeCounter),
+                cycleToken);
         }
         catch (Exception ex)
         {
-            AddLog($"LEGACY_MIRROR_FAILED PartCnt/production.statistics.json: {ex.Message}");
-        }
-
-        if (!passed)
-        {
-            try
-            {
-                await Task.Run(() => ErrorLogService.SaveIfEnabled(
-                    _productionSettings, model, completedLot, completed), cycleToken);
-            }
-            catch (Exception ex)
-            {
-                AddLog($"Không thể auto-save error detail: {ex.Message}");
-            }
+            AddLog($"LEGACY_MIRROR_FAILED PartCnt.txt: {ex.Message}");
         }
 
         if (shouldAutoPrint &&
@@ -7278,103 +7240,6 @@ public sealed class TestViewModel : ObservableObject
         UpdateDailyLotDisplay();
     }
 
-    private void StartSharedProductionWatchers()
-    {
-        if (Interlocked.Exchange(ref _sharedProductionWatchersStarted, 1) != 0)
-            return;
-
-        try
-        {
-            AddSharedProductionWatcher(_legacyHistoryReader.PassRoot, "Day*.dat", includeSubdirectories: true);
-            AddSharedProductionWatcher(_legacyHistoryReader.ErrorRoot, "Day*.err", includeSubdirectories: true);
-
-            string? partCounterDirectory = Path.GetDirectoryName(PartCounterStore.StoragePath);
-            if (!string.IsNullOrWhiteSpace(partCounterDirectory))
-                AddSharedProductionWatcher(
-                    partCounterDirectory,
-                    Path.GetFileName(PartCounterStore.StoragePath),
-                    includeSubdirectories: false);
-        }
-        catch
-        {
-            // Cho phép retry nếu OS/path tạm thời chưa sẵn sàng.
-            Interlocked.Exchange(ref _sharedProductionWatchersStarted, 0);
-            throw;
-        }
-    }
-
-    private void AddSharedProductionWatcher(string directory, string filter, bool includeSubdirectories)
-    {
-        if (!Directory.Exists(directory))
-            return;
-
-        var watcher = new FileSystemWatcher(directory, filter)
-        {
-            IncludeSubdirectories = includeSubdirectories,
-            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size
-        };
-        FileSystemEventHandler changed = (_, _) => ScheduleSharedProductionRefresh();
-        RenamedEventHandler renamed = (_, _) => ScheduleSharedProductionRefresh();
-        watcher.Changed += changed;
-        watcher.Created += changed;
-        watcher.Renamed += renamed;
-        watcher.EnableRaisingEvents = true;
-        _sharedProductionWatchers.Add(watcher);
-    }
-
-    private void ScheduleSharedProductionRefresh()
-    {
-        if (Volatile.Read(ref _shutdownStarted) != 0)
-            return;
-        try
-        {
-            // One append/replace can raise several events. Wait until the writer
-            // has closed the shared file and perform only one refresh.
-            _sharedProductionSyncTimer.Change(300, Timeout.Infinite);
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-    }
-
-    private void RefreshSharedProductionState()
-    {
-        ProductModel? model = _model;
-        if (model is null ||
-            Volatile.Read(ref _shutdownStarted) != 0 ||
-            Interlocked.CompareExchange(ref _sharedProductionSyncRunning, 1, 0) != 0)
-        {
-            return;
-        }
-
-        try
-        {
-            // Legacy files are compatibility exports only. A file watcher may
-            // request a refresh, but it must never overwrite authoritative DB
-            // counters by parsing PHT/PartCnt back into the production state.
-            ScheduleStatisticsLoadForModel(model);
-        }
-        catch (Exception ex)
-        {
-            AddLog($"Không thể làm mới sản lượng SQLite: {ex.Message}");
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _sharedProductionSyncRunning, 0);
-        }
-    }
-
-    private void ApplySharedProductionStatistics(LegacyProductionSnapshot snapshot)
-    {
-        Total = checked((int)snapshot.DailyTotal);
-        Pass = checked((int)snapshot.DailyPass);
-        Fail = checked((int)snapshot.DailyFail);
-        DailyTestCount = snapshot.DailyTotal;
-        MonthlyTestCount = snapshot.MonthlyTotal;
-        LifetimeTestCount = snapshot.LifetimeTotal;
-        UpdateDailyLotDisplay();
-    }
-
     private void UpdateDailyLotDisplay()
     {
         // Số LOT trên màn hình là sản lượng PASS trong ngày, không phải số
@@ -7439,12 +7304,12 @@ public sealed class TestViewModel : ObservableObject
                 ProductionConfigService.Save(_productionSettings);
                 string fullPath = ResolveModelPath(selectedPath);
                 if (!string.Equals(
-                        ResolveOptionalModelPath(_settings.Storage.LastTestedModelFile),
+                        ResolveOptionalModelPath(_productionSettings.LastThtPath),
                         fullPath,
                         StringComparison.OrdinalIgnoreCase))
                 {
-                    _settings.Storage.LastTestedModelFile = fullPath;
-                    _settings.Save();
+                    _productionSettings.LastThtPath = fullPath;
+                    ProductionConfigService.Save(_productionSettings);
                 }
             });
         }
@@ -7469,15 +7334,9 @@ public sealed class TestViewModel : ObservableObject
                 _lifetimeCts.Token);
             try
             {
-                ProductionStatisticsSnapshot statistics = await ProductionPersistence.GetStatisticsAsync(
-                    PartIdentitySnapshot.Capture(model),
-                    DateTime.Now,
+                await Task.Run(
+                    () => PartCounterStore.Mirror(model, counter),
                     _lifetimeCts.Token);
-                await Task.Run(() =>
-                {
-                    PartCounterStore.Mirror(model, counter);
-                    StatisticsStore.Mirror(model, statistics, counter);
-                }, _lifetimeCts.Token);
             }
             catch (Exception ex)
             {
@@ -7540,15 +7399,9 @@ public sealed class TestViewModel : ObservableObject
                 _lifetimeCts.Token);
             try
             {
-                ProductionStatisticsSnapshot statistics = await ProductionPersistence.GetStatisticsAsync(
-                    PartIdentitySnapshot.Capture(model),
-                    DateTime.Now,
+                await Task.Run(
+                    () => PartCounterStore.Mirror(model, reset),
                     _lifetimeCts.Token);
-                await Task.Run(() =>
-                {
-                    PartCounterStore.Mirror(model, reset);
-                    StatisticsStore.Mirror(model, statistics, reset);
-                }, _lifetimeCts.Token);
             }
             catch (Exception ex)
             {
@@ -7626,14 +7479,6 @@ public sealed class TestViewModel : ObservableObject
             {
                 InvokeUi(() => Lot = _lotSequence.NextLot.ToString());
                 SetSuccessfulLabelContext(new LabelPrintContext(request, historyStore, historyId));
-                try
-                {
-                    _labelDuplicateGuard.RecordSuccessfulPrint(request, printedAt ?? DateTime.Now);
-                }
-                catch (Exception ex)
-                {
-                    AddLog($"LABEL DUPLICATE STATE ERROR: {ex.Message}");
-                }
             }
 
             if (commitUnknown)

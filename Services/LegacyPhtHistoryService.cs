@@ -27,8 +27,8 @@ public sealed class LegacyPhtHistoryService
         string? errorRoot = null,
         bool enabled = true)
     {
-        _passRoot = string.IsNullOrWhiteSpace(passRoot) ? @"C:\Pass_" : Path.GetFullPath(passRoot);
-        _errorRoot = string.IsNullOrWhiteSpace(errorRoot) ? @"C:\Error_" : Path.GetFullPath(errorRoot);
+        _passRoot = string.IsNullOrWhiteSpace(passRoot) ? RuntimePaths.PassRoot : Path.GetFullPath(passRoot);
+        _errorRoot = string.IsNullOrWhiteSpace(errorRoot) ? RuntimePaths.ErrorRoot : Path.GetFullPath(errorRoot);
         _enabled = enabled;
     }
 
