@@ -10,10 +10,13 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        AsyncFileLogService.Current.Initialize();
+        // Khởi tạo/migrate History và config trước để khóa log lấy đúng giá trị
+        // đã lưu của trạm. History không phụ thuộc và không bị khóa bởi log.
+        StartupBootstrapService.EnsureStartupFiles();
+        var productionSettings = ProductionConfigService.Load();
+        AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
         AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
         StartupPerformanceTrace.Mark("T0 App.OnStartup");
-        StartupBootstrapService.EnsureStartupFiles();
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;

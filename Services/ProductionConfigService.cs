@@ -160,6 +160,7 @@ public static class ProductionConfigService
             $"[TemperatureTolerance]{F(settings.TemperatureTolerance)}",
             $"[MinimumErrorLogValue]{settings.MinimumErrorLogValue}",
             $"[AutoSaveErrors]{Bool(settings.AutoSaveErrors)}",
+            $"[EnableSystemLogs]{Bool(settings.EnableSystemLogs)}",
             $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
             $"[Relay2MarkingPulseMs]{settings.Relay2MarkingPulseMs}",
@@ -395,6 +396,7 @@ public static class ProductionConfigService
         settings.TemperatureTolerance = D(map, "TemperatureTolerance", settings.TemperatureTolerance);
         settings.MinimumErrorLogValue = I(map, "MinimumErrorLogValue", settings.MinimumErrorLogValue);
         settings.AutoSaveErrors = B(map, "AutoSaveErrors", settings.AutoSaveErrors);
+        settings.EnableSystemLogs = B(map, "EnableSystemLogs", settings.EnableSystemLogs);
 
         settings.IoScanIntervalMs = I(map, "IoScanIntervalMs", settings.IoScanIntervalMs);
         settings.OpenCircuitConfirmMs = I(map, "OpenCircuitConfirmMs", settings.OpenCircuitConfirmMs);

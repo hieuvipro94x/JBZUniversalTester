@@ -13,7 +13,7 @@ public static class ErrorLogService
         long lotNo,
         CompletedTestResult result)
     {
-        if (!settings.AutoSaveErrors || result.Passed)
+        if (!settings.EnableSystemLogs || !settings.AutoSaveErrors || result.Passed)
             return;
 
         FaultDetail[] errors = result.Faults.ToArray();

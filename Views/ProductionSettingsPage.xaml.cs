@@ -170,7 +170,7 @@ public partial class ProductionSettingsPage : UserControl
 
             PrinterConnectionStatusText.Text = "ĐANG KẾT NỐI...";
             LabelPrinterConnectionResult result = await _main.Test.ConnectLabelPrinterAsync(_vm.Settings.Label);
-            PrinterConnectionStatusText.Text = result.Connected ? $"ĐÃ NỐI\n{portName}" : "KẾT NỐI LỖI";
+            PrinterConnectionStatusText.Text = result.Connected ? $"ĐÃ NỐI {portName}" : "KẾT NỐI LỖI";
 
             if (result.Connected)
             {
@@ -331,7 +331,7 @@ public partial class ProductionSettingsPage : UserControl
     {
         if (_main?.Test.IsLabelPrinterConnected == true)
         {
-            PrinterConnectionStatusText.Text = $"ĐÃ NỐI\n{_main.Test.LabelPrinterConnectedPort}";
+            PrinterConnectionStatusText.Text = $"ĐÃ NỐI {_main.Test.LabelPrinterConnectedPort}";
             return;
         }
 

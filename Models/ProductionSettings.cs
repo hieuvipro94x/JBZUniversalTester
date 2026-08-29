@@ -101,6 +101,12 @@ public sealed class ProductionSettings
 
     public bool AutoSaveErrors { get; set; }
 
+    /// <summary>
+    /// Khóa tổng cho Data/Logs và Data/ErrorLogs. History dùng kho riêng và
+    /// luôn được ghi độc lập với tùy chọn này.
+    /// </summary>
+    public bool EnableSystemLogs { get; set; }
+
     // ============================================================
     // THỜI GIAN
     // ============================================================

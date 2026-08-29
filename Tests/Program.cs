@@ -34,6 +34,7 @@ internal static class Program
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
+            ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
             ("THT label renderer and LOT lifecycle", TestThtLabelAndLotLifecycle),
             ("PASS label snapshot/idempotency/traceability", TestLabelPrintingSafety),
@@ -568,6 +569,11 @@ internal static class Program
                settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
             "Production settings exposes reconnectable printer control and connection status");
+        Assert(settingsXaml.Contains("<ColumnDefinition Width=\"110\"/>", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Width=\"115\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Grid.Row=\"2\"\n                                    Grid.Column=\"2\"", StringComparison.Ordinal),
+            "Label printer controls use a compact three-row layout so manual resistance stays visible");
         Assert(settingsXaml.Contains("x:Name=\"RelayWiringModeComboBox\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Settings.RelayWiringMode", StringComparison.Ordinal),
             "Production settings exposes one physical relay-role mapping and states FAIL behavior clearly");
@@ -583,6 +589,14 @@ internal static class Program
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
         Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
             "Production settings exposes the dedicated TEM BE QR selection");
+
+        Assert(settingsXaml.Contains(
+                   "Settings.EnableSystemLogs, Mode=TwoWay",
+                   StringComparison.Ordinal) &&
+               settingsXaml.Contains(
+                   "Data/History vẫn luôn được lưu",
+                   StringComparison.Ordinal),
+            "Production settings exposes a system-log master switch that preserves History");
 
         string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
         string soundSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
@@ -1364,6 +1378,74 @@ internal static class Program
         Assert(BrushHex(row.Color2Brush) == two, $"Color #2 for '{code}'");
         Assert(BrushHex(row.Color3Brush) == three, $"Color #3 for '{code}'");
         Assert(BrushHex(row.Color4Brush) == four, $"Color #4 for '{code}'");
+    }
+
+    private static void TestSystemLogMasterSwitch()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZSystemLogSwitchTests",
+            Guid.NewGuid().ToString("N"));
+        string logsRoot = Path.Combine(root, "Logs");
+
+        try
+        {
+            var logger = new AsyncFileLogService();
+            try
+            {
+                logger.Configure(enabled: false, rootDirectory: logsRoot);
+                logger.Application("MUST_NOT_CREATE_LOG_DIRECTORY");
+                Assert(!Directory.Exists(logsRoot),
+                    "Disabled system logging does not create Data/Logs");
+
+                logger.Configure(enabled: true);
+                Assert(logger.FileLoggingEnabled && logger.Level == AppLogLevel.ProtocolTrace,
+                    "Enabled system logging includes protocol trace level");
+                logger.Board("ENABLED_PROTOCOL_TRACE", AppLogLevel.ProtocolTrace);
+
+                logger.Configure(enabled: false);
+                logger.Error("MUST_NOT_BE_WRITTEN_AFTER_DISABLE");
+            }
+            finally
+            {
+                logger.Dispose();
+            }
+
+            string boardLog = Directory.EnumerateFiles(
+                    Path.Combine(logsRoot, AppLogCategory.Board.ToString()),
+                    "*.log")
+                .Single();
+            Assert(File.ReadAllText(boardLog).Contains(
+                    "ENABLED_PROTOCOL_TRACE",
+                    StringComparison.Ordinal),
+                "Enabled system logging writes Board protocol trace");
+            Assert(!Directory.EnumerateFiles(
+                    Path.Combine(logsRoot, AppLogCategory.Error.ToString()),
+                    "*.log")
+                .Any(),
+                "Disabling the master switch stops subsequent Error log writes");
+
+            string historyPath = Path.Combine(root, "History", "test-history.db");
+            var history = new TestHistoryStore(historyPath);
+            DateTime now = DateTime.Now;
+            history.Add(new TestHistoryRecord
+            {
+                Started = now,
+                Finished = now,
+                PartNumber = "LOG-OFF-HISTORY",
+                Result = "PASS",
+                Passed = true
+            });
+            Assert(File.Exists(historyPath) && history.Search(
+                    new HistorySearchCriteria(null, null, null, "LOG-OFF-HISTORY", "ALL", 10)).Count == 1,
+                "History remains writable while the system log master switch is off");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void AssertBalancedTwoColorBrush(string code, string first, string second)

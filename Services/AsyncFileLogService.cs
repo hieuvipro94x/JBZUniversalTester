@@ -44,41 +44,70 @@ public sealed class AsyncFileLogService : IDisposable
     private Task? _writerTask;
     private int _started;
     private int _disposed;
+    private int _fileLoggingEnabled;
 
     public string RootDirectory { get; private set; } =
         Path.Combine(AppContext.BaseDirectory, "Data", "Logs");
 
-    public AppLogLevel Level { get; set; } = AppLogLevel.Normal;
+    public AppLogLevel Level { get; private set; } = AppLogLevel.Normal;
 
-    // Log chẩn đoán Data/Logs được tắt trong bản Production. Lịch sử kiểm tra,
-    // sản lượng và dữ liệu tem dùng kho riêng nên không bị ảnh hưởng.
-    public bool FileLoggingEnabled { get; set; }
+    // Data/Logs được điều khiển bởi ProductionSettings.EnableSystemLogs.
+    // History, production counter và dữ liệu tem dùng kho riêng.
+    public bool FileLoggingEnabled => Volatile.Read(ref _fileLoggingEnabled) != 0;
 
-    public void Initialize(string? rootDirectory = null)
+    public void Configure(bool enabled, string? rootDirectory = null)
     {
-        if (!FileLoggingEnabled)
-            return;
-
-        if (Interlocked.Exchange(ref _started, 1) != 0)
-            return;
-
-        if (!string.IsNullOrWhiteSpace(rootDirectory))
+        if (!string.IsNullOrWhiteSpace(rootDirectory) && Volatile.Read(ref _started) == 0)
         {
             RootDirectory = Path.IsPathRooted(rootDirectory)
                 ? rootDirectory
                 : Path.Combine(AppContext.BaseDirectory, rootDirectory);
         }
 
-        foreach (string name in Enum.GetNames<AppLogCategory>())
-            Directory.CreateDirectory(Path.Combine(RootDirectory, name));
+        // Khi bật khóa tổng, ghi đủ cả Normal/Diagnostic/ProtocolTrace.
+        Level = enabled ? AppLogLevel.ProtocolTrace : AppLogLevel.Normal;
+        Volatile.Write(ref _fileLoggingEnabled, enabled ? 1 : 0);
+        if (enabled)
+            Initialize();
+    }
 
-        _writerTask = Task.Run(WriterLoopAsync);
-        Write(AppLogCategory.Application, $"Log service initialized. Root={RootDirectory}");
+    public void Initialize(string? rootDirectory = null)
+    {
+        if (!string.IsNullOrWhiteSpace(rootDirectory) && Volatile.Read(ref _started) == 0)
+        {
+            RootDirectory = Path.IsPathRooted(rootDirectory)
+                ? rootDirectory
+                : Path.Combine(AppContext.BaseDirectory, rootDirectory);
+        }
+
+        if (!FileLoggingEnabled)
+            return;
+
+        if (Interlocked.CompareExchange(ref _started, 1, 0) != 0)
+            return;
+
+        try
+        {
+            foreach (string name in Enum.GetNames<AppLogCategory>())
+                Directory.CreateDirectory(Path.Combine(RootDirectory, name));
+
+            _writerTask = Task.Run(WriterLoopAsync);
+            Write(AppLogCategory.Application, $"Log service initialized. Root={RootDirectory}");
+        }
+        catch (Exception ex)
+        {
+            Interlocked.Exchange(ref _started, 0);
+            Volatile.Write(ref _fileLoggingEnabled, 0);
+            Debug.WriteLine($"AsyncFileLogService initialization failed: {ex}");
+        }
     }
 
     public void Write(AppLogCategory category, string message, AppLogLevel level = AppLogLevel.Normal)
     {
-        if (Volatile.Read(ref _started) == 0 || Volatile.Read(ref _disposed) != 0 || level > Level)
+        if (!FileLoggingEnabled ||
+            Volatile.Read(ref _started) == 0 ||
+            Volatile.Read(ref _disposed) != 0 ||
+            level > Level)
             return;
 
         string safe = string.IsNullOrWhiteSpace(message) ? "(empty)" : message.Trim();

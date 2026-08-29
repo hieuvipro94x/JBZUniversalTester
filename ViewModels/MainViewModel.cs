@@ -292,6 +292,7 @@ public sealed class MainViewModel : ObservableObject
     public void ReloadProductionSettings()
     {
         ProductionConfigService.ReloadInto(_productionSettings);
+        AsyncFileLogService.Current.Configure(_productionSettings.EnableSystemLogs);
         Test.RefreshProductionConfiguration();
         RefreshSettingsBindings();
     }
@@ -311,6 +312,7 @@ public sealed class MainViewModel : ObservableObject
         };
 
         ProductionConfigService.ReloadInto(_productionSettings);
+        AsyncFileLogService.Current.Configure(_productionSettings.EnableSystemLogs);
 
         bool boardSelectionChanged = old.BoardMode != _productionSettings.BoardMode;
         bool scanHardwareChanged =
