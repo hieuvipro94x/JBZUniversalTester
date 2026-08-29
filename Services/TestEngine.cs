@@ -46,6 +46,16 @@ public sealed record PassGateDiagnostics(
 /// </summary>
 public sealed class TestEngine : IDisposable
 {
+    public sealed class PreparedModelState
+    {
+        internal ProductModel Model { get; init; } = null!;
+        internal Dictionary<int, int> ComponentByIo { get; init; } = null!;
+        internal Dictionary<PinRecord, WireNet[]> NetsByPin { get; init; } = null!;
+        internal Dictionary<PinRecord, int> DisplayOrderByPin { get; init; } = null!;
+        internal Dictionary<WireNet, int> DisplayOrderByNet { get; init; } = null!;
+        internal Dictionary<WireNet, string> ConfirmationKeyByNet { get; init; } = null!;
+        internal Dictionary<ClipBranch, string> ConfirmationKeyByClip { get; init; } = null!;
+    }
     const int ClipDisplayOrderBase = -1_000_000;
     public const int JigEjectRelay = 1;
     public const int MarkingRelay = 2;
@@ -345,23 +355,55 @@ public sealed class TestEngine : IDisposable
         // tuyệt đối snapshot đầu dò lọt vào logic đấu sai/chập.
     }
 
-    public void SetModel(ProductModel model)
+    public PreparedModelState PrepareModel(ProductModel model)
     {
-        _model = model ?? throw new ArgumentNullException(nameof(model));
-        _componentByIo = BuildExpectedComponents(model);
-        _netsByPin = BuildNetsByPin(model);
-        _displayOrderByPin = BuildDisplayOrderByPin(model);
-        _displayOrderByNet = BuildNetworkDisplayOrder(model);
-        _confirmationKeyByNet = new Dictionary<WireNet, string>(ReferenceEqualityComparer.Instance);
-        foreach (WireNet net in model.Nets)
-            _confirmationKeyByNet[net] = NetConfirmationKey(net.Name);
+        ArgumentNullException.ThrowIfNull(model);
 
-        _confirmationKeyByClip = new Dictionary<ClipBranch, string>(ReferenceEqualityComparer.Instance);
+        // Build immutable topology outside the frame lock. Only the short
+        // reference swap/reset is serialized with ProcessFrame.
+        Dictionary<int, int> componentByIo = BuildExpectedComponents(model);
+        Dictionary<PinRecord, WireNet[]> netsByPin = BuildNetsByPin(model);
+        Dictionary<PinRecord, int> displayOrderByPin = BuildDisplayOrderByPin(model);
+        Dictionary<WireNet, int> displayOrderByNet = BuildNetworkDisplayOrder(model);
+        var confirmationKeyByNet = new Dictionary<WireNet, string>(ReferenceEqualityComparer.Instance);
+        foreach (WireNet net in model.Nets)
+            confirmationKeyByNet[net] = NetConfirmationKey(net.Name);
+
+        var confirmationKeyByClip = new Dictionary<ClipBranch, string>(ReferenceEqualityComparer.Instance);
         foreach (ClipBranch branch in model.Clip?.Branches ?? [])
-            _confirmationKeyByClip[branch] = ClipConfirmationKey(branch.NetName);
-        _latchedClipKeys.Clear();
-        Reset();
+            confirmationKeyByClip[branch] = ClipConfirmationKey(branch.NetName);
+
+        return new PreparedModelState
+        {
+            Model = model,
+            ComponentByIo = componentByIo,
+            NetsByPin = netsByPin,
+            DisplayOrderByPin = displayOrderByPin,
+            DisplayOrderByNet = displayOrderByNet,
+            ConfirmationKeyByNet = confirmationKeyByNet,
+            ConfirmationKeyByClip = confirmationKeyByClip
+        };
     }
+
+    public void CommitPreparedModel(PreparedModelState prepared)
+    {
+        ArgumentNullException.ThrowIfNull(prepared);
+        lock (_gate)
+        {
+            _model = prepared.Model;
+            _componentByIo = prepared.ComponentByIo;
+            _netsByPin = prepared.NetsByPin;
+            _displayOrderByPin = prepared.DisplayOrderByPin;
+            _displayOrderByNet = prepared.DisplayOrderByNet;
+            _confirmationKeyByNet = prepared.ConfirmationKeyByNet;
+            _confirmationKeyByClip = prepared.ConfirmationKeyByClip;
+            _latchedClipKeys.Clear();
+            ResetUnsafe();
+        }
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    public void SetModel(ProductModel model) => CommitPreparedModel(PrepareModel(model));
 
     static Dictionary<PinRecord, WireNet[]> BuildNetsByPin(ProductModel model)
     {
@@ -643,33 +685,32 @@ public sealed class TestEngine : IDisposable
     public void Reset()
     {
         lock (_gate)
-        {
-            _passedNets.Clear();
-            _stableCounters.Clear();
-            _currentActive.Clear();
-            _currentConnections.Clear();
-            _actualComponentByIo.Clear();
-            _unexpectedIo.Clear();
-            _wiringFaults.Clear();
-            _candidateWiringFaults.Clear();
-            _confirmedOpenKeys.Clear();
-            _faultConfirmation.Reset();
-            _contactUnstable = false;
-            _contactLossTimedOut = false;
-            _productStable = false;
-            _readyToEvaluateProductFaults = false;
-            _hasExpectedSourceCoverage = false;
-            _lastFrameValid = false;
-            _lastFrameSequence = 0;
-            _lastFrameUnknownBytes = 0;
-            // Frame production hoàn chỉnh đầu tiên sau Reset luôn phải phát
-            // Changed, kể cả nó rỗng. Sau PASS relay có thể đã nhả toàn bộ
-            // harness trước frame đầu tiên; nếu bỏ event rỗng thì UI sẽ mắc
-            // ở PASS dù sản phẩm đã được tháo.
-            _forceNextFrameChanged = true;
-        }
+            ResetUnsafe();
 
         Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void ResetUnsafe()
+    {
+        _passedNets.Clear();
+        _stableCounters.Clear();
+        _currentActive.Clear();
+        _currentConnections.Clear();
+        _actualComponentByIo.Clear();
+        _unexpectedIo.Clear();
+        _wiringFaults.Clear();
+        _candidateWiringFaults.Clear();
+        _confirmedOpenKeys.Clear();
+        _faultConfirmation.Reset();
+        _contactUnstable = false;
+        _contactLossTimedOut = false;
+        _productStable = false;
+        _readyToEvaluateProductFaults = false;
+        _hasExpectedSourceCoverage = false;
+        _lastFrameValid = false;
+        _lastFrameSequence = 0;
+        _lastFrameUnknownBytes = 0;
+        _forceNextFrameChanged = true;
     }
 
     public void ResetProductCycle()
@@ -685,12 +726,10 @@ public sealed class TestEngine : IDisposable
         if (_disposed)
             return false;
 
-        ProductModel? model = _model;
         // Tuyệt đối không cho snapshot TestPin đi vào logic production.
         // Điều này ngăn que GND tạo cảnh báo đấu sai/chập giả.
         if (!_frameProcessingEnabled ||
             frame.Mode != BoardScanMode.Production ||
-            model is null ||
             !frame.Complete ||
             frame.UnknownBytes > 0)
             return false;
@@ -703,7 +742,8 @@ public sealed class TestEngine : IDisposable
             // Có thể SetFrameProcessingEnabled(false) xảy ra sau check phía
             // ngoài nhưng trước khi callback lấy được lock. Kiểm tra lại để
             // frame production cũ không tạo lỗi đúng lúc chuyển sang TestPin.
-            if (!_frameProcessingEnabled || frame.Mode != BoardScanMode.Production)
+            ProductModel? model = _model;
+            if (!_frameProcessingEnabled || frame.Mode != BoardScanMode.Production || model is null)
                 return false;
 
             bool sameActive = _currentActive.SetEquals(frame.ActiveIo);

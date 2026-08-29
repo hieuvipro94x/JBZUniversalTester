@@ -25,7 +25,7 @@ public sealed class LotSequenceService
         {
             ProductionConfigService.GetOrCreateProductLot(
                 _settings, _activeProductKey, migrateCurrentLot: true);
-            EnsureCurrentProductionDateLocked(_activeProductKey);
+            EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
         }
     }
 
@@ -34,14 +34,11 @@ public sealed class LotSequenceService
         lock (_gate)
         {
             string key = NormalizeProductKey(productKey);
-            bool existed = _settings.LotSettingsByProduct.ContainsKey(key);
             ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
                 _settings, key, migrateCurrentLotIfMissing);
             _activeProductKey = key;
             SyncCompatibilityFieldsLocked(lot);
-            bool dateChanged = EnsureCurrentProductionDateLocked(key);
-            if (!existed && !dateChanged)
-                TryPersistNewProductLocked(key);
+            EnsureCurrentProductionDateLocked(key, persist: false);
         }
     }
 
@@ -52,7 +49,7 @@ public sealed class LotSequenceService
             ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
                 _settings, _activeProductKey, migrateCurrentLot: true);
             SyncCompatibilityFieldsLocked(lot);
-            EnsureCurrentProductionDateLocked(_activeProductKey);
+            EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
         }
     }
 
@@ -62,7 +59,7 @@ public sealed class LotSequenceService
         {
             lock (_gate)
             {
-                EnsureCurrentProductionDateLocked(_activeProductKey);
+                EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
                 return ActiveLotLocked().LotNo;
             }
         }
@@ -78,7 +75,7 @@ public sealed class LotSequenceService
             if (_reservations.TryGetValue(cycleId, out LotReservation existing))
                 return existing.LotNo;
 
-            EnsureCurrentProductionDateLocked(_activeProductKey);
+            EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
             ProductLotSettings lot = ActiveLotLocked();
             int pendingForProduct = _reservations.Values
                 .Where(item => string.Equals(item.ProductKey, _activeProductKey, StringComparison.OrdinalIgnoreCase))
@@ -118,7 +115,7 @@ public sealed class LotSequenceService
                     SyncCompatibilityFieldsLocked(lot);
                 _persist(_settings);
                 _reservations.Remove(cycleId);
-                EnsureCurrentProductionDateLocked(reservation.ProductKey);
+                EnsureCurrentProductionDateLocked(reservation.ProductKey, persist: false);
                 error = string.Empty;
                 return true;
             }
@@ -176,12 +173,12 @@ public sealed class LotSequenceService
         {
             if (_reservations.TryGetValue(cycleId, out LotReservation reservation))
                 return reservation.LotNo;
-            EnsureCurrentProductionDateLocked(_activeProductKey);
+            EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
             return ActiveLotLocked().LotNo;
         }
     }
 
-    private bool EnsureCurrentProductionDateLocked(string productKey)
+    private bool EnsureCurrentProductionDateLocked(string productKey, bool persist)
     {
         if (_reservations.Values.Any(item =>
                 string.Equals(item.ProductKey, productKey, StringComparison.OrdinalIgnoreCase)))
@@ -212,14 +209,19 @@ public sealed class LotSequenceService
         if (IsActiveProduct(productKey))
             SyncCompatibilityFieldsLocked(lot);
 
-        try
+        if (!persist)
         {
-            _persist(_settings);
             if (previousLot != lot.LotNo)
             {
                 AsyncFileLogService.Current.Test(
                     $"LOTNO DAILY RESET product={productKey} date={today} previous={previousLot} next=0");
             }
+            return true;
+        }
+
+        try
+        {
+            _persist(_settings);
             return true;
         }
         catch (Exception ex)

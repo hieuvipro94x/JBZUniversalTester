@@ -159,24 +159,39 @@ public sealed class ScanSupervisor
         int timeoutMs,
         CancellationToken ct)
     {
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        while (watch.ElapsedMilliseconds < timeoutMs)
+        if (_board.FramesReceived > baselineFrameCount)
+            return true;
+
+        var frameArrived = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void OnFrameReceived(object? sender, ScanFrame frame)
         {
-            ct.ThrowIfCancellationRequested();
+            if (frame.Mode == BoardScanMode.Production &&
+                _board.FramesReceived > baselineFrameCount)
+            {
+                frameArrived.TrySetResult(true);
+            }
+        }
 
-            if (!_board.IsConnected)
-                return false;
-
-            // Decoder sequence starts again at 1 for every scan generation.
-            // FramesReceived is transport-wide and monotonic, so it detects the
-            // first real frame after START_SCAN even when its sequence equals the
-            // final frame sequence from the previous generation.
+        _board.FrameReceived += OnFrameReceived;
+        try
+        {
+            // Recheck after subscribing so a frame arriving across the
+            // subscription boundary cannot be lost.
             if (_board.FramesReceived > baselineFrameCount)
                 return true;
 
-            await Task.Delay(25, ct);
+            using CancellationTokenRegistration registration = ct.Register(
+                () => frameArrived.TrySetCanceled(ct));
+            Task timeout = Task.Delay(timeoutMs, CancellationToken.None);
+            Task completed = await Task.WhenAny(frameArrived.Task, timeout);
+            ct.ThrowIfCancellationRequested();
+            return completed == frameArrived.Task && await frameArrived.Task;
         }
-
-        return _board.FramesReceived > baselineFrameCount;
+        finally
+        {
+            _board.FrameReceived -= OnFrameReceived;
+        }
     }
 }

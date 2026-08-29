@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,9 +13,12 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 public partial class HistoryPage : UserControl
 {
-    private readonly TestHistoryStore _store;
+    private readonly string _historyPath;
+    private readonly object _storeGate = new();
+    private TestHistoryStore? _store;
     private readonly LegacyPhtHistoryReader _legacyReader = new();
-    public ObservableCollection<TestHistoryRecord> Records { get; } = new();
+    private IReadOnlyList<TestHistoryRecord> _records = [];
+    private int _reloadGeneration;
 
     public event EventHandler? RequestClose;
 
@@ -32,7 +34,7 @@ public partial class HistoryPage : UserControl
         if (!Path.IsPathRooted(directory))
             directory = Path.Combine(AppContext.BaseDirectory, directory);
 
-        _store = new TestHistoryStore(Path.Combine(directory, "test-history.db"));
+        _historyPath = Path.Combine(directory, "test-history.db");
 
         SetDefaultFilters();
         Loaded += (_, _) => Reload();
@@ -66,21 +68,30 @@ public partial class HistoryPage : UserControl
         e.Handled = true;
     }
 
-    private void Reload()
+    private TestHistoryStore GetStore()
     {
+        lock (_storeGate)
+            return _store ??= new TestHistoryStore(_historyPath);
+    }
+
+    private async void Reload()
+    {
+        int generation = Interlocked.Increment(ref _reloadGeneration);
         try
         {
             HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
-            IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
-                _store.Search(criteria),
-                _legacyReader.Search(criteria),
-                exportOrder: false)
-                .Take(criteria.MaxRows)
-                .ToArray();
+            IReadOnlyList<TestHistoryRecord> rows = await Task.Run(() =>
+                LegacyPhtHistoryReader.MergeWithoutDuplicates(
+                        GetStore().Search(criteria),
+                        _legacyReader.Search(criteria),
+                        exportOrder: false)
+                    .Take(criteria.MaxRows)
+                    .ToArray());
+            if (generation != Volatile.Read(ref _reloadGeneration))
+                return;
 
-            Records.Clear();
-            foreach (TestHistoryRecord row in rows)
-                Records.Add(row);
+            _records = rows;
+            HistoryGrid.ItemsSource = rows;
 
             TestHistoryRecord[] products = rows.Where(row => !row.IsMasterRecord).ToArray();
             int pass = products.Count(row => row.Passed);
@@ -93,7 +104,7 @@ public partial class HistoryPage : UserControl
 
             SummaryText.Text =
                 $"{rows.Count:N0} bản ghi | SẢN PHẨM {products.Length:N0} " +
-                $"(PASS {pass:N0} / FAIL {fail:N0}) | MASTER {master:N0} | DB: {_store.DatabasePath}";
+                $"(PASS {pass:N0} / FAIL {fail:N0}) | MASTER {master:N0} | DB: {_historyPath}";
         }
         catch (Exception ex)
         {
@@ -122,7 +133,7 @@ public partial class HistoryPage : UserControl
 
     private async void ExportCsv_Click(object sender, RoutedEventArgs e)
     {
-        if (Records.Count == 0)
+        if (_records.Count == 0)
         {
             ShowMessage("Không có dữ liệu để xuất.", "Lịch sử", MessageBoxImage.Information);
             return;
@@ -145,7 +156,7 @@ public partial class HistoryPage : UserControl
             int exportedCount = await Task.Run(() =>
             {
                 IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
-                    _store.SearchForExport(criteria),
+                    GetStore().SearchForExport(criteria),
                     _legacyReader.SearchForExport(criteria),
                     exportOrder: true);
                 HistoryExportService.ExportCsv(dialog.FileName, rows);
@@ -164,7 +175,7 @@ public partial class HistoryPage : UserControl
 
     private async void ExportXlsx_Click(object sender, RoutedEventArgs e)
     {
-        if (Records.Count == 0)
+        if (_records.Count == 0)
         {
             ShowMessage("Không có dữ liệu để xuất.", "Lịch sử", MessageBoxImage.Information);
             return;
@@ -187,7 +198,7 @@ public partial class HistoryPage : UserControl
             int exportedCount = await Task.Run(() =>
             {
                 IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
-                    _store.SearchForExport(criteria),
+                    GetStore().SearchForExport(criteria),
                     _legacyReader.SearchForExport(criteria),
                     exportOrder: true);
                 HistoryExportService.ExportXlsx(dialog.FileName, rows);

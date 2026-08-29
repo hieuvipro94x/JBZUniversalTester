@@ -1,0 +1,2276 @@
+# MASTER CODEX TASK — FINAL
+
+# JBZUniversalTester — TÁI CẤU TRÚC TRIỆT ĐỂ THEO KIẾN TRÚC HTDRV GỐC
+
+# FIX STARTUP / MODEL LOAD / START TEST / UI FREEZE / D2XX LIFECYCLE / REALTIME FLOW
+
+## 0. NGUYÊN TẮC LÀM VIỆC
+
+Hãy lấy TOÀN BỘ solution hiện tại làm nguồn sự thật duy nhất.
+
+KHÔNG dựa vào file backup hoặc source cũ ngoài solution.
+
+Trước khi sửa:
+
+* phân tích toàn solution;
+* dựng call graph;
+* xác định root cause;
+* xác định chính xác file cần sửa.
+
+Sau đó mới edit.
+
+KHÔNG rewrite toàn bộ project một cách mù quáng.
+
+KHÔNG thay giao diện nếu không cần.
+
+KHÔNG thay `.tht`.
+
+KHÔNG thay protocol firmware nếu không có bằng chứng từ trace.
+
+KHÔNG thay semantics PASS/FAIL đang hoạt động.
+
+KHÔNG tạo:
+
+* `.bak`
+* `.old`
+* `.backup`
+* file copy
+  trong source tree.
+
+Sau task chỉ báo cáo những file thực sự thay đổi.
+
+---
+
+# 1. MỤC TIÊU CUỐI
+
+JBZUniversalTester phải hoạt động theo triết lý giống Htdrv gốc:
+
+> PERMANENT HARDWARE ENGINE
+>
+> * LOGICAL TEST STATE MACHINE
+> * THIN WPF UI
+
+Người vận hành phải cảm nhận:
+
+* mở app nhanh;
+* cửa sổ hiện ngay;
+* UI không đơ trong lúc board connect;
+* chọn mã hàng không freeze;
+* bấm BẮT ĐẦU gần như tức thì;
+* TestWindow mở ngay;
+* không delay vô lý trước khi test;
+* Probe chạm/nhả nhanh;
+* WRONG WIRING/SHORT nhanh;
+* PASS/FAIL không làm UI khựng;
+* leak/resistance chạy ổn định;
+* chạy production hàng trăm chu kỳ không tích tụ thread/task/handle;
+* không phải thoát app vào lại sau vài chu kỳ.
+
+---
+
+# 2. KIẾN TRÚC HTDRV GỐC ĐÃ PHÂN TÍCH
+
+Htdrv gốc là native Win32/MFC.
+
+Kiến trúc quan sát được:
+
+UI THREAD
+|
++-- Windows message pump
++-- button/message
++-- vẽ control
++-- chỉ cập nhật UI khi logical state đổi
+
+HARDWARE THREAD
+|
++-- FTDI
++-- wait/event
++-- queue status
++-- read bytes
++-- decode
++-- test state
++-- notify UI
+
+Htdrv có dấu hiệu sử dụng:
+
+* `CreateThread`
+* `CreateEvent`
+* `WaitForSingleObject`
+* `WaitForMultipleObjects`
+* `PostMessage`
+* `PeekMessage`
+* `SetTimer`
+
+D2XX:
+
+* `FT_OpenEx`
+* `FT_Close`
+* `FT_SetEventNotification`
+* `FT_GetQueueStatus`
+* `FT_Read`
+* `FT_Write`
+* `FT_Purge`
+
+Đặc biệt:
+
+`FT_EVENT_RXCHAR`
+
+được sử dụng để đánh thức worker khi có RX.
+
+Bản gốc có wait/sleep trong WORKER để nhường CPU.
+
+Điều đó KHÔNG phải UI delay.
+
+Không được hiểu sai và đưa `Thread.Sleep()` vào UI.
+
+---
+
+# 3. KIẾN TRÚC ĐÍCH
+
+Luồng bắt buộc:
+
+FT245R
+↓
+D2xxBoardTransport
+↓
+single permanent RX worker
+↓
+BoardIoDecoder
+↓
+ScanFrame
+↓
+TestEngine
+↓
+logical state / delta
+↓
+TestViewModel
+↓
+WPF Dispatcher
+↓
+UI
+
+Không được:
+
+FT_Read
+↓
+Dispatcher
+↓
+DataGrid
+
+Không được:
+
+raw byte
+↓
+UI.
+
+---
+
+# 4. PHÂN TÍCH TOÀN BỘ STARTUP CALL GRAPH
+
+Dựng chính xác:
+
+App.OnStartup
+↓
+StartupBootstrapService
+↓
+MainWindow constructor
+↓
+MainViewModel constructor
+↓
+TestViewModel constructor
+↓
+MainWindow Loaded
+↓
+MainWindow ContentRendered
+↓
+MainViewModel.InitializeApplicationAsync
+↓
+TestViewModel.InitializeAsync
+↓
+InitializeHardwareAsync
+↓
+ConnectBoardAsync
+↓
+UnifiedBoardTransport.ConnectAsync
+↓
+D2xxBoardTransport.ConnectAsync
+↓
+handshake
+↓
+INIT
+↓
+START_SCAN
+↓
+LoadLastTestedModelAsync
+↓
+ThtModelParser
+↓
+TestEngine.SetModel
+↓
+SetModel UI
+↓
+statistics/history
+↓
+READY.
+
+Với từng bước ghi:
+
+* UI thread hay worker;
+* disk I/O;
+* DB I/O;
+* FTDI native call;
+* COM I/O;
+* Dispatcher;
+* ObservableCollection;
+* logging;
+* audio;
+* FileSystemWatcher.
+
+---
+
+# 5. FIRST RENDER PHẢI ĐƯỢC ƯU TIÊN TUYỆT ĐỐI
+
+MainWindow phải render trước heavy initialization.
+
+Desired:
+
+App start
+↓
+create window
+↓
+Show
+↓
+ContentRendered
+↓
+UI responsive
+↓
+hardware/model/services async.
+
+Không heavy work trong:
+
+* `App.OnStartup`
+* `MainWindow` constructor
+* `MainViewModel` constructor
+* `TestViewModel` constructor
+* `MainWindow.Loaded`
+
+trước first render.
+
+---
+
+# 6. STARTUP BOOTSTRAP
+
+Audit:
+
+`StartupBootstrapService`
+`ProductionDataUpgradeService`
+
+Không được scan/copy toàn bộ:
+
+* history;
+* SQLite;
+* `C:\Pass_`;
+* `C:\Error_`;
+* PartCnt;
+* LastBarcode;
+* old V* directories;
+
+trước first render nếu không bắt buộc.
+
+Thiết kế:
+
+FAST BOOTSTRAP
+→ chỉ config bắt buộc.
+
+DEFERRED MIGRATION
+→ history/statistics/counters chạy background.
+
+Nhưng phải chống race:
+
+persistence task nào có thể tạo file mới phải await deferred migration tương ứng trước khi ghi.
+
+Không làm mất counter/history cũ khi nâng phiên bản.
+
+---
+
+# 7. APP SOUND
+
+`AppSoundService.Initialize()` không được chạy hai lần.
+
+App là owner.
+
+Không initialize thêm từ `TestViewModel` constructor.
+
+Audio load/play startup:
+
+sau first render hoặc `ApplicationIdle`.
+
+Audio lỗi không được phá startup.
+
+---
+
+# 8. TESTVIEWMODEL CONSTRUCTOR PHẢI NHẸ
+
+Constructor chỉ:
+
+* assign service;
+* subscribe event;
+* tạo command;
+* tạo lightweight state.
+
+Không:
+
+* load PHT;
+* scan history;
+* write config;
+* create heavy watcher;
+* initialize sound;
+* initialize SQLite schema;
+* FTDI connect;
+* model parse.
+
+Audit constructor của:
+
+* `ProductionStatisticsStore`
+* `PartCounterStore`
+* `TestHistoryStore`
+* `LegacyPhtHistoryService`
+* `LotSequenceService`
+
+để đảm bảo không có I/O ẩn.
+
+---
+
+# 9. LOTSEQUENCESERVICE
+
+Không ghi:
+
+`production.settings.json`
+
+ngay trong constructor hoặc ngay khi chọn model nếu không cần.
+
+LOT state có thể update memory trước.
+
+Persistence:
+background/async.
+
+Nhưng khi cần durable commit sau PASS/label thì phải giữ consistency.
+
+---
+
+# 10. MỘT HARDWARE OWNER DUY NHẤT
+
+Search toàn solution:
+
+`FT_Open`
+`FT_OpenEx`
+`FT_Close`
+`FT_Read`
+`FT_Write`
+`FT_GetQueueStatus`
+`FT_SetEventNotification`
+`FT_SetLatencyTimer`
+`FT_SetUSBParameters`
+`FT_Purge`.
+
+Sau refactor:
+
+chỉ `D2xxBoardTransport` được trực tiếp gọi D2XX.
+
+Không class nào khác được mở FTDI.
+
+---
+
+# 11. FT_OPEN INDEX TRONG TRACE
+
+Trace cũ từng xuất hiện:
+
+FT_Open(index)
+→ FT_Close
+→ FT_OpenEx(serial)
+
+Trong source hiện tại nếu không có `FT_Open(index)`:
+
+search:
+
+* DllImport;
+* wrapper;
+* helper;
+* diagnostic code;
+* reflection;
+* `GetProcAddress`;
+* native dependency.
+
+Nếu không tìm thấy trong solution:
+ghi rõ.
+
+Không tự viết workaround đoán mò.
+
+---
+
+# 12. UNIFIEDBOARDTRANSPORT
+
+`UnifiedBoardTransport` chỉ là wrapper.
+
+Không được:
+
+* tạo transport khác;
+* reconnect riêng;
+* duplicate shutdown.
+
+Connect/Disconnect serialize.
+
+Dispose không được cleanup inner transport hai lần.
+
+---
+
+# 13. CONNECTION STATE MACHINE
+
+Thiết kế rõ:
+
+Disconnected
+Connecting
+Initializing
+Ready
+Scanning
+PausedForHardwareOperation
+Recovering
+Faulted
+ShuttingDown.
+
+Mọi transition serialized.
+
+Không:
+
+Connecting → Connecting
+
+Không:
+
+Scanning → tạo reader mới.
+
+---
+
+# 14. CONNECTASYNC IDEMPOTENT
+
+Nếu connected:
+return ngay.
+
+Nếu connect đang chạy:
+caller khác await cùng operation.
+
+Nếu failed:
+lần sau mới retry.
+
+Không overlap:
+
+Main startup
++
+Hardware monitor
++
+TestWindow
++
+Start Test
++
+DeviceFault recovery.
+
+---
+
+# 15. MỘT D2XX RX WORKER DUY NHẤT
+
+Reader worker được tạo sau khi connect/initialize.
+
+Chỉ một worker.
+
+Reader tồn tại xuyên suốt app lifetime.
+
+Không tạo reader mới khi:
+
+* mở TestWindow;
+* đóng TestWindow;
+* bấm START;
+* PASS;
+* FAIL;
+* đổi model;
+* đổi tab.
+
+Reader chỉ chết khi:
+
+* disconnect;
+* USB error;
+* shutdown.
+
+---
+
+# 16. D2XX EVENT-DRIVEN
+
+Dùng:
+
+`FT_SetEventNotification(... FT_EVENT_RXCHAR ...)`
+
+Reader:
+
+while (!cancel)
+{
+Wait RX event/cancel/timeout;
+
+```
+FT_GetQueueStatus;
+
+while (available > 0)
+{
+    FT_Read block;
+    decoder.Feed(block);
+
+    nếu queue còn data:
+        đọc tiếp;
+}
+```
+
+}
+
+Không busy-spin.
+
+---
+
+# 17. KHÔNG POLL 1000+ LẦN/S KHI QUEUE RỖNG
+
+Trace cũ từng thấy khoảng:
+
+~2000 D2XX API call/sec
+
+trong khi board chỉ ~14 complete frame/sec.
+
+Idle worker phải:
+
+WAIT.
+
+Không:
+
+while(true)
+FT_GetQueueStatus();
+
+Timeout chỉ dùng watchdog/perf.
+
+---
+
+# 18. D2XX READ
+
+Đọc toàn bộ block available hợp lý.
+
+Không cố chia nhỏ 1-2 byte.
+
+`BoardIoDecoder` phải xử lý được:
+
+* partial frame;
+* nhiều frame trong một read;
+* split frame giữa nhiều read.
+
+---
+
+# 19. BOARDIODECODER LÀ PURE HOT PATH
+
+Không:
+
+* UI;
+* Dispatcher;
+* DB;
+* MessageBox;
+* ObservableCollection;
+* sync file logging.
+
+Input:
+`ReadOnlySpan<byte>`.
+
+Output:
+`0..N ScanFrame`.
+
+---
+
+# 20. CONFIGURESCANRANGE KHÔNG ĐƯỢC BLOCK UI
+
+Đặc biệt audit:
+
+`ConfigureScanRange()`.
+
+Không được:
+
+`_ioLock.Wait()`
++
+`FT_SetLatencyTimer()`
+
+trong synchronous method có thể gọi từ UI.
+
+Tách:
+
+LOGICAL CAPACITY CONFIG
+
+khỏi:
+
+NATIVE USB CONFIG.
+
+Nếu latency/config native không đổi:
+không gọi lại driver.
+
+Cache:
+
+* latency;
+* capacity;
+* start card;
+* scan parameter.
+
+---
+
+# 21. KHÔNG `_ioLock.Wait()` TRÊN UI
+
+Search:
+
+`.Wait()`
+`.Result`
+`.GetAwaiter().GetResult()`
+`Thread.Sleep`
+`Dispatcher.Invoke`
+`_ioLock.Wait()`.
+
+Audit toàn bộ.
+
+UI path phải async.
+
+D2XX synchronization:
+`WaitAsync`.
+
+---
+
+# 22. START_SCAN IDEMPOTENT
+
+Nếu:
+
+* already scanning;
+* same mode;
+* same capacity;
+* stream healthy;
+
+`StartScanAsync()` phải return/reuse.
+
+Không:
+
+STOP
+→ START
+
+vì caller gọi lại.
+
+---
+
+# 23. SCANSUPERVISOR
+
+Role duy nhất:
+
+* ensure scan running;
+* verify health;
+* stall watchdog;
+* controlled recovery.
+
+Không được dùng như helper để STOP/START ở mọi stage.
+
+`EnsureProductionScanAsync`:
+
+if healthy:
+return false.
+
+---
+
+# 24. WATCHDOG RECOVERY LEVEL
+
+Nếu stall:
+
+LEVEL 1
+check reader state.
+
+LEVEL 2
+STOP/START firmware một lần.
+
+LEVEL 3
+D2XX disconnect/reconnect.
+
+LEVEL 4
+DeviceFault.
+
+Không reconnect chỉ vì:
+
+* mở TestWindow;
+* start cycle;
+* đổi model.
+
+---
+
+# 25. BACKGROUND PRODUCTION SCAN
+
+Ngay sau board ready:
+
+Production scan chạy nền.
+
+MainWindow:
+scan chạy.
+
+TestWindow:
+reuse.
+
+Close TestWindow:
+scan vẫn chạy.
+
+Open TestWindow:
+reuse.
+
+---
+
+# 26. BẤM START KHÔNG CÓ NGHĨA START HARDWARE
+
+ĐÂY LÀ NGUYÊN TẮC QUAN TRỌNG NHẤT.
+
+START chỉ:
+
+validate
+↓
+reset logical cycle state
+↓
+capture current frame sequence
+↓
+enable TestEngine
+↓
+ARM cycle
+↓
+return.
+
+Không:
+
+reload settings
+reconnect board
+reinitialize FTDI
+STOP scan
+INIT
+START scan
+
+nếu hardware đã healthy.
+
+---
+
+# 27. MAINVIEWMODEL.ENSUREMODELCARDCAPACITY
+
+Đặc biệt audit.
+
+Không được mỗi lần bấm START lại:
+
+`ReloadProductionSettings()`
+
+→ disk read
+→ reconfigure transport.
+
+Settings chỉ reload/apply khi:
+
+* startup;
+* người dùng Save Settings;
+* explicit config reload.
+
+Không trong Start Test hot path.
+
+---
+
+# 28. STARTTESTASYNC
+
+Audit từng dòng.
+
+Tách:
+
+LOGICAL CYCLE RESET
+
+khỏi:
+
+HARDWARE CONTROL.
+
+Mỗi cycle được phép reset:
+
+* engine state;
+* fault state;
+* runtime generation;
+* result gate;
+* removal state;
+* UI logical state.
+
+Không được reset hardware chỉ vì cycle mới.
+
+---
+
+# 29. ALLRELAYSOFF KHI START
+
+Không gửi `ALL_RELAYS_OFF` mỗi lần START nếu:
+
+* relay state đã safe;
+* không có manual/operation trước đó yêu cầu.
+
+Nếu cần relay safety:
+cache logical relay state hoặc safe-state transition.
+
+Không để lệnh relay làm `_scanPrepared=false` nếu firmware không yêu cầu.
+
+---
+
+# 30. `_scanPrepared`
+
+Expected startup:
+
+Connect
+↓
+STOP_SCAN
+↓
+Handshake
+↓
+INIT1
+↓
+INIT2
+↓
+safe relay state
+↓
+START_SCAN.
+
+Không:
+
+INIT1
+INIT2
+relay off
+scanPrepared=false
+INIT1
+INIT2
+START.
+
+Command `0x8E` không invalidate prepare nếu trace không chứng minh.
+
+`0x90/0x91` resistance routing có thể invalidate.
+
+---
+
+# 31. FRESH FRAME GATE
+
+Cycle mới không cần hardware restart để "clean frame".
+
+Khi ARM:
+
+armSequence = LastFrameSequence.
+
+Chỉ xử lý production frame:
+
+Sequence > armSequence.
+
+Dùng logical generation.
+
+---
+
+# 32. TESTWINDOW
+
+Constructor:
+light.
+
+Loaded:
+không initialize hardware lần nữa nếu startup app đã làm.
+
+TestWindow open phải nhanh.
+
+Nếu board chưa ready:
+UI vẫn mở/hiển thị trạng thái.
+
+Không block render.
+
+---
+
+# 33. MODEL SELECTION
+
+Flow mong muốn:
+
+Select file
+↓
+parse async
+↓
+build engine model state worker
+↓
+atomic commit
+↓
+UI model ready
+↓
+stats/history worker
+↓
+stats UI update sau.
+
+Không:
+
+Select
+↓
+PHT scan
+↓
+SQLite
+↓
+history
+↓
+board reconfig native
+↓
+ready.
+
+---
+
+# 34. THT PARSE
+
+`ThtModelParser.Load`:
+background.
+
+Đo:
+
+parse_ms.
+
+Không Dispatcher.
+
+---
+
+# 35. TESTENGINE.SETMODEL
+
+Nếu SetModel build:
+
+* topology;
+* expected network;
+* dictionaries;
+* lookup;
+* clip topology;
+
+thì phần build phải chạy worker nếu nặng.
+
+Commit engine model state phải atomic.
+
+Engine state shared với `ProcessFrame()` phải protected đúng lock/gate.
+
+Không race giữa:
+
+frame processing
++
+model swap.
+
+Event `Changed` chỉ phát sau lock release.
+
+---
+
+# 36. MODEL GENERATION
+
+Người dùng chọn A rồi B:
+
+A hoàn thành muộn không được overwrite B.
+
+Generation token bắt buộc.
+
+---
+
+# 37. PIN LOOKUP / TOPOLOGY LOGGING
+
+Không build diagnostic string lớn trên Dispatcher.
+
+`LogExpectedNetBuild`
+`LogModelTopology`
+
+nếu duyệt hàng trăm network:
+chạy worker / diagnostic logger.
+
+Không bắt model UI chờ log.
+
+---
+
+# 38. HISTORY / STATISTICS KHÔNG NẰM MODEL HOT PATH
+
+Không:
+
+SetModel
+→ GetProductionSnapshot
+→ scan C:\Pass_
+→ scan C:\Error_
+→ UI freeze.
+
+Flow:
+
+SetModel ready
+↓
+start background statistics
+↓
+commit result later.
+
+---
+
+# 39. KHÔNG FULL-SCAN PHT MỖI CYCLE
+
+`LegacyPhtHistoryReader.GetProductionSnapshot`
+
+không được chạy trong PASS/FAIL hot path hoặc mỗi Probe cycle.
+
+Dùng:
+
+* background refresh;
+* FileSystemWatcher debounce;
+* cached aggregate;
+* incremental update.
+
+---
+
+# 40. FILESYSTEMWATCHER
+
+Khởi tạo sau first render.
+
+Idempotent.
+
+Không tạo nhiều watcher.
+
+Callback không full-scan ngay.
+
+Callback:
+
+mark dirty
+↓
+debounce
+↓
+background refresh.
+
+---
+
+# 41. PRODUCTION STATISTICS STORE
+
+PASS/FAIL result state phải chốt trước.
+
+Persistence:
+
+* statistics JSON;
+* SQLite;
+* PHT;
+* Error log;
+
+không được chạy synchronous trên Dispatcher.
+
+Nhưng vẫn phải giữ durable ordering khi cần:
+
+result commit
+→ persistence
+→ label/eject nếu business logic yêu cầu.
+
+---
+
+# 42. RECORDCOMPLETEDPRODUCT
+
+Refactor thành async nếu cần.
+
+Logic gate:
+
+`Interlocked resultRecorded`
+
+chốt đúng một lần ngay.
+
+Sau đó persistence chạy worker.
+
+Không để frame callback giữ UI trong lúc file/SQLite.
+
+---
+
+# 43. TESTHISTORYSTORE
+
+Constructor không heavy schema init nếu chạy trước UI.
+
+Schema initialization:
+
+lazy / async warm-up.
+
+Nếu nhiều instance cùng mở DB:
+dùng process-wide schema initialization lock/task.
+
+Không để:
+
+2 instances
+→ CREATE/ALTER simultaneously
+→ database locked.
+
+---
+
+# 44. SQLITE
+
+Không synchronous DB operation trên Dispatcher trong production cycle.
+
+History write:
+worker.
+
+History page query:
+worker.
+
+---
+
+# 45. HISTORYPAGE
+
+Không:
+
+query DB
++
+parse PHT
++
+20,000 ObservableCollection.Add
+
+trên Dispatcher.
+
+Flow:
+
+background query/merge
+↓
+build snapshot
+↓
+single UI replace.
+
+Nếu DataGrid cần collection:
+dùng `ItemsSource = snapshot` hoặc batch collection strategy.
+
+---
+
+# 46. PROBE COUNTER
+
+`RecordProbeCycleStarted()` không được:
+
+read/write PartCnt
+write production.statistics
+
+ngay trong realtime frame callback.
+
+Chốt cycle gate ngay.
+
+Persistence:
+worker.
+
+Không để Probe/SHORT/WRONG chờ disk.
+
+---
+
+# 47. LOGGING
+
+Raw:
+
+TX
+RX
+frame
+
+Diagnostic level.
+
+Không `Logs.Insert` từng frame trực tiếp.
+
+Use pending queue:
+
+enqueue
+↓
+single Dispatcher flush
+↓
+max N rows/batch
+↓
+Background priority.
+
+Limit UI logs.
+
+---
+
+# 48. NO DISPATCHER SPAM
+
+Một scan frame không được tạo nhiều:
+
+Dispatcher.BeginInvoke.
+
+Dùng UI coalescing.
+
+Pending latest logical state.
+
+Schedule đúng một flush.
+
+---
+
+# 49. TESTENGINE HOT PATH
+
+`ProcessFrame()` xử lý mọi complete frame.
+
+Không throttle hardware logic.
+
+Không Task.Run per frame.
+
+Không Dispatcher.
+
+Không disk.
+
+Không DB.
+
+---
+
+# 50. UI DELTA
+
+Tạo hoặc giữ cơ chế:
+
+state changed?
+fault changed?
+probe changed?
+counter changed?
+
+Nếu unchanged:
+UI không làm gì.
+
+---
+
+# 51. FAULT GRID
+
+Không rebuild every frame.
+
+Dùng stable signature/key.
+
+`SynchronizeFaultRows`.
+
+Nếu desired == existing:
+return.
+
+---
+
+# 52. PROBE
+
+Production stream hiện có thể detect Probe:
+không switch hardware mode nếu không cần.
+
+Probe observer chỉ update khi:
+
+TOUCH set thay đổi
+RELEASE.
+
+Không Clear/Add UI mỗi frame.
+
+---
+
+# 53. WRONG WIRING / SHORT
+
+Không làm giảm độ nhạy.
+
+Mọi frame vẫn vào engine.
+
+Confirmation policy giữ nguyên.
+
+Chỉ UI/log coalesce.
+
+---
+
+# 54. OPEN CIRCUIT SEMANTICS
+
+Giữ behavior hiện tại nếu project đã disable OPEN product FAIL.
+
+Không tự khôi phục OPEN fault chỉ vì Htdrv cũ có logic khác.
+
+Master nếu cần OPEN evidence riêng:
+giữ theo logic hiện tại.
+
+---
+
+# 55. CLIP
+
+Giữ nguyên topology CLIP:
+
+A0/AO common
++
+a1/a2/a3...
+
+Không làm hỏng logic group/branch.
+
+---
+
+# 56. RESISTANCE
+
+Resistance là special hardware stage.
+
+Được phép:
+
+pause firmware scan
+↓
+0x90/0x91 route
+↓
+Keysight measure
+↓
+release route
+↓
+resume Production.
+
+Nhưng:
+
+* FTDI connection giữ nguyên;
+* hardware owner giữ nguyên;
+* reader architecture giữ nguyên;
+* resume đúng một lần.
+
+---
+
+# 57. WATERPROOF
+
+Leak COM độc lập D2XX.
+
+Không chạy SerialPort blocking trên UI.
+
+Leak COM error:
+Equipment/Device error,
+không ghi Product FAIL sai.
+
+D2XX connection không bị dispose vì Leak lỗi.
+
+---
+
+# 58. PASS
+
+Flow:
+
+continuity confirmed
+↓
+optional resistance
+↓
+optional waterproof
+↓
+result commit
+↓
+label/relay according config
+↓
+resume scan nếu đã pause
+↓
+wait removal.
+
+Không hardware restart nếu không pause.
+
+---
+
+# 59. FAIL WRONG/SHORT
+
+Flow:
+
+confirmed fault
+↓
+lock logical cycle
+↓
+result commit
+↓
+UI dialog
+↓
+JIG relay
+↓
+resume scan
+↓
+wait removal.
+
+Không reconnect D2XX.
+
+---
+
+# 60. PRODUCT REMOVAL
+
+Dùng scan liên tục.
+
+Không suy diễn mất một pin là removed.
+
+Chỉ full logical release mới rearm.
+
+Giữ current safety behavior.
+
+---
+
+# 61. MASTER GOOD/BAD
+
+Giữ toàn bộ semantics hiện tại:
+
+Good Master
+Bad Master
+unique fault count
+no production counter
+no fake PASS/FAIL.
+
+MasterFault UI chỉ update khi unique set đổi.
+
+---
+
+# 62. MANUAL MODE
+
+Manual được phép pause Production scan nếu cần control relay.
+
+Exit Manual:
+resume exactly once.
+
+Không duplicate reader.
+
+---
+
+# 63. PRINTER
+
+Printer không được giữ startup readiness.
+
+App hardware/model ready không cần chờ printer.
+
+Printer connect:
+background.
+
+Printer fail:
+label status riêng.
+
+Không làm D2XX DeviceFault.
+
+---
+
+# 64. SAVE LAST MODEL
+
+Không ghi appsettings mỗi cycle nếu path không đổi.
+
+Cache last saved path.
+
+Chỉ persist khi cần.
+
+---
+
+# 65. PRODUCTION SETTINGS
+
+Không reload file mỗi START.
+
+Apply changes khi Save Settings.
+
+Có runtime config state/version.
+
+---
+
+# 66. LOGICAL VS HARDWARE STATE
+
+Tách rõ:
+
+HARDWARE:
+Connected
+Scanning
+Prepared
+Paused
+
+LOGICAL:
+Background
+Production
+Probe
+Master
+WaitingRemoval
+Fault
+Completed.
+
+Không dùng hardware restart để đổi logical state.
+
+---
+
+# 67. THREAD MODEL MONG MUỐN
+
+Expected:
+
+1 WPF Dispatcher.
+
+1 D2XX reader worker.
+
+1 async log writer.
+
+Optional:
+
+* history/stat worker;
+* Waterproof worker;
+* Keysight operation worker.
+
+Không:
+
+* Task.Run per frame;
+* Dispatcher work per raw read.
+
+---
+
+# 68. LOCK ORDER
+
+Audit:
+
+connect lock
+scan switch lock
+io lock
+manual relay gate
+stats gate
+history schema gate
+Dispatcher.
+
+Không giữ native/engine lock rồi gọi Dispatcher.
+
+Không lock synchronous qua `await`.
+
+---
+
+# 69. SHUTDOWN
+
+Canonical:
+
+logical ShuttingDown
+↓
+cancel cycles/monitor
+↓
+STOP firmware scan
+↓
+cancel reader
+↓
+await reader
+↓
+safe relay OFF
+↓
+optional firmware final cleanup
+↓
+FT_Close once
+↓
+dispose optional services.
+
+Không double disconnect.
+
+---
+
+# 70. UNIFIEDBOARDTRANSPORT DISPOSE
+
+Audit:
+
+Test.ShutdownAsync
+→ board.Disconnect
+
+sau đó:
+
+MainViewModel
+→ board.Dispose
+
+Không được chạy final hardware cleanup hai lần.
+
+Idempotent.
+
+---
+
+# 71. HARDWARE MONITOR
+
+Monitor không tự tạo Connect song song.
+
+Chỉ gọi:
+
+EnsureConnected/EnsureScan
+
+qua same lifecycle coordinator.
+
+Polling monitor khoảng vài giây là được.
+
+Không spam D2XX.
+
+---
+
+# 72. DEVICEFAULT
+
+Hardware failure:
+safe lock.
+
+Không global exception handler che lifecycle corruption.
+
+Reset device:
+controlled recovery.
+
+Không tạo reader thứ hai.
+
+---
+
+# 73. APP GLOBAL EXCEPTION
+
+`DispatcherUnhandledException e.Handled=true`
+
+chỉ là last-resort protection.
+
+Không dựa vào nó để app “không crash”.
+
+Fix lỗi tại source.
+
+---
+
+# 74. PERF LOGGING
+
+Thêm / giữ summary mỗi ~5s:
+
+D2XX:
+
+* opens;
+* closes;
+* reader count;
+* queue calls/s;
+* reads/s;
+* bytes/s;
+* frames/s.
+
+Engine:
+
+* frames processed/s;
+* logical changes/s;
+* avg process ms.
+
+UI:
+
+* scheduled flush;
+* rendered flush;
+* log flush;
+* stall.
+
+System:
+
+* threads;
+* handles;
+* memory.
+
+---
+
+# 75. UI STALL WATCHDOG
+
+Diagnostics only.
+
+Dispatcher heartbeat ~250ms.
+
+Nếu stall >100ms:
+log:
+
+`UI_STALL duration_ms=...`
+
+Không MessageBox.
+
+---
+
+# 76. STARTUP MARKERS
+
+Phải có:
+
+T0 APP_START
+T1 MAIN_CONSTRUCTED
+T2 FIRST_RENDER
+T3 SETTINGS_READY
+T4 BOARD_CONNECT_BEGIN
+T5 FTDI_OPENED
+T6 BOARD_INIT_DONE
+T7 SCANNER_READY
+T8 MODEL_PARSE_DONE
+T9 MODEL_LOGIC_READY
+T10 MODEL_UI_READY
+T11 STATS_BACKGROUND
+T12 STARTUP_READY.
+
+---
+
+# 77. MODEL PERF
+
+Log:
+
+MODEL_PARSE
+ENGINE_MODEL_BUILD
+ENGINE_MODEL_COMMIT
+PIN_LOOKUP
+UI_MODEL_APPLY
+HISTORY_BACKGROUND
+TOTAL_TO_MODEL_READY.
+
+---
+
+# 78. START TEST PERF
+
+Log:
+
+TEST_START_CLICK
+TEST_ARM_BEGIN
+TEST_START_SCAN_REUSED
+TEST_ARM_READY
+FIRST_FRAME_AFTER_ARM
+FIRST_LOGICAL_STATE
+FIRST_UI_UPDATE.
+
+Normal healthy case expected:
+
+`TEST_START_SCAN_REUSED`
+
+không `START_SCAN_SENT`.
+
+---
+
+# 79. STATIC SEARCH SAU REFACTOR
+
+Search solution:
+
+`Thread.Sleep`
+`.Result`
+`.Wait()`
+`.GetAwaiter().GetResult()`
+`Dispatcher.Invoke`
+`FT_Open`
+`FT_OpenEx`
+`FT_Close`
+`StartScanAsync`
+`StopScanAsync`
+`ConfigureScanRange`
+`InitializeHardwareAsync`
+`ReloadProductionSettings`
+`GetProductionSnapshot`
+`ObservableCollection.Clear`
+`Logs.Insert`.
+
+Giải thích từng hit quan trọng còn lại.
+
+---
+
+# 80. BUILD
+
+Sau edit:
+
+Clean.
+
+Delete bin/obj nếu cần.
+
+Restore.
+
+Build Release x64 / target hiện tại.
+
+Không đổi framework nếu không cần.
+
+Không suppress compile errors.
+
+---
+
+# 81. KIỂM TRA STARTUP
+
+Expected:
+
+* MainWindow render nhanh;
+* UI draggable;
+* không Not Responding;
+* board connect background;
+* model load async;
+* history không giữ startup;
+* printer không giữ startup.
+
+FTDI:
+logical open count = 1.
+
+Reader = 1.
+
+INIT normal = 1.
+
+---
+
+# 82. KIỂM TRA CHỌN MÃ
+
+Model lớn + history lớn.
+
+UI không freeze.
+
+Start button không cần đợi history statistics nếu model logic đã ready.
+
+---
+
+# 83. KIỂM TRA START
+
+Board connected + background scan healthy:
+
+click Start
+↓
+TestWindow open
+↓
+ARM
+↓
+reuse scan.
+
+Không:
+
+STOP
+INIT
+START.
+
+---
+
+# 84. STRESS TEST
+
+Nếu có simulation/replay:
+
+> =500 cycles.
+
+Theo dõi:
+
+* thread count;
+* task count;
+* handle count;
+* memory;
+* DB connection;
+* D2XX worker.
+
+Không tăng tuyến tính.
+
+---
+
+# 85. REGRESSION MATRIX
+
+Bắt buộc report:
+
+Board Connect
+Background Scan
+Start reuse
+Correct Wiring
+Wrong Wiring
+Short
+Probe Touch
+Probe Release
+CLIP
+Resistance
+Resistance NG
+Leak PASS
+Leak FAIL
+Leak Equipment Error
+Master Good
+Master Bad
+PASS relay
+FAIL eject
+Product Removal
+Manual
+Label
+History
+Counters
+Shutdown.
+
+---
+
+# 86. CÁC FILE ĐẶC BIỆT PHẢI AUDIT
+
+Ít nhất kiểm tra sâu:
+
+`App.xaml.cs`
+`MainWindow.xaml.cs`
+`MainViewModel.cs`
+`TestWindow.xaml.cs`
+`TestViewModel.cs`
+
+`D2xxBoardTransport.cs`
+`UnifiedBoardTransport.cs`
+`ScanSupervisor.cs`
+`IBoardTransport.cs`
+`BoardIoDecoder.cs`
+`BoardAddressMapper.cs`
+
+`TestEngine.cs`
+`ProbeContactClassifier.cs`
+`ProductionFaultConfirmationGate.cs`
+
+`ThtModelParser.cs`
+
+`ProductionStatisticsStore.cs`
+`TestHistoryStore.cs`
+`LegacyPhtHistoryReader.cs`
+`LegacyPhtHistoryService.cs`
+`PartCounterStore.cs`
+`LotSequenceService.cs`
+
+`LabelPrintService.cs`
+`WaterProofSerialService.cs`
+`KeysightVisaService.cs`
+
+`StartupBootstrapService.cs`
+`ProductionDataUpgradeService.cs`
+`ProductionConfigService.cs`
+
+`HistoryPage.xaml.cs`.
+
+---
+
+# 87. KHÔNG SỬA NẾU KHÔNG CẦN
+
+Nếu một file đã đúng architecture:
+không edit chỉ để formatting.
+
+Report:
+`AUDITED — NO CHANGE REQUIRED`.
+
+---
+
+# 88. ROOT CAUSE REPORT TRƯỚC EDIT
+
+Trước khi sửa phải in:
+
+## ARCHITECTURE AUDIT
+
+Startup flow:
+...
+
+Hardware lifecycle:
+...
+
+RX worker:
+...
+
+Model flow:
+...
+
+Start Test flow:
+...
+
+Persistence flow:
+...
+
+UI update flow:
+...
+
+Shutdown flow:
+...
+
+## ROOT CAUSES
+
+STARTUP:
+1.
+2.
+3.
+
+MODEL:
+1.
+2.
+3.
+
+START:
+1.
+2.
+3.
+
+RUNTIME:
+1.
+2.
+3.
+
+## FILES TO MODIFY
+
+...
+
+Sau đó mới code.
+
+---
+
+# 89. REPORT SAU EDIT
+
+## FILES MODIFIED
+
+Chỉ file thật sự thay.
+
+## ARCHITECTURE BEFORE
+
+...
+
+## ARCHITECTURE AFTER
+
+...
+
+## HARDWARE THREAD
+
+...
+
+## ENGINE THREAD
+
+...
+
+## UI THREAD
+
+...
+
+## STORAGE WORKERS
+
+...
+
+## START FLOW BEFORE/AFTER
+
+...
+
+## MODEL FLOW BEFORE/AFTER
+
+...
+
+## PASS/FAIL FLOW BEFORE/AFTER
+
+...
+
+## SHUTDOWN BEFORE/AFTER
+
+...
+
+---
+
+# 90. KHÔNG TẠO DELAY GIẢ
+
+Tuyệt đối không chữa bằng:
+
+`Task.Delay(50)`
+`Task.Delay(100)`
+`Thread.Sleep`
+
+trong UI flow.
+
+Wait ngắn chỉ được dùng nếu:
+
+* firmware protocol thật sự yêu cầu;
+* hardware worker idle wait;
+* confirmation policy;
+* relay pulse;
+* equipment timing.
+
+Mỗi delay protocol phải có comment lý do.
+
+---
+
+# 91. KHÔNG GIẢM ĐỘ NHẠY TEST
+
+Không throttle:
+
+`TestEngine.ProcessFrame`.
+
+Không drop Production frame.
+
+Không tăng debounce tùy tiện.
+
+SHORT/WRONG/Probe vẫn phải phản ứng theo frame cadence thật của board.
+
+---
+
+# 92. PHÂN BIỆT HARDWARE ACQUISITION VÀ UI RENDERING
+
+Hardware:
+
+xử lý mọi frame.
+
+UI:
+
+chỉ render logical change.
+
+Có thể coalesce UI 16-33ms nếu cần.
+
+Không coalesce fault processing.
+
+---
+
+# 93. ƯU TIÊN TỐI ƯU
+
+Theo thứ tự:
+
+1. Loại UI-thread blocking.
+2. Một D2XX owner.
+3. Một RX worker.
+4. Event-driven D2XX.
+5. START chỉ ARM.
+6. Không STOP/START healthy stream.
+7. Model build background.
+8. Storage khỏi realtime loop.
+9. UI coalescing.
+10. Logging batching.
+11. History async.
+12. Shutdown idempotent.
+
+---
+
+# 94. INVARIANT CUỐI
+
+Sau refactor phải có thể khẳng định:
+
+* D2XX native API chỉ có một owner.
+* FTDI connection không phụ thuộc Window.
+* Reader count không vượt 1.
+* START không reload settings.
+* START không reconnect.
+* START không INIT nếu stream khỏe.
+* Model selection không full-scan history trên Dispatcher.
+* PASS/FAIL persistence không block Dispatcher.
+* Probe counter persistence không block frame processing.
+* History UI không Add hàng nghìn row từng cái.
+* Printer không block app readiness.
+* Shutdown FT_Close đúng một lần.
+
+---
+
+# 95. FLOW MONG MUỐN CUỐI CÙNG
+
+## APP
+
+Render UI
+↓
+Connect FTDI
+↓
+Initialize firmware
+↓
+Start permanent RX
+↓
+Start background scan
+↓
+Load model
+↓
+READY
+
+## SELECT MODEL
+
+Parse worker
+↓
+Build engine model worker
+↓
+atomic commit
+↓
+UI model ready
+↓
+statistics background
+
+## START
+
+ARM logical cycle
+↓
+capture sequence
+↓
+enable engine
+↓
+READY
+
+## PRODUCT
+
+frames
+↓
+decoder
+↓
+engine
+↓
+logical state
+
+## WRONG/SHORT
+
+confirm
+↓
+commit result
+↓
+UI fault
+↓
+eject
+↓
+resume scan
+↓
+wait removal
+
+## PASS
+
+continuity
+↓
+resistance if needed
+↓
+leak if needed
+↓
+commit
+↓
+label/relay
+↓
+resume scan
+↓
+wait removal
+
+## REMOVE
+
+full removal frame
+↓
+logical reset
+↓
+next cycle ARM
+
+## EXIT
+
+cancel logic
+↓
+stop firmware
+↓
+cancel reader
+↓
+await worker
+↓
+safe outputs
+↓
+FT_Close once.
+
+---
+
+# 96. PHẠM VI AN TOÀN
+
+KHÔNG được làm hỏng:
+
+* `.tht`;
+* connector mapping;
+* I/O mapping;
+* duplicate pin mapping;
+* CLIP;
+* Probe GND;
+* startup I/O interlock;
+* Master;
+* Wrong;
+* Short;
+* Resistance;
+* Leak;
+* Manual;
+* relay;
+* label;
+* production history;
+* counters.
+
+Nếu một thay đổi kiến trúc xung đột protocol chưa được chứng minh:
+
+giữ behavior cũ và ghi:
+
+`BLOCKED BY HARDWARE/PROTOCOL EVIDENCE`.
+
+---
+
+# 97. KHÔNG CHỈ PATCH CÁC FILE ĐÃ BIẾT
+
+Phải search toàn solution.
+
+Nếu root cause nằm ở file chưa liệt kê:
+sửa file đó.
+
+Nhưng phải giải thích.
+
+---
+
+# 98. SOURCE TREE SẠCH
+
+Sau task:
+
+không backup source.
+
+Không generated debug source.
+
+Không duplicate class.
+
+Không commented-out old implementation dài hàng trăm dòng.
+
+Xóa code cũ thực sự không dùng nếu refactor đã thay thế và build xác nhận an toàn.
+
+---
+
+# 99. VERSION
+
+Nếu refactor hoàn tất và build pass:
+tăng version theo convention hiện tại của project.
+
+Không tự đổi major version.
+
+---
+
+# 100. YÊU CẦU CUỐI CÙNG CHO CODEX
+
+Đừng chỉ sửa triệu chứng.
+
+Hãy tái cấu trúc đúng boundary:
+
+D2XX TRANSPORT
+≠
+TEST LOGIC
+≠
+PERSISTENCE
+≠
+WPF UI.
+
+Mỗi tầng phải độc lập.
+
+Đặc biệt:
+
+> BẤM BẮT ĐẦU KIỂM TRA KHÔNG PHẢI LỆNH KHỞI ĐỘNG PHẦN CỨNG.
+
+Hardware phải đã chạy nền.
+
+START chỉ ARM logical test.
+
+Đây là nguyên tắc trung tâm để JBZUniversalTester đạt cảm giác realtime/mượt giống Htdrv gốc.

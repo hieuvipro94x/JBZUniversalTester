@@ -106,7 +106,6 @@ public partial class TestWindow : Window
         try
         {
             await Dispatcher.Yield(DispatcherPriority.Background);
-            await viewModel.InitializeHardwareAsync();
             if (_autoStartProduction)
                 await viewModel.StartProductionTestAsync();
         }

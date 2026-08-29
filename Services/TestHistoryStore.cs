@@ -6,6 +6,7 @@ namespace JBZUniversalTester.Services;
 
 public sealed class TestHistoryStore
 {
+    private static readonly object SchemaGate = new();
     private readonly string _path;
 
     public TestHistoryStore(string? path = null)
@@ -18,7 +19,8 @@ public sealed class TestHistoryStore
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
 
-        Initialize();
+        lock (SchemaGate)
+            Initialize();
     }
 
     public string DatabasePath => _path;

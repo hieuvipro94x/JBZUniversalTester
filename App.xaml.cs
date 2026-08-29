@@ -12,7 +12,7 @@ public partial class App : Application
     {
         // Khởi tạo/migrate History và config trước để khóa log lấy đúng giá trị
         // đã lưu của trạm. History không phụ thuộc và không bị khóa bởi log.
-        StartupBootstrapService.EnsureStartupFiles();
+        StartupBootstrapService.EnsureFastConfiguration();
         var productionSettings = ProductionConfigService.Load();
         AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
         AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");

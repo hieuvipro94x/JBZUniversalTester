@@ -27,7 +27,7 @@ internal static class Program
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
             ("Inline probe does not clear wiring faults", TestInlineProbeDoesNotClearWiringFaults),
             ("Htdrv endpoint/probe display cases", TestHtdrvEndpointProbeDisplayCases),
-            ("100-cycle scan/probe/fault stress", TestHundredCycleScanProbeFaultStress),
+            ("500-cycle scan/probe/fault stress", TestFiveHundredCycleScanProbeFaultStress),
             ("Continuity/open/wrong/splice engine", TestEngineVectors),
             ("Production PASS gate minimal latency", TestProductionPassGateMinimalLatency),
             ("THT column semantics and string wire topology", TestThtColumnSemantics),
@@ -46,7 +46,7 @@ internal static class Program
             ("Leak connector mapping and PASS/FAIL presentation", TestWaterProofConfigurationAndPresentation),
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
-            ("Production scan token survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
+            ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
             ("Incomplete product full release resets normal and CLIP cycle", TestIncompleteProductFullReleaseResetsClipCycle),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),
@@ -507,9 +507,9 @@ internal static class Program
         publishRecoveryFrame.GetAwaiter().GetResult();
         Assert(recoveryVm.ResultStatusText == "SẴN SÀNG" &&
                recoveryVm.Faults.Count == 2 &&
-               recoveryBoard.Commands.Contains("START") &&
+               !recoveryBoard.Commands.Contains("START") &&
                !recoveryBoard.Commands.Contains("SET:2"),
-            "Rejected FAIL commit restarts removal scan, restores IO rows, and cannot remain latched at KHÔNG ĐẠT");
+            "Rejected FAIL commit reuses healthy removal scan, restores IO rows, and cannot remain latched at KHÔNG ĐẠT");
 
         string xaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
         Assert(!xaml.Contains("ProbeToggleText", StringComparison.Ordinal) &&
@@ -601,10 +601,10 @@ internal static class Program
         string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
         string soundSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
         Assert(appSource.Contains("AppSoundService.Current.PlayStartup();", StringComparison.Ordinal) &&
-               !appSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
+               appSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
                soundSource.Contains("SafePlaySync(player)", StringComparison.Ordinal) &&
                soundSource.Contains("_startupPlaybackActive", StringComparison.Ordinal),
-            "START.wav begins immediately and is protected from Probe reset/click interruption");
+            "START.wav begins after first-render idle and is protected from Probe reset/click interruption");
 
         TestViewModel deviceFaultVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         deviceFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
@@ -1333,9 +1333,14 @@ internal static class Program
         vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
 
         board.StopScanAsync().GetAwaiter().GetResult();
+        int commandsBeforeArm = board.Commands.Count;
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(board.Commands.Count == commandsBeforeArm && !board.IsScanning,
+            "START does not reconnect, initialize, or start hardware when background scan is unavailable");
 
-        Assert(board.LastStartScanToken.HasValue, "Production start sends START_SCAN when scan is not already alive");
+        board.StartScanAsync(BoardScanMode.Production, CancellationToken.None).GetAwaiter().GetResult();
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(board.LastStartScanToken.HasValue, "Background lifecycle owns the production START_SCAN token");
         CancellationToken scanToken = board.LastStartScanToken.GetValueOrDefault();
 
         MethodInfo cancelCycle = typeof(TestViewModel).GetMethod(
@@ -1344,7 +1349,7 @@ internal static class Program
             ?? throw new InvalidOperationException("CancelCycleOperations method not found.");
         cancelCycle.Invoke(vm, []);
 
-        Assert(board.IsScanning, "Canceling ProductCycleToken does not stop D2XX scan session");
+        Assert(board.IsScanning, "Canceling ProductCycleToken does not stop the background D2XX scan session");
         Assert(!scanToken.IsCancellationRequested, "START_SCAN token is independent from ProductCycleToken");
     }
 
@@ -2542,7 +2547,7 @@ internal static class Program
             "StartProbeScanAsync enables Probe/TestPin observation on Production stream");
     }
 
-    private static void TestHundredCycleScanProbeFaultStress()
+    private static void TestFiveHundredCycleScanProbeFaultStress()
     {
         var production = new ProductionSettings
         {
@@ -2557,7 +2562,11 @@ internal static class Program
         vm.SetModel(model);
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
 
-        for (int cycle = 1; cycle <= 100; cycle++)
+        int threadCountBefore = Process.GetCurrentProcess().Threads.Count;
+        int handleCountBefore = Process.GetCurrentProcess().HandleCount;
+        long memoryBefore = GC.GetTotalMemory(forceFullCollection: true);
+
+        for (int cycle = 1; cycle <= 500; cycle++)
         {
             long seq = 1000 + cycle;
             switch (cycle % 5)
@@ -2584,9 +2593,21 @@ internal static class Program
             }
         }
 
-        Assert(board.FramesReceived >= 100, "Stress: FramesReceived keeps increasing");
-        Assert(vm.ProductionFramesProcessed >= 100, "Stress: Probe/fault frames are not suppressed before TestEngine");
+        long memoryAfter = GC.GetTotalMemory(forceFullCollection: true);
+        int threadCountAfter = Process.GetCurrentProcess().Threads.Count;
+        int handleCountAfter = Process.GetCurrentProcess().HandleCount;
+
+        Assert(board.FramesReceived >= 500, "Stress: FramesReceived keeps increasing through 500 cycles");
+        Assert(vm.ProductionFramesProcessed >= 500, "Stress: Probe/fault frames are not suppressed before TestEngine");
         Assert(board.IsScanning, "Stress: Product/probe processing does not stop D2XX scan");
+        Assert(board.Commands.Count(command => command == "START") <= 1,
+            "Stress: logical cycles reuse one healthy production scan");
+        Assert(threadCountAfter <= threadCountBefore + 4,
+            $"Stress: thread count remains bounded ({threadCountBefore} -> {threadCountAfter})");
+        Assert(handleCountAfter <= handleCountBefore + 16,
+            $"Stress: handle count remains bounded ({handleCountBefore} -> {handleCountAfter})");
+        Assert(memoryAfter <= memoryBefore + (32L * 1024 * 1024),
+            $"Stress: managed memory remains bounded ({memoryBefore} -> {memoryAfter})");
         Assert(vm.Faults.Count(row => row.Kind == FaultKind.Probe && row.Io == 1) <= 1,
             "Stress: Probe display does not duplicate the same IO row");
         Assert(!vm.IsDeviceFault, "Stress: no DeviceFault/deadlock from mixed scan/probe/fault frames");
@@ -3335,8 +3356,8 @@ internal static class Program
         Assert(
             migratedLots.NextLot == 9876 &&
             migratedSettings.LotNoDate == "2026-08-30" &&
-            migrationPersistCount == 1,
-            "First upgrade stamps LOTNO date without discarding the current sequence");
+            migrationPersistCount == 0,
+            "First upgrade stamps LOTNO date in memory without constructor disk I/O or discarding the current sequence");
 
         var perProductSettings = new ProductionSettings
         {

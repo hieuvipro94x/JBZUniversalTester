@@ -85,10 +85,6 @@ public sealed class MainViewModel : ObservableObject
     {
         _settings = AppSettings.Load();
         _productionSettings = ProductionConfigService.Load();
-        StartupPerformanceTrace.Mark("T3 Settings loaded");
-        // Yêu cầu 3: ngay khi app khởi động, ghi lại đầy đủ config tiếng Anh.
-        ProductionConfigService.EnsureSavedOnStartup(_productionSettings);
-
         _board = new UnifiedBoardTransport(
             _settings.Board.FtdiSerial,
             _productionSettings
@@ -147,12 +143,15 @@ public sealed class MainViewModel : ObservableObject
     {
         Status = "ĐANG NẠP MÃ HÀNG VÀ KẾT NỐI BO...";
 
+        await Task.Run(StartupBootstrapService.EnsureDeferredProductionFiles);
+        StartupPerformanceTrace.Mark("T3 SETTINGS_READY");
+
         Task printerConnectionTask = Test.AutoConnectLabelPrinterAsync();
+        _ = ObservePrinterStartupAsync(printerConnectionTask);
 
         // TestViewModel thực hiện hai việc tự động: recovery/kết nối FTDI và
         // tải model gần nhất. SetModel sẽ đồng bộ model trở lại MainWindow.
         await Test.InitializeAsync();
-        await printerConnectionTask;
 
         Home.Refresh();
         Raise(nameof(CurrentBoardCapacity));
@@ -171,6 +170,20 @@ public sealed class MainViewModel : ObservableObject
             Status = $"ĐÃ NẠP {Model.ModelName} - BO CHƯA KẾT NỐI";
         else
             Status = "CHƯA CÓ MÃ HÀNG - BO CHƯA KẾT NỐI";
+    }
+
+    private async Task ObservePrinterStartupAsync(Task printerConnectionTask)
+    {
+        try
+        {
+            await printerConnectionTask;
+        }
+        catch (Exception ex)
+        {
+            // Máy in là thiết bị phụ trợ: lỗi kết nối được hiển thị riêng,
+            // không được giữ trạng thái khởi động của bo/model ở phía sau.
+            Test.AddExternalLog($"Không thể tự kết nối máy in tem: {ex.Message}");
+        }
     }
 
     public async Task ShutdownAsync()
@@ -352,9 +365,6 @@ public sealed class MainViewModel : ObservableObject
     {
         if (Model is null)
             return false;
-
-        // Đọc setting mới nhất ngay trước khi test/probe.
-        ReloadProductionSettings();
 
         if (HasEnoughCardsForModel)
             return true;

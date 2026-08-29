@@ -19,6 +19,7 @@ public partial class MainWindow : Window
     private bool _shutdownStarted;
     private bool _shutdownComplete;
     private bool _startupStarted;
+    private UiStallWatchdog? _uiStallWatchdog;
 
     public MainWindow()
     {
@@ -39,6 +40,7 @@ public partial class MainWindow : Window
     {
         ContentRendered -= MainWindow_ContentRendered;
         StartupPerformanceTrace.Mark("T2 MainWindow first ContentRendered");
+        _uiStallWatchdog = new UiStallWatchdog(Dispatcher);
 
         // Quan trọng: không khởi tạo FTDI/model/printer trong Loaded.
         // ContentRendered đảm bảo WPF đã vẽ frame đầu tiên; Task.Yield trả
@@ -331,6 +333,8 @@ public partial class MainWindow : Window
 
         try
         {
+            _uiStallWatchdog?.Dispose();
+            _uiStallWatchdog = null;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
             await _viewModel.ShutdownAsync();
         }

@@ -23,6 +23,13 @@ public static class ProductionDataUpgradeService
         Path.Combine("Data", "LastBarcode.txt")
     ];
 
+    private static readonly string[] FastConfigurationFiles =
+    [
+        "appsettings.json",
+        "production.settings.json",
+        "UniversalTester.cfg"
+    ];
+
     public static IReadOnlyList<string> MigrateForCurrentVersion()
     {
         string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
@@ -31,9 +38,33 @@ public static class ProductionDataUpgradeService
             FindPreviousVersionDirectories(targetDirectory));
     }
 
+    public static IReadOnlyList<string> MigrateFastConfigurationForCurrentVersion()
+    {
+        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        return MigrateMissingProductionData(
+            targetDirectory,
+            FindPreviousVersionDirectories(targetDirectory),
+            FastConfigurationFiles);
+    }
+
+    public static IReadOnlyList<string> MigrateDeferredProductionDataForCurrentVersion()
+    {
+        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
+        return MigrateMissingProductionData(
+            targetDirectory,
+            FindPreviousVersionDirectories(targetDirectory),
+            ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase));
+    }
+
     public static IReadOnlyList<string> MigrateMissingProductionData(
         string targetDirectory,
-        IEnumerable<string> candidateDirectories)
+        IEnumerable<string> candidateDirectories) =>
+        MigrateMissingProductionData(targetDirectory, candidateDirectories, ProductionFiles);
+
+    private static IReadOnlyList<string> MigrateMissingProductionData(
+        string targetDirectory,
+        IEnumerable<string> candidateDirectories,
+        IEnumerable<string> relativePaths)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
         ArgumentNullException.ThrowIfNull(candidateDirectories);
@@ -47,7 +78,7 @@ public static class ProductionDataUpgradeService
             .ToArray();
 
         var migrated = new List<string>();
-        foreach (string relativePath in ProductionFiles)
+        foreach (string relativePath in relativePaths)
         {
             string targetPath = Path.Combine(targetRoot, relativePath);
             if (File.Exists(targetPath))

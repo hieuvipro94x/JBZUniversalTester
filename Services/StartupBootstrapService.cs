@@ -5,27 +5,30 @@ namespace JBZUniversalTester.Services;
 
 public static class StartupBootstrapService
 {
-    public static void EnsureStartupFiles()
+    public static void EnsureFastConfiguration()
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
         {
-            IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateForCurrentVersion();
+            IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateFastConfigurationForCurrentVersion();
             if (migrated.Count > 0)
-            {
-                log.Application(
-                    $"Production data inherited from previous local version: {string.Join(", ", migrated)}");
-            }
+                log.Application($"Fast configuration inherited: {string.Join(", ", migrated)}");
         }
         catch (Exception ex)
         {
-            // Migration failure must be visible, but must not prevent the app
-            // from loading production data that already exists in this folder.
-            log.Error($"Production data inheritance failed: {ex}");
+            log.Error($"Fast configuration inheritance failed: {ex}");
         }
+    }
 
+    public static void EnsureDeferredProductionFiles()
+    {
+        AsyncFileLogService log = AsyncFileLogService.Current;
         try
         {
+            IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateDeferredProductionDataForCurrentVersion();
+            if (migrated.Count > 0)
+                log.Application($"Deferred production data inherited: {string.Join(", ", migrated)}");
+
             _ = AppSettings.Load();
             log.Application($"appsettings.json ready: {AppSettings.SettingsPath}");
 
@@ -44,11 +47,11 @@ public static class StartupBootstrapService
             string historyPath = Path.Combine(historyDirectory, "test-history.db");
             _ = new TestHistoryStore(historyPath);
             log.Application($"history database ready: {historyPath}");
-            log.Application("Startup filesystem bootstrap completed.");
+            log.Application("Deferred filesystem bootstrap completed.");
         }
         catch (Exception ex)
         {
-            log.Error($"Startup bootstrap error: {ex}");
+            log.Error($"Deferred startup bootstrap error: {ex}");
         }
     }
 }

@@ -260,7 +260,6 @@
                 BorderThickness="1"
                 CornerRadius="2">
             <DataGrid x:Name="HistoryGrid"
-                      ItemsSource="{Binding Records}"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
                       CanUserAddRows="False"

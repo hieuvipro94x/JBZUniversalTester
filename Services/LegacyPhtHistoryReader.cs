@@ -23,6 +23,8 @@ public sealed partial class LegacyPhtHistoryReader
     private static readonly Encoding KoreanEncoding = CreateKoreanEncoding();
     private readonly string _passRoot;
     private readonly string _errorRoot;
+    private readonly object _cacheGate = new();
+    private readonly Dictionary<string, CachedFile> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     public LegacyPhtHistoryReader(string? passRoot = null, string? errorRoot = null)
     {
@@ -126,13 +128,43 @@ public sealed partial class LegacyPhtHistoryReader
     {
         foreach (string path in EnumerateFiles(_passRoot, "Day*.dat"))
         {
-            foreach (TestHistoryRecord row in ReadPassFile(path))
+            foreach (TestHistoryRecord row in ReadCachedFile(path, passedFile: true))
                 yield return row;
         }
         foreach (string path in EnumerateFiles(_errorRoot, "Day*.err"))
         {
-            foreach (TestHistoryRecord row in ReadErrorFile(path))
+            foreach (TestHistoryRecord row in ReadCachedFile(path, passedFile: false))
                 yield return row;
+        }
+    }
+
+    private IReadOnlyList<TestHistoryRecord> ReadCachedFile(string path, bool passedFile)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            long length = info.Length;
+            long modified = info.LastWriteTimeUtc.Ticks;
+            lock (_cacheGate)
+            {
+                if (_cache.TryGetValue(path, out CachedFile? cached) &&
+                    cached.Length == length && cached.LastWriteUtcTicks == modified)
+                {
+                    return cached.Rows;
+                }
+            }
+
+            TestHistoryRecord[] rows = (passedFile ? ReadPassFile(path) : ReadErrorFile(path)).ToArray();
+            info.Refresh();
+            var updated = new CachedFile(info.Length, info.LastWriteTimeUtc.Ticks, rows);
+            lock (_cacheGate)
+                _cache[path] = updated;
+            return rows;
+        }
+        catch (IOException)
+        {
+            lock (_cacheGate)
+                return _cache.TryGetValue(path, out CachedFile? cached) ? cached.Rows : [];
         }
     }
 
@@ -293,4 +325,6 @@ public sealed partial class LegacyPhtHistoryReader
         @"^\[[^\]]*\]\s*\*(?<name>[^;]*);\s*(?<part>[^;]*);\s*(?<vehicle>[^;]*);\s*(?<alc>[^;]*);\s*;\s*;\s*(?<lot>\d+)\s+(?<start>\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})\s*-\s*(?<end>\d{2}:\d{2}:\d{2})\|?",
         RegexOptions.CultureInvariant)]
     private static partial Regex ErrorHeaderRegex();
+
+    private sealed record CachedFile(long Length, long LastWriteUtcTicks, TestHistoryRecord[] Rows);
 }

@@ -2,8 +2,24 @@
 using System.IO;
 namespace JBZUniversalTester.Services;
 
+public enum BoardConnectionState
+{
+    Disconnected,
+    Connecting,
+    Initializing,
+    Ready,
+    Scanning,
+    PausedForHardwareOperation,
+    Recovering,
+    Faulted,
+    ShuttingDown
+}
+
 public interface IBoardTransport : IAsyncDisposable
 {
+    BoardConnectionState ConnectionState => IsScanning
+        ? BoardConnectionState.Scanning
+        : IsConnected ? BoardConnectionState.Ready : BoardConnectionState.Disconnected;
     bool IsConnected { get; }
     bool IsScanning { get; }
     BoardScanMode CurrentScanMode { get; }
