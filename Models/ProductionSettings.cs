@@ -84,6 +84,11 @@ public sealed class ProductionSettings
     // Chỉ sau khi in tem PASS thành công, phần mềm mới tăng +1 và lưu lại.
     public long LotNo { get; set; } = 2000;
 
+    // Ngày làm việc gắn với LOTNO, lưu theo ISO yyyy-MM-dd. Cấu hình cũ chưa
+    // có trường này sẽ giữ nguyên LOTNO trong ngày nâng cấp đầu tiên; từ ngày
+    // kế tiếp LOTNO tự trở về 0.
+    public string LotNoDate { get; set; } = string.Empty;
+
     // Giữ trường cũ để đọc các file cấu hình V11.4 trở về trước.
     public string Lot { get; set; } = string.Empty;
 

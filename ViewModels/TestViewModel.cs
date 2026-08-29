@@ -136,6 +136,7 @@ public sealed class TestViewModel : ObservableObject
     private long _engineUiUpdatesScheduled;
     private long _engineUiUpdatesRendered;
     private long _lastContinuousScanMetricsTick;
+    private long _noProductionFrameObservedSinceTick;
     private string _lastPassGateSignature = string.Empty;
     private string _lastFaultGateSignature = string.Empty;
     private string _lastFaultGateSuppressedSignature = string.Empty;
@@ -1631,11 +1632,36 @@ public sealed class TestViewModel : ObservableObject
                     else if (ShouldWatchProductionScan())
                     {
                         DateTime lastFrameUtc = _board.LastFrameTimestampUtc;
-                        if (lastFrameUtc != DateTime.MinValue)
+                        int scanStallTimeoutMs =
+                            ScanSupervisor.ResolveProductionStallTimeoutMs(_board.Capacity);
+                        if (lastFrameUtc == DateTime.MinValue)
                         {
+                            long nowTick = Environment.TickCount64;
+                            long observedSince = Interlocked.Read(
+                                ref _noProductionFrameObservedSinceTick);
+                            if (observedSince == 0)
+                            {
+                                Interlocked.CompareExchange(
+                                    ref _noProductionFrameObservedSinceTick,
+                                    nowTick,
+                                    0);
+                            }
+                            else if (nowTick - observedSince > scanStallTimeoutMs)
+                            {
+                                Interlocked.Exchange(
+                                    ref _noProductionFrameObservedSinceTick,
+                                    nowTick);
+                                await RecoverProductionScanStallAsync(
+                                    nowTick - observedSince,
+                                    _board.LastFrameSequence,
+                                    _board.FramesReceived,
+                                    ct);
+                            }
+                        }
+                        else
+                        {
+                            Interlocked.Exchange(ref _noProductionFrameObservedSinceTick, 0);
                             double ageMs = (DateTime.UtcNow - lastFrameUtc).TotalMilliseconds;
-                            int scanStallTimeoutMs =
-                                ScanSupervisor.ResolveProductionStallTimeoutMs(_board.Capacity);
                             if (ageMs > scanStallTimeoutMs)
                             {
                                 await RecoverProductionScanStallAsync(
@@ -1645,6 +1671,10 @@ public sealed class TestViewModel : ObservableObject
                                     ct);
                             }
                         }
+                    }
+                    else
+                    {
+                        Interlocked.Exchange(ref _noProductionFrameObservedSinceTick, 0);
                     }
                 }
             }

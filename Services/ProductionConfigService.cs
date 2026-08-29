@@ -152,6 +152,7 @@ public static class ProductionConfigService
             $"[WaterProofWriteTimeoutMs]{settings.WaterProofMachine.WriteTimeoutMs}",
 
             $"[LotNo]{settings.LotNo}",
+            $"[LotNoDate]{settings.LotNoDate}",
             $"[Lot]{settings.Lot}",
             $"[DeviceName]{settings.DeviceName}",
             $"[DeviceNumber]{settings.DeviceNumber}",
@@ -388,6 +389,7 @@ public static class ProductionConfigService
         }
 
         settings.LotNo = L(map, "LotNo", settings.LotNo);
+        settings.LotNoDate = S(map, "LotNoDate", settings.LotNoDate);
         settings.Lot = S(map, "Lot", settings.Lot);
         settings.DeviceName = S(map, "DeviceName", settings.DeviceName);
         settings.DeviceNumber = S(map, "DeviceNumber", settings.DeviceNumber);
@@ -541,6 +543,7 @@ public static class ProductionConfigService
         }
 
         if (settings.LotNo < 0) settings.LotNo = 0;
+        settings.LotNoDate = (settings.LotNoDate ?? string.Empty).Trim();
         ProductionTimingPolicy.Normalize(settings);
         settings.UsbDelay = Math.Clamp(settings.UsbDelay, 1, 16);
         settings.IoConfirm1 = Math.Clamp(settings.IoConfirm1, 0, 127);

@@ -94,12 +94,12 @@ public partial class ProductionSettingsPage : UserControl
         }
 
         // 1920x1080 là bố cục chính: ba panel dùng toàn bộ chiều rộng theo
-        // tỷ lệ 28/28/44. Khi hẹp hơn 1240px, hai panel nhỏ nằm trên và panel
-        // TEM/ĐIỆN TRỞ xuống hàng để chữ và control không bị ép mất.
-        double available = Math.Max(760, e.NewSize.Width - 34);
+        // tỷ lệ 28/28/44. Không cưỡng chiều rộng 760px vì trên màn hình nhỏ
+        // hoặc DPI cao nó làm nội dung vượt viewport trong khi cuộn ngang tắt.
+        double available = Math.Max(320, e.NewSize.Width - 28);
         if (available >= 1240)
         {
-            double content = available - 30;
+            double content = available - 24;
             IoSettingsPanel.Width = Math.Floor(content * 0.28);
             RelaySettingsPanel.Width = Math.Floor(content * 0.28);
             LabelSettingsPanel.Width = Math.Max(
@@ -108,10 +108,22 @@ public partial class ProductionSettingsPage : UserControl
             return;
         }
 
-        double halfPanel = Math.Max(360, Math.Floor((available - 20) / 2));
-        IoSettingsPanel.Width = halfPanel;
-        RelaySettingsPanel.Width = halfPanel;
-        LabelSettingsPanel.Width = Math.Max(540, available - 10);
+        if (available >= 760)
+        {
+            double halfPanel = Math.Floor((available - 16) / 2);
+            IoSettingsPanel.Width = halfPanel;
+            RelaySettingsPanel.Width = halfPanel;
+            LabelSettingsPanel.Width = available - 8;
+            return;
+        }
+
+        // Màn hình rất hẹp: mỗi panel một hàng. Giữ 500px tối thiểu để form
+        // TEM không ép mất chữ; ScrollViewer chỉ hiện cuộn ngang ở trường hợp
+        // ngoại lệ này thay vì cắt hẳn mép phải.
+        double singlePanel = Math.Max(500, available - 8);
+        IoSettingsPanel.Width = singlePanel;
+        RelaySettingsPanel.Width = singlePanel;
+        LabelSettingsPanel.Width = singlePanel;
     }
 
     private void InitializeComboBoxItems()

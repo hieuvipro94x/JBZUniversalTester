@@ -24,7 +24,7 @@
         </Style>
 
         <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
-            <Setter Property="Height" Value="26"/>
+            <Setter Property="Height" Value="24"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
@@ -40,7 +40,7 @@
         </Style>
 
         <Style TargetType="TextBox">
-            <Setter Property="Height" Value="30"/>
+            <Setter Property="Height" Value="28"/>
             <Setter Property="Margin" Value="0,2"/>
             <Setter Property="Padding" Value="6,2"/>
             <Setter Property="FontSize" Value="13"/>
@@ -51,7 +51,7 @@
         </Style>
 
         <Style TargetType="ComboBox">
-            <Setter Property="Height" Value="30"/>
+            <Setter Property="Height" Value="28"/>
             <Setter Property="Margin" Value="0,2"/>
             <Setter Property="Padding" Value="4,1"/>
             <Setter Property="FontSize" Value="13"/>
@@ -62,14 +62,14 @@
         </Style>
 
         <Style TargetType="CheckBox">
-            <Setter Property="Height" Value="30"/>
+            <Setter Property="Height" Value="28"/>
             <Setter Property="Margin" Value="0,2"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="FontSize" Value="13"/>
         </Style>
 
         <Style TargetType="Button">
-            <Setter Property="Height" Value="40"/>
+            <Setter Property="Height" Value="34"/>
             <Setter Property="Margin" Value="4,0"/>
             <Setter Property="Padding" Value="12,4"/>
             <Setter Property="FontSize" Value="13"/>
@@ -86,8 +86,8 @@
             <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="2"/>
-            <Setter Property="Padding" Value="10"/>
-            <Setter Property="Margin" Value="5"/>
+            <Setter Property="Padding" Value="8"/>
+            <Setter Property="Margin" Value="4"/>
         </Style>
 
         <Style x:Key="MiniHeaderStyle" TargetType="TextBlock">
@@ -100,9 +100,9 @@
 
     <Grid Background="{StaticResource PageBackground}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="58"/>
+            <RowDefinition Height="52"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="56"/>
+            <RowDefinition Height="50"/>
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,0,0,1">
@@ -119,9 +119,9 @@
 
         <ScrollViewer Grid.Row="1"
                       VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled"
+                      HorizontalScrollBarVisibility="Auto"
                       CanContentScroll="False">
-        <WrapPanel x:Name="SettingsPanelsHost" Margin="8" Orientation="Horizontal">
+        <WrapPanel x:Name="SettingsPanelsHost" Margin="6" Orientation="Horizontal">
 
             <Border x:Name="IoSettingsPanel" Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <StackPanel>
@@ -674,8 +674,8 @@
                         </ItemsControl>
 
                         <Border Grid.Row="1"
-                                Margin="0,8,0,0"
-                                Padding="8"
+                                Margin="0,6,0,0"
+                                Padding="6"
                                 Background="#F3F7FF"
                                 BorderBrush="#9CADCF"
                                 BorderThickness="1"
@@ -683,9 +683,9 @@
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="42"/>
                                     <RowDefinition Height="36"/>
-                                    <RowDefinition Height="220"/>
+                                    <RowDefinition Height="32"/>
+                                    <RowDefinition Height="150"/>
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Text="ĐO ĐIỆN TRỞ BẰNG TAY"
@@ -730,9 +730,9 @@
                                           GridLinesVisibility="Horizontal"
                                           HorizontalGridLinesBrush="#D8DEE9"
                                           AlternatingRowBackground="#F4F7FC"
-                                          RowHeight="34"
-                                          ColumnHeaderHeight="36"
-                                          FontSize="12.5"
+                                          RowHeight="30"
+                                          ColumnHeaderHeight="32"
+                                          FontSize="12"
                                           FontWeight="SemiBold"
                                           SelectionMode="Single"
                                           EnableRowVirtualization="True">

@@ -3280,9 +3280,10 @@ internal static class Program
         Assert(productA == "MUST-NOT-OVERRIDE-MODEL|IF-A" && productB == "PART-B|IF-B" && productA != productB,
             "Two THT-derived product snapshots render different labels without product-specific code");
 
-        var settings = new ProductionSettings { LotNo = 2044 };
+        DateTime lotClock = new(2026, 8, 29, 8, 0, 0);
+        var settings = new ProductionSettings { LotNo = 2044, LotNoDate = "2026-08-29" };
         int persistCount = 0;
-        var lots = new LotSequenceService(settings, _ => persistCount++);
+        var lots = new LotSequenceService(settings, _ => persistCount++, () => lotClock);
         long cycleA = lots.ReserveForCycle("cycle-a");
         Assert(cycleA == 2044 && lots.ReserveForCycle("cycle-a") == 2044,
             "Duplicate PASS callback keeps the same reserved LOT");
@@ -3301,10 +3302,30 @@ internal static class Program
         Assert(lots.NextLot == 2045,
             "Failed/mismatched print leaves next LOT unchanged for retry");
 
-        var restartedSettings = new ProductionSettings { LotNo = settings.LotNo };
-        var restarted = new LotSequenceService(restartedSettings, _ => { });
+        var restartedSettings = new ProductionSettings
+        {
+            LotNo = settings.LotNo,
+            LotNoDate = settings.LotNoDate
+        };
+        var restarted = new LotSequenceService(restartedSettings, _ => { }, () => lotClock);
         Assert(restarted.NextLot == 2045,
             "Restart resumes from last successfully committed LOT");
+
+        lotClock = lotClock.AddDays(1);
+        Assert(restarted.NextLot == 0 && restartedSettings.LotNoDate == "2026-08-30",
+            "LOTNO resets to zero and records the new production date");
+
+        var migratedSettings = new ProductionSettings { LotNo = 9876 };
+        int migrationPersistCount = 0;
+        var migratedLots = new LotSequenceService(
+            migratedSettings,
+            _ => migrationPersistCount++,
+            () => lotClock);
+        Assert(
+            migratedLots.NextLot == 9876 &&
+            migratedSettings.LotNoDate == "2026-08-30" &&
+            migrationPersistCount == 1,
+            "First upgrade stamps LOTNO date without discarding the current sequence");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelProfileTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
