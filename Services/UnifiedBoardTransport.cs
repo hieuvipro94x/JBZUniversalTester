@@ -10,6 +10,7 @@ public sealed class UnifiedBoardTransport : IBoardTransport
 {
     readonly ProductionSettings _production;
     readonly D2xxBoardTransport _d2xx;
+    readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     int _disposed;
 
     public UnifiedBoardTransport(string ftdiSerial, ProductionSettings production)
@@ -35,30 +36,47 @@ public sealed class UnifiedBoardTransport : IBoardTransport
     public async Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default)
     {
         ThrowIfDisposed();
-        if (IsConnected)
-            return new BoardConnectionInfo(BoardModeCatalog.DisplayName(ActiveMode), string.Empty);
-
+        await _lifecycleGate.WaitAsync(ct);
         try
         {
-            BoardConnectionInfo info = await _d2xx.ConnectAsync(ct);
-            ActiveMode = BoardMode.D2xx;
-            ConfigureScanRange(0);
-            Log?.Invoke(this, "BOARD SELECTED: JBZ D2XX");
-            return info with { Description = $"JBZ D2XX - {info.Description}" };
+            ThrowIfDisposed();
+            if (IsConnected)
+                return new BoardConnectionInfo(BoardModeCatalog.DisplayName(ActiveMode), string.Empty);
+
+            try
+            {
+                BoardConnectionInfo info = await _d2xx.ConnectAsync(ct);
+                ActiveMode = BoardMode.D2xx;
+                ConfigureScanRange(0);
+                Log?.Invoke(this, "BOARD SELECTED: JBZ D2XX");
+                return info with { Description = $"JBZ D2XX - {info.Description}" };
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                try { await _d2xx.DisconnectAsync(); } catch { }
+                throw new InvalidOperationException(
+                    "Không kết nối được bo JBZ D2XX. Kiểm tra cáp USB/driver FTDI. " + ex.Message,
+                    ex);
+            }
         }
-        catch (Exception ex) when (!ct.IsCancellationRequested)
+        finally
         {
-            try { await _d2xx.DisconnectAsync(); } catch { }
-            throw new InvalidOperationException(
-                "Không kết nối được bo JBZ D2XX. Kiểm tra cáp USB/driver FTDI. " + ex.Message,
-                ex);
+            _lifecycleGate.Release();
         }
     }
 
     public async Task DisconnectAsync()
     {
-        ActiveMode = BoardMode.Auto;
-        await _d2xx.DisconnectAsync();
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            ActiveMode = BoardMode.Auto;
+            await _d2xx.DisconnectAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
     }
 
     public Task HandshakeAsync(CancellationToken ct = default) => _d2xx.HandshakeAsync(ct);
@@ -82,7 +100,20 @@ public sealed class UnifiedBoardTransport : IBoardTransport
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
-        try { await DisconnectAsync(); } catch { }
-        await _d2xx.DisposeAsync();
+
+        // Dispose trực tiếp inner transport dưới lifecycle gate. Không gọi
+        // DisconnectAsync rồi DisposeAsync liên tiếp vì inner Dispose đã cleanup
+        // D2XX; tránh một vòng lifecycle wrapper dư thừa.
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            ActiveMode = BoardMode.Auto;
+            await _d2xx.DisposeAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+            _lifecycleGate.Dispose();
+        }
     }
 }

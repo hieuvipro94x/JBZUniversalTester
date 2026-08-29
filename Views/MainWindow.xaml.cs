@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using JBZUniversalTester.ViewModels;
@@ -34,10 +35,16 @@ public partial class MainWindow : Window
         UpdateProductRemovalGate();
     }
 
-    private void MainWindow_ContentRendered(object? sender, EventArgs e)
+    private async void MainWindow_ContentRendered(object? sender, EventArgs e)
     {
         ContentRendered -= MainWindow_ContentRendered;
         StartupPerformanceTrace.Mark("T2 MainWindow first ContentRendered");
+
+        // Quan trọng: không khởi tạo FTDI/model/printer trong Loaded.
+        // ContentRendered đảm bảo WPF đã vẽ frame đầu tiên; Task.Yield trả
+        // quyền cho Dispatcher xử lý input/paint trước khi bắt đầu startup I/O.
+        await Task.Yield();
+        await InitializeApplicationAfterFirstRenderAsync();
     }
 
     private void ViewModel_ExplicitModelLoaded(ProductModel model)
@@ -48,20 +55,26 @@ public partial class MainWindow : Window
     }
 
 
-    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        // Loaded có thể xảy ra trước ContentRendered. Chỉ khóa các nút phụ thuộc
+        // hardware ở đây; tuyệt đối không chạy FTDI/model/printer trước frame đầu.
+        StartTestButton.IsEnabled = false;
+        SelectModelButton.IsEnabled = false;
+    }
+
+    private async Task InitializeApplicationAfterFirstRenderAsync()
     {
         if (_startupStarted)
             return;
 
         _startupStarted = true;
-        StartTestButton.IsEnabled = false;
-        SelectModelButton.IsEnabled = false;
 
         try
         {
-            // V10.9: ngay khi MainWindow xuất hiện, tự nạp mã gần nhất và
-            // tự kết nối/recovery bo. Bấm BẮT ĐẦU KIỂM TRA chỉ chuyển sang
-            // production scan, không còn là thời điểm mới đi kết nối phần cứng.
+            // Tự nạp mã gần nhất và tự kết nối/recovery bo sau khi cửa sổ đã
+            // render. Các API bên dưới vẫn await bình thường nên Dispatcher
+            // không bị giữ trong thời gian handshake/delay phần cứng.
             await _viewModel.InitializeApplicationAsync();
         }
         catch (Exception ex)

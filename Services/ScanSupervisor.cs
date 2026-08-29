@@ -37,10 +37,39 @@ public sealed class ScanSupervisor
     {
         ct.ThrowIfCancellationRequested();
 
+        BoardCapacity previousCapacity = _board.Capacity;
         _board.ConfigureScanRange(maxIo);
+        BoardCapacity configuredCapacity = _board.Capacity;
+        int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(configuredCapacity);
+
+        bool capacityChanged =
+            previousCapacity.ExpansionModuleCount != configuredCapacity.ExpansionModuleCount ||
+            previousCapacity.StartCardNumber != configuredCapacity.StartCardNumber ||
+            previousCapacity.TotalIoCapacity != configuredCapacity.TotalIoCapacity;
+
+        // App đã chạy Production scan nền ngay sau khi kết nối. Khi người dùng
+        // mở TestView với cùng capacity, không STOP/START stream khỏe chỉ để
+        // "xác nhận" lại. Việc STOP/START ở đây trước đây tạo thêm chuyển trạng
+        // thái D2XX và làm startup/TestView có cảm giác đứng.
+        if (!capacityChanged &&
+            _board.IsScanning &&
+            _board.CurrentScanMode == BoardScanMode.Production)
+        {
+            long healthyBaseline = _board.FramesReceived;
+            if (await WaitForNextProductionFrameAsync(
+                    healthyBaseline,
+                    firstFrameTimeoutMs,
+                    ct))
+            {
+                _log($"SCAN KEEP-ALIVE sau {reason}: giữ stream production hiện tại, đã nhận frame mới.");
+                return;
+            }
+
+            _log($"SCAN KEEP-ALIVE sau {reason} không có frame mới - chuyển sang recovery STOP/START.");
+        }
+
         long baselineFrameCount = _board.FramesReceived;
         await _board.StartScanAsync(BoardScanMode.Production, ct);
-        int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
 
         if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
         {

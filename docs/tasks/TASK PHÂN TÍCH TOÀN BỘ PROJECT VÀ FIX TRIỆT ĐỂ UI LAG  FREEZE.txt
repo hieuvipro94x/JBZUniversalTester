@@ -1,0 +1,1393 @@
+# TASK: PHÂN TÍCH TOÀN BỘ PROJECT VÀ FIX TRIỆT ĐỂ UI LAG / FREEZE
+
+Project: JBZUniversalTester
+
+## MỤC TIÊU
+
+Phân tích TOÀN BỘ project trước khi sửa và xử lý triệt để mọi nguyên nhân gây:
+
+1. Lag/treo UI khi KHỞI ĐỘNG phần mềm.
+2. Lag/treo UI khi CHỌN / LOAD MÃ HÀNG `.tht`.
+3. Lag/treo UI khi bấm BẮT ĐẦU KIỂM TRA và mở `TestWindow`.
+4. Lag/đơ ngắn khi chuyển trạng thái scan, STOP/START scan, relay, model, history hoặc cập nhật DataGrid.
+5. Không được làm giảm tốc độ nhận Pin, SHORT, WRONG WIRING hoặc Probe.
+
+Đây là phần mềm tester production nên yêu cầu quan trọng nhất:
+
+> UI luôn responsive, không block Dispatcher, nhưng phần hardware acquisition và fault detection vẫn phải chạy nhanh nhất.
+
+KHÔNG sửa kiểu thêm `Task.Delay(50)` hoặc `Thread.Sleep()` để che lag.
+
+KHÔNG rewrite toàn project.
+
+Phải tìm ROOT CAUSE rồi minimal-safe-refactor.
+
+---
+
+# 1. PHẢI PHÂN TÍCH TOÀN BỘ STARTUP FLOW
+
+Hãy dựng chính xác call graph:
+
+App.OnStartup
+→ MainWindow constructor
+→ MainViewModel constructor
+→ TestViewModel constructor
+→ MainWindow.Loaded
+→ MainWindow.ContentRendered
+→ MainViewModel.InitializeApplicationAsync
+→ TestViewModel.InitializeAsync
+→ InitializeHardwareAsync
+→ ConnectBoardAsync
+→ UnifiedBoardTransport.ConnectAsync
+→ D2xxBoardTransport.ConnectAsync
+→ handshake/init
+→ START_SCAN
+→ LoadLastTestedModelAsync
+→ ThtModelParser
+→ SetModel
+→ statistics/history
+→ MainWindow ready.
+
+Đánh dấu từng đoạn:
+
+* chạy trên UI thread;
+* chạy background;
+* có synchronous filesystem I/O;
+* có native D2XX call;
+* có COM call;
+* có database I/O;
+* có Dispatcher call;
+* có ObservableCollection/DataGrid update;
+* có logging;
+* có timer/watcher creation;
+* có audio initialization.
+
+Phải xác định chính xác đoạn nào giữ UI thread > 16 ms, > 50 ms, > 100 ms.
+
+---
+
+# 2. TRACE ĐÃ CHỈ RA CÁC DẤU HIỆU QUAN TRỌNG
+
+Trace production trước đây cho thấy startup có chuỗi tương tự:
+
+FT_Open index=...
+FT_Close
+FT_OpenEx(serial)
+STOP_SCAN
+HANDSHAKE
+INIT_1
+INIT_2
+INIT_1
+INIT_2
+START_SCAN
+
+Cần xác định tại sao.
+
+Đặc biệt:
+
+`D2xxBoardTransport` hiện chủ yếu dùng:
+
+FT_OpenEx(serial)
+
+Nếu trace vẫn xuất hiện:
+
+FT_Open(index)
+
+thì phải search toàn solution / dependency / helper / diagnostic code để tìm nơi thực sự gọi nó.
+
+Search:
+
+FT_Open(
+FT_OpenEx
+FT_Close
+FT_CreateDeviceInfoList
+FT_GetDeviceInfoDetail
+FT_GetQueueStatus
+FT_Read
+FT_Write
+
+Không được kết luận trước khi search toàn project.
+
+---
+
+# 3. KIỂM TRA FTDI LIFECYCLE
+
+Các class quan trọng:
+
+* `D2xxBoardTransport.cs`
+* `UnifiedBoardTransport.cs`
+* `ScanSupervisor.cs`
+* `TestViewModel.cs`
+* `MainViewModel.cs`
+
+Phải đảm bảo:
+
+## Một owner duy nhất
+
+Chỉ một transport/service sở hữu D2XX handle.
+
+Không được có:
+
+MainWindow mở FTDI
+
+và
+
+TestViewModel mở FTDI
+
+và
+
+UnifiedBoardTransport lại mở FTDI.
+
+## Connect phải idempotent
+
+Nếu đang Connected:
+
+return ngay.
+
+Nếu Connect đang chạy:
+
+caller tiếp theo await cùng task / lock.
+
+Không được tạo hai initialization sequence song song.
+
+## Disconnect phải serialize
+
+Không được:
+
+FT_Close
+
+trong khi ScanLoop vẫn đang:
+
+FT_GetQueueStatus / FT_Read.
+
+## Chỉ có 1 reader worker
+
+Xác nhận:
+
+`IsScanning == true`
+
+thực sự tương ứng một scan worker duy nhất.
+
+Không để `StartScanAsync()` gọi lặp tạo nhiều worker.
+
+---
+
+# 4. SỬA INIT SCAN BỊ LẶP
+
+Kiểm tra đặc biệt trạng thái:
+
+`_scanPrepared`
+
+Sequence mong muốn khi startup:
+
+Connect FTDI
+→ configure
+→ STOP_SCAN
+→ handshake
+→ INIT_1
+→ delay protocol
+→ INIT_2
+→ relay safe OFF
+→ START_SCAN
+
+Không được biến thành:
+
+INIT_1
+INIT_2
+ALL_RELAYS_OFF
+_scanPrepared = false
+INIT_1
+INIT_2
+START_SCAN
+
+Nếu relay command `0x8E` không thực sự phá scan configuration của firmware thì KHÔNG được invalidate `_scanPrepared`.
+
+Chỉ các command thực sự đổi routing/config board mới invalidate scan prepare.
+
+Ví dụ cần xem kỹ:
+
+0x90
+0x91
+resistance route
+
+có thể invalidate.
+
+Nhưng:
+
+0x8E relay
+
+không được tự động coi như phá INIT nếu trace hardware không chứng minh điều đó.
+
+---
+
+# 5. SCAN LOOP KHÔNG ĐƯỢC BUSY POLLING
+
+Trace cũ có khoảng:
+
+~2000 D2XX API call/s
+
+trong khi board chỉ khoảng:
+
+~14 complete frame/s.
+
+Hãy kiểm tra implementation hiện tại.
+
+Nếu đã dùng:
+
+FT_SetEventNotification
+FT_EVENT_RXCHAR
+AutoResetEvent
+
+thì đảm bảo thực sự wait event khi RX queue == 0.
+
+Không được:
+
+while(...)
+{
+FT_GetQueueStatus();
+}
+
+liên tục.
+
+Mục tiêu:
+
+* RX event đánh thức worker.
+* Khi có data thì đọc toàn bộ available block hợp lý.
+* Feed streaming decoder.
+* Khi không có data thì worker sleep/wait event.
+* Cancellation phải đánh thức worker ngay.
+
+KHÔNG thêm delay lớn làm giảm phản ứng.
+
+---
+
+# 6. HARDWARE THREAD KHÔNG ĐƯỢC BLOCK UI THREAD
+
+Search:
+
+.Result
+.Wait()
+.GetAwaiter().GetResult()
+Thread.Sleep
+Dispatcher.Invoke
+
+đặc biệt trong:
+
+* startup;
+* model load;
+* StartTest;
+* scan callbacks;
+* relay;
+* printer;
+* history;
+* statistics.
+
+Không được synchronous `Dispatcher.Invoke()` từ hardware thread nếu UI thread có khả năng đang await hardware.
+
+Ưu tiên:
+
+Dispatcher.BeginInvoke
+Dispatcher.InvokeAsync
+
+hoặc queue/coalescing.
+
+---
+
+# 7. MAINWINDOW PHẢI RENDER TRƯỚC HARDWARE INIT
+
+Không chạy workload lớn trong:
+
+MainWindow constructor
+MainViewModel constructor
+TestViewModel constructor
+MainWindow.Loaded
+
+trước first render.
+
+Mục tiêu:
+
+MainWindow.Show
+→ ContentRendered
+→ Dispatcher có cơ hội paint/input
+→ sau đó mới bắt đầu hardware/model/background initialization.
+
+Nếu dùng StartupUri thì phải chú ý:
+
+`base.OnStartup()` có thể tạo MainWindow trước khi Dispatcher được idle.
+
+Không được để:
+
+audio init
+filesystem scan
+FileSystemWatcher
+PHT history
+D2XX handshake
+
+giữ first UI frame.
+
+---
+
+# 8. APP SOUND KHÔNG ĐƯỢC BLOCK STARTUP
+
+Kiểm tra:
+
+AppSoundService.Initialize()
+PlayStartup()
+
+Nếu có:
+
+file open
+WaveOut
+SoundPlayer.Load
+audio device enumeration
+
+thì không chạy synchronous trước first render.
+
+Có thể defer bằng:
+
+DispatcherPriority.ApplicationIdle
+
+hoặc background phù hợp.
+
+Lifecycle audio vẫn do App sở hữu.
+
+Không initialize cùng service nhiều lần từ:
+
+App
++
+TestViewModel constructor.
+
+---
+
+# 9. TESTVIEWMODEL CONSTRUCTOR PHẢI NHẸ
+
+Constructor không được thực hiện heavy I/O.
+
+Rà soát toàn bộ:
+
+new TestHistoryStore(...)
+ProductionStatisticsStore
+PartCounterStore
+LegacyPhtHistoryService
+ThtModelParser
+AppSoundService
+FileSystemWatcher
+timer
+config load
+database migration
+
+Constructor chỉ nên:
+
+* assign dependency;
+* subscribe event;
+* tạo lightweight state;
+* tạo command.
+
+Heavy startup phải chuyển vào async initialization sau first render.
+
+---
+
+# 10. FILESYSTEMWATCHER KHÔNG ĐƯỢC LÀM NẶNG STARTUP
+
+Kiểm tra các watcher trên:
+
+C:\Pass_
+C:\Error_
+PartCounter
+history folders
+
+Việc:
+
+Directory.Exists
+Directory.CreateDirectory
+new FileSystemWatcher
+EnableRaisingEvents
+
+có thể chạm filesystem/antivirus/network disk.
+
+Không tạo chúng trước first render.
+
+Khởi tạo background sau startup chính.
+
+Phải idempotent:
+
+StartWatchers()
+
+gọi nhiều lần cũng chỉ tạo một bộ watcher.
+
+---
+
+# 11. CHỌN MÃ HÀNG `.tht` KHÔNG ĐƯỢC FREEZE UI
+
+Flow cần phân tích:
+
+LoadModelAsync
+→ LoadSelectedModelFromPathAsync
+→ ThtModelParser.Load
+→ SetModel
+→ ConfigureScanRange
+→ TestEngine.SetModel
+→ statistics
+→ history
+→ cards
+→ ObservableCollections
+→ FaultGrid/DataGrid.
+
+## Parse THT
+
+File read + parse chạy background.
+
+Không parse file lớn trên Dispatcher.
+
+## SetModel
+
+Phải đo riêng thời gian từng phase.
+
+Ví dụ instrumentation:
+
+MODEL_LOAD phase=THT_PARSE
+MODEL_LOAD phase=ENGINE_SET_MODEL
+MODEL_LOAD phase=BUILD_PIN_LOOKUP
+MODEL_LOAD phase=STATISTICS
+MODEL_LOAD phase=PHT_HISTORY
+MODEL_LOAD phase=UI_BINDING
+MODEL_LOAD phase=TOTAL
+
+---
+
+# 12. PHT HISTORY LÀ NGHI PHẠM RẤT LỚN
+
+Kiểm tra:
+
+`LegacyPhtHistoryReader.GetProductionSnapshot()`
+
+và các hàm liên quan.
+
+Nếu nó scan:
+
+C:\Pass_
+C:\Error_
+
+và đọc rất nhiều:
+
+Day*.dat
+Day*.err
+
+thì TUYỆT ĐỐI không được chạy trên WPF Dispatcher trong `SetModel()`.
+
+Đặc biệt nếu hiện tại:
+
+SetModel()
+→ LoadStatisticsForModel()
+→ LegacyPhtHistoryReader.GetProductionSnapshot()
+
+thì phải chuyển phần đọc filesystem/history sang background worker.
+
+Sau đó chỉ commit kết quả:
+
+Total
+Pass
+Fail
+DailyTestCount
+MonthlyTestCount
+LifetimeTestCount
+ProbeCycleCount
+
+trở về UI.
+
+Khi người dùng chọn model A rồi nhanh chóng chọn model B:
+
+kết quả background của A không được ghi đè B.
+
+Dùng generation/version token.
+
+---
+
+# 13. KHÔNG CHO NHIỀU HISTORY SCAN CHẠY SONG SONG
+
+Nếu chọn mã liên tục:
+
+Model A
+Model B
+Model C
+
+không được tạo ba Task cùng scan toàn bộ `C:\Pass_`.
+
+Dùng:
+
+SemaphoreSlim
+
+hoặc serialized worker.
+
+Kết quả stale phải bỏ.
+
+---
+
+# 14. LOG MODEL TOPOLOGY KHÔNG ĐƯỢC BLOCK UI
+
+Kiểm tra:
+
+LogExpectedNetBuild
+LogModelTopology
+
+Nếu model có hàng trăm network/pin, việc build chuỗi lớn cũng có thể gây lag.
+
+Không build hàng trăm dòng diagnostic đồng bộ trên Dispatcher.
+
+Có thể chạy background.
+
+Production logging chỉ cần summary cần thiết.
+
+Full topology log chỉ diagnostic/debug nếu cần.
+
+---
+
+# 15. LOG D2XX KHÔNG ĐƯỢC SPAM DISPATCHER
+
+Đặc biệt xem:
+
+OnBoardLog
+AddLog
+Logs ObservableCollection.
+
+Không được:
+
+mỗi TX
+mỗi RX frame
+→ Dispatcher.BeginInvoke riêng
+→ Logs.Insert(0)
+
+Nếu có 20-100 log/s sẽ làm Dispatcher queue dài.
+
+Phải dùng queue/coalescing.
+
+Ví dụ:
+
+Concurrent/pending queue
+→ schedule 1 Dispatcher flush
+→ lấy tối đa N dòng/batch
+→ DispatcherPriority.Background
+→ giới hạn Logs ~300 dòng.
+
+Nếu callback flush đang pending thì không schedule callback mới.
+
+---
+
+# 16. DATA BINDING / OBSERVABLECOLLECTION
+
+Kiểm tra tất cả:
+
+Faults
+ProbeContacts
+Cards
+Resistance
+WaterProofChannels
+Logs
+MasterFaults
+
+Không được Clear/Add hàng trăm phần tử vô ích mỗi frame.
+
+Nếu state không đổi:
+không update collection.
+
+Nếu cần replace nhiều rows:
+dùng synchronization/diff hiện có hoặc batch strategy.
+
+Không gọi:
+
+Faults.Clear()
+foreach (...)
+Faults.Add(...)
+
+trên mọi frame nếu dữ liệu không đổi.
+
+---
+
+# 17. BẤM “BẮT ĐẦU KIỂM TRA” PHẢI GẦN NHƯ TỨC THỜI
+
+Phân tích:
+
+TestWindow creation
+→ InitializeComponent
+→ DataContext
+→ Loaded
+→ InitializeHardwareAsync
+→ StartProductionTestAsync
+→ StartTestAsync.
+
+Nếu board đã Connected và Production scan nền đang chạy khỏe:
+
+KHÔNG được:
+
+STOP_SCAN
+INIT
+START_SCAN
+
+chỉ vì mở TestWindow.
+
+Phải reuse stream hiện tại nếu:
+
+* Connected;
+* IsScanning;
+* CurrentScanMode == Production;
+* BoardCapacity không đổi;
+* frame vẫn đang tới.
+
+---
+
+# 18. SCANSUPERVISOR KHÔNG ĐƯỢC STOP/START STREAM KHỎE
+
+Kiểm tra:
+
+StartProductionScanAndVerifyFrameAsync.
+
+Nếu scan Production hiện tại đang chạy:
+
+hãy thử chờ frame mới trước.
+
+Nếu nhận frame:
+KEEP STREAM.
+
+Chỉ recovery STOP/START khi:
+
+* không có frame mới trong watchdog;
+* scan mode sai;
+* capacity thực sự thay đổi;
+* driver lỗi.
+
+Không được STOP/START chỉ để “verify”.
+
+---
+
+# 19. STARTTESTASYNC KHÔNG ĐƯỢC TỰ RESET HARDWARE KHÔNG CẦN THIẾT
+
+Trong `StartTestAsync()` hãy audit toàn bộ:
+
+AllRelaysOffAsync
+SaveLastTestedModel
+SetModel state
+engine.Reset
+ConfigureScanRange
+RebuildActiveCards
+START_SCAN
+Master init
+startup IO interlock.
+
+Phân biệt:
+
+### Logic phải chạy mỗi cycle
+
+engine state
+cycle state
+fault state
+UI state.
+
+### Logic hardware không cần chạy nếu stream đã sẵn sàng
+
+STOP_SCAN
+INIT
+START_SCAN.
+
+Không reset hardware chỉ vì ARM một production cycle.
+
+---
+
+# 20. `ConfigureScanRange` PHẢI NHẸ
+
+Hiện nó có thể gọi:
+
+FT_SetLatencyTimer
+
+và `_ioLock.Wait()`.
+
+Kiểm tra xem method này được gọi trên UI thread không.
+
+Nếu có native D2XX call synchronous trong method non-async được gọi từ UI:
+
+đây là nguy cơ freeze.
+
+Không để WPF thread chờ `_ioLock` trong lúc scan worker đang giữ D2XX.
+
+Có thể:
+
+* chỉ update config nếu giá trị thực sự thay đổi;
+* move native setting change vào serialized async transport operation;
+* cache current latency/capacity.
+
+Không gọi FT_SetLatencyTimer lại nếu setting không đổi.
+
+---
+
+# 21. KHÔNG DÙNG `_ioLock.Wait()` TRÊN UI THREAD
+
+Search toàn bộ:
+
+_ioLock.Wait()
+
+Nếu public method có thể được gọi từ UI và dùng `.Wait()` thì phải sửa.
+
+Dùng:
+
+await _ioLock.WaitAsync(ct)
+
+ở async flow.
+
+Native D2XX synchronization vẫn cần nhưng không được block Dispatcher.
+
+---
+
+# 22. PRINTER KHÔNG ĐƯỢC LÀM UI STARTUP ĐỨNG
+
+Main startup có thể chạy:
+
+AutoConnectLabelPrinterAsync()
+
+song song.
+
+Kiểm tra:
+
+SerialPort.Open
+GetPortNames
+driver timeout
+printer probing.
+
+Không được synchronous COM scan trên Dispatcher.
+
+Printer failure không được làm board startup chậm.
+
+Printer connect là optional service.
+
+App vẫn phải responsive và board vẫn chạy nếu printer lỗi.
+
+---
+
+# 23. DATABASE / HISTORY STORE
+
+Audit:
+
+TestHistoryStore
+ProductionStatisticsStore
+PartCounterStore
+StartupBootstrapService.
+
+Nếu startup làm:
+
+SQLite migration
+Directory scan
+JSON load/save
+history import
+
+thì đo thời gian.
+
+Các migration bắt buộc trước UI phải thật nhỏ.
+
+Các thao tác có thể defer thì defer sau first render.
+
+Không được migrate/scan toàn bộ lịch sử trước khi cửa sổ hiện.
+
+---
+
+# 24. `ProductionConfigService.EnsureSavedOnStartup`
+
+Kiểm tra method này.
+
+Nếu mỗi startup đều rewrite file config synchronous trên UI constructor:
+
+cân nhắc chỉ ghi nếu thực sự cần migration/change.
+
+Không ghi file vô ích.
+
+---
+
+# 25. HARDWARE MONITOR KHÔNG ĐƯỢC TẠO RACE
+
+Audit:
+
+HardwareMonitorLoopAsync
+InitializeHardwareAsync
+ConnectBoardWithRetryAsync.
+
+Các caller có thể đồng thời:
+
+Main startup
+TestWindow Loaded
+Hardware monitor
+StartTest
+Probe
+DeviceFault reset.
+
+Phải bảo đảm chúng cùng đi qua một initialization gate/task.
+
+Không để:
+
+monitor Connect
++
+TestWindow Connect
+
+đồng thời.
+
+---
+
+# 26. `InitializeHardwareAsync` PHẢI CÓ SEMANTICS RÕ
+
+Nếu Connected:
+không reconnect.
+
+Nếu Connect task đang chạy:
+await cùng task.
+
+Nếu Connect task thất bại:
+lần sau mới tạo retry task.
+
+Không giữ permanently failed task.
+
+Không để Connect retry sequence overlap hardware monitor.
+
+---
+
+# 27. RETRY CONNECT KHÔNG ĐƯỢC BLOCK UI
+
+Retry:
+
+attempt 1
+delay
+attempt 2
+delay
+attempt 3
+
+phải async toàn bộ.
+
+Không dùng Thread.Sleep.
+
+Không popup mỗi attempt.
+
+Chỉ update một trạng thái nhẹ.
+
+---
+
+# 28. FIRST RENDER PHẢI ĐƯỢC ĐO
+
+Dùng `StartupPerformanceTrace`.
+
+Cần marker:
+
+T0 App startup
+T1 MainWindow constructed
+T2 MainWindow first ContentRendered
+T3 settings ready
+T4 D2XX connect start
+T5 D2XX connect open complete
+T6 handshake/init complete
+T7 board scan ready
+T8 model parse complete
+T9 SetModel complete
+T10 statistics background started
+T11 statistics committed
+T12 startup complete.
+
+Output log phải giúp biết:
+
+thời gian tới frame UI đầu tiên
+
+không chỉ thời gian hardware.
+
+---
+
+# 29. THÊM UI WATCHDOG CHẨN ĐOÁN DEBUG
+
+Có thể thêm lightweight DEBUG-only Dispatcher heartbeat.
+
+Ví dụ mỗi 250 ms:
+
+record expected time vs actual execution.
+
+Nếu Dispatcher bị chậm >100 ms:
+
+log:
+
+UI_STALL duration_ms=...
+
+Không popup.
+
+Không làm production nặng.
+
+Có thể bật bằng system log setting.
+
+---
+
+# 30. ĐO MODEL LOAD
+
+Thêm log:
+
+MODEL_LOAD_PERF
+parse_ms
+engine_set_model_ms
+lookup_ms
+ui_collection_ms
+history_background_ms
+total_ui_block_ms.
+
+Quan trọng:
+
+history background có thể mất vài giây nhưng UI không được đứng.
+
+---
+
+# 31. ĐO START TEST
+
+Marker:
+
+TEST_START_REQUEST
+TEST_START_UI_STATE_READY
+TEST_START_SCAN_REUSED
+
+hoặc:
+
+TEST_START_SCAN_SENT
+
+FIRST_FRAME_AFTER_ARM
+FIRST_LOGICAL_STATE_READY
+FIRST_UI_UPDATE_RENDERED.
+
+Từ click tới UI ready phải nhanh.
+
+---
+
+# 32. HARDWARE DETECTION KHÔNG ĐƯỢC GIẢM ĐỘ NHẠY
+
+Không được:
+
+delay 20/50/100 ms trong scan reader.
+
+Không throttle:
+
+TestEngine.ProcessFrame.
+
+Có thể throttle/coalesce:
+
+UI render
+log
+DataGrid refresh.
+
+Hardware parser vẫn phải xử lý toàn bộ frame.
+
+SHORT/WRONG có thể xuất hiện ngắn vẫn phải bắt theo confirmation policy hiện tại.
+
+---
+
+# 33. KHÔNG ĐƯỢC PHÁ LOGIC PRODUCTION
+
+Regression bắt buộc:
+
+Correct wiring → PASS
+
+Wrong wiring → FAIL
+
+Short → FAIL
+
+Resistance NG → FAIL
+
+Leak NG → FAIL nếu bật
+
+Leak COM error → Device/Equipment error, không ghi product FAIL sai
+
+Probe GND → hiển thị nhanh
+
+Probe release → clear nhanh
+
+Master Good → hoạt động đúng
+
+Master Bad → đủ số fault unique mới pass master gate
+
+Product removal → reset đúng
+
+Relay Jig → đúng mapping
+
+Marking → đúng mapping
+
+Label → không thay đổi
+
+History → không mất dữ liệu.
+
+---
+
+# 34. KHÔNG ĐƯỢC LÀM MẤT BACKGROUND SCAN
+
+Background Production scan là mục tiêu tốt.
+
+Sau connect:
+
+START_SCAN nền.
+
+MainWindow vẫn nhận frame.
+
+Khi mở TestWindow:
+
+reuse stream.
+
+Khi đóng TestWindow:
+
+nếu không ở Manual/Leak/Resistance stage đặc biệt thì background scan tiếp tục.
+
+Nhờ vậy nút START không có delay hardware.
+
+---
+
+# 35. RESISTANCE / LEAK LÀ NGOẠI LỆ HỢP LÝ
+
+Được phép STOP scan khi protocol thực sự cần:
+
+resistance routing
+waterproof stage nếu architecture hiện tại cần
+PASS relay flow
+fault eject flow.
+
+Nhưng sau khi trở lại Production:
+
+restart đúng một lần.
+
+Không INIT lại nếu board vẫn prepared và trace firmware chứng minh START trực tiếp được.
+
+---
+
+# 36. TRÁNH DEADLOCK
+
+Audit lock order giữa:
+
+_connectLock
+_scanSwitchLock
+_ioLock
+_manualRelayGate
+_statisticsLoadGate
+Dispatcher.
+
+Không để:
+
+UI thread giữ lock rồi await hardware
+
+trong khi:
+
+hardware giữ lock rồi Dispatcher.Invoke UI.
+
+Không được lock synchronous qua await.
+
+---
+
+# 37. DISPOSE / SHUTDOWN
+
+Hiện shutdown có thể:
+
+Test.ShutdownAsync()
+→ board.DisconnectAsync()
+
+sau đó MainViewModel lại:
+
+_board.DisposeAsync()
+
+Kiểm tra có cleanup D2XX lặp không.
+
+Dispose phải idempotent.
+
+Không chạy sequence hardware shutdown hai lần.
+
+Wrapper `UnifiedBoardTransport.DisposeAsync` không nên:
+
+Disconnect inner
++
+inner.DisposeAsync lại Disconnect lần nữa
+
+nếu inner Dispose đã tự cleanup.
+
+---
+
+# 38. APP UNHANDLED EXCEPTION HANDLER
+
+Không được dùng global:
+
+DispatcherUnhandledException
+e.Handled = true
+
+để che bug deadlock/invalid state.
+
+Có thể giữ safety handler nhưng:
+
+hardware lifecycle error phải được catch đúng tầng.
+
+Không swallow lỗi rồi để UI tiếp tục với state hỏng.
+
+---
+
+# 39. KHÔNG TẠO BACKUP FILE TRONG PROJECT
+
+Không tạo:
+
+*.bak
+*.old
+*.backup
+Copy of ...
+_temp.cs
+
+trong compile tree.
+
+Chỉ sửa file thật.
+
+---
+
+# 40. BUILD
+
+Sau thay đổi:
+
+Clean
+delete bin/obj nếu cần
+Restore
+Build Release x64.
+
+Sửa mọi compile error do task tạo ra.
+
+Không disable nullable/warning chung để build.
+
+---
+
+# 41. KIỂM TRA BẰNG STATIC SEARCH SAU KHI SỬA
+
+Search lại:
+
+Thread.Sleep
+.Result
+.Wait()
+Dispatcher.Invoke
+FT_Open
+FT_OpenEx
+FT_Close
+StartScanAsync
+InitializeHardwareAsync
+LoadStatisticsForModel
+GetProductionSnapshot
+FileSystemWatcher
+Logs.Insert
+ObservableCollection.Clear.
+
+Với từng kết quả quan trọng hãy giải thích tại sao an toàn.
+
+---
+
+# 42. ACCEPTANCE CRITERIA — STARTUP
+
+MainWindow phải:
+
+* hiện nhanh;
+* render trước hardware;
+* kéo/di chuyển được trong lúc connect board;
+* không Not Responding;
+* không freeze vì audio;
+* không freeze vì printer;
+* không freeze vì PHT history;
+* không freeze vì watcher.
+
+FTDI startup bình thường:
+
+* một logical Connect;
+* một D2XX handle;
+* không Open/Close/Open vô lý;
+* một handshake;
+* một INIT sequence;
+* một reader task.
+
+---
+
+# 43. ACCEPTANCE CRITERIA — CHỌN MÃ HÀNG
+
+Khi chọn `.tht`:
+
+UI không được đứng trong lúc:
+
+* parse file;
+* đọc Pass_/Error_;
+* tính statistic;
+* log topology.
+
+Model UI phải hiện sau parse/setup cần thiết.
+
+Statistics có thể cập nhật sau một chút nhưng async.
+
+Nếu history rất lớn:
+UI vẫn responsive.
+
+---
+
+# 44. ACCEPTANCE CRITERIA — BẮT ĐẦU KIỂM TRA
+
+Nếu board đang connected và scan nền khỏe:
+
+click BẮT ĐẦU
+→ TestWindow render
+→ ARM test
+→ reuse Production scan
+→ không STOP/START
+→ không INIT.
+
+Không có delay vài trăm ms/giây chỉ để vào TestView.
+
+---
+
+# 45. PERFORMANCE TARGET
+
+Không yêu cầu con số tuyệt đối phụ thuộc máy, nhưng:
+
+First ContentRendered:
+phải xảy ra trước heavy hardware/history.
+
+UI callback:
+không có synchronous block dài.
+
+Model parse:
+background.
+
+PHT history:
+background.
+
+D2XX reader:
+event-driven/low idle CPU.
+
+UI logs:
+batched.
+
+DataGrid:
+không refresh vô ích từng frame.
+
+---
+
+# 46. OUTPUT BẮT BUỘC TRƯỚC KHI SỬA
+
+Trước khi edit code, in báo cáo:
+
+ROOT CAUSE ANALYSIS
+
+STARTUP:
+1.
+2.
+3.
+
+MODEL SELECTION:
+1.
+2.
+3.
+
+START TEST:
+1.
+2.
+3.
+
+D2XX LIFECYCLE:
+...
+
+UI THREAD BLOCKERS:
+...
+
+FILES THAT NEED MODIFICATION:
+...
+
+Không sửa file không liên quan.
+
+---
+
+# 47. OUTPUT BẮT BUỘC SAU KHI SỬA
+
+In:
+
+## FILES MODIFIED
+
+chỉ file thật sự thay.
+
+## ROOT CAUSES FIXED
+
+Startup:
+
+* ...
+
+Model selection:
+
+* ...
+
+Start Test:
+
+* ...
+
+## OLD FLOW
+
+...
+
+## NEW FLOW
+
+...
+
+## THREADING CHANGES
+
+UI thread:
+...
+
+Background:
+...
+
+D2XX worker:
+...
+
+## PERFORMANCE
+
+Before / After nếu đo được:
+
+First render:
+Model parse:
+PHT history:
+Start Test:
+D2XX opens:
+Handshake count:
+INIT count:
+reader workers:
+UI log callbacks/sec:
+frames/sec:
+
+## REGRESSION
+
+D2XX connect: PASS/FAIL
+Background scan: PASS/FAIL
+Test start: PASS/FAIL
+Correct wiring: PASS/FAIL
+Wrong wiring: PASS/FAIL
+Short circuit: PASS/FAIL
+Probe: PASS/FAIL
+Resistance: PASS/FAIL
+Leak: PASS/FAIL
+Master: PASS/FAIL
+Relay/Jig: PASS/FAIL
+Label: PASS/FAIL
+History: PASS/FAIL
+Shutdown: PASS/FAIL
+
+---
+
+# 48. QUY TẮC CUỐI CÙNG
+
+Ưu tiên theo thứ tự:
+
+1. Không block WPF Dispatcher.
+2. Không tạo D2XX lifecycle trùng.
+3. Không STOP/START scan khỏe.
+4. Không đọc history/filesystem lớn trên UI.
+5. Không spam Dispatcher bằng log/collection.
+6. Không giảm tốc độ hardware.
+7. Không thay đổi logic PASS/FAIL.
+8. Không thay đổi protocol nếu chưa có bằng chứng trace.
+9. Không thêm delay lớn để “giảm CPU”.
+10. Build và kiểm tra toàn solution sau khi sửa.
+
+MỤC TIÊU CUỐI:
+
+JBZUniversalTester phải có cảm giác như phần mềm công nghiệp realtime:
+
+* mở app nhanh;
+* UI luôn phản hồi;
+* chọn mã hàng không đơ;
+* bấm BẮT ĐẦU vào TestWindow gần như tức thì;
+* scan Pin/SHORT/WRONG vẫn nhạy;
+* chạy lặp production lâu dài không tích tụ Task, Dispatcher callback, reader hoặc handle.

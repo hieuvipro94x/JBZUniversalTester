@@ -788,8 +788,14 @@ public sealed class D2xxBoardTransport : IBoardTransport
     async Task WriteRelayAsync(byte[] command, string reason, CancellationToken ct)
     {
         await WriteAsync(command, ct);
-        _scanPrepared = false;
-        Log?.Invoke(this, $"D2XX PREPARE INVALIDATED after {reason}; next START_SCAN will run INIT recovery.");
+
+        // 0x8E chỉ điều khiển relay ngoài (JIG/MARKING), không thay đổi
+        // routing 0x90/0x91 đã được INIT cho continuity scan. Trace production
+        // cho thấy sau relay OFF, Htdrv có thể gửi START_SCAN trực tiếp mà
+        // không chạy lại INIT_1/INIT_2. Vì vậy không invalid _scanPrepared
+        // tại đây; nếu invalid sẽ làm startup và mỗi chu kỳ relay bị cộng thêm
+        // một vòng INIT không cần thiết.
+        Log?.Invoke(this, $"D2XX RELAY {reason}; scan prepare preserved.");
     }
 
     Task ScanLoopAsync(

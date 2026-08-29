@@ -24,8 +24,24 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        AppSoundService.Current.Initialize();
-        AppSoundService.Current.PlayStartup();
+        // Không load/khởi tạo audio đồng bộ trong OnStartup. Với StartupUri,
+        // MainWindow đã được tạo trong base.OnStartup nhưng Dispatcher chưa có
+        // cơ hội render frame đầu. Đẩy sound xuống ApplicationIdle để audio I/O
+        // không làm cửa sổ có cảm giác treo ngay khi vừa mở.
+        _ = Dispatcher.BeginInvoke(
+            new Action(() =>
+            {
+                try
+                {
+                    AppSoundService.Current.Initialize();
+                    AppSoundService.Current.PlayStartup();
+                }
+                catch (Exception ex)
+                {
+                    AsyncFileLogService.Current.Error($"Startup sound init failed: {ex}");
+                }
+            }),
+            DispatcherPriority.ApplicationIdle);
     }
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
