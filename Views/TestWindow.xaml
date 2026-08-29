@@ -551,7 +551,7 @@
 
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <Ellipse Width="8" Height="8" Fill="{Binding WaterProofAccentBrush}" Margin="0,0,7,0"/>
-                        <TextBlock Text="ĐỘ RÒ LỚN NHẤT"
+                        <TextBlock Text="ĐỘ RÒ RỈ"
                                    FontSize="18"
                                    FontWeight="Bold"
                                    Foreground="#26344A"
@@ -581,7 +581,7 @@
                                         <StackPanel Orientation="Horizontal"
                                                     HorizontalAlignment="Center"
                                                     VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding PressureText}"
+                                            <TextBlock Text="{Binding LeakText}"
                                                        Foreground="White"
                                                        FontSize="16"
                                                        FontWeight="Bold"/>
@@ -811,7 +811,7 @@
                     <DataGridTextColumn Header="K&#202;NH / CONNECTOR" Binding="{Binding ChannelText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="&#193;P BAN &#272;&#7846;U" Binding="{Binding FirstPressureText}" Width="2*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="&#193;P GI&#7918;" Binding="{Binding SecondPressureText}" Width="2*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
-                    <DataGridTextColumn Header="&#272;&#7896; S&#7908;T" Binding="{Binding LeakText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="&#272;&#7896; R&#210; R&#7880;" Binding="{Binding LeakText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="GI&#7898;I H&#7840;N" Binding="{Binding LeakLimitText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="K&#7870;T QU&#7842;" Binding="{Binding ResultText}" Width="1.5*" CellStyle="{StaticResource PassFailResultCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                 </DataGrid.Columns>

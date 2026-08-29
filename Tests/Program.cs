@@ -1169,10 +1169,105 @@ internal static class Program
         Assert(passRow.PressureText == "2.1" && passRow.LeakText == "2.1",
             "Leak summary card displays machine-reported pressure drop instead of fill/hold pressure");
 
-        string xaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
-        Assert(xaml.Contains("Text=\"ĐỘ RÒ LỚN NHẤT\"", StringComparison.Ordinal) &&
-               xaml.Contains("Text=\" kPa\"", StringComparison.Ordinal),
-            "Leak summary card identifies the machine-reported leak value and displays kPa");
+        string xaml = File.ReadAllText(
+    Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
+
+        Assert(
+            xaml.Contains("Text=\"ĐỘ RÒ RỈ\"", StringComparison.Ordinal) &&
+            xaml.Contains("Text=\"{Binding LeakText}\"", StringComparison.Ordinal) &&
+            xaml.Contains("Text=\" kPa\"", StringComparison.Ordinal),
+            "Leak summary card displays realtime leak value in kPa");
+
+        // Regression: :PRESS lưu áp cuối làm baseline, từng :WAIT phải cập nhật
+        // Leak ngay trên UI nhưng tuyệt đối chưa được chốt PASS/FAIL trước :RESULT.
+        TestViewModel realtimeLeakVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 });
+
+        FieldInfo realtimeProfileField = typeof(TestViewModel).GetField(
+            "_waterProofProfile",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak realtime profile field not found");
+
+        MethodInfo resetRealtimeLeak = typeof(TestViewModel).GetMethod(
+            "ResetWaterProofDisplay",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak realtime reset method not found");
+
+        MethodInfo applyRealtimeLeak = typeof(TestViewModel).GetMethod(
+            "ApplyWaterProofProgress",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak realtime progress method not found");
+
+        realtimeProfileField.SetValue(
+            realtimeLeakVm,
+            new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel2Enabled = true,
+                Channel3Enabled = true,
+                LeakLimit = 2.0
+            });
+
+        resetRealtimeLeak.Invoke(realtimeLeakVm, null);
+
+        Assert(
+            realtimeLeakVm.WaterProofChannels.Count == 3 &&
+            realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured),
+            "Leak realtime reset creates three enabled channels without marking a result");
+
+        applyRealtimeLeak.Invoke(
+            realtimeLeakVm,
+            [
+                new WaterProofProgress(
+                    WaterProofStage.Pressurizing,
+                    new double[] { 84.1, 84.2, 84.0 },
+                    ":PRESS,84.1,84.2,84.0")
+            ]);
+
+        Assert(
+            Math.Abs(realtimeLeakVm.WaterProofChannels[0].PressPressure.GetValueOrDefault() - 84.1) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[1].PressPressure.GetValueOrDefault() - 84.2) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[2].PressPressure.GetValueOrDefault() - 84.0) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels.All(row => Math.Abs(row.Leak.GetValueOrDefault()) < 0.0001) &&
+            realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured),
+            "PRESS updates live pressure baseline, starts Leak at zero, and cannot mark PASS/FAIL");
+
+        applyRealtimeLeak.Invoke(
+            realtimeLeakVm,
+            [
+                new WaterProofProgress(
+                    WaterProofStage.Waiting,
+                    new double[] { 84.0, 84.1, 83.9 },
+                    ":WAIT,84.0,84.1,83.9")
+            ]);
+
+        Assert(
+            Math.Abs(realtimeLeakVm.WaterProofChannels[0].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[1].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            realtimeLeakVm.WaterProofStageText == "ĐANG ĐO ĐỘ RÒ",
+            "First WAIT frame updates displayed Leak immediately for all channels");
+
+        applyRealtimeLeak.Invoke(
+            realtimeLeakVm,
+            [
+                new WaterProofProgress(
+                    WaterProofStage.Waiting,
+                    new double[] { 83.5, 83.7, 83.4 },
+                    ":WAIT,83.5,83.7,83.4")
+            ]);
+
+        Assert(
+            Math.Abs(realtimeLeakVm.WaterProofChannels[0].Leak.GetValueOrDefault() - 0.6) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[1].Leak.GetValueOrDefault() - 0.5) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.6) < 0.0001,
+            "Later WAIT frames continuously replace the realtime Leak values");
+
+        Assert(
+            realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured) &&
+            realtimeLeakVm.WaterProofChannels.All(row => row.ResultText == "---"),
+            "Realtime PRESS/WAIT display never publishes PASS/FAIL before the final RESULT");
         int resultStyleUses = xaml.Split(
             "CellStyle=\"{StaticResource PassFailResultCellStyle}\"",
             StringSplitOptions.None).Length - 1;
@@ -1358,13 +1453,17 @@ internal static class Program
             Environment.CurrentDirectory,
             "Services",
             "WaterProofSerialService.cs"));
-        Assert(leakServiceSource.Contains(
-                   "await DisconnectAsync(cancellationToken).ConfigureAwait(false);",
-                   StringComparison.Ordinal) &&
-               leakServiceSource.Contains(
-                   "next run will reconnect cleanly",
-                   StringComparison.Ordinal),
-            "A completed Leak result closes its COM session so cycle 2 cannot reuse stale machine state");
+        Assert(
+            leakServiceSource.Contains(
+                "ReleaseRunPort(runNumber, port)",
+                StringComparison.Ordinal) &&
+            leakServiceSource.Contains(
+                "WaitForPendingCloseBestEffortAsync",
+                StringComparison.Ordinal) &&
+            leakServiceSource.Contains(
+                "next run will reconnect cleanly",
+                StringComparison.Ordinal),
+            "A completed Leak result releases only its owned COM session and waits bounded cleanup before cycle 2");
     }
 
     private static void TestProductionScanTokenSurvivesCycleCancel()
