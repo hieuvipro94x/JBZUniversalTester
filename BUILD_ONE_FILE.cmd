@@ -59,10 +59,8 @@ if errorlevel 1 (
 )
 
 for /f "delims=" %%B in ('git branch --show-current') do set "CURRENT_BRANCH=%%B"
-if /I not "%CURRENT_BRANCH%"=="main" (
-    echo [LỖI GIT] Nhánh hiện tại: %CURRENT_BRANCH%
-    echo Chỉ cho phép chay tren nhanh main.
-    echo Hãy chạy: git switch main
+if not defined CURRENT_BRANCH (
+    echo [LỖI GIT] Dang o detached HEAD. Hay switch sang mot branch truoc khi build.
     goto :FAIL
 )
 
@@ -72,8 +70,38 @@ if errorlevel 1 (
     goto :FAIL
 )
 
-echo [GIT] Nhánh hiện tại: main
+echo [GIT] Nhánh hiện tại: %CURRENT_BRANCH%
 echo [GIT] Mọi file được stage sẽ tuân theo .gitignore.
+echo.
+
+rem ============================================================
+rem B0 - DONG BO SOURCE TRUOC KHI GAN VERSION VA BUILD
+rem ============================================================
+echo ============================================================
+echo BUOC 0/3 - DONG BO origin/%CURRENT_BRANCH%
+echo ============================================================
+
+git fetch origin
+if errorlevel 1 (
+    echo [LỖI GIT] Khong fetch duoc origin. Dung build de tranh trung version.
+    goto :FAIL
+)
+
+set "REMOTE_BEFORE_BUILD=NONE"
+git show-ref --verify --quiet "refs/remotes/origin/%CURRENT_BRANCH%"
+if errorlevel 1 (
+    echo [GIT] Branch origin/%CURRENT_BRANCH% chua ton tai; se tao khi push lan dau.
+) else (
+    git rebase --autostash "origin/%CURRENT_BRANCH%"
+    if errorlevel 1 (
+        echo [LỖI GIT] Khong the rebase voi origin/%CURRENT_BRANCH%.
+        echo Xu ly conflict, git rebase --continue, sau do chay lai file nay.
+        goto :FAIL
+    )
+    for /f "delims=" %%C in ('git rev-parse "refs/remotes/origin/%CURRENT_BRANCH%"') do set "REMOTE_BEFORE_BUILD=%%C"
+)
+
+echo [GIT] Source da dong bo truoc build.
 echo.
 
 rem ============================================================
@@ -181,6 +209,26 @@ echo ============================================================
 echo BƯỚC 3/3 - TỔNG HỢP SOURCE THEO .GITIGNORE
 echo ============================================================
 
+rem Remote co the thay doi trong vai phut build. Neu co, dung lai de EXE
+rem khong bi lech source/version so voi commit sap push.
+git fetch origin
+if errorlevel 1 (
+    echo [LỖI GIT] Khong fetch duoc origin sau build.
+    goto :FAIL
+)
+
+set "REMOTE_AFTER_BUILD=NONE"
+git show-ref --verify --quiet "refs/remotes/origin/%CURRENT_BRANCH%"
+if not errorlevel 1 (
+    for /f "delims=" %%C in ('git rev-parse "refs/remotes/origin/%CURRENT_BRANCH%"') do set "REMOTE_AFTER_BUILD=%%C"
+)
+
+if /I not "%REMOTE_AFTER_BUILD%"=="%REMOTE_BEFORE_BUILD%" (
+    echo [LỖI GIT] origin/%CURRENT_BRANCH% da thay doi trong luc build.
+    echo Chay lai BUILD_ONE_FILE.cmd de dong bo va build dung source moi nhat.
+    goto :FAIL
+)
+
 git add -A
 if errorlevel 1 (
     echo [LỖI GIT] git add -A that bai.
@@ -194,7 +242,7 @@ git status --short
 echo ------------------------------------------------------------
 echo.
 
-choice /C YN /N /M "Commit và đẩy source lên GitHub main? [Y/N]: "
+choice /C YN /N /M "Commit và đẩy source lên GitHub branch %CURRENT_BRANCH%? [Y/N]: "
 if errorlevel 2 (
     echo Đã hủy push. File build V%NEW_VERSION% vẫn được giữ trên máy.
     goto :CANCEL
@@ -212,35 +260,26 @@ if errorlevel 1 (
 )
 
 echo.
-echo Đang fetch origin...
-git fetch origin
-if errorlevel 1 (
-    echo [LỖI GIT] git fetch that bai.
-    goto :FAIL
-)
-
-echo Đang rebase với origin/main...
-git rebase --autostash origin/main
-if errorlevel 1 (
-    echo [LỖI GIT] REBASE THẤT BẠI. Có thể có xung đột code.
-    echo Xử lý xung đột rồi chạy:
-    echo git rebase --continue
-    echo git push origin main
-    goto :FAIL
-)
-
 echo.
 echo Các commit đang chờ push:
-git log --oneline origin/main..HEAD
+if "%REMOTE_AFTER_BUILD%"=="NONE" (
+    git log --oneline -5 HEAD
+) else (
+    git log --oneline "origin/%CURRENT_BRANCH%..HEAD"
+)
 echo.
 
-choice /C YN /N /M "Xác nhận PUSH lên origin/main ngay bây giờ? [Y/N]: "
+choice /C YN /N /M "Xác nhận PUSH lên origin/%CURRENT_BRANCH% ngay bây giờ? [Y/N]: "
 if errorlevel 2 (
     echo Đã hủy PUSH. Commit van an toan tren may.
     goto :CANCEL
 )
 
-git push origin main
+if "%REMOTE_AFTER_BUILD%"=="NONE" (
+    git push -u origin "%CURRENT_BRANCH%"
+) else (
+    git push origin "%CURRENT_BRANCH%"
+)
 if errorlevel 1 (
     echo [LỖI GIT] PUSH thất bại.
     goto :FAIL
@@ -250,14 +289,19 @@ echo.
 echo ============================================================
 echo HOÀN TẤT THÀNH CÔNG
 echo Version : V%NEW_VERSION%
-echo GitHub  : origin/main đã cập nhật
+echo GitHub  : origin/%CURRENT_BRANCH% đã cập nhật
 echo ============================================================
 git status -sb
+goto :SUCCESS
+
+:SUCCESS
+set "FINAL_EXIT=0"
 goto :DONE
 
 :CANCEL
 echo.
 echo Đã hủy theo yeu cau. Không có source nao bi xoa.
+set "FINAL_EXIT=0"
 goto :DONE
 
 :FAIL
@@ -266,10 +310,11 @@ echo ============================================================
 echo ĐÃ DỪNG DO CÓ LỖI
 echo Cửa sổ sẽ KHÔNG tự động đóng.
 echo ============================================================
+set "FINAL_EXIT=1"
 goto :DONE
 
 :DONE
 echo.
 pause
 popd >nul
-exit /b 0
+exit /b %FINAL_EXIT%

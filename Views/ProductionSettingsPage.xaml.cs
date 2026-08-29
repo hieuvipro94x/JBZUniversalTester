@@ -21,6 +21,8 @@ public partial class ProductionSettingsPage : UserControl
     private readonly MainViewModel? _main;
     private readonly ProductionSettingsViewModel _vm;
     private readonly string _labelSettingsPasswordAtOpen;
+    private int _released;
+    private int _portRefreshGeneration;
 
     public event EventHandler? SettingsSaved;
     public event EventHandler? RequestClose;
@@ -54,16 +56,28 @@ public partial class ProductionSettingsPage : UserControl
         Loaded -= ProductionSettingsPage_Loaded;
         await System.Windows.Threading.Dispatcher.Yield(
             System.Windows.Threading.DispatcherPriority.ContextIdle);
-        RefreshPrinterPorts();
-        RefreshWaterProofPorts();
+        if (IsReleased)
+            return;
+
+        await RefreshPortsAsync();
+        if (IsReleased)
+            return;
         RefreshPrinterConnectionStatus();
     }
 
     public void ReleasePageResources()
     {
+        if (Interlocked.Exchange(ref _released, 1) != 0)
+            return;
+
+        Interlocked.Increment(ref _portRefreshGeneration);
         Loaded -= ProductionSettingsPage_Loaded;
         DataContext = null;
+        SettingsSaved = null;
+        RequestClose = null;
     }
+
+    private bool IsReleased => Volatile.Read(ref _released) != 0;
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
 
@@ -179,7 +193,8 @@ public partial class ProductionSettingsPage : UserControl
         };
     }
 
-    private void RefreshPrinterPorts_Click(object sender, RoutedEventArgs e) => RefreshPrinterPorts();
+    private async void RefreshPrinterPorts_Click(object sender, RoutedEventArgs e) =>
+        await RefreshPortsAsync();
 
     private async void ConnectPrinter_Click(object sender, RoutedEventArgs e)
     {
@@ -326,16 +341,23 @@ public partial class ProductionSettingsPage : UserControl
         return string.IsNullOrWhiteSpace(safe) ? "UNRESOLVED" : safe;
     }
 
-    private void RefreshPrinterPorts()
+    private async Task RefreshPortsAsync()
     {
+        int generation = Interlocked.Increment(ref _portRefreshGeneration);
         try
         {
-            string savedPort = _vm.Settings.Label.PrinterCom?.Trim() ?? string.Empty;
-            List<ComPortOption> options = SerialPort.GetPortNames()
+            string[] ports = await Task.Run(() => SerialPort.GetPortNames()
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(GetComPortNumber)
                 .ThenBy(x => x, StringComparer.OrdinalIgnoreCase)
+                .ToArray());
+
+            if (IsReleased || generation != Volatile.Read(ref _portRefreshGeneration))
+                return;
+
+            string savedPort = _vm.Settings.Label.PrinterCom?.Trim() ?? string.Empty;
+            List<ComPortOption> options = ports
                 .Select(x => new ComPortOption(x, x))
                 .ToList();
 
@@ -348,14 +370,22 @@ public partial class ProductionSettingsPage : UserControl
             options.Insert(0, new ComPortOption(string.Empty, "Không dùng COM / dùng Windows printer"));
             PrinterComComboBox.ItemsSource = options;
             PrinterComComboBox.SelectedValue = savedPort;
+
+            string savedWaterProofPort = _vm.Settings.WaterProofMachine.PortName?.Trim() ?? string.Empty;
+            WaterProofComComboBox.ItemsSource = ports;
+            WaterProofComComboBox.Text = savedWaterProofPort;
         }
         catch (Exception ex)
         {
+            if (IsReleased || generation != Volatile.Read(ref _portRefreshGeneration))
+                return;
+
             PrinterComComboBox.ItemsSource = new[] { new ComPortOption(string.Empty, "Không dùng COM") };
             PrinterComComboBox.SelectedIndex = 0;
+            WaterProofComComboBox.ItemsSource = Array.Empty<string>();
             ShowMessage(
                 $"Không thể quét cổng COM.\n\n{ex.Message}",
-                "Cổng COM in tem",
+                "Cổng COM",
                 MessageBoxImage.Warning);
         }
     }
@@ -373,31 +403,8 @@ public partial class ProductionSettingsPage : UserControl
             : "CHƯA KẾT NỐI";
     }
 
-    private void RefreshWaterProofPorts_Click(object sender, RoutedEventArgs e) => RefreshWaterProofPorts();
-
-    private void RefreshWaterProofPorts()
-    {
-        try
-        {
-            string savedPort = _vm.Settings.WaterProofMachine.PortName?.Trim() ?? string.Empty;
-            string[] ports = SerialPort.GetPortNames()
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(GetComPortNumber)
-                .ThenBy(x => x, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            WaterProofComComboBox.ItemsSource = ports;
-            WaterProofComComboBox.Text = savedPort;
-        }
-        catch (Exception ex)
-        {
-            WaterProofComComboBox.ItemsSource = Array.Empty<string>();
-            ShowMessage(
-                $"Không thể quét cổng COM máy kín nước.\n\n{ex.Message}",
-                "UART/RS232 kín nước",
-                MessageBoxImage.Warning);
-        }
-    }
+    private async void RefreshWaterProofPorts_Click(object sender, RoutedEventArgs e) =>
+        await RefreshPortsAsync();
 
     private static int GetComPortNumber(string portName)
     {
@@ -638,6 +645,9 @@ public partial class ProductionSettingsPage : UserControl
 
     private void ShowMessage(string message, string title, MessageBoxImage image)
     {
+        if (IsReleased)
+            return;
+
         Window? owner = HostWindow;
         if (owner is not null)
             MessageBox.Show(owner, message, title, MessageBoxButton.OK, image);

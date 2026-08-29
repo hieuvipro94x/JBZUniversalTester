@@ -42,6 +42,7 @@ public sealed class AppSoundService : IDisposable
     private int _globalButtonHandlerRegistered;
     private int _startupPlayed;
     private int _startupPlaybackActive;
+    private int _testOkPlaybackActive;
 
     public static AppSoundService Current => LazyInstance.Value;
 
@@ -144,7 +145,8 @@ public sealed class AppSoundService : IDisposable
     public void PlayClick()
     {
         EnsureInitialized();
-        if (Volatile.Read(ref _startupPlaybackActive) != 0)
+        if (Volatile.Read(ref _startupPlaybackActive) != 0 ||
+            Volatile.Read(ref _testOkPlaybackActive) != 0)
             return;
         SafePlay(_clickPlayer);
     }
@@ -152,7 +154,52 @@ public sealed class AppSoundService : IDisposable
     public void PlayTestOk()
     {
         EnsureInitialized();
-        SafePlay(_testOkPlayer);
+
+        // DINGDONG phải tiếp tục phát xuyên suốt các cập nhật UI
+        // ĐẠT -> THÁO SẢN PHẨM -> SẴN SÀNG. SoundPlayer dùng chung
+        // PlaySound của Windows, vì vậy Stop() trên player Probe/fault khác
+        // cũng có thể cắt âm PASS nếu không có khoảng bảo vệ này.
+        if (Interlocked.CompareExchange(ref _testOkPlaybackActive, 1, 0) != 0)
+            return;
+
+        SoundPlayer? player;
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+                return;
+            }
+
+            _wiringFaultAlarmActive = false;
+            _testPointContactSoundActive = false;
+            SafeStop(_clickPlayer);
+            SafeStop(_startupPlayer);
+            SafeStop(_testPointContactPlayer);
+            SafeStop(_wiringFaultPlayer);
+            player = _testOkPlayer;
+        }
+
+        if (player is null)
+        {
+            Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+            AsyncFileLogService.Current.Error("PASS_SOUND resource DINGDONG.wav is unavailable");
+            return;
+        }
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                AsyncFileLogService.Current.Application("PASS_SOUND PLAY_BEGIN");
+                SafePlaySync(player);
+                AsyncFileLogService.Current.Application("PASS_SOUND PLAY_END");
+            }
+            finally
+            {
+                CompleteTestOkPlayback();
+            }
+        });
     }
 
     /// <summary>Phát TESTPOINT.wav một lần khi đầu dò firmware chuyển sang ON.</summary>
@@ -161,7 +208,8 @@ public sealed class AppSoundService : IDisposable
         EnsureInitialized();
         lock (_gate)
         {
-            if (_disposed || _wiringFaultAlarmActive)
+            if (_disposed || _wiringFaultAlarmActive ||
+                Volatile.Read(ref _testOkPlaybackActive) != 0)
                 return;
             SafePlay(_testPointContactPlayer);
         }
@@ -179,6 +227,14 @@ public sealed class AppSoundService : IDisposable
         {
             if (_disposed)
                 return;
+
+            if (Volatile.Read(ref _testOkPlaybackActive) != 0)
+            {
+                // Ghi nhớ trạng thái mới nhất nhưng không gọi Play/Stop vì mọi
+                // thao tác PlaySound lúc này đều có thể cắt DINGDONG.
+                _testPointContactSoundActive = active;
+                return;
+            }
 
             // RELEASE luôn cưỡng bức Stop, kể cả cờ trạng thái đã về false
             // từ một callback trước đó. Điều này tránh WAV looping bị sót khi
@@ -211,10 +267,21 @@ public sealed class AppSoundService : IDisposable
 
         lock (_gate)
         {
-            if (_disposed || _wiringFaultAlarmActive == active)
+            if (_disposed)
             {
                 return;
             }
+
+            if (Volatile.Read(ref _testOkPlaybackActive) != 0)
+            {
+                // Nếu fault vẫn còn sau DINGDONG thì bật lại alarm ở
+                // CompleteTestOkPlayback; nếu đã hết thì trạng thái false thắng.
+                _wiringFaultAlarmActive = active;
+                return;
+            }
+
+            if (_wiringFaultAlarmActive == active)
+                return;
 
             _wiringFaultAlarmActive = active;
 
@@ -350,7 +417,31 @@ public sealed class AppSoundService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"Không thể phát hết âm thanh: {ex}");
-            AsyncFileLogService.Current.Error($"STARTUP_SOUND PLAY_FAILED: {ex.Message}");
+            AsyncFileLogService.Current.Error($"SYNC_SOUND PLAY_FAILED: {ex.Message}");
+        }
+    }
+
+    private void CompleteTestOkPlayback()
+    {
+        lock (_gate)
+        {
+            Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+            if (_disposed)
+                return;
+
+            try
+            {
+                // Wiring fault có độ ưu tiên cao hơn âm tiếp xúc Probe. Chỉ
+                // resume yêu cầu vẫn còn hiệu lực ở đúng thời điểm PASS kết thúc.
+                if (_wiringFaultAlarmActive)
+                    _wiringFaultPlayer?.PlayLooping();
+                else if (_testPointContactSoundActive)
+                    _testPointContactPlayer?.PlayLooping();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Không thể khôi phục âm sau PASS: {ex}");
+            }
         }
     }
 

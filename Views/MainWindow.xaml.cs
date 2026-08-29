@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private bool _shutdownStarted;
     private bool _shutdownComplete;
     private bool _startupStarted;
+    private long _internalPageGeneration;
     private UiStallWatchdog? _uiStallWatchdog;
 
     public MainWindow()
@@ -242,12 +243,22 @@ public partial class MainWindow : Window
     private async Task ShowSettingsPageAsync()
     {
         CloseInternalPage();
+        long navigationGeneration = Volatile.Read(ref _internalPageGeneration);
         LogMemory("MEM BEFORE_SETTINGS");
 
         // Config/THT preparation có disk/parse work; tạo ViewModel ngoài
         // Dispatcher để BAML của page được cấp phát sau khi UI đã rảnh.
         ProductionSettingsViewModel settingsViewModel = await Task.Run(
             () => new ProductionSettingsViewModel(_viewModel.Test));
+
+        // Người dùng có thể chuyển sang History/đóng app trong lúc config/THT
+        // đang được chuẩn bị. Không dựng BAML cho một navigation đã stale.
+        if (_shutdownStarted ||
+            navigationGeneration != Volatile.Read(ref _internalPageGeneration))
+        {
+            return;
+        }
+
         _settingsPage = new ProductionSettingsPage(_viewModel, settingsViewModel);
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
@@ -259,10 +270,11 @@ public partial class MainWindow : Window
 
     private async void SettingsPage_SettingsSaved(object? sender, EventArgs e)
     {
+        ProductionSettingsPage? savedPage = sender as ProductionSettingsPage;
         try
         {
-            if (_settingsPage is not null)
-                await _settingsPage.ReleaseManualOutputsAsync();
+            if (savedPage is not null)
+                await savedPage.ReleaseManualOutputsAsync();
             await _viewModel.ReloadProductionSettingsAsync();
         }
         catch (Exception ex)
@@ -276,7 +288,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        CloseInternalPage();
+        if (ReferenceEquals(_settingsPage, savedPage))
+            CloseInternalPage();
     }
 
     private void OpenHistory_Click(
@@ -309,6 +322,8 @@ public partial class MainWindow : Window
 
     private void CloseInternalPage()
     {
+        Interlocked.Increment(ref _internalPageGeneration);
+
         if (_settingsPage is not null)
         {
             _settingsPage.RequestClose -= InternalPage_RequestClose;
@@ -359,6 +374,7 @@ public partial class MainWindow : Window
             CloseInternalPage();
             _uiStallWatchdog?.Dispose();
             _uiStallWatchdog = null;
+            _viewModel.ExplicitModelLoaded -= ViewModel_ExplicitModelLoaded;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
             await _viewModel.ShutdownAsync();
         }

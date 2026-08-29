@@ -220,6 +220,7 @@ public partial class TestWindow : Window
 
     private void CleanupUiHandlers()
     {
+        ContentRendered -= TestWindow_ContentRendered;
         _clockTimer.Stop();
         _clockTimer.Tick -= ClockTimer_Tick;
         _scrollCts?.Cancel();
@@ -228,5 +229,6 @@ public partial class TestWindow : Window
         if (DataContext is TestViewModel vm && _faultsChangedHandler is not null)
             vm.Faults.CollectionChanged -= _faultsChangedHandler;
         _faultsChangedHandler = null;
+        DataContext = null;
     }
 }

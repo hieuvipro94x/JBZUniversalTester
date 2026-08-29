@@ -5,7 +5,9 @@
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release",
 
-    [string]$OutputFolder = "PublishSingle"
+    [string]$OutputFolder = "PublishSingle",
+
+    [switch]$NoOpenOutput
 )
 
 Set-StrictMode -Version 2.0
@@ -79,7 +81,9 @@ try {
         throw "Version.props does not contain Version/VersionFileTag."
     }
 
-    $appName = "JBZUniversalTester_V" + $versionFileTag
+    # Runtime V16 uses one stable executable name. Version remains in file
+    # metadata and in the versioned publish directory.
+    $appName = "JBZUniversalTester"
     $publishRoot = Join-Path $projectDir $OutputFolder
     $publishDir = Join-Path $publishRoot ("V" + $productVersion)
     $logPath = Join-Path $projectDir ("publish_V" + $productVersion + ".log")
@@ -202,7 +206,9 @@ try {
     Write-Host ("Log  : " + $logPath) -ForegroundColor Green
     Write-Host "============================================================" -ForegroundColor Green
 
-    Start-Process -FilePath "explorer.exe" -ArgumentList $publishDir
+    if (-not $NoOpenOutput) {
+        Start-Process -FilePath "explorer.exe" -ArgumentList $publishDir
+    }
 
     exit 0
 }

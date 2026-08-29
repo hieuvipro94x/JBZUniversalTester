@@ -47,8 +47,7 @@ public partial class App : Application
 
     private static async void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        CrashReportService.Write(e.Exception, "DispatcherUnhandledException", BuildRuntimeContext());
-        AsyncFileLogService.Current.Error($"DispatcherUnhandledException: {e.Exception}");
+        WriteCrashDiagnostics(e.Exception, "DispatcherUnhandledException");
 
         if (e.Exception is OutOfMemoryException)
         {
@@ -62,10 +61,7 @@ public partial class App : Application
             }
             catch (Exception shutdownException)
             {
-                CrashReportService.Write(
-                    shutdownException,
-                    "OutOfMemory.SafeShutdown",
-                    BuildRuntimeContext());
+                WriteCrashDiagnostics(shutdownException, "OutOfMemory.SafeShutdown");
             }
 
             try
@@ -108,8 +104,7 @@ public partial class App : Application
     {
         Exception exception = e.ExceptionObject as Exception
             ?? new InvalidOperationException(e.ExceptionObject?.ToString() ?? "Unknown fatal exception");
-        CrashReportService.Write(exception, "AppDomain.UnhandledException", BuildRuntimeContext());
-        AsyncFileLogService.Current.Error($"AppDomain UnhandledException: {e.ExceptionObject}");
+        WriteCrashDiagnostics(exception, "AppDomain.UnhandledException");
     }
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
@@ -145,6 +140,29 @@ public partial class App : Application
         catch
         {
             return "Runtime context unavailable";
+        }
+    }
+
+    private static void WriteCrashDiagnostics(Exception exception, string source)
+    {
+        // Crash diagnostics must stay best-effort, especially for OOM where even
+        // formatting a second diagnostic can fail before hardware reaches safe state.
+        try
+        {
+            CrashReportService.Write(exception, source, BuildRuntimeContext());
+        }
+        catch
+        {
+            // The original fatal exception remains authoritative.
+        }
+
+        try
+        {
+            AsyncFileLogService.Current.Error($"{source}: {exception}");
+        }
+        catch
+        {
+            // Logging cannot be allowed to recursively fail the fatal-error handler.
         }
     }
 }
