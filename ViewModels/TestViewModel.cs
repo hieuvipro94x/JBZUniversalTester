@@ -64,11 +64,13 @@ public sealed class TestViewModel : ObservableObject
     private Task _modelPersistenceTask = Task.CompletedTask;
     private Task _probePersistenceTask = Task.CompletedTask;
     private Task _removalPersistenceTask = Task.CompletedTask;
+    private Task _masterPersistenceTask = Task.CompletedTask;
     private long _statisticsLoadGeneration;
     private Task _statisticsLoadTask = Task.CompletedTask;
     private readonly bool _requireStartupIoClear;
     private readonly object _historyStoreGate = new();
     private TestHistoryStore? _historyStore;
+    private ProductionPersistenceService? _productionPersistence;
     private readonly LabelPrintService _labelPrintService = new();
     private readonly LabelDuplicateGuard _labelDuplicateGuard = new();
     private readonly AppSoundService _sound = AppSoundService.Current;
@@ -169,6 +171,7 @@ public sealed class TestViewModel : ObservableObject
     private DateTime? _cycleWaterProofStartedAt;
     private DateTime? _cycleWaterProofCompletedAt;
     private string _cycleWaterProofSummary = string.Empty;
+    private IReadOnlyList<WaterProofChannelMeasurement> _lastWaterProofMeasurements = [];
     private string _activeCycleId = Guid.NewGuid().ToString("N");
     private string _recordedHistoryCycleId = string.Empty;
     private TestHistoryStore? _recordedHistoryStore;
@@ -1481,6 +1484,22 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    private ProductionPersistenceService ProductionPersistence
+    {
+        get
+        {
+            lock (_historyStoreGate)
+            {
+                TestHistoryStore repository = _historyStore ??=
+                    new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings));
+                return _productionPersistence ??= new ProductionPersistenceService(
+                    repository,
+                    _productionSettings,
+                    ProgramIdentityService.VersionText);
+            }
+        }
+    }
+
     private CancellationToken BeginCycleOperations()
     {
         CancellationTokenSource? old;
@@ -1864,6 +1883,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 long parseStarted = Stopwatch.GetTimestamp();
                 ProductModel parsed = _modelParser.Load(fullPath);
+                ModelFileIdentityService.Capture(parsed, fullPath);
                 double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
                     $"MODEL_LOAD_PERF phase=THT_PARSE path={Path.GetFileName(fullPath)} duration_ms={parseMs:0.###}");
@@ -1893,7 +1913,11 @@ public sealed class TestViewModel : ObservableObject
     {
         if (model is null) throw new ArgumentNullException(nameof(model));
         Interlocked.Increment(ref _modelLoadGeneration);
-        TestEngine.PreparedModelState prepared = await Task.Run(() => _engine.PrepareModel(model));
+        TestEngine.PreparedModelState prepared = await Task.Run(() =>
+        {
+            ModelFileIdentityService.Capture(model);
+            return _engine.PrepareModel(model);
+        });
         SetModel(model, prepared);
         State = _board.IsConnected ? ReadyStateForCurrentModel() : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
         return model;
@@ -1934,6 +1958,7 @@ public sealed class TestViewModel : ObservableObject
             {
                 long parseStarted = Stopwatch.GetTimestamp();
                 ProductModel parsed = _modelParser.Load(fullPath);
+                ModelFileIdentityService.Capture(parsed, fullPath);
                 double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
                     $"MODEL_LOAD_PERF phase=STARTUP_THT_PARSE path={Path.GetFileName(fullPath)} duration_ms={parseMs:0.###}");
@@ -2378,7 +2403,6 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         _removalPersistenceTask = PersistRemovalTimingAsync(
-            store,
             cycleId,
             removalStarted,
             removedAt: null,
@@ -2397,7 +2421,6 @@ public sealed class TestViewModel : ObservableObject
         _cycleRemovalStartedAt = removalStarted;
 
         _removalPersistenceTask = PersistRemovalTimingAsync(
-            store,
             cycleId,
             removalStarted,
             removedAt,
@@ -2405,7 +2428,6 @@ public sealed class TestViewModel : ObservableObject
     }
 
     private async Task PersistRemovalTimingAsync(
-        TestHistoryStore store,
         string cycleId,
         DateTime removalStarted,
         DateTime? removedAt,
@@ -2415,8 +2437,8 @@ public sealed class TestViewModel : ObservableObject
         try
         {
             long timestamp = Stopwatch.GetTimestamp();
-            bool updated = await Task.Run(
-                () => store.UpdateRemovalTiming(cycleId, removalStarted, removedAt));
+            bool updated = await ProductionPersistence.UpdateRemovalTimingAsync(
+                cycleId, removalStarted, removedAt, _lifetimeCts.Token);
             if (!updated)
                 return;
 
@@ -2452,6 +2474,7 @@ public sealed class TestViewModel : ObservableObject
         _cycleWaterProofStartedAt = null;
         _cycleWaterProofCompletedAt = null;
         _cycleWaterProofSummary = string.Empty;
+        _lastWaterProofMeasurements = [];
     }
 
     private void ResetFullCycleAfterProductRemoved()
@@ -3701,6 +3724,7 @@ public sealed class TestViewModel : ObservableObject
         try { await _modelPersistenceTask; } catch { }
         try { await _probePersistenceTask; } catch { }
         try { await _removalPersistenceTask; } catch { }
+        try { await _masterPersistenceTask; } catch { }
         try { await _statisticsLoadTask; } catch { }
 
         _cycleActive = false;
@@ -3742,6 +3766,21 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             AddLog($"Cleanup máy in tem khi thoát chưa hoàn chỉnh: {ex.Message}");
+        }
+
+        ProductionPersistenceService? persistence;
+        lock (_historyStoreGate)
+            persistence = _productionPersistence;
+        if (persistence is not null)
+        {
+            try
+            {
+                await persistence.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                AddLog($"Không thể đóng phiên lưu dữ liệu production hoàn chỉnh: {ex.Message}");
+            }
         }
 
         _engine.Changed -= OnEngineChanged;
@@ -5286,19 +5325,36 @@ public sealed class TestViewModel : ObservableObject
             PrintStatus = LabelPrintStatus.NotRequested.ToString()
         };
 
+        TestHistoryStore store = HistoryStore;
+        _masterRecordedHistoryStore = store;
+        _masterHistoryCycleId = cycleId;
+        ProductionResultCommitRequest request = ProductionResultCommitRequest.Capture(
+            history,
+            model,
+            _productionSettings,
+            faultSnapshot,
+            Resistance.ToArray(),
+            waterProof: null,
+            ProgramIdentityService.VersionText);
+        _masterPersistenceTask = PersistMasterHistoryAsync(request, inspectionType, cycleId);
+    }
+
+    private async Task PersistMasterHistoryAsync(
+        ProductionResultCommitRequest request,
+        string inspectionType,
+        string cycleId)
+    {
         try
         {
-            TestHistoryStore store = HistoryStore;
-            store.Add(history);
-            _masterRecordedHistoryStore = store;
-            _masterHistoryCycleId = cycleId;
+            await ProductionPersistence.CommitTestResultAsync(request, _lifetimeCts.Token);
             AddLog(
-                $"History: {inspectionType} cycle {cycleId} đã lưu; " +
+                $"History: {inspectionType} cycle {cycleId} đã commit SQLite; " +
                 "không tăng LOT/sản lượng/Probe counter.");
         }
         catch (Exception ex)
         {
-            AddLog($"Không thể lưu lịch sử {inspectionType}: {ex.Message}");
+            AddLog($"LỖI LƯU DỮ LIỆU MASTER {inspectionType}: {ex.Message}");
+            throw;
         }
     }
 
@@ -5327,10 +5383,20 @@ public sealed class TestViewModel : ObservableObject
         if (store is null || string.IsNullOrWhiteSpace(cycleId))
             return;
 
+        _masterPersistenceTask = UpdateMasterRemovalHistoryAsync(
+            cycleId, removalStarted, removedAt);
+    }
+
+    private async Task UpdateMasterRemovalHistoryAsync(
+        string cycleId,
+        DateTime removalStarted,
+        DateTime? removedAt)
+    {
         long timestamp = Stopwatch.GetTimestamp();
         try
         {
-            if (store.UpdateRemovalTiming(cycleId, removalStarted, removedAt))
+            if (await ProductionPersistence.UpdateRemovalTimingAsync(
+                    cycleId, removalStarted, removedAt, _lifetimeCts.Token))
             {
                 double durationMs = Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
@@ -5355,20 +5421,31 @@ public sealed class TestViewModel : ObservableObject
         if (!reserved)
             return;
 
+        Task databaseCommit = _masterPersistenceTask;
+        _masterPersistenceTask = AppendLegacyMasterHistoryAsync(
+            databaseCommit, model, goodMaster);
+    }
+
+    private async Task AppendLegacyMasterHistoryAsync(
+        Task databaseCommit,
+        ProductModel model,
+        bool goodMaster)
+    {
         try
         {
-            PartCounterEntry counter = PartCounterStore.GetOrCreate(
-                model,
-                Math.Max(ProbeCycleCount, Total),
-                ProbeReplacementThreshold);
-            string path = _legacyHistory.AppendMaster(
+            await databaseCommit;
+            ProbeCounterSnapshot counter = await ProductionPersistence.GetProbeCounterAsync(
+                PartIdentitySnapshot.Capture(model),
+                ProbeReplacementThreshold,
+                _lifetimeCts.Token);
+            string path = await Task.Run(() => _legacyHistory.AppendMaster(
                 model,
                 DateTime.Now,
                 counter.Counter,
-                goodMaster);
+                goodMaster), _lifetimeCts.Token);
             AddLog(
                 $"PHT HISTORY: {(goodMaster ? "MASTER GOOD" : "MASTER BAD")} " +
-                $"đã append vào {path}; counter không tăng.");
+                $"đã append sau SQLite commit vào {path}; counter không tăng.");
         }
         catch (Exception ex)
         {
@@ -5376,7 +5453,7 @@ public sealed class TestViewModel : ObservableObject
                 Interlocked.Exchange(ref _legacyGoodMasterRecorded, 0);
             else
                 Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
-            AddLog($"Không thể append lịch sử MASTER theo định dạng PHT20: {ex.Message}");
+            AddLog($"LEGACY_EXPORT_FAILED MASTER: {ex.Message}");
         }
     }
 
@@ -5575,8 +5652,10 @@ public sealed class TestViewModel : ObservableObject
         });
     }
 
-    private Task ApplyWaterProofFinalResultAsync(WaterProofRunResult result) =>
-        InvokeUiAsync(() =>
+    private Task ApplyWaterProofFinalResultAsync(WaterProofRunResult result)
+    {
+        _lastWaterProofMeasurements = result.Channels.ToArray();
+        return InvokeUiAsync(() =>
         {
             foreach (WaterProofChannelMeasurement measurement in result.Channels.Where(item => item.Enabled))
             {
@@ -5609,6 +5688,7 @@ public sealed class TestViewModel : ObservableObject
             Raise(nameof(WaterProofCardBackground));
             Raise(nameof(WaterProofAccentBrush));
         });
+    }
 
     private void ArmWaterProofFaultRemovalWait()
     {
@@ -6754,29 +6834,23 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            var snapshot = await Task.Run(() =>
+            PartIdentitySnapshot part = PartIdentitySnapshot.Capture(model);
+            Task<ProductionStatisticsSnapshot> statisticsTask =
+                ProductionPersistence.GetStatisticsAsync(part, DateTime.Now, _lifetimeCts.Token);
+            Task<ProbeCounterSnapshot> probeTask = ProductionPersistence.GetProbeCounterAsync(
+                part,
+                _productionSettings.ProbeReplacementThreshold,
+                _lifetimeCts.Token);
+            await Task.Run(() =>
             {
-                ModelProductionStatistics stats = StatisticsStore.Get(model);
-                PartCounterEntry partCounter = PartCounterStore.GetOrCreate(
-                    model,
-                    Math.Max(stats.ProbeCycleCount, stats.Total),
-                    _productionSettings.ProbeReplacementThreshold);
-
-                LegacyProductionSnapshot? shared = _legacyHistoryReader.HasSharedHistory
-                    ? _legacyHistoryReader.GetProductionSnapshot(model, DateTime.Now)
-                    : null;
-
                 // Diagnostic topology có thể có hàng trăm network; dựng chuỗi/log ở
                 // worker thay vì giữ Dispatcher sau khi parse THT.
                 LogExpectedNetBuild(model);
                 LogModelTopology(model);
-
-                return (
-                    Stats: stats,
-                    PartCounter: partCounter,
-                    Shared: shared,
-                    PartCounterWarning: PartCounterStore.LastWarning);
             }, _lifetimeCts.Token);
+            var snapshot = (
+                Stats: await statisticsTask,
+                PartCounter: await probeTask);
 
             if (generation != Volatile.Read(ref _statisticsLoadGeneration) ||
                 _lifetimeCts.IsCancellationRequested)
@@ -6792,22 +6866,12 @@ public sealed class TestViewModel : ObservableObject
                     return;
                 }
 
-                if (snapshot.Shared is not null)
-                    ApplySharedProductionStatistics(snapshot.Shared);
-                else
-                {
-                    ApplyDailyProductionStatistics(snapshot.Stats);
-                    ApplyExtendedStatistics(snapshot.Stats);
-                }
-
+                ApplyProductionStatistics(snapshot.Stats);
                 ApplyPartCounter(snapshot.PartCounter);
                 RaiseTestStatistics();
 
-                if (!string.IsNullOrWhiteSpace(snapshot.PartCounterWarning))
-                    AddLog($"PART COUNTER WARNING: {snapshot.PartCounterWarning}");
-
                 AddLog(
-                    $"Đã nạp sản lượng mã hàng: Tổng {Total}, PASS {Pass}, FAIL {Fail}, " +
+                    $"Đã nạp sản lượng từ SQLite: Tổng {Total}, PASS {Pass}, FAIL {Fail}, " +
                     $"Tỷ lệ {Rate:0.00}%.");
             });
         }
@@ -6934,27 +6998,6 @@ public sealed class TestViewModel : ObservableObject
             Resistance = Resistance.ToArray()
         };
 
-        try
-        {
-            ModelProductionStatistics stats = await Task.Run(() => StatisticsStore.Record(
-                model, passed, completedLot, passed ? "PASS" : failureName), cycleToken);
-            await InvokeUiAsync(() =>
-            {
-                ApplyDailyProductionStatistics(stats);
-                ApplyExtendedStatistics(stats);
-            });
-        }
-        catch (Exception ex)
-        {
-            await InvokeUiAsync(() =>
-            {
-                Total++;
-                if (passed) Pass++; else Fail++;
-                UpdateDailyLotDisplay();
-            });
-            AddLog($"Không thể lưu production.statistics.json: {ex.Message}");
-        }
-
         int openCount = faultDetails.Count(x => x.Type == ProductFaultType.OpenCircuit);
         int wrongOnly = faultDetails.Count(x => x.Type == ProductFaultType.WrongWiring);
         int shortOnly = faultDetails.Count(x => x.Type == ProductFaultType.ShortCircuit);
@@ -7053,22 +7096,46 @@ public sealed class TestViewModel : ObservableObject
 
         TestHistoryStore historyStore = HistoryStore;
         bool historySaved = false;
+        ProductionCommitResult? databaseResult = null;
         try
         {
-            await Task.Run(() => historyStore.Add(history), cycleToken);
+            ProductionResultCommitRequest commitRequest = ProductionResultCommitRequest.Capture(
+                history,
+                model,
+                _productionSettings,
+                faultDetails,
+                Resistance.ToArray(),
+                _lastWaterProofMeasurements,
+                ProgramIdentityService.VersionText);
+            databaseResult = await ProductionPersistence.CommitTestResultAsync(
+                commitRequest,
+                cycleToken);
+            history.Id = databaseResult.TestId;
             historySaved = true;
             _recordedHistoryCycleId = cycleId;
             _recordedHistoryStore = historyStore;
+            await InvokeUiAsync(() =>
+            {
+                ApplyProductionStatistics(databaseResult.Statistics);
+                ApplyPartCounter(databaseResult.ProbeCounter);
+            });
             AsyncFileLogService.Current.Performance(
                 $"PASS_LATENCY T_HISTORY_COMMIT cycle={cycleId} result={resultStatus}");
             string historyFault = passed ? string.Empty : $" - {failureName}";
-            AddLog($"History: cycle {cycleId}, LOT {completedLot} {resultStatus}{historyFault} đã lưu vào {historyStore.DatabasePath}.");
+            AddLog(
+                $"History: cycle {cycleId}, LOT {completedLot} {resultStatus}{historyFault} " +
+                $"đã commit atomic vào {historyStore.DatabasePath}" +
+                (databaseResult.AlreadyCommitted ? " (CycleId đã tồn tại, không cộng trùng)." : "."));
         }
         catch (Exception ex)
         {
-            AddLog($"Không thể lưu test history: {ex.Message}");
+            AddLog($"LỖI LƯU DỮ LIỆU: kết quả cycle {cycleId} chưa được xác nhận trong SQLite: {ex.Message}");
+            await InvokeUiAsync(() => State = "LỖI LƯU DỮ LIỆU - KIỂM TRA Ổ ĐĨA");
+            return false;
         }
 
+        // Các định dạng cũ chỉ được sinh sau khi SQLite đã commit. Hỏng mirror
+        // không được rollback hoặc cộng lại một kết quả production đã durable.
         try
         {
             string legacyPath = await Task.Run(
@@ -7080,7 +7147,21 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AddLog($"Không thể append lịch sử dùng chung C:\\Pass_/C:\\Error_: {ex.Message}");
+            AddLog($"LEGACY_EXPORT_FAILED C:\\Pass_/C:\\Error_: {ex.Message}");
+        }
+
+        try
+        {
+            ProductionCommitResult committed = databaseResult!;
+            await Task.Run(() =>
+            {
+                PartCounterStore.Mirror(model, committed.ProbeCounter);
+                StatisticsStore.Mirror(model, committed.Statistics, committed.ProbeCounter);
+            }, cycleToken);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"LEGACY_MIRROR_FAILED PartCnt/production.statistics.json: {ex.Message}");
         }
 
         if (!passed)
@@ -7186,6 +7267,17 @@ public sealed class TestViewModel : ObservableObject
         UpdateDailyLotDisplay();
     }
 
+    private void ApplyProductionStatistics(ProductionStatisticsSnapshot stats)
+    {
+        Total = checked((int)stats.DailyTotal);
+        Pass = checked((int)stats.DailyPass);
+        Fail = checked((int)stats.DailyFail);
+        DailyTestCount = stats.DailyTotal;
+        MonthlyTestCount = stats.MonthlyTotal;
+        LifetimeTestCount = stats.LifetimeTotal;
+        UpdateDailyLotDisplay();
+    }
+
     private void StartSharedProductionWatchers()
     {
         if (Interlocked.Exchange(ref _sharedProductionWatchersStarted, 1) != 0)
@@ -7257,26 +7349,14 @@ public sealed class TestViewModel : ObservableObject
 
         try
         {
-            LegacyProductionSnapshot? snapshot = _legacyHistoryReader.HasSharedHistory
-                ? _legacyHistoryReader.GetProductionSnapshot(model, DateTime.Now)
-                : null;
-            PartCounterEntry partCounter = PartCounterStore.GetOrCreate(
-                model,
-                Math.Max(ProbeCycleCount, Total),
-                _productionSettings.ProbeReplacementThreshold);
-            InvokeUi(() =>
-            {
-                if (!ReferenceEquals(_model, model))
-                    return;
-                if (snapshot is not null)
-                    ApplySharedProductionStatistics(snapshot);
-                ApplyPartCounter(partCounter);
-                RaiseTestStatistics();
-            });
+            // Legacy files are compatibility exports only. A file watcher may
+            // request a refresh, but it must never overwrite authoritative DB
+            // counters by parsing PHT/PartCnt back into the production state.
+            ScheduleStatisticsLoadForModel(model);
         }
         catch (Exception ex)
         {
-            AddLog($"Không thể đồng bộ sản lượng dùng chung PHT20: {ex.Message}");
+            AddLog($"Không thể làm mới sản lượng SQLite: {ex.Message}");
         }
         finally
         {
@@ -7314,6 +7394,17 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(ProbeMaintenanceBackground));
     }
 
+    private void ApplyPartCounter(ProbeCounterSnapshot entry)
+    {
+        ProbeCycleCount = entry.Counter;
+        _probeReplacementThreshold = Math.Max(1, entry.ReplacementThreshold);
+        Raise(nameof(ProbeReplacementThreshold));
+        Raise(nameof(ProbeCycleText));
+        Raise(nameof(ProbeMaintenanceDue));
+        Raise(nameof(ProbeMaintenanceStatus));
+        Raise(nameof(ProbeMaintenanceBackground));
+    }
+
     private void RecordProbeCycleStarted()
     {
         ProductModel? model = _model;
@@ -7326,11 +7417,6 @@ public sealed class TestViewModel : ObservableObject
         }
 
         bool wasDue = ProbeCycleCount >= ProbeReplacementThreshold;
-        long optimisticCounter = checked(ProbeCycleCount + 1);
-        InvokeUi(() => ApplyPartCounter(new PartCounterEntry(
-            string.IsNullOrWhiteSpace(model.PartNumber) ? model.ModelName : model.PartNumber,
-            ProbeReplacementThreshold,
-            optimisticCounter)));
         _probePersistenceTask = PersistProbeCycleStartedAsync(model, wasDue);
     }
 
@@ -7377,21 +7463,28 @@ public sealed class TestViewModel : ObservableObject
         await _productionPersistenceGate.WaitAsync();
         try
         {
-            PartCounterEntry counter = await Task.Run(() => PartCounterStore.Increment(
-                model,
-                Math.Max(ProbeCycleCount - 1, Total),
-                ProbeReplacementThreshold));
+            ProbeCounterSnapshot counter = await ProductionPersistence.IncrementProbeCounterAsync(
+                PartIdentitySnapshot.Capture(model),
+                ProbeReplacementThreshold,
+                _lifetimeCts.Token);
             try
             {
-                await Task.Run(
-                    () => StatisticsStore.RecordProbeCycle(model, counter.ReplacementThreshold));
+                ProductionStatisticsSnapshot statistics = await ProductionPersistence.GetStatisticsAsync(
+                    PartIdentitySnapshot.Capture(model),
+                    DateTime.Now,
+                    _lifetimeCts.Token);
+                await Task.Run(() =>
+                {
+                    PartCounterStore.Mirror(model, counter);
+                    StatisticsStore.Mirror(model, statistics, counter);
+                }, _lifetimeCts.Token);
             }
             catch (Exception ex)
             {
-                AddLog($"Không thể ghi bản sao ProbeCycleCount vào production.statistics.json: {ex.Message}");
+                AddLog($"LEGACY_MIRROR_FAILED ProbeCycleCount: {ex.Message}");
             }
 
-            AddLog($"PartCnt: {counter.PartNumber} {counter.Counter:N0}/{counter.ReplacementThreshold:N0} ({PartCounterStore.StoragePath}).");
+            AddLog($"SQLite ProbeCounter: {counter.PartNumber} {counter.Counter:N0}/{counter.ReplacementThreshold:N0}.");
             bool reachedDue = counter.Counter >= counter.ReplacementThreshold;
             InvokeUi(() =>
             {
@@ -7421,62 +7514,58 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    public bool TryResetProbeCycle(string password, out string message)
+    public async Task<(bool Reset, string Message)> TryResetProbeCycleAsync(string password)
     {
         ProductModel? model = _model;
         if (model is null)
-        {
-            message = "Chưa chọn mã hàng.";
-            return false;
-        }
+            return (false, "Chưa chọn mã hàng.");
 
         if (_productDetectedThisCycle || _waitForProductRelease || _waitForFaultProductRemoval)
-        {
-            message = "Không thể reset trong khi sản phẩm/JIG đang ở trong chu kỳ test.";
-            return false;
-        }
+            return (false, "Không thể reset trong khi sản phẩm/JIG đang ở trong chu kỳ test.");
 
         if (!MasterApproved)
-        {
-            message = "Không thể reset counter trong chu trình xác nhận MASTER.";
-            return false;
-        }
+            return (false, "Không thể reset counter trong chu trình xác nhận MASTER.");
 
         if (!AdminAuthenticationService.VerifyProbeMaintenance(password))
-        {
-            message = "Mật khẩu quản trị thay Probe Pin không đúng.";
-            return false;
-        }
+            return (false, "Mật khẩu quản trị thay Probe Pin không đúng.");
 
         try
         {
             long previous = ProbeCycleCount;
-            PartCounterEntry reset = PartCounterStore.Reset(model);
+            ProbeCounterSnapshot reset = await ProductionPersistence.ResetProbeCounterAsync(
+                PartIdentitySnapshot.Capture(model),
+                ProbeReplacementThreshold,
+                "PROBE_ADMIN",
+                _productionSettings.DeviceName,
+                _lifetimeCts.Token);
             try
             {
-                StatisticsStore.ResetProbeCycle(
-                    model,
-                    reset.ReplacementThreshold,
-                    "PROBE_ADMIN",
-                    _productionSettings.DeviceName);
+                ProductionStatisticsSnapshot statistics = await ProductionPersistence.GetStatisticsAsync(
+                    PartIdentitySnapshot.Capture(model),
+                    DateTime.Now,
+                    _lifetimeCts.Token);
+                await Task.Run(() =>
+                {
+                    PartCounterStore.Mirror(model, reset);
+                    StatisticsStore.Mirror(model, statistics, reset);
+                }, _lifetimeCts.Token);
             }
             catch (Exception ex)
             {
-                AddLog($"PartCnt đã reset nhưng không thể ghi lịch sử maintenance JSON: {ex.Message}");
+                AddLog($"LEGACY_MIRROR_FAILED sau reset Probe Pin: {ex.Message}");
             }
 
             ApplyPartCounter(reset);
             Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
-            message = $"Đã lưu thay Probe Pin vào PartCnt.txt. Counter {previous:N0} → 0.";
+            string message = $"Đã lưu thay Probe Pin vào SQLite. Counter {previous:N0} → 0.";
             AddLog(
                 $"MAINTENANCE: PROBE PIN REPLACED; part={reset.PartNumber}; " +
-                $"previous={previous}; file={PartCounterStore.StoragePath}; admin=PROBE_ADMIN.");
-            return true;
+                $"previous={previous}; database={HistoryStore.DatabasePath}; admin=PROBE_ADMIN.");
+            return (true, message);
         }
         catch (Exception ex)
         {
-            message = $"Không thể lưu reset Probe Pin: {ex.Message}";
-            return false;
+            return (false, $"Không thể lưu reset Probe Pin: {ex.Message}");
         }
     }
 
@@ -7487,7 +7576,8 @@ public sealed class TestViewModel : ObservableObject
     {
         try
         {
-            if (!historyStore.TryBeginFirstPrint(historyId, request.CycleId))
+            if (!await ProductionPersistence.TryBeginFirstPrintAsync(
+                    historyId, request.CycleId, _lifetimeCts.Token))
             {
                 AddLog($"LABEL DUPLICATE BLOCKED: cycle {request.CycleId} đã có first-print transaction.");
                 return;
@@ -7496,7 +7586,7 @@ public sealed class TestViewModel : ObservableObject
             if (!_lotSequence.IsCommitCandidate(request.CycleId, request.Data.LotNo))
             {
                 string blocked = $"LOT {request.Data.LotNo} đang chờ LOT trước đó được in/commit; chưa gửi dữ liệu tới máy in.";
-                UpdateLabelPrintOutcomeSafe(
+                await UpdateLabelPrintOutcomeSafeAsync(
                     historyStore, historyId, request.CycleId, LabelPrintStatus.Failed, null, blocked);
                 SetFailedLabelContext(new LabelPrintContext(request, historyStore, historyId), blocked);
                 AddLog($"LABEL BLOCKED: cycle {request.CycleId}; {blocked}");
@@ -7522,7 +7612,7 @@ public sealed class TestViewModel : ObservableObject
                 ? LabelPrintStatus.Printed
                 : LabelPrintStatus.Failed;
             DateTime? printedAt = result.Printed ? DateTime.Now : null;
-            UpdateLabelPrintOutcomeSafe(
+            await UpdateLabelPrintOutcomeSafeAsync(
                 historyStore,
                 historyId,
                 request.CycleId,
@@ -7560,7 +7650,7 @@ public sealed class TestViewModel : ObservableObject
         catch (OperationCanceledException)
         {
             const string message = "Giao dịch in bị hủy; trạng thái tem vật lý chưa thể xác định. Không tự retry.";
-            UpdateLabelPrintOutcomeSafe(
+            await UpdateLabelPrintOutcomeSafeAsync(
                 historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
             AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
             SetUnknownLabelStatus(request, message);
@@ -7568,7 +7658,7 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             string message = $"Printer/driver/transport error: {ex.Message}. Trạng thái tem vật lý chưa xác định; không tự retry.";
-            UpdateLabelPrintOutcomeSafe(
+            await UpdateLabelPrintOutcomeSafeAsync(
                 historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
             AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
             SetUnknownLabelStatus(request, message);
@@ -7614,8 +7704,12 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            context.HistoryStore.IncrementLabelReprint(
-                context.HistoryId, context.Request.CycleId, DateTime.Now, result.Message);
+            await ProductionPersistence.IncrementLabelReprintAsync(
+                context.HistoryId,
+                context.Request.CycleId,
+                DateTime.Now,
+                result.Message,
+                _lifetimeCts.Token);
             InvokeUi(() => LabelStatusText = $"TEM: ĐÃ IN LẠI LOT {context.Request.Data.LotNo}");
             AddLog($"LABEL REPRINTED: cycle {context.Request.CycleId}; LOT {context.Request.Data.LotNo}; không tăng LOT.");
         }
@@ -7670,7 +7764,7 @@ public sealed class TestViewModel : ObservableObject
         });
     }
 
-    private void UpdateLabelPrintOutcomeSafe(
+    private async Task UpdateLabelPrintOutcomeSafeAsync(
         TestHistoryStore historyStore,
         long historyId,
         string cycleId,
@@ -7681,8 +7775,14 @@ public sealed class TestViewModel : ObservableObject
     {
         try
         {
-            historyStore.UpdateLabelPrintOutcome(
-                historyId, cycleId, status, printTimestamp, message, printedBarcode);
+            await ProductionPersistence.UpdateLabelPrintOutcomeAsync(
+                historyId,
+                cycleId,
+                status,
+                printTimestamp,
+                message,
+                printedBarcode,
+                _lifetimeCts.Token);
         }
         catch (Exception ex)
         {

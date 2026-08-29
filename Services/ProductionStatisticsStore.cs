@@ -129,6 +129,41 @@ public sealed class ProductionStatisticsStore
         }
     }
 
+    /// <summary>
+    /// Regenerates the legacy JSON cache from authoritative SQLite values.
+    /// No production decision may be made from this mirror.
+    /// </summary>
+    public ModelProductionStatistics Mirror(
+        ProductModel model,
+        ProductionStatisticsSnapshot statistics,
+        ProbeCounterSnapshot probe)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(statistics);
+        ArgumentNullException.ThrowIfNull(probe);
+        lock (_gate)
+        {
+            string key = BuildModelKey(model);
+            ModelProductionStatistics item = GetOrCreate(model);
+            item.Total = checked((int)statistics.LifetimeTotal);
+            item.Pass = checked((int)statistics.LifetimePass);
+            item.Fail = checked((int)statistics.LifetimeFail);
+            item.DailyTestCount = statistics.DailyTotal;
+            item.DailyPassCount = statistics.DailyPass;
+            item.DailyFailCount = statistics.DailyFail;
+            item.MonthlyTestCount = statistics.MonthlyTotal;
+            item.LifetimeTestCount = statistics.LifetimeTotal;
+            item.LastLotNo = statistics.LastLotNo;
+            item.LastResult = statistics.LastResult;
+            item.ProbeCycleCount = probe.Counter;
+            item.ProbeReplacementThreshold = probe.ReplacementThreshold;
+            item.LastTestedAt = LocalNow();
+            _items[key] = item;
+            SaveFile();
+            return item.Clone();
+        }
+    }
+
     public ModelProductionStatistics RecordProbeCycle(
         ProductModel model,
         long replacementThreshold)

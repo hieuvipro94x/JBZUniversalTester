@@ -98,6 +98,9 @@ public sealed class ProductModel
     public string Nco { get; set; } = "";
     public string Alc { get; set; } = "";
     public string SourcePath { get; set; } = "";
+    public string SourceHash { get; set; } = "";
+    public long SourceLength { get; set; }
+    public DateTime? SourceModifiedAt { get; set; }
 
     /// <summary>
     /// Additional static label values read from the Part table in the THT file.

@@ -16,7 +16,6 @@ public partial class HistoryPage : UserControl
     private readonly string _historyPath;
     private readonly object _storeGate = new();
     private TestHistoryStore? _store;
-    private readonly LegacyPhtHistoryReader _legacyReader = new();
     private IReadOnlyList<TestHistoryRecord> _records = [];
     private int _reloadGeneration;
 
@@ -81,12 +80,7 @@ public partial class HistoryPage : UserControl
         {
             HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
             IReadOnlyList<TestHistoryRecord> rows = await Task.Run(() =>
-                LegacyPhtHistoryReader.MergeWithoutDuplicates(
-                        GetStore().Search(criteria),
-                        _legacyReader.Search(criteria),
-                        exportOrder: false)
-                    .Take(criteria.MaxRows)
-                    .ToArray());
+                GetStore().Search(criteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
 
@@ -155,10 +149,7 @@ public partial class HistoryPage : UserControl
         {
             int exportedCount = await Task.Run(() =>
             {
-                IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
-                    GetStore().SearchForExport(criteria),
-                    _legacyReader.SearchForExport(criteria),
-                    exportOrder: true);
+                IReadOnlyList<TestHistoryRecord> rows = GetStore().SearchForExport(criteria);
                 HistoryExportService.ExportCsv(dialog.FileName, rows);
                 return rows.Count;
             });
@@ -197,10 +188,7 @@ public partial class HistoryPage : UserControl
         {
             int exportedCount = await Task.Run(() =>
             {
-                IReadOnlyList<TestHistoryRecord> rows = LegacyPhtHistoryReader.MergeWithoutDuplicates(
-                    GetStore().SearchForExport(criteria),
-                    _legacyReader.SearchForExport(criteria),
-                    exportOrder: true);
+                IReadOnlyList<TestHistoryRecord> rows = GetStore().SearchForExport(criteria);
                 HistoryExportService.ExportXlsx(dialog.FileName, rows);
                 return rows.Count;
             });

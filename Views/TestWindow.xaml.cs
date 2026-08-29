@@ -138,7 +138,7 @@ public partial class TestWindow : Window
         }, DispatcherPriority.Background);
     }
 
-    private void ResetProbeCounter_Click(object sender, RoutedEventArgs e)
+    private async void ResetProbeCounter_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not TestViewModel viewModel)
             return;
@@ -155,7 +155,7 @@ public partial class TestWindow : Window
         if (dialog.ShowDialog() != true)
             return;
 
-        bool reset = viewModel.TryResetProbeCycle(dialog.AdminPassword, out string message);
+        (bool reset, string message) = await viewModel.TryResetProbeCycleAsync(dialog.AdminPassword);
         MessageBox.Show(
             this,
             message,

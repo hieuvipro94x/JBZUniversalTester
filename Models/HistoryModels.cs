@@ -60,6 +60,8 @@ public sealed class TestHistoryRecord
     public int ReprintCount { get; set; }
     public string PrintMessage { get; set; } = string.Empty;
 
+    public TestHistoryRecord ClonePersistenceSnapshot() => (TestHistoryRecord)MemberwiseClone();
+
     public string DateText => EffectiveTestStartedAt.ToString("yyyy/MM/dd");
     public string TimeText => EffectiveTestStartedAt.ToString("HH:mm:ss");
     public string PassedText => Passed ? "PASS" : "FAIL";
@@ -229,7 +231,14 @@ public sealed record HistorySearchCriteria(
     long? LotNo,
     string PartKeyword,
     string Result,
-    int MaxRows = 5000);
+    int MaxRows = 5000,
+    int Offset = 0,
+    string InspectionType = "",
+    string FaultType = "",
+    int? Io = null,
+    string WireName = "",
+    string CycleId = "",
+    string AppVersion = "");
 
 public sealed record LabelPrintData(
     string PartName,

@@ -101,6 +101,28 @@ public sealed class PartCounterStore
         }
     }
 
+    /// <summary>
+    /// Writes the legacy PartCnt.txt compatibility mirror from authoritative
+    /// SQLite state. This method must never be used to calculate DB state.
+    /// </summary>
+    public PartCounterEntry Mirror(ProductModel model, ProbeCounterSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        lock (_gate)
+        {
+            PartCounterFile file = Load();
+            string partNumber = ResolvePartNumber(model);
+            var mirrored = new PartCounterEntry(
+                partNumber,
+                NormalizeThreshold(snapshot.ReplacementThreshold),
+                Math.Max(0, snapshot.Counter));
+            file.Items[partNumber] = mirrored;
+            Save(file);
+            return mirrored;
+        }
+    }
+
     private PartCounterFile Load()
     {
         var result = new PartCounterFile();

@@ -1,0 +1,2495 @@
+# MASTER CODEX TASK
+
+# JBZUniversalTester — REFACTOR DATABASE THEO KIẾN TRÚC HTDRV NHƯNG DÙNG SQLITE HIỆN ĐẠI
+
+# SQLITE = SINGLE SOURCE OF TRUTH
+
+# GIỮ LEGACY PHT / PASS_ / ERROR_ / PARTCNT CHỈ LÀ COMPATIBILITY
+
+## 0. YÊU CẦU CHUNG
+
+Hãy phân tích TOÀN BỘ solution JBZUniversalTester hiện tại trước khi sửa.
+
+Không được chỉ đọc `TestHistoryStore.cs` rồi tự thiết kế database mới độc lập với project.
+
+Phải dựng đầy đủ dependency/call graph của:
+
+Test cycle
+→ PASS/FAIL
+→ statistics
+→ LOT
+→ Part Counter
+→ History
+→ Fault detail
+→ Master
+→ Resistance
+→ Waterproof
+→ Label
+→ PHT legacy
+→ C:\Pass_
+→ C:\Error_
+→ PartCnt.txt
+→ production.statistics.json
+→ SQLite hiện tại.
+
+Mục tiêu là chuyển kiến trúc dữ liệu từ nhiều nguồn song song thành:
+
+SQLITE = SOURCE OF TRUTH
+
+và:
+
+PHT / Pass_ / Error_
+PartCnt.txt
+production.statistics.json
+
+chỉ còn là:
+
+LEGACY EXPORT
+COMPATIBILITY MIRROR
+CACHE
+
+KHÔNG còn là nguồn quyết định dữ liệu production chính.
+
+Không được làm mất dữ liệu hiện có.
+
+Không được phá tương thích với phần mềm/history cũ.
+
+Không được thay đổi logic PASS/FAIL.
+
+Không được làm database I/O gây lag UI hoặc chặn realtime scan.
+
+---
+
+# 1. KIẾN TRÚC HTDRV GỐC ĐÃ PHÂN TÍCH
+
+`HtDrv.tdb` gốc là Microsoft Access/Jet database.
+
+Không copy Access/Jet.
+
+Chỉ học kiến trúc relational của nó.
+
+Các entity quan trọng của Htdrv gồm:
+
+DBInfo
+
+Part
+
+File
+
+FileToPart
+
+Run
+
+Test
+
+Error
+
+Config
+
+Worker
+
+Prob
+
+Các relationship quan trọng:
+
+Part
+→ FileToPart
+→ File
+
+Run
+→ Test
+
+Config
+→ Test
+
+Test
+→ Error
+
+Đây là kiến trúc cần mô phỏng bằng SQLite hiện đại.
+
+---
+
+# 2. KHÔNG COPY DATABASE HTDRV 1:1
+
+Không tạo `.tdb`.
+
+Không dùng Access.
+
+Không cài Jet provider.
+
+Không giữ naming legacy một cách máy móc.
+
+Sử dụng SQLite hiện tại của JBZUniversalTester.
+
+Thiết kế schema mới theo domain hiện tại của project.
+
+---
+
+# 3. KIẾN TRÚC DATABASE ĐÍCH
+
+Database production mới phải có tối thiểu các bảng logical sau:
+
+Parts
+
+Models
+
+ProductionRuns
+
+ConfigSnapshots
+
+Tests
+
+TestFaults
+
+ProbeMaintenance
+
+Có thể thêm:
+
+SchemaInfo
+
+Operators
+
+Labels
+
+ResistanceMeasurements
+
+WaterProofMeasurements
+
+nếu sau khi phân tích project thấy thật sự cần.
+
+Không tạo bảng chỉ để đẹp schema.
+
+---
+
+# 4. SCHEMA VERSION
+
+Tạo bảng:
+
+SchemaInfo
+
+Fields đề xuất:
+
+Id
+
+SchemaVersion
+
+CreatedAt
+
+UpdatedAt
+
+AppVersion
+
+MigrationVersion
+
+Chỉ có một row active hoặc dùng version history tùy implementation.
+
+Database migration phải idempotent.
+
+Không chạy:
+
+CREATE/ALTER
+
+vô ích mỗi startup nếu schema đã đúng version.
+
+---
+
+# 5. BẢNG PARTS
+
+Thiết kế:
+
+Parts
+
+Fields đề xuất:
+
+Id INTEGER PRIMARY KEY
+
+PartNumber TEXT NOT NULL
+
+PartName TEXT
+
+VehicleType TEXT
+
+Eco TEXT
+
+Nco TEXT
+
+Alc TEXT
+
+CustomerCode TEXT
+
+FirstUseAt TEXT
+
+LastUseAt TEXT
+
+TotalTests INTEGER NOT NULL DEFAULT 0
+
+TotalPass INTEGER NOT NULL DEFAULT 0
+
+TotalFail INTEGER NOT NULL DEFAULT 0
+
+ProbeCounter INTEGER NOT NULL DEFAULT 0
+
+ProbeReplacementThreshold INTEGER NOT NULL DEFAULT 0
+
+CreatedAt TEXT
+
+UpdatedAt TEXT
+
+Constraints:
+
+UNIQUE normalized PartNumber nếu business data đảm bảo PartNumber unique.
+
+Nếu PartNumber không đủ unique trong project thực tế:
+
+hãy phân tích khóa chính domain hiện tại trước khi đặt constraint.
+
+Không tự suy đoán.
+
+---
+
+# 6. PART COUNTER
+
+Hiện tại project có:
+
+PartCounterStore
+PartCnt.txt
+ProbeCycleCount
+ProbeReplacementThreshold
+
+Phân tích chính xác semantics.
+
+Sau migration:
+
+SQLite `Parts.ProbeCounter`
+
+hoặc bảng `ProbeMaintenance`
+
+là source of truth.
+
+`PartCnt.txt` chỉ mirror/export nếu còn cần tương thích.
+
+Không đọc PartCnt.txt trong realtime cycle để quyết định counter nếu DB đã sẵn sàng.
+
+---
+
+# 7. BẢNG MODELS
+
+Tương đương ý tưởng Htdrv:
+
+File
++
+FileToPart
+
+nhưng có thể hợp nhất thành:
+
+Models
+
+Fields:
+
+Id
+
+PartId
+
+FilePath
+
+FileName
+
+FileHash
+
+FileLength
+
+FileModifiedAt
+
+ModelName
+
+MaxIo
+
+FirstUsedAt
+
+LastUsedAt
+
+CreatedAt
+
+UpdatedAt
+
+Foreign key:
+
+PartId → Parts.Id
+
+Tạo index:
+
+PartId
+
+FileHash
+
+FilePath nếu phù hợp.
+
+---
+
+# 8. MODEL VERSIONING
+
+Một Part có thể từng sử dụng nhiều `.tht`.
+
+Không overwrite record model cũ khi file thay đổi.
+
+Nếu file:
+
+WH322244.tht
+
+thay nội dung:
+
+hash mới
+
+→ tạo model/version record mới hoặc update theo chiến lược versioning rõ ràng.
+
+History Test phải biết chính xác model version nào được sử dụng lúc sản phẩm được test.
+
+---
+
+# 9. FILE HASH
+
+Có thể dùng:
+
+SHA-256
+
+để nhận dạng nội dung `.tht`.
+
+Không tính hash trên UI thread nếu file lớn.
+
+Model load worker có thể tính cùng lúc parse.
+
+Hash không được làm chậm START TEST.
+
+---
+
+# 10. BẢNG PRODUCTIONRUNS
+
+Tạo:
+
+ProductionRuns
+
+Fields:
+
+Id
+
+StartedAt
+
+FinishedAt
+
+DeviceName
+
+DeviceNumber
+
+ProductionLine
+
+OperatorCompany
+
+OperatorName
+
+AppVersion
+
+MachineName
+
+WindowsVersion
+
+CreatedAt
+
+Một lần app production/session có thể tạo một Run.
+
+Không tạo Run mới mỗi Test.
+
+Xác định lifecycle phù hợp từ project:
+
+app startup
+
+hoặc production shift
+
+hoặc model selection.
+
+Chọn cách ít phá behavior hiện tại nhất.
+
+---
+
+# 11. CONFIGSNAPSHOTS
+
+Đây là phần nên học mạnh từ Htdrv.
+
+Tạo bảng:
+
+ConfigSnapshots
+
+Fields tối thiểu:
+
+Id
+
+ConfigHash
+
+CreatedAt
+
+AppVersion
+
+BoardMode
+
+ExpansionCardCount
+
+StartCardNumber
+
+UsbDelay
+
+RelayWiringMode
+
+JigEjectRelayEnabled
+
+PassMarkingRelayEnabled
+
+MasterFaultRequiredCount
+
+UseTestPointer
+
+ResistanceConfigJson
+
+WaterProofConfigJson
+
+LabelConfigJson
+
+MachineConfigJson
+
+Optional:
+
+FullConfigJson
+
+ConfigHash UNIQUE nếu snapshot nội dung giống nhau.
+
+---
+
+# 12. KHÔNG COPY CONFIG MỖI TEST
+
+Trước khi test:
+
+tính ConfigHash.
+
+Nếu snapshot cùng hash đã tồn tại:
+
+reuse ConfigId.
+
+Nếu config mới:
+
+insert ConfigSnapshots.
+
+Tests chỉ lưu:
+
+ConfigId.
+
+Không copy cả config JSON vào mỗi Test nếu không cần.
+
+---
+
+# 13. BẢNG TESTS LÀ TRUNG TÂM
+
+Tạo:
+
+Tests
+
+Đây phải là bảng production history chính.
+
+Fields đề xuất:
+
+Id INTEGER PRIMARY KEY
+
+CycleId TEXT NOT NULL UNIQUE
+
+RunId
+
+PartId
+
+ModelId
+
+ConfigId
+
+InspectionType
+
+Lot
+
+ProductionCounter
+
+StartedAt
+
+InstallStartedAt
+
+TestStartedAt
+
+ContinuityCompletedAt
+
+ResistanceStartedAt
+
+ResistanceCompletedAt
+
+WaterProofStartedAt
+
+WaterProofCompletedAt
+
+ResultAt
+
+RemovalStartedAt
+
+RemovedAt
+
+FinishedAt
+
+Passed
+
+Result
+
+ResultCode
+
+Barcode
+
+LabelSerial
+
+ResistanceSummary
+
+WaterProofSummary
+
+DeviceName
+
+DeviceNumber
+
+OperatorCompany
+
+ProductionLine
+
+AppVersion
+
+CreatedAt
+
+Foreign keys:
+
+RunId → ProductionRuns
+
+PartId → Parts
+
+ModelId → Models
+
+ConfigId → ConfigSnapshots.
+
+---
+
+# 14. INSPECTION TYPE
+
+Giữ toàn bộ semantics hiện tại như:
+
+Production
+
+MasterGood
+
+MasterBad
+
+Manual diagnostic nếu có record
+
+hoặc các type project đang dùng.
+
+Không làm Master Good/Bad trở thành production PASS/FAIL thông thường.
+
+---
+
+# 15. BẢNG TESTFAULTS
+
+Không tiếp tục phụ thuộc chủ yếu vào:
+
+FaultDetailsJson.
+
+Tạo relational child table:
+
+TestFaults
+
+Fields:
+
+Id
+
+TestId
+
+FaultOrder
+
+FaultType
+
+FaultCode
+
+Message
+
+ExpectedSourceIo
+
+ExpectedTargetIo
+
+ActualSourceIo
+
+ActualTargetIo
+
+ConnectorFrom
+
+PinFrom
+
+ConnectorTo
+
+PinTo
+
+ActualConnectorFrom
+
+ActualPinFrom
+
+ActualConnectorTo
+
+ActualPinTo
+
+WireName
+
+WireColor
+
+RelatedIosJson
+
+MeasuredResistance
+
+ResistanceMin
+
+ResistanceMax
+
+WaterProofChannel
+
+LeakValue
+
+LeakLimit
+
+CreatedAt
+
+Foreign key:
+
+TestId → Tests.Id ON DELETE CASCADE.
+
+---
+
+# 16. MỘT TEST CÓ NHIỀU FAULT
+
+Ví dụ:
+
+Test #100
+
+có:
+
+WRONG IO10 → IO25
+
+SHORT IO40 ↔ IO45
+
+Resistance CH2 NG
+
+thì:
+
+Tests:
+1 record
+
+TestFaults:
+3 records.
+
+Không nhét tất cả thành một string duy nhất.
+
+---
+
+# 17. INDEX TESTFAULTS
+
+Tạo index hữu ích cho:
+
+TestId
+
+FaultType
+
+FaultCode
+
+ActualSourceIo
+
+ActualTargetIo
+
+ExpectedSourceIo
+
+ExpectedTargetIo
+
+WireName
+
+Không over-index mọi column.
+
+---
+
+# 18. QUERY HISTORY PHẢI NHANH
+
+Các query sau phải nhanh khi database lớn:
+
+History theo:
+
+date range
+
+PartNumber
+
+PartName
+
+Result
+
+InspectionType
+
+FaultType
+
+IO
+
+WireName
+
+LOT
+
+CycleId.
+
+Tạo index đúng theo query thực tế của `HistoryPage`.
+
+---
+
+# 19. PART COUNTER TRANSACTION
+
+Khi Production Test hoàn tất:
+
+không làm:
+
+write Tests
+
+sau đó riêng:
+
+write production.statistics.json
+
+sau đó riêng:
+
+write PartCnt.txt.
+
+Thay bằng SQLite transaction:
+
+BEGIN
+
+INSERT Tests
+
+INSERT TestFaults...
+
+UPDATE Parts
+SET
+TotalTests = TotalTests + 1,
+TotalPass = ...,
+TotalFail = ...,
+LastUseAt = ...
+
+UPDATE ProbeCounter nếu semantics yêu cầu
+
+COMMIT.
+
+Nếu bất kỳ phần nào lỗi:
+
+ROLLBACK.
+
+Không để history PASS nhưng counter chưa tăng hoặc ngược lại.
+
+---
+
+# 20. RESULT COMMIT PHẢI ATOMIC
+
+Thiết kế:
+
+ProductionResultPersistenceService
+
+hoặc mở rộng `TestHistoryStore` phù hợp.
+
+Một method logical:
+
+CommitTestResultAsync(...)
+
+phải chịu trách nhiệm transaction hoàn chỉnh.
+
+Không để TestViewModel tự gọi 4-5 store độc lập.
+
+---
+
+# 21. TESTVIEWMODEL KHÔNG QUẢN LÝ DATABASE CHI TIẾT
+
+Hiện nếu TestViewModel gọi:
+
+_statisticsStore
+
+_partCounterStore
+
+_historyStore
+
+_legacyHistory
+
+trực tiếp ở nhiều chỗ:
+
+hãy giảm coupling.
+
+Tạo một persistence boundary rõ ràng, ví dụ:
+
+IProductionRepository
+
+ProductionPersistenceService
+
+hoặc tên phù hợp convention project.
+
+TestViewModel chỉ gửi:
+
+CompletedTestRecord
+
+hoặc:
+
+ProductionResultCommitRequest.
+
+Không để ViewModel tự orchestration nhiều file store.
+
+---
+
+# 22. KHÔNG REWRITE TEST LOGIC
+
+Tách persistence boundary nhưng không rewrite:
+
+TestEngine
+
+Wrong/Short detection
+
+Master logic
+
+Probe logic
+
+Waterproof
+
+Resistance.
+
+Chỉ đổi cách dữ liệu được lưu.
+
+---
+
+# 23. ASYNC PERSISTENCE
+
+Database I/O không được chạy trên Dispatcher.
+
+Result logical gate vẫn chốt ngay.
+
+Sau đó:
+
+await persistence worker.
+
+Nếu business flow yêu cầu durable history trước label/eject:
+
+await DB commit trước bước đó.
+
+Nhưng await phải không block WPF Dispatcher.
+
+---
+
+# 24. SQLITE TRANSACTION VÀ CONNECTION
+
+Không mở một connection mới cho từng SQL statement.
+
+Một transaction result nên dùng cùng connection.
+
+Sử dụng parameterized SQL.
+
+Không string-concatenate data vào SQL.
+
+---
+
+# 25. SQLITE WAL
+
+Đánh giá sử dụng:
+
+PRAGMA journal_mode=WAL;
+
+PRAGMA synchronous=NORMAL;
+
+PRAGMA foreign_keys=ON;
+
+Nếu phù hợp môi trường production.
+
+Không bật setting mù quáng.
+
+Giải thích lựa chọn.
+
+Ưu tiên durability đủ tốt cho production tester.
+
+---
+
+# 26. SCHEMA INITIALIZATION
+
+Schema init phải:
+
+idempotent
+
+thread-safe
+
+process-wide.
+
+Nếu nhiều `TestHistoryStore` instance:
+
+không được đồng thời migration.
+
+Dùng:
+
+static Task / SemaphoreSlim
+
+hoặc migration coordinator.
+
+Không `database is locked` startup.
+
+---
+
+# 27. MIGRATION DATABASE HIỆN TẠI
+
+Project hiện có `test-history.db`.
+
+KHÔNG xóa database cũ.
+
+Phải migration in-place hoặc side-by-side an toàn.
+
+Trước khi code migration:
+
+audit schema hiện tại đầy đủ.
+
+---
+
+# 28. GIỮ TESTHISTORY CŨ TRONG GIAI ĐOẠN MIGRATION
+
+Nếu bảng hiện tại tên:
+
+TestHistory
+
+hãy quyết định một trong hai:
+
+A.
+
+Giữ TestHistory làm legacy table và copy sang schema mới.
+
+Hoặc B.
+
+Migration trực tiếp sang Tests/TestFaults.
+
+Không drop TestHistory ngay lần đầu.
+
+Ưu tiên an toàn.
+
+---
+
+# 29. MIGRATION PHẢI IDEMPOTENT
+
+Nếu app crash giữa migration:
+
+startup lần sau phải tiếp tục được.
+
+Không duplicate Tests.
+
+Dùng:
+
+CycleId
+
+và unique constraints.
+
+---
+
+# 30. MIGRATE FAULTDETAILSJSON
+
+History cũ có thể lưu:
+
+FaultDetailsJson.
+
+Migration:
+
+parse JSON
+
+→ insert các row `TestFaults`.
+
+Nếu JSON lỗi:
+
+không bỏ cả Test.
+
+Giữ record Test.
+
+Ghi migration warning.
+
+Có thể tạo one fallback Fault row nếu cần.
+
+---
+
+# 31. MIGRATE PHT LEGACY
+
+`C:\Pass_`
+
+`C:\Error_`
+
+có thể có dữ liệu không nằm trong SQLite cũ.
+
+Không import toàn bộ PHT vào DB mỗi startup.
+
+Tạo explicit migration/import process:
+
+LegacyPhtImportService.
+
+Import một lần.
+
+Theo file fingerprint:
+
+path
+
+size
+
+modified timestamp
+
+hash nếu cần.
+
+---
+
+# 32. LEGACY IMPORT STATE
+
+Tạo bảng:
+
+LegacyImportState
+
+nếu cần.
+
+Fields:
+
+Path
+
+Length
+
+LastWriteTime
+
+ImportedAt
+
+RecordCount
+
+Hash optional.
+
+Nhờ đó app không parse lại toàn bộ file mỗi startup.
+
+---
+
+# 33. PASS_ / ERROR_ SAU MIGRATION
+
+Sau khi SQLite mới là source of truth:
+
+C:\Pass_
+
+C:\Error_
+
+chỉ được sử dụng cho:
+
+legacy export
+
+compatibility
+
+external customer tool
+
+nếu vẫn bắt buộc.
+
+Không dùng chúng để tính:
+
+Total
+
+Pass
+
+Fail
+
+Daily
+
+Monthly
+
+Lifetime.
+
+---
+
+# 34. LEGACY PHT EXPORT
+
+Giữ:
+
+LegacyPhtHistoryService.
+
+Sau SQLite transaction thành công:
+
+có thể append PHT legacy.
+
+Nếu PHT export lỗi:
+
+SQLite result vẫn tồn tại.
+
+Log:
+
+LEGACY_EXPORT_FAILED.
+
+Không rollback một Product PASS chỉ vì compatibility export lỗi, trừ khi business requirement hiện tại thực sự yêu cầu.
+
+Phân tích behavior hiện tại trước khi chọn.
+
+---
+
+# 35. PARTCNT.TXT
+
+Sau migration:
+
+DB counter là authoritative.
+
+PartCnt.txt được ghi mirror.
+
+Nếu file mất:
+
+rebuild từ DB được.
+
+Không reverse:
+
+DB đọc lại PartCnt mỗi cycle.
+
+---
+
+# 36. PRODUCTION.STATISTICS.JSON
+
+Sau migration:
+
+không phải source of truth.
+
+Có thể:
+
+Option A:
+bỏ runtime dependency.
+
+Option B:
+giữ như cache/export.
+
+Nếu giữ:
+
+DB → regenerate JSON.
+
+Không JSON → overwrite DB.
+
+---
+
+# 37. DAILY / MONTHLY / LIFETIME COUNTERS
+
+Không cần scan PHT.
+
+Query SQLite.
+
+Hoặc dùng aggregate cache trong Parts + query date-based Tests.
+
+Daily:
+
+COUNT Tests WHERE PartId=? AND ResultAt in today.
+
+Monthly:
+
+COUNT Tests WHERE PartId=? AND ResultAt in month.
+
+Lifetime:
+
+Parts.TotalTests
+
+hoặc COUNT.
+
+Có index.
+
+---
+
+# 38. KHÔNG QUERY COUNT MỖI FRAME
+
+Statistics chỉ refresh khi:
+
+model selected
+
+result committed
+
+external import
+
+History refresh.
+
+Không trong scan frame.
+
+---
+
+# 39. PART STATISTICS CACHE
+
+`Parts.TotalPass/TotalFail/TotalTests`
+
+là aggregate cache.
+
+Update cùng transaction với Tests.
+
+Có thể có diagnostic integrity method:
+
+RebuildPartAggregatesAsync(partId)
+
+tính lại từ Tests.
+
+Không chạy thường xuyên.
+
+---
+
+# 40. PROBE COUNTER
+
+Xác định đúng semantics hiện tại:
+
+ProbeCounter tăng lúc nào?
+
+Sản phẩm bắt đầu?
+
+Chu kỳ production?
+
+Probe maintenance cycle?
+
+Master có tăng không?
+
+Giữ behavior hiện tại.
+
+Nhưng update counter bằng DB transaction/background persistence.
+
+---
+
+# 41. PROBE MAINTENANCE EVENTS
+
+Nếu muốn giữ lịch sử thay Probe, tạo:
+
+ProbeMaintenanceEvents
+
+Id
+
+PartId
+
+EventType
+
+CounterBefore
+
+CounterAfter
+
+Threshold
+
+OccurredAt
+
+Operator
+
+Memo.
+
+Không bắt buộc nếu project chưa cần.
+
+---
+
+# 42. CONFIG SNAPSHOT CREATION
+
+Khi config load/save:
+
+build normalized snapshot.
+
+Hash normalized configuration.
+
+Nếu same config:
+
+reuse row.
+
+Không insert duplicate ConfigSnapshot mỗi test.
+
+---
+
+# 43. TEST RECORD PHẢI LƯU APP VERSION
+
+Mỗi Test phải biết phiên bản software.
+
+Dùng:
+
+AppVersion
+
+hoặc ConfigSnapshot.AppVersion.
+
+Điều này giúp điều tra lỗi production sau này.
+
+---
+
+# 44. MODEL HASH TRONG HISTORY
+
+Test phải reference ModelId.
+
+Do đó biết:
+
+file path
+
+file name
+
+hash
+
+modified timestamp.
+
+Không chỉ lưu `ModelFile` string.
+
+---
+
+# 45. PRODUCTION RUN
+
+Khi app production startup thành công:
+
+tạo/open ProductionRun.
+
+App shutdown:
+
+FinishedAt.
+
+Nếu crash:
+
+Run cũ có FinishedAt null.
+
+Startup mới có thể mark previous run interrupted nếu muốn.
+
+Không bắt buộc làm phức tạp quá mức.
+
+---
+
+# 46. WORKER / OPERATOR
+
+Nếu project chưa có operator login:
+
+không cần tạo hệ thống auth.
+
+Có thể lưu text hiện tại trong ProductionRuns.
+
+Nếu sau này cần normalized Workers mới tách bảng.
+
+---
+
+# 47. LABEL DATA
+
+Audit:
+
+LabelPrintService
+
+LabelDuplicateGuard
+
+Label serial.
+
+Nếu label cần audit tốt hơn:
+
+tạo bảng:
+
+Labels
+
+Id
+
+TestId
+
+Serial
+
+PrintedAt
+
+Status
+
+RetryCount
+
+PrinterPort
+
+ErrorMessage.
+
+Nếu không cần:
+giữ fields trong Tests.
+
+Không over-design.
+
+---
+
+# 48. RESISTANCE MEASUREMENTS
+
+Nếu một test có nhiều kênh điện trở và cần truy vấn từng channel:
+
+tạo:
+
+ResistanceMeasurements
+
+Id
+
+TestId
+
+Channel
+
+Name
+
+MeasuredOhm
+
+MinOhm
+
+MaxOhm
+
+Passed
+
+SampleCount
+
+StabilizationMs.
+
+Nếu project hiện chỉ cần summary:
+có thể giữ fault rows + summary.
+
+Phân tích nhu cầu trước.
+
+---
+
+# 49. WATERPROOF MEASUREMENTS
+
+Tương tự.
+
+Nếu cần trace từng CH1/CH2/CH3:
+
+WaterProofMeasurements
+
+Id
+
+TestId
+
+Channel
+
+Connector
+
+FirstPressure
+
+SecondPressure
+
+Leak
+
+LeakLimit
+
+Passed.
+
+Không bắt buộc nếu existing history đã đủ.
+
+---
+
+# 50. DATABASE REPOSITORY BOUNDARY
+
+Sau refactor nên có kiến trúc:
+
+TestViewModel
+↓
+ProductionPersistenceService
+↓
+ProductionRepository
+↓
+SQLite
+
+và riêng:
+
+LegacyExportService
+↓
+PHT / Error / PartCnt compatibility.
+
+Không:
+
+TestViewModel
+→ SQLite
+→ JSON
+→ TXT
+→ PHT
+
+trực tiếp.
+
+---
+
+# 51. RESULT COMMIT FLOW MỚI
+
+Flow đề xuất:
+
+TestEngine result
+↓
+TestViewModel locks result once
+↓
+build immutable CompletedTestResult
+↓
+ProductionPersistenceService.CommitAsync
+↓
+SQLite transaction
+INSERT Tests
+INSERT TestFaults
+UPDATE Parts
+UPDATE ProbeCounter...
+↓
+COMMIT
+↓
+memory/UI counter update
+↓
+enqueue legacy exports
+↓
+label/eject according business flow.
+
+---
+
+# 52. KHÔNG DÙNG UI OBJECT TRONG REPOSITORY
+
+Repository không nhận:
+
+FaultRow
+
+ObservableCollection
+
+Window
+
+MessageBox
+
+Brush
+
+ViewModel.
+
+Dùng domain DTO immutable.
+
+---
+
+# 53. DTO RESULT
+
+Tạo object kiểu:
+
+CompletedTestRecord
+
+gồm:
+
+CycleId
+
+Part identity
+
+Model identity
+
+Config identity
+
+timings
+
+result
+
+faults
+
+resistance
+
+waterproof
+
+label
+
+inspection type
+
+machine/run context.
+
+Naming theo convention project.
+
+---
+
+# 54. TRANSACTION FAILURE
+
+Nếu SQLite commit lỗi:
+
+không giả vờ PASS đã lưu thành công.
+
+State phải chuyển:
+
+PERSISTENCE ERROR
+
+hoặc Device/Production storage fault phù hợp.
+
+Không tự tăng counter UI nếu DB rollback.
+
+Không kích label nếu serial/result cần durable history trước.
+
+---
+
+# 55. LEGACY EXPORT FAILURE
+
+Khác với SQLite failure.
+
+SQLite success
++
+PHT export failed
+
+→ result vẫn durable.
+
+Hiển thị/log compatibility warning.
+
+Không duplicate product count.
+
+---
+
+# 56. UNIQUE CYCLEID
+
+`Tests.CycleId UNIQUE`.
+
+Nếu retry persistence cùng cycle:
+
+không insert duplicate.
+
+Có thể detect existing record và return existing identity.
+
+---
+
+# 57. MASTER HISTORY
+
+Master Good/Bad lưu trong Tests với:
+
+InspectionType.
+
+Không tăng:
+
+Parts.TotalTests/Pass/Fail production
+
+nếu semantics hiện tại không tính Master vào production.
+
+Transaction logic phải phân biệt.
+
+---
+
+# 58. IO MAPPING MODE
+
+Không ghi Production result nếu hiện tại mode này không PASS/FAIL.
+
+Giữ behavior.
+
+---
+
+# 59. MANUAL MODE
+
+Không tự ghi Production Test.
+
+Nếu cần diagnostic history:
+inspection type riêng.
+
+Không thay behavior hiện tại nếu chưa có yêu cầu.
+
+---
+
+# 60. HISTORY PAGE
+
+Refactor để đọc schema mới.
+
+Query:
+
+Tests
+JOIN Parts
+JOIN Models
+LEFT JOIN TestFaults.
+
+Không full-load hàng trăm nghìn records nếu UI chỉ cần page đầu.
+
+Ưu tiên pagination:
+
+LIMIT
+OFFSET
+
+hoặc keyset pagination.
+
+---
+
+# 61. HISTORY FILTER
+
+Filters SQL-side.
+
+Không:
+
+load 100.000 records
+→ LINQ filter UI.
+
+Query DB trực tiếp.
+
+---
+
+# 62. HISTORY DETAIL
+
+Danh sách chính chỉ load Test summary.
+
+Khi chọn một Test:
+
+query `TestFaults` theo TestId.
+
+Không JOIN fault làm duplicate Test rows trong main grid.
+
+---
+
+# 63. HISTORY PERFORMANCE
+
+Tạo indexes phù hợp:
+
+Tests.ResultAt
+
+Tests.PartId + ResultAt
+
+Tests.Result
+
+Tests.InspectionType
+
+Tests.CycleId
+
+TestFaults.TestId
+
+TestFaults.FaultType
+
+TestFaults.ActualSourceIo
+
+TestFaults.ExpectedSourceIo.
+
+---
+
+# 64. SEARCH THEO IO
+
+Mục tiêu sau migration phải query được:
+
+Tất cả SHORT liên quan IO125.
+
+Tất cả WRONG liên quan IO50.
+
+Tất cả failure WireName BG1.
+
+Mà không parse JSON.
+
+---
+
+# 65. SEARCH THEO MODEL VERSION
+
+Phải query được:
+
+Part X từng dùng bao nhiêu version `.tht`.
+
+Test Y dùng hash model nào.
+
+---
+
+# 66. SEARCH THEO APP VERSION
+
+Phải query được:
+
+các FAIL xảy ra trên AppVersion V16.0.xxx.
+
+Đây là giá trị lớn của ConfigSnapshot/AppVersion relation.
+
+---
+
+# 67. DATABASE BACKUP
+
+Thiết kế backup SQLite an toàn.
+
+Không copy file DB mù quáng trong lúc connection đang write nếu WAL.
+
+Có thể dùng SQLite backup API hoặc shutdown-safe copy.
+
+Không cần tự động backup mỗi cycle.
+
+---
+
+# 68. DATABASE RECOVERY
+
+Không tự xóa DB nếu corrupt.
+
+Log rõ.
+
+Nếu integrity check cần:
+chạy explicit/diagnostic.
+
+Không block startup production lâu.
+
+---
+
+# 69. STARTUP
+
+Startup database:
+
+open/lazy initialize.
+
+Không migrate hàng trăm nghìn legacy records trước MainWindow first render.
+
+Legacy import lớn:
+
+background.
+
+UI phải responsive.
+
+---
+
+# 70. FIRST RUN SAU UPGRADE
+
+Flow:
+
+UI render
+↓
+hardware startup
+↓
+DB schema ready nhẹ
+↓
+production có thể hoạt động khi critical migration ready
+↓
+legacy bulk import background nếu an toàn.
+
+Nếu production phải chờ một migration để tránh counter conflict:
+
+await async migration
+
+nhưng không block Dispatcher.
+
+Hiển thị:
+
+ĐANG NÂNG CẤP DỮ LIỆU
+
+nếu cần.
+
+---
+
+# 71. LEGACY MIGRATION LOCK
+
+Không để:
+
+background legacy importer
+
+và:
+
+new production test
+
+cùng tạo conflicting aggregate.
+
+Phải serialize migration critical section.
+
+---
+
+# 72. IMPORT DEDUPLICATION
+
+Không import cùng legacy Test hai lần.
+
+Nếu PHT không có CycleId:
+
+xây stable legacy key từ các field phù hợp:
+
+file
+timestamp
+part
+counter
+result
+record position
+
+hoặc schema import-state.
+
+Không tự đoán nếu format hiện tại đã có identifier tốt hơn.
+
+---
+
+# 73. GIỮ FILE LEGACY
+
+Không xóa:
+
+C:\Pass_
+
+C:\Error_
+
+PartCnt.txt
+
+database cũ
+
+sau migration.
+
+Chỉ ngừng phụ thuộc runtime.
+
+---
+
+# 74. KHÔNG TẠO DATA LOSS
+
+Trước migration code:
+
+backup database hiện tại hoặc tạo migration safety mechanism.
+
+Không destructive `DROP TABLE` trước khi xác nhận copy thành công.
+
+---
+
+# 75. MIGRATION PHASE
+
+Ưu tiên nhiều phase:
+
+PHASE 1:
+create new schema.
+
+PHASE 2:
+copy SQLite TestHistory → Tests/TestFaults.
+
+PHASE 3:
+validate counts.
+
+PHASE 4:
+switch reads to new schema.
+
+PHASE 5:
+switch writes to new schema.
+
+PHASE 6:
+legacy files become exports/cache.
+
+Không làm tất cả bằng một destructive SQL script.
+
+---
+
+# 76. VALIDATION SAU MIGRATION
+
+So sánh:
+
+old TestHistory row count
+
+vs
+
+new migrated Tests corresponding count.
+
+PASS count.
+
+FAIL count.
+
+Master Good count.
+
+Master Bad count.
+
+Fault count.
+
+Part aggregates.
+
+Không yêu cầu 1:1 nếu old schema có duplicates/legacy data, nhưng phải report difference.
+
+---
+
+# 77. DATABASE INTEGRITY TESTS
+
+Viết tests hoặc diagnostic migration verifier:
+
+Test transaction rollback.
+
+Duplicate CycleId.
+
+Multi-fault test.
+
+Master test no production counter.
+
+Part aggregate.
+
+Probe counter.
+
+History query.
+
+Legacy import dedup.
+
+Concurrent schema init.
+
+---
+
+# 78. KHÔNG BLOCK REALTIME TEST
+
+SQLite/PHT/JSON không được nằm trong:
+
+D2XX RX worker
+
+BoardIoDecoder
+
+TestEngine.ProcessFrame
+
+Probe classifier.
+
+Storage chỉ bắt đầu sau logical result/counter event.
+
+---
+
+# 79. THREADING
+
+Repository async.
+
+Không:
+
+.Result
+
+.Wait()
+
+Thread.Sleep
+
+Dispatcher.Invoke.
+
+Không giữ SQLite lock rồi Dispatcher.
+
+---
+
+# 80. SINGLE WRITER
+
+Nếu contention SQLite xảy ra:
+
+cân nhắc một serialized production persistence queue.
+
+Ví dụ:
+
+Channel<CommitRequest>
+
+→ single DB writer.
+
+Nhưng result cần durable acknowledgement thì caller await completion của request.
+
+Không fire-and-forget result critical data.
+
+---
+
+# 81. CACHE
+
+Có thể cache:
+
+PartId by PartNumber
+
+ModelId by hash
+
+ConfigId by hash
+
+CurrentRunId.
+
+Không query lại DB liên tục mỗi frame/cycle nếu không cần.
+
+Cache phải invalidate đúng khi settings/model đổi.
+
+---
+
+# 82. CONFIG HASH
+
+Normalize JSON trước hash để tránh:
+
+field order khác
+
+→ config record mới giả.
+
+Có thể serialize deterministic options.
+
+---
+
+# 83. TIME FORMAT
+
+Dùng UTC hoặc strategy hiện tại nhất quán.
+
+Nếu UI/history cần local Asia/Bangkok:
+
+convert ở presentation.
+
+Không trộn nhiều format không rõ timezone.
+
+Nếu schema hiện tại đang lưu local DateTime và migration đổi UTC có nguy cơ sai dữ liệu:
+
+giữ compatibility và document.
+
+---
+
+# 84. SQLITE FOREIGN KEYS
+
+Bật:
+
+PRAGMA foreign_keys=ON.
+
+Không cho TestFault orphan.
+
+---
+
+# 85. DELETE POLICY
+
+Production history không nên bị cascade từ Part/Model.
+
+Không cho xóa Part làm mất Tests.
+
+Nếu cần:
+soft deactivate Part/Model.
+
+---
+
+# 86. DOMAIN ENTITY KHÔNG ĐƯỢC MUTABLE KHẮP NƠI
+
+Persistence DTO nên immutable hoặc snapshot tại thời điểm result.
+
+Không lưu reference tới live `ProductModel` rồi background worker đọc nó sau khi người dùng đã đổi model.
+
+Snapshot dữ liệu trước enqueue.
+
+---
+
+# 87. LABEL / BARCODE DUPLICATE
+
+Nếu LabelDuplicateGuard hiện chỉ memory:
+
+audit xem có cần DB unique/index để chống duplicate qua restart.
+
+Không thay behavior nếu chưa hiểu serial generation.
+
+Nếu safe:
+lưu label serial theo Test.
+
+---
+
+# 88. STORAGE STATUS
+
+Thêm diagnostics:
+
+DatabasePath
+
+SchemaVersion
+
+CurrentRunId
+
+PendingPersistenceCount
+
+LegacyExportPending
+
+LastDatabaseError
+
+không cần hiển thị production UI mặc định.
+
+---
+
+# 89. PERF METRICS
+
+Log:
+
+DB_COMMIT duration_ms
+
+TEST_INSERT duration_ms
+
+FAULT_INSERT count
+
+PART_AGGREGATE duration_ms
+
+HISTORY_QUERY duration_ms
+
+LEGACY_EXPORT duration_ms
+
+LEGACY_IMPORT records
+
+No spam.
+
+---
+
+# 90. SOURCE OF TRUTH SAU REFACTOR
+
+Sau khi task hoàn thành:
+
+SQLite:
+
+AUTHORITATIVE
+
+cho:
+
+Tests
+Faults
+Part counters
+Pass/Fail totals
+Model history
+Config history
+Run history.
+
+PHT:
+
+compatibility/export.
+
+PartCnt:
+
+mirror/export.
+
+production.statistics.json:
+
+cache/export hoặc deprecated.
+
+---
+
+# 91. KHÔNG XÓA LEGACY SERVICE NGAY
+
+Giữ:
+
+LegacyPhtHistoryService
+LegacyPhtHistoryReader
+PartCounterStore
+ProductionStatisticsStore
+
+nếu external compatibility còn dùng.
+
+Nhưng tách chúng khỏi authoritative calculation.
+
+Có thể annotate:
+
+LEGACY COMPATIBILITY.
+
+---
+
+# 92. DỄ ROLLBACK
+
+Migration version đầu tiên nên cho phép quay lại build cũ mà không làm hỏng dữ liệu cũ nếu có thể.
+
+Không đổi legacy files thành format không tương thích.
+
+---
+
+# 93. VERSIONING
+
+Sau khi database architecture migration build/test thành công:
+
+tăng app version theo convention hiện tại.
+
+Tăng schema version riêng.
+
+Không dùng AppVersion làm SchemaVersion.
+
+---
+
+# 94. FILES PHẢI AUDIT
+
+Ít nhất:
+
+TestHistoryStore.cs
+
+ProductionStatisticsStore.cs
+
+PartCounterStore.cs
+
+LegacyPhtHistoryReader.cs
+
+LegacyPhtHistoryService.cs
+
+LotSequenceService.cs
+
+TestViewModel.cs
+
+MainViewModel.cs
+
+HistoryPage.xaml.cs
+
+ProductionDataUpgradeService.cs
+
+StartupBootstrapService.cs
+
+ProductionConfigService.cs
+
+LabelPrintService.cs
+
+ProductModel / ProductBundle classes
+
+TestHistoryRecord.cs
+
+FaultDetail.cs
+
+ResistanceResult.cs
+
+WaterProof result models.
+
+Search toàn solution thêm các caller khác.
+
+---
+
+# 95. TRƯỚC KHI SỬA
+
+In:
+
+DATABASE ARCHITECTURE AUDIT
+
+Current SQLite schema:
+...
+
+Current source of truth:
+...
+
+Current PASS persistence:
+...
+
+Current FAIL persistence:
+...
+
+Current counter persistence:
+...
+
+Current Probe counter:
+...
+
+Current PHT role:
+...
+
+Current JSON statistics role:
+...
+
+Current PartCnt role:
+...
+
+Current History query flow:
+...
+
+Data duplication risks:
+...
+
+Race conditions:
+...
+
+UI blocking storage calls:
+...
+
+Migration risks:
+...
+
+FILES TO MODIFY:
+...
+
+Sau đó mới edit.
+
+---
+
+# 96. SAU KHI SỬA
+
+Report:
+
+NEW SCHEMA
+
+tables
+columns
+PK
+FK
+indexes
+unique constraints.
+
+Report:
+
+SOURCE OF TRUTH MATRIX
+
+Tests → SQLite
+Faults → SQLite
+Part Counter → SQLite
+Production totals → SQLite
+PHT → Legacy Export
+PartCnt → Legacy Mirror
+JSON Stats → Cache/Legacy.
+
+---
+
+# 97. MIGRATION REPORT
+
+Bao nhiêu old Tests migrated.
+
+Bao nhiêu faults migrated.
+
+Bao nhiêu malformed FaultDetailsJson.
+
+Bao nhiêu Parts.
+
+Bao nhiêu Models.
+
+Bao nhiêu Config snapshots.
+
+Có duplicate CycleId không.
+
+Aggregate PASS/FAIL trước/sau.
+
+---
+
+# 98. PERFORMANCE ACCEPTANCE
+
+Chọn model:
+
+không scan toàn bộ PHT.
+
+History summary:
+SQL indexed query.
+
+PASS/FAIL:
+
+một SQLite transaction.
+
+UI không freeze.
+
+D2XX engine không chờ storage.
+
+---
+
+# 99. PRODUCTION REGRESSION
+
+Phải kiểm tra:
+
+Correct harness PASS.
+
+Wrong Wiring FAIL.
+
+Short FAIL.
+
+Resistance NG.
+
+Leak PASS/FAIL.
+
+Leak equipment error.
+
+Master Good.
+
+Master Bad.
+
+Probe.
+
+CLIP.
+
+Product removal.
+
+LOT.
+
+Probe counter.
+
+Label.
+
+History.
+
+Restart app counter persistence.
+
+Legacy PHT export.
+
+---
+
+# 100. MỤC TIÊU CUỐI CÙNG
+
+Chuyển JBZUniversalTester từ:
+
+SQLite
++
+JSON
++
+PartCnt.txt
++
+Pass_
++
+Error_
++
+PHT
+
+đều cùng giữ một phần trạng thái production
+
+thành:
+
+```
+                    SQLite
+                       │
+       ┌───────────────┼────────────────┐
+       │               │                │
+     Parts           Models       ConfigSnapshots
+       │               │                │
+       └───────────────┼────────────────┘
+                       │
+                ProductionRuns
+                       │
+                       ▼
+                     Tests
+                       │
+                 1 ─────┴──── N
+                       │
+                       ▼
+                   TestFaults
+                       │
+           ┌───────────┼────────────┐
+           ▼           ▼            ▼
+      Resistance   Waterproof      Label
+      optional      optional       optional
+```
+
+SQLite là SINGLE SOURCE OF TRUTH.
+
+Legacy files chỉ được sinh từ SQLite / result commit để tương thích.
+
+Không ngược lại trong realtime production.
+
+Mục tiêu không chỉ là schema đẹp.
+
+Mục tiêu là:
+
+* dữ liệu nhất quán;
+* không duplicate counter;
+* không phải scan history khi chọn model;
+* query nhanh;
+* tìm lỗi theo IO được;
+* truy ra model/config/app version của từng Test;
+* transaction PASS/FAIL an toàn;
+* UI không lag vì storage;
+* chạy production nhiều năm database vẫn quản lý được.
+
+Hãy refactor từng bước, migration an toàn, giữ tương thích production hiện tại, build và test toàn solution sau khi hoàn thành.

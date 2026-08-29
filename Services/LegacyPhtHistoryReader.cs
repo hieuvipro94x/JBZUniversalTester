@@ -36,6 +36,40 @@ public sealed partial class LegacyPhtHistoryReader
     public string PassRoot => _passRoot;
     public string ErrorRoot => _errorRoot;
 
+    public IReadOnlyList<LegacyImportFile> EnumerateImportFiles() =>
+        EnumerateFiles(_passRoot, "Day*.dat")
+            .Select(path => CreateImportFile(path, passedFile: true))
+            .Concat(EnumerateFiles(_errorRoot, "Day*.err")
+                .Select(path => CreateImportFile(path, passedFile: false)))
+            .Where(item => item is not null)
+            .Cast<LegacyImportFile>()
+            .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    public IReadOnlyList<TestHistoryRecord> ReadImportFile(LegacyImportFile file) =>
+        ReadCachedFile(file.Path, file.PassedFile);
+
+    private static LegacyImportFile? CreateImportFile(string path, bool passedFile)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return new LegacyImportFile(
+                info.FullName,
+                info.Length,
+                info.LastWriteTimeUtc,
+                passedFile);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     public LegacyProductionSnapshot GetProductionSnapshot(ProductModel model, DateTime now)
     {
         ArgumentNullException.ThrowIfNull(model);
