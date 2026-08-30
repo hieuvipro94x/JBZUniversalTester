@@ -18,7 +18,7 @@
         <Border Background="#23D9D9"
                 BorderBrush="#333333"
                 BorderThickness="2">
-            <TextBlock Text="S&#7842;N PH&#7848;M KH&#212;NG &#272;&#7840;T"
+            <TextBlock Text="SẢN PHẨM KHÔNG ĐẠT"
                        Foreground="#333333"
                        HorizontalAlignment="Center"
                        VerticalAlignment="Center"
@@ -27,44 +27,64 @@
         </Border>
 
         <StackPanel Grid.Row="1"
-                    VerticalAlignment="Center"
-                    HorizontalAlignment="Center">
-            <TextBlock Text="H&#195;Y KI&#7874;M TRA V&#192; S&#7916;A S&#7842;N PH&#7848;M"
-                       Foreground="#FFE000"
+            VerticalAlignment="Center"
+            HorizontalAlignment="Stretch"
+            Margin="10,8">
+
+            <TextBlock Text="HÃY KIỂM TRA SẢN PHẨM"
+               Foreground="#FFE000"
+               HorizontalAlignment="Center"
+               TextAlignment="Center"
+               FontSize="18"
+               FontWeight="Bold"/>
+
+            <Border Background="#A61919"
+            BorderBrush="#FFE000"
+            BorderThickness="2"
+            CornerRadius="4"
+            Margin="0,14,0,8"
+            Padding="12">
+
+                <StackPanel>
+                    <TextBlock x:Name="FaultTypeText"
+                       Text="LỖI SAI DÂY"
+                       Foreground="White"
                        HorizontalAlignment="Center"
                        TextAlignment="Center"
-                       FontSize="19"
+                       FontSize="22"
                        FontWeight="Bold"/>
-            <TextBlock Text="XEM V&#7882; TR&#205; L&#7894;I TR&#202;N M&#192;N H&#204;NH"
-                       Foreground="#FFE000"
-                       HorizontalAlignment="Center"
-                       TextAlignment="Center"
-                       FontSize="19"
-                       FontWeight="Bold"
-                       Margin="0,7,0,22"/>
-            <TextBlock x:Name="SummaryText"
-                       Foreground="#FFE000"
-                       HorizontalAlignment="Center"
-                       TextAlignment="Center"
-                       FontSize="18"
-                       FontWeight="Bold"/>
-            <TextBlock x:Name="FooterText"
+
+                    <TextBlock x:Name="SummaryText"
                        Foreground="#FFE000"
                        HorizontalAlignment="Center"
                        TextAlignment="Center"
                        TextWrapping="Wrap"
-                       FontSize="13"
+                       FontSize="21"
                        FontWeight="Bold"
                        Margin="0,8,0,0"
-                       MaxWidth="450"/>
-            <ItemsControl x:Name="FaultItemsControl" Visibility="Collapsed"/>
+                       MaxWidth="455"/>
+                </StackPanel>
+            </Border>
+
+            <TextBlock x:Name="FooterText"
+               Foreground="White"
+               HorizontalAlignment="Center"
+               TextAlignment="Center"
+               TextWrapping="Wrap"
+               FontSize="13"
+               FontWeight="Bold"
+               Margin="0,5,0,0"
+               MaxWidth="455"/>
+
+            <ItemsControl x:Name="FaultItemsControl"
+                  Visibility="Collapsed"/>
         </StackPanel>
 
         <Button Grid.Row="2"
                 Width="120"
                 Height="52"
                 HorizontalAlignment="Right"
-                Content="X&#193;C NH&#7852;N"
+                Content="XÁC NHẬN"
                 FontSize="15"
                 FontWeight="Bold"
                 IsDefault="True"

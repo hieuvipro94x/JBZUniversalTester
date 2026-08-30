@@ -561,7 +561,7 @@
                         <Button Grid.Column="2"
                                 Height="28"
                                 Margin="0,2,4,2"
-                                Content="QU&#201;T"
+                                Content="QUÉT"
                                 FontSize="11"
                                 Padding="2,0"
                                 Click="RefreshPrinterPorts_Click"/>

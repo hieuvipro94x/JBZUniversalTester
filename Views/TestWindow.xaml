@@ -503,8 +503,10 @@
                             CornerRadius="4">
                         <TextBlock x:Name="CurrentTimeText"
                                    Foreground="#1E293B"
-                                   FontSize="15"
+                                   FontSize="36"
                                    FontWeight="Bold"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
                                    TextAlignment="Center"/>
                     </Border>
                 </Grid>
@@ -768,13 +770,13 @@
                       Style="{StaticResource FaultOperationGridStyle}">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Lo&#7841;i" Binding="{Binding FaultType}" Width="1.20*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongTextStyle}"/>
-                    <DataGridTextColumn Header="IO-CN-PN" Binding="{Binding IoCnPnText}" Width="1.20*" MinWidth="120" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongTextStyle}"/>
                     <DataGridTextColumn x:Name="ConnectorColumn" Header="CONNECTOR" Binding="{Binding Connector}" Width="0.80*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridTextStyle}"/>
                     <DataGridTextColumn Header="Ch&#226;n" Binding="{Binding Pin}" Width="0.80*" MinWidth="70" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridTextStyle}"/>
                     <DataGridTextColumn Header="T&#234;n d&#226;y" Binding="{Binding WireName}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource HtdrvGridTextStyle}"/>
                     <DataGridTextColumn Header="C&#7905; d&#226;y" Binding="{Binding Section}" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridTextStyle}"/>
                     <DataGridTemplateColumn Header="M&#224;u" Width="0.60*" MinWidth="64" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" CellTemplate="{StaticResource WireColorCellTemplate}"/>
                     <DataGridTextColumn Header="Tr&#7841;ng th&#225;i" Binding="{Binding Status}" Width="1.30*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongTextStyle}"/>
+                    <DataGridTextColumn Header="IO-CN-PN" Binding="{Binding IoCnPnText}" Width="1.20*" MinWidth="120" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>
 

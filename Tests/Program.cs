@@ -30,6 +30,7 @@ internal static class Program
             ("Htdrv endpoint/probe display cases", TestHtdrvEndpointProbeDisplayCases),
             ("500-cycle scan/probe/fault stress", TestFiveHundredCycleScanProbeFaultStress),
             ("Continuity/open/wrong/splice engine", TestEngineVectors),
+            ("Pending continuity presentation and CLIP branch visibility", TestPendingContinuityPresentation),
             ("Production PASS gate minimal latency", TestProductionPassGateMinimalLatency),
             ("THT column semantics and string wire topology", TestThtColumnSemantics),
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
@@ -611,7 +612,8 @@ internal static class Program
                settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
             "Production settings exposes reconnectable printer control and connection status");
         Assert(settingsXaml.Contains("<ColumnDefinition Width=\"110\"/>", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) &&
+               (settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) ||
+                settingsXaml.Contains("Content=\"QUÉT\"", StringComparison.Ordinal)) &&
                settingsXaml.Contains("Width=\"115\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Grid.Row=\"2\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Grid.Column=\"2\"", StringComparison.Ordinal),
@@ -2107,8 +2109,9 @@ internal static class Program
         engine.SetModel(pair);
         IReadOnlyList<FaultRow> initialPairRows = engine.BuildRows().Where(row => row.WireName == "PAIR").ToArray();
         Assert(initialPairRows.Count == 2 &&
-               initialPairRows.Any(row => row.Io == 1 && row.Kind == FaultKind.Info && row.FaultType == "KIỂM TRA" && row.Pin == "1") &&
-               initialPairRows.Any(row => row.Io == 18 && row.Kind == FaultKind.MissingConnection && row.FaultType == "HỞ MẠCH" && row.Pin == "18") &&
+               initialPairRows.Any(row => row.Io == 1 && row.Kind == FaultKind.MissingConnection && row.FaultType == "Đơn" && row.Pin == "1") &&
+               initialPairRows.Any(row => row.Io == 18 && row.Kind == FaultKind.MissingConnection && row.FaultType == "Đơn" && row.Pin == "18") &&
+               initialPairRows.All(row => row.Status == "CHƯA KẾT NỐI") &&
                initialPairRows.All(row => !row.IoText.Contains("<->", StringComparison.Ordinal) &&
                                           !row.Pin.Contains("<->", StringComparison.Ordinal)),
             "Model load shows one Htdrv-style endpoint row per pin, not a merged IO/pin row");
@@ -2124,7 +2127,7 @@ internal static class Program
         engine.ProcessFrame(Frame((1, Array.Empty<int>())));
         IReadOnlyList<FaultRow> pairReleased = engine.BuildRows().Where(row => row.WireName == "PAIR").ToArray();
         Assert(pairReleased.Count == 2 &&
-               pairReleased.Any(row => row.Io == 18 && row.FaultType == "HỞ MẠCH"),
+               pairReleased.All(row => row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
             "Releasing/jig-open frame shows endpoint rows again");
 
         engine.SetModel(pair);
@@ -2138,8 +2141,8 @@ internal static class Program
 
         engine.SetModel(pair);
         engine.ProcessFrame(Frame());
-        Assert(engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
-            "Missing IO1-IO18 is a display-only pending row");
+        Assert(engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 2,
+            "Missing IO1-IO18 keeps both endpoint rows as display-only pending rows");
         Assert(!engine.BuildRows().Any(row => row.Kind == FaultKind.Open), "Missing IO1-IO18 is not a production fault row");
         Assert(!engine.HasConfirmedOpenCircuit, "Empty fixture is not inferred as product OPEN");
 
@@ -2178,8 +2181,8 @@ internal static class Program
         Assert(engine.ReadyToEvaluateProductFaults &&
                !engine.HasConfirmedOpenCircuit &&
                !engine.HasWiringFault &&
-               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
-            "Full source coverage with missing endpoint remains display-only");
+               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 2,
+            "Full source coverage with a pending pair keeps both endpoint rows display-only");
 
         ProductModel splice = Model(("SPLICE", new[] { 5, 20, 33 }));
         engine.SetModel(splice);
@@ -2190,7 +2193,9 @@ internal static class Program
         IReadOnlyList<FaultDetail> confirmedSpliceOpen = engine.BuildConfirmedOpenFaults();
         Assert(confirmedSpliceOpen.Count == 0 &&
                !engine.BuildRows().Any(row => row.Kind == FaultKind.Open) &&
-               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
+               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 3 &&
+               engine.BuildRows().Where(row => row.WireName == "SPLICE")
+                   .All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI"),
             "Splice missing target is display-only, not production OPEN");
 
         engine.SetModel(splice);
@@ -2239,6 +2244,91 @@ internal static class Program
             new Dictionary<int, IReadOnlySet<int>> { [1] = new HashSet<int> { 40 } },
             new Dictionary<int, int> { [40] = 1 }, BoardScanMode.Probe));
         Assert(!engine.HasWiringFault && !engine.ContinuityPassed, "Probe frame never enters production evaluation");
+    }
+
+    private static void TestPendingContinuityPresentation()
+    {
+        using var engine = CreateEngine(out _);
+        ProductModel twoPairs = Model(
+            ("PAIR-A", new[] { 1, 3 }),
+            ("PAIR-B", new[] { 2, 4 }));
+        engine.SetModel(twoPairs);
+
+        FaultRow[] initialRows = engine.BuildRows()
+            .Where(row => row.WireName is "PAIR-A" or "PAIR-B")
+            .ToArray();
+        int[] initialOrder = initialRows.Select(row => row.Io).ToArray();
+        Dictionary<int, int> initialDisplayOrder = initialRows.ToDictionary(row => row.Io, row => row.DisplayOrder);
+        Assert(initialRows.Length == 4 && initialOrder.SequenceEqual([1, 3, 2, 4]),
+            "Two pending pairs keep the model/display endpoint order");
+        Assert(initialRows.All(row =>
+                   row.Kind == FaultKind.MissingConnection &&
+                   row.FaultType == "Đơn" &&
+                   row.Status == "CHƯA KẾT NỐI") &&
+               initialRows.All(row => row.FaultType != "KIỂM TRA" && row.Status != "CHỜ KẾT NỐI"),
+            "Pending point-to-point rows use only Đơn / CHƯA KẾT NỐI");
+
+        ScanFrame pairAPass = Frame((1, new[] { 3 }));
+        engine.ProcessFrame(pairAPass);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(pairAPass);
+        FaultRow[] afterPairA = engine.BuildRows()
+            .Where(row => row.WireName is "PAIR-A" or "PAIR-B")
+            .ToArray();
+        Assert(afterPairA.Select(row => row.Io).SequenceEqual([2, 4]) &&
+               afterPairA.All(row => row.Status == "CHƯA KẾT NỐI") &&
+               !engine.ContinuityPassed,
+            "Passing PAIR-A hides only IO1/IO3 and leaves PAIR-B pending");
+
+        ScanFrame bothPass = Frame((1, new[] { 3 }), (2, new[] { 4 }));
+        engine.ProcessFrame(bothPass);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(bothPass);
+        Assert(engine.ContinuityPassed &&
+               !engine.HasWiringFault &&
+               !engine.BuildRows().Any(row => row.WireName is "PAIR-A" or "PAIR-B"),
+            "Both correct pairs remove all normal pending rows without false wiring faults");
+
+        engine.ProcessFrame(Frame((2, new[] { 4 })));
+        FaultRow[] restoredPairA = engine.BuildRows().Where(row => row.WireName == "PAIR-A").ToArray();
+        Assert(restoredPairA.Select(row => row.Io).SequenceEqual([1, 3]) &&
+               restoredPairA.All(row =>
+                   row.Status == "CHƯA KẾT NỐI" &&
+                   row.DisplayOrder == initialDisplayOrder[row.Io]),
+            "A lost completed pair reappears at its original DisplayOrder");
+
+        ProductModel splice = Model(("SPLICE", new[] { 5, 20, 33 }));
+        engine.SetModel(splice);
+        FaultRow[] spliceRows = engine.BuildRows().Where(row => row.WireName == "SPLICE").ToArray();
+        Assert(spliceRows.Length == 3 &&
+               spliceRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI"),
+            "A multi-endpoint network remains one splice topology presented as Nối chung");
+
+        var common = new PinRecord("CLIP", "AO", 201, "AO", PinType: "AO", OriginalOrder: 1);
+        var a1 = new PinRecord("CLIP", "a1", 202, "a1", PinType: "a1", OriginalOrder: 2);
+        var a2 = new PinRecord("CLIP", "a2", 203, "a2", PinType: "a2", OriginalOrder: 3);
+        var a3 = new PinRecord("CLIP", "a3", 204, "a3", PinType: "a3", OriginalOrder: 4);
+        var clipModel = new ProductModel { ModelName = "CLIP", PartNumber = "CLIP" };
+        clipModel.Pins.AddRange([common, a1, a2, a3]);
+        clipModel.Clip = new ClipTopology(
+            common,
+            [
+                new ClipBranch("a1", 1, 202, a1, null),
+                new ClipBranch("a2", 2, 203, a2, null),
+                new ClipBranch("a3", 3, 204, a3, null)
+            ]);
+        engine.SetModel(clipModel);
+        FaultRow[] initialClipRows = engine.BuildRows().ToArray();
+        Assert(initialClipRows.Length == 4 &&
+               initialClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI"),
+            "CLIP common and all unlatch branches use Nối chung / CHƯA KẾT NỐI");
+
+        engine.ProcessFrame(Frame((201, new[] { 202 })));
+        FaultRow[] remainingClipRows = engine.BuildRows().ToArray();
+        Assert(remainingClipRows.Select(row => row.Io).Order().SequenceEqual([203, 204]) &&
+               remainingClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI") &&
+               !engine.HasWiringFault,
+            "Latching CLIP a1 hides only common/a1 per existing common behavior; a2/a3 remain without false SHORT");
     }
 
     private static void TestProductionFaultConfirmation()
@@ -2982,8 +3072,8 @@ internal static class Program
 
         FaultRow[] openRows = engine.BuildRows().Where(row => row.WireName == "1").ToArray();
         Assert(openRows.Length == 2 &&
-               openRows.Any(row => row.Io == 1 && row.FaultType == "KIỂM TRA" && row.Connector == "1" && row.Pin == "1" && row.IoCnPnText == "1-1-1") &&
-               openRows.Any(row => row.Io == 2 && row.FaultType == "HỞ MẠCH" && row.Connector == "1" && row.Pin == "2" && row.IoCnPnText == "2-1-2") &&
+               openRows.Any(row => row.Io == 1 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI" && row.Connector == "1" && row.Pin == "1" && row.IoCnPnText == "1-1-1") &&
+               openRows.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI" && row.Connector == "1" && row.Pin == "2" && row.IoCnPnText == "2-1-2") &&
                openRows.All(row => !row.IoText.Contains("<->", StringComparison.Ordinal) && !row.Pin.Contains("<->", StringComparison.Ordinal)),
             "CASE A: Open display uses one endpoint row per pin with IO-CN-PN metadata");
 
@@ -3007,12 +3097,12 @@ internal static class Program
 
         Assert(vm.HasInlineProbeContacts &&
                vm.Faults.Any(row => row.Kind == FaultKind.Probe && row.Io == 1 && row.FaultType == "KIỂM TRA") &&
-               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "HỞ MẠCH"),
+               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
             "CASE B: Probe IO1 is displayed while the IO2 open row remains");
 
         board.Publish(FrameSeq(12));
         Assert(!vm.HasInlineProbeContacts &&
-               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "HỞ MẠCH"),
+               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
             "CASE C: Probe release removes only Probe presentation and keeps production open row");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));

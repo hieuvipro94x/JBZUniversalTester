@@ -1664,13 +1664,13 @@ public sealed class TestEngine : IDisposable
         int[] relatedIos = endpointIos
             .OrderBy(io => ResolvePeerOrder(net, io))
             .ToArray();
+        string topologyType = !net.IsSplice && endpointIos.Count == 2
+            ? "Đơn"
+            : "Nối chung";
 
         return pins
             .Select((pin, endpointIndex) =>
             {
-                bool isSource = pin.IoNumber == net.SourceIo;
-                bool endpointConnected = IsEndpointConnectedWithinNet(net, pin.IoNumber, _currentConnections);
-                bool showAsReference = isSource || endpointConnected || connected;
                 int? firstPeer = endpointIos
                     .Where(io => io != pin.IoNumber)
                     .OrderBy(io => ResolvePeerOrder(net, io))
@@ -1679,9 +1679,9 @@ public sealed class TestEngine : IDisposable
 
                 return new FaultRow
                 {
-                    Kind = showAsReference ? FaultKind.Info : FaultKind.MissingConnection,
+                    Kind = FaultKind.MissingConnection,
                     ProductFaultType = ProductFaultType.None,
-                    FaultType = showAsReference ? "KIỂM TRA" : "HỞ MẠCH",
+                    FaultType = topologyType,
                     Io = pin.IoNumber,
                     DisplayOrder = ResolveNetworkEndpointDisplayOrder(net, pin, endpointIndex),
                     ExpectedSourceIo = net.SourceIo,
@@ -1693,9 +1693,7 @@ public sealed class TestEngine : IDisposable
                     Splice = pin.SpliceName,
                     Section = pin.Section,
                     Color = pin.Color,
-                    Status = showAsReference
-                        ? (endpointConnected ? "ĐÃ KẾT NỐI" : "KIỂM TRA")
-                        : "CHỜ KẾT NỐI"
+                    Status = "CHƯA KẾT NỐI"
                 };
             })
             .ToArray();
@@ -1781,7 +1779,7 @@ public sealed class TestEngine : IDisposable
         {
             Kind = FaultKind.MissingConnection,
             ProductFaultType = ProductFaultType.None,
-            FaultType = "CHƯA KẾT NỐI",
+            FaultType = "Nối chung",
             Io = branch.TargetIo,
             DisplayOrder = ClipDisplayOrder(branch),
             ExpectedSourceIo = clip.CommonIo,
@@ -1792,7 +1790,7 @@ public sealed class TestEngine : IDisposable
             Splice = displayPin.SpliceName,
             Section = displayPin.Section,
             Color = displayPin.Color,
-            Status = "CHỜ KẾT NỐI"
+            Status = "CHƯA KẾT NỐI"
         };
     }
 
@@ -1803,7 +1801,7 @@ public sealed class TestEngine : IDisposable
         {
             Kind = FaultKind.MissingConnection,
             ProductFaultType = ProductFaultType.None,
-            FaultType = "CHƯA KẾT NỐI",
+            FaultType = "Nối chung",
             Io = common.IoNumber,
             DisplayOrder = ClipDisplayOrderBase,
             Connector = common.Connector,
@@ -1812,7 +1810,7 @@ public sealed class TestEngine : IDisposable
             Splice = common.SpliceName,
             Section = common.Section,
             Color = common.Color,
-            Status = "CHỜ KẾT NỐI"
+            Status = "CHƯA KẾT NỐI"
         };
     }
 

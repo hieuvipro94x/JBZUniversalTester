@@ -311,7 +311,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 ", ",
                 matches.Select(item => $"{item.Description} [{item.Serial}] ID=0x{item.Id:X8}"));
             throw new InvalidOperationException(
-                "Có nhiều bo FT245R phù hợp nhưng FtdiSerial không xác định đúng một bo. " +
+                "Có nhiều bo xác định. " +
                 $"Dừng để tránh mở nhầm thiết bị: {candidates}");
         }
 

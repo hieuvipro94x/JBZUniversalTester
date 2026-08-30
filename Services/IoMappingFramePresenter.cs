@@ -60,7 +60,7 @@ public static class IoMappingFramePresenter
             WireName = $"IO({io})",
             RelatedIos = [io],
             DisplayOrder = io,
-            Status = $"ĐẦU DÒ ĐANG CHẠM IO({io})"
+            Status = $"PHÁT HIỆN IO({io})"
         }));
 
         rows.AddRange(pairs

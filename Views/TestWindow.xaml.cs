@@ -49,7 +49,7 @@ public partial class TestWindow : Window
         StartupPerformanceTrace.Mark("T9 TestWindow first rendered");
     }
 
-    private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("yyyy/MM/dd  HH:mm:ss");
+    private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("HH:mm:ss");
 
     private void ClockTimer_Tick(object? sender, EventArgs e) => UpdateClock();
 

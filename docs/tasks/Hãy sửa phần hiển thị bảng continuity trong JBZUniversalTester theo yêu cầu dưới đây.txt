@@ -1,0 +1,1004 @@
+Hãy sửa phần hiển thị bảng continuity trong JBZUniversalTester theo yêu cầu dưới đây.
+
+## 0. PHẠM VI VÀ NGUYÊN TẮC AN TOÀN
+
+Trước khi sửa, hãy đọc toàn bộ code liên quan và hiểu flow hiện tại, tối thiểu:
+
+* `Services/TestEngine.cs`
+* `Models/FaultRow.cs`
+* `Views/TestWindow.xaml`
+* `ViewModels/TestViewModel.cs`
+* model topology: `WireNet`, `PinRecord`, `ClipTopology`, `ClipBranch`
+* các SelfTests liên quan `BuildRows`, endpoint ordering, CLIP, FaultGrid.
+
+KHÔNG được thay đổi protocol phần cứng.
+
+KHÔNG sửa:
+
+* D2XX scan
+* decoder
+* PASS gate
+* `ContinuityPassed`
+* WrongWiring
+* ShortCircuit
+* fault confirmation/debounce
+* relay
+* Leak
+* Resistance
+* Probe
+* startup interlock.
+
+Đây chủ yếu là task presentation của `FaultGrid`.
+
+ĐẶC BIỆT:
+
+KHÔNG thay đổi cách ghép cặp IO hiện tại.
+
+KHÔNG thay đổi:
+
+* `BuildDisplayOrderByPin`
+* `BuildNetworkDisplayOrder`
+* `ResolveNetworkEndpointDisplayOrder`
+* `ResolveDisplayOrder`
+* `ResolvePeerOrder`
+* `DisplayOrder`
+* `RelatedIos`
+* `ExpectedSourceIo`
+* `ExpectedTargetIo`
+* source/target topology
+* thứ tự Connector/Pin từ THT.
+
+Không tự suy luận lại cặp bằng `OrderBy(IO)`.
+
+Không tự ghép:
+IO1-IO2,
+IO3-IO4...
+
+Phải dùng đúng topology/cặp mà parser/model hiện tại đã tạo.
+
+---
+
+# 1. MỤC TIÊU CỦA FAULTGRID
+
+FaultGrid trong `TestWindow` phải được hiểu là:
+
+"DANH SÁCH NHỮNG KẾT NỐI CÒN CHƯA HOÀN THÀNH"
+
+Nó KHÔNG phải danh sách toàn bộ pin có cả PASS và FAIL.
+
+Một cặp đã kết nối đúng phải biến mất khỏi bảng.
+
+Một cặp chưa kết nối phải còn trên bảng.
+
+Nếu một cặp đã biến mất nhưng sau đó mất continuity trở lại trước khi chu kỳ hoàn tất, cặp đó phải xuất hiện trở lại đúng vị trí cũ với trạng thái:
+
+`CHƯA KẾT NỐI`
+
+Không hiển thị trạng thái `ĐÃ KẾT NỐI` cho các hàng production continuity bình thường, vì ngay khi kết nối đúng thì row sẽ biến mất.
+
+Vòng đời đúng:
+
+`CHƯA KẾT NỐI`
+→ kết nối đúng
+→ row/cặp biến mất
+→ nếu mất kết nối trở lại
+→ row/cặp xuất hiện lại
+→ `CHƯA KẾT NỐI`
+
+---
+
+# 2. BỎ HOÀN TOÀN "KIỂM TRA" KHỎI CONTINUITY ROW
+
+Trong `CreateNetworkMappingRows()` hiện có presentation kiểu:
+
+```csharp
+FaultType = showAsReference ? "KIỂM TRA" : "HỞ MẠCH"
+```
+
+và:
+
+```csharp
+Status = showAsReference
+    ? (endpointConnected ? "ĐÃ KẾT NỐI" : "KIỂM TRA")
+    : "CHỜ KẾT NỐI";
+```
+
+Không được dùng `"KIỂM TRA"` làm trạng thái nữa.
+
+Đối với production continuity row bình thường, cột `TRẠNG THÁI` chỉ dùng:
+
+`CHƯA KẾT NỐI`
+
+Không dùng:
+
+* `KIỂM TRA`
+* `ĐÃ KIỂM TRA`
+* `CHỜ KẾT NỐI`
+* `HỞ MẠCH`
+* `ĐÃ KẾT NỐI`
+
+cho row bình thường đã đạt, vì row đạt phải biến mất.
+
+Lưu ý:
+
+Không được biến lỗi thật `SAI DÂY`, `CHẬP MẠCH`, Probe, Resistance... thành `CHƯA KẾT NỐI`.
+
+Các fault thật vẫn giữ presentation riêng.
+
+---
+
+# 3. CỘT "LOẠI"
+
+Trong TestWindow hiện có cột `LOẠI`.
+
+Cột này không còn dùng `"KIỂM TRA"` hoặc `"HỞ MẠCH"` cho normal continuity.
+
+Cột `LOẠI` phải mô tả topology của dây:
+
+## 3.1. ĐƠN
+
+Hiển thị:
+
+`Đơn`
+
+khi đây là kết nối point-to-point bình thường, tức một logical wire connection 1-1.
+
+Ví dụ:
+
+IO1 ↔ IO3
+
+hoặc:
+
+Connector 1 / Pin 1
+↔
+Connector 2 / Pin 5
+
+Nếu topology hiện tại xác định network chỉ có đúng 2 endpoint IO và không phải splice/common/CLIP thì loại là:
+
+`Đơn`
+
+Không được dựa vào số IO lớn/nhỏ để xác định.
+
+---
+
+## 3.2. NỐI CHUNG
+
+Hiển thị:
+
+`Nối chung`
+
+cho topology dạng điểm chung, ví dụ:
+
+* điểm dập nối / splice;
+* một network có nhiều endpoint cùng chung điện;
+* CLIP dùng A0/AO common với a1, a2, a3...;
+* các topology đã được model hiện tại xác định là common/splice/CLIP.
+
+Ưu tiên metadata topology hiện có như:
+
+* `net.IsSplice`
+* số endpoint của network
+* `ClipTopology`
+* `ClipBranch`
+
+Không parse tên dây bằng chuỗi nếu model đã có metadata chính xác.
+
+Không thay đổi bản thân topology chỉ để lấy chữ `Đơn` hoặc `Nối chung`.
+
+---
+
+# 4. CÁCH HIỂN THỊ CẶP ĐƠN
+
+Ví dụ hiện tại model có hai logical connection độc lập:
+
+Cặp A:
+IO1 ↔ IO3
+
+Cặp B:
+IO2 ↔ IO4
+
+Ban đầu cả hai chưa thông.
+
+FaultGrid phải giữ đúng cách sắp xếp hiện tại và hiển thị các endpoint của hai cặp với:
+
+LOẠI = `Đơn`
+TRẠNG THÁI = `CHƯA KẾT NỐI`
+
+Ví dụ về semantics:
+
+```
+Đơn | IO1 ... | CHƯA KẾT NỐI
+Đơn | IO3 ... | CHƯA KẾT NỐI
+
+Đơn | IO2 ... | CHƯA KẾT NỐI
+Đơn | IO4 ... | CHƯA KẾT NỐI
+```
+
+Không yêu cầu thay layout hiện tại; nếu UI hiện mỗi endpoint một hàng thì tiếp tục mỗi endpoint một hàng.
+
+Nếu IO1 ↔ IO3 kết nối đúng:
+
+Hai row thuộc cặp IO1-IO3 phải biến mất.
+
+FaultGrid chỉ còn:
+
+```
+Đơn | IO2 ... | CHƯA KẾT NỐI
+Đơn | IO4 ... | CHƯA KẾT NỐI
+```
+
+KHÔNG được hiển thị:
+
+```
+IO1 | ĐÃ KẾT NỐI
+IO3 | ĐÃ KẾT NỐI
+```
+
+Nếu IO1 ↔ IO3 bị mất kết nối trở lại trước khi cycle hoàn tất:
+
+Hai row IO1-IO3 phải xuất hiện lại đúng vị trí cũ:
+
+```
+Đơn | IO1 ... | CHƯA KẾT NỐI
+Đơn | IO3 ... | CHƯA KẾT NỐI
+```
+
+Cặp IO2-IO4 vẫn giữ nguyên trạng thái của nó.
+
+Tức là mỗi logical connection phải hide/restore độc lập.
+
+Một cặp PASS không được làm mất các cặp khác chưa PASS.
+
+---
+
+# 5. NỐI CHUNG / SPLICE
+
+Không được chuyển một splice/common network thành các cặp 1-1 giả chỉ để phục vụ UI.
+
+Phải giữ topology chung hiện tại.
+
+Cột `LOẠI` =:
+
+`Nối chung`
+
+Đối với splice/network nhiều endpoint:
+
+* giữ cách engine hiện tại xác định network đạt;
+* giữ cách ghép/sắp endpoint hiện tại;
+* các endpoint chưa hoàn thành hiển thị `CHƯA KẾT NỐI`;
+* khi logical requirement tương ứng đã đạt, presentation có thể bỏ row theo đúng topology hiện hành;
+* không thay đổi `ContinuityPassed` hoặc connectivity algorithm.
+
+Nếu code hiện tại coi toàn bộ splice là một logical network và chỉ PASS khi toàn bộ component đạt, hãy giữ nguyên điều đó trừ khi code đã có branch topology rõ ràng.
+
+KHÔNG được tự chia splice thành pair theo index.
+
+---
+
+# 6. CLIP A0 / AO / a1 / a2 / a3...
+
+CLIP là:
+
+`Nối chung`
+
+A0/AO là common.
+
+a1, a2, a3... là các nhánh.
+
+Giữ nguyên logic CLIP hiện tại.
+
+Hiện code đã có behavior:
+
+* branch đã latch → bỏ branch đó khỏi `BuildRows`;
+* branch chưa latch → vẫn tạo row;
+* common row có logic riêng.
+
+Không làm hỏng behavior này.
+
+Ví dụ:
+
+A0 common có:
+
+a1 → IO10
+a2 → IO20
+a3 → IO30
+
+Nếu a1 đạt:
+
+a1 phải biến mất.
+
+a2/a3 chưa đạt vẫn hiển thị:
+
+`Nối chung`
+`CHƯA KẾT NỐI`
+
+Không được vì a1 đạt mà ẩn cả a2/a3.
+
+Không được báo short giả giữa các nhánh CLIP cùng A0.
+
+---
+
+# 7. MÀU HIỂN THỊ
+
+Không tô xanh background của cả hàng.
+
+Không thêm DataTrigger làm:
+
+```xml
+Background = Green
+```
+
+cho row connected.
+
+Vì row connected sẽ biến mất.
+
+Đối với row `CHƯA KẾT NỐI`:
+
+* giữ background hiện tại của FaultGrid;
+* chỉ dùng màu chữ hợp lý theo style hiện tại;
+* không cần màu xanh PASS.
+
+Nếu cần thay màu, chỉ thay `Foreground` của text/cell liên quan, không thay background cả DataGridRow.
+
+Các màu lỗi Wrong/Short hiện tại phải giữ nguyên.
+
+---
+
+# 8. CỘT TRẠNG THÁI TRONG TESTWINDOW
+
+Phải xác nhận trong `Views/TestWindow.xaml` rằng cột:
+
+`TRẠNG THÁI`
+
+bind trực tiếp:
+
+```xml
+Binding="{Binding Status}"
+```
+
+Normal continuity row đang còn trên bảng phải hiển thị:
+
+`CHƯA KẾT NỐI`
+
+Không được để cột này hiển thị:
+
+* `KIỂM TRA`
+* `CHỜ KẾT NỐI`
+* `ĐÃ KẾT NỐI`
+
+cho normal incomplete connection.
+
+Nếu cột đang bind property khác, sửa đúng binding nhưng không thay layout không cần thiết.
+
+---
+
+# 9. IO-CN-PN
+
+Không thay semantics hiện tại của cột này.
+
+Nó có nghĩa:
+
+* IO = Global I/O number
+* CN = Connector/Housing ID
+* PN = Pin Number trong connector
+
+Ví dụ:
+
+`1-1-1`
+
+= IO1 / Connector(Housing)1 / Pin1
+
+`2-1-2`
+
+= IO2 / Connector(Housing)1 / Pin2
+
+CN KHÔNG phải card expansion.
+
+CN KHÔNG phải port 32 IO.
+
+Không sửa mapping của cột IO-CN-PN trong task này.
+
+---
+
+# 10. KHÔNG PHÁ CÁCH SẮP XẾP HIỆN TẠI
+
+Đây là yêu cầu bắt buộc.
+
+Không thay:
+
+```csharp
+BuildDisplayOrderByPin(...)
+BuildNetworkDisplayOrder(...)
+ResolveNetworkEndpointDisplayOrder(...)
+ResolveDisplayOrder(...)
+ResolvePeerOrder(...)
+```
+
+Không bỏ:
+
+```csharp
+DisplayOrder
+RelatedIos
+ExpectedSourceIo
+ExpectedTargetIo
+```
+
+Không đổi final stable sort:
+
+```csharp
+OrderBy(fault priority)
+.ThenBy(DisplayOrder)
+```
+
+trừ khi chứng minh có bug trực tiếp liên quan task, và nếu có thì phải báo trước trong report, không tự refactor.
+
+Hai endpoint của cùng logical connection vẫn phải đứng cạnh nhau như hiện tại.
+
+Khi cặp biến mất và xuất hiện lại, nó phải quay về đúng vị trí cũ, không nhảy xuống cuối bảng.
+
+---
+
+# 11. GIỮ TỐI ƯU UI HIỆN TẠI
+
+`TestViewModel` hiện dùng danh sách `BuildRows()` rồi synchronization vi sai.
+
+Không đổi thành:
+
+```csharp
+Faults.Clear();
+foreach (...)
+    Faults.Add(...);
+```
+
+mỗi frame.
+
+Phải giữ `SynchronizeFaultRows()`/cơ chế tương đương để tránh DataGrid giật khi scan nhanh.
+
+Không Dispatch per byte/per IO.
+
+Không refresh toàn bảng trên frame giống nhau.
+
+---
+
+# 12. WRONG / SHORT
+
+Nếu phát hiện WrongWiring hoặc ShortCircuit:
+
+giữ nguyên behavior hiện tại.
+
+Không được ẩn lỗi chỉ vì expected pair khác đã PASS.
+
+Không được biến:
+
+`SAI DÂY`
+
+thành:
+
+`CHƯA KẾT NỐI`
+
+Không được biến:
+
+`CHẬP MẠCH`
+
+thành:
+
+`CHƯA KẾT NỐI`
+
+Các row lỗi vẫn được ưu tiên lên đầu bảng theo `FaultTypeCatalog.Priority`.
+
+---
+
+# 13. TEST BẮT BUỘC
+
+Cập nhật/thêm SelfTests nhưng KHÔNG sửa test chỉ để ép nó PASS nếu behavior sai.
+
+## Test 1 — hai cặp đơn chưa nối
+
+Model:
+
+IO1 ↔ IO3
+IO2 ↔ IO4
+
+Không connection.
+
+Kỳ vọng:
+
+* row IO1, IO3, IO2, IO4 còn;
+* thứ tự/cặp giữ theo existing DisplayOrder;
+* `FaultType/LOẠI = "Đơn"` cho normal single connection;
+* tất cả Status = `"CHƯA KẾT NỐI"`.
+
+Không có `"KIỂM TRA"`.
+Không có `"CHỜ KẾT NỐI"`.
+
+---
+
+## Test 2 — một cặp đạt
+
+Từ model trên:
+
+frame chỉ có đúng continuity IO1 ↔ IO3.
+
+Kỳ vọng:
+
+* IO1/IO3 biến mất khỏi normal pending rows;
+* IO2/IO4 vẫn còn;
+* IO2/IO4 Status = `"CHƯA KẾT NỐI"`;
+* IO2/IO4 giữ đúng DisplayOrder;
+* chưa PASS toàn sản phẩm.
+
+---
+
+## Test 3 — cả hai cặp đạt
+
+IO1 ↔ IO3
+IO2 ↔ IO4 đều đúng.
+
+Kỳ vọng:
+
+* normal pending rows của cả hai cặp biến mất;
+* `ContinuityPassed` đúng theo engine hiện tại;
+* không tạo Wrong/Short giả.
+
+---
+
+## Test 4 — cặp đã đạt bị mất lại
+
+IO1 ↔ IO3 đạt → row biến mất.
+
+Sau đó frame mất continuity IO1 ↔ IO3.
+
+Kỳ vọng:
+
+* IO1/IO3 xuất hiện lại;
+* Status = `"CHƯA KẾT NỐI"`;
+* quay đúng vị trí DisplayOrder cũ.
+
+---
+
+## Test 5 — splice/nối chung
+
+Tạo network nhiều endpoint/splice.
+
+Kỳ vọng:
+
+* `LOẠI = "Nối chung"`;
+* topology/PASS của splice không đổi;
+* không tự tách thành các pair giả;
+* row chưa hoàn thành hiển thị `"CHƯA KẾT NỐI"`.
+
+---
+
+## Test 6 — CLIP
+
+A0/AO với a1,a2,a3.
+
+Kỳ vọng:
+
+* `LOẠI = "Nối chung"`;
+* branch chưa latch hiển thị `"CHƯA KẾT NỐI"`;
+* a1 latch thì chỉ a1 biến mất;
+* a2/a3 còn nguyên;
+* không tạo SHORT giả.
+
+---
+
+## Test 7 — không regression
+
+Verify:
+
+* Wrong wiring vẫn FAIL.
+* Short vẫn FAIL.
+* PASS gate không đổi.
+* Relay không đổi.
+* Probe không đổi.
+* Leak không đổi.
+* Resistance không đổi.
+* startup sync không đổi.
+
+---
+
+# 14. LƯU Ý VỀ CODE HIỆN TẠI
+
+Trong `CreateNetworkMappingRows()` hiện đang có:
+
+```csharp
+if (connected)
+    return [];
+```
+
+Đây là behavior phù hợp với yêu cầu rằng một logical normal network đã đạt thì presentation biến mất.
+
+ĐỪNG xóa dòng này chỉ để hiển thị `ĐÃ KẾT NỐI`.
+
+Task trước từng có ý tưởng giữ row PASS và tô xanh; yêu cầu đó ĐÃ HỦY.
+
+Yêu cầu cuối cùng là:
+
+PASS → row biến mất.
+
+Ngoài ra code hiện tại dùng:
+
+```csharp
+FaultType = showAsReference ? "KIỂM TRA" : "HỞ MẠCH"
+```
+
+và Status có `"KIỂM TRA"` / `"CHỜ KẾT NỐI"`.
+
+Hãy sửa presentation này để normal pending row có:
+
+LOẠI:
+
+* `Đơn`
+  hoặc
+* `Nối chung`
+
+TRẠNG THÁI:
+
+* `CHƯA KẾT NỐI`
+
+Không dùng LOẠI để biểu diễn lỗi open/missing.
+
+Current Production không sinh OpenCircuit product fault; đây chỉ là pending continuity presentation.
+
+---
+
+# 15. FILE NÊN SỬA
+
+Chỉ sửa file thật sự cần thiết.
+
+Khả năng cao:
+
+* `Services/TestEngine.cs`
+* `Models/FaultRow.cs` nếu style/property presentation thực sự nằm ở đây
+* `Views/TestWindow.xaml`
+* `Tests/Program.cs`
+
+Chỉ sửa `TestViewModel.cs` nếu binding/synchronization hiện tại thật sự cần thay đổi.
+
+Không thay cả `TestViewModel.cs` bằng bản cũ.
+
+Không tạo:
+
+* `.bak.cs`
+* `copy.cs`
+* file backup trong compile tree.
+
+---
+
+# 16. BUILD
+
+Sau khi sửa chạy:
+
+```powershell
+dotnet build -c Release
+```
+
+sau đó:
+
+```powershell
+dotnet run --project Tests\JBZUniversalTester.SelfTests.csproj -c Release
+```
+
+Nếu project HardwareVerification vẫn dùng được:
+
+```powershell
+dotnet run --project HardwareVerification\JBZUniversalTester.HardwareVerification.csproj -c Release
+```
+
+Không được kết luận hoàn thành nếu build hoặc SelfTests fail.
+
+---
+
+# 17. BÁO CÁO KẾT QUẢ
+
+Sau khi hoàn thành, báo ngắn gọn:
+
+1. Root cause của `"KIỂM TRA"` / `"CHỜ KẾT NỐI"`.
+2. File nào đã sửa.
+3. Cách xác định `Đơn`.
+4. Cách xác định `Nối chung`.
+5. Xác nhận cách ghép/sắp IO không thay đổi.
+6. Xác nhận cặp PASS biến mất riêng.
+7. Xác nhận cặp mất lại xuất hiện đúng vị trí.
+8. Xác nhận CLIP branch đạt chỉ ẩn branch đó.
+9. Kết quả build.
+10. Kết quả SelfTests.
+11. Liệt kê chính xác các test mới/cập nhật.
+
+Không refactor ngoài phạm vi task.
+
+# 18. SỬA HIỂN THỊ GIỜ TRÊN TESTWINDOW
+
+Trong `Views/TestWindow.xaml`, tìm đúng khu vực đang hiển thị ngày giờ hiện tại.
+
+Yêu cầu mới:
+
+* BỎ hoàn toàn phần ngày/tháng/năm.
+* Chỉ hiển thị:
+
+`HH:mm:ss`
+
+Ví dụ:
+
+`21:18:45`
+
+Không hiển thị:
+
+`30/08/2026 21:18:45`
+
+hoặc bất kỳ ngày tháng nào.
+
+## Giao diện
+
+Phần giờ phải được phóng to, rõ, dễ nhìn từ xa trên máy Production.
+
+Ưu tiên:
+
+```xml
+FontSize="36"
+FontWeight="Bold"
+HorizontalAlignment="Center"
+VerticalAlignment="Center"
+TextAlignment="Center"
+```
+
+Nếu layout hiện tại đủ rộng có thể dùng `FontSize="40"`, nhưng không được làm tràn hoặc phá layout TestWindow.
+
+## Binding
+
+Nếu đang bind trực tiếp `DateTime`:
+
+```xml
+Text="{Binding CurrentDateTime, StringFormat={}{0:HH:mm:ss}}"
+```
+
+hoặc property tương đương hiện có.
+
+Nếu ViewModel đã có property riêng cho giờ thì tiếp tục dùng property đó.
+
+KHÔNG tạo thêm timer mới nếu project hiện tại đã có timer cập nhật ngày giờ.
+
+KHÔNG được tạo một DispatcherTimer thứ hai chạy song song chỉ để đổi format hiển thị.
+
+Chỉ thay presentation.
+
+Nếu hiện tại có:
+
+* một TextBlock hiển thị ngày;
+* một TextBlock hiển thị giờ;
+
+thì bỏ/ẩn phần ngày và cho phần giờ sử dụng vùng hiển thị lớn hơn.
+
+## Không ảnh hưởng
+
+Không sửa:
+
+* logic test;
+* scan;
+* PASS/FAIL;
+* FaultGrid;
+* relay;
+* Leak;
+* Resistance;
+* Probe;
+* Product cycle.
+
+Sau khi sửa phải xác nhận TestWindow hiển thị dạng:
+
+```text
+21:18:45
+```
+
+với chữ lớn, đậm và không còn ngày tháng.
+
+
+# 19. ĐỔI THỨ TỰ CỘT TRONG FAULTGRID CỦA TESTWINDOW
+
+Trong `Views/TestWindow.xaml`, tìm `DataGrid` đang hiển thị danh sách continuity/fault của sản phẩm.
+
+Đổi thứ tự các cột thành chính xác:
+
+```text
+LOẠI | CONNECTOR | CHÂN | TÊN DÂY | CỠ DÂY | MÀU | TRẠNG THÁI | IO-CN-PN
+```
+
+Thứ tự bắt buộc từ trái sang phải:
+
+1. `LOẠI`
+2. `CONNECTOR`
+3. `CHÂN`
+4. `TÊN DÂY`
+5. `CỠ DÂY`
+6. `MÀU`
+7. `TRẠNG THÁI`
+8. `IO-CN-PN`
+
+## Binding phải giữ đúng dữ liệu hiện tại
+
+Không đổi ý nghĩa property.
+
+Dùng đúng binding hiện tại tương ứng, ví dụ:
+
+```xml id="9a0ubp"
+LOẠI
+→ FaultType hoặc property presentation tương ứng đang dùng
+
+CONNECTOR
+→ Connector
+
+CHÂN
+→ Pin
+
+TÊN DÂY
+→ WireName
+
+CỠ DÂY
+→ Section
+
+MÀU
+→ Color
+
+TRẠNG THÁI
+→ Status
+
+IO-CN-PN
+→ property hiện tại đang format IO / Connector / Pin
+```
+
+Nếu `IO-CN-PN` hiện tại được bind bằng converter, `MultiBinding`, hoặc property computed riêng thì giữ nguyên cách đó.
+
+KHÔNG viết lại mapping IO-CN-PN trong task này.
+
+---
+
+## YÊU CẦU VỀ CỘT LOẠI
+
+Theo yêu cầu ở phần trước:
+
+Normal continuity row chỉ hiển thị:
+
+```text
+Đơn
+```
+
+hoặc:
+
+```text
+Nối chung
+```
+
+Không hiển thị:
+
+```text
+KIỂM TRA
+HỞ MẠCH
+CHỜ KẾT NỐI
+```
+
+trong cột `LOẠI`.
+
+Các row lỗi thật như:
+
+```text
+SAI DÂY
+CHẬP MẠCH
+```
+
+vẫn được phép hiển thị loại lỗi riêng theo logic hiện tại.
+
+---
+
+## YÊU CẦU VỀ CỘT TRẠNG THÁI
+
+Normal continuity row còn tồn tại trên bảng chỉ hiển thị:
+
+```text
+CHƯA KẾT NỐI
+```
+
+Không hiển thị:
+
+```text
+KIỂM TRA
+ĐÃ KIỂM TRA
+CHỜ KẾT NỐI
+ĐÃ KẾT NỐI
+```
+
+Khi kết nối đúng thì row/cặp đó phải biến mất theo behavior đã yêu cầu trước đó.
+
+---
+
+## KHÔNG ĐƯỢC LÀM ẢNH HƯỞNG VIỆC SẮP XẾP ROW
+
+Đây chỉ là đổi vị trí CỘT.
+
+Không được đổi:
+
+```csharp id="o2dqsh"
+DisplayOrder
+BuildDisplayOrderByPin()
+BuildNetworkDisplayOrder()
+ResolveNetworkEndpointDisplayOrder()
+ResolveDisplayOrder()
+ResolvePeerOrder()
+```
+
+Không sort DataGrid theo thứ tự cột mới.
+
+Không bật `CanUserSortColumns` nếu hiện tại đang tắt.
+
+Không thay order của cặp IO.
+
+Ví dụ một cặp hiện đang đứng:
+
+```text
+IO1
+IO3
+```
+
+thì sau khi đổi vị trí cột vẫn phải đứng đúng vị trí đó.
+
+---
+
+## ĐỀ XUẤT ĐỘ RỘNG
+
+Có thể tối ưu tương đối như sau nhưng phải ưu tiên không tràn cửa sổ:
+
+```text
+LOẠI       : 0.9*
+CONNECTOR  : 1.1*
+CHÂN       : 0.8*
+TÊN DÂY    : 1.3*
+CỠ DÂY     : 0.9*
+MÀU        : 0.9*
+TRẠNG THÁI : 1.5*
+IO-CN-PN   : 1.1*
+```
+
+Nếu TestWindow hiện tại đã có width phù hợp thì giữ các width cũ và chỉ đổi thứ tự cột.
+
+Không làm chữ quá nhỏ chỉ để nhét đủ cột.
+
+---
+
+## KẾT QUẢ MONG MUỐN
+
+FaultGrid phải nhìn theo dạng:
+
+```text
+LOẠI | CONNECTOR | CHÂN | TÊN DÂY | CỠ DÂY | MÀU | TRẠNG THÁI | IO-CN-PN
+Đơn  | 1         | 1    | EA1     | 0.5    | R   | CHƯA KẾT NỐI | 1-1-1
+Đơn  | 2         | 3    | EA1     | 0.5    | R   | CHƯA KẾT NỐI | 3-2-3
+```
+
+Nếu cặp trên kết nối đúng thì cả hai row biến mất.
+
+Với nối chung:
+
+```text
+Nối chung | 1 | 5 | MC1 | 0.5 | B | CHƯA KẾT NỐI | ...
+```
+
+CLIP A0/a1/a2/a3 cũng dùng:
+
+```text
+Nối chung
+```
+
+---
+
+## BUILD / SELFTEST
+
+Sau khi đổi cột, chạy lại:
+
+```powershell id="737tg9"
+dotnet build -c Release
+dotnet run --project Tests\JBZUniversalTester.SelfTests.csproj -c Release
+```
+
+Nếu SelfTest đang kiểm tra thứ tự cột/header cũ thì cập nhật đúng thứ tự mới.
+
+Không sửa test logic về thứ tự ROW/cặp IO.
+

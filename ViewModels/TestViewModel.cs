@@ -4197,7 +4197,8 @@ public sealed class TestViewModel : ObservableObject
 
         var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             dialogFaults,
-            "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
+            "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
+            FindPinByIo);
         faultDialog.Owner = Application.Current?.MainWindow;
         faultDialog.ShowDialog();
         SelectedOperationTabIndex = 0;
@@ -5919,7 +5920,8 @@ public sealed class TestViewModel : ObservableObject
             {
                 var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
                     faults,
-                    "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
+                    "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
+            FindPinByIo);
                 Window? owner = ResolveOperatorDialogOwner();
                 if (owner is not null)
                     dialog.Owner = owner;
@@ -6077,7 +6079,8 @@ public sealed class TestViewModel : ObservableObject
                         .ToArray();
                     var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
                         resistanceFaults,
-                        "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
+                        "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
+            FindPinByIo);
                     faultDialog.Owner = Application.Current?.MainWindow;
                     faultDialog.ShowDialog();
                     SelectedOperationTabIndex = 0;
@@ -6361,7 +6364,8 @@ public sealed class TestViewModel : ObservableObject
 
         var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             faults,
-            "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
+            "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
+            FindPinByIo);
         faultDialog.Owner = Application.Current?.MainWindow;
         faultDialog.ShowDialog();
 
