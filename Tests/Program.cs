@@ -1229,9 +1229,11 @@ internal static class Program
             Math.Abs(realtimeLeakVm.WaterProofChannels[0].PressPressure.GetValueOrDefault() - 84.1) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[1].PressPressure.GetValueOrDefault() - 84.2) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[2].PressPressure.GetValueOrDefault() - 84.0) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].FirstPressureText == "84.1" &&
+            realtimeLeakVm.WaterProofChannels[0].SecondPressureText == "---" &&
             realtimeLeakVm.WaterProofChannels.All(row => Math.Abs(row.Leak.GetValueOrDefault()) < 0.0001) &&
             realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured),
-            "PRESS updates live pressure baseline, starts Leak at zero, and cannot mark PASS/FAIL");
+            "PRESS updates live pressure/table baseline, starts Leak at zero, and cannot mark PASS/FAIL");
 
         applyRealtimeLeak.Invoke(
             realtimeLeakVm,
@@ -1246,8 +1248,9 @@ internal static class Program
             Math.Abs(realtimeLeakVm.WaterProofChannels[0].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[1].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].SecondPressureText == "84.0" &&
             realtimeLeakVm.WaterProofStageText == "ĐANG ĐO ĐỘ RÒ",
-            "First WAIT frame updates displayed Leak immediately for all channels");
+            "First WAIT frame updates displayed hold pressure and Leak immediately for all channels");
 
         applyRealtimeLeak.Invoke(
             realtimeLeakVm,
@@ -1268,6 +1271,15 @@ internal static class Program
             realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured) &&
             realtimeLeakVm.WaterProofChannels.All(row => row.ResultText == "---"),
             "Realtime PRESS/WAIT display never publishes PASS/FAIL before the final RESULT");
+
+        MethodInfo showLeakPanel = typeof(TestViewModel).GetMethod(
+            "ShowWaterProofOperationPanel",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak operation panel method not found");
+        realtimeLeakVm.SelectedOperationTabIndex = 0;
+        showLeakPanel.Invoke(realtimeLeakVm, null);
+        Assert(realtimeLeakVm.SelectedOperationTabIndex == 3,
+            "Leak run switches to its detailed realtime table before RESULT");
         int resultStyleUses = xaml.Split(
             "CellStyle=\"{StaticResource PassFailResultCellStyle}\"",
             StringSplitOptions.None).Length - 1;

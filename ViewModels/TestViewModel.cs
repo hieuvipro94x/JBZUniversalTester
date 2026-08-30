@@ -5625,6 +5625,8 @@ public sealed class TestViewModel : ObservableObject
                         // Giữ giá trị PRESS mới nhất làm mốc. Khi máy chuyển sang
                         // WAIT, độ rò realtime được tính từ đúng mốc áp cuối này.
                         row.PressPressure = current;
+                        row.FirstResultPressure = current;
+                        row.SecondResultPressure = null;
                         _waterProofLivePressBaseline[i] = current;
 
                         // Trong thời gian tạo áp chưa có sụt áp nên hiển thị 0.
@@ -5634,6 +5636,7 @@ public sealed class TestViewModel : ObservableObject
                     else
                     {
                         row.WaitPressure = current;
+                        row.SecondResultPressure = current;
 
                         if (_waterProofLivePressBaseline[i] is double baseline)
                         {
@@ -5704,6 +5707,32 @@ public sealed class TestViewModel : ObservableObject
         // Giữ bảng kết quả Leak trong suốt thời gian sản phẩm còn nối với
         // bất kỳ I/O nào. ResetFullCycleAfterProductRemoved() là nơi duy nhất
         // rời bảng kết quả sau frame xác nhận đã tháo toàn bộ sản phẩm.
+    }
+
+    private void ShowWaterProofOperationPanel() =>
+        InvokeUi(() => SelectedOperationTabIndex = 3);
+
+    private static Window? ResolveOperatorDialogOwner()
+    {
+        Application? application = Application.Current;
+        if (application is null)
+            return null;
+
+        Window? active = application.Windows
+            .OfType<Window>()
+            .FirstOrDefault(window => window.IsVisible && window.IsActive);
+        if (active is not null)
+            return active;
+
+        Window? visible = application.Windows
+            .OfType<Window>()
+            .FirstOrDefault(window => window.IsVisible);
+        if (visible is not null)
+            return visible;
+
+        return application.MainWindow is { IsVisible: true } mainWindow
+            ? mainWindow
+            : null;
     }
 
     private void ArmWaterProofEquipmentErrorRemovalWait()
@@ -5796,7 +5825,7 @@ public sealed class TestViewModel : ObservableObject
     {
         Type = ProductFaultType.WaterProofLeak,
         WireName = channel.ChannelText,
-        Message = $"{channel.ChannelText}: áp giữ {channel.PressureText}; độ rò {channel.LeakText}; " +
+        Message = $"{channel.ChannelText}: áp giữ {channel.SecondPressureText}; độ rò {channel.LeakText}; " +
                   $"yêu cầu áp >= {_waterProofProfile.PressMin:0.###}, độ sụt <= {_waterProofProfile.LeakLimit:0.###}"
     };
 
@@ -5845,6 +5874,7 @@ public sealed class TestViewModel : ObservableObject
 
             _cycleWaterProofStartedAt ??= DateTime.Now;
             State = "ĐANG TEST LEAK";
+            ShowWaterProofOperationPanel();
             SetWaterProofStage(WaterProofStage.Connecting, "ĐANG KẾT NỐI", "---");
             AddLog(
                 $"[WATERPROOF] START model={cycleModel.ModelName} port={_productionSettings.WaterProofMachine.PortName} " +
@@ -5886,7 +5916,7 @@ public sealed class TestViewModel : ObservableObject
                 }
 
                 await InvokeUiAsync(() => MessageBox.Show(
-                    Application.Current?.MainWindow,
+                    ResolveOperatorDialogOwner(),
                     $"Không thể hoàn thành kiểm tra kín nước qua UART/RS232.\n\n{ex.Message}\n\n" +
                     "Bo D2XX vẫn được giữ độc lập; hãy kiểm tra cổng COM/máy leak, tháo sản phẩm rồi chạy lại.",
                     "Lỗi thiết bị kín nước",
@@ -5946,7 +5976,9 @@ public sealed class TestViewModel : ObservableObject
                 var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
                     faults,
                     "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
-                dialog.Owner = Application.Current?.MainWindow;
+                Window? owner = ResolveOperatorDialogOwner();
+                if (owner is not null)
+                    dialog.Owner = owner;
                 dialog.ShowDialog();
             });
 
@@ -5970,7 +6002,7 @@ public sealed class TestViewModel : ObservableObject
                 State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
                 AddLog($"Không thể eject/restart scan sau lỗi kín nước: {ex.Message}");
                 await InvokeUiAsync(() => MessageBox.Show(
-                    Application.Current?.MainWindow,
+                    ResolveOperatorDialogOwner(),
                     $"Không thể mở JIG hoặc khởi động lại scan sau lỗi kín nước.\n\n{ex.Message}",
                     "Lỗi thiết bị",
                     MessageBoxButton.OK,
