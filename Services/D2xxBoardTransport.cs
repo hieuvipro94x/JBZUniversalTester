@@ -598,12 +598,12 @@ public sealed class D2xxBoardTransport : IBoardTransport
         _scanCapacity = BoardScanCapacity.Create(_production, maxIo);
         _installedCapacity = _scanCapacity.Installed;
         _capacity = _scanCapacity.Active;
-        _production.ExpansionCardCount = _installedCapacity.ExpansionModuleCount;
+        _production.ExpansionCardCount = _installedCapacity.ExpansionCardCount;
         _production.CardCount = _installedCapacity.ScanCardCount;
-        _production.StartCardNumber = _installedCapacity.StartCardNumber;
+        _production.StartCardNumber = 1;
         _expectedIoCount = _capacity.TotalIoCapacity;
 
-        string signature = $"{_scanCapacity}:{_installedCapacity.StartCardNumber}:{_scanCapacity.IsModelWithinInstalledCapacity}";
+        string signature = $"{_scanCapacity}:{_scanCapacity.IsModelWithinInstalledCapacity}";
         if (string.Equals(signature, _lastCapacityLogSignature, StringComparison.Ordinal))
             return;
         _lastCapacityLogSignature = signature;
@@ -612,7 +612,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             this,
             $"BOARD_CAPACITY installed={_scanCapacity.InstalledScanUnits} " +
             $"required={_scanCapacity.RequiredScanUnits} active={_scanCapacity.ActiveScanUnits} " +
-            $"io={_scanCapacity.ActiveIoCapacity} startCard={_capacity.StartCardNumber} " +
+            $"io={_scanCapacity.ActiveIoCapacity} " +
             $"fit={_scanCapacity.IsModelWithinInstalledCapacity}.");
 
         if (!_scanCapacity.IsModelWithinInstalledCapacity)
@@ -645,9 +645,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
             await StopScanCoreAsync(ct);
             await ApplyPendingNativeConfigurationAsync(ct);
 
-            // Firmware chỉ nhận ACTIVE scan range của model hiện tại. Installed
-            // capacity chỉ dùng để kiểm tra model có vừa phần cứng hay không; không
-            // được gửi thẳng số card đã cài vào START_SCAN nếu model cần ít hơn.
+            // Required capacity của model chỉ dùng để validate. START_SCAN luôn
+            // nhận đúng số card operator đã cấu hình, kể cả model dùng ít card hơn.
 
             if (!_scanPrepared)
                 await PrepareScanAsync(ct);
@@ -844,7 +843,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
     }
 
     private string BuildScanConfiguration(BoardScanMode mode) =>
-        $"{mode}:{_capacity.ExpansionModuleCount}:{_capacity.StartCardNumber}:{_capacity.StartScanParameter}";
+        $"{mode}:{_capacity.ExpansionCardCount}:{_capacity.StartScanParameter}";
 
     private async Task ApplyPendingNativeConfigurationAsync(CancellationToken ct)
     {

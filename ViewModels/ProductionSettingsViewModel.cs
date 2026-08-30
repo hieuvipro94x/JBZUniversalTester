@@ -381,6 +381,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             Settings.ExpansionCardCount,
             1,
             BoardIoDecoder.MaxExpansionCardCount);
+        Settings.StartCardNumber = 1;
         Settings.CardCount = BoardIoDecoder.ScanCardCountFromExpansionCards(
             Settings.ExpansionCardCount);
         Settings.ResistanceChannels = ResistanceChannels

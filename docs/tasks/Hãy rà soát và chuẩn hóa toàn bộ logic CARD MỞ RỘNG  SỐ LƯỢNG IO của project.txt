@@ -1,0 +1,1816 @@
+Hãy rà soát và sửa toàn bộ logic **CARD MỞ RỘNG / DUNG LƯỢNG IO / START_SCAN / Production Scan / BoardIoDecoder / Startup IO Interlock** của project `JBZUniversalTester` theo đúng quy tắc của phần mềm gốc dưới đây.
+
+# 1. QUY ƯỚC PHẦN CỨNG CHÍNH XÁC
+
+Một CARD MỞ RỘNG vật lý có:
+
+```text
+1 CARD = 64 IO
+```
+
+Bên trong một card có:
+
+```text
+Port 1 = 32 IO
+Port 2 = 32 IO
+```
+
+Nhưng đây chỉ là cấu trúc phần cứng nội bộ.
+
+Người vận hành KHÔNG được phải chọn:
+
+```text
+Port
+PhysicalCard
+nhóm 32 IO
+số cổng
+```
+
+Người vận hành chỉ chọn:
+
+```text
+SỐ CARD MỞ RỘNG
+```
+
+Ví dụ:
+
+```text
+1 card  = 64 IO
+2 card  = 128 IO
+3 card  = 192 IO
+4 card  = 256 IO
+5 card  = 320 IO
+6 card  = 384 IO
+7 card  = 448 IO
+8 card  = 512 IO
+9 card  = 576 IO
+10 card = 640 IO
+```
+
+Giới hạn hiện tại:
+
+```text
+10 card
+640 IO
+```
+
+---
+
+# 2. MAPPING CARD / PORT / IO
+
+Mapping vật lý phải được hiểu:
+
+```text
+CARD 1
+  Port 1 = IO1   -> IO32
+  Port 2 = IO33  -> IO64
+
+CARD 2
+  Port 1 = IO65  -> IO96
+  Port 2 = IO97  -> IO128
+
+CARD 3
+  Port 1 = IO129 -> IO160
+  Port 2 = IO161 -> IO192
+
+CARD 4
+  Port 1 = IO193 -> IO224
+  Port 2 = IO225 -> IO256
+
+...
+
+CARD 10
+  Port 1 = IO577 -> IO608
+  Port 2 = IO609 -> IO640
+```
+
+Công thức:
+
+```csharp
+ExpansionCardNumber =
+    ((globalIo - 1) / 64) + 1;
+
+PortNumber =
+    (((globalIo - 1) % 64) / 32) + 1;
+
+LocalIoOnPort =
+    ((globalIo - 1) % 32) + 1;
+```
+
+Không được làm hỏng `BoardAddressMapper` nếu code nội bộ hiện đang dùng khái niệm nhóm 32 IO.
+
+Nếu hiện tại có:
+
+```text
+PhysicalCard 1 = IO1-32
+PhysicalCard 2 = IO33-64
+```
+
+thì phải hiểu đó thực chất là:
+
+```text
+Expansion Card 1 / Port 1
+Expansion Card 1 / Port 2
+```
+
+Không được hiểu nhầm thành 2 card mở rộng vật lý.
+
+---
+
+# 3. CONFIGURED CARD VÀ REQUIRED CARD LÀ HAI KHÁI NIỆM KHÁC NHAU
+
+Đây là yêu cầu cực kỳ quan trọng.
+
+## ConfiguredCardCount
+
+Là:
+
+```text
+SỐ CARD MỞ RỘNG THỰC TẾ OPERATOR ĐÃ CHỌN
+```
+
+Ví dụ operator chọn:
+
+```text
+10 card
+```
+
+thì:
+
+```text
+ConfiguredCardCount = 10
+ConfiguredCapacity = 640 IO
+```
+
+## RequiredCardCount
+
+Là:
+
+```text
+SỐ CARD TỐI THIỂU MODEL CẦN
+```
+
+Required card KHÔNG được tính theo số lượng chân đang dùng.
+
+Phải tính theo:
+
+```text
+IO LỚN NHẤT CỦA MODEL
+```
+
+Công thức:
+
+```csharp
+RequiredCardCount =
+    (MaxModelIo + 63) / 64;
+```
+
+Sau đó:
+
+```csharp
+RequiredCapacity =
+    RequiredCardCount * 64;
+```
+
+Ví dụ model chỉ có:
+
+```text
+IO1
+IO18
+IO97
+IO201
+```
+
+mặc dù chỉ dùng 4 IO, nhưng:
+
+```text
+MaxModelIo = 201
+```
+
+nên:
+
+```text
+RequiredCardCount = 4
+RequiredCapacity = 256 IO
+```
+
+KHÔNG được kết luận:
+
+```text
+model chỉ có 4 chân
+=> 1 card là đủ
+```
+
+Đó là sai.
+
+---
+
+# 4. CẢNH BÁO THIẾU CARD PHẢI GIỐNG PHẦN MỀM GỐC
+
+Ví dụ:
+
+```text
+Model Max IO = 201
+RequiredCardCount = 4
+RequiredCapacity = 256 IO
+```
+
+Operator chỉ chọn:
+
+```text
+ConfiguredCardCount = 3
+ConfiguredCapacity = 192 IO
+```
+
+thì phải cảnh báo dạng:
+
+```text
+KHÔNG ĐỦ CARD MỞ RỘNG
+192 / 256 IO
+```
+
+hoặc đúng format hiện có của giao diện.
+
+Điều quan trọng là:
+
+```text
+192 = capacity card đang cấu hình
+256 = capacity tối thiểu model yêu cầu
+```
+
+Không phải:
+
+```text
+192 / 201
+```
+
+Mà phải làm tròn RequiredCapacity theo block 64 IO.
+
+Ví dụ bắt buộc:
+
+```text
+Max IO = 64
+Required = 1 card = 64 IO
+
+Max IO = 65
+Required = 2 card = 128 IO
+
+Max IO = 128
+Required = 2 card = 128 IO
+
+Max IO = 129
+Required = 3 card = 192 IO
+
+Max IO = 192
+Required = 3 card = 192 IO
+
+Max IO = 193
+Required = 4 card = 256 IO
+
+Max IO = 201
+Required = 4 card = 256 IO
+
+Max IO = 255
+Required = 4 card = 256 IO
+
+Max IO = 256
+Required = 4 card = 256 IO
+
+Max IO = 257
+Required = 5 card = 320 IO
+
+Max IO = 640
+Required = 10 card = 640 IO
+```
+
+Nếu:
+
+```text
+MaxModelIo > 640
+```
+
+thì phải báo vượt giới hạn phần cứng.
+
+---
+
+# 5. QUY TẮC VALIDATE MODEL
+
+Logic phải là:
+
+```text
+ConfiguredCapacity =
+    ConfiguredCardCount * 64
+
+RequiredCardCount =
+    ceil(MaxModelIo / 64)
+
+RequiredCapacity =
+    RequiredCardCount * 64
+```
+
+Nếu:
+
+```text
+RequiredCardCount > ConfiguredCardCount
+```
+
+thì:
+
+```text
+BLOCK PRODUCTION
+CẢNH BÁO THIẾU CARD
+```
+
+Nếu:
+
+```text
+RequiredCardCount <= ConfiguredCardCount
+```
+
+thì:
+
+```text
+MODEL HỢP LỆ
+```
+
+Ví dụ:
+
+```text
+Model cần 4 card
+Operator chọn 3
+=> 192 / 256
+=> BLOCK
+```
+
+```text
+Model cần 4 card
+Operator chọn 4
+=> 256 / 256
+=> OK
+```
+
+```text
+Model cần 4 card
+Operator chọn 10
+=> 640 / 256
+=> OK
+```
+
+---
+
+# 6. START_SCAN PHẢI THEO CONFIGURED CARD
+
+Đây là điểm phải sửa chính xác.
+
+`RequiredCardCount` CHỈ dùng để:
+
+```text
+VALIDATE MODEL
+```
+
+Không được dùng để thu nhỏ scan.
+
+`START_SCAN` phải dùng:
+
+```text
+ConfiguredCardCount
+```
+
+Ví dụ:
+
+```text
+Model cần 2 card
+Operator chọn 10 card
+```
+
+thì:
+
+```text
+RequiredCardCount = 2
+ConfiguredCardCount = 10
+RequiredCapacity = 128
+ConfiguredCapacity = 640
+
+MODEL = OK
+
+START_SCAN = 10
+```
+
+KHÔNG được:
+
+```text
+START_SCAN = 2
+```
+
+Ví dụ khác:
+
+```text
+Model cần 8 card
+Operator chọn 10 card
+```
+
+phải:
+
+```text
+START_SCAN = 10
+```
+
+KHÔNG phải:
+
+```text
+START_SCAN = 8
+```
+
+Tóm lại:
+
+```csharp
+StartScanParameter = ConfiguredCardCount;
+```
+
+sau khi đã xác nhận:
+
+```text
+RequiredCardCount <= ConfiguredCardCount
+```
+
+---
+
+# 7. KHÔNG ĐƯỢC TỰ ĐỘNG GIẢM ACTIVE SCAN THEO MODEL
+
+Tìm các logic hiện tại kiểu:
+
+```text
+RequiredScanUnits
+ActiveScanUnits
+InstalledScanUnits
+StartScanParameter
+```
+
+Nếu hiện tại đang làm:
+
+```text
+Configured = 10
+Required = 8
+Active = 8
+START_SCAN = 8
+```
+
+thì phải sửa.
+
+Kết quả đúng phải là:
+
+```text
+Configured = 10
+Required = 8
+Active = 10
+START_SCAN = 10
+```
+
+Required chỉ là validation.
+
+Configured mới là số scan thực tế.
+
+---
+
+# 8. KHI OPERATOR ĐỔI SỐ CARD
+
+Ví dụ đang:
+
+```text
+Configured = 3
+START_SCAN = 3
+```
+
+operator đổi thành:
+
+```text
+Configured = 10
+```
+
+thì phải:
+
+```text
+1. lưu ConfiguredCardCount = 10
+2. cập nhật capacity = 640 IO
+3. reset decoder/buffer của scan cũ
+4. nếu scan đang chạy capacity 3 thì STOP đúng 1 lần
+5. START_SCAN=10 đúng 1 lần
+6. chờ frame COMPLETE đầu tiên của capacity 10
+7. tiếp tục giữ stream 10-card chạy liên tục
+```
+
+Không được:
+
+```text
+STOP/START liên tục mỗi cycle
+```
+
+---
+
+# 9. PRODUCTION SCAN PHẢI CHẠY LIÊN TỤC
+
+Sau khi:
+
+```text
+START_SCAN=ConfiguredCardCount
+```
+
+thành công thì scan phải tiếp tục chạy background.
+
+Không được STOP/START scan mỗi khi:
+
+```text
+lắp sản phẩm
+PASS
+FAIL
+ProductRemoved
+cycle mới
+```
+
+Chỉ restart khi thật sự cần:
+
+```text
+- ConfiguredCardCount thay đổi
+- USB/D2XX mất kết nối
+- reconnect
+- firmware stream chết thật
+- watchdog xác nhận stall
+```
+
+Nếu capacity không đổi và stream đang khỏe:
+
+```text
+REUSE STREAM HIỆN TẠI
+```
+
+---
+
+# 10. MỤC TIÊU TỐC ĐỘ GIỐNG PHẦN MỀM GỐC
+
+Bất kể chọn:
+
+```text
+1 card
+2 card
+3 card
+...
+10 card
+```
+
+phần mềm phải:
+
+```text
+đọc IO nhanh
+UI phản hồi nhanh
+không treo
+không nhấp nháy
+không báo lỗi giả
+không chậm dần bất thường
+```
+
+Với:
+
+```text
+10 card = 640 IO
+```
+
+frame vật lý có thể lớn hơn, nhưng operator không được cảm thấy phần mềm bị lỗi hoặc phải đợi những delay do software tự tạo.
+
+Không được chữa bằng cách chỉ tăng timeout.
+
+Phải tối ưu pipeline thật.
+
+---
+
+# 11. PIPELINE ĐÚNG
+
+Phải hướng tới:
+
+```text
+D2XX READ
+   ↓
+RX BUFFER
+   ↓
+BoardIoDecoder
+   ↓
+FRAME CHƯA ĐỦ
+   → BUFFER TIẾP
+   → KHÔNG UPDATE UI
+   → KHÔNG ProcessFrame
+   ↓
+FRAME COMPLETE
+   ↓
+Publish ScanFrame
+   ↓
+TestEngine.ProcessFrame
+   ↓
+Logical state thay đổi?
+   ├─ NO  → không update UI
+   └─ YES → update phần cần thiết
+```
+
+---
+
+# 12. PARTIAL FRAME TUYỆT ĐỐI KHÔNG ĐƯỢC ĐÁNH GIÁ SẢN PHẨM
+
+Ví dụ:
+
+```text
+Configured = 10
+Expected = 640 IO
+```
+
+decoder mới nhận:
+
+```text
+300 / 640 IO
+```
+
+thì không được suy luận:
+
+```text
+IO301-640 bị mất
+```
+
+Không được:
+
+```text
+- MissingConnection
+- Open
+- Wrong
+- Short
+- reset Continuity
+- ProductRemoved
+- PASS
+- FAIL
+- KIỂM TRA IO
+- thay đổi production state
+```
+
+Phải coi là:
+
+```text
+FRAME CHƯA COMPLETE
+```
+
+và tiếp tục buffer.
+
+Chỉ frame:
+
+```text
+SourceCount = ExpectedIoCount
++
+terminator hợp lệ
+```
+
+mới được Production evaluation.
+
+---
+
+# 13. RX CHUNK KHÔNG ĐỒNG NGHĨA FRAME
+
+Một frame 640 IO có thể về dưới dạng:
+
+```text
+RX1
+RX2
+RX3
+RX4
+...
+```
+
+Đây là hoàn toàn bình thường.
+
+Không được tạo một Production ScanFrame độc lập cho từng RX packet.
+
+BoardIoDecoder phải ghép lại.
+
+Ví dụ:
+
+```text
+RX1 = 200 source
+RX2 = 200 source
+RX3 = 240 source + terminator
+```
+
+kết quả cuối phải là:
+
+```text
+1 COMPLETE FRAME = 640 source
+```
+
+---
+
+# 14. NHIỀU FRAME TRONG MỘT RX
+
+Ngược lại, một lần Read có thể chứa:
+
+```text
+FRAME N
+FRAME N+1
+```
+
+Decoder phải trả đúng:
+
+```text
+2 complete frames
+```
+
+Không được merge hai frame.
+
+---
+
+# 15. RESET DECODER KHI ĐỔI CAPACITY
+
+Khi đổi:
+
+```text
+3 card -> 10 card
+```
+
+mọi dữ liệu partial của stream 3-card phải bị bỏ.
+
+Không được:
+
+```text
+old partial frame
++
+new 10-card frame
+```
+
+ghép thành một frame giả.
+
+Phải reset:
+
+```text
+buffer
+current source
+sequence
+partial frame state
+expected IO
+```
+
+theo đúng lifecycle.
+
+---
+
+# 16. “KIỂM TRA IO BAN ĐẦU” KHÔNG PHẢI LỖI CAPACITY
+
+Logic startup safety hiện tại cần được giữ:
+
+Phần mềm cần một:
+
+```text
+COMPLETE CLEAN FRAME
+```
+
+để xác nhận:
+
+```text
+không còn sản phẩm cũ trên jig
+```
+
+Nhưng không nên hiển thị:
+
+```text
+KIỂM TRA IO BAN ĐẦU
+```
+
+vì operator dễ hiểu nhầm thành lỗi IO/card.
+
+Hãy dùng:
+
+```text
+ĐANG ĐỒNG BỘ DỮ LIỆU BO...
+```
+
+và status lớn:
+
+```text
+ĐỒNG BỘ BO
+```
+
+Đây chỉ là trạng thái:
+
+```text
+WAITING FOR FIRST COMPLETE CLEAN FRAME
+```
+
+không phải lỗi.
+
+---
+
+# 17. COMPLETE CLEAN FRAME ĐẦU TIÊN PHẢI MỞ GATE NGAY
+
+Sau khi START_SCAN:
+
+```text
+nhận COMPLETE frame đầu tiên
+```
+
+nếu:
+
+```text
+không có connection nào
+```
+
+thì ngay lập tức:
+
+```text
+startup interlock clear
+SẴN SÀNG
+```
+
+Không được yêu cầu thêm:
+
+```text
+2 frame
+3 frame
+500 ms
+1 giây
+```
+
+nếu không có lý do protocol thực tế.
+
+Không thêm delay chỉ để “ổn định”.
+
+---
+
+# 18. NẾU CÒN SẢN PHẨM TRÊN JIG
+
+Nếu complete frame đầu tiên có connection thực sự:
+
+```text
+IOx <-> IOy
+```
+
+thì safety interlock phải giữ:
+
+```text
+VUI LÒNG THÁO SẢN PHẨM
+```
+
+Đây là behavior đúng.
+
+Không được bỏ interlock chỉ để làm phần mềm có vẻ nhanh hơn.
+
+---
+
+# 19. UI KHÔNG ĐƯỢC UPDATE THEO TỪNG FRAME GIỐNG NHAU
+
+Nếu nhận:
+
+```text
+Frame 100
+Frame 101
+Frame 102
+...
+```
+
+nhưng electrical topology không đổi thì:
+
+```text
+KHÔNG rebuild toàn bộ DataGrid
+KHÔNG Faults.Clear()
+KHÔNG Add lại tất cả rows
+KHÔNG Raise toàn bộ property
+```
+
+Chỉ update UI khi state thật sự thay đổi.
+
+Giữ hoặc cải thiện logic:
+
+```text
+SynchronizeFaultRows
+Changed filtering
+brush cache
+```
+
+---
+
+# 20. GOOD NETWORK PHẢI PHẢN HỒI NHANH
+
+Một network đúng phải được nhận PASS từ:
+
+```text
+FIRST VALID COMPLETE FRAME
+```
+
+Không được trì hoãn good network bởi:
+
+```text
+WrongConnectionConfirmMs
+ShortCircuitConfirmMs
+ProductSettleTime
+```
+
+nếu architecture hiện tại đã tách good network khỏi fault confirmation.
+
+Wrong/Short candidate có thể:
+
+```text
+block final PASS ngay
+```
+
+nhưng chỉ:
+
+```text
+commit FAIL
+```
+
+sau confirmation policy.
+
+---
+
+# 21. KHÔNG DÙNG DELAY ĐỂ GIẢ VỜ NHANH/ỔN ĐỊNH
+
+Không thêm:
+
+```csharp
+Thread.Sleep(...)
+Task.Delay(100)
+Task.Delay(200)
+Task.Delay(500)
+```
+
+vào hot path:
+
+```text
+RX
+Decoder
+ProcessFrame
+UI update
+```
+
+trừ khi đó là timing bắt buộc của hardware protocol đã được chứng minh.
+
+---
+
+# 22. WATCHDOG PHẢI PHỤ THUỘC CAPACITY
+
+10-card frame lớn hơn 1-card frame.
+
+Do đó watchdog có thể cần khác nhau theo capacity.
+
+Giữ hoặc cải thiện:
+
+```text
+ResolveFirstFrameTimeoutMs
+ResolveProductionStallTimeoutMs
+```
+
+Nhưng không được giải quyết vấn đề bằng:
+
+```text
+chỉ tăng timeout
+```
+
+Mục tiêu vẫn phải là:
+
+```text
+decode nhanh
+publish complete frame đúng
+UI update ít
+```
+
+---
+
+# 23. LOGGING KHÔNG ĐƯỢC LÀM CHẬM PRODUCTION
+
+Trong normal production:
+
+Không log:
+
+```text
+từng byte
+từng source
+từng target
+từng RX packet
+```
+
+ra disk.
+
+Protocol trace chi tiết chỉ bật khi:
+
+```text
+EnableSystemLogs / ProtocolTrace
+```
+
+được bật.
+
+Có thể giữ diagnostic nhẹ kiểu:
+
+```text
+[SCAN]
+Configured=10
+Required=4
+Capacity=640
+START_SCAN=10
+Sequence=123
+Complete=True
+FrameMs=...
+```
+
+Không log 640 IO riêng lẻ mỗi frame.
+
+---
+
+# 24. PROBE KHÔNG ĐƯỢC PHÁ PRODUCTION STREAM
+
+Giữ logic Probe/TestPin hiện tại:
+
+```text
+presentation-only trên Production stream
+```
+
+nếu đó là architecture hiện tại.
+
+Probe không được:
+
+```text
+STOP scan
+restart scan
+clear wiring fault
+clear continuity
+switch decoder mode sai
+```
+
+---
+
+# 25. LEAK / WATERPROOF
+
+Không làm regress Leak.
+
+Nếu Leak cần:
+
+```text
+PauseProductionScanForWaterProofAsync
+```
+
+thì giữ.
+
+Sau Leak phải resume đúng lifecycle.
+
+Giữ logic quan trọng:
+
+```text
+continuityLatchedForFinalPass = waterProofCompleted
+```
+
+nếu hiện tại đang có.
+
+Không để stale STOP/empty frame sau Leak biến PASS thành FAIL giả.
+
+---
+
+# 26. DEVICE FAULT
+
+Không cần nút:
+
+```text
+KHỞI TẠO LẠI
+```
+
+trên Production UI.
+
+Nếu DeviceFault nội bộ nghiêm trọng:
+
+```text
+- stop cycle
+- disable TestEngine processing
+- safe relay OFF
+- giữ LỖI THIẾT BỊ
+```
+
+Không cho operator reset bừa từ UI.
+
+Nhưng cần phân biệt:
+
+```text
+internal DeviceFault
+```
+
+với:
+
+```text
+USB/D2XX disconnect tạm thời
+```
+
+Nếu USB/D2XX disconnect thông thường và hệ thống hiện đã có reconnect an toàn thì giữ:
+
+```text
+auto reconnect
+handshake
+START_SCAN lại ConfiguredCardCount
+wait complete clean frame
+resume
+```
+
+Không bắt operator restart app cho mọi lỗi USB tạm thời nếu có thể recover an toàn.
+
+---
+
+# 27. KHÔNG ĐƯỢC LÀM REGRESS
+
+Giữ nguyên toàn bộ logic đang ổn:
+
+```text
+Master
+Probe
+TestPin
+Wrong Wiring
+Short Circuit
+Resistance
+Leak
+Relay
+ProductRemoved
+PASS lifecycle
+FAIL lifecycle
+History
+Label
+PartCnt
+Production counters
+Startup interlock
+DeviceFault safeguards
+```
+
+---
+
+# 28. TESTVIEWMODEL ĐÃ SỬA NHIỀU LẦN
+
+`TestViewModel.cs` là file rất nhạy cảm.
+
+KHÔNG được:
+
+```text
+replace toàn file bằng bản cũ
+```
+
+Phải:
+
+```text
+đọc current working tree
+diff
+patch tối thiểu
+```
+
+Không được xóa những sửa chữa hiện có chỉ vì một branch/file cũ nhìn đơn giản hơn.
+
+---
+
+# 29. KHÔNG TẠO BACKUP SOURCE TRONG PROJECT
+
+Không tạo:
+
+```text
+TestViewModel_old.cs
+TestViewModel_backup.cs
+BoardIoDecoder_copy.cs
+*.bak.cs
+```
+
+trong compile tree.
+
+Nếu cần backup dùng Git.
+
+---
+
+# 30. RÀ SOÁT CÁC CLASS SAU
+
+Tìm và phân tích toàn bộ:
+
+```text
+BoardCapacity
+BoardScanCapacity
+BoardAddressMapper
+BoardIoDecoder
+D2xxBoardService
+ScanSupervisor
+TestEngine
+ProductionFaultConfirmationGate
+TestViewModel
+ProductionSettings
+ProductionConfigService
+ProductionSettingsPage
+TestWindow
+SelfTests
+HardwareVerification
+```
+
+Đồng thời search toàn project:
+
+```text
+ExpansionCardCount
+ExpansionModuleCount
+PhysicalCardCount
+IoPerPhysicalCard
+IoPerExpansionModule
+TotalIoCapacity
+RequiredScanUnits
+ActiveScanUnits
+InstalledScanUnits
+StartScanParameter
+RequestedScanCapacity
+AppliedScanCapacity
+START_SCAN
+FrameReceived
+ProcessFrame
+Complete
+SourceCount
+ExpectedIoCount
+```
+
+---
+
+# 31. SELFTEST CAPACITY BẮT BUỘC
+
+Phải có:
+
+```text
+1 card  -> 64
+2 card  -> 128
+3 card  -> 192
+4 card  -> 256
+5 card  -> 320
+8 card  -> 512
+10 card -> 640
+```
+
+---
+
+# 32. SELFTEST REQUIRED CARD
+
+Phải test:
+
+```text
+MaxIO 1   -> Required 1 / 64
+MaxIO 64  -> Required 1 / 64
+
+MaxIO 65  -> Required 2 / 128
+MaxIO 128 -> Required 2 / 128
+
+MaxIO 129 -> Required 3 / 192
+MaxIO 192 -> Required 3 / 192
+
+MaxIO 193 -> Required 4 / 256
+MaxIO 201 -> Required 4 / 256
+MaxIO 256 -> Required 4 / 256
+
+MaxIO 257 -> Required 5 / 320
+
+MaxIO 640 -> Required 10 / 640
+
+MaxIO 641
+=> reject vượt giới hạn
+```
+
+---
+
+# 33. SELFTEST THIẾU CARD
+
+Test:
+
+```text
+Configured=3
+MaxModelIo=201
+
+ConfiguredCapacity=192
+RequiredCard=4
+RequiredCapacity=256
+
+IsModelWithinInstalledCapacity=false
+```
+
+Cảnh báo phải có:
+
+```text
+192
+256
+```
+
+---
+
+# 34. SELFTEST CONFIGURED LỚN HƠN REQUIRED
+
+Test bắt buộc:
+
+```text
+Configured=10
+MaxModelIo=201
+
+Required=4
+Configured=10
+
+IsModelWithinInstalledCapacity=true
+START_SCAN=10
+```
+
+Đây là regression test quan trọng nhất.
+
+Không được cho:
+
+```text
+START_SCAN=4
+```
+
+---
+
+# 35. SELFTEST 10 CARD MODEL 640
+
+Test:
+
+```text
+Configured=10
+MaxModelIo=640
+
+Required=10
+Configured=10
+Capacity=640
+START_SCAN=10
+IsModelWithinInstalledCapacity=true
+```
+
+Không được cảnh báo thiếu card.
+
+---
+
+# 36. SELFTEST ADDRESS BOUNDARIES
+
+Test:
+
+```text
+IO1
+IO32
+IO33
+IO64
+
+IO65
+IO96
+IO97
+IO128
+
+IO129
+IO160
+IO161
+IO192
+
+IO193
+IO224
+IO225
+IO256
+
+IO577
+IO608
+IO609
+IO640
+```
+
+Verify:
+
+```text
+Expansion Card
+Port
+Local IO
+```
+
+đúng.
+
+---
+
+# 37. SELFTEST PARTIAL FRAME 10 CARD
+
+Tạo:
+
+```text
+Configured=10
+Expected=640
+```
+
+nhưng chỉ nhận:
+
+```text
+300 sources
+```
+
+Expected:
+
+```text
+Complete=false
+```
+
+và frame không được gây:
+
+```text
+Missing
+Open
+Wrong
+Short
+ProductRemoved
+PASS
+FAIL
+State change
+```
+
+---
+
+# 38. SELFTEST SPLIT FRAME
+
+Tạo một valid 640-IO frame rồi chia thành nhiều chunk nhỏ.
+
+Feed decoder từng chunk.
+
+Expected:
+
+```text
+chưa tới terminator
+=> không publish complete frame
+
+sau chunk cuối
+=> đúng 1 Complete frame
+```
+
+---
+
+# 39. SELFTEST MULTIPLE FRAME PER READ
+
+Feed:
+
+```text
+Frame A + Frame B
+```
+
+trong cùng một byte array.
+
+Expected:
+
+```text
+2 frames
+```
+
+---
+
+# 40. SELFTEST SEQUENCE RESET
+
+Sau khi capacity đổi:
+
+```text
+old partial frame
+```
+
+phải bị bỏ.
+
+New frame không được nối tiếp old partial.
+
+---
+
+# 41. PERFORMANCE SELFTEST
+
+Giữ test hiện tại kiểu:
+
+```text
+10,000 identical ProcessFrame calls
+```
+
+với yêu cầu:
+
+```text
+Changed event không tăng vô hạn
+allocation bounded
+no DeviceFault
+```
+
+---
+
+# 42. 10-CARD STRESS TEST
+
+Bổ sung stress:
+
+```text
+BoardCapacity.Create(10)
+640 IO
+```
+
+ít nhất:
+
+```text
+500-1000 complete frames
+```
+
+Theo dõi:
+
+```text
+elapsed
+allocations
+Changed count
+START count
+STOP count
+frames processed
+```
+
+Không hardcode thời gian quá chặt phụ thuộc máy CI.
+
+Nhưng phải đảm bảo:
+
+```text
+no crash
+no freeze
+no fake IO warning
+no repeated START/STOP
+no unbounded allocations
+```
+
+---
+
+# 43. 500-CYCLE MIXED STRESS
+
+Giữ hoặc mở rộng:
+
+```text
+PASS
+empty
+Wrong
+Short
+Probe
+```
+
+500 cycle.
+
+Expected:
+
+```text
+scan vẫn chạy
+thread bounded
+handle bounded
+memory bounded
+DeviceFault=false
+```
+
+---
+
+# 44. KẾT QUẢ UI CUỐI CÙNG
+
+Trong Production Settings operator chỉ cần thấy:
+
+```text
+SỐ CARD MỞ RỘNG: [10]
+TỔNG I/O: 640
+```
+
+Có thể thêm readonly:
+
+```text
+MODEL YÊU CẦU: 256 IO
+```
+
+nếu muốn.
+
+Nhưng không bắt operator hiểu:
+
+```text
+port
+physical card
+scan group
+32 IO
+```
+
+---
+
+# 45. KẾT LUẬN LOGIC BẮT BUỘC
+
+Phải tuân thủ chính xác:
+
+```text
+ConfiguredCardCount
+= số card operator chọn
+
+ConfiguredCapacity
+= ConfiguredCardCount * 64
+
+MaxModelIo
+= IO lớn nhất xuất hiện trong model
+
+RequiredCardCount
+= ceil(MaxModelIo / 64)
+
+RequiredCapacity
+= RequiredCardCount * 64
+```
+
+Validation:
+
+```text
+Required > Configured
+=> BLOCK + cảnh báo ConfiguredCapacity / RequiredCapacity
+
+Required <= Configured
+=> OK
+```
+
+Scan:
+
+```text
+START_SCAN = ConfiguredCardCount
+```
+
+KHÔNG phải:
+
+```text
+START_SCAN = RequiredCardCount
+```
+
+---
+
+# 46. VÍ DỤ CHUẨN CUỐI CÙNG
+
+## CASE A
+
+```text
+Operator chọn 3 card
+Model MaxIO=192
+
+Configured=3
+Required=3
+ConfiguredCapacity=192
+RequiredCapacity=192
+
+=> OK
+=> START_SCAN=3
+```
+
+## CASE B
+
+```text
+Operator chọn 3 card
+Model MaxIO=201
+
+Configured=3
+Required=4
+ConfiguredCapacity=192
+RequiredCapacity=256
+
+=> KHÔNG ĐỦ CARD
+=> hiển thị 192/256 IO
+=> không chạy Production
+```
+
+## CASE C
+
+```text
+Operator chọn 4 card
+Model MaxIO=201
+
+Configured=4
+Required=4
+
+=> OK
+=> START_SCAN=4
+```
+
+## CASE D
+
+```text
+Operator chọn 10 card
+Model MaxIO=201
+
+Configured=10
+Required=4
+ConfiguredCapacity=640
+RequiredCapacity=256
+
+=> OK
+=> START_SCAN=10
+```
+
+## CASE E
+
+```text
+Operator chọn 10 card
+Model MaxIO=512
+
+Configured=10
+Required=8
+
+=> OK
+=> START_SCAN=10
+```
+
+KHÔNG được START_SCAN=8.
+
+## CASE F
+
+```text
+Operator chọn 10 card
+Model MaxIO=640
+
+Configured=10
+Required=10
+
+=> OK
+=> START_SCAN=10
+```
+
+---
+
+# 47. SAU KHI SỬA PHẢI CHẠY
+
+```powershell
+dotnet build -c Release
+```
+
+Sau đó:
+
+```powershell
+dotnet run --project Tests\JBZUniversalTester.SelfTests.csproj -c Release
+```
+
+Nếu HardwareVerification có thể chạy:
+
+```powershell
+dotnet run --project HardwareVerification\JBZUniversalTester.HardwareVerification.csproj -c Release
+```
+
+---
+
+# 48. BÁO CÁO CUỐI CHO TÔI
+
+Không chỉ nói “đã sửa”.
+
+Phải báo:
+
+```text
+1. Logic trước khi sửa
+2. Root cause
+3. ConfiguredCardCount được dùng ở đâu
+4. RequiredCardCount được dùng ở đâu
+5. Công thức RequiredCardCount
+6. Công thức RequiredCapacity
+7. Công thức ConfiguredCapacity
+8. START_SCAN trước sửa
+9. START_SCAN sau sửa
+10. Partial frame trước xử lý thế nào
+11. Partial frame sau xử lý thế nào
+12. Startup sync trước/sau
+13. Các file đã sửa
+14. Kết quả build
+15. Kết quả SelfTests
+16. Kết quả stress 10-card
+```
+
+Đặc biệt báo rõ các case:
+
+```text
+Configured=3 / MaxIO=201
+=> 192/256 BLOCK
+
+Configured=4 / MaxIO=201
+=> START_SCAN=4
+
+Configured=10 / MaxIO=201
+=> START_SCAN=10
+
+Configured=10 / MaxIO=512
+=> START_SCAN=10
+
+Configured=10 / MaxIO=640
+=> START_SCAN=10
+```
+
+---
+
+# NGUYÊN TẮC CUỐI CÙNG
+
+Không sửa bằng cách:
+
+```text
+tăng timeout thật lớn
+thêm delay
+bỏ kiểm tra safety
+bỏ complete-frame validation
+giảm số card scan theo model
+```
+
+Phải sửa đúng kiến trúc:
+
+```text
+OPERATOR CHỌN CARD THẬT
+        ↓
+CONFIGURED CARD
+        ↓
+VALIDATE MODEL BẰNG MAX IO
+        ↓
+NẾU ĐỦ
+        ↓
+START_SCAN = CONFIGURED CARD
+        ↓
+BUFFER RX
+        ↓
+CHỈ PUBLISH COMPLETE FRAME
+        ↓
+PROCESS FRAME NHANH
+        ↓
+CHỈ UPDATE UI KHI LOGICAL STATE THAY ĐỔI
+```
+
+Mục tiêu cuối cùng:
+
+**Phần mềm phải vận hành giống phần mềm gốc: operator chọn bao nhiêu card mở rộng thì bo quét đúng bấy nhiêu card; model chỉ được dùng để kiểm tra đủ/thiếu capacity. Dù chọn 1 hay 10 card, Production vẫn phải đọc IO nhanh, ổn định, không sinh “KIỂM TRA IO” giả, không STOP/START scan liên tục và không làm UI chậm.**

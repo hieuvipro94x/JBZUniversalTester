@@ -29,25 +29,40 @@ public sealed class BoardAddressMapper
         byte index,
         out int globalIo)
     {
+        if (!TryDecodeProtocolAddress(marker, markerBase, index, out globalIo) ||
+            !Capacity.ContainsGlobalIo(globalIo))
+        {
+            globalIo = 0;
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Decodes the absolute protocol I/O. The decoder uses this to consume a
+    /// complete protocol word even when it lies beyond the active scan capacity.
+    /// </summary>
+    public static bool TryDecodeProtocolAddress(
+        byte marker,
+        byte markerBase,
+        byte index,
+        out int globalIo)
+    {
         globalIo = 0;
 
-        if (marker < markerBase || marker >= markerBase + 0x10)
+        if (marker < markerBase || marker >= markerBase + 0x10 ||
+            index >= IoPerProtocolBank)
+        {
             return false;
-
-        if (index >= IoPerProtocolBank)
-            return false;
+        }
 
         int bank = marker - markerBase;
-        int relativeZeroBased = (bank * IoPerProtocolBank) + index;
-
-        if (relativeZeroBased < 0 || relativeZeroBased >= Capacity.TotalIoCapacity)
+        int decoded = (bank * IoPerProtocolBank) + index + 1;
+        if (decoded > BoardCapacity.MaxGlobalIo)
             return false;
 
-        int mapped = Capacity.FirstGlobalIo + relativeZeroBased;
-        if (!Capacity.ContainsGlobalIo(mapped))
-            return false;
-
-        globalIo = mapped;
+        globalIo = decoded;
         return true;
     }
 
@@ -57,19 +72,16 @@ public sealed class BoardAddressMapper
         if (!Capacity.ContainsGlobalIo(globalIo))
             return false;
 
-        int relative = globalIo - Capacity.FirstGlobalIo;
-        int physicalOffset = relative / BoardCapacity.IoPerPhysicalCard;
-        int localIo = (relative % BoardCapacity.IoPerPhysicalCard) + 1;
-        int physicalCard = Capacity.StartCardNumber + physicalOffset;
-        int moduleOffset = physicalOffset / BoardCapacity.PhysicalCardsPerExpansionModule;
-        int physicalInModule = (physicalOffset % BoardCapacity.PhysicalCardsPerExpansionModule) + 1;
+        int zeroBased = globalIo - 1;
+        int expansionCard = (zeroBased / BoardCapacity.IoPerExpansionCard) + 1;
+        int port = ((zeroBased % BoardCapacity.IoPerExpansionCard) / BoardCapacity.IoPerPort) + 1;
+        int localIo = (zeroBased % BoardCapacity.IoPerPort) + 1;
 
         address = new BoardCardAddress(
             globalIo,
-            physicalCard,
-            localIo,
-            moduleOffset + 1,
-            physicalInModule);
+            expansionCard,
+            port,
+            localIo);
         return true;
     }
 

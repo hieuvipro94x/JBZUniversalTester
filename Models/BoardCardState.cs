@@ -2,14 +2,15 @@
 
 namespace JBZUniversalTester.Models;
 
-/// <summary>Trạng thái một card vật lý 32 I/O trên TestView.</summary>
+/// <summary>Trạng thái một scan-card 64 I/O trên TestView.</summary>
 public sealed class BoardCardState : ObservableObject
 {
     private bool _hasProbeActivity;
     private bool _isScanning;
 
     public int CardNumber { get; init; }
-    public int ExpansionModuleNumber { get; init; }
+    public int ExpansionCardNumber { get; init; }
+    public int ExpansionModuleNumber => ExpansionCardNumber;
     public int FirstGlobalIo { get; init; }
     public int LastGlobalIo { get; init; }
     public bool IsEnabled { get; init; } = true;

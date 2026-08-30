@@ -5,7 +5,7 @@ namespace JBZUniversalTester.Services;
 public sealed class ScanSupervisor
 {
     private const int MinimumFirstFrameTimeoutMs = 1_500;
-    private const int FirstFrameTimeoutPerExpansionModuleMs = 1_500;
+    private const int FirstFrameTimeoutPerExpansionCardMs = 1_500;
     private const int StallTimeoutMarginMs = 2_500;
     private readonly IBoardTransport _board;
     private readonly Action<string> _log;
@@ -150,7 +150,7 @@ public sealed class ScanSupervisor
         ArgumentNullException.ThrowIfNull(capacity);
         return Math.Max(
             MinimumFirstFrameTimeoutMs,
-            checked(capacity.ExpansionModuleCount * FirstFrameTimeoutPerExpansionModuleMs));
+            checked(capacity.ExpansionCardCount * FirstFrameTimeoutPerExpansionCardMs));
     }
 
     public static int ResolveProductionStallTimeoutMs(BoardCapacity capacity) =>
@@ -158,7 +158,6 @@ public sealed class ScanSupervisor
 
     private static bool HasSameActiveRange(BoardCapacity left, BoardCapacity right) =>
         left.StartScanParameter == right.StartScanParameter &&
-        left.StartCardNumber == right.StartCardNumber &&
         left.TotalIoCapacity == right.TotalIoCapacity;
 
     private string BuildFrameTimeoutDiagnostic(string reason)

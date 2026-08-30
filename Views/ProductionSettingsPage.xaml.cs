@@ -164,10 +164,10 @@ public partial class ProductionSettingsPage : UserControl
     private void InitializeComboBoxItems()
     {
         CardIoComboBox.ItemsSource = Enumerable
-            .Range(1, BoardCapacity.MaxExpansionModuleCount)
+            .Range(1, BoardCapacity.MaxExpansionCardCount)
             .Select(n => new CardIoOption(
                 n,
-                $"{n} card / {n * BoardCapacity.IoPerExpansionModule} IO"))
+                n.ToString()))
             .ToArray();
 
         if (_vm.Settings.ExpansionCardCount <= 0)
@@ -179,10 +179,11 @@ public partial class ProductionSettingsPage : UserControl
         _vm.Settings.ExpansionCardCount = Math.Clamp(
             _vm.Settings.ExpansionCardCount,
             1,
-            BoardCapacity.MaxExpansionModuleCount);
+            BoardCapacity.MaxExpansionCardCount);
 
         BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
         _vm.Settings.CardCount = capacity.ScanCardCount;
+        RefreshTotalIoCapacity();
 
         IoConfirm1ComboBox.ItemsSource = Enumerable.Range(0, 128).ToArray();
         IoConfirmNComboBox.ItemsSource = Enumerable.Range(0, 32).ToArray();
@@ -191,6 +192,21 @@ public partial class ProductionSettingsPage : UserControl
             new RelayWiringOption(0, "R2 MARK → R1 JIG • FAIL R1"),
             new RelayWiringOption(1, "R1 MARK → R2 JIG • FAIL R2")
         };
+    }
+
+    private void CardIoComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        RefreshTotalIoCapacity();
+
+    private void RefreshTotalIoCapacity()
+    {
+        if (TotalIoCapacityText is null)
+            return;
+
+        int count = CardIoComboBox?.SelectedValue is int selected
+            ? selected
+            : _vm.Settings.ExpansionCardCount;
+        count = Math.Clamp(count, 1, BoardCapacity.MaxExpansionCardCount);
+        TotalIoCapacityText.Text = $"{count * BoardCapacity.IoPerExpansionCard} IO";
     }
 
     private async void RefreshPrinterPorts_Click(object sender, RoutedEventArgs e) =>
@@ -567,15 +583,9 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         }
 
-        if (_vm.Settings.ExpansionCardCount is < 1 or > BoardCapacity.MaxExpansionModuleCount)
+        if (_vm.Settings.ExpansionCardCount is < 1 or > BoardCapacity.MaxExpansionCardCount)
         {
-            error = $"Card mở rộng phải từ 1 đến {BoardCapacity.MaxExpansionModuleCount}.";
-            return false;
-        }
-
-        if (_vm.Settings.StartCardNumber is < 1 or > BoardCapacity.MaxPhysicalCardCount)
-        {
-            error = $"Số card bắt đầu phải từ 1 đến {BoardCapacity.MaxPhysicalCardCount}.";
+            error = $"Card mở rộng phải từ 1 đến {BoardCapacity.MaxExpansionCardCount}.";
             return false;
         }
 
@@ -584,9 +594,9 @@ public partial class ProductionSettingsPage : UserControl
         {
             error =
                 "Cấu hình card vượt phạm vi phần cứng hiện tại.\n\n" +
-                $"Start card: {capacity.StartCardNumber}\n" +
-                $"Card vật lý active: {capacity.PhysicalCardCount}\n" +
-                $"Giới hạn card vật lý: {BoardCapacity.MaxPhysicalCardCount}.";
+                $"Card mở rộng: {capacity.ExpansionCardCount}\n" +
+                $"Tổng IO: {capacity.TotalIoCapacity}\n" +
+                $"Giới hạn card: {BoardCapacity.MaxExpansionCardCount}.";
             return false;
         }
 

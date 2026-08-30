@@ -240,14 +240,14 @@ public sealed class TestViewModel : ObservableObject
     // chỉ cấp dữ liệu cho thanh trạng thái đầu dò, không bao giờ thay thế Faults.
     public ObservableCollection<FaultRow> ProbeContacts { get; } = new();
 
-    // V12.9: card vật lý được sinh động từ BoardCapacity. Probe chỉ đổi
+    // Card 64-I/O được sinh động từ BoardCapacity. Probe chỉ đổi
     // HasProbeActivity; card vẫn ACTIVE khi nhấc que.
     public ObservableCollection<BoardCardState> Cards { get; } = new();
     // Alias tương thích mã cũ; collection này chứa cả card bật và card tắt.
     public ObservableCollection<BoardCardState> ActiveCards => Cards;
     public BoardCapacity BoardCapacity => _board.Capacity;
     public string BoardCapacityText =>
-        $"{BoardCapacity.ExpansionModuleCount} module / {BoardCapacity.PhysicalCardCount} card / " +
+        $"{BoardCapacity.ScanCardCount} CARD / " +
         $"{BoardCapacity.TotalIoCapacity} I/O";
 
     public bool HasInlineProbeContacts => ProbeContacts.Count > 0;
@@ -339,8 +339,8 @@ public sealed class TestViewModel : ObservableObject
             if (value.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
                 return "THÁO SẢN PHẨM";
 
-            if (value.Contains("KIỂM TRA IO BAN ĐẦU", StringComparison.OrdinalIgnoreCase))
-                return "KIỂM TRA IO";
+            if (value.Contains("ĐỒNG BỘ DỮ LIỆU BO", StringComparison.OrdinalIgnoreCase))
+                return "ĐỒNG BỘ BO";
 
             if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
                 return "CHƯA KẾT NỐI BO";
@@ -880,7 +880,6 @@ public sealed class TestViewModel : ObservableObject
     public AsyncRelayCommand Relay1Command { get; }
     public AsyncRelayCommand Relay2Command { get; }
     public AsyncRelayCommand RelaysOffCommand { get; }
-    public AsyncRelayCommand ResetDeviceFaultCommand { get; }
     public AsyncRelayCommand RetryLabelCommand { get; }
     public AsyncRelayCommand ReprintLabelCommand { get; }
 
@@ -998,7 +997,6 @@ public sealed class TestViewModel : ObservableObject
                 AddLog("Tất cả relay OFF");
             });
 
-        ResetDeviceFaultCommand = new AsyncRelayCommand(ResetDeviceFaultAsync);
         RetryLabelCommand = new AsyncRelayCommand(RetryLastFailedLabelAsync, () => CanRetryLabel);
         ReprintLabelCommand = new AsyncRelayCommand(ReprintLastSuccessfulLabelAsync, () => CanReprintLabel);
 
@@ -1106,7 +1104,7 @@ public sealed class TestViewModel : ObservableObject
     public async Task<int> SetManualRelayAsync(int relay, bool turnOn)
     {
         if (IsDeviceFault)
-            throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy khởi tạo lại trước.");
+            throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy thoát và mở lại ứng dụng.");
         if (relay is not 1 and not 2)
             throw new ArgumentOutOfRangeException(nameof(relay));
         if (!EnsureManualBoardReady($"manual Relay {relay}", requireD2xxRelay: true))
@@ -1168,7 +1166,7 @@ public sealed class TestViewModel : ObservableObject
     public async Task ResetManualOutputsAsync()
     {
         if (IsDeviceFault)
-            throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy khởi tạo lại trước.");
+            throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy thoát và mở lại ứng dụng.");
         if (!EnsureManualBoardReady("manual RESET", requireD2xxRelay: true))
             return;
         if (!IsManualModeActive)
@@ -1257,7 +1255,7 @@ public sealed class TestViewModel : ObservableObject
         if (IsIoMappingMode)
             return "SẴN SÀNG LẬP BẢN ĐỒ IO";
         if (_requireStartupIoClear && Volatile.Read(ref _startupIoInterlockState) != 2)
-            return "CHỜ KIỂM TRA IO BAN ĐẦU";
+            return "CHỜ ĐỒNG BỘ DỮ LIỆU BO";
         return MasterApproved
             ? "CHỜ LẮP SẢN PHẨM"
             : "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
@@ -1292,8 +1290,6 @@ public sealed class TestViewModel : ObservableObject
     private void ReportDeviceFaultForTest(Exception exception, int desiredRowsCount = -1) =>
         EnterDeviceFault(exception, "SELF-TEST", desiredRowsCount);
 
-    private Task ResetDeviceFaultForTestAsync() => ResetDeviceFaultAsync();
-
     private void EnterDeviceFault(Exception exception, string source, int desiredRowsCount = -1)
     {
         ArgumentNullException.ThrowIfNull(exception);
@@ -1326,7 +1322,7 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         _deviceFaultMessage =
-            "Hệ thống không nhận được tín hiệu ổn định từ bo kiểm tra. Máy đã dừng để tránh kết quả sai.";
+            "Bo lỗi hoặc mất kết nối. Hãy thoát ứng dụng và mở lại sau khi kiểm tra cáp/nguồn.";
         _cycleActive = false;
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
@@ -1384,7 +1380,7 @@ public sealed class TestViewModel : ObservableObject
                 "- nguồn điện cấp cho bo;\n" +
                 "- đầu gá/JIG;\n" +
                 "- các dây kết nối.\n\n" +
-                "Sau khi kiểm tra, bấm KHỞI TẠO LẠI trên màn hình Test.",
+                "Sau khi kiểm tra, hãy THOÁT ỨNG DỤNG và mở lại để khởi tạo bo từ đầu.",
                 "LỖI HỆ THỐNG KIỂM TRA",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
@@ -1402,55 +1398,6 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(StateBackground));
         Raise(nameof(StateForeground));
         RaiseActiveFault();
-    }
-
-    private async Task ResetDeviceFaultAsync()
-    {
-        if (!IsDeviceFault)
-            return;
-
-        AddLog("DEVICE FAULT: operator yêu cầu khởi tạo lại.");
-        _deviceFaultMessage = "Đang khởi tạo lại thiết bị...";
-        Raise(nameof(DeviceFaultMessage));
-
-        try
-        {
-            SwitchRuntimeMode(RuntimeMode.Background);
-            CancelCycleOperations();
-            _engine.SetFrameProcessingEnabled(false);
-            ResetEngineWithoutChangedReentry();
-            Faults.Clear();
-            Resistance.Clear();
-            ClearInlineProbeContactsState(clearLastSeen: true);
-            InvokeUi(ClearInlineProbeDisplay);
-
-            if (_board.IsConnected)
-            {
-                await _board.StopScanAsync();
-                await _board.AllRelaysOffAsync();
-            }
-            else
-            {
-                await InitializeHardwareAsync();
-            }
-
-            Interlocked.Exchange(ref _deviceFault, 0);
-            Interlocked.Exchange(ref _deviceFaultDialogShown, 0);
-            _deviceFaultMessage =
-                "Hệ thống không nhận được tín hiệu ổn định từ bo kiểm tra. Máy đã dừng để tránh kết quả sai.";
-            State = ReadyStateForCurrentModel();
-            RaiseDeviceFaultState();
-            await EnsureContinuousProductionScanAsync();
-            AddLog("DEVICE FAULT: khởi tạo lại hoàn tất.");
-        }
-        catch (Exception ex)
-        {
-            _deviceFaultMessage = "Không thể khởi tạo lại thiết bị. Hãy kiểm tra kết nối bo.";
-            State = "LỖI THIẾT BỊ";
-            RaiseDeviceFaultState();
-            AsyncFileLogService.Current.Error($"DeviceFault reset failed: {ex}");
-            AddLog($"DEVICE FAULT: khởi tạo lại thất bại: {ex.Message}");
-        }
     }
 
     private static string ResolveHistoryDatabasePath(ProductionSettings settings) =>
@@ -3537,19 +3484,16 @@ public sealed class TestViewModel : ObservableObject
         int[] currentProbe = SnapshotInlineProbeContacts();
 
         Cards.Clear();
-        for (int cardNumber = 1; cardNumber <= BoardCapacity.MaxPhysicalCardCount; cardNumber++)
+        for (int cardNumber = 1; cardNumber <= BoardCapacity.MaxExpansionCardCount; cardNumber++)
         {
-            int firstIo = ((cardNumber - 1) * BoardCapacity.IoPerPhysicalCard) + 1;
-            int lastIo = firstIo + BoardCapacity.IoPerPhysicalCard - 1;
-            bool enabled =
-                cardNumber >= capacity.StartCardNumber &&
-                cardNumber < capacity.StartCardNumber + capacity.PhysicalCardCount;
+            int firstIo = ((cardNumber - 1) * BoardCapacity.IoPerExpansionCard) + 1;
+            int lastIo = firstIo + BoardCapacity.IoPerExpansionCard - 1;
+            bool enabled = cardNumber <= capacity.ScanCardCount;
 
             Cards.Add(new BoardCardState
             {
                 CardNumber = cardNumber,
-                ExpansionModuleNumber =
-                    ((cardNumber - 1) / BoardCapacity.PhysicalCardsPerExpansionModule) + 1,
+                ExpansionCardNumber = cardNumber,
                 FirstGlobalIo = firstIo,
                 LastGlobalIo = lastIo,
                 IsEnabled = enabled,
@@ -4009,8 +3953,8 @@ public sealed class TestViewModel : ObservableObject
 
         if (_requireStartupIoClear)
         {
-            State = "ĐANG KIỂM TRA IO BAN ĐẦU...";
-            AddLog("Đang chờ một frame IO sạch trước khi ARM Production/Master.");
+            State = "ĐANG ĐỒNG BỘ DỮ LIỆU BO...";
+            AddLog("Đang chờ một frame hoàn chỉnh và sạch trước khi ARM Production/Master.");
             return;
         }
 
@@ -6617,7 +6561,6 @@ public sealed class TestViewModel : ObservableObject
         BoardCapacity? appliedActiveCapacity = _board.AppliedScanCapacity;
         bool activeCapacityChanged = appliedActiveCapacity is null ||
             appliedActiveCapacity.StartScanParameter != requestedActiveCapacity.StartScanParameter ||
-            appliedActiveCapacity.StartCardNumber != requestedActiveCapacity.StartCardNumber ||
             appliedActiveCapacity.TotalIoCapacity != requestedActiveCapacity.TotalIoCapacity;
         bool restartRequired = activeCapacityChanged || forceNativeRestart;
 

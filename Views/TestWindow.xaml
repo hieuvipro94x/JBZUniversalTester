@@ -710,7 +710,6 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="190"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="130"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Text="L&#7894;I THI&#7870;T B&#7882;"
                                Foreground="White"
@@ -726,12 +725,6 @@
                                VerticalAlignment="Center"
                                TextTrimming="CharacterEllipsis"
                                Margin="10,0"/>
-                    <Button Grid.Column="2"
-                            Content="KH&#7902;I T&#7840;O L&#7840;I"
-                            Command="{Binding ResetDeviceFaultCommand}"
-                            Style="{StaticResource PiButtonStyle}"
-                            Height="34"
-                            Margin="4,0"/>
                 </Grid>
             </Border>
 

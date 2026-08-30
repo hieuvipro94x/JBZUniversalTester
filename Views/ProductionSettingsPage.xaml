@@ -165,10 +165,16 @@
                                   DisplayMemberPath="Display"
                                   SelectedValuePath="ExpansionCardCount"
                                   SelectedValue="{Binding Settings.ExpansionCardCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  ToolTip="S&#7889; scan-unit/card m&#7903; r&#7897;ng d&#249;ng cho START_SCAN"/>
+                                  SelectionChanged="CardIoComboBox_SelectionChanged"
+                                  ToolTip="S&#7889; card m&#7903; r&#7897;ng 64 IO; START_SCAN d&#249;ng c&#249;ng &#273;&#417;n v&#7883;"/>
 
-                        <TextBlock Grid.Row="1" Text="Card b&#7855;t &#273;&#7847;u" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Settings.StartCardNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="1" Text="T&#7893;ng I/O" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBlock x:Name="TotalIoCapacityText"
+                                   Grid.Row="1"
+                                   Grid.Column="1"
+                                   VerticalAlignment="Center"
+                                   FontWeight="Bold"
+                                   ToolTip="T&#7921; t&#237;nh: s&#7889; card m&#7903; r&#7897;ng &#215; 64 IO"/>
 
                         <TextBlock Grid.Row="2" Text="X&#225;c nh&#7853;n IO1" Style="{StaticResource FieldLabelStyle}"/>
                         <ComboBox x:Name="IoConfirm1ComboBox" Grid.Row="2" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirm1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>

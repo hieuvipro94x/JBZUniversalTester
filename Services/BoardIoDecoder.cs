@@ -20,16 +20,15 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class BoardIoDecoder
 {
-    // V12.9: các hằng số compatibility trỏ về BoardCapacity để toàn project
-    // dùng cùng một nguồn sự thật. 1 physical card = 32 I/O; 1 expansion
-    // module hiện cấu hình 2 physical card = 64 I/O.
-    public const int IoPerCard = BoardCapacity.IoPerPhysicalCard;
+    // Card shown in Production Settings is one firmware scan-unit = 64 I/O.
+    // The two internal 32-I/O physical boards remain an implementation detail.
+    public const int IoPerCard = BoardCapacity.IoPerExpansionCard;
     public const int ScanCardsPerExpansionCard = 1;
-    public const int IoPerScanCard = BoardCapacity.IoPerExpansionModule;
-    public const int IoPerExpansionCard = BoardCapacity.IoPerExpansionModule;
-    public const int MaxExpansionCardCount = BoardCapacity.MaxExpansionModuleCount;
-    public const int MaxScanCardCount = BoardCapacity.MaxExpansionModuleCount;
-    public const int MaxCardCount = BoardCapacity.MaxPhysicalCardCount;
+    public const int IoPerScanCard = BoardCapacity.IoPerExpansionCard;
+    public const int IoPerExpansionCard = BoardCapacity.IoPerExpansionCard;
+    public const int MaxExpansionCardCount = BoardCapacity.MaxExpansionCardCount;
+    public const int MaxScanCardCount = BoardCapacity.MaxExpansionCardCount;
+    public const int MaxCardCount = BoardCapacity.MaxExpansionCardCount;
     public const int IoPerBank = BoardAddressMapper.IoPerProtocolBank;
     public const int MaxIoCount = BoardCapacity.MaxGlobalIo;
 
@@ -53,13 +52,7 @@ public sealed class BoardIoDecoder
     long _sequence;
     int _unknownBytes;
     BoardCapacity _capacity = BoardCapacity.Create(1);
-    readonly BoardAddressMapper _addressMapper;
     BoardScanMode _mode = BoardScanMode.Production;
-
-    public BoardIoDecoder()
-    {
-        _addressMapper = new BoardAddressMapper(_capacity);
-    }
 
     public BoardCapacity Capacity => _capacity;
     public int ExpectedIoCount => _capacity.TotalIoCapacity;
@@ -91,15 +84,7 @@ public sealed class BoardIoDecoder
     {
         ArgumentNullException.ThrowIfNull(capacity);
         _capacity = capacity;
-        _addressMapper.Configure(capacity);
         Reset();
-    }
-
-    public void ConfigureStartCardNumber(int startCardNumber)
-    {
-        ConfigureCapacity(BoardCapacity.Create(
-            _capacity.ExpansionModuleCount,
-            startCardNumber));
     }
 
     public void ConfigureMode(BoardScanMode mode)
@@ -114,7 +99,7 @@ public sealed class BoardIoDecoder
     public void ConfigureCardCount(int cardCount)
     {
         int scanCardCount = NormalizeScanCardCount(cardCount);
-        ConfigureCapacity(BoardCapacity.Create(scanCardCount, _capacity.StartCardNumber));
+        ConfigureCapacity(BoardCapacity.Create(scanCardCount));
     }
 
     public void ConfigureIoCount(int ioCount)
@@ -123,7 +108,7 @@ public sealed class BoardIoDecoder
             (int)Math.Ceiling(Math.Max(1, ioCount) / (double)IoPerExpansionCard),
             1,
             MaxExpansionCardCount);
-        ConfigureCapacity(BoardCapacity.Create(expansion, _capacity.StartCardNumber));
+        ConfigureCapacity(BoardCapacity.Create(expansion));
     }
 
     public void Reset()
@@ -163,24 +148,34 @@ public sealed class BoardIoDecoder
             byte first = _buffer[_bufferOffset];
             byte second = _buffer[_bufferOffset + 1];
 
-            if (TryDecodeSource(first, second, out int sourceIo))
+            if (TryDecodeProtocolSource(first, second, out int sourceIo))
             {
-                _currentSource = sourceIo;
-                _sourcesSeen.Add(sourceIo);
-                _connections.TryAdd(sourceIo, []);
                 AppendRaw(first, second);
                 _bufferOffset += 2;
+
+                if (_capacity.ContainsGlobalIo(sourceIo))
+                {
+                    _currentSource = sourceIo;
+                    _sourcesSeen.Add(sourceIo);
+                    _connections.TryAdd(sourceIo, []);
+                }
+                else
+                {
+                    // Consume data beyond active capacity without exposing it to runtime.
+                    _currentSource = null;
+                }
                 continue;
             }
 
-            if (TryDecodeTarget(first, second, out int targetIo))
+            if (TryDecodeProtocolTarget(first, second, out int targetIo))
             {
-                _activeTargets.Add(targetIo);
-                _targetHitCounts[targetIo] =
-                    _targetHitCounts.GetValueOrDefault(targetIo) + 1;
-
-                if (_currentSource is int source)
+                if (_capacity.ContainsGlobalIo(targetIo) &&
+                    _currentSource is int source)
                 {
+                    _activeTargets.Add(targetIo);
+                    _targetHitCounts[targetIo] =
+                        _targetHitCounts.GetValueOrDefault(targetIo) + 1;
+
                     if (!_connections.TryGetValue(source, out HashSet<int>? targets))
                     {
                         targets = [];
@@ -260,10 +255,13 @@ public sealed class BoardIoDecoder
             byte first = _buffer[_bufferOffset];
             byte second = _buffer[_bufferOffset + 1];
 
-            if (TryDecodeProbeState(first, second, out int io, out bool active))
+            if (TryDecodeProtocolProbeState(first, second, out int io, out bool active))
             {
                 AppendRaw(first, second);
                 _bufferOffset += 2;
+
+                if (!_capacity.ContainsGlobalIo(io))
+                    continue;
 
                 // V12.9.2: protocol Probe được xử lý như event-based state.
                 // TARGET = TOUCH/ON, SOURCE = RELEASE/OFF. Cả hai đều cập nhật
@@ -345,11 +343,11 @@ public sealed class BoardIoDecoder
             _buffer.Add(value);
     }
 
-    bool TryDecodeSource(byte first, byte second, out int io) =>
-        _addressMapper.TryDecode(first, SourceBase, second, out io);
+    static bool TryDecodeProtocolSource(byte first, byte second, out int io) =>
+        BoardAddressMapper.TryDecodeProtocolAddress(first, SourceBase, second, out io);
 
-    bool TryDecodeTarget(byte first, byte second, out int io) =>
-        _addressMapper.TryDecode(first, TargetBase, second, out io);
+    static bool TryDecodeProtocolTarget(byte first, byte second, out int io) =>
+        BoardAddressMapper.TryDecodeProtocolAddress(first, TargetBase, second, out io);
 
     /// <summary>
     /// Terminator protocol đã có bằng chứng cho code 00 và 01. C0 với code khác
@@ -373,17 +371,17 @@ public sealed class BoardIoDecoder
         return true;
     }
 
-    bool TryDecodeProbeState(byte first, byte second, out int io, out bool active)
+    static bool TryDecodeProtocolProbeState(byte first, byte second, out int io, out bool active)
     {
         active = false;
 
-        if (_addressMapper.TryDecode(first, SourceBase, second, out io))
+        if (TryDecodeProtocolSource(first, second, out io))
         {
             active = false;
             return true;
         }
 
-        if (_addressMapper.TryDecode(first, TargetBase, second, out io))
+        if (TryDecodeProtocolTarget(first, second, out io))
         {
             active = true;
             return true;

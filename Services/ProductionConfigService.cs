@@ -155,7 +155,6 @@ public static class ProductionConfigService
             $"[IoConfirm1]{settings.IoConfirm1}",
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",
-            $"[StartCardNumber]{settings.StartCardNumber}",
             $"[UseTestPointer]{Bool(settings.UseTestPointer)}",
             $"[ManualModeEnabled]{Bool(settings.ManualModeEnabled)}",
             $"[AutoMasterSequence]{Bool(settings.AutoMasterSequence)}",
@@ -441,7 +440,7 @@ public static class ProductionConfigService
         settings.ExpansionCardCount = Math.Clamp(
             expansionModules,
             1,
-            BoardCapacity.MaxExpansionModuleCount);
+            BoardCapacity.MaxExpansionCardCount);
         settings.CardCount = settings.ExpansionCardCount;
         settings.IoConfirm1 = IAny(map, settings.IoConfirm1, "IoConfirm1", "IO1 확인");
         settings.IoConfirmN = IAny(map, settings.IoConfirmN, "IoConfirmN", "IOn 확인");
@@ -677,14 +676,11 @@ public static class ProductionConfigService
         settings.ExpansionCardCount = Math.Clamp(
             settings.ExpansionCardCount,
             1,
-            BoardCapacity.MaxExpansionModuleCount);
+            BoardCapacity.MaxExpansionCardCount);
 
-        int activePhysicalCards =
-            settings.ExpansionCardCount * BoardCapacity.PhysicalCardsPerExpansionModule;
-        int maxStartCard = Math.Max(
-            1,
-            BoardCapacity.MaxPhysicalCardCount - activePhysicalCards + 1);
-        settings.StartCardNumber = Math.Clamp(settings.StartCardNumber, 1, maxStartCard);
+        // Compatibility CFG cũ có thể chứa StartCardNumber. Không áp dụng offset
+        // chưa được protocol/trace chứng minh; runtime luôn bắt đầu từ card 1.
+        settings.StartCardNumber = 1;
 
         BoardCapacity capacity = BoardCapacity.FromSettings(settings);
         settings.CardCount = capacity.ScanCardCount;

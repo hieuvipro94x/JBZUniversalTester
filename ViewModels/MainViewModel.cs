@@ -57,12 +57,12 @@ public sealed class MainViewModel : ObservableObject
     public int RequiredCardCount =>
         Model is null
             ? 1
-            : BoardCapacity.RequiredScanUnitsForIo(
-                Model.MaxIo,
-                _productionSettings.StartCardNumber);
+            : BoardCapacity.RequiredScanUnitsForIo(Model.MaxIo);
 
-    public int ConfiguredCardCount => CurrentBoardCapacity.ExpansionModuleCount;
+    public int ConfiguredCardCount => CurrentBoardCapacity.ExpansionCardCount;
     public int ConfiguredIoCapacity => CurrentBoardCapacity.TotalIoCapacity;
+    public long RequiredIoCapacity =>
+        (long)RequiredCardCount * BoardCapacity.IoPerExpansionCard;
     public int ConfiguredIoStart => CurrentBoardCapacity.FirstGlobalIo;
     public int ConfiguredIoEnd => CurrentBoardCapacity.LastGlobalIo;
 
@@ -72,7 +72,7 @@ public sealed class MainViewModel : ObservableObject
         Model is null || !UsesD2xxCardCapacity ||
         (CurrentBoardCapacity.IsRangeWithinSystem &&
          Model.MaxIo <= BoardCapacity.MaxGlobalIo &&
-         Model.Pins.All(pin => CurrentBoardCapacity.ContainsGlobalIo(pin.IoNumber)));
+         RequiredCardCount <= ConfiguredCardCount);
 
     public HomeViewModel Home { get; }
     public TestViewModel Test { get; }
@@ -158,6 +158,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(RequiredCardCount));
         Raise(nameof(ConfiguredCardCount));
         Raise(nameof(ConfiguredIoCapacity));
+        Raise(nameof(RequiredIoCapacity));
         Raise(nameof(ConfiguredIoStart));
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
@@ -288,6 +289,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(RequiredCardCount));
         Raise(nameof(ConfiguredCardCount));
         Raise(nameof(ConfiguredIoCapacity));
+        Raise(nameof(RequiredIoCapacity));
         Raise(nameof(ConfiguredIoStart));
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
@@ -320,7 +322,6 @@ public sealed class MainViewModel : ObservableObject
         {
             BoardMode = _productionSettings.BoardMode,
             ExpansionCardCount = _productionSettings.ExpansionCardCount,
-            StartCardNumber = _productionSettings.StartCardNumber,
             UsbDelay = _productionSettings.UsbDelay
         };
 
@@ -330,7 +331,6 @@ public sealed class MainViewModel : ObservableObject
         bool boardSelectionChanged = old.BoardMode != _productionSettings.BoardMode;
         bool scanHardwareChanged =
             old.ExpansionCardCount != _productionSettings.ExpansionCardCount ||
-            old.StartCardNumber != _productionSettings.StartCardNumber ||
             old.UsbDelay != _productionSettings.UsbDelay;
 
         // Manual relay là trạng thái runtime tức thời, không reload từ file.
@@ -357,6 +357,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(RequiredCardCount));
         Raise(nameof(ConfiguredCardCount));
         Raise(nameof(ConfiguredIoCapacity));
+        Raise(nameof(RequiredIoCapacity));
         Raise(nameof(ConfiguredIoStart));
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
@@ -386,6 +387,8 @@ public sealed class MainViewModel : ObservableObject
             : $"Hãy vào CÀI ĐẶT -> Card mở rộng và chọn tối thiểu {RequiredCardCount} card trước khi test.";
 
         MessageBox.Show(
+            $"KHÔNG ĐỦ CARD MỞ RỘNG\n" +
+            $"{ConfiguredIoCapacity} / {RequiredIoCapacity} IO\n\n" +
             $"THÔNG TIN PIN / CARD\n\n" +
             $"Số I/O của mã hàng : {Model.MaxIo}\n" +
             $"Card mở rộng cần    : {RequiredCardCount}\n" +

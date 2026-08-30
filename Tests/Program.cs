@@ -23,6 +23,7 @@ internal static class Program
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
+            ("10-card complete-frame stress", TestTenCardCompleteFrameStress),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
             ("Inline probe does not clear wiring faults", TestInlineProbeDoesNotClearWiringFaults),
@@ -171,7 +172,7 @@ internal static class Program
 
         static ScanFrame CreateProductionFrame(long sequence) => new(
             DateTime.Now,
-            BoardCapacity.MaxExpansionModuleCount,
+            BoardCapacity.MaxExpansionCardCount,
             new HashSet<int>(),
             [],
             true,
@@ -653,11 +654,6 @@ internal static class Program
             "ReportDeviceFaultForTest",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("DeviceFault test reporter not found");
-        MethodInfo resetDeviceFault = typeof(TestViewModel).GetMethod(
-            "ResetDeviceFaultForTestAsync",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("DeviceFault test reset not found");
-
         for (int index = 0; index < 100; index++)
             reportDeviceFault.Invoke(deviceFaultVm, [new ArgumentOutOfRangeException("index", "simulated index fault"), -1]);
         Assert(deviceFaultVm.IsDeviceFault, "DeviceFault latches after index exception");
@@ -668,15 +664,17 @@ internal static class Program
                deviceFaultVm.StateForeground == "#FFFFFF",
             "DeviceFault status mapping");
 
-        ((Task)(resetDeviceFault.Invoke(deviceFaultVm, []) ?? throw new InvalidOperationException("DeviceFault reset returned null")))
-            .GetAwaiter()
-            .GetResult();
-        Assert(!deviceFaultVm.IsDeviceFault, "DeviceFault reset clears latch");
-        Assert(deviceFaultVm.ResultStatusText == "SẴN SÀNG", "DeviceFault reset returns to ready presentation");
         reportDeviceFault.Invoke(deviceFaultVm, [new InvalidOperationException("second episode"), -1]);
-        Assert(deviceFaultVm.DeviceFaultTransitionCount == 2 &&
-               deviceFaultVm.DeviceFaultDialogCount == 2,
-            "A later independent DeviceFault episode may show one new dialog");
+        Assert(deviceFaultVm.IsDeviceFault &&
+               deviceFaultVm.DeviceFaultTransitionCount == 1 &&
+               deviceFaultVm.DeviceFaultDialogCount == 1,
+            "DeviceFault remains latched for the process lifetime and cannot be reset in-app");
+
+        string testWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
+        Assert(!testWindowXaml.Contains("ResetDeviceFaultCommand", StringComparison.Ordinal) &&
+               !testWindowXaml.Contains("KH&#7902;I T&#7840;O L&#7840;I", StringComparison.Ordinal),
+            "DeviceFault UI has no reinitialize button; operator must restart the application");
     }
 
     private static void TestManualModeInterlock()
@@ -783,8 +781,9 @@ internal static class Program
         int passBeforeWarning = vm.Pass;
         int failBeforeWarning = vm.Fail;
 
-        Assert(vm.State.Contains("KIỂM TRA IO BAN ĐẦU", StringComparison.Ordinal),
-            "Production does not present READY before receiving a clean baseline frame");
+        Assert(vm.State.Contains("ĐỒNG BỘ DỮ LIỆU BO", StringComparison.Ordinal) &&
+               vm.ResultStatusText == "ĐỒNG BỘ BO",
+            "Production waits for a clean baseline frame without reporting an IO-capacity warning");
 
         board.Publish(FrameSeq(102, (1, new[] { 18 }), (18, new[] { 1 })));
         Assert(vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM" &&
@@ -1740,26 +1739,180 @@ internal static class Program
 
     private static void TestBoardCapacity()
     {
+        for (int cardCount = 1; cardCount <= 10; cardCount++)
+        {
+            BoardCapacity everyCapacity = BoardCapacity.Create(cardCount);
+            Assert(everyCapacity.ExpansionCardCount == cardCount &&
+                   everyCapacity.TotalIoCapacity == cardCount * 64 &&
+                   everyCapacity.StartScanParameter == cardCount,
+                $"Every selectable card count {cardCount} maps to {cardCount * 64} IO and START_SCAN={cardCount}");
+        }
+
         AssertCapacity(1, 2, 1, 64);
         AssertCapacity(2, 4, 2, 128);
+        AssertCapacity(3, 6, 3, 192);
+        AssertCapacity(4, 8, 4, 256);
         AssertCapacity(5, 10, 5, 320);
         AssertCapacity(10, 20, 10, 640);
 
         BoardCapacity capacity = BoardCapacity.Create(10);
         var mapper = new BoardAddressMapper(capacity);
-        Assert(mapper.GetCardAddress(1) == new BoardCardAddress(1, 1, 1, 1, 1), "IO1 mapping");
-        Assert(mapper.GetCardAddress(32).LocalIoNumber == 32, "IO32 local");
-        Assert(mapper.GetCardAddress(33).PhysicalCardNumber == 2, "IO33 card");
-        Assert(mapper.GetCardAddress(64).LocalIoNumber == 32, "IO64 local");
-        Assert(mapper.GetCardAddress(65).PhysicalCardNumber == 3, "IO65 card");
+        AssertAddress(mapper, 1, 1, 1, 1);
+        AssertAddress(mapper, 32, 1, 1, 32);
+        AssertAddress(mapper, 33, 1, 2, 1);
+        AssertAddress(mapper, 64, 1, 2, 32);
+        AssertAddress(mapper, 65, 2, 1, 1);
+        AssertAddress(mapper, 96, 2, 1, 32);
+        AssertAddress(mapper, 97, 2, 2, 1);
+        AssertAddress(mapper, 128, 2, 2, 32);
+        AssertAddress(mapper, 129, 3, 1, 1);
+        AssertAddress(mapper, 160, 3, 1, 32);
+        AssertAddress(mapper, 161, 3, 2, 1);
+        AssertAddress(mapper, 192, 3, 2, 32);
+        AssertAddress(mapper, 193, 4, 1, 1);
+        AssertAddress(mapper, 224, 4, 1, 32);
+        AssertAddress(mapper, 225, 4, 2, 1);
+        AssertAddress(mapper, 256, 4, 2, 32);
+        AssertAddress(mapper, 577, 10, 1, 1);
+        AssertAddress(mapper, 608, 10, 1, 32);
+        AssertAddress(mapper, 609, 10, 2, 1);
+        AssertAddress(mapper, 640, 10, 2, 32);
         Assert(capacity.ContainsGlobalIo(640), "IO640 accepted");
         Assert(!capacity.ContainsGlobalIo(641), "IO641 rejected");
+
+        (int MaxIo, int RequiredCards, long RequiredIo)[] requiredCases =
+        [
+            (1, 1, 64),
+            (64, 1, 64),
+            (65, 2, 128),
+            (128, 2, 128),
+            (129, 3, 192),
+            (192, 3, 192),
+            (193, 4, 256),
+            (201, 4, 256),
+            (256, 4, 256),
+            (257, 5, 320),
+            (640, 10, 640)
+        ];
+        foreach ((int maxIo, int requiredCards, long requiredIo) in requiredCases)
+        {
+            BoardScanCapacity requiredCapacity = BoardScanCapacity.Create(
+                new ProductionSettings { ExpansionCardCount = 10 },
+                maxIo);
+            Assert(requiredCapacity.RequiredScanUnits == requiredCards &&
+                   requiredCapacity.RequiredIoCapacity == requiredIo,
+                $"MaxIO {maxIo} requires {requiredCards} card / {requiredIo} IO");
+        }
+
+        BoardScanCapacity insufficient = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 3 },
+            201);
+        Assert(!insufficient.IsModelWithinInstalledCapacity &&
+               insufficient.Installed.TotalIoCapacity == 192 &&
+               insufficient.RequiredScanUnits == 4 &&
+               insufficient.RequiredIoCapacity == 256 &&
+               insufficient.CapacityErrorMessage.Contains("192 / 256 IO", StringComparison.Ordinal),
+            "Configured 3 / MaxIO 201 blocks Production and warns 192 / 256 IO");
+
+        BoardScanCapacity configured4 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 4 },
+            201);
+        Assert(configured4.IsModelWithinInstalledCapacity &&
+               configured4.RequiredScanUnits == 4 &&
+               configured4.StartScanParameter == 4,
+            "Configured 4 / MaxIO 201 is valid and keeps START_SCAN=4");
+
+        BoardScanCapacity configured10Model201 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            201);
+        Assert(configured10Model201.IsModelWithinInstalledCapacity &&
+               configured10Model201.RequiredScanUnits == 4 &&
+               configured10Model201.ActiveScanUnits == 10 &&
+               configured10Model201.StartScanParameter == 10 &&
+               configured10Model201.ActiveIoCapacity == 640,
+            "Configured 10 / MaxIO 201 validates with required=4 but keeps START_SCAN=10");
+
+        BoardScanCapacity configured10Model512 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            512);
+        Assert(configured10Model512.IsModelWithinInstalledCapacity &&
+               configured10Model512.RequiredScanUnits == 8 &&
+               configured10Model512.ActiveScanUnits == 10 &&
+               configured10Model512.StartScanParameter == 10,
+            "Configured 10 / MaxIO 512 validates with required=8 but keeps START_SCAN=10");
+
+        BoardScanCapacity overLimit = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            641);
+        Assert(!overLimit.IsModelWithinInstalledCapacity &&
+               overLimit.RequiredScanUnits == 11 &&
+               overLimit.CapacityErrorMessage.Contains("vượt giới hạn 640 IO", StringComparison.Ordinal),
+            "MaxIO 641 is rejected as beyond the 10-card/640-IO hardware limit");
+
+        BoardScanCapacity tenCardModel = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            640);
+        Assert(tenCardModel.IsModelWithinInstalledCapacity &&
+               tenCardModel.RequiredScanUnits == 10 &&
+               tenCardModel.ActiveScanUnits == 10 &&
+               tenCardModel.ActiveIoCapacity == 640 &&
+               tenCardModel.StartScanParameter == 10,
+            "A valid IO640 model fits exactly in ten cards without a capacity warning");
+
+        var legacyStart = new ProductionSettings
+        {
+            ExpansionCardCount = 4,
+            StartCardNumber = 3
+        };
+        BoardCapacity legacyCapacity = BoardCapacity.FromSettings(legacyStart);
+        Assert(legacyCapacity.FirstGlobalIo == 1 && legacyCapacity.LastGlobalIo == 256 &&
+               legacyCapacity.TotalIoCapacity == 256 && legacyCapacity.StartCardNumber == 1,
+            "Unverified legacy StartCardNumber cannot offset or reduce the configured 4-card capacity");
+
+        string settingsXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        Assert(settingsXaml.Contains("Settings.ExpansionCardCount", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"TotalIoCapacityText\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.StartCardNumber", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.PhysicalCardCount", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.PortCount", StringComparison.Ordinal),
+            "Production Settings exposes only ExpansionCardCount and read-only Total IO for card capacity");
+
+        string cfgPath = Path.Combine(Path.GetTempPath(), $"jbz-card-capacity-{Guid.NewGuid():N}.cfg");
+        try
+        {
+            ProductionConfigService.SaveLegacyCfg(legacyStart, cfgPath);
+            string cfg = File.ReadAllText(cfgPath);
+            Assert(legacyStart.StartCardNumber == 1 &&
+                   !cfg.Contains("[StartCardNumber]", StringComparison.Ordinal),
+                "New CFG normalizes legacy start-card to 1 and persists only the expansion-card count");
+        }
+        finally
+        {
+            if (File.Exists(cfgPath))
+                File.Delete(cfgPath);
+        }
+    }
+
+    private static void AssertAddress(
+        BoardAddressMapper mapper,
+        int globalIo,
+        int expansionCard,
+        int port,
+        int localIo)
+    {
+        BoardCardAddress address = mapper.GetCardAddress(globalIo);
+        Assert(address.GlobalIoNumber == globalIo &&
+               address.ExpansionCardNumber == expansionCard &&
+               address.PortNumber == port &&
+               address.LocalIoOnPort == localIo,
+            $"IO{globalIo} => expansion card {expansionCard} / port {port} / local {localIo}");
     }
 
     private static void AssertCapacity(int expansion, int physical, int scan, int io)
     {
         BoardCapacity capacity = BoardCapacity.Create(expansion);
-        Assert(capacity.PhysicalCardCount == physical, $"Expansion {expansion}: physical");
+        Assert(capacity.PortCount == physical, $"Expansion {expansion}: internal port count");
         Assert(capacity.ScanCardCount == scan, $"Expansion {expansion}: scan");
         Assert(capacity.TotalIoCapacity == io, $"Expansion {expansion}: IO");
     }
@@ -1794,22 +1947,22 @@ internal static class Program
             "Multiple complete frames in one read are decoded");
 
         decoder.Reset();
-        byte[] partialLarge = BuildProductionScanFrame(8, 0x01)
+        byte[] partialLarge = BuildProductionScanFrame(10, 0x01)
             .Take(300 * 2)
             .Concat(new byte[] { 0xC0, 0x01 })
             .ToArray();
-        decoder.ConfigureCapacity(BoardCapacity.Create(8));
+        decoder.ConfigureCapacity(BoardCapacity.Create(10));
         ScanFrame incomplete = decoder.Feed(partialLarge).Single();
         Assert(!incomplete.Complete && incomplete.SourceCount == 300 &&
-               incomplete.ExpectedIoCount == 512 && incomplete.EndMarkerCode == 0x01,
-            "Partial 300/512 frame is diagnostic incomplete and cannot ARM");
+               incomplete.ExpectedIoCount == 640 && incomplete.EndMarkerCode == 0x01,
+            "Partial 300/640 frame is diagnostic incomplete and cannot ARM");
 
         decoder.Reset();
-        byte[] largeRaw = BuildProductionScanFrame(8, 0x01);
+        byte[] largeRaw = BuildProductionScanFrame(10, 0x01);
         ScanFrame large = decoder.Feed(largeRaw).Single();
-        Assert(large.Complete && large.SourceCount == 512 && large.ExpectedIoCount == 512 &&
+        Assert(large.Complete && large.SourceCount == 640 && large.ExpectedIoCount == 640 &&
                large.EndMarkerCode == 0x01 && large.UnknownBytes == 0,
-            "Trace-sized 512-source frame accepts C0 01 without unknown bytes");
+            "Ten-card 640-source frame accepts C0 01 without unknown bytes");
 
         decoder.Reset();
         Assert(decoder.Feed(largeRaw.AsSpan(0, largeRaw.Length - 1)).Count == 0,
@@ -1825,16 +1978,19 @@ internal static class Program
                unknownTerminator.EndMarkerCode == 0x02,
             "C0 02 is diagnostic only, not guessed as a valid terminator");
 
-        BoardScanCapacity active8 = BoardScanCapacity.Create(
-            new ProductionSettings { ExpansionCardCount = 10, StartCardNumber = 1 },
+        BoardScanCapacity configured10Required8 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
             512);
-        Assert(active8.InstalledScanUnits == 10 && active8.RequiredScanUnits == 8 &&
-               active8.ActiveScanUnits == 8 && active8.StartScanParameter == 8 &&
-               active8.ActiveIoCapacity == 512 && active8.IsModelWithinInstalledCapacity,
-            "Installed 10 / required 8 selects active 8 and START_SCAN parameter 8");
+        Assert(configured10Required8.InstalledScanUnits == 10 &&
+               configured10Required8.RequiredScanUnits == 8 &&
+               configured10Required8.ActiveScanUnits == 10 &&
+               configured10Required8.StartScanParameter == 10 &&
+               configured10Required8.ActiveIoCapacity == 640 &&
+               configured10Required8.IsModelWithinInstalledCapacity,
+            "Configured 10 / required 8 keeps active 10 and START_SCAN parameter 10");
 
         BoardScanCapacity insufficient = BoardScanCapacity.Create(
-            new ProductionSettings { ExpansionCardCount = 4, StartCardNumber = 1 },
+            new ProductionSettings { ExpansionCardCount = 4 },
             512);
         Assert(insufficient.InstalledScanUnits == 4 && insufficient.RequiredScanUnits == 8 &&
                !insufficient.IsModelWithinInstalledCapacity,
@@ -1858,6 +2014,63 @@ internal static class Program
         ScanFrame noStaleSource = decoder.Feed(BuildProductionScanFrame(1, 0x00)).Single();
         Assert(noStaleSource.Connections.Values.All(targetsAfterSwitch => targetsAfterSwitch.Count == 0),
             "No stale source/target edge after mode switch");
+
+        decoder.ConfigureCapacity(BoardCapacity.Create(3));
+        _ = decoder.Feed(BuildProductionScanFrame(3, 0x00).AsSpan(0, 200));
+        decoder.ConfigureCapacity(BoardCapacity.Create(10));
+        ScanFrame afterCapacityChange = decoder.Feed(BuildProductionScanFrame(10, 0x01)).Single();
+        Assert(afterCapacityChange.Complete &&
+               afterCapacityChange.SourceCount == 640 &&
+               afterCapacityChange.ExpectedIoCount == 640 &&
+               afterCapacityChange.Sequence == 1,
+            "Changing 3 -> 10 cards discards old partial data and resets frame sequence");
+    }
+
+    private static void TestTenCardCompleteFrameStress()
+    {
+        var decoder = new BoardIoDecoder();
+        decoder.ConfigureCapacity(BoardCapacity.Create(10));
+        decoder.ConfigureMode(BoardScanMode.Production);
+        byte[] raw = BuildProductionScanFrame(10, 0x01);
+
+        using TestEngine engine = CreateEngine(out FakeBoard board);
+        engine.SetModel(Model(("PAIR", new[] { 1, 18 })));
+        int changed = 0;
+        engine.Changed += (_, _) => changed++;
+
+        var supervisor = new ScanSupervisor(board, _ => { });
+        bool restarted = supervisor.EnsureProductionScanAsync(640, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+
+        const int frameCount = 500;
+        long retainedBefore = GC.GetTotalMemory(forceFullCollection: true);
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var stopwatch = Stopwatch.StartNew();
+        for (int index = 0; index < frameCount; index++)
+        {
+            ScanFrame frame = decoder.Feed(raw).Single();
+            board.Publish(frame);
+            engine.ProcessFrame(frame);
+        }
+        stopwatch.Stop();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        long retainedAfter = GC.GetTotalMemory(forceFullCollection: true);
+        int startCount = board.Commands.Count(command => command == "START");
+        int stopCount = board.Commands.Count(command => command == "STOP");
+
+        Assert(!restarted && startCount == 0 && stopCount == 0,
+            "Ten-card stress reuses the healthy configured stream without repeated START/STOP");
+        Assert(board.CompleteFramesReceived == frameCount &&
+               engine.FramesProcessed == frameCount,
+            "Ten-card stress processes all 500 complete 640-IO frames");
+        Assert(changed <= 1,
+            "Ten-card identical topology does not raise unbounded Changed/UI events");
+        Assert(retainedAfter <= retainedBefore + (32L * 1024 * 1024),
+            $"Ten-card stress retained memory stays bounded ({retainedBefore} -> {retainedAfter})");
+        Console.WriteLine(
+            $"10-CARD STRESS: frames={frameCount} elapsedMs={stopwatch.ElapsedMilliseconds} " +
+            $"allocated={allocated:N0} changed={changed} START={startCount} STOP={stopCount}");
     }
 
     private static byte[] BuildProductionScanFrame(
@@ -1865,7 +2078,7 @@ internal static class Program
         byte terminatorCode,
         (int Source, int Target)? connection = null)
     {
-        int ioCount = scanUnits * BoardCapacity.IoPerExpansionModule;
+        int ioCount = scanUnits * BoardCapacity.IoPerExpansionCard;
         var bytes = new List<byte>((ioCount * 2) + 4);
         for (int io = 1; io <= ioCount; io++)
         {

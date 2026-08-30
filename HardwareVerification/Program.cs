@@ -80,11 +80,11 @@ if (!string.IsNullOrWhiteSpace(modelDirectory))
         try
         {
             ProductModel model = parser.Load(modelPath);
-            int requiredModules = BoardCapacity.RequiredScanUnitsForIo(model.MaxIo);
+            int requiredCards = BoardCapacity.RequiredScanUnitsForIo(model.MaxIo);
             Console.WriteLine(
                 $"MODEL_PARSE PASS file=\"{Path.GetFileName(modelPath)}\" part=\"{model.PartNumber}\" " +
                 $"pins={model.Pins.Count} nets={model.Nets.Count} maxIo={model.MaxIo} " +
-                $"requiredModules={requiredModules} warnings={model.TopologyWarnings.Count}");
+                $"requiredCards={requiredCards} warnings={model.TopologyWarnings.Count}");
             foreach (string warning in model.TopologyWarnings)
                 Console.WriteLine($"MODEL_WARNING file=\"{Path.GetFileName(modelPath)}\" {warning}");
         }
@@ -200,9 +200,8 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
         Console.WriteLine($"CONNECTED Description=\"{connection.Description}\" Serial=\"{connection.SerialNumber}\"");
 
         // HardwareVerification không có model THT bắt buộc. --expansion-cards
-        // vì vậy chính là active range cần thử; nếu không configure, transport
-        // mới mặc định active=1 dù máy được khai báo 10 scan units.
-        int verificationMaxIo = checked(expansionCards * BoardCapacity.IoPerExpansionModule);
+        // là configured range và cũng là START_SCAN range cần thử.
+        int verificationMaxIo = checked(expansionCards * BoardCapacity.IoPerExpansionCard);
         board.ConfigureActiveScanRange(verificationMaxIo);
 
         if (verifySupervisor)

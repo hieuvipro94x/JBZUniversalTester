@@ -24,6 +24,10 @@ public sealed class ProductionSettings
 
     public int UsbDelay { get; set; } = 1;
 
+    /// <summary>
+    /// Trường chỉ để đọc tương thích CFG/database cũ. Runtime chuẩn luôn bắt đầu
+    /// từ card 1; protocol hiện không có tham số start-card đã được xác minh.
+    /// </summary>
     public int StartCardNumber { get; set; } = 1;
 
     public bool UseTestPointer { get; set; } = true;
@@ -68,10 +72,9 @@ public sealed class ProductionSettings
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Số module/card mở rộng người vận hành cấu hình: 1..10.
-    /// 1 module = 2 card vật lý x 32 I/O = 64 I/O.
-    /// 10 module = 20 card vật lý = 640 I/O.
-    /// START_SCAN xx dùng chính số module/scan-unit này.
+    /// Số card mở rộng 64 I/O người vận hành cấu hình: 1..10.
+    /// Mỗi card có 2 port nội bộ x 32 I/O; operator không cấu hình số port.
+    /// START_SCAN xx dùng chính số card/scan-unit này.
     /// </summary>
     public int ExpansionCardCount { get; set; } = 1;
 
