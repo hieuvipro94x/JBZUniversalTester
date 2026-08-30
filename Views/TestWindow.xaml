@@ -761,7 +761,7 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Row="2">
+        <Grid x:Name="OperationTablesHost" Grid.Row="2">
             <DataGrid x:Name="FaultGrid"
                       ItemsSource="{Binding Faults}"
                       HorizontalAlignment="Stretch"

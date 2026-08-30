@@ -100,9 +100,22 @@ internal static class Program
         Assert(
             string.Equals(
                 filterText.GetRawConstantValue()?.ToString(),
-                "JBZ THT (*.tht)|*.tht|Mã hàng legacy (*.model)|*.model",
+                "The Files (*.tht)|*.tht|All Files (*.*)|*.*",
                 StringComparison.Ordinal),
-            "Standard dialog filter must prefer .tht first and keep .model as legacy");
+            "Native dialog filter must match the original Htdrv .tht/all-files order");
+
+        string pickerSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "HomeViewModel.cs"));
+        Assert(pickerSource.Contains("DefaultExt = \".tht\"", StringComparison.Ordinal) &&
+               pickerSource.Contains("OriginalItemDirectory = @\"C:\\Item\"", StringComparison.Ordinal) &&
+               pickerSource.Contains("FirstOrDefault(window => window.IsActive)", StringComparison.Ordinal) &&
+               pickerSource.Contains("dialog.ShowDialog(owner)", StringComparison.Ordinal) &&
+               !pickerSource.Contains("StandardFileDialogPositionGuard", StringComparison.Ordinal) &&
+               !File.Exists(Path.Combine(
+                   Environment.CurrentDirectory,
+                   "Views",
+                   "StandardFileDialogPositionGuard.cs")),
+            "Product picker uses an owner-bound native dialog without custom sizing or positioning");
     }
 
     private static void TestProductionScanFirstFrameAfterSequenceReset()
@@ -587,13 +600,27 @@ internal static class Program
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
         Assert(mainWindowSource.Contains(
-                   "StartTestButton.IsEnabled = boardConnected && _viewModel.Model is not null;",
+                   "StartTestButton.IsEnabled = _viewModel.Model is not null;",
                    StringComparison.Ordinal) &&
                mainWindowSource.Contains(
-                   "SelectModelButton.IsEnabled = boardConnected && !blocked;",
+                   "SelectModelButton.IsEnabled = !blocked;",
                    StringComparison.Ordinal) &&
-               mainWindowSource.Contains("nameof(TestViewModel.IsBoardConnected)", StringComparison.Ordinal),
-            "Main actions unlock only after board connection; removal still locks only product selection");
+               mainWindowSource.Contains("offlinePreview: offlinePreview", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("autoStartProduction: boardConnected && hasCapacity", StringComparison.Ordinal),
+            "Main actions allow offline model preview while production auto-start still requires a connected board");
+
+        string mainViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
+        Assert(!mainViewModelSource.Contains(
+                   "Chỉ được chọn mã hàng sau khi bo kết nối thành công.",
+                   StringComparison.Ordinal),
+            "Selecting and parsing a model is allowed without a connected board");
+
+        Assert(xaml.Contains("x:Name=\"OperationTablesHost\"", StringComparison.Ordinal) &&
+               testWindowSource.Contains("OperationTablesHost.Visibility = Visibility.Collapsed;", StringComparison.Ordinal) &&
+               testWindowSource.Contains("XEM MÃ HÀNG OFFLINE - BO CHƯA KẾT NỐI", StringComparison.Ordinal) &&
+               testWindowSource.Contains("if (_autoStartProduction && !_offlinePreview)", StringComparison.Ordinal),
+            "Offline TestWindow hides all operation tables and cannot ARM production testing");
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));

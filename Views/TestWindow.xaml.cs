@@ -18,19 +18,29 @@ public partial class TestWindow : Window
     private bool _initializationStarted;
     private bool _closeInProgress;
     private readonly bool _autoStartProduction;
+    private readonly bool _offlinePreview;
     private readonly DispatcherTimer _clockTimer;
     private NotifyCollectionChangedEventHandler? _faultsChangedHandler;
     private CancellationTokenSource? _scrollCts;
 
-    public TestWindow(TestViewModel viewModel, bool autoStartProduction = true)
+    public TestWindow(
+        TestViewModel viewModel,
+        bool autoStartProduction = true,
+        bool offlinePreview = false)
     {
         InitializeComponent();
         Title = $"UniversalTester {AppVersion.DisplayVersion} - Màn hình kiểm tra";
         TestAppVersionText.Text = AppVersion.DisplayVersion;
         DataContext = viewModel;
         _autoStartProduction = autoStartProduction;
+        _offlinePreview = offlinePreview;
 
-        if (!_autoStartProduction)
+        if (_offlinePreview)
+        {
+            OperationTablesHost.Visibility = Visibility.Collapsed;
+            viewModel.State = "XEM MÃ HÀNG OFFLINE - BO CHƯA KẾT NỐI";
+        }
+        else if (!_autoStartProduction)
             viewModel.State = "CẤU HÌNH CARD KHÔNG ĐỦ";
 
         _clockTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -102,13 +112,16 @@ public partial class TestWindow : Window
         ModelTitleText.Visibility = viewModel.ShowTitle ? Visibility.Visible : Visibility.Collapsed;
         ConnectorColumn.Visibility = Visibility.Visible;
 
-        _faultsChangedHandler = (_, _) => ScheduleScrollToFirstFault(viewModel);
-        viewModel.Faults.CollectionChanged += _faultsChangedHandler;
+        if (!_offlinePreview)
+        {
+            _faultsChangedHandler = (_, _) => ScheduleScrollToFirstFault(viewModel);
+            viewModel.Faults.CollectionChanged += _faultsChangedHandler;
+        }
 
         try
         {
             await Dispatcher.Yield(DispatcherPriority.Background);
-            if (_autoStartProduction)
+            if (_autoStartProduction && !_offlinePreview)
                 await viewModel.StartProductionTestAsync();
         }
         catch (Exception ex)

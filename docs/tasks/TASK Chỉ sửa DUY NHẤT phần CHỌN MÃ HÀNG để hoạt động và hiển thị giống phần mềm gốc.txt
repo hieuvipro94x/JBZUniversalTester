@@ -1,0 +1,276 @@
+TASK: Chỉ sửa DUY NHẤT phần "CHỌN MÃ HÀNG" để hoạt động và hiển thị giống phần mềm gốc Htdrv3-KETQU2000.exe.
+
+QUY TẮC BẮT BUỘC:
+- KHÔNG sửa bất kỳ logic test nào.
+- KHÔNG sửa giao tiếp phần cứng.
+- KHÔNG sửa TestEngine.
+- KHÔNG sửa ViewModel nếu không thực sự cần cho thao tác mở file.
+- KHÔNG sửa parser file .tht.
+- KHÔNG sửa cách load model sau khi đã chọn file.
+- KHÔNG sửa MainWindow/TestWindow layout ngoài nút CHỌN MÃ HÀNG nếu không cần.
+- KHÔNG sửa màu sắc, font, kích thước các control khác.
+- KHÔNG đổi DPI awareness toàn bộ ứng dụng.
+- KHÔNG refactor ngoài phạm vi task.
+- KHÔNG đổi tên class/method không liên quan.
+- KHÔNG tạo file backup *.bak, *.old, copy, temp trong project.
+- Mục tiêu là patch nhỏ nhất có thể.
+
+==============================
+THAM CHIẾU PHẦN MỀM GỐC
+==============================
+
+Phân tích Htdrv3-KETQU2000.exe cho thấy phần mềm gốc dùng native Windows/MFC file dialog:
+
+- CFileDialog / GetOpenFileNameA
+- Default extension: tht
+- Initial directory: C:\Item
+- Filter:
+
+    The Files (*.tht)|*.tht|All Files (*.*)|*.*||
+
+- Không có custom Window riêng để chọn file.
+- Không tự đặt Width/Height.
+- Không tự tính Left/Top.
+- Không MoveWindow / SetWindowPos để ép kích thước.
+- Windows tự quản lý kích thước và vị trí dialog.
+
+Cấu hình gốc tương đương:
+
+    CFileDialog(
+        TRUE,
+        "tht",
+        NULL,
+        0x06,
+        "The Files (*.tht)|*.tht|All Files (*.*)|*.*||",
+        NULL
+    );
+
+    dlg.m_ofn.lpstrInitialDir = "C:\\Item";
+
+==============================
+YÊU CẦU SỬA
+==============================
+
+1. Tìm chính xác handler/command đang được gọi khi bấm nút:
+
+    CHỌN MÃ HÀNG
+
+2. Chỉ sửa flow mở hộp thoại chọn file.
+
+3. Nếu hiện tại đang dùng custom WPF Window/UserControl để duyệt file thì bỏ custom dialog đó khỏi flow CHỌN MÃ HÀNG và dùng native Windows OpenFileDialog.
+
+4. Sử dụng:
+
+    Microsoft.Win32.OpenFileDialog
+
+5. Cấu hình:
+
+    var dialog = new Microsoft.Win32.OpenFileDialog
+    {
+        DefaultExt = ".tht",
+        Filter = "The Files (*.tht)|*.tht|All Files (*.*)|*.*",
+        Multiselect = false
+    };
+
+6. Thư mục mở mặc định:
+
+    C:\Item
+
+Nếu tồn tại:
+
+    dialog.InitialDirectory = @"C:\Item";
+
+Nếu không tồn tại:
+- giữ fallback hiện tại của chương trình,
+hoặc
+- dùng thư mục model hiện tại,
+hoặc
+- AppContext.BaseDirectory.
+
+KHÔNG tạo C:\Item mới chỉ để mở dialog.
+
+7. PHẢI gán OWNER đúng cho dialog.
+
+Ưu tiên cửa sổ đang active:
+
+    Window? owner = Application.Current.Windows
+        .OfType<Window>()
+        .FirstOrDefault(w => w.IsActive)
+        ?? Application.Current.MainWindow;
+
+Sau đó:
+
+    bool? result = owner != null
+        ? dialog.ShowDialog(owner)
+        : dialog.ShowDialog();
+
+Không tạo cửa sổ owner giả.
+Không sử dụng HWND desktop làm owner.
+
+8. Tuyệt đối KHÔNG tự chỉnh kích thước dialog:
+
+Không được thêm hoặc giữ code kiểu:
+
+    Width
+    Height
+    MinWidth
+    MinHeight
+    Left
+    Top
+    WindowStartupLocation
+    SetWindowPos
+    MoveWindow
+    GetWindowRect
+    Screen.PrimaryScreen
+    WorkingArea
+    monitor center calculation
+    DPI scale multiplier
+
+nếu những đoạn code đó chỉ phục vụ OpenFileDialog.
+
+9. Không ép dialog ra giữa màn hình.
+
+Windows phải tự bố trí dialog dựa trên owner giống native common dialog.
+
+10. Khi người dùng bấm Cancel:
+
+    - không thay đổi model hiện tại
+    - không reset chương trình
+    - không clear dữ liệu
+    - không tạo lỗi
+    - không gọi model loader
+
+11. Khi người dùng chọn file:
+
+    string selectedPath = dialog.FileName;
+
+Sau đó PHẢI gọi lại đúng flow/load method hiện tại của project.
+
+Ví dụ nếu project hiện đang dùng:
+
+    LoadModel(path)
+
+hoặc:
+
+    OpenModel(path)
+
+hoặc:
+
+    SelectModelAsync(path)
+
+thì GIỮ NGUYÊN method đó.
+
+KHÔNG viết lại parser.
+KHÔNG viết lại model loader.
+KHÔNG thay đổi behavior sau khi file đã được chọn.
+
+==============================
+PHẠM VI FILE
+==============================
+
+Trước khi sửa:
+- tìm tất cả reference của nút CHỌN MÃ HÀNG
+- tìm OpenFileDialog
+- tìm FileDialog
+- tìm custom dialog chọn model
+- tìm *.tht
+
+Chỉ sửa file thực sự cần thiết cho chức năng này.
+
+Ưu tiên chỉ sửa:
+- MainWindow.xaml.cs
+hoặc
+- TestWindow.xaml.cs
+hoặc
+- service chọn file hiện tại
+
+tùy kiến trúc project.
+
+Không được sửa lan sang các file test engine / hardware / parser.
+
+==============================
+YÊU CẦU GIỮ NGUYÊN
+==============================
+
+Các chức năng sau PHẢI giữ nguyên 100%:
+
+- START TEST
+- STOP TEST
+- Production mode
+- Master mode
+- UART
+- Relay
+- IO scan
+- Wrong wiring
+- Short circuit
+- Resistance
+- Leak test
+- Pin probe
+- History
+- Counter
+- Label printing
+- Model parsing
+- File .tht parsing
+- Settings
+- Offline mode
+- UI TestWindow
+- bảng lỗi
+- trạng thái PASS/FAIL
+- logic khóa/mở các nút
+
+Không được "cleanup" hoặc "improve" các phần trên trong task này.
+
+==============================
+MỤC TIÊU CUỐI
+==============================
+
+Sau sửa:
+
+Bấm CHỌN MÃ HÀNG
+        ↓
+Native Windows OpenFileDialog xuất hiện
+        ↓
+Mở tại C:\Item nếu thư mục tồn tại
+        ↓
+Filter đầu tiên chỉ hiện *.tht
+        ↓
+Dialog có kích thước do Windows quản lý
+        ↓
+Không còn bị quá to
+        ↓
+Không còn bị lệch bất thường
+        ↓
+Dialog thuộc đúng MainWindow/TestWindow
+        ↓
+Chọn file
+        ↓
+Chạy đúng model-loading flow cũ
+        ↓
+Toàn bộ chức năng khác không thay đổi.
+
+==============================
+KIỂM TRA SAU KHI SỬA
+==============================
+
+Chạy:
+
+    dotnet build -c Release
+
+Nếu project có self-test:
+
+    dotnet test -c Release
+
+hoặc chạy đúng self-test command hiện tại của project.
+
+Sau đó báo cáo cho tôi CHỈ:
+
+1. Root cause của dialog hiện tại bị to/lệch.
+2. File nào đã sửa.
+3. Method nào đã sửa.
+4. Có xóa custom sizing/positioning nào không.
+5. Xác nhận model loading logic không bị thay đổi.
+6. Kết quả build.
+7. Kết quả test.
+
+KHÔNG tự ý sửa thêm lỗi khác phát hiện được.
+Nếu thấy vấn đề khác, chỉ báo cáo, không sửa.

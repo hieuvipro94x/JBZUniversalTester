@@ -109,17 +109,6 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
-        if (!_viewModel.Test.IsBoardConnected)
-        {
-            MessageBox.Show(
-                "Bo JBZ chưa kết nối thành công. Phần mềm sẽ tự thử kết nối lại; " +
-                "chỉ có thể bắt đầu kiểm tra khi bo đã sẵn sàng.",
-                "Bo chưa kết nối",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            return;
-        }
-
         if (_viewModel.Model is null)
         {
             MessageBox.Show(
@@ -144,8 +133,10 @@ public partial class MainWindow : Window
         // cấu hình dù số card chưa đủ; chỉ KHÔNG ARM test. MainViewModel đã
         // cảnh báo thiếu card ngay sau khi load. Với nút BẮT ĐẦU thủ công thì
         // vẫn chặn như máy gốc.
-        bool hasCapacity = _viewModel.EnsureModelCardCapacity(showWarning: !allowViewWhenInsufficient);
-        if (!hasCapacity && !allowViewWhenInsufficient)
+        bool boardConnected = _viewModel.Test.IsBoardConnected;
+        bool hasCapacity = _viewModel.EnsureModelCardCapacity(
+            showWarning: boardConnected && !allowViewWhenInsufficient);
+        if (boardConnected && !hasCapacity && !allowViewWhenInsufficient)
             return;
 
         if (_testWindow is { IsLoaded: true })
@@ -159,7 +150,11 @@ public partial class MainWindow : Window
 
         try
         {
-            _testWindow = new TestWindow(_viewModel.Test, autoStartProduction: hasCapacity);
+            bool offlinePreview = !boardConnected;
+            _testWindow = new TestWindow(
+                _viewModel.Test,
+                autoStartProduction: boardConnected && hasCapacity,
+                offlinePreview: offlinePreview);
             _testWindow.Closed += TestWindow_Closed;
 
             // Faults đã được SetModel/BuildRows trước khi Show(), vì vậy DataGrid
@@ -212,13 +207,12 @@ public partial class MainWindow : Window
     private void UpdateProductRemovalGate()
     {
         bool blocked = _viewModel.Test.IsProductRemovalPending;
-        bool boardConnected = _viewModel.Test.IsBoardConnected;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
-        // Không cho nạp model/đi vào Production khi D2XX chưa hoàn tất kết nối.
-        // Khi đang chờ tháo vẫn cho mở lại TestView để quan sát, nhưng không
-        // cho đổi mã hàng cho tới khi nhận ProductRemoved đầy đủ.
-        StartTestButton.IsEnabled = boardConnected && _viewModel.Model is not null;
-        SelectModelButton.IsEnabled = boardConnected && !blocked;
+        // Cho phép chuẩn bị/xem mã hàng ở máy phát triển không có bo. TestWindow
+        // tự vào Offline Preview và không ARM scan/PASS/relay. Removal gate vẫn
+        // khóa đổi mã hàng để bảo toàn chu kỳ production đang dở.
+        StartTestButton.IsEnabled = _viewModel.Model is not null;
+        SelectModelButton.IsEnabled = !blocked;
     }
 
     private async void OpenSettings_Click(

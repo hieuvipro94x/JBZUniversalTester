@@ -3,7 +3,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Services;
-using JBZUniversalTester.Views;
 using Microsoft.Win32;
 
 namespace JBZUniversalTester.ViewModels;
@@ -11,7 +10,8 @@ namespace JBZUniversalTester.ViewModels;
 public sealed class HomeViewModel : ObservableObject
 {
     private const string ProductFileFilter =
-        "JBZ THT (*.tht)|*.tht|Mã hàng legacy (*.model)|*.model";
+        "The Files (*.tht)|*.tht|All Files (*.*)|*.*";
+    private const string OriginalItemDirectory = @"C:\Item";
     private readonly MainViewModel _main;
 
     // Cho HomeView mở màn hình kiểm tra chân pin và cài đặt.
@@ -51,79 +51,79 @@ public sealed class HomeViewModel : ObservableObject
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Chọn mã hàng",
+            DefaultExt = ".tht",
             Filter = ProductFileFilter,
-            CheckFileExists = true,
-            CheckPathExists = true,
-            Multiselect = false,
-            ValidateNames = true
+            Multiselect = false
         };
 
-        string? initialDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
-        if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
-            dialog.InitialDirectory = initialDirectory;
-        else if (Directory.Exists(RuntimePaths.ItemDirectory))
-            dialog.InitialDirectory = RuntimePaths.ItemDirectory;
-
-        Window? owner = Application.Current?.MainWindow;
-        bool? accepted;
-        if (owner is not null)
+        if (Directory.Exists(OriginalItemDirectory))
         {
-            using var positionGuard = new StandardFileDialogPositionGuard(owner);
-            accepted = dialog.ShowDialog(owner);
+            dialog.InitialDirectory = OriginalItemDirectory;
         }
         else
         {
-            accepted = dialog.ShowDialog();
+            string? currentModelDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
+            dialog.InitialDirectory = !string.IsNullOrWhiteSpace(currentModelDirectory) &&
+                                      Directory.Exists(currentModelDirectory)
+                ? currentModelDirectory
+                : AppContext.BaseDirectory;
         }
 
-        if (accepted == true)
-        {
-            string selectedFilePath = dialog.FileName;
-            if (!IsSupportedProductFile(selectedFilePath))
-            {
-                MessageBox.Show(
-                    owner ?? Application.Current?.MainWindow,
-                    "Chỉ có thể chọn file mã hàng .tht hoặc .model legacy.",
-                    "File không được hỗ trợ",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
+        Window? owner = Application.Current?.Windows
+            .OfType<Window>()
+            .FirstOrDefault(window => window.IsActive)
+            ?? Application.Current?.MainWindow;
+        bool? accepted = owner is not null
+            ? dialog.ShowDialog(owner)
+            : dialog.ShowDialog();
 
-            try
-            {
-                await _main.LoadModelAsync(selectedFilePath);
-            }
-            catch (InvalidDataException ex)
-            {
-                MessageBox.Show(
-                    $"Không thể đọc file mã hàng JBZ (.model/.tht).\n\n" +
-                    $"File: {selectedFilePath}\n\n" +
-                    $"{ex.Message}\n\n" +
-                    "Hãy kiểm tra đúng file mã hàng gốc. Nếu file đang được phần mềm khác ghi/copy, " +
-                    "đợi hoàn tất rồi chọn lại.",
-                    "File model không hợp lệ",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
-            catch (IOException ex)
-            {
-                MessageBox.Show(
-                    $"Không thể mở file mã hàng vì file đang bận hoặc lỗi I/O.\n\n" +
-                    $"File: {selectedFilePath}\n\n{ex.Message}",
-                    "Không mở được file model",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Không thể nạp mã hàng.\n\n{ex.Message}",
-                    "Lỗi nạp model",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
+        if (accepted != true)
+            return;
+
+        string selectedFilePath = dialog.FileName;
+        if (!IsSupportedProductFile(selectedFilePath))
+        {
+            MessageBox.Show(
+                owner ?? Application.Current?.MainWindow,
+                "Chỉ có thể chọn file mã hàng .tht hoặc .model legacy.",
+                "File không được hỗ trợ",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            await _main.LoadModelAsync(selectedFilePath);
+        }
+        catch (InvalidDataException ex)
+        {
+            MessageBox.Show(
+                $"Không thể đọc file mã hàng JBZ (.model/.tht).\n\n" +
+                $"File: {selectedFilePath}\n\n" +
+                $"{ex.Message}\n\n" +
+                "Hãy kiểm tra đúng file mã hàng gốc. Nếu file đang được phần mềm khác ghi/copy, " +
+                "đợi hoàn tất rồi chọn lại.",
+                "File model không hợp lệ",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch (IOException ex)
+        {
+            MessageBox.Show(
+                $"Không thể mở file mã hàng vì file đang bận hoặc lỗi I/O.\n\n" +
+                $"File: {selectedFilePath}\n\n{ex.Message}",
+                "Không mở được file model",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Không thể nạp mã hàng.\n\n{ex.Message}",
+                "Lỗi nạp model",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
