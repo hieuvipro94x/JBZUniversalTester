@@ -6666,6 +6666,15 @@ public sealed class TestViewModel : ObservableObject
         _lotSequence.SelectProduct(
             ProductionConfigService.GetLotProductKey(_model),
             migrateLegacyLot);
+        // Không để sản lượng mã trước còn hiện trong lúc SQLite đang tải mã mới.
+        // Mỗi mã bắt đầu UI ở 0 rồi nhận đúng daily statistics theo PartNumber.
+        Total = 0;
+        Pass = 0;
+        Fail = 0;
+        DailyTestCount = 0;
+        MonthlyTestCount = 0;
+        LifetimeTestCount = 0;
+        ProbeCycleCount = 0;
         _pinsByIoLookup = _model.Pins.ToLookup(pin => pin.IoNumber);
 
         _sound.SetWiringFaultAlarm(false);
@@ -7255,10 +7264,15 @@ public sealed class TestViewModel : ObservableObject
 
     private void UpdateDailyLotDisplay()
     {
-        // Số LOT trên màn hình là sản lượng PASS trong ngày, không phải số
-        // serial tuyệt đối. Ví dụ serial/LOT thực 2002 sau hai sản phẩm thì
-        // màn hình hiển thị 2; sang ngày mới DailyPassCount trả về 0.
-        Lot = Math.Max(0, Pass).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // LOT hiển thị = LOTNO bắt đầu riêng của mã hàng + Tổng đạt trong ngày.
+        // Ví dụ base 2000 và PASS 10 => 2010. Giá trị in tem thực tế vẫn được
+        // commit riêng sau khi máy in xác nhận để tránh trùng LOT vật lý.
+        long passedToday = Math.Max(0, Pass);
+        long startLot = _lotSequence.StartLot;
+        long displayLot = startLot > long.MaxValue - passedToday
+            ? long.MaxValue
+            : startLot + passedToday;
+        Lot = displayLot.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void ApplyPartCounter(PartCounterEntry entry)
@@ -7490,7 +7504,7 @@ public sealed class TestViewModel : ObservableObject
 
             if (result.Printed)
             {
-                InvokeUi(() => Lot = _lotSequence.NextLot.ToString());
+                InvokeUi(UpdateDailyLotDisplay);
                 SetSuccessfulLabelContext(new LabelPrintContext(request, historyStore, historyId));
             }
 

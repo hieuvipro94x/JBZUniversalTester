@@ -65,6 +65,15 @@ public sealed class LotSequenceService
         }
     }
 
+    public long StartLot
+    {
+        get
+        {
+            lock (_gate)
+                return Math.Max(0, ActiveLotLocked().StartLotNo);
+        }
+    }
+
     public long ReserveForCycle(string cycleId)
     {
         if (string.IsNullOrWhiteSpace(cycleId))
@@ -203,7 +212,9 @@ public sealed class LotSequenceService
                 storedDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out _))
         {
-            lot.LotNo = 0;
+            // Operator chỉ đặt LOTNO bắt đầu một lần cho từng mã hàng. Sang
+            // ngày sản xuất mới quay về base đó, không được làm mất thành 0.
+            lot.LotNo = Math.Max(0, lot.StartLotNo);
         }
         lot.LotNoDate = today;
         if (IsActiveProduct(productKey))

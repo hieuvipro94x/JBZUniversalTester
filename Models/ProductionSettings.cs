@@ -87,9 +87,8 @@ public sealed class ProductionSettings
     // Chỉ sau khi in tem PASS thành công, phần mềm mới tăng +1 và lưu lại.
     public long LotNo { get; set; } = 2000;
 
-    // Ngày làm việc gắn với LOTNO, lưu theo ISO yyyy-MM-dd. Cấu hình cũ chưa
-    // có trường này sẽ giữ nguyên LOTNO trong ngày nâng cấp đầu tiên; từ ngày
-    // kế tiếp LOTNO tự trở về 0.
+    // Ngày làm việc gắn với LOTNO, lưu theo ISO yyyy-MM-dd. Sang ngày mới,
+    // LOT kế tiếp trở về LOTNO bắt đầu riêng của mã hàng; daily PASS về 0.
     public string LotNoDate { get; set; } = string.Empty;
 
     /// <summary>
@@ -323,6 +322,13 @@ public sealed class ProductionSettings
 
 public sealed class ProductLotSettings
 {
+    /// <summary>
+    /// LOTNO bắt đầu do operator đặt một lần cho mã hàng. -1 chỉ xuất hiện khi
+    /// đọc cấu hình cũ chưa có field này và sẽ được migrate từ LotNo hiện tại.
+    /// </summary>
+    public long StartLotNo { get; set; } = -1;
+
+    /// <summary>LOT kế tiếp thực tế dành cho giao dịch in tem an toàn.</summary>
     public long LotNo { get; set; }
 
     public string LotNoDate { get; set; } = string.Empty;

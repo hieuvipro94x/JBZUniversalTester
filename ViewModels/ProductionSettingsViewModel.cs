@@ -130,7 +130,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             Settings,
             _lotProductKey,
             migrateCurrentLot: true);
-        Settings.LotNo = productLot.LotNo;
+        // Trường trên màn Cài đặt là LOTNO bắt đầu, không phải LOT kế tiếp đã
+        // tăng trong quá trình sản xuất.
+        Settings.LotNo = productLot.StartLotNo;
         Settings.LotNoDate = productLot.LotNoDate;
         if (!string.IsNullOrWhiteSpace(_modelPath))
             Settings.LastThtPath = _modelPath;

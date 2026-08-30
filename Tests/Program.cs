@@ -2671,7 +2671,7 @@ internal static class Program
                 "New day increments the correct daily production counters");
 
             TestViewModel lotDisplayVm = CreateTestViewModel(
-                new ProductionSettings { LotNo = 2002, MasterFaultRequiredCount = 0 });
+                new ProductionSettings { LotNo = 2000, MasterFaultRequiredCount = 0 });
             MethodInfo applyDailyStatistics = typeof(TestViewModel).GetMethod(
                 "ApplyDailyProductionStatistics",
                 BindingFlags.Instance | BindingFlags.NonPublic)
@@ -2680,17 +2680,17 @@ internal static class Program
             [
                 new ModelProductionStatistics
                 {
-                    DailyTestCount = 3,
-                    DailyPassCount = 2,
-                    DailyFailCount = 1
+                    DailyTestCount = 10,
+                    DailyPassCount = 10,
+                    DailyFailCount = 0
                 }
             ]);
-            Assert(lotDisplayVm.Lot == "2" && lotDisplayVm.Total == 3 &&
-                   lotDisplayVm.Pass == 2 && lotDisplayVm.Fail == 1,
-                "LOT 2002 displays daily accepted quantity 2, not serial base 2000");
+            Assert(lotDisplayVm.Lot == "2010" && lotDisplayVm.Total == 10 &&
+                   lotDisplayVm.Pass == 10 && lotDisplayVm.Fail == 0,
+                "LOT display is starting LOT 2000 plus daily PASS 10");
             applyDailyStatistics.Invoke(lotDisplayVm, [new ModelProductionStatistics()]);
-            Assert(lotDisplayVm.Lot == "0" && lotDisplayVm.Total == 0,
-                "New daily period displays LOT quantity zero");
+            Assert(lotDisplayVm.Lot == "2000" && lotDisplayVm.Total == 0,
+                "New daily period resets production to zero and LOT display to its starting value");
 
             clock.Advance(TimeSpan.FromDays(24));
             Assert(restarted.Get(modelA).MonthlyTestCount == 0 && restarted.Get(modelA).ProbeCycleCount == 1, "Monthly period rolls without resetting probe");
@@ -3882,15 +3882,26 @@ internal static class Program
         var restartedSettings = new ProductionSettings
         {
             LotNo = settings.LotNo,
-            LotNoDate = settings.LotNoDate
+            LotNoDate = settings.LotNoDate,
+            LotSettingsByProduct = settings.LotSettingsByProduct.ToDictionary(
+                pair => pair.Key,
+                pair => new ProductLotSettings
+                {
+                    StartLotNo = pair.Value.StartLotNo,
+                    LotNo = pair.Value.LotNo,
+                    LotNoDate = pair.Value.LotNoDate
+                },
+                StringComparer.OrdinalIgnoreCase)
         };
         var restarted = new LotSequenceService(restartedSettings, _ => { }, () => lotClock);
         Assert(restarted.NextLot == 2045,
             "Restart resumes from last successfully committed LOT");
 
         lotClock = lotClock.AddDays(1);
-        Assert(restarted.NextLot == 0 && restartedSettings.LotNoDate == "2026-08-30",
-            "LOTNO resets to zero and records the new production date");
+        Assert(restarted.StartLot == 2044 &&
+               restarted.NextLot == 2044 &&
+               restartedSettings.LotNoDate == "2026-08-30",
+            "New production day resets next LOT to the per-product starting LOT");
 
         var migratedSettings = new ProductionSettings { LotNo = 9876 };
         int migrationPersistCount = 0;
@@ -3909,9 +3920,9 @@ internal static class Program
             LotNoDate = "2026-08-30",
             LotSettingsByProduct = new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase)
             {
-                ["PART-2000"] = new() { LotNo = 2000, LotNoDate = "2026-08-30" },
-                ["PART-7000"] = new() { LotNo = 7000, LotNoDate = "2026-08-30" },
-                ["PART-5000"] = new() { LotNo = 5000, LotNoDate = "2026-08-30" }
+                ["PART-2000"] = new() { StartLotNo = 2000, LotNo = 2000, LotNoDate = "2026-08-30" },
+                ["PART-7000"] = new() { StartLotNo = 7000, LotNo = 7000, LotNoDate = "2026-08-30" },
+                ["PART-5000"] = new() { StartLotNo = 5000, LotNo = 5000, LotNoDate = "2026-08-30" }
             }
         };
         var perProductLots = new LotSequenceService(perProductSettings, _ => { }, () => lotClock);
@@ -3929,6 +3940,9 @@ internal static class Program
         perProductLots.SelectProduct("PART-2000", migrateCurrentLotIfMissing: false);
         Assert(perProductLots.NextLot == 2001,
             "Switching back restores the previously advanced LOT for that product");
+        lotClock = lotClock.AddDays(1);
+        Assert(perProductLots.NextLot == 2000,
+            "PART-2000 returns to its own starting LOT when the production date changes");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelProfileTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);

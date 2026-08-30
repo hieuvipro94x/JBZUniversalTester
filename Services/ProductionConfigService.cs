@@ -233,7 +233,9 @@ public static class ProductionConfigService
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
         {
             string encodedKey = Uri.EscapeDataString(productKey);
-            lines.Add($"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate}");
+            lines.Add(
+                $"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate};" +
+                $"{Math.Max(0, lot.StartLotNo)}");
         }
 
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
@@ -312,6 +314,7 @@ public static class ProductionConfigService
         {
             lot = new ProductLotSettings
             {
+                StartLotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
                 LotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
                 LotNoDate = migrateCurrentLot ? settings.LotNoDate : string.Empty
             };
@@ -323,12 +326,30 @@ public static class ProductionConfigService
     public static void SetProductLot(
         ProductionSettings settings,
         string productKey,
-        long lotNo,
+        long startLotNo,
         string lotNoDate)
     {
         ProductLotSettings lot = GetOrCreateProductLot(settings, productKey, migrateCurrentLot: false);
-        lot.LotNo = Math.Max(0, lotNo);
-        lot.LotNoDate = (lotNoDate ?? string.Empty).Trim();
+        long normalizedStart = Math.Max(0, startLotNo);
+        long previousStart = Math.Max(0, lot.StartLotNo);
+        string normalizedDate = (lotNoDate ?? string.Empty).Trim();
+        if (normalizedStart != previousStart)
+        {
+            // Đổi base trong cùng ngày giữ số PASS/LOT đã chạy; nếu cấu hình
+            // được mở sang ngày mới thì bắt đầu lại đúng base mới.
+            bool sameProductionDate = string.Equals(
+                lot.LotNoDate,
+                normalizedDate,
+                StringComparison.Ordinal);
+            long progress = sameProductionDate
+                ? Math.Max(0, lot.LotNo - previousStart)
+                : 0;
+            lot.StartLotNo = normalizedStart;
+            lot.LotNo = normalizedStart > long.MaxValue - progress
+                ? long.MaxValue
+                : normalizedStart + progress;
+            lot.LotNoDate = normalizedDate;
+        }
         settings.LotNo = lot.LotNo;
         settings.LotNoDate = lot.LotNoDate;
     }
@@ -488,7 +509,11 @@ public static class ProductionConfigService
             settings.LotSettingsByProduct[productKey] = new ProductLotSettings
             {
                 LotNo = Math.Max(0, lotNo),
-                LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty
+                LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty,
+                StartLotNo = parts.Length > 2 &&
+                             long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long startLotNo)
+                    ? Math.Max(0, startLotNo)
+                    : Math.Max(0, lotNo)
             };
         }
 
@@ -666,6 +691,9 @@ public static class ProductionConfigService
                 settings.LotSettingsByProduct.Remove(key);
                 continue;
             }
+            if (lot.StartLotNo < 0)
+                lot.StartLotNo = lot.LotNo;
+            lot.StartLotNo = Math.Max(0, lot.StartLotNo);
             lot.LotNo = Math.Max(0, lot.LotNo);
             lot.LotNoDate = (lot.LotNoDate ?? string.Empty).Trim();
         }
