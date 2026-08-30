@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Services;
+using JBZUniversalTester.Views;
 using Microsoft.Win32;
 
 namespace JBZUniversalTester.ViewModels;
@@ -73,9 +74,16 @@ public sealed class HomeViewModel : ObservableObject
             .OfType<Window>()
             .FirstOrDefault(window => window.IsActive)
             ?? Application.Current?.MainWindow;
-        bool? accepted = owner is not null
-            ? dialog.ShowDialog(owner)
-            : dialog.ShowDialog();
+        bool? accepted;
+        if (owner is not null)
+        {
+            using var positionGuard = new FixedPositionOpenFileDialogGuard(owner);
+            accepted = dialog.ShowDialog(owner);
+        }
+        else
+        {
+            accepted = dialog.ShowDialog();
+        }
 
         if (accepted != true)
             return;

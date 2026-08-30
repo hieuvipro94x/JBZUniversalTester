@@ -369,12 +369,34 @@
                 <ColumnDefinition Width="500"/>
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" Margin="0,0,18,0">
-                <Button Content="V&#7872; TRANG CH&#205;NH"
-                        Click="BackToMain_Click"
-                        Style="{StaticResource PiButtonStyle}"
-                        Width="166"
-                        HorizontalAlignment="Left"/>
+            <StackPanel Grid.Column="0" Margin="0,0,6,0">
+                <Grid Height="38">
+                    <Button Content="V&#7872; TRANG CH&#205;NH"
+                            Click="BackToMain_Click"
+                            Style="{StaticResource PiButtonStyle}"
+                            Width="166"
+                            HorizontalAlignment="Left"/>
+
+                    <!-- 4 đèn trạng thái: Vàng - Trắng - Xanh - Đỏ.
+                         Giữ nguyên x:Name để không ảnh hưởng code-behind. -->
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Margin="0,0,1,0">
+                        <Ellipse x:Name="YellowStatusLed"
+                                 Width="15" Height="15" Margin="0,0,4,0"
+                                 Fill="#6B6240" Stroke="#4B5563" StrokeThickness="1"/>
+                        <Ellipse x:Name="WhiteStatusLed"
+                                 Width="15" Height="15" Margin="0,0,4,0"
+                                 Fill="#9CA3AF" Stroke="#6B7280" StrokeThickness="1"/>
+                        <Ellipse x:Name="GreenStatusLed"
+                                 Width="15" Height="15" Margin="0,0,4,0"
+                                 Fill="#31543B" Stroke="#4B5563" StrokeThickness="1"/>
+                        <Ellipse x:Name="RedStatusLed"
+                                 Width="15" Height="15"
+                                 Fill="#5A3030" Stroke="#4B5563" StrokeThickness="1"/>
+                    </StackPanel>
+                </Grid>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                     <Button Content="TH&#7916; IN L&#7840;I"
                             Command="{Binding RetryLabelCommand}"
@@ -527,7 +549,11 @@
                     <TextBlock Grid.Column="2" Text="Lo&#7841;i xe" Style="{StaticResource ProductRightLabelStyle}"/>
                     <TextBox Grid.Column="3" Text="{Binding VehicleType, Mode=OneWay}" ToolTip="{Binding VehicleType, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
 
-                    <TextBlock Grid.Row="1" Text="T&#234;n s&#7843;n ph&#7849;m" Style="{StaticResource PiLabelStyle}"/>
+                    <Grid Grid.Row="1">
+                        <TextBlock Text="T&#234;n s&#7843;n ph&#7849;m"
+                                   Style="{StaticResource PiLabelStyle}"
+                                   VerticalAlignment="Top"/>
+                    </Grid>
                     <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ProductName, Mode=OneWay}" ToolTip="{Binding ProductName, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
                     <TextBlock Grid.Row="1" Grid.Column="2" Text="M&#227; kh&#225;ch h&#224;ng" Style="{StaticResource ProductRightLabelStyle}"/>
                     <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding CustomerCode, Mode=OneWay}" ToolTip="{Binding CustomerCode, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>

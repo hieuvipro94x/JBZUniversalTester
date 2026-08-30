@@ -106,16 +106,22 @@ internal static class Program
 
         string pickerSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "HomeViewModel.cs"));
+        string pickerGuardSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "FixedPositionOpenFileDialogGuard.cs"));
         Assert(pickerSource.Contains("DefaultExt = \".tht\"", StringComparison.Ordinal) &&
                pickerSource.Contains("OriginalItemDirectory = @\"C:\\Item\"", StringComparison.Ordinal) &&
                pickerSource.Contains("FirstOrDefault(window => window.IsActive)", StringComparison.Ordinal) &&
                pickerSource.Contains("dialog.ShowDialog(owner)", StringComparison.Ordinal) &&
-               !pickerSource.Contains("StandardFileDialogPositionGuard", StringComparison.Ordinal) &&
-               !File.Exists(Path.Combine(
-                   Environment.CurrentDirectory,
-                   "Views",
-                   "StandardFileDialogPositionGuard.cs")),
-            "Product picker uses an owner-bound native dialog without custom sizing or positioning");
+               pickerSource.Contains("FixedPositionOpenFileDialogGuard(owner)", StringComparison.Ordinal),
+            "Product picker uses the original filter/directory and binds its native dialog to the active owner");
+        Assert(pickerGuardSource.Contains("GetWindow(handle, GwOwner) == _ownerHandle", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("MonitorFromWindow(_ownerHandle, MonitorDefaultToNearest)", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("GetMonitorInfo(monitor, ref monitorInfo)", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("SwpNoSize | SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("message == WmSysCommand", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("message == WmNcLButtonDown", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("ReleaseCreationHook();", StringComparison.Ordinal),
+            "OpenFileDialog guard centers in the owner monitor work area and locally blocks only move operations");
     }
 
     private static void TestProductionScanFirstFrameAfterSequenceReset()
@@ -676,6 +682,20 @@ internal static class Program
                soundSource.Contains("SafePlaySync(player)", StringComparison.Ordinal) &&
                soundSource.Contains("_startupPlaybackActive", StringComparison.Ordinal),
             "START.wav begins after first-render idle and is protected from Probe reset/click interruption");
+        Assert(typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
+                   name.EndsWith(".Assets.Sounds.COMPUTER.wav", StringComparison.OrdinalIgnoreCase)) &&
+               soundSource.Contains("PlayProductStart()", StringComparison.Ordinal) &&
+               soundSource.Contains("CreatePlayer(\"COMPUTER.wav\"", StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "PlayProductStartSoundOnce(generation, preserveProductionFaultsForProbe);",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "Interlocked.CompareExchange(ref _productStartSoundPlayed, 1, 0)",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "CurrentProductionPhase != ProductionPhase.Continuity",
+                   StringComparison.Ordinal),
+            "COMPUTER.wav is embedded and requested once on the first real Production connection of each cycle");
 
         TestViewModel deviceFaultVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         deviceFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();

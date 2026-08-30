@@ -113,6 +113,7 @@ public sealed class TestViewModel : ObservableObject
     private int _selectedOperationTabIndex;
     private int _shutdownStarted;
     private bool _productDetectedThisCycle;
+    private int _productStartSoundPlayed;
     private int _probeSessionActive;
     private int _runtimeMode = (int)RuntimeMode.Background;
     private int _productionPhase = (int)ProductionPhase.WaitingProduct;
@@ -302,6 +303,11 @@ public sealed class TestViewModel : ObservableObject
     /// PinProbe dùng event này thay vì cố phân tích chuỗi log.
     /// </summary>
     public event EventHandler<ScanFrame>? ScanFrameReceived;
+
+    /// <summary>
+    /// Báo hoạt động frame thật cho lớp hiển thị trạng thái; không tham gia xử lý kết quả test.
+    /// </summary>
+    public event EventHandler<ScanFrame>? BoardFrameActivity;
 
     public string State
     {
@@ -2411,6 +2417,7 @@ public sealed class TestViewModel : ObservableObject
         SetProductionPhase(ProductionPhase.Continuity);
         _waterProofEquipmentErrorAwaitingRemoval = false;
         _productDetectedThisCycle = false;
+        Interlocked.Exchange(ref _productStartSoundPlayed, 0);
         _lastFaultRejectSignature = string.Empty;
         _lastPassGateSignature = string.Empty;
         _lastFaultGateSignature = string.Empty;
@@ -2464,6 +2471,17 @@ public sealed class TestViewModel : ObservableObject
 
     private void OnBoardFrameReceived(object? sender, ScanFrame frame)
     {
+        // BoardFrameActivity chỉ là telemetry cho UI LED. Subscriber presentation
+        // không được phép làm gián đoạn hot path nhận/giải mã frame của bo.
+        try
+        {
+            BoardFrameActivity?.Invoke(this, frame);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"BoardFrameActivity observer error: {ex}");
+        }
+
         if (IsDeviceFault)
             return;
 
@@ -2653,6 +2671,7 @@ public sealed class TestViewModel : ObservableObject
                 long processStarted = Stopwatch.GetTimestamp();
                 bool engineChanged = _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
                 Interlocked.Increment(ref _productionFramesProcessed);
+                PlayProductStartSoundOnce(generation, preserveProductionFaultsForProbe);
                 double processMs = Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
                 // Diagnostic topology có thể lớn hàng trăm network. Chỉ dựng khi
                 // trạng thái logic đổi; frame giống hệt vẫn đi qua debounce engine.
@@ -2675,6 +2694,25 @@ public sealed class TestViewModel : ObservableObject
         {
             EnterDeviceFault(ex, "BoardFrameReceived");
         }
+    }
+
+    private void PlayProductStartSoundOnce(
+        long generation,
+        bool frameClassifiedAsProbe)
+    {
+        if (frameClassifiedAsProbe ||
+            !_cycleActive ||
+            _waitForProductRelease ||
+            _waitForFaultProductRemoval ||
+            CurrentProductionPhase != ProductionPhase.Continuity ||
+            !IsProductionFaultContext(generation) ||
+            !_engine.HasProductActivity ||
+            Interlocked.CompareExchange(ref _productStartSoundPlayed, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _sound.PlayProductStart();
     }
 
     private void ProcessIoMappingFrame(ScanFrame frame, long generation)
@@ -3915,6 +3953,7 @@ public sealed class TestViewModel : ObservableObject
             MasterStatus = "IO MAPPING MODE • KHÔNG PASS/FAIL";
         }
         _productDetectedThisCycle = false;
+        Interlocked.Exchange(ref _productStartSoundPlayed, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
         _activeCycleId = Guid.NewGuid().ToString("N");
@@ -4512,6 +4551,7 @@ public sealed class TestViewModel : ObservableObject
         _productionSettings.AutoMasterSequence = true;
         _cycleActive = false;
         _productDetectedThisCycle = false;
+        Interlocked.Exchange(ref _productStartSoundPlayed, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;

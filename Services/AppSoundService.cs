@@ -22,6 +22,7 @@ public sealed class AppSoundService : IDisposable
     private readonly object _gate = new();
 
     private SoundPlayer? _clickPlayer;
+    private SoundPlayer? _productStartPlayer;
     private SoundPlayer? _testOkPlayer;
     private SoundPlayer? _startupPlayer;
     private SoundPlayer? _testPointContactPlayer;
@@ -29,6 +30,7 @@ public sealed class AppSoundService : IDisposable
 
     // Giữ stream sống trong toàn bộ vòng đời SoundPlayer.
     private MemoryStream? _clickStream;
+    private MemoryStream? _productStartStream;
     private MemoryStream? _testOkStream;
     private MemoryStream? _startupStream;
     private MemoryStream? _testPointContactStream;
@@ -42,6 +44,7 @@ public sealed class AppSoundService : IDisposable
     private int _globalButtonHandlerRegistered;
     private int _startupPlayed;
     private int _startupPlaybackActive;
+    private int _productStartPlaybackActive;
     private int _testOkPlaybackActive;
 
     public static AppSoundService Current => LazyInstance.Value;
@@ -85,6 +88,7 @@ public sealed class AppSoundService : IDisposable
             if (!_initialized)
             {
                 _clickPlayer = CreatePlayer("CLICK.wav", out _clickStream);
+                _productStartPlayer = CreatePlayer("COMPUTER.wav", out _productStartStream);
                 _testOkPlayer = CreatePlayer("DINGDONG.wav", out _testOkStream);
                 _startupPlayer = CreatePlayer("START.wav", out _startupStream);
                 _testPointContactPlayer = CreatePlayer("TESTPOINT.wav", out _testPointContactStream);
@@ -146,9 +150,53 @@ public sealed class AppSoundService : IDisposable
     {
         EnsureInitialized();
         if (Volatile.Read(ref _startupPlaybackActive) != 0 ||
+            Volatile.Read(ref _productStartPlaybackActive) != 0 ||
             Volatile.Read(ref _testOkPlaybackActive) != 0)
             return;
         SafePlay(_clickPlayer);
+    }
+
+    /// <summary>Phát COMPUTER.wav một lần khi chu kỳ nhận kết nối sản phẩm đầu tiên.</summary>
+    public void PlayProductStart()
+    {
+        EnsureInitialized();
+
+        if (Interlocked.CompareExchange(ref _productStartPlaybackActive, 1, 0) != 0)
+            return;
+
+        SoundPlayer? player;
+        lock (_gate)
+        {
+            if (_disposed || Volatile.Read(ref _testOkPlaybackActive) != 0)
+            {
+                Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+                return;
+            }
+
+            SafeStop(_clickPlayer);
+            player = _productStartPlayer;
+        }
+
+        if (player is null)
+        {
+            Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+            AsyncFileLogService.Current.Error("PRODUCT_START_SOUND resource COMPUTER.wav is unavailable");
+            return;
+        }
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_BEGIN");
+                SafePlaySync(player);
+                AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_END");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+            }
+        });
     }
 
     public void PlayTestOk()
@@ -174,6 +222,7 @@ public sealed class AppSoundService : IDisposable
             _wiringFaultAlarmActive = false;
             _testPointContactSoundActive = false;
             SafeStop(_clickPlayer);
+            SafeStop(_productStartPlayer);
             SafeStop(_startupPlayer);
             SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
@@ -316,6 +365,7 @@ public sealed class AppSoundService : IDisposable
             _testPointContactSoundActive = false;
 
             SafeStop(_clickPlayer);
+            SafeStop(_productStartPlayer);
             SafeStop(_testOkPlayer);
             SafeStop(_startupPlayer);
             SafeStop(_testPointContactPlayer);
@@ -477,12 +527,14 @@ public sealed class AppSoundService : IDisposable
             StopAll();
 
             _clickPlayer?.Dispose();
+            _productStartPlayer?.Dispose();
             _testOkPlayer?.Dispose();
             _startupPlayer?.Dispose();
             _testPointContactPlayer?.Dispose();
             _wiringFaultPlayer?.Dispose();
 
             _clickStream?.Dispose();
+            _productStartStream?.Dispose();
             _testOkStream?.Dispose();
             _startupStream?.Dispose();
             _testPointContactStream?.Dispose();

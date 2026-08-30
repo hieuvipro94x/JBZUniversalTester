@@ -1,0 +1,575 @@
+TASK: Chỉ sửa DUY NHẤT hộp thoại "CHỌN MÃ HÀNG" để hành vi giống Htdrv3-KETQU2000.exe.
+
+CỰC KỲ QUAN TRỌNG:
+Đây là một PATCH NHỎ.
+KHÔNG được thay đổi bất cứ chức năng nào khác của chương trình.
+
+==================================================
+1. HÀNH VI BẢN GỐC ĐÃ XÁC NHẬN
+==================================================
+
+Phần mềm gốc Htdrv3-KETQU2000.exe sử dụng CFileDialog/Win32
+để chọn file .tht.
+
+Phân tích binary cho thấy:
+
+- dùng GetOpenFileNameA
+- extension mặc định: tht
+- filter:
+
+  The Files (*.tht)|*.tht|All Files (*.*)|*.*||
+
+- thư mục ban đầu:
+
+  C:\Item
+
+Ngoài ra CFileDialog của phần mềm gốc KHÔNG phải chỉ là
+CFileDialog mặc định.
+
+Binary cho thấy constructor của dialog gọi base CFileDialog
+sau đó sử dụng class/vtable riêng.
+
+Hành vi thực tế của phần mềm gốc đã được xác nhận:
+
+1. Khi bấm CHỌN MÃ HÀNG:
+   - dialog xuất hiện ở CHÍNH GIỮA màn hình.
+
+2. Dialog KHÔNG được phép kéo sang vị trí khác.
+
+3. Giữ chuột vào title bar rồi kéo:
+   - dialog KHÔNG DI CHUYỂN.
+
+4. Dialog vẫn hoạt động modal bình thường.
+
+5. Các nút:
+   - Open/Mở
+   - Cancel/Hủy
+   - Close X
+   vẫn hoạt động bình thường.
+
+6. Việc duyệt thư mục/file vẫn hoạt động bình thường.
+
+7. Chỉ KHÓA việc di chuyển cửa sổ.
+   KHÔNG khóa các thao tác bên trong dialog.
+
+==================================================
+2. MỤC TIÊU
+==================================================
+
+Sửa hộp chọn file hiện tại thành:
+
+             CHỌN MÃ HÀNG
+                    ↓
+          native OpenFileDialog
+                    ↓
+        xuất hiện giữa màn hình
+                    ↓
+          KHÓA NGUYÊN VỊ TRÍ
+                    ↓
+       không thể kéo bằng title bar
+                    ↓
+            chọn file .tht
+                    ↓
+       chạy model-loading flow CŨ
+
+Không thay đổi bất cứ logic nào sau khi file được chọn.
+
+==================================================
+3. DÙNG NATIVE OPEN FILE DIALOG
+==================================================
+
+Tiếp tục sử dụng native Windows dialog.
+
+Ưu tiên:
+
+    Microsoft.Win32.OpenFileDialog
+
+Cấu hình:
+
+    var dialog = new Microsoft.Win32.OpenFileDialog
+    {
+        DefaultExt = ".tht",
+        Filter = "The Files (*.tht)|*.tht|All Files (*.*)|*.*",
+        Multiselect = false
+    };
+
+Nếu C:\Item tồn tại:
+
+    dialog.InitialDirectory = @"C:\Item";
+
+Nếu không tồn tại:
+giữ fallback directory hiện tại của chương trình.
+
+KHÔNG tạo custom WPF file browser.
+
+==================================================
+4. PHẢI CÓ OWNER
+==================================================
+
+Dialog phải thuộc đúng cửa sổ ứng dụng hiện tại.
+
+Ví dụ:
+
+    Window? owner =
+        Application.Current.Windows
+            .OfType<Window>()
+            .FirstOrDefault(w => w.IsActive)
+        ?? Application.Current.MainWindow;
+
+Không tạo hidden window làm owner.
+
+Không dùng Desktop làm owner.
+
+==================================================
+5. LUÔN CENTER SCREEN
+==================================================
+
+Đây là yêu cầu BẮT BUỘC.
+
+Không để Windows nhớ vị trí dialog lần trước.
+
+Mỗi lần bấm CHỌN MÃ HÀNG:
+
+dialog phải xuất hiện lại ở giữa màn hình.
+
+Nếu ứng dụng đang ở monitor nào thì center trong WORK AREA
+của monitor chứa cửa sổ owner đó.
+
+Không center theo toàn bộ VirtualScreen nếu có nhiều monitor.
+
+Có thể dùng Win32:
+
+    MonitorFromWindow
+    GetMonitorInfo
+    GetWindowRect
+    SetWindowPos
+
+Tính:
+
+    x = workArea.Left
+        + (workArea.Width - dialogWidth) / 2;
+
+    y = workArea.Top
+        + (workArea.Height - dialogHeight) / 2;
+
+Sau khi HWND của OpenFileDialog được tạo:
+
+    SetWindowPos(
+        hwndDialog,
+        ...,
+        x,
+        y,
+        0,
+        0,
+        SWP_NOSIZE |
+        SWP_NOZORDER |
+        SWP_NOACTIVATE
+    );
+
+PHẢI tính theo pixel thực tế của HWND.
+
+Không dùng tọa độ WPF DIP trực tiếp để tránh lỗi DPI.
+
+==================================================
+6. KHÓA DI CHUYỂN DIALOG
+==================================================
+
+Đây cũng là yêu cầu BẮT BUỘC.
+
+Sau khi dialog HWND được tạo, subclass CHỈ HWND của
+OpenFileDialog đó.
+
+KHÔNG hook toàn bộ application.
+KHÔNG hook global Windows.
+
+Chặn:
+
+    WM_SYSCOMMAND
+
+nếu:
+
+    (wParam & 0xFFF0) == SC_MOVE
+
+thì:
+
+    return IntPtr.Zero;
+
+Đồng thời nên chặn thao tác kéo title bar:
+
+    WM_NCLBUTTONDOWN
+
+nếu:
+
+    wParam == HTCAPTION
+
+thì không cho DefWindowProc bắt đầu thao tác MOVE.
+
+Có thể vô hiệu hóa lệnh Move trong system menu của CHÍNH
+dialog đó:
+
+    GetSystemMenu(hwnd, false)
+
+và disable/remove:
+
+    SC_MOVE
+
+NHƯNG:
+
+- KHÔNG disable SC_CLOSE
+- KHÔNG disable nút X
+- KHÔNG disable Open
+- KHÔNG disable Cancel
+
+Mục tiêu duy nhất:
+
+    USER CANNOT MOVE THE FILE DIALOG.
+
+==================================================
+7. KHÔNG KHÓA SAI CHỨC NĂNG
+==================================================
+
+Không được làm các lỗi sau:
+
+- không kéo được scrollbar
+- không chọn được file
+- không double click file
+- không đổi folder
+- không dùng address bar
+- không dùng Back
+- không dùng search
+- không dùng Open
+- không dùng Cancel
+- không đóng được X
+
+Chỉ ngăn việc kéo TOÀN BỘ CỬA SỔ dialog.
+
+==================================================
+8. HOOK PHẢI CÓ PHẠM VI CỤC BỘ
+==================================================
+
+Nếu cần dùng Win32 hook để lấy HWND của OpenFileDialog:
+
+chỉ dùng thread-specific hook trong thời gian:
+
+    trước ShowDialog()
+       →
+    dialog HWND được tạo
+       →
+    lấy HWND
+       →
+    center
+       →
+    subclass dialog
+       →
+    bỏ creation hook ngay
+
+Sau khi dialog đóng:
+
+- restore original WndProc nếu cần
+- UnhookWindowsHookEx
+- giải phóng GCHandle/delegate
+- không để hook sống sau khi dialog đóng.
+
+TUYỆT ĐỐI KHÔNG dùng global hook.
+
+==================================================
+9. CÓ THỂ DÙNG WH_CBT NẾU CẦN
+==================================================
+
+Vì Microsoft.Win32.OpenFileDialog không expose HWND trực tiếp,
+có thể dùng thread-specific WH_CBT hook.
+
+Ví dụ flow:
+
+    SetWindowsHookEx(
+        WH_CBT,
+        callback,
+        IntPtr.Zero,
+        GetCurrentThreadId()
+    );
+
+    dialog.ShowDialog(owner);
+
+Trong HCBT_ACTIVATE / lúc dialog được tạo:
+
+- kiểm tra class HWND là #32770
+- kiểm tra đó đúng là OpenFileDialog vừa mở
+- không tác động MessageBox/dialog khác
+
+Sau đó:
+
+1. lấy HWND
+2. center
+3. subclass HWND
+4. bỏ CBT hook
+
+Không được hook nhầm:
+- MessageBox
+- Settings
+- TestWindow
+- MainWindow
+- popup lỗi
+- dialog khác.
+
+==================================================
+10. KHÔNG ÉP SIZE NẾU KHÔNG CẦN
+==================================================
+
+Yêu cầu hiện tại là:
+
+- đúng vị trí giữa màn hình
+- không kéo được
+
+KHÔNG tự ý đặt Width/Height mới.
+
+KHÔNG phóng to dialog.
+
+KHÔNG maximize dialog.
+
+KHÔNG sửa kích thước toàn bộ app.
+
+Nếu code hiện tại đang tự ép dialog cực lớn bằng:
+
+    MoveWindow
+    SetWindowPos với SWP_NOSIZE không được dùng
+    Width
+    Height
+    monitor bounds
+    Maximize
+
+thì loại bỏ CHỈ phần ép size sai đó.
+
+Cho native dialog dùng kích thước bình thường của Windows.
+
+==================================================
+11. DPI / MULTI MONITOR
+==================================================
+
+Không thay đổi DPI awareness của cả application.
+
+Không sửa app.manifest chỉ vì task này.
+
+Center HWND bằng Win32 coordinates.
+
+Nếu owner ở Monitor 1:
+    dialog giữa Monitor 1.
+
+Nếu owner chuyển Monitor 2:
+    dialog giữa Monitor 2.
+
+Dùng:
+
+    MonitorFromWindow(ownerHwnd, MONITOR_DEFAULTTONEAREST)
+
+và:
+
+    GetMonitorInfo(...).rcWork
+
+để tránh taskbar.
+
+==================================================
+12. CANCEL
+==================================================
+
+Nếu user bấm Cancel:
+
+- model hiện tại giữ nguyên
+- không clear table
+- không reset test
+- không đổi PartNumber
+- không đổi Model
+- không gọi parser
+- không tạo error.
+
+==================================================
+13. OPEN
+==================================================
+
+Nếu user chọn file:
+
+    string selectedPath = dialog.FileName;
+
+Sau đó gọi CHÍNH XÁC flow hiện tại.
+
+Ví dụ nếu code cũ đang là:
+
+    await LoadSelectedModelAsync(selectedPath);
+
+thì giữ nguyên.
+
+KHÔNG viết lại:
+
+- THT parser
+- model parser
+- connector parser
+- pin mapping
+- IO mapping
+- CLIP mapping
+- resistance
+- leak configuration
+- label configuration.
+
+==================================================
+14. TUYỆT ĐỐI KHÔNG SỬA
+==================================================
+
+Không sửa:
+
+- TestViewModel logic
+- TestEngine
+- Hardware
+- Serial/UART
+- Relay
+- IO Scan
+- PASS/FAIL
+- Wrong Wiring
+- Short Circuit
+- Open Circuit
+- Resistance
+- Leak Test
+- Temperature
+- Probe
+- History
+- Counter
+- Label
+- Production
+- Master
+- Offline
+- Setup
+- Settings
+- TestWindow table
+- Status strip
+- Version logic
+
+trừ khi một dòng reference trực tiếp cần thiết để gọi
+file-selection method.
+
+Không refactor các phần trên.
+
+==================================================
+15. KHÔNG TẠO FILE RÁC
+==================================================
+
+Không tạo:
+
+    *.bak
+    *.backup
+    *.old
+    *.tmp
+    Copy of ...
+    *_fixed.cs
+    *_new.cs
+
+trong project.
+
+Sửa trực tiếp đúng file.
+
+==================================================
+16. PATCH TỐI THIỂU
+==================================================
+
+Trước khi sửa hãy tìm:
+
+    "CHỌN MÃ HÀNG"
+    OpenFileDialog
+    ShowDialog
+    *.tht
+    InitialDirectory
+
+Xác định đúng method hiện tại.
+
+Chỉ patch method/service liên quan.
+
+Nếu cần thêm helper Win32 cho việc center + lock:
+tạo helper nhỏ nhất có thể.
+
+Ví dụ tên:
+
+    FixedPositionOpenFileDialog.cs
+
+hoặc đặt private nested helper ngay trong file hiện tại nếu
+như vậy giảm số file thay đổi.
+
+Không tạo architecture mới.
+
+==================================================
+17. ACCEPTANCE TEST
+==================================================
+
+Sau sửa test thủ công logic sau:
+
+TEST 1
+- mở app
+- bấm CHỌN MÃ HÀNG
+
+PASS nếu:
+- dialog nằm giữa monitor đang chạy app.
+
+TEST 2
+- giữ chuột vào title bar
+- kéo trái/phải/lên/xuống
+
+PASS nếu:
+- dialog KHÔNG di chuyển.
+
+TEST 3
+- bấm Cancel
+
+PASS nếu:
+- dialog đóng
+- model hiện tại không thay đổi.
+
+TEST 4
+- mở lại CHỌN MÃ HÀNG
+
+PASS nếu:
+- dialog lại xuất hiện đúng giữa màn hình.
+
+TEST 5
+- chọn .tht
+
+PASS nếu:
+- model load bằng flow hiện tại.
+
+TEST 6
+- mở/chuyển thư mục
+- scroll
+- search
+- chọn file
+- double click
+- Open
+- Cancel
+
+PASS nếu:
+- tất cả vẫn hoạt động.
+
+==================================================
+18. BUILD
+==================================================
+
+Sau sửa chạy:
+
+    dotnet build -c Release
+
+và self-test hiện có của project.
+
+KHÔNG sửa lỗi unrelated nếu phát hiện.
+
+Nếu thấy lỗi khác chỉ báo cáo.
+
+==================================================
+19. BÁO CÁO CUỐI
+==================================================
+
+Chỉ báo cáo:
+
+1. File đã sửa.
+2. Method đã sửa.
+3. Cách lấy HWND OpenFileDialog.
+4. Cách center dialog.
+5. Cách chặn SC_MOVE/title drag.
+6. Xác nhận không thay đổi model-loading logic.
+7. Build result.
+8. Self-test result.
+
+Không thực hiện thêm thay đổi ngoài task.

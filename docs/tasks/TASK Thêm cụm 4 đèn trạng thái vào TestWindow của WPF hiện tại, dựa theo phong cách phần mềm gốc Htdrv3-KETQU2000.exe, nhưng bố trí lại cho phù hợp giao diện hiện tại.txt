@@ -1,0 +1,109 @@
+TASK: PATCH NHỎ - THÊM 4 ĐÈN STATUS VÀO TESTWINDOW
+
+Chỉ làm đúng task này, không refactor và không sửa logic khác.
+
+UI:
+- Thêm 4 LED tròn nhỏ nằm NGANG ngay dưới khu vực "Tên sản phẩm".
+- Thứ tự: YELLOW | WHITE | GREEN | RED
+- Không có chữ RX/TX/PASS/FAIL.
+- Giữ nền trắng/style hiện tại.
+- Không tạo panel/card mới.
+- Không làm lệch layout hiện tại.
+- LED khoảng 14–16 px, OFF vẫn nhìn thấy nhưng tối, ON sáng rõ.
+- White LED có stroke nhẹ để thấy trên nền trắng.
+
+Behavior:
+1. YELLOW:
+   - pulse 150–200 ms khi có BO/IO scan activity THỰC TẾ.
+   - không tạo timer giả.
+
+2. WHITE:
+   - pulse 80–100 ms khi có communication activity THỰC TẾ.
+   - ưu tiên hook vào send/receive/frame activity hiện có.
+   - không sửa protocol hoặc scan timing.
+
+3. GREEN:
+   - BO disconnected -> OFF.
+   - BO connected -> ON steady.
+   - Khi existing PASS xảy ra:
+       + Green blink OFF/ON 3 lần, khoảng 120 ms mỗi trạng thái.
+       + Sau blink: nếu BO vẫn connected -> ON steady.
+       + nếu BO đã disconnect -> OFF.
+   - Nếu BO disconnect trong lúc đang blink PASS:
+       + cancel blink ngay
+       + Green OFF.
+   - PASS mới khi blink cũ chưa xong:
+       + cancel blink cũ
+       + restart blink mới.
+   - Không tạo nhiều Task/timer song song.
+
+4. RED:
+   - existing FAIL/NG -> ON steady.
+   - new test cycle/reset -> OFF.
+   - FAIL không được tắt Green nếu BO vẫn connected.
+   - Trạng thái GREEN ON + RED ON khi BO connected + FAIL là HỢP LỆ.
+
+New test cycle:
+- cancel Green PASS blink
+- Red OFF
+- Green = existing board connection state
+- Yellow/White OFF cho tới activity mới
+
+QUAN TRỌNG:
+- Reuse existing IsBoardConnected / board connection event.
+- Reuse existing PASS/FAIL result.
+- Reuse existing BO scan / IO scan / send / receive activity.
+- LED chỉ HIỂN THỊ trạng thái, tuyệt đối không quyết định test result.
+- Không sửa:
+  TestEngine
+  PASS/FAIL logic
+  UART/protocol
+  relay
+  IO mapping
+  scan interval
+  leak
+  resistance
+  probe
+  history
+  label
+  counter
+  model parser
+  chọn mã hàng
+  board connection logic
+  các UI khác.
+
+Non-blocking:
+- Không Thread.Sleep
+- Không .Wait()
+- Không .Result
+- Dùng async Task.Delay / DispatcherTimer / CancellationToken phù hợp.
+- Cleanup timer/token/event khi TestWindow đóng.
+- Không memory leak.
+- Không tạo file *.bak/*.old/*_new/*_fixed.
+
+Trước khi sửa chỉ cần tìm:
+- TestWindow.xaml
+- TestWindow.xaml.cs / TestViewModel.cs
+- existing board connected state
+- existing PASS/FAIL state
+- existing scan/send/receive hooks
+
+Patch số file ít nhất có thể.
+
+Sau sửa chạy:
+dotnet build -c Release
+
+và self-tests hiện có.
+
+Báo cáo cuối:
+1. File đã sửa.
+2. Event/state nào dùng cho Yellow.
+3. Event/state nào dùng cho White.
+4. State nào điều khiển Green connection.
+5. PASS event nào trigger Green blink.
+6. FAIL event nào bật Red.
+7. Cách cancel Green blink.
+8. Build result.
+9. Self-test result.
+
+Nếu phát hiện lỗi khác ngoài task này: chỉ báo cáo, KHÔNG sửa.

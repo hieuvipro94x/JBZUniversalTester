@@ -98,12 +98,17 @@
   <!-- Nhúng âm thanh vào EXE -->
   <ItemGroup>
     <None Remove="Assets\Sounds\CLICK.wav" />
+    <None Remove="Assets\Sounds\COMPUTER.wav" />
     <None Remove="Assets\Sounds\DINGDONG.wav" />
     <None Remove="Assets\Sounds\START.wav" />
     <None Remove="Assets\Sounds\TESTPOINT.wav" />
 
     <EmbeddedResource Include="Assets\Sounds\CLICK.wav">
       <LogicalName>JBZUniversalTester.Assets.Sounds.CLICK.wav</LogicalName>
+    </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\COMPUTER.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.COMPUTER.wav</LogicalName>
     </EmbeddedResource>
 
     <EmbeddedResource Include="Assets\Sounds\DINGDONG.wav">
