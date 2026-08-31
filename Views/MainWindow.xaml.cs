@@ -307,15 +307,23 @@ public partial class MainWindow : Window
             if (savedPage is not null)
                 await savedPage.ReleaseManualOutputsAsync();
             await _viewModel.ReloadProductionSettingsAsync();
+
+            MessageBox.Show(
+                this,
+                "Đã lưu và đồng bộ cấu hình với BO.",
+                "JBZ",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
             MessageBox.Show(
                 this,
-                $"Đã lưu file cài đặt nhưng chưa reconfigure runtime hoàn chỉnh.\n\n{ex.Message}",
-                "Cảnh báo áp dụng cài đặt",
+                $"Không thể đồng bộ cấu hình mới với BO.\n" +
+                $"Hãy thoát hoàn toàn ứng dụng rồi mở lại.\n\n{ex.Message}",
+                "Lỗi đồng bộ BO",
                 MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+                MessageBoxImage.Error);
             return;
         }
 

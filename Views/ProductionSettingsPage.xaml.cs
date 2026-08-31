@@ -546,11 +546,6 @@ public partial class ProductionSettingsPage : UserControl
             _vm.Settings.CardCount = capacity.ScanCardCount;
             _vm.Save();
 
-            ShowMessage(
-                "Đã lưu cấu hình.",
-                "JBZ",
-                MessageBoxImage.Information);
-
             SettingsSaved?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex)

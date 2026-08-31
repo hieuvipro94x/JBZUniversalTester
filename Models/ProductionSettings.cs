@@ -16,7 +16,7 @@ public sealed class ProductionSettings
     /// 1 scan-unit = 64 I/O = 2 card vật lý x 32 I/O. Giá trị này được đồng
     /// bộ tự động từ ExpansionCardCount.
     /// </summary>
-    public int CardCount { get; set; } = 1;
+    public int CardCount { get; set; } = 2;
 
     public int IoConfirm1 { get; set; } = 1;
 
@@ -76,7 +76,7 @@ public sealed class ProductionSettings
     /// Mỗi card có 2 port nội bộ x 32 I/O; operator không cấu hình số port.
     /// START_SCAN xx dùng chính số card/scan-unit này.
     /// </summary>
-    public int ExpansionCardCount { get; set; } = 1;
+    public int ExpansionCardCount { get; set; } = 2;
 
     // ============================================================
     // THÔNG TIN PRODUCTION

@@ -1957,6 +1957,13 @@ internal static class Program
 
     private static void TestBoardCapacity()
     {
+        var defaultSettings = new ProductionSettings();
+        Assert(
+            defaultSettings.ExpansionCardCount == 2 &&
+            defaultSettings.CardCount == 2 &&
+            BoardCapacity.FromSettings(defaultSettings).TotalIoCapacity == 128,
+            "A new station defaults to two expansion cards / 128 IO");
+
         for (int cardCount = 1; cardCount <= 10; cardCount++)
         {
             BoardCapacity everyCapacity = BoardCapacity.Create(cardCount);

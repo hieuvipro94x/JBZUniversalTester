@@ -6614,6 +6614,7 @@ public sealed class TestViewModel : ObservableObject
     {
         int maxIo = _model?.MaxIo ?? 0;
         bool wasScanning = _board.IsScanning;
+        bool usedFullReconnect = false;
         RuntimeMode runtimeMode = CurrentRuntimeMode;
         BoardScanMode resumeMode = runtimeMode == RuntimeMode.Probe
             ? BoardScanMode.Probe
@@ -6655,12 +6656,61 @@ public sealed class TestViewModel : ObservableObject
         if (_board.IsConnected && wasScanning && restartRequired &&
             _board.ScanCapacity.IsModelWithinInstalledCapacity)
         {
-            if (resumeMode == BoardScanMode.Production)
-                await StartProductionScanAndVerifyFrameAsync(
-                    _lifetimeCts.Token,
-                    "PRODUCTION_RECONFIGURE");
-            else
-                await _board.StartScanAsync(resumeMode);
+            try
+            {
+                if (resumeMode == BoardScanMode.Production)
+                    await StartProductionScanAndVerifyFrameAsync(
+                        _lifetimeCts.Token,
+                        "PRODUCTION_RECONFIGURE");
+                else
+                    await _board.StartScanAsync(resumeMode);
+            }
+            catch (Exception liveReconfigureError) when
+                (!_lifetimeCts.IsCancellationRequested)
+            {
+                // Một số BO giữ nguyên độ dài frame cũ sau khi đổi byte xx của
+                // START_SCAN dù STOP/RESET/INIT đã chạy. Thử lại bằng lifecycle
+                // đầy đủ ngay trong lần Save để operator không phải tự thoát app.
+                AddLog(
+                    "Đổi số card tại chỗ chưa nhận đúng frame; tự reconnect BO " +
+                    $"với cấu hình mới. Lỗi đầu tiên: {liveReconfigureError.Message}");
+
+                try
+                {
+                    await ReconnectBoardForSettingsAsync();
+                    if (!_board.IsConnected)
+                    {
+                        throw new InvalidOperationException(
+                            "Không kết nối lại được BO sau khi đổi số card.");
+                    }
+
+                    _board.ConfigureActiveScanRange(maxIo);
+                    if (resumeMode == BoardScanMode.Production)
+                    {
+                        await StartProductionScanAndVerifyFrameAsync(
+                            _lifetimeCts.Token,
+                            "PRODUCTION_RECONFIGURE_RECONNECT");
+                    }
+                    else
+                    {
+                        await _board.StartScanAsync(resumeMode, _lifetimeCts.Token);
+                    }
+
+                    usedFullReconnect = true;
+                    AddLog("Đã đồng bộ số card sau khi tự reconnect BO.");
+                }
+                catch (Exception reconnectError) when
+                    (!_lifetimeCts.IsCancellationRequested)
+                {
+                    AddLog(
+                        "Không thể đồng bộ số card sau reconnect: " +
+                        reconnectError.Message);
+                    throw new InvalidOperationException(
+                        "Không thể đồng bộ số card mở rộng với BO. " +
+                        "Hãy thoát hoàn toàn ứng dụng, mở lại rồi kiểm tra kết nối BO.",
+                        new AggregateException(liveReconfigureError, reconnectError));
+                }
+            }
         }
 
         // Chỉ Production đang ARM mới được nối lại engine. Background vẫn chỉ scan nền.
@@ -6670,7 +6720,9 @@ public sealed class TestViewModel : ObservableObject
             (MasterApproved || IsMasterSequenceActive));
 
         AddLog(
-            $"Đã reconfigure card runtime không đóng FTDI: {_board.Capacity}; " +
+            $"Đã reconfigure card runtime" +
+            (usedFullReconnect ? " sau reconnect BO" : " không đóng FTDI") +
+            $": {_board.Capacity}; " +
             $"resume={resumeMode}, wasScanning={wasScanning}, restart={restartRequired}.");
     }
 
