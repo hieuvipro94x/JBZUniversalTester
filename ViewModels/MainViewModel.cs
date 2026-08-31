@@ -106,7 +106,8 @@ public sealed class MainViewModel : ObservableObject
             _visa,
             _waterProof,
             _settings,
-            _productionSettings
+            _productionSettings,
+            requireStartupIoClear: false
         );
 
         // Việc tự nạp mã + tự kết nối bo được bắt đầu tại MainWindow.Loaded.

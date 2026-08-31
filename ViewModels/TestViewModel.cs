@@ -2489,6 +2489,9 @@ public sealed class TestViewModel : ObservableObject
 
     private void OnBoardFrameReceived(object? sender, ScanFrame frame)
     {
+        if (IsDeviceFault || !_board.IsConnected)
+            return;
+
         // BoardFrameActivity chỉ là telemetry cho UI LED. Subscriber presentation
         // không được phép làm gián đoạn hot path nhận/giải mã frame của bo.
         try
@@ -2499,9 +2502,6 @@ public sealed class TestViewModel : ObservableObject
         {
             Debug.WriteLine($"BoardFrameActivity observer error: {ex}");
         }
-
-        if (IsDeviceFault)
-            return;
 
         try
         {
@@ -3868,11 +3868,30 @@ public sealed class TestViewModel : ObservableObject
     {
         AsyncFileLogService.Current.Performance("TEST_START_CLICK");
 
-        if (IsProductRemovalPending)
+        // Sản phẩm do scan nền phát hiện chỉ khóa thao tác ĐỔI MÃ. Khi process
+        // vừa mở lại và vẫn giữ model cuối, chuyển thẳng sang Production để
+        // frame kế tiếp nhận diện continuity đang có. Gate sau kết quả đã commit
+        // hoặc gate thuộc runtime Production vẫn giữ nguyên để tránh test trùng.
+        bool resumeCurrentStartupModel =
+            IsProductRemovalPending &&
+            !_requireStartupIoClear &&
+            CurrentRuntimeMode == RuntimeMode.Background &&
+            Volatile.Read(ref _resultRecordedThisCycle) == 0;
+
+        if (IsProductRemovalPending && !resumeCurrentStartupModel)
         {
             State = "VUI LÒNG THÁO SẢN PHẨM";
             AddLog("BLOCKED: chưa thể bắt đầu kiểm tra vì sản phẩm chưa được tháo hoàn toàn khỏi JIG.");
             return;
+        }
+
+        if (resumeCurrentStartupModel)
+        {
+            SetProductRemovalPending(false);
+            Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
+            Interlocked.Exchange(ref _startupIoInterlockState, 2);
+            _startupIoWarningSignature = string.Empty;
+            AddLog("START: giữ mã hiện tại và nhận tiếp sản phẩm đang lắp; removal gate vẫn khóa thao tác đổi mã.");
         }
 
         if (IsDeviceFault)

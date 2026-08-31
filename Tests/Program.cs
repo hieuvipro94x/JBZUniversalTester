@@ -605,6 +605,17 @@ internal static class Program
                testWindowSource.Contains("TestGridMaximumScale = 1.25", StringComparison.Ordinal) &&
                testWindowSource.Contains("Resources[\"TestFaultGridFontSize\"]", StringComparison.Ordinal),
             "TestView keeps large 1280x768 text and scales grid typography/row spacing uniformly through Full HD");
+        int yellowLedIndex = xaml.IndexOf("x:Name=\"YellowStatusLed\"", StringComparison.Ordinal);
+        int whiteLedIndex = xaml.IndexOf("x:Name=\"WhiteStatusLed\"", StringComparison.Ordinal);
+        int greenLedIndex = xaml.IndexOf("x:Name=\"GreenStatusLed\"", StringComparison.Ordinal);
+        int redLedIndex = xaml.IndexOf("x:Name=\"RedStatusLed\"", StringComparison.Ordinal);
+        Assert(yellowLedIndex >= 0 && yellowLedIndex < whiteLedIndex &&
+               whiteLedIndex < greenLedIndex && greenLedIndex < redLedIndex &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(180)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(90)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("blink < 3", StringComparison.Ordinal) &&
+               testWindowSource.Contains("viewModel.IsDeviceFault", StringComparison.Ordinal),
+            "TestView LEDs keep YELLOW-WHITE-GREEN-RED order, pulse timing, three PASS blinks, and hardware-fault blackout");
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
@@ -624,6 +635,8 @@ internal static class Program
                    "Chỉ được chọn mã hàng sau khi bo kết nối thành công.",
                    StringComparison.Ordinal),
             "Selecting and parsing a model is allowed without a connected board");
+        Assert(mainViewModelSource.Contains("requireStartupIoClear: false", StringComparison.Ordinal),
+            "Production startup accepts the first live frame for the remembered model without requiring a clean baseline");
 
         Assert(xaml.Contains("x:Name=\"OperationTablesHost\"", StringComparison.Ordinal) &&
                testWindowSource.Contains("OperationTablesHost.Visibility = Visibility.Collapsed;", StringComparison.Ordinal) &&
@@ -633,6 +646,9 @@ internal static class Program
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.Contains("resumeCurrentStartupModel", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("BoardFrameActivity?.Invoke(this, frame);", StringComparison.Ordinal),
+            "Remembered-model START resumes real frame processing while UI LEDs observe the existing board frame stream");
         int initializeHardwareIndex = testViewModelSource.IndexOf(
             "await InitializeHardwareAsync();",
             StringComparison.Ordinal);
@@ -811,6 +827,29 @@ internal static class Program
             StartupIoInterlock.FindConnectedPairs(duplicatedDirections);
         Assert(normalized.Count == 1 && normalized[0] == new StartupIoContactPair(1, 18),
             "Startup IO detector normalizes and de-duplicates bidirectional edges");
+
+        var resumeProduction = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            ProductSettleTimeMs = 0,
+            WrongConnectionConfirmMs = 0,
+            ShortCircuitConfirmMs = 0
+        };
+        TestViewModel resumeVm = CreateTestViewModel(
+            resumeProduction,
+            out FakeBoard resumeBoard,
+            requireStartupIoClear: false);
+        resumeVm.SetModel(Model(("RESUME-PAIR", new[] { 1, 18 })));
+        resumeBoard.Publish(duplicatedDirections);
+        Assert(resumeVm.IsProductRemovalPending,
+            "Installed product in background locks changing the current model");
+        AssertThrows<InvalidOperationException>(
+            () => resumeVm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
+            "Background installed product cannot be assigned to another model");
+        resumeVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(!resumeVm.IsProductRemovalPending &&
+               !resumeVm.State.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase),
+            "START resumes the remembered model without requiring a clean frame first");
 
         var production = new ProductionSettings
         {

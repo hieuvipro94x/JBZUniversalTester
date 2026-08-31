@@ -186,13 +186,17 @@ public partial class TestWindow : Window
         _lastLedState = viewModel.State ?? string.Empty;
         _lastLedResultStatus = viewModel.ResultStatusText;
         ResetActivityLeds();
-        SetGreenLed(viewModel.IsBoardConnected);
-        SetRedLed(viewModel.ResultStatusText == "KHÔNG ĐẠT");
+        bool hardwareReady = viewModel.IsBoardConnected && !viewModel.IsDeviceFault;
+        SetGreenLed(hardwareReady);
+        SetRedLed(hardwareReady && IsConfirmedFailLedState(viewModel, viewModel.ResultStatusText));
     }
 
     private void ViewModel_BoardFrameActivity(object? sender, ScanFrame frame)
     {
-        if (Volatile.Read(ref _statusLedHandlersAttached) == 0)
+        if (Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
+            sender is not TestViewModel viewModel ||
+            !viewModel.IsBoardConnected ||
+            viewModel.IsDeviceFault)
             return;
 
         Interlocked.Exchange(ref _whitePulsePending, 1);
@@ -205,7 +209,10 @@ public partial class TestWindow : Window
         _ = Dispatcher.BeginInvoke(() =>
         {
             Interlocked.Exchange(ref _statusPulseDispatchQueued, 0);
-            if (Volatile.Read(ref _statusLedHandlersAttached) == 0)
+            if (Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
+                DataContext is not TestViewModel currentViewModel ||
+                !currentViewModel.IsBoardConnected ||
+                currentViewModel.IsDeviceFault)
                 return;
 
             if (Interlocked.Exchange(ref _whitePulsePending, 0) != 0)
@@ -218,6 +225,7 @@ public partial class TestWindow : Window
     private void ViewModel_StatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is not (nameof(TestViewModel.IsBoardConnected) or
+                                   nameof(TestViewModel.IsDeviceFault) or
                                    nameof(TestViewModel.State) or
                                    nameof(TestViewModel.ResultStatusText)) ||
             sender is not TestViewModel viewModel)
@@ -251,6 +259,17 @@ public partial class TestWindow : Window
         string state = viewModel.State ?? string.Empty;
         string resultStatus = viewModel.ResultStatusText;
         bool boardConnected = viewModel.IsBoardConnected;
+        if (!boardConnected || viewModel.IsDeviceFault)
+        {
+            CancelGreenPassBlink(false);
+            SetRedLed(false);
+            ResetActivityLeds();
+            _lastLedBoardConnected = boardConnected;
+            _lastLedState = state;
+            _lastLedResultStatus = resultStatus;
+            return;
+        }
+
         if (boardConnected == _lastLedBoardConnected &&
             state.Equals(_lastLedState, StringComparison.Ordinal) &&
             resultStatus.Equals(_lastLedResultStatus, StringComparison.Ordinal))
@@ -382,7 +401,8 @@ public partial class TestWindow : Window
         if (request != Volatile.Read(ref _greenBlinkRequestGeneration) ||
             Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
             DataContext != viewModel ||
-            !viewModel.IsBoardConnected)
+            !viewModel.IsBoardConnected ||
+            viewModel.IsDeviceFault)
         {
             return;
         }
@@ -405,7 +425,8 @@ public partial class TestWindow : Window
 
             if (request == Volatile.Read(ref _greenBlinkRequestGeneration) &&
                 Volatile.Read(ref _statusLedHandlersAttached) != 0 &&
-                DataContext == viewModel)
+                DataContext == viewModel &&
+                !viewModel.IsDeviceFault)
             {
                 SetGreenLed(viewModel.IsBoardConnected);
             }
@@ -419,12 +440,12 @@ public partial class TestWindow : Window
         for (int blink = 0; blink < 3; blink++)
         {
             token.ThrowIfCancellationRequested();
-            if (!viewModel.IsBoardConnected)
+            if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault)
                 return;
 
             SetGreenLed(false);
             await Task.Delay(TimeSpan.FromMilliseconds(120), token);
-            if (!viewModel.IsBoardConnected)
+            if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault)
                 return;
 
             SetGreenLed(true);
