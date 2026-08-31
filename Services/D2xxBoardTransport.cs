@@ -610,7 +610,14 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     public void ConfigureActiveScanRange(int maxIo)
     {
-        _scanCapacity = BoardScanCapacity.Create(_production, maxIo);
+        // Test pointer là chế độ quan sát I/O vật lý. Khi bật, BO phải quét
+        // toàn bộ card đã cấu hình, không được co theo MaxIo của THT; nhờ đó
+        // có thể dò IO128 trên máy 2 card dù THT chỉ khai báo ví dụ IO1..64.
+        // TestEngine vẫn chỉ đánh giá topology trong model nên I/O ngoài THT không thể PASS/FAIL.
+        _scanCapacity = BoardScanCapacity.Create(
+            _production,
+            maxIo,
+            scanAllInstalledIo: _production.UseTestPointer);
         _installedCapacity = _scanCapacity.Installed;
         _capacity = _scanCapacity.Active;
         _production.ExpansionCardCount = _installedCapacity.ExpansionCardCount;
@@ -628,7 +635,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
             $"BOARD_CAPACITY installed={_scanCapacity.InstalledScanUnits} " +
             $"required={_scanCapacity.RequiredScanUnits} active={_scanCapacity.ActiveScanUnits} " +
             $"io={_scanCapacity.ActiveIoCapacity} " +
-            $"fit={_scanCapacity.IsModelWithinInstalledCapacity}.");
+            $"fit={_scanCapacity.IsModelWithinInstalledCapacity} " +
+            $"probe_all_io={_production.UseTestPointer}.");
 
         if (!_scanCapacity.IsModelWithinInstalledCapacity)
             Log?.Invoke(this, _scanCapacity.CapacityErrorMessage);

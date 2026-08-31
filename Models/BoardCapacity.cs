@@ -132,7 +132,10 @@ public sealed record BoardScanCapacity
     public long RequiredIoCapacity =>
         (long)RequiredScanUnits * BoardCapacity.IoPerExpansionCard;
 
-    public static BoardScanCapacity Create(ProductionSettings settings, int maxGlobalIo)
+    public static BoardScanCapacity Create(
+        ProductionSettings settings,
+        int maxGlobalIo,
+        bool scanAllInstalledIo = false)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -148,7 +151,7 @@ public sealed record BoardScanCapacity
         // card. With a valid model, scan only through its highest configured IO
         // so a 10-card station does not pay the 640-source frame time for a
         // product that uses only the first card.
-        int activeScanUnits = maxGlobalIo > 0 && fits
+        int activeScanUnits = !scanAllInstalledIo && maxGlobalIo > 0 && fits
             ? required
             : installed.ScanCardCount;
         BoardCapacity active = BoardCapacity.Create(activeScanUnits);

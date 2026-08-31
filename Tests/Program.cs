@@ -2233,6 +2233,16 @@ internal static class Program
                configured10Required8.IsModelWithinInstalledCapacity,
             "Installed 10 / required 8 keeps installed capacity but scans active 8");
 
+        BoardScanCapacity probeAllInstalled = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 2, UseTestPointer = true },
+            maxGlobalIo: 18,
+            scanAllInstalledIo: true);
+        Assert(probeAllInstalled.InstalledScanUnits == 2 &&
+               probeAllInstalled.ActiveScanUnits == 2 &&
+               probeAllInstalled.ActiveIoCapacity == 128 &&
+               probeAllInstalled.IsModelWithinInstalledCapacity,
+            "Test pointer scans all configured IO: a two-card station exposes IO1-128 regardless of THT MaxIo");
+
         BoardScanCapacity insufficient = BoardScanCapacity.Create(
             new ProductionSettings { ExpansionCardCount = 4 },
             512);
