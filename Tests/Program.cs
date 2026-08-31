@@ -2537,6 +2537,25 @@ internal static class Program
                faultDialogSource.Contains("ApplyCompactSummary(summary);", StringComparison.Ordinal),
             "FAIL dialog uses a compact auto-height layout without duplicating its fault title");
 
+        string mainWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));
+        string mainWindowSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
+        Assert(mainWindowXaml.Contains("Content=\"KẾT NỐI LẠI BO\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Command=\"{Binding Test.ConnectBoardCommand}\"", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("StartupControlUnlockTimeout", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("Task.WhenAny(", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("ObserveDeferredStartupAsync(initialization)", StringComparison.Ordinal),
+            "Slow board startup unlocks product selection and exposes an explicit safe reconnect action");
+
+        string bootstrapSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "StartupBootstrapService.cs"));
+        Assert(bootstrapSource.IndexOf("Critical filesystem bootstrap completed.", StringComparison.Ordinal) <
+               bootstrapSource.IndexOf("StartLegacyHistoryImportInBackground(", StringComparison.Ordinal) &&
+               bootstrapSource.Contains("Task.Run(async () =>", StringComparison.Ordinal) &&
+               bootstrapSource.Contains("Deferred legacy history import completed.", StringComparison.Ordinal),
+            "Legacy C:\\Pass_/C:\\Error_ import cannot block board connection or operator controls at startup");
+
         var invalid = new ProductionSettings
         {
             IoScanIntervalMs = -1,

@@ -13,6 +13,7 @@ namespace JBZUniversalTester.Views;
 
 public partial class MainWindow : Window
 {
+    private static readonly TimeSpan StartupControlUnlockTimeout = TimeSpan.FromSeconds(8);
     private readonly MainViewModel _viewModel;
     private TestWindow? _testWindow;
     private ProductionSettingsPage? _settingsPage;
@@ -80,7 +81,26 @@ public partial class MainWindow : Window
             // Tự nạp mã gần nhất và tự kết nối/recovery bo sau khi cửa sổ đã
             // render. Các API bên dưới vẫn await bình thường nên Dispatcher
             // không bị giữ trong thời gian handshake/delay phần cứng.
-            await _viewModel.InitializeApplicationAsync();
+            Task initialization = _viewModel.InitializeApplicationAsync();
+            Task completed = await Task.WhenAny(
+                initialization,
+                Task.Delay(StartupControlUnlockTimeout));
+
+            if (completed != initialization)
+            {
+                // Một số driver/D2XX trên máy production có thể giữ lời gọi mở
+                // thiết bị lâu bất thường. Không để lỗi phần cứng khóa luôn việc
+                // chọn THT/cài đặt. Tác vụ kết nối vẫn tiếp tục và được theo dõi.
+                _viewModel.Status =
+                    "KẾT NỐI BO ĐANG CHẬM - CÓ THỂ CHỌN MÃ HOẶC BẤM KẾT NỐI LẠI BO";
+                AsyncFileLogService.Current.Error(
+                    $"STARTUP HARDWARE TIMEOUT after {StartupControlUnlockTimeout.TotalSeconds:0}s; " +
+                    "operator controls unlocked while initialization continues.");
+                _ = ObserveDeferredStartupAsync(initialization);
+                return;
+            }
+
+            await initialization;
         }
         catch (Exception ex)
         {
@@ -97,6 +117,23 @@ public partial class MainWindow : Window
         finally
         {
             UpdateProductRemovalGate();
+        }
+    }
+
+    private async Task ObserveDeferredStartupAsync(Task initialization)
+    {
+        try
+        {
+            await initialization;
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"DEFERRED STARTUP FAILED: {ex}");
+        }
+        finally
+        {
+            if (!_shutdownStarted)
+                await Dispatcher.InvokeAsync(UpdateProductRemovalGate);
         }
     }
 

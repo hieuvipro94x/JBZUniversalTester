@@ -191,6 +191,14 @@
                     Style="{StaticResource FlatButton}"
                     Content="CHỌN MÃ HÀNG"/>
 
+            <Button x:Name="ReconnectBoardButton"
+                    Grid.Column="4"
+                    Width="190"
+                    HorizontalAlignment="Left"
+                    Command="{Binding Test.ConnectBoardCommand}"
+                    Style="{StaticResource FlatButton}"
+                    Content="KẾT NỐI LẠI BO"/>
+
             <Button Grid.Column="5"
                     Command="{Binding ExitCommand}"
                     Style="{StaticResource FlatButton}"

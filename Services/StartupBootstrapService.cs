@@ -5,6 +5,10 @@ namespace JBZUniversalTester.Services;
 
 public static class StartupBootstrapService
 {
+    private static readonly object LegacyImportGate = new();
+    private static Task _legacyImportTask = Task.CompletedTask;
+    private static bool _legacyImportStarted;
+
     public static void EnsureFastConfiguration()
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
@@ -43,7 +47,7 @@ public static class StartupBootstrapService
         }
     }
 
-    public static async Task EnsureDeferredProductionFiles()
+    public static Task EnsureDeferredProductionFiles()
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
@@ -69,12 +73,46 @@ public static class StartupBootstrapService
                 log.Application($"PARTCNT_IMPORT rows={importedCounters}");
             partCounter.MirrorAll(repository.GetAllProbeCounters());
 
-            await ImportLegacyHistoryOnceAsync(repository, production, log).ConfigureAwait(false);
-            log.Application("Deferred filesystem bootstrap completed.");
+            // C:\Pass_ và C:\Error_ trên máy cũ có thể chứa hàng trăm file.
+            // Import chúng không phải điều kiện để kết nối bo/chọn mã; chờ tại
+            // đây từng làm startup dừng trước T3 và khóa toàn bộ nút vận hành.
+            log.Application("Critical filesystem bootstrap completed.");
+            StartLegacyHistoryImportInBackground(repository, production, log);
         }
         catch (Exception ex)
         {
             log.Error($"Deferred startup bootstrap error: {ex}");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static void StartLegacyHistoryImportInBackground(
+        TestHistoryStore repository,
+        ProductionSettings production,
+        AsyncFileLogService log)
+    {
+        lock (LegacyImportGate)
+        {
+            if (_legacyImportStarted)
+                return;
+
+            _legacyImportStarted = true;
+            _legacyImportTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await ImportLegacyHistoryOnceAsync(repository, production, log)
+                        .ConfigureAwait(false);
+                    log.Application("Deferred legacy history import completed.");
+                }
+                catch (Exception ex)
+                {
+                    // Dữ liệu production SQLite hiện tại đã sẵn sàng. Lỗi import
+                    // lịch sử cũ chỉ được ghi log, không hạ kết nối bo đang chạy.
+                    log.Error($"Deferred legacy history import error: {ex}");
+                }
+            });
         }
     }
 
