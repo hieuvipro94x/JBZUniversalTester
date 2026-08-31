@@ -870,7 +870,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     async Task WriteRelayAsync(byte[] command, string reason, int relayState, CancellationToken ct)
     {
-        if (Volatile.Read(ref _activeRelay) == relayState)
+        // Lệnh OFF là lệnh an toàn cưỡng bức: luôn ghi lại 00, kể cả khi cache
+        // phần mềm đang nghĩ relay đã OFF. Nhờ đó Manual/PASS không phụ thuộc
+        // vào trạng thái cache nếu một relay cơ khí vừa nhả chậm hoặc bị nhiễu.
+        if (relayState != 0 && Volatile.Read(ref _activeRelay) == relayState)
             return;
         await WriteAsync(command, ct);
         Volatile.Write(ref _activeRelay, relayState);

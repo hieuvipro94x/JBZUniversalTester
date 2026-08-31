@@ -731,7 +731,13 @@ internal static class Program
 
     private static void TestManualModeInterlock()
     {
-        var settings = new ProductionSettings { ManualModeEnabled = false, MasterFaultRequiredCount = 0 };
+        var settings = new ProductionSettings
+        {
+            ManualModeEnabled = false,
+            MasterFaultRequiredCount = 0,
+            Relay1JigPulseMs = 50,
+            Relay2MarkingPulseMs = 50
+        };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
         vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
 
@@ -741,24 +747,20 @@ internal static class Program
             "Manual relay menu is ready without a saved ManualModeEnabled setting");
 
         board.Commands.Clear();
-        int relay = vm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
-        Assert(relay == 1 && vm.IsManualModeActive && vm.State == "MANUAL" && !board.IsScanning,
-            "Relay 1 ON automatically enters temporary Manual runtime");
-        Assert(board.Commands.Count(command => command == "OFF") >= 1 &&
-               board.Commands.Last() == "SET:1",
-            "Direct Relay 1 ON performs safe all-off before SetRelay(1)");
+        vm.PulseManualRelayAsync(1).GetAwaiter().GetResult();
+        Assert(!vm.IsManualModeActive && vm.State != "MANUAL" && board.IsScanning,
+            "Manual Relay 1 pulse automatically exits Manual and resumes Production scan");
+        Assert(board.Commands.Count(command => command == "SET:1") == 1 &&
+               board.Commands.Count(command => command == "OFF") >= 2 &&
+               board.Commands.Last() == "START",
+            "Manual Relay 1 is one safe pulse: OFF before, SET:1 once, OFF after, then restart scan");
 
         board.Commands.Clear();
-        relay = vm.SetManualRelayAsync(2, true).GetAwaiter().GetResult();
-        Assert(relay == 2, "Relay 2 ON replaces Relay 1");
-        Assert(string.Join(",", board.Commands) == "OFF,SET:2",
-            "Relay 2 ON performs all-off before SetRelay(2)");
-
-        board.Commands.Clear();
-        relay = vm.SetManualRelayAsync(2, false).GetAwaiter().GetResult();
-        Assert(relay == 0 && !vm.IsManualModeActive &&
-               board.Commands.Contains("OFF") && board.Commands.Contains("START"),
-            "Relay OFF leaves all outputs off and automatically resumes Production scan");
+        vm.PulseManualRelayAsync(2).GetAwaiter().GetResult();
+        Assert(board.Commands.Count(command => command == "SET:2") == 1 &&
+               board.Commands.Count(command => command == "OFF") >= 2 &&
+               board.Commands.Last() == "START",
+            "Manual Relay 2 is one safe pulse and cannot remain latched ON");
 
         board.Commands.Clear();
         vm.ResetManualOutputsAsync().GetAwaiter().GetResult();
@@ -771,13 +773,19 @@ internal static class Program
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         Assert(vm.State != "MANUAL", "Production is no longer locked after direct Relay OFF/RESET");
 
-        var faultSettings = new ProductionSettings { ManualModeEnabled = false, MasterFaultRequiredCount = 0 };
+        var faultSettings = new ProductionSettings
+        {
+            ManualModeEnabled = false,
+            MasterFaultRequiredCount = 0,
+            Relay1JigPulseMs = 50,
+            Relay2MarkingPulseMs = 50
+        };
         TestViewModel faultVm = CreateTestViewModel(faultSettings, out FakeBoard faultBoard);
         faultVm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
         faultBoard.ThrowOnSetRelay = true;
         try
         {
-            faultVm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
+            faultVm.PulseManualRelayAsync(1).GetAwaiter().GetResult();
             throw new InvalidOperationException("Manual relay failure should throw");
         }
         catch (InvalidOperationException)
