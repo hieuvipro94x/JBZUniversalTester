@@ -2496,14 +2496,13 @@ internal static class Program
 
         gate.Reset();
         var shortFault = new[] { new UnexpectedFaultObservation(1, 2, ProductFaultType.ShortCircuit) };
-        gate.Observe(clean, [], true);
-        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultProductSettleTimeMs + 1));
-        gate.Observe(clean, [], true);
         gate.Observe(clean, shortFault, true);
         clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultShortCircuitConfirmMs - 1));
-        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient SHORT not confirmed");
+        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Count == 0,
+            "Transient SHORT is not confirmed, without waiting for product settle first");
         clock.Advance(TimeSpan.FromMilliseconds(2));
-        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Contains((1, 2)), "Stable SHORT confirmed");
+        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Contains((1, 2)),
+            "Stable SHORT is confirmed on the next stable frame without extra product-settle latency");
         Assert(gate.Observe(clean, [], true).ConfirmedUnexpectedPairs.Count == 0, "SHORT recovery resets candidate");
 
         var wrongFault = new[] { new UnexpectedFaultObservation(3, 4, ProductFaultType.WrongWiring) };
@@ -2512,6 +2511,21 @@ internal static class Program
         Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient wrong connection not confirmed");
         clock.Advance(TimeSpan.FromMilliseconds(2));
         Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Contains((3, 4)), "Stable wrong connection confirmed");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.IndexOf("TriggerPassUi();", StringComparison.Ordinal) <
+               testViewModelSource.IndexOf("await PauseProductionScanForFinalPassAsync(ct);", StringComparison.Ordinal),
+            "PASS UI is raised before waiting for the hardware scan to stop");
+
+        string soundSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
+        int productSoundStart = soundSource.IndexOf("public void PlayProductStart()", StringComparison.Ordinal);
+        int passSoundStart = soundSource.IndexOf("public void PlayTestOk()", StringComparison.Ordinal);
+        string productSoundMethod = soundSource[productSoundStart..passSoundStart];
+        Assert(productSoundMethod.Contains("SafePlay(player);", StringComparison.Ordinal) &&
+               !productSoundMethod.Contains("SafePlaySync(player);", StringComparison.Ordinal),
+            "Product-start sound never holds the UI sound path for the full WAV duration");
 
         var invalid = new ProductionSettings
         {

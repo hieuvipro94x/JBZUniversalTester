@@ -6200,7 +6200,6 @@ public sealed class TestViewModel : ObservableObject
             }
 
             SetProductionPhase(ProductionPhase.Completed);
-            await PauseProductionScanForFinalPassAsync(ct);
             bool passUiTriggered = false;
             long passUiTimestamp = 0;
             DateTime? passResultAt = null;
@@ -6221,6 +6220,7 @@ public sealed class TestViewModel : ObservableObject
             }
 
             TriggerPassUi();
+            await PauseProductionScanForFinalPassAsync(ct);
 
             // PASS UI/sound phải bật ngay khi điều kiện logic đã đạt.
             // Relay chạy sau theo cấu hình Production Settings.

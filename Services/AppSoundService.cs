@@ -184,19 +184,12 @@ public sealed class AppSoundService : IDisposable
             return;
         }
 
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_BEGIN");
-                SafePlaySync(player);
-                AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_END");
-            }
-            finally
-            {
-                Interlocked.Exchange(ref _productStartPlaybackActive, 0);
-            }
-        });
+        // SoundPlayer.Play() trả về ngay. PlaySync giữ tài nguyên PlaySound suốt
+        // file COMPUTER.wav (~2,8 s), khiến Stop/Play của đầu dò, lỗi hoặc PASS
+        // có thể chặn Dispatcher đúng lúc cần phản hồi nhanh nhất.
+        AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_ASYNC");
+        SafePlay(player);
+        Interlocked.Exchange(ref _productStartPlaybackActive, 0);
     }
 
     public void PlayTestOk()

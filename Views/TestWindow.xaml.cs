@@ -31,8 +31,11 @@ public partial class TestWindow : Window
     private int _greenBlinkRequestGeneration;
     private int _statusLedHandlersAttached;
     private int _statusPulseDispatchQueued;
+    private int _statusStateDispatchQueued;
     private int _yellowPulsePending;
     private int _whitePulsePending;
+    private bool _lastLedBoardConnected;
+    private string _lastLedState = string.Empty;
     private string _lastLedResultStatus = string.Empty;
 
     private static readonly Brush YellowLedOffBrush = CreateFrozenBrush(0x6B, 0x62, 0x40);
@@ -70,13 +73,13 @@ public partial class TestWindow : Window
         };
         _clockTimer.Tick += ClockTimer_Tick;
 
-        _yellowPulseTimer = new DispatcherTimer(DispatcherPriority.Render, Dispatcher)
+        _yellowPulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
             Interval = TimeSpan.FromMilliseconds(180)
         };
         _yellowPulseTimer.Tick += YellowPulseTimer_Tick;
 
-        _whitePulseTimer = new DispatcherTimer(DispatcherPriority.Render, Dispatcher)
+        _whitePulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
             Interval = TimeSpan.FromMilliseconds(90)
         };
@@ -179,6 +182,8 @@ public partial class TestWindow : Window
 
         viewModel.BoardFrameActivity += ViewModel_BoardFrameActivity;
         viewModel.PropertyChanged += ViewModel_StatusPropertyChanged;
+        _lastLedBoardConnected = viewModel.IsBoardConnected;
+        _lastLedState = viewModel.State ?? string.Empty;
         _lastLedResultStatus = viewModel.ResultStatusText;
         ResetActivityLeds();
         SetGreenLed(viewModel.IsBoardConnected);
@@ -207,7 +212,7 @@ public partial class TestWindow : Window
                 PulseWhiteLed();
             if (Interlocked.Exchange(ref _yellowPulsePending, 0) != 0)
                 PulseYellowLed();
-        }, DispatcherPriority.Render);
+        }, DispatcherPriority.Background);
     }
 
     private void ViewModel_StatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -222,37 +227,53 @@ public partial class TestWindow : Window
 
         if (!Dispatcher.CheckAccess())
         {
+            if (Interlocked.Exchange(ref _statusStateDispatchQueued, 1) != 0)
+                return;
+
             _ = Dispatcher.BeginInvoke(
-                () => ApplyStatusLedState(viewModel, e.PropertyName),
+                () =>
+                {
+                    Interlocked.Exchange(ref _statusStateDispatchQueued, 0);
+                    ApplyStatusLedState(viewModel);
+                },
                 DispatcherPriority.DataBind);
             return;
         }
 
-        ApplyStatusLedState(viewModel, e.PropertyName);
+        ApplyStatusLedState(viewModel);
     }
 
-    private void ApplyStatusLedState(TestViewModel viewModel, string? changedProperty)
+    private void ApplyStatusLedState(TestViewModel viewModel)
     {
         if (Volatile.Read(ref _statusLedHandlersAttached) == 0 || DataContext != viewModel)
             return;
 
         string state = viewModel.State ?? string.Empty;
         string resultStatus = viewModel.ResultStatusText;
+        bool boardConnected = viewModel.IsBoardConnected;
+        if (boardConnected == _lastLedBoardConnected &&
+            state.Equals(_lastLedState, StringComparison.Ordinal) &&
+            resultStatus.Equals(_lastLedResultStatus, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        bool boardConnectionChanged = boardConnected != _lastLedBoardConnected;
         bool isNewCycle = state.Equals("CHỜ LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
                           state.Equals("SẴN SÀNG SẢN XUẤT", StringComparison.OrdinalIgnoreCase) ||
                           state.Equals("SẴN SÀNG", StringComparison.OrdinalIgnoreCase);
 
         if (isNewCycle)
         {
-            CancelGreenPassBlink(viewModel.IsBoardConnected);
+            CancelGreenPassBlink(boardConnected);
             SetRedLed(false);
             ResetActivityLeds();
         }
-        else if (!viewModel.IsBoardConnected)
+        else if (!boardConnected)
         {
             CancelGreenPassBlink(false);
         }
-        else if (changedProperty == nameof(TestViewModel.IsBoardConnected) || _greenBlinkTask.IsCompleted)
+        else if (boardConnectionChanged || _greenBlinkTask.IsCompleted)
         {
             SetGreenLed(true);
         }
@@ -263,6 +284,8 @@ public partial class TestWindow : Window
         if (resultStatus == "ĐẠT" && _lastLedResultStatus != "ĐẠT")
             _ = RestartGreenPassBlinkAsync(viewModel);
 
+        _lastLedBoardConnected = boardConnected;
+        _lastLedState = state;
         _lastLedResultStatus = resultStatus;
     }
 
