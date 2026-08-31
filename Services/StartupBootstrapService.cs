@@ -76,8 +76,8 @@ public static class StartupBootstrapService
             // C:\Pass_ và C:\Error_ trên máy cũ có thể chứa hàng trăm file.
             // Import chúng không phải điều kiện để kết nối bo/chọn mã; chờ tại
             // đây từng làm startup dừng trước T3 và khóa toàn bộ nút vận hành.
-            log.Application("Critical filesystem bootstrap completed.");
-            StartLegacyHistoryImportInBackground(repository, production, log);
+            log.Application(
+                "Critical filesystem bootstrap completed. Legacy history import is available from the History page.");
         }
         catch (Exception ex)
         {
@@ -87,15 +87,19 @@ public static class StartupBootstrapService
         return Task.CompletedTask;
     }
 
-    private static void StartLegacyHistoryImportInBackground(
+    public static Task ImportLegacyHistoryForMaintenanceAsync(
         TestHistoryStore repository,
         ProductionSettings production,
-        AsyncFileLogService log)
+        AsyncFileLogService? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(production);
+        AsyncFileLogService log = logger ?? AsyncFileLogService.Current;
+
         lock (LegacyImportGate)
         {
             if (_legacyImportStarted)
-                return;
+                return _legacyImportTask;
 
             _legacyImportStarted = true;
             _legacyImportTask = Task.Run(async () =>
@@ -113,6 +117,7 @@ public static class StartupBootstrapService
                     log.Error($"Deferred legacy history import error: {ex}");
                 }
             });
+            return _legacyImportTask;
         }
     }
 

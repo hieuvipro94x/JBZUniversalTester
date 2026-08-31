@@ -645,8 +645,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
             await StopScanCoreAsync(ct);
             await ApplyPendingNativeConfigurationAsync(ct);
 
-            // Required capacity của model chỉ dùng để validate. START_SCAN luôn
-            // nhận đúng số card operator đã cấu hình, kể cả model dùng ít card hơn.
+            // Số card đã cài là giới hạn phần cứng; dải active được co theo
+            // MaxIo của model để không kéo dài mỗi frame vì các card không dùng.
 
             if (!_scanPrepared)
                 await PrepareScanAsync(ct);

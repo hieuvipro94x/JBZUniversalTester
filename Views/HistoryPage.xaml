@@ -108,7 +108,7 @@
                     <ColumnDefinition Width="92"/>
                     <ColumnDefinition Width="92"/>
                     <ColumnDefinition Width="92"/>
-                    <ColumnDefinition Width="300"/>
+                    <ColumnDefinition Width="430"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
@@ -148,6 +148,11 @@
                             VerticalAlignment="Center"
                             HorizontalAlignment="Right"
                             Margin="0">
+                    <Button x:Name="ImportLegacyButton"
+                            Content="NHẬP LỊCH SỬ CŨ"
+                            Width="122"
+                            Style="{StaticResource CompactButton}"
+                            Click="ImportLegacy_Click"/>
                     <Button Content="CSV"
                             Width="78"
                             Style="{StaticResource CompactButton}"

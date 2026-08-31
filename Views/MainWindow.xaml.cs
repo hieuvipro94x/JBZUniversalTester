@@ -92,7 +92,7 @@ public partial class MainWindow : Window
                 // thiết bị lâu bất thường. Không để lỗi phần cứng khóa luôn việc
                 // chọn THT/cài đặt. Tác vụ kết nối vẫn tiếp tục và được theo dõi.
                 _viewModel.Status =
-                    "KẾT NỐI BO ĐANG CHẬM - CÓ THỂ CHỌN MÃ HOẶC BẤM KẾT NỐI LẠI BO";
+                    "KẾT NỐI BO ĐANG CHẬM - PHẦN MỀM ĐANG TỰ THỬ LẠI";
                 AsyncFileLogService.Current.Error(
                     $"STARTUP HARDWARE TIMEOUT after {StartupControlUnlockTimeout.TotalSeconds:0}s; " +
                     "operator controls unlocked while initialization continues.");

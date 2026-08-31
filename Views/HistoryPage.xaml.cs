@@ -14,6 +14,7 @@ namespace JBZUniversalTester.Views;
 public partial class HistoryPage : UserControl
 {
     private const int UiRowLimit = 2_000;
+    private readonly ProductionSettings _settings;
     private readonly string _historyPath;
     private readonly object _storeGate = new();
     private TestHistoryStore? _store;
@@ -26,6 +27,7 @@ public partial class HistoryPage : UserControl
     {
         InitializeComponent();
         DataContext = this;
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
 
         _historyPath = RuntimePaths.DatabaseFile;
 
@@ -60,6 +62,27 @@ public partial class HistoryPage : UserControl
     }
 
     private void Search_Click(object sender, RoutedEventArgs e) => Reload();
+
+    private async void ImportLegacy_Click(object sender, RoutedEventArgs e)
+    {
+        ImportLegacyButton.IsEnabled = false;
+        SummaryText.Text = "Đang nhập lịch sử cũ — vui lòng chờ và chưa bắt đầu Production...";
+        try
+        {
+            await StartupBootstrapService.ImportLegacyHistoryForMaintenanceAsync(
+                GetStore(),
+                _settings);
+            Reload();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage(ex.ToString(), "Không thể nhập lịch sử cũ", MessageBoxImage.Error);
+        }
+        finally
+        {
+            ImportLegacyButton.IsEnabled = true;
+        }
+    }
 
     private void ClearFilter_Click(object sender, RoutedEventArgs e)
     {

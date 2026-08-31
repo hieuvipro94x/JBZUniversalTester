@@ -282,7 +282,9 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
 
         // HardwareVerification không có model THT bắt buộc. --expansion-cards
         // là configured range và cũng là START_SCAN range cần thử.
-        int verificationMaxIo = checked(expansionCards * BoardCapacity.IoPerExpansionCard);
+        int verificationMaxIo = diagnosticModel is { MaxIo: > 0 }
+            ? diagnosticModel.MaxIo
+            : checked(expansionCards * BoardCapacity.IoPerExpansionCard);
         board.ConfigureActiveScanRange(verificationMaxIo);
 
         if (verifySupervisor)

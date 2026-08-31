@@ -144,7 +144,14 @@ public sealed record BoardScanCapacity
 
         // Required chỉ dùng để validate model. Firmware phải quét đúng toàn bộ
         // số card operator đã cấu hình, không tự thu nhỏ START_SCAN theo model.
-        BoardCapacity active = installed;
+        // Without a model (or in blank-THT IO mapping), scan every installed
+        // card. With a valid model, scan only through its highest configured IO
+        // so a 10-card station does not pay the 640-source frame time for a
+        // product that uses only the first card.
+        int activeScanUnits = maxGlobalIo > 0 && fits
+            ? required
+            : installed.ScanCardCount;
+        BoardCapacity active = BoardCapacity.Create(activeScanUnits);
 
         return new BoardScanCapacity
         {

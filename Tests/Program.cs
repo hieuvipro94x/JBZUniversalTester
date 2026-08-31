@@ -1920,19 +1920,40 @@ internal static class Program
             201);
         Assert(configured10Model201.IsModelWithinInstalledCapacity &&
                configured10Model201.RequiredScanUnits == 4 &&
-               configured10Model201.ActiveScanUnits == 10 &&
-               configured10Model201.StartScanParameter == 10 &&
-               configured10Model201.ActiveIoCapacity == 640,
-            "Configured 10 / MaxIO 201 validates with required=4 but keeps START_SCAN=10");
+               configured10Model201.InstalledScanUnits == 10 &&
+               configured10Model201.ActiveScanUnits == 4 &&
+               configured10Model201.StartScanParameter == 4 &&
+               configured10Model201.ActiveIoCapacity == 256,
+            "Installed 10 / MaxIO 201 keeps installed capacity but scans only the four required cards");
 
         BoardScanCapacity configured10Model512 = BoardScanCapacity.Create(
             new ProductionSettings { ExpansionCardCount = 10 },
             512);
         Assert(configured10Model512.IsModelWithinInstalledCapacity &&
                configured10Model512.RequiredScanUnits == 8 &&
-               configured10Model512.ActiveScanUnits == 10 &&
-               configured10Model512.StartScanParameter == 10,
-            "Configured 10 / MaxIO 512 validates with required=8 but keeps START_SCAN=10");
+               configured10Model512.InstalledScanUnits == 10 &&
+               configured10Model512.ActiveScanUnits == 8 &&
+               configured10Model512.StartScanParameter == 8,
+            "Installed 10 / MaxIO 512 scans only the eight required cards");
+
+        BoardScanCapacity configured10Model37 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            37);
+        Assert(configured10Model37.IsModelWithinInstalledCapacity &&
+               configured10Model37.InstalledScanUnits == 10 &&
+               configured10Model37.RequiredScanUnits == 1 &&
+               configured10Model37.ActiveScanUnits == 1 &&
+               configured10Model37.StartScanParameter == 1 &&
+               configured10Model37.ActiveIoCapacity == 64,
+            "The logged MaxIO 37 case scans 64 sources instead of all 640 installed sources");
+
+        BoardScanCapacity configured10WithoutModel = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            0);
+        Assert(configured10WithoutModel.ActiveScanUnits == 10 &&
+               configured10WithoutModel.StartScanParameter == 10 &&
+               configured10WithoutModel.ActiveIoCapacity == 640,
+            "Startup without a model and blank-THT IO mapping still scan every installed card");
 
         BoardScanCapacity overLimit = BoardScanCapacity.Create(
             new ProductionSettings { ExpansionCardCount = 10 },
@@ -2094,11 +2115,11 @@ internal static class Program
             512);
         Assert(configured10Required8.InstalledScanUnits == 10 &&
                configured10Required8.RequiredScanUnits == 8 &&
-               configured10Required8.ActiveScanUnits == 10 &&
-               configured10Required8.StartScanParameter == 10 &&
-               configured10Required8.ActiveIoCapacity == 640 &&
+               configured10Required8.ActiveScanUnits == 8 &&
+               configured10Required8.StartScanParameter == 8 &&
+               configured10Required8.ActiveIoCapacity == 512 &&
                configured10Required8.IsModelWithinInstalledCapacity,
-            "Configured 10 / required 8 keeps active 10 and START_SCAN parameter 10");
+            "Installed 10 / required 8 keeps installed capacity but scans active 8");
 
         BoardScanCapacity insufficient = BoardScanCapacity.Create(
             new ProductionSettings { ExpansionCardCount = 4 },
@@ -2541,20 +2562,29 @@ internal static class Program
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
-        Assert(mainWindowXaml.Contains("Content=\"KẾT NỐI LẠI BO\"", StringComparison.Ordinal) &&
-               mainWindowXaml.Contains("Command=\"{Binding Test.ConnectBoardCommand}\"", StringComparison.Ordinal) &&
+        Assert(!mainWindowXaml.Contains("KẾT NỐI LẠI BO", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("Test.ConnectBoardCommand", StringComparison.Ordinal) &&
                mainWindowSource.Contains("StartupControlUnlockTimeout", StringComparison.Ordinal) &&
                mainWindowSource.Contains("Task.WhenAny(", StringComparison.Ordinal) &&
                mainWindowSource.Contains("ObserveDeferredStartupAsync(initialization)", StringComparison.Ordinal),
-            "Slow board startup unlocks product selection and exposes an explicit safe reconnect action");
+            "Slow board startup unlocks product selection while board reconnect remains fully automatic");
 
         string bootstrapSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Services", "StartupBootstrapService.cs"));
-        Assert(bootstrapSource.IndexOf("Critical filesystem bootstrap completed.", StringComparison.Ordinal) <
-               bootstrapSource.IndexOf("StartLegacyHistoryImportInBackground(", StringComparison.Ordinal) &&
+        Assert(bootstrapSource.Contains("Critical filesystem bootstrap completed.", StringComparison.Ordinal) &&
+               !bootstrapSource.Contains("StartLegacyHistoryImportInBackground(", StringComparison.Ordinal) &&
+               bootstrapSource.Contains("ImportLegacyHistoryForMaintenanceAsync(", StringComparison.Ordinal) &&
                bootstrapSource.Contains("Task.Run(async () =>", StringComparison.Ordinal) &&
                bootstrapSource.Contains("Deferred legacy history import completed.", StringComparison.Ordinal),
             "Legacy C:\\Pass_/C:\\Error_ import cannot block board connection or operator controls at startup");
+
+        string historyPageXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
+        string historyPageSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml.cs"));
+        Assert(historyPageXaml.Contains("Content=\"NHẬP LỊCH SỬ CŨ\"", StringComparison.Ordinal) &&
+               historyPageSource.Contains("ImportLegacyHistoryForMaintenanceAsync(", StringComparison.Ordinal),
+            "Legacy history migration runs only from the explicit maintenance action on the History page");
 
         var invalid = new ProductionSettings
         {
