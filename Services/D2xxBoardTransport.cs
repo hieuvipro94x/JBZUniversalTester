@@ -875,7 +875,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
         // vào trạng thái cache nếu một relay cơ khí vừa nhả chậm hoặc bị nhiễu.
         if (relayState != 0 && Volatile.Read(ref _activeRelay) == relayState)
             return;
-        await WriteAsync(command, ct);
+        // JBZ I/O Monitor V1.9 purge RX/TX ngay trước mọi frame relay.
+        // Manual đã dừng scan nên purge không làm mất frame Production;
+        // thao tác này ngăn BO bỏ qua frame OFF 8E 00 00 00 trên một số máy.
+        await WriteAsync(command, ct, purgeBeforeWrite: true);
         Volatile.Write(ref _activeRelay, relayState);
 
         // 0x8E chỉ điều khiển relay ngoài (JIG/MARKING), không thay đổi

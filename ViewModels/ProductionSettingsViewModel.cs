@@ -110,8 +110,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         private set => Set(ref _manualResistanceStatus, value);
     }
 
-    public AsyncRelayCommand ManualRelay1PulseCommand { get; }
-    public AsyncRelayCommand ManualRelay2PulseCommand { get; }
+    public AsyncRelayCommand ManualRelay1OnCommand { get; }
+    public AsyncRelayCommand ManualRelay1OffCommand { get; }
+    public AsyncRelayCommand ManualRelay2OnCommand { get; }
+    public AsyncRelayCommand ManualRelay2OffCommand { get; }
     public AsyncRelayCommand ManualResetCommand { get; }
     public AsyncRelayCommand ManualMeasureResistanceCommand { get; }
 
@@ -146,11 +148,17 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         _masterFaultRequiredCount = ProductionConfigService.GetMasterFaultRequiredCountForPath(
             Settings, _modelPath);
 
-        ManualRelay1PulseCommand = new AsyncRelayCommand(
-            async () => await RunManualRelayPulseAsync(1),
+        ManualRelay1OnCommand = new AsyncRelayCommand(
+            async () => await RunManualRelayCommandAsync(1, true),
             CanUseManualControls);
-        ManualRelay2PulseCommand = new AsyncRelayCommand(
-            async () => await RunManualRelayPulseAsync(2),
+        ManualRelay1OffCommand = new AsyncRelayCommand(
+            async () => await RunManualRelayCommandAsync(1, false),
+            CanUseManualControls);
+        ManualRelay2OnCommand = new AsyncRelayCommand(
+            async () => await RunManualRelayCommandAsync(2, true),
+            CanUseManualControls);
+        ManualRelay2OffCommand = new AsyncRelayCommand(
+            async () => await RunManualRelayCommandAsync(2, false),
             CanUseManualControls);
         ManualResetCommand = new AsyncRelayCommand(
             RunManualResetAsync,
@@ -208,20 +216,24 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private bool CanUseManualResistance() => CanUseManualControls();
 
-    private async Task RunManualRelayPulseAsync(int relay)
+    private async Task RunManualRelayCommandAsync(int relay, bool turnOn)
     {
         if (_test is null)
             return;
 
-        ManualStatus = $"Đang nhấn-nhả Relay {relay}...";
+        ManualStatus = turnOn
+            ? $"Đang bật Relay {relay}..."
+            : $"Đang tắt Relay {relay}...";
 
         try
         {
-            await _test.PulseManualRelayAsync(relay);
+            int activeRelay = await _test.SetManualRelayAsync(relay, turnOn);
             ManualRuntimeActive = _test.IsManualModeActive;
-            ManualRelay1Status = "OFF";
-            ManualRelay2Status = "OFF";
-            ManualStatus = $"Relay {relay} đã pulse xong - tất cả relay OFF";
+            ManualRelay1Status = activeRelay == 1 ? "ON" : "OFF";
+            ManualRelay2Status = activeRelay == 2 ? "ON" : "OFF";
+            ManualStatus = activeRelay == 0
+                ? "MANUAL - tất cả relay OFF"
+                : $"MANUAL - Relay {activeRelay} ON";
             RefreshManualCommands();
         }
         catch
@@ -394,8 +406,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private void RefreshManualCommands()
     {
-        ManualRelay1PulseCommand?.RaiseCanExecuteChanged();
-        ManualRelay2PulseCommand?.RaiseCanExecuteChanged();
+        ManualRelay1OnCommand?.RaiseCanExecuteChanged();
+        ManualRelay1OffCommand?.RaiseCanExecuteChanged();
+        ManualRelay2OnCommand?.RaiseCanExecuteChanged();
+        ManualRelay2OffCommand?.RaiseCanExecuteChanged();
         ManualResetCommand?.RaiseCanExecuteChanged();
         ManualMeasureResistanceCommand?.RaiseCanExecuteChanged();
     }

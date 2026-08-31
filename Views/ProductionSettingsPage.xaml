@@ -442,6 +442,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="76"/>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="54"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
@@ -452,16 +453,18 @@
                             </Grid.RowDefinitions>
 
                             <TextBlock Text="Relay 1" Style="{StaticResource FieldLabelStyle}"/>
-                            <Button Grid.Column="1" Content="NH&#7844;N - NH&#7842;" Command="{Binding ManualRelay1PulseCommand}"/>
-                            <TextBlock Grid.Column="2" Text="{Binding ManualRelay1Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                            <Button Grid.Column="1" Content="B&#7852;T" Command="{Binding ManualRelay1OnCommand}"/>
+                            <Button Grid.Column="2" Content="T&#7854;T" Command="{Binding ManualRelay1OffCommand}"/>
+                            <TextBlock Grid.Column="3" Text="{Binding ManualRelay1Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
 
                             <TextBlock Grid.Row="1" Text="Relay 2" Style="{StaticResource FieldLabelStyle}"/>
-                            <Button Grid.Row="1" Grid.Column="1" Content="NH&#7844;N - NH&#7842;" Command="{Binding ManualRelay2PulseCommand}"/>
-                            <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                            <Button Grid.Row="1" Grid.Column="1" Content="B&#7852;T" Command="{Binding ManualRelay2OnCommand}"/>
+                            <Button Grid.Row="1" Grid.Column="2" Content="T&#7854;T" Command="{Binding ManualRelay2OffCommand}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
 
                             <Button Grid.Row="2"
                                     Grid.Column="1"
-                                    Grid.ColumnSpan="1"
+                                    Grid.ColumnSpan="2"
                                     Content="RESET"
                                     Command="{Binding ManualResetCommand}"/>
 

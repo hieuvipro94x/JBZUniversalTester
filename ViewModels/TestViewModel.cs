@@ -1109,45 +1109,50 @@ public sealed class TestViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Thử relay vật lý theo chế độ nhấn-nhả an toàn. Manual không được giữ relay ON:
-    /// mỗi lần bấm chỉ phát đúng một xung theo R1/R2 pulse đã cấu hình, rồi cưỡng bức OFF.
+    /// Manual relay tương thích JBZ I/O Monitor V1.9: BẬT giữ đúng một relay,
+    /// TẮT cưỡng bức cả hai relay OFF rồi mới khôi phục Production scan.
     /// </summary>
-    public async Task PulseManualRelayAsync(int relay)
+    public async Task<int> SetManualRelayAsync(int relay, bool turnOn)
     {
         if (IsDeviceFault)
             throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy thoát và mở lại ứng dụng.");
         if (relay is not 1 and not 2)
             throw new ArgumentOutOfRangeException(nameof(relay));
         if (!EnsureManualBoardReady($"manual Relay {relay}", requireD2xxRelay: true))
-            return;
+            return Volatile.Read(ref _manualActiveRelay);
         if (!IsManualModeActive)
             await EnterManualModeAsync();
 
         long started = Stopwatch.GetTimestamp();
         AsyncFileLogService.Current.Performance(
-            $"MANUAL_RELAY_LATENCY relay={relay} action=PULSE event=button_click");
+            $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=button_click");
 
+        int activeRelay;
         await _manualRelayGate.WaitAsync();
         try
         {
             AsyncFileLogService.Current.Performance(
-                $"MANUAL_RELAY_LATENCY relay={relay} action=PULSE event=command_enqueued");
+                $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=command_enqueued");
 
             if (_board.IsScanning)
                 await _board.StopScanAsync();
 
             try
             {
-                int pulseMs = relay == 1
-                    ? _productionSettings.Relay1JigPulseMs
-                    : _productionSettings.Relay2MarkingPulseMs;
-                AddLog($"MANUAL Relay {relay}: nhấn-nhả một xung ({pulseMs} ms), sau xung tự OFF.");
-                await _engine.PulsePhysicalRelayAsync(relay);
-                Volatile.Write(ref _manualActiveRelay, 0);
+                // Giống V1.9: mỗi lần BẬT luôn gửi OFF trước để hai relay
+                // không thể cùng giữ, sau đó mới chọn đúng relay cần bật.
+                await _board.AllRelaysOffAsync();
+                if (turnOn)
+                    await _board.SetRelayAsync(relay);
+
+                Volatile.Write(ref _manualActiveRelay, turnOn ? relay : 0);
                 double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
-                    $"MANUAL_RELAY_LATENCY relay={relay} action=PULSE event=completed elapsed_ms={elapsedMs:0.###}");
-                AddLog($"MANUAL Relay {relay}: pulse hoàn tất, tất cả relay OFF.");
+                    $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=ui_update elapsed_ms={elapsedMs:0.###}");
+                AddLog(turnOn
+                    ? $"MANUAL Relay {relay} ON - relay còn lại đã OFF."
+                    : $"MANUAL Relay {relay} OFF - tất cả relay OFF.");
+                activeRelay = Volatile.Read(ref _manualActiveRelay);
             }
             catch (Exception ex)
             {
@@ -1163,8 +1168,12 @@ public sealed class TestViewModel : ObservableObject
             _manualRelayGate.Release();
         }
 
-        // Sau mỗi xung phải rời Manual và khôi phục scan; không tồn tại trạng thái relay giữ ON.
-        await ExitManualModeAsync(outputsAlreadyOff: true);
+        // Giữ Manual khi relay ON. Chỉ khi bấm TẮT mới thoát Manual và
+        // khôi phục scan Production, đúng thao tác BẬT/TẮT của V1.9.
+        if (!turnOn)
+            await ExitManualModeAsync(outputsAlreadyOff: true);
+
+        return activeRelay;
     }
 
     public async Task ResetManualOutputsAsync()

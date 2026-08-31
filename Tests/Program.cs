@@ -747,20 +747,25 @@ internal static class Program
             "Manual relay menu is ready without a saved ManualModeEnabled setting");
 
         board.Commands.Clear();
-        vm.PulseManualRelayAsync(1).GetAwaiter().GetResult();
-        Assert(!vm.IsManualModeActive && vm.State != "MANUAL" && board.IsScanning,
-            "Manual Relay 1 pulse automatically exits Manual and resumes Production scan");
-        Assert(board.Commands.Count(command => command == "SET:1") == 1 &&
-               board.Commands.Count(command => command == "OFF") >= 2 &&
-               board.Commands.Last() == "START",
-            "Manual Relay 1 is one safe pulse: OFF before, SET:1 once, OFF after, then restart scan");
+        int relay = vm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
+        Assert(relay == 1 && vm.IsManualModeActive && vm.State == "MANUAL" && !board.IsScanning,
+            "Manual Relay 1 ON holds one relay and keeps Production scan stopped");
+        Assert(board.Commands.Count(command => command == "OFF") >= 1 &&
+               board.Commands.Last() == "SET:1",
+            "Manual Relay 1 ON forces all relay OFF before selecting Relay 1");
 
         board.Commands.Clear();
-        vm.PulseManualRelayAsync(2).GetAwaiter().GetResult();
-        Assert(board.Commands.Count(command => command == "SET:2") == 1 &&
-               board.Commands.Count(command => command == "OFF") >= 2 &&
-               board.Commands.Last() == "START",
-            "Manual Relay 2 is one safe pulse and cannot remain latched ON");
+        relay = vm.SetManualRelayAsync(2, true).GetAwaiter().GetResult();
+        Assert(relay == 2 && vm.IsManualModeActive && !board.IsScanning,
+            "Manual Relay 2 ON replaces Relay 1 while Manual remains active");
+        Assert(string.Join(",", board.Commands) == "OFF,SET:2",
+            "Manual relay switching is mutually exclusive: OFF before SET:2");
+
+        board.Commands.Clear();
+        relay = vm.SetManualRelayAsync(2, false).GetAwaiter().GetResult();
+        Assert(relay == 0 && !vm.IsManualModeActive &&
+               board.Commands.Contains("OFF") && board.Commands.Last() == "START",
+            "Manual Relay OFF forces both outputs OFF and resumes Production scan");
 
         board.Commands.Clear();
         vm.ResetManualOutputsAsync().GetAwaiter().GetResult();
@@ -785,7 +790,7 @@ internal static class Program
         faultBoard.ThrowOnSetRelay = true;
         try
         {
-            faultVm.PulseManualRelayAsync(1).GetAwaiter().GetResult();
+            faultVm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
             throw new InvalidOperationException("Manual relay failure should throw");
         }
         catch (InvalidOperationException)
