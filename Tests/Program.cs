@@ -37,6 +37,7 @@ internal static class Program
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
+            ("History initialization waits for an active SQLite writer", TestHistoryInitializationWaitsForWriter),
             ("Canonical runtime paths and SQLite PartCnt authority", TestCanonicalRuntimePersistence),
             ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
@@ -1629,6 +1630,49 @@ internal static class Program
         }
     }
 
+    private static void TestHistoryInitializationWaitsForWriter()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZHistoryInitializationLockTests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        try
+        {
+            Directory.CreateDirectory(root);
+            _ = new TestHistoryStore(dbPath);
+
+            using var writerStarted = new ManualResetEventSlim(false);
+            Task writer = Task.Run(() =>
+            {
+                using var connection = new SqliteConnection(
+                    $"Data Source={dbPath};Cache=Shared;Pooling=False;Default Timeout=5");
+                connection.Open();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "UPDATE SchemaInfo SET UpdatedAt=UpdatedAt WHERE Id=1;";
+                command.ExecuteNonQuery();
+                writerStarted.Set();
+                Thread.Sleep(250);
+                transaction.Commit();
+            });
+
+            Assert(writerStarted.Wait(TimeSpan.FromSeconds(5)),
+                "Concurrent SQLite writer entered its transaction");
+            var reopened = new TestHistoryStore(dbPath);
+            writer.GetAwaiter().GetResult();
+            Assert(reopened.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "History store opens after the active writer commits instead of throwing SQLITE_LOCKED");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
     private static void TestCanonicalRuntimePersistence()
     {
         Assert(Path.GetFileName(RuntimePaths.ConfigFile) == "JBZUniversalTester.cfg",
@@ -1978,6 +2022,24 @@ internal static class Program
         Assert(production.SourceCount == 64 && production.ExpectedIoCount == 64 &&
                production.EndMarkerCode == 0x00 && production.UnknownBytes == 0,
             "Small production frame has strict coverage and C0 00 metadata");
+
+        decoder.Reset();
+        var replacementRaw = BuildProductionScanFrame(1, 0x00, (1, 2)).ToList();
+        replacementRaw.RemoveRange(4, 2); // Bo thật có thể phát A0 01 thay cho source 80 01.
+        ScanFrame targetReplacement = decoder.Feed(replacementRaw.ToArray()).Single();
+        Assert(targetReplacement.Complete &&
+               targetReplacement.SourceCount == 63 &&
+               targetReplacement.ActiveIo.SetEquals([2]) &&
+               targetReplacement.Connections.TryGetValue(1, out IReadOnlySet<int>? replacementTargets) &&
+               replacementTargets.SetEquals([2]),
+            "Target word replacing its own source still provides complete production coverage");
+        using (TestEngine replacementEngine = CreateEngine(out _))
+        {
+            replacementEngine.SetModel(Model(("NAM", new[] { 1, 2 })));
+            replacementEngine.ProcessFrame(targetReplacement);
+            Assert(replacementEngine.ContinuityPassed,
+                "Source-replacement frame reaches TestEngine and passes the NAM IO1-IO2 network");
+        }
 
         decoder.Reset();
         Assert(decoder.Feed(smallRaw.AsSpan(0, smallRaw.Length - 1)).Count == 0,

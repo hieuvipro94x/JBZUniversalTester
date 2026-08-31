@@ -208,10 +208,11 @@ public sealed class BoardIoDecoder
 
                 _sequence++;
 
-                // Production scan phải phủ đúng toàn bộ active capacity. Frame
-                // thiếu source vẫn được phát để diagnostic nhưng không thể ARM.
-                bool complete = terminator.IsKnown &&
-                                _sourcesSeen.Count == ExpectedIoCount;
+                // Firmware có hai dạng snapshot đã thấy trên bo thật: target A0/A1
+                // có thể được chèn thêm sau source, hoặc thay chính word source của
+                // I/O đang active. Vì vậy coverage đầy đủ là SOURCE hợp TARGET,
+                // không chỉ riêng số SOURCE. Vẫn từ chối frame thiếu bất kỳ I/O nào.
+                bool complete = terminator.IsKnown && HasCompleteProductionCoverage();
 
                 frames.Add(new ScanFrame(
                     DateTime.Now,
@@ -243,6 +244,23 @@ public sealed class BoardIoDecoder
 
         CompactBuffer();
         return frames;
+    }
+
+    private bool HasCompleteProductionCoverage()
+    {
+        if (_sourcesSeen.Count == ExpectedIoCount)
+            return true;
+
+        if (_sourcesSeen.Count + _activeTargets.Count < ExpectedIoCount)
+            return false;
+
+        for (int io = _capacity.FirstGlobalIo; io <= _capacity.LastGlobalIo; io++)
+        {
+            if (!_sourcesSeen.Contains(io) && !_activeTargets.Contains(io))
+                return false;
+        }
+
+        return true;
     }
 
     IReadOnlyList<ScanFrame> FeedProbe(ReadOnlySpan<byte> data)

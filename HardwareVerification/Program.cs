@@ -18,6 +18,8 @@ bool verifySupervisor = Has("--verify-supervisor");
 bool verifyVisa = Has("--visa");
 string? tracePath = Value("--trace");
 string? modelDirectory = Value("--model-directory");
+string? diagnosticModelPath = Value("--model");
+ProductModel? diagnosticModel = null;
 
 Console.WriteLine($"UTC={DateTime.UtcNow:O} Architecture={RuntimeInformation.ProcessArchitecture}");
 uint d2xxVersion;
@@ -100,6 +102,37 @@ if (!string.IsNullOrWhiteSpace(modelDirectory))
         return 7;
 }
 
+if (!string.IsNullOrWhiteSpace(diagnosticModelPath))
+{
+    string fullModelPath = Path.GetFullPath(diagnosticModelPath);
+    if (!File.Exists(fullModelPath))
+    {
+        Console.Error.WriteLine($"MODEL_NOT_FOUND: {fullModelPath}");
+        return 8;
+    }
+
+    try
+    {
+        diagnosticModel = new ThtModelParser().Load(fullModelPath);
+        int requiredCards = BoardCapacity.RequiredScanUnitsForIo(diagnosticModel.MaxIo);
+        Console.WriteLine(
+            $"MODEL_DIAGNOSTIC PASS file=\"{Path.GetFileName(fullModelPath)}\" " +
+            $"part=\"{diagnosticModel.PartNumber}\" pins={diagnosticModel.Pins.Count} " +
+            $"nets={diagnosticModel.Nets.Count} maxIo={diagnosticModel.MaxIo} requiredCards={requiredCards}");
+        if (requiredCards > expansionCards)
+        {
+            Console.Error.WriteLine(
+                $"MODEL_CAPACITY_FAIL: model requires {requiredCards} card(s), configured {expansionCards}.");
+            return 9;
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"MODEL_DIAGNOSTIC FAIL {ex.GetType().Name}: {ex.Message}");
+        return 10;
+    }
+}
+
 if (passiveSeconds == 0 && connectCycles == 0 && scanCycles == 0 &&
     !routeResistance && !measureResistance && !verifySupervisor)
     return 0;
@@ -157,6 +190,23 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
     long firstFrameTicks = 0;
     long rxBytes = 0;
     long txBytes = 0;
+    long modelFrames = 0;
+    long modelPassFrames = 0;
+    long modelFaultFrames = 0;
+    string modelSignature = string.Empty;
+    TestEngine? diagnosticEngine = null;
+    KeysightVisaService? diagnosticVisa = null;
+
+    if (diagnosticModel is not null)
+    {
+        diagnosticVisa = new KeysightVisaService();
+        diagnosticEngine = new TestEngine(
+            board,
+            diagnosticVisa,
+            new AppSettings(),
+            production);
+        diagnosticEngine.SetModel(diagnosticModel);
+    }
 
     if (!string.IsNullOrWhiteSpace(tracePath))
     {
@@ -192,6 +242,37 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
         if (frame.Complete) Interlocked.Increment(ref completeFrames);
         else Interlocked.Increment(ref incompleteFrames);
         Interlocked.Add(ref unknownBytes, frame.UnknownBytes);
+
+        if (diagnosticEngine is not null && frame.Complete && frame.UnknownBytes == 0)
+        {
+            diagnosticEngine.ProcessFrame(frame);
+            PassGateDiagnostics gate = diagnosticEngine.GetPassGateDiagnostics();
+            Interlocked.Increment(ref modelFrames);
+            if (gate.ContinuityPassed)
+                Interlocked.Increment(ref modelPassFrames);
+            if (gate.HasWiringFault)
+                Interlocked.Increment(ref modelFaultFrames);
+
+            string connections = string.Join(
+                ",",
+                frame.Connections
+                    .Where(pair => pair.Value.Count > 0)
+                    .SelectMany(pair => pair.Value.Select(target => $"{pair.Key}->{target}"))
+                    .OrderBy(value => value, StringComparer.Ordinal));
+            string nextSignature =
+                $"passed={gate.PassedNetCount}/{gate.ExpectedNetCount}|activity={gate.HasProductActivity}|" +
+                $"fault={gate.HasWiringFault}|connections={connections}";
+            if (!string.Equals(nextSignature, modelSignature, StringComparison.Ordinal))
+            {
+                modelSignature = nextSignature;
+                string remaining = string.Join(" | ", gate.RemainingNetworks.Select(item => item.Display));
+                Console.WriteLine(
+                    $"MODEL_FRAME seq={frame.Sequence} passed={gate.PassedNetCount}/{gate.ExpectedNetCount} " +
+                    $"continuity={gate.ContinuityPassed} activity={gate.HasProductActivity} " +
+                    $"wrong={gate.WrongConfirmedCount} short={gate.ShortConfirmedCount} " +
+                    $"connections=\"{connections}\" remaining=\"{remaining}\"");
+            }
+        }
     };
 
     try
@@ -248,6 +329,12 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
                 $"incompleteFrames={incompleteFrames} unknownBytes={unknownBytes} " +
                 $"maxFrameGapMs={maxFrameGapTicks * 1000.0 / Stopwatch.Frequency:0.###}";
             Console.WriteLine(passiveSummary);
+            if (diagnosticEngine is not null)
+            {
+                Console.WriteLine(
+                    $"MODEL_SUMMARY frames={modelFrames} continuityPassFrames={modelPassFrames} " +
+                    $"faultFrames={modelFaultFrames} final=\"{modelSignature}\"");
+            }
         }
 
         if (routeResistance)
@@ -311,6 +398,8 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
         try { await board.AllRelaysOffAsync(CancellationToken.None); } catch (Exception ex) { Console.Error.WriteLine($"RELAYS_OFF_FAIL: {ex.Message}"); }
         try { await board.StopScanAsync(CancellationToken.None); } catch (Exception ex) { Console.Error.WriteLine($"STOP_FAIL: {ex.Message}"); }
         try { await board.DisconnectAsync(); } catch (Exception ex) { Console.Error.WriteLine($"DISCONNECT_FAIL: {ex.Message}"); }
+        diagnosticEngine?.Dispose();
+        diagnosticVisa?.Dispose();
         trace?.Dispose();
     }
 }

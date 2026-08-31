@@ -37,7 +37,7 @@ public sealed class TestHistoryStore
     private SqliteConnection Open()
     {
         var connection = new SqliteConnection(
-            $"Data Source={_path};Cache=Shared;Pooling=True;Default Timeout=5");
+            $"Data Source={_path};Cache=Private;Pooling=True;Default Timeout=5");
         connection.Open();
         using SqliteCommand pragma = connection.CreateCommand();
         pragma.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
