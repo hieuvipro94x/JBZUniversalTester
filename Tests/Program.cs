@@ -25,6 +25,7 @@ internal static class Program
             ("Production/probe decoder separation", TestDecoderModes),
             ("10-card complete-frame stress", TestTenCardCompleteFrameStress),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),
+            ("THT discard contact interlock and frame isolation", TestDiscardContactInterlock),
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
             ("Inline probe does not clear wiring faults", TestInlineProbeDoesNotClearWiringFaults),
             ("Htdrv endpoint/probe display cases", TestHtdrvEndpointProbeDisplayCases),
@@ -126,6 +127,83 @@ internal static class Program
                pickerGuardSource.Contains("message == WmNcLButtonDown", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("ReleaseCreationHook();", StringComparison.Ordinal),
             "OpenFileDialog guard centers in the owner monitor work area and locally blocks only move operations");
+    }
+
+    private static void TestDiscardContactInterlock()
+    {
+        const string thtText =
+            "파트번호\t파트명\n" +
+            "DISCARD-TEST\tDISCARD SENSOR\n\n" +
+            "번 호\t커넥터\t핀 수\n" +
+            "1\t1\t2\n\n" +
+            "커넥터\t선이름\tI/O\t핀번호\n" +
+            "1\tMC01\t1\t1\n" +
+            "1\tMC01\t2\t2\n" +
+            "_DISCARD\t\t97\t\n" +
+            "_DISCARD\t\t98\t\n\n" +
+            "선이름\t선연결\t굵기\t색깔\n" +
+            "MC01\t\t0.5\tB";
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZDiscardThtTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "discard.tht");
+            File.WriteAllBytes(path, BuildMinimalThtFile(thtText));
+            ProductModel parsed = new ThtModelParser().Load(path);
+            Assert(parsed.DiscardContactIo.SequenceEqual([97, 98]) &&
+                   parsed.HasDiscardInterlock &&
+                   parsed.Pins.All(pin => pin.IoNumber is not 97 and not 98) &&
+                   parsed.MaxIo == 98,
+                "THT parser must preserve exactly two _DISCARD IO while excluding them from product topology");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
+        var model = new ProductModel
+        {
+            Pins = [new PinRecord("1", "MC01", 1, "1")],
+            DiscardContactIo = [97, 98]
+        };
+        Assert(model.HasDiscardInterlock && model.MaxIo == 98,
+            "_DISCARD pair must extend active scan range without becoming a product pin");
+
+        ScanFrame raw = FrameSeq(
+            1,
+            (1, new[] { 18 }),
+            (97, new[] { 98 }));
+        Assert(DiscardContactInterlock.IsContactClosed(raw, model.DiscardContactIo),
+            "Normally-open _DISCARD contact closes when the configured pair is connected");
+
+        ScanFrame filtered = DiscardContactInterlock.RemoveDiscardIo(
+            raw,
+            model.DiscardContactIo);
+        Assert(!filtered.ActiveIo.Contains(97) &&
+               !filtered.ActiveIo.Contains(98) &&
+               filtered.Connections.ContainsKey(1) &&
+               !filtered.Connections.ContainsKey(97),
+            "Discard IO must remain visible to its monitor but never enter continuity/fault evaluation");
+
+        var tracker = new DiscardContactInterlock();
+        tracker.Arm(contactClosed: false);
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.Closed,
+            "Open baseline followed by closure registers the bin sensor");
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None,
+            "A held contact cannot complete or retrigger the interlock");
+        Assert(tracker.Observe(contactClosed: false) == DiscardContactTransition.Completed &&
+               tracker.IsCompleted,
+            "Only release after a detected closure completes the discard cycle");
+
+        tracker.Arm(contactClosed: true);
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None &&
+               tracker.Observe(contactClosed: false) == DiscardContactTransition.None &&
+               tracker.Observe(contactClosed: true) == DiscardContactTransition.Closed &&
+               tracker.Observe(contactClosed: false) == DiscardContactTransition.Completed,
+            "A contact already closed at ARM must open and perform a fresh close-open cycle");
     }
 
     private static void TestProductionScanFirstFrameAfterSequenceReset()

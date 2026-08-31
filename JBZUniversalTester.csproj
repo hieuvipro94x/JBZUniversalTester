@@ -102,6 +102,7 @@
     <None Remove="Assets\Sounds\DINGDONG.wav" />
     <None Remove="Assets\Sounds\START.wav" />
     <None Remove="Assets\Sounds\TESTPOINT.wav" />
+    <None Remove="Assets\Sounds\DRIP.wav" />
 
     <EmbeddedResource Include="Assets\Sounds\CLICK.wav">
       <LogicalName>JBZUniversalTester.Assets.Sounds.CLICK.wav</LogicalName>
@@ -121,6 +122,10 @@
 
     <EmbeddedResource Include="Assets\Sounds\TESTPOINT.wav">
       <LogicalName>JBZUniversalTester.Assets.Sounds.TESTPOINT.wav</LogicalName>
+    </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\DRIP.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.DRIP.wav</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

@@ -27,6 +27,7 @@ public sealed class AppSoundService : IDisposable
     private SoundPlayer? _startupPlayer;
     private SoundPlayer? _testPointContactPlayer;
     private SoundPlayer? _wiringFaultPlayer;
+    private SoundPlayer? _discardContactPlayer;
 
     // Giữ stream sống trong toàn bộ vòng đời SoundPlayer.
     private MemoryStream? _clickStream;
@@ -35,6 +36,7 @@ public sealed class AppSoundService : IDisposable
     private MemoryStream? _startupStream;
     private MemoryStream? _testPointContactStream;
     private MemoryStream? _wiringFaultStream;
+    private MemoryStream? _discardContactStream;
 
     private bool _initialized;
     private bool _disposed;
@@ -93,6 +95,7 @@ public sealed class AppSoundService : IDisposable
                 _startupPlayer = CreatePlayer("START.wav", out _startupStream);
                 _testPointContactPlayer = CreatePlayer("TESTPOINT.wav", out _testPointContactStream);
                 _wiringFaultPlayer = CreatePlayer("TESTPOINT.wav", out _wiringFaultStream);
+                _discardContactPlayer = CreatePlayer("DRIP.wav", out _discardContactStream);
 
                 _initialized = true;
             }
@@ -257,6 +260,19 @@ public sealed class AppSoundService : IDisposable
         }
     }
 
+    /// <summary>Phát DRIP.wav một lần khi tiếp điểm _DISCARD chuyển sang THÔNG.</summary>
+    public void PlayDiscardContact()
+    {
+        EnsureInitialized();
+        lock (_gate)
+        {
+            if (_disposed || Volatile.Read(ref _testOkPlaybackActive) != 0)
+                return;
+
+            SafePlay(_discardContactPlayer);
+        }
+    }
+
     /// <summary>
     /// Phát TESTPOINT.wav liên tục trong thời gian đầu dò đang chạm Pin.
     /// Đây chỉ là âm xác nhận tiếp xúc, hoàn toàn độc lập với trạng thái lỗi dây.
@@ -363,6 +379,7 @@ public sealed class AppSoundService : IDisposable
             SafeStop(_startupPlayer);
             SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
+            SafeStop(_discardContactPlayer);
         }
     }
 
@@ -525,6 +542,7 @@ public sealed class AppSoundService : IDisposable
             _startupPlayer?.Dispose();
             _testPointContactPlayer?.Dispose();
             _wiringFaultPlayer?.Dispose();
+            _discardContactPlayer?.Dispose();
 
             _clickStream?.Dispose();
             _productStartStream?.Dispose();
@@ -532,6 +550,7 @@ public sealed class AppSoundService : IDisposable
             _startupStream?.Dispose();
             _testPointContactStream?.Dispose();
             _wiringFaultStream?.Dispose();
+            _discardContactStream?.Dispose();
 
             _disposed = true;
         }

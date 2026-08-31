@@ -191,6 +191,7 @@ public static class ProductionConfigService
             $"[ShieldDelayMs]{settings.ShieldDelay}",
             $"[ResistanceDelayMs]{settings.ResistanceDelayMs}",
             $"[SettingsPassword]{settings.Password}",
+            $"[DiscardPassword]{settings.DiscardPassword}",
 
             $"[ItemHeight]{settings.ItemHeight}",
             $"[ScrollDelayMs]{settings.ScrollDelay}",
@@ -563,6 +564,7 @@ public static class ProductionConfigService
         settings.ShieldDelay = I(map, "ShieldDelayMs", settings.ShieldDelay);
         settings.ResistanceDelayMs = I(map, "ResistanceDelayMs", settings.ResistanceDelayMs);
         settings.Password = S(map, "SettingsPassword", settings.Password);
+        settings.DiscardPassword = S(map, "DiscardPassword", settings.DiscardPassword);
 
         settings.ItemHeight = I(map, "ItemHeight", settings.ItemHeight);
         settings.ScrollDelay = I(map, "ScrollDelayMs", settings.ScrollDelay);

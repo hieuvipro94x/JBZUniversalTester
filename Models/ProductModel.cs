@@ -123,6 +123,14 @@ public sealed class ProductModel
     public List<ResistanceStep> ResistanceSteps { get; set; } = [];
 
     /// <summary>
+    /// Hai I/O được khai báo bằng Connector=_DISCARD trong THT. Đây là một
+    /// cặp tiếp điểm thường mở của thùng hàng lỗi, không thuộc topology sản phẩm.
+    /// </summary>
+    public List<int> DiscardContactIo { get; set; } = [];
+
+    public bool HasDiscardInterlock => DiscardContactIo.Count == 2;
+
+    /// <summary>
     /// I/O đặc biệt không đủ thông tin để dựng topology. AO/aN hợp lệ sẽ được
     /// đưa vào ClipTopology, chỉ dữ liệu special bị thiếu/malformed mới nằm đây.
     /// </summary>
@@ -146,7 +154,10 @@ public sealed class ProductModel
             int clipTargetMax = Clip is not null && Clip.Branches.Count > 0
                 ? Clip.Branches.Max(branch => branch.TargetIo)
                 : 0;
-            return Math.Max(pinMax, clipTargetMax);
+            int discardMax = DiscardContactIo.Count == 0
+                ? 0
+                : DiscardContactIo.Max();
+            return Math.Max(Math.Max(pinMax, clipTargetMax), discardMax);
         }
     }
 }

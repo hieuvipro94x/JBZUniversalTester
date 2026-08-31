@@ -816,6 +816,8 @@ public sealed class ThtModelParser
                     "_DISCARD",
                     StringComparison.OrdinalIgnoreCase))
             {
+                if (!model.DiscardContactIo.Contains(rawPin.IoNumber))
+                    model.DiscardContactIo.Add(rawPin.IoNumber);
                 continue;
             }
 
@@ -954,6 +956,14 @@ public sealed class ThtModelParser
             {
                 model.IgnoredIo.Add(special.IoNumber);
             }
+        }
+
+        model.DiscardContactIo.Sort();
+        if (model.DiscardContactIo.Count != 0 && model.DiscardContactIo.Count != 2)
+        {
+            model.TopologyWarnings.Add(
+                $"DISCARD_CONFIG_INVALID count={model.DiscardContactIo.Count} " +
+                $"ios=[{string.Join(',', model.DiscardContactIo)}] expected=2 action=disabled");
         }
 
         if (model.Pins.Count == 0 && tables.Pins.Rows.Count > 0)
@@ -1326,7 +1336,8 @@ public sealed class ThtModelParser
                 "LinkedWire",
                 "WireConnection");
 
-            if (!string.IsNullOrWhiteSpace(connector))
+            if (!string.IsNullOrWhiteSpace(connector) &&
+                !connector.Equals("_DISCARD", StringComparison.OrdinalIgnoreCase))
             {
                 lastConnector = connector;
             }

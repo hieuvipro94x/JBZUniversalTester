@@ -4,7 +4,7 @@
         Title="Sản phẩm không đạt"
         Width="500"
         MinHeight="260"
-        MaxHeight="420"
+        MaxHeight="520"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
@@ -87,7 +87,27 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel x:Name="DiscardPasswordPanel"
+                            Grid.ColumnSpan="2"
+                            Margin="0,0,0,8"
+                            Visibility="Collapsed">
+                    <TextBlock Text="NHẬP MẬT KHẨU XỬ LÝ HÀNG LỖI"
+                               FontWeight="Bold" Foreground="#991B1B"/>
+                    <PasswordBox x:Name="DiscardPasswordBox"
+                                 Height="36" Margin="0,5,0,0"
+                                 Padding="7,3" FontSize="16"/>
+                    <TextBlock x:Name="DiscardPasswordErrorText"
+                               Margin="0,4,0,0" Foreground="#B91C1C"
+                               FontWeight="SemiBold" Visibility="Collapsed"/>
+                </StackPanel>
+
                 <TextBlock x:Name="FooterText"
+                           Grid.Row="1"
                            Margin="0,0,14,0"
                            Foreground="#4B5563"
                            VerticalAlignment="Center"
@@ -96,7 +116,8 @@
                            FontWeight="SemiBold"
                            MaxWidth="320"/>
 
-                <Button Grid.Column="1"
+                <Button Grid.Row="1"
+                        Grid.Column="1"
                         Width="110"
                         Height="42"
                         Content="XÁC NHẬN"

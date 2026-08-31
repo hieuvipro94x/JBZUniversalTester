@@ -6,15 +6,26 @@ namespace JBZUniversalTester.Views;
 public partial class FaultConfirmationWindow : Window
 {
     private readonly Func<int, PinRecord?>? _pinResolver;
+    private readonly string? _requiredDiscardPassword;
+    private bool _authorized;
 
     public FaultConfirmationWindow(
         IReadOnlyList<FaultDetail> faults,
         string footer,
-        Func<int, PinRecord?>? pinResolver = null)
+        Func<int, PinRecord?>? pinResolver = null,
+        string? requiredDiscardPassword = null)
     {
         InitializeComponent();
 
         _pinResolver = pinResolver;
+        _requiredDiscardPassword = requiredDiscardPassword;
+
+        if (requiredDiscardPassword is not null)
+        {
+            DiscardPasswordPanel.Visibility = Visibility.Visible;
+            Loaded += (_, _) => DiscardPasswordBox.Focus();
+            Closing += PreventUnauthorizedClose;
+        }
 
         FaultDetail? primaryFault = faults
             .OrderBy(fault => FaultTypeCatalog.Priority(fault.Type))
@@ -205,7 +216,38 @@ public partial class FaultConfirmationWindow : Window
 
     private void Confirm_Click(object sender, RoutedEventArgs e)
     {
+        if (_requiredDiscardPassword is not null)
+        {
+            if (string.IsNullOrEmpty(_requiredDiscardPassword))
+            {
+                DiscardPasswordErrorText.Text =
+                    "Chưa cài Mật khẩu thùng lỗi trong Cài đặt Production.";
+                DiscardPasswordErrorText.Visibility = Visibility.Visible;
+                return;
+            }
+
+            if (!JBZUniversalTester.Services.AdminAuthenticationService.Verify(
+                    _requiredDiscardPassword,
+                    DiscardPasswordBox.Password))
+            {
+                DiscardPasswordErrorText.Text = "Mật khẩu xử lý hàng lỗi không đúng.";
+                DiscardPasswordErrorText.Visibility = Visibility.Visible;
+                DiscardPasswordBox.SelectAll();
+                DiscardPasswordBox.Focus();
+                return;
+            }
+        }
+
+        _authorized = true;
         DialogResult = true;
         Close();
+    }
+
+    private void PreventUnauthorizedClose(
+        object? sender,
+        System.ComponentModel.CancelEventArgs e)
+    {
+        if (!_authorized && IsVisible)
+            e.Cancel = true;
     }
 }
