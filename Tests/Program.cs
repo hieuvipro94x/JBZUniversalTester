@@ -38,6 +38,8 @@ internal static class Program
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
             ("History initialization waits for an active SQLite writer", TestHistoryInitializationWaitsForWriter),
+            ("Production SQLite writer retries a transient lock", TestProductionPersistenceRetriesTransientLock),
+            ("SQLite interrupted transaction reopens without deleting database", TestHistoryInterruptedTransactionRecovery),
             ("Canonical runtime paths and SQLite PartCnt authority", TestCanonicalRuntimePersistence),
             ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
@@ -1673,6 +1675,116 @@ internal static class Program
         }
     }
 
+    private static void TestHistoryInterruptedTransactionRecovery()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZHistoryInterruptedTransactionTests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        try
+        {
+            Directory.CreateDirectory(root);
+            _ = new TestHistoryStore(dbPath);
+
+            using (var connection = new SqliteConnection(
+                       $"Data Source={dbPath};Pooling=False;Default Timeout=2"))
+            {
+                connection.Open();
+                using (SqliteCommand seed = connection.CreateCommand())
+                {
+                    seed.CommandText =
+                        "CREATE TABLE IF NOT EXISTS PowerLossProbe(Id INTEGER PRIMARY KEY, Value TEXT NOT NULL);" +
+                        "INSERT OR REPLACE INTO PowerLossProbe(Id,Value) VALUES(1,'COMMITTED');";
+                    seed.ExecuteNonQuery();
+                }
+
+                using SqliteTransaction interrupted = connection.BeginTransaction();
+                using SqliteCommand update = connection.CreateCommand();
+                update.Transaction = interrupted;
+                update.CommandText = "UPDATE PowerLossProbe SET Value='UNCOMMITTED' WHERE Id=1;";
+                update.ExecuteNonQuery();
+                // Không Commit: mô phỏng transaction bị ngắt giữa chừng ở mức
+                // ứng dụng. Dispose phải rollback phần chưa durable.
+            }
+
+            var reopened = new TestHistoryStore(dbPath);
+            using var verify = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            verify.Open();
+            using SqliteCommand command = verify.CreateCommand();
+            command.CommandText =
+                "SELECT Value, (SELECT quick_check FROM pragma_quick_check LIMIT 1) " +
+                "FROM PowerLossProbe WHERE Id=1;";
+            using SqliteDataReader reader = command.ExecuteReader();
+            Assert(reader.Read() && reader.GetString(0) == "COMMITTED" && reader.GetString(1) == "ok",
+                "WAL reopens cleanly and discards only the interrupted transaction");
+            Assert(reopened.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "Recovered production database keeps the current schema");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    private static void TestProductionPersistenceRetriesTransientLock()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZProductionPersistenceRetryTests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        ProductionPersistenceService? persistence = null;
+        try
+        {
+            Directory.CreateDirectory(root);
+            var repository = new TestHistoryStore(dbPath);
+            persistence = new ProductionPersistenceService(
+                repository,
+                new ProductionSettings(),
+                "SELF-TEST");
+            persistence.Initialization.GetAwaiter().GetResult();
+
+            using var writerStarted = new ManualResetEventSlim(false);
+            Task writer = Task.Run(() =>
+            {
+                using var connection = new SqliteConnection(
+                    $"Data Source={dbPath};Pooling=False;Default Timeout=2");
+                connection.Open();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "UPDATE SchemaInfo SET UpdatedAt=UpdatedAt WHERE Id=1;";
+                command.ExecuteNonQuery();
+                writerStarted.Set();
+                Thread.Sleep(2150);
+                transaction.Commit();
+            });
+
+            Assert(writerStarted.Wait(TimeSpan.FromSeconds(5)),
+                "Transient SQLite writer acquired the database lock");
+            var part = new PartIdentitySnapshot(
+                "PN:LOCK-RETRY",
+                "LOCK-RETRY",
+                "", "", "", "", "", "");
+            ProbeCounterSnapshot counter = persistence.IncrementProbeCounterAsync(part, 200000)
+                .GetAwaiter().GetResult();
+            writer.GetAwaiter().GetResult();
+            Assert(counter.Counter == 1 && string.IsNullOrEmpty(persistence.LastDatabaseError),
+                "Serialized writer retries BUSY and commits once after the transient lock clears");
+        }
+        finally
+        {
+            if (persistence is not null)
+                persistence.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
     private static void TestCanonicalRuntimePersistence()
     {
         Assert(Path.GetFileName(RuntimePaths.ConfigFile) == "JBZUniversalTester.cfg",
@@ -2579,6 +2691,22 @@ internal static class Program
                bootstrapSource.Contains("Task.Run(async () =>", StringComparison.Ordinal) &&
                bootstrapSource.Contains("Deferred legacy history import completed.", StringComparison.Ordinal),
             "Legacy import stays off startup and shares the production SQLite writer instead of creating a competing writer");
+
+        string persistenceSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "ProductionPersistenceService.cs"));
+        Assert(persistenceSource.Contains("SQLITE_BUSY_RETRY", StringComparison.Ordinal) &&
+               persistenceSource.Contains("exception.SqliteErrorCode is 5 or 6", StringComparison.Ordinal),
+            "Production SQLite writer retries transient BUSY/LOCKED transactions");
+
+        string mainViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
+        Assert(mainViewModelSource.Contains(
+                   "Task.WhenAll(productionDataTask, boardInitializationTask)",
+                   StringComparison.Ordinal) &&
+               mainViewModelSource.Contains(
+                   "await Test.InitializeAsync();",
+                   StringComparison.Ordinal),
+            "Board connects alongside DB bootstrap while model/history wait for canonical database migration");
 
         string historyPageXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));

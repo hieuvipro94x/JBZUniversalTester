@@ -143,15 +143,21 @@ public sealed class MainViewModel : ObservableObject
     {
         Status = "ĐANG NẠP MÃ HÀNG VÀ KẾT NỐI BO...";
 
-        await Task.Run(StartupBootstrapService.EnsureDeferredProductionFiles);
-        StartupPerformanceTrace.Mark("T3 SETTINGS_READY");
+        // DB migration/import counter và nhận dạng FTDI độc lập. Chỉ kết nối
+        // hardware song song; nạp model/statistics chờ bootstrap xong để DB cũ
+        // luôn được chuyển sang canonical path trước khi repository có thể tạo DB.
+        Task productionDataTask = Task.Run(StartupBootstrapService.EnsureDeferredProductionFiles);
 
         Task printerConnectionTask = Test.AutoConnectLabelPrinterAsync();
         _ = ObservePrinterStartupAsync(printerConnectionTask);
 
-        // TestViewModel thực hiện hai việc tự động: recovery/kết nối FTDI và
-        // tải model gần nhất. SetModel sẽ đồng bộ model trở lại MainWindow.
+        Task boardInitializationTask = Test.InitializeHardwareAsync();
+        await Task.WhenAll(productionDataTask, boardInitializationTask);
+
+        // Sau khi canonical DB đã sẵn sàng mới nạp model và lịch sử sản lượng.
+        // InitializeAsync reuse kết nối vừa hoàn tất, không mở bo lần hai.
         await Test.InitializeAsync();
+        StartupPerformanceTrace.Mark("T3 SETTINGS_READY");
 
         Home.Refresh();
         Raise(nameof(CurrentBoardCapacity));

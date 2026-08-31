@@ -37,10 +37,13 @@ public sealed class TestHistoryStore
     private SqliteConnection Open()
     {
         var connection = new SqliteConnection(
-            $"Data Source={_path};Cache=Private;Pooling=True;Default Timeout=5");
+            $"Data Source={_path};Cache=Private;Pooling=True;Default Timeout=2");
         connection.Open();
         using SqliteCommand pragma = connection.CreateCommand();
-        pragma.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
+        // Chờ ngắn tại SQLite rồi để production writer retry cả transaction.
+        // Cách này tránh FAIL ngay khi antivirus/History giữ file thoáng qua,
+        // nhưng cũng không làm giao diện đứng 5 giây cho mỗi lần thử.
+        pragma.CommandText = "PRAGMA foreign_keys=ON; PRAGMA busy_timeout=2000;";
         pragma.ExecuteNonQuery();
         return connection;
     }

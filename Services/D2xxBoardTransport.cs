@@ -566,11 +566,19 @@ public sealed class D2xxBoardTransport : IBoardTransport
     public async Task HandshakeAsync(CancellationToken ct = default)
     {
         await WriteAsync(CmdHandshake, ct);
-        byte[] rx = await ReadExactOrAvailableAsync(2, 500, ct);
+        byte[] rx = await ReadUntilHandshakeAsync(500, ct);
 
-        if (rx.Length < 2 || rx[0] != 0x0F || rx[1] != 0x00)
+        if (!ContainsHandshake(rx))
             throw new InvalidOperationException(
                 $"Handshake không hợp lệ: {Convert.ToHexString(rx)}");
+
+        int handshakeOffset = FindHandshakeOffset(rx);
+        if (handshakeOffset > 0)
+        {
+            Log?.Invoke(
+                this,
+                $"Handshake đã đồng bộ lại sau {handshakeOffset} byte scan còn lại.");
+        }
     }
 
     public async Task ResetClearAsync(CancellationToken ct = default)
@@ -1262,22 +1270,43 @@ public sealed class D2xxBoardTransport : IBoardTransport
         }
     }
 
-    async Task<byte[]> ReadExactOrAvailableAsync(
-        int expected,
-        int timeoutMs,
-        CancellationToken ct)
+    async Task<byte[]> ReadUntilHandshakeAsync(int timeoutMs, CancellationToken ct)
     {
-        var result = new List<byte>(expected);
+        // Sau reconnect, một số firmware còn đẩy phần cuối frame scan dù STOP
+        // đã được gửi. Không kết luận handshake sai ngay ở hai byte đầu; tiếp
+        // tục đọc trong chính timeout hiện có cho tới phản hồi 0F 00.
+        var result = new List<byte>(64);
         long until = Environment.TickCount64 + timeoutMs;
 
-        while (result.Count < expected && Environment.TickCount64 < until)
+        while (Environment.TickCount64 < until)
         {
-            result.AddRange(await ReadAvailableAsync(ct));
-            if (result.Count < expected)
+            byte[] available = await ReadAvailableAsync(ct);
+            if (available.Length == 0)
+            {
                 await Task.Delay(1, ct);
+                continue;
+            }
+
+            result.AddRange(available);
+            if (ContainsHandshake(result))
+                break;
         }
 
         return result.ToArray();
+    }
+
+    private static bool ContainsHandshake(IReadOnlyList<byte> bytes) =>
+        FindHandshakeOffset(bytes) >= 0;
+
+    private static int FindHandshakeOffset(IReadOnlyList<byte> bytes)
+    {
+        for (int index = 0; index + 1 < bytes.Count; index++)
+        {
+            if (bytes[index] == 0x0F && bytes[index + 1] == 0x00)
+                return index;
+        }
+
+        return -1;
     }
 
     static byte[] ParseFrame(string text, byte[] fallback)

@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using JBZUniversalTester.Models;
+using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.Services;
 
@@ -9,6 +10,13 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class ProductionPersistenceService : IAsyncDisposable
 {
+    private static readonly TimeSpan[] BusyRetryDelays =
+    [
+        TimeSpan.FromMilliseconds(50),
+        TimeSpan.FromMilliseconds(150),
+        TimeSpan.FromMilliseconds(350)
+    ];
+
     private readonly TestHistoryStore _repository;
     private readonly Channel<Func<Task>> _commands;
     private readonly CancellationTokenSource _shutdown = new();
@@ -163,8 +171,8 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
             {
                 try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    T result = action();
+                    T result = await ExecuteWithBusyRetryAsync(action, cancellationToken)
+                        .ConfigureAwait(false);
                     Volatile.Write(ref _lastDatabaseError, string.Empty);
                     completion.TrySetResult(result);
                 }
@@ -191,6 +199,33 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
 
         return completion.Task;
     }
+
+    private static async Task<T> ExecuteWithBusyRetryAsync<T>(
+        Func<T> action,
+        CancellationToken cancellationToken)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return action();
+            }
+            catch (SqliteException exception) when (
+                IsTransientLock(exception) && attempt < BusyRetryDelays.Length)
+            {
+                TimeSpan delay = BusyRetryDelays[attempt];
+                AsyncFileLogService.Current.Application(
+                    $"SQLITE_BUSY_RETRY attempt={attempt + 1}/{BusyRetryDelays.Length} " +
+                    $"delay_ms={delay.TotalMilliseconds:0} code={exception.SqliteErrorCode} " +
+                    $"extended={exception.SqliteExtendedErrorCode}");
+                await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private static bool IsTransientLock(SqliteException exception) =>
+        exception.SqliteErrorCode is 5 or 6; // SQLITE_BUSY / SQLITE_LOCKED
 
     private async Task ProcessCommandsAsync()
     {
