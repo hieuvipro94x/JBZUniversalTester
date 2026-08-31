@@ -24,12 +24,24 @@ public partial class FaultConfirmationWindow : Window
             .Select(FaultDisplayFormatter.FormatOperator)
             .ToArray();
 
-        SummaryText.Text = primaryFault is null
+        string summary = primaryFault is null
             ? "KIỂM TRA SẢN PHẨM"
             : BuildShortSummary(primaryFault);
+        ApplyCompactSummary(summary);
 
         FaultItemsControl.ItemsSource = displays;
         FooterText.Text = footer ?? string.Empty;
+    }
+
+    private void ApplyCompactSummary(string summary)
+    {
+        string[] lines = summary
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        FaultTypeText.Text = lines.Length > 0 ? lines[0] : "LỖI SẢN PHẨM";
+        SummaryText.Text = lines.Length > 1
+            ? string.Join(Environment.NewLine, lines.Skip(1))
+            : "VUI LÒNG KIỂM TRA SẢN PHẨM";
     }
 
     private string BuildShortSummary(FaultDetail fault)

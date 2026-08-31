@@ -2527,6 +2527,16 @@ internal static class Program
                !productSoundMethod.Contains("SafePlaySync(player);", StringComparison.Ordinal),
             "Product-start sound never holds the UI sound path for the full WAV duration");
 
+        string faultDialogXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml"));
+        string faultDialogSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml.cs"));
+        Assert(faultDialogXaml.Contains("SizeToContent=\"Height\"", StringComparison.Ordinal) &&
+               faultDialogXaml.Contains("x:Name=\"FaultTypeText\"", StringComparison.Ordinal) &&
+               faultDialogXaml.Contains("x:Name=\"SummaryText\"", StringComparison.Ordinal) &&
+               faultDialogSource.Contains("ApplyCompactSummary(summary);", StringComparison.Ordinal),
+            "FAIL dialog uses a compact auto-height layout without duplicating its fault title");
+
         var invalid = new ProductionSettings
         {
             IoScanIntervalMs = -1,

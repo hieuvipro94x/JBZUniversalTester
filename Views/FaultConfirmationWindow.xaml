@@ -2,96 +2,114 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Sản phẩm không đạt"
-        Width="520" Height="330"
+        Width="500"
+        MinHeight="260"
+        MaxHeight="420"
+        SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        Background="#C62828"
+        Background="#F3F4F6"
         FontFamily="Arial"
         ShowInTaskbar="False">
-    <Grid Margin="14">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="58"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="58"/>
+            <RowDefinition Height="56"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Background="#23D9D9"
-                BorderBrush="#333333"
-                BorderThickness="2">
-            <TextBlock Text="SẢN PHẨM KHÔNG ĐẠT"
-                       Foreground="#333333"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
-                       FontSize="22"
-                       FontWeight="Bold"/>
+        <Border Background="#C62828">
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                <Border Width="28" Height="28"
+                        Margin="0,0,10,0"
+                        CornerRadius="14"
+                        Background="White">
+                    <TextBlock Text="!"
+                               Foreground="#C62828"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontSize="20"
+                               FontWeight="Bold"/>
+                </Border>
+                <TextBlock Text="SẢN PHẨM KHÔNG ĐẠT"
+                           Foreground="White"
+                           VerticalAlignment="Center"
+                           FontSize="21"
+                           FontWeight="Bold"/>
+            </StackPanel>
         </Border>
 
-        <StackPanel Grid.Row="1"
-            VerticalAlignment="Center"
-            HorizontalAlignment="Stretch"
-            Margin="10,8">
+        <Border Grid.Row="1"
+                Margin="14,12,14,10"
+                Padding="18,14"
+                Background="White"
+                BorderBrush="#E1E4E8"
+                BorderThickness="1"
+                CornerRadius="7">
+            <StackPanel>
+                <TextBlock x:Name="FaultTypeText"
+                           Foreground="#B91C1C"
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           FontSize="20"
+                           FontWeight="Bold"/>
 
-            <TextBlock Text="HÃY KIỂM TRA SẢN PHẨM"
-               Foreground="#FFE000"
-               HorizontalAlignment="Center"
-               TextAlignment="Center"
-               FontSize="18"
-               FontWeight="Bold"/>
+                <Border Height="2"
+                        Margin="72,10,72,10"
+                        Background="#F1B8B8"/>
 
-            <Border Background="#A61919"
-            BorderBrush="#FFE000"
-            BorderThickness="2"
-            CornerRadius="4"
-            Margin="0,14,0,8"
-            Padding="12">
+                <TextBlock x:Name="SummaryText"
+                           Foreground="#20242A"
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           FontSize="18"
+                           FontWeight="SemiBold"
+                           LineHeight="26"
+                           MaxWidth="440"/>
 
-                <StackPanel>
-                    <TextBlock x:Name="FaultTypeText"
-                       Text="LỖI SAI DÂY"
-                       Foreground="White"
-                       HorizontalAlignment="Center"
-                       TextAlignment="Center"
-                       FontSize="22"
-                       FontWeight="Bold"/>
+                <ItemsControl x:Name="FaultItemsControl"
+                              Visibility="Collapsed"/>
+            </StackPanel>
+        </Border>
 
-                    <TextBlock x:Name="SummaryText"
-                       Foreground="#FFE000"
-                       HorizontalAlignment="Center"
-                       TextAlignment="Center"
-                       TextWrapping="Wrap"
-                       FontSize="21"
-                       FontWeight="Bold"
-                       Margin="0,8,0,0"
-                       MaxWidth="455"/>
-                </StackPanel>
-            </Border>
+        <Border Grid.Row="2"
+                Background="#E9EBEF"
+                BorderBrush="#D7DADE"
+                BorderThickness="0,1,0,0"
+                Padding="14,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
 
-            <TextBlock x:Name="FooterText"
-               Foreground="White"
-               HorizontalAlignment="Center"
-               TextAlignment="Center"
-               TextWrapping="Wrap"
-               FontSize="13"
-               FontWeight="Bold"
-               Margin="0,5,0,0"
-               MaxWidth="455"/>
+                <TextBlock x:Name="FooterText"
+                           Margin="0,0,14,0"
+                           Foreground="#4B5563"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           MaxWidth="320"/>
 
-            <ItemsControl x:Name="FaultItemsControl"
-                  Visibility="Collapsed"/>
-        </StackPanel>
-
-        <Button Grid.Row="2"
-                Width="120"
-                Height="52"
-                HorizontalAlignment="Right"
-                Content="XÁC NHẬN"
-                FontSize="15"
-                FontWeight="Bold"
-                IsDefault="True"
-                Background="#E7E7E4"
-                Foreground="#101010"
-                BorderBrush="#333333"
-                BorderThickness="2"
-                Click="Confirm_Click"/>
+                <Button Grid.Column="1"
+                        Width="110"
+                        Height="42"
+                        Content="XÁC NHẬN"
+                        FontSize="14"
+                        FontWeight="Bold"
+                        IsDefault="True"
+                        Background="#C62828"
+                        Foreground="White"
+                        BorderBrush="#9F1F1F"
+                        BorderThickness="1"
+                        Cursor="Hand"
+                        Click="Confirm_Click"/>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
