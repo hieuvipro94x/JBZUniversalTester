@@ -879,11 +879,15 @@ public sealed class TestEngine : IDisposable
             // Snapshot đã được classifier xác định là đầu dò chỉ dùng để hiển
             // thị Pin đang chạm. Không cho snapshot này tạo candidate/confirmed
             // WRONG hoặc SHORT mới; các lỗi thật đã có trước đó vẫn được giữ.
+            // PASS cần coverage đầy đủ của model; một cạnh SAI thật thì không.
+            // Nếu operator chạm đủ hai đầu của một dây sai, BO đã trả về cạnh
+            // vật lý đó và phải báo sau debounce riêng, không đợi 99 dây của
+            // WH322244 được lắp xong.
             bool wiringChanged = !preserveConfirmedWiringFaults && UpdateWiringFaults(
                 model,
                 _expectedConnectionScratch,
                 hasProductActivity,
-                _readyToEvaluateProductFaults);
+                hasProductActivity);
 
             if (preserveConfirmedWiringFaults &&
                 previousConfirmedWiringFaults.Length > 0 &&
@@ -951,6 +955,13 @@ public sealed class TestEngine : IDisposable
             foreach (int target in pair.Value)
             {
                 if (model.IgnoredIo.Contains(target))
+                    continue;
+
+                // Một word target thay source có thể được decoder biểu diễn
+                // tạm thời là IOx -> IOx. Đây là một đầu đang chạm, không hề
+                // chứng minh có dây nối sai; chỉ cạnh giữa HAI IO khác nhau mới
+                // được phép tạo WRONG/SHORT candidate.
+                if (source == target)
                     continue;
 
                 bool targetMapped = componentByIo.TryGetValue(target, out int targetComponent);

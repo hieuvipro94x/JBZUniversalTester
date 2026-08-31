@@ -2226,7 +2226,6 @@ public sealed class TestViewModel : ObservableObject
 
         if (_cycleActive &&
             phase == ProductionPhase.Continuity &&
-            _engine.ReadyToEvaluateProductFaults &&
             _engine.LastFrameValid &&
             _engine.HasWiringFault &&
             Interlocked.CompareExchange(ref _wiringFaultHandlingStarted, 1, 0) == 0)

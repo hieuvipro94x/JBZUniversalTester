@@ -2416,6 +2416,28 @@ internal static class Program
                !engine.HasConfirmedOpenCircuit &&
                !engine.HasWiringFault,
             "Partial source coverage is installing, not product FAIL");
+
+        // Một cạnh sai vật lý phải được xác nhận ngay cả khi sản phẩm mới lắp
+        // một phần. PASS vẫn bị khóa bởi coverage đầy đủ, nhưng không được xóa
+        // candidate sai dây chỉ vì các source khác chưa xuất hiện.
+        engine.SetModel(twoPairs);
+        ScanFrame partialWrongWire = Frame((1, new[] { 40 }));
+        engine.ProcessFrame(partialWrongWire);
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(partialWrongWire);
+        Assert(!engine.ReadyToEvaluateProductFaults && engine.HasWiringFault,
+            "A stable wrong physical pair fails without waiting for full model source coverage");
+
+        // Source==target là trạng thái một đầu chạm/từ decoder target-replace,
+        // không phải một dây nối giữa hai đầu và không được tạo FAIL giả.
+        engine.SetModel(twoPairs);
+        ScanFrame oneEndTouch = Frame((1, new[] { 1 }));
+        engine.ProcessFrame(oneEndTouch);
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(oneEndTouch);
+        Assert(!engine.HasWiringFault,
+            "One-end source self-edge never becomes a wrong-wire FAIL");
+
         ScanFrame fullCoverageOpen = Frame((1, new[] { 18 }), (2, Array.Empty<int>()));
         engine.ProcessFrame(fullCoverageOpen);
         Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
