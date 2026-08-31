@@ -60,6 +60,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
     string _activeScanConfiguration = string.Empty;
     long _lastScanLogTick;
     bool _scanPrepared;
+    // INIT_1/INIT_2 chuẩn bị đường quét theo số scan-unit đang hoạt động.
+    // Không được dùng preparation của 1 card để START_SCAN cho 4/10 card.
+    BoardCapacity? _preparedScanCapacity;
     BoardCapacity _installedCapacity;
     BoardCapacity _capacity;
     BoardCapacity? _appliedScanCapacity;
@@ -407,6 +410,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 Volatile.Write(ref _connectionState, (int)BoardConnectionState.Initializing);
 
                 _scanPrepared = false;
+                _preparedScanCapacity = null;
                 _activeRelay = -1;
 
                 // Startup theo trace Htdrv: STOP_SCAN -> ~500 ms -> HANDSHAKE
@@ -436,6 +440,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 _handle = IntPtr.Zero;
                 _connectedSerial = string.Empty;
                 _scanPrepared = false;
+                _preparedScanCapacity = null;
                 _activeRelay = -1;
                 _appliedScanCapacity = null;
                 _activeScanConfiguration = string.Empty;
@@ -551,6 +556,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             finally
             {
                 _scanPrepared = false;
+                _preparedScanCapacity = null;
                 _appliedScanCapacity = null;
                 _activeScanConfiguration = string.Empty;
                 Volatile.Write(ref _connectionState, (int)BoardConnectionState.Disconnected);
@@ -592,13 +598,14 @@ public sealed class D2xxBoardTransport : IBoardTransport
     async Task PrepareScanAsync(CancellationToken ct)
     {
         EnsureConnected();
-        if (_scanPrepared)
+        if (_scanPrepared && HasSameScanRange(_preparedScanCapacity, _capacity))
             return;
 
         await WriteAsync(CmdInit1, ct);
         await Task.Delay(ProductionTimingPolicy.StartupInit1ToInit2Ms, ct);
         await WriteAsync(CmdInit2, ct);
         _scanPrepared = true;
+        _preparedScanCapacity = _capacity;
     }
 
     public void ConfigureActiveScanRange(int maxIo)
@@ -649,14 +656,29 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 return;
             }
 
+            bool capacityPreparationChanged =
+                !HasSameScanRange(_preparedScanCapacity, _capacity);
+
             // Chỉ restart khi mode/capacity thật sự đổi hoặc stream không chạy.
             await StopScanCoreAsync(ct);
             await ApplyPendingNativeConfigurationAsync(ct);
 
-            // Số card đã cài là giới hạn phần cứng; dải active được co theo
-            // MaxIo của model để không kéo dài mỗi frame vì các card không dùng.
+            // Trace Htdrv với 4 card khởi tạo BO trước khi gửi 8C 00 04 00.
+            // Khi operator đổi product từ dải 1 card sang 4/10 card, INIT của
+            // dải cũ không còn hợp lệ: reset sạch và chuẩn bị lại trước scan.
+            // Nếu không, BO có thể stream chỉ 64/256 source và UI trông như lag.
+            if (capacityPreparationChanged)
+            {
+                Log?.Invoke(
+                    this,
+                    $"SCAN_CAPACITY_REPREPARE old={FormatScanRange(_preparedScanCapacity)} " +
+                    $"new={FormatScanRange(_capacity)}; STOP->RESET->INIT trước START_SCAN.");
+                await ResetClearAsync(ct);
+                _scanPrepared = false;
+                _preparedScanCapacity = null;
+            }
 
-            if (!_scanPrepared)
+            if (!_scanPrepared || !HasSameScanRange(_preparedScanCapacity, _capacity))
                 await PrepareScanAsync(ct);
 
             _lastScanSignature = string.Empty;
@@ -687,6 +709,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             // QUAN TRỌNG: START_SCAN không làm mất INIT. Giữ prepared=true để
             // STOP -> RESET -> START tiếp theo diễn ra ngay, không chờ INIT 700 ms.
             _scanPrepared = true;
+            _preparedScanCapacity = _capacity;
 
             long generation = Interlocked.Increment(ref _scanGeneration);
             _scanMode = mode;
@@ -772,6 +795,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             await PurgeAsync(ct);
 
             _scanPrepared = true;
+            _preparedScanCapacity = _capacity;
             Volatile.Write(ref _connectionState, (int)BoardConnectionState.Ready);
             Log?.Invoke(this, "Board đã về IDLE sạch, giữ FTDI mở và sẵn sàng START_SCAN lại.");
         }
@@ -798,6 +822,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         await Task.Delay(350, ct);
         await WriteAsync(routeB, ct);
         _scanPrepared = false;
+        _preparedScanCapacity = null;
     }
 
     public async Task ReleaseResistanceRouteAsync(
@@ -820,6 +845,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         }
 
         _scanPrepared = true;
+        _preparedScanCapacity = _capacity;
     }
 
     public Task SetRelayAsync(int relay, CancellationToken ct = default) => relay switch
@@ -852,6 +878,15 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     private string BuildScanConfiguration(BoardScanMode mode) =>
         $"{mode}:{_capacity.ExpansionCardCount}:{_capacity.StartScanParameter}";
+
+    private static bool HasSameScanRange(BoardCapacity? left, BoardCapacity right) =>
+        left is not null &&
+        left.StartScanParameter == right.StartScanParameter &&
+        left.TotalIoCapacity == right.TotalIoCapacity;
+
+    private static string FormatScanRange(BoardCapacity? capacity) => capacity is null
+        ? "none"
+        : $"{capacity.StartScanParameter}/{capacity.TotalIoCapacity}";
 
     private async Task ApplyPendingNativeConfigurationAsync(CancellationToken ct)
     {
@@ -1036,6 +1071,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 _handle = IntPtr.Zero;
                 _connectedSerial = string.Empty;
                 _scanPrepared = false;
+                _preparedScanCapacity = null;
                 if (handle != IntPtr.Zero)
                 {
                     try { FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX); } catch { }
@@ -1109,21 +1145,24 @@ public sealed class D2xxBoardTransport : IBoardTransport
             decoded.EndMarkerCode is byte endMarkerCode ? endMarkerCode : -1);
         Volatile.Write(ref _lastFrameUnknownBytes, decoded.UnknownBytes);
         long now = Environment.TickCount64;
-        bool forceLog = decoded.UnknownBytes > 0 ||
-                        !decoded.TerminatorKnown ||
-                        (decoded.Mode == BoardScanMode.Production && !decoded.Complete);
-        bool canLogTransition = now - _lastScanLogTick >= 50;
+        bool unhealthyFrame = decoded.UnknownBytes > 0 ||
+                              !decoded.TerminatorKnown ||
+                              (decoded.Mode == BoardScanMode.Production && !decoded.Complete);
+        // Khung thiếu có thể đến 10+ lần/giây. Ghi từng khung làm nghẽn UI log
+        // đúng lúc BO chưa đồng bộ; giữ diagnostic nhưng chỉ một lần/giây.
+        long logIntervalMs = unhealthyFrame ? 1_000 : 50;
+        bool canLogTransition = now - _lastScanLogTick >= logIntervalMs;
 
         // Log DataGrid/ObservableCollection không được phép kéo chậm worker.
         // Chỉ log trạng thái RX tối đa khoảng 20 lần/giây; FrameReceived vẫn
         // phát TẤT CẢ frame cho TestEngine nên logic test không bị giảm tốc.
-        if (forceLog || canLogTransition)
+        if (canLogTransition)
         {
             string signature = $"{decoded.Mode}:" + string.Join(",", decoded.ActiveIo.Order());
             bool signatureChanged =
                 !string.Equals(signature, _lastScanSignature, StringComparison.Ordinal);
 
-            if (forceLog || signatureChanged)
+            if (unhealthyFrame || signatureChanged)
             {
                 _lastScanLogTick = now;
                 _lastScanSignature = signature;
