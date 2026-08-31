@@ -1,0 +1,79 @@
+<Window x:Class="JBZUniversalTester.Views.TopologyLearningWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Học cấu hình sản phẩm"
+        Width="900" Height="650"
+        MinWidth="760" MinHeight="520"
+        WindowStartupLocation="CenterOwner"
+        Background="White"
+        Loaded="Window_Loaded"
+        Closed="Window_Closed">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="HỌC TOPOLOGY / CHẨN ĐOÁN IO"
+                       FontSize="24" FontWeight="Bold" Foreground="#243B7A"/>
+            <TextBlock Margin="0,6,0,0"
+                       Text="Chỉ lưu quan hệ continuity. Không phải file THT; không PASS/FAIL, relay, điện trở, leak hoặc in tem."
+                       FontSize="14" Foreground="#8A3B00" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,16,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="220"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="90"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Mã cấu hình" VerticalAlignment="Center" FontWeight="SemiBold"/>
+            <TextBox x:Name="ProductCodeTextBox" Grid.Column="1" Margin="8,0,18,0" Height="30"/>
+            <TextBlock Grid.Column="2" Text="Frame ổn định" VerticalAlignment="Center" FontWeight="SemiBold"/>
+            <TextBox x:Name="StableFrameCountTextBox" Grid.Column="3" Margin="8,0,18,0" Height="30" Text="20"/>
+            <TextBlock x:Name="BoardStatusText" Grid.Column="4" VerticalAlignment="Center"
+                       HorizontalAlignment="Right" FontWeight="Bold" Foreground="#8A3B00"/>
+        </Grid>
+
+        <DataGrid x:Name="TopologyGrid"
+                  Grid.Row="2"
+                  ItemsSource="{Binding Rows}"
+                  AutoGenerateColumns="False"
+                  IsReadOnly="True"
+                  CanUserAddRows="False"
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  HeadersVisibility="Column"
+                  GridLinesVisibility="Horizontal"
+                  FontSize="18"
+                  RowHeight="34">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="70"/>
+                <DataGridTextColumn Header="CÁC IO ĐANG NỐI VỚI NHAU" Binding="{Binding Connection}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <Grid Grid.Row="3" Margin="0,14,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="150"/>
+                <ColumnDefinition Width="120"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="LearningStatusText" FontSize="16" FontWeight="Bold" Foreground="#243B7A"/>
+                <ProgressBar x:Name="LearningProgress" Height="10" Margin="0,6,18,0" Minimum="0" Maximum="1"/>
+            </StackPanel>
+            <Button x:Name="DiagnoseButton" Grid.Column="1" Margin="5,0" Height="42"
+                    Content="CHẨN ĐOÁN" Click="Diagnose_Click"/>
+            <Button x:Name="SaveButton" Grid.Column="2" Margin="5,0" Height="42"
+                    Content="LƯU CẤU HÌNH" Click="Save_Click" IsEnabled="False"/>
+            <Button Grid.Column="3" Margin="5,0" Height="42" Content="ĐÓNG" Click="Close_Click"/>
+        </Grid>
+    </Grid>
+</Window>

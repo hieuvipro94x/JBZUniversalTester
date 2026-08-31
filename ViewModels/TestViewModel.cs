@@ -225,7 +225,7 @@ public sealed class TestViewModel : ObservableObject
     private string _masterHistoryInspectionType = string.Empty;
     private TestHistoryStore? _masterRecordedHistoryStore;
     private const int MasterBadSettleMs = 120;
-    private string _masterStatus = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+    private string _masterStatus = "KIỂM TRA MASTER ĐẠT";
 
     // Mỗi lần người vận hành chọn model mới sẽ tăng generation. Tác vụ
     // auto-load model gần nhất lúc startup chỉ được áp dụng nếu generation
@@ -356,9 +356,7 @@ public sealed class TestViewModel : ObservableObject
                 return "ĐANG KẾT NỐI BO";
 
             if (IsMasterSequenceActive)
-                return value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase)
-                    ? "CHỜ MASTER"
-                    : "MASTER";
+                return NormalizeSingleLine(value);
 
             if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
                 return "ĐẠT";
@@ -391,6 +389,9 @@ public sealed class TestViewModel : ObservableObject
 
             string state = NormalizeSingleLine(State);
             string status = NormalizeSingleLine(MasterStatus);
+
+            if (state.Equals(status, StringComparison.OrdinalIgnoreCase))
+                return state;
 
             return string.Join("      ", new[] { state, status }.Where(x => !string.IsNullOrWhiteSpace(x)));
         }
@@ -585,9 +586,7 @@ public sealed class TestViewModel : ObservableObject
         get
         {
             if (IsMasterSequenceActive)
-                return IsMasterBadPhase
-                    ? $"{MasterStatus}  •  {MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
-                    : MasterStatus;
+                return MasterStatus;
 
             FaultDetail? fault = GetVisiblePrimaryFault();
             if (fault is null)
@@ -855,7 +854,7 @@ public sealed class TestViewModel : ObservableObject
     public int MasterRequiredFaultCount => _masterRequiredFaultCount;
     public int MasterDetectedFaultCount => _masterDetectedFaultKeys.Count;
     public string MasterProgressText => IsMasterBadPhase
-        ? $"LỖI MASTER: {MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
+        ? $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
         : MasterApproved
             ? "MASTER HOÀN TẤT • SẴN SÀNG SẢN XUẤT"
             : string.Empty;
@@ -1271,7 +1270,7 @@ public sealed class TestViewModel : ObservableObject
             return "CHỜ ĐỒNG BỘ DỮ LIỆU BO";
         return MasterApproved
             ? "CHỜ LẮP SẢN PHẨM"
-            : "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+            : "KIỂM TRA MASTER ĐẠT";
     }
 
     private string PassRelaySequenceText()
@@ -2878,7 +2877,7 @@ public sealed class TestViewModel : ObservableObject
         }
         else
         {
-            State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+            State = "KIỂM TRA MASTER ĐẠT";
             AddLog("STARTUP IO INTERLOCK: frame sạch, bắt đầu chuỗi MASTER.");
             _ = StartAutomaticMasterSequenceAsync();
         }
@@ -3320,52 +3319,17 @@ public sealed class TestViewModel : ObservableObject
 
     private IReadOnlyList<FaultRow> BuildProbeDisplayRows(int io)
     {
-        // V12.8: mỗi I/O đầu dò tạo đúng MỘT dòng; tối đa 2 dòng cùng lúc. Nếu chính I/O đang
-        // chạm không có WireName, lấy tên dây từ đầu còn lại của cùng network
-        // trong THT để người vận hành vẫn biết đúng dây cần kiểm tra.
-        IReadOnlyList<PinRecord> pins = FindPinsByIo(io);
-        PinRecord? pin = pins.FirstOrDefault(item => !string.IsNullOrWhiteSpace(item.WireName))
-                         ?? pins.FirstOrDefault();
-
-        string? clipStatus = BuildClipProbeStatus(io);
-        string wireName = ResolveProbeWireName(io, pin);
-        string color = ResolveProbeColor(io, pin, wireName);
-        IReadOnlyList<int> related = FindRelatedIo(io, wireName);
-
-        string status;
-        bool mapped = pin is not null || !string.IsNullOrWhiteSpace(wireName);
-        if (!string.IsNullOrWhiteSpace(clipStatus))
-        {
-            status = clipStatus;
-        }
-        else if (!string.IsNullOrWhiteSpace(wireName) && related.Count > 0)
-        {
-            status = $"ĐẦU DÒ IO({io}) • Dây {wireName} • IO đối diện: " +
-                     string.Join(", ", related.Select(value => $"IO({value})"));
-        }
-        else if (!string.IsNullOrWhiteSpace(wireName))
-        {
-            status = $"ĐẦU DÒ IO({io}) • Dây {wireName}";
-        }
-        else
-        {
-            status = $"ĐẦU DÒ IO({io})";
-        }
-
+        // Đầu dò chỉ là lớp quan sát: đúng một dòng cho mỗi IO chạm và chỉ
+        // hiển thị IO(n) tại cột Tên dây. Không đẩy metadata THT sang cột khác.
         return
         [
             new FaultRow
             {
                 Kind = FaultKind.Probe,
-                FaultType = "KIỂM TRA",
-                Io = io,
-                Connector = mapped ? pin?.Connector ?? string.Empty : $"KHÔNG SỬ DỤNG IO({io})",
-                Pin = pin?.PinNumber ?? string.Empty,
-                WireName = wireName,
-                Splice = pin?.SpliceName ?? string.Empty,
-                Section = pin?.Section ?? string.Empty,
-                Color = color,
-                Status = status
+                Io = 0,
+                RelatedIos = [io],
+                WireName = $"IO({io})",
+                DisplayOrder = io
             }
         ];
     }
@@ -3497,7 +3461,7 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(ProbeBarText));
         Raise(nameof(ProbeBarBackground));
 
-        string display = string.Join(", ", rows.Select(row => $"IO({row.Io})"));
+        string display = string.Join(", ", ios.Select(io => $"IO({io})"));
         AddLog($"Đầu dò phát hiện {display}; hiển thị song song và bỏ qua logic chập của frame probe.");
     }
 
@@ -3856,6 +3820,37 @@ public sealed class TestViewModel : ObservableObject
         InvokeUi(ClearInlineProbeDisplay);
         await Task.CompletedTask;
         AddLog("TESTPIN/Probe observer OFF - Production Test không đổi trạng thái.");
+    }
+
+    /// <summary>
+    /// Learning chỉ được chạy từ MainWindow/background. ScanSupervisor vẫn là
+    /// owner duy nhất; maxIo=0 yêu cầu toàn bộ số card operator đã cấu hình.
+    /// </summary>
+    public async Task StartTopologyLearningAsync()
+    {
+        if (IsDeviceFault || !_board.IsConnected)
+            throw new InvalidOperationException("Bo chưa kết nối hoặc đang lỗi.");
+        if (CurrentRuntimeMode != RuntimeMode.Background ||
+            _cycleActive || _waitForProductRelease || _waitForFaultProductRemoval ||
+            Volatile.Read(ref _resultRecordedThisCycle) != 0)
+        {
+            throw new InvalidOperationException(
+                "Chỉ được học topology ở MainWindow khi không có chu kỳ Production đang chờ xử lý.");
+        }
+
+        bool started = await _scanSupervisor.EnsureProductionScanAsync(0, _lifetimeCts.Token);
+        if (started)
+            InvokeUi(UpdateCardScanningState);
+        AddLog("TOPOLOGY LEARNING ON - quét toàn bộ card đã cấu hình, không ARM Production.");
+    }
+
+    public async Task StopTopologyLearningAsync()
+    {
+        if (IsDeviceFault || !_board.IsConnected || CurrentRuntimeMode != RuntimeMode.Background)
+            return;
+
+        await EnsureContinuousProductionScanAsync();
+        AddLog("TOPOLOGY LEARNING OFF - khôi phục dải scan nền của mã hiện tại.");
     }
 
     /// <summary>
@@ -4543,8 +4538,8 @@ public sealed class TestViewModel : ObservableObject
         }
 
         MasterState = MasterSequenceState.WaitingGoodMaster;
-        MasterStatus = $"CẦN MASTER ĐẠT → MASTER SAI DÂY ({_masterRequiredFaultCount} LỖI)";
-        State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
+        MasterStatus = "KIỂM TRA MASTER ĐẠT";
+        State = "KIỂM TRA MASTER ĐẠT";
         RaiseMasterState();
     }
 
@@ -4611,8 +4606,8 @@ public sealed class TestViewModel : ObservableObject
         RefreshFaults();
 
         MasterState = MasterSequenceState.WaitingGoodMaster;
-        State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
-        MasterStatus = "MASTER GOOD START • TỰ ĐỘNG KIỂM TRA KHI LẮP MẪU";
+        State = "KIỂM TRA MASTER ĐẠT";
+        MasterStatus = "KIỂM TRA MASTER ĐẠT";
         AddLog("MASTER GOOD START - production gate LOCKED; không cộng LOT/Pass/Fail.");
 
         await _scanSupervisor.EnsureProductionScanAsync(
@@ -4654,8 +4649,8 @@ public sealed class TestViewModel : ObservableObject
                 {
                     BeginMasterHistoryCycle(HistoryInspectionType.MasterGood);
                     MasterState = MasterSequenceState.TestingGoodMaster;
-                    State = "ĐANG KIỂM TRA MẪU MASTER ĐẠT";
-                    MasterStatus = "ĐANG KIỂM TRA TOÀN BỘ CONTINUITY / ĐIỆN TRỞ";
+                    State = "KIỂM TRA MASTER ĐẠT";
+                    MasterStatus = "KIỂM TRA MASTER ĐẠT";
                     AddLog("MASTER GOOD: phát hiện mẫu, bắt đầu kiểm tra tự động.");
                 }
                 break;
@@ -4667,8 +4662,8 @@ public sealed class TestViewModel : ObservableObject
                     Interlocked.Exchange(ref _masterPostStarted, 0);
                     MasterState = MasterSequenceState.WaitingGoodMaster;
                     ResetEngineWithoutChangedReentry();
-                    State = "ĐANG CHỜ LẮP MẪU MASTER ĐẠT";
-                    MasterStatus = "MASTER ĐẠT CHƯA PASS - LẮP LẠI MẪU ĐẠT";
+                    State = "KIỂM TRA MASTER ĐẠT";
+                    MasterStatus = "KIỂM TRA MASTER ĐẠT";
                     AddLog("MASTER GOOD chưa PASS và đã tháo; giữ gate LOCKED, chờ kiểm tra lại.");
                     break;
                 }
@@ -4712,8 +4707,8 @@ public sealed class TestViewModel : ObservableObject
                 {
                     BeginMasterHistoryCycle(HistoryInspectionType.MasterBad);
                     MasterState = MasterSequenceState.TestingBadMaster;
-                    State = "ĐANG KIỂM TRA MẪU SAI DÂY";
-                    MasterStatus = $"ĐANG XÁC NHẬN LỖI MASTER: {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
+                    State = $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
+                    MasterStatus = State;
                     Interlocked.Exchange(
                         ref _masterBadCollectNotBeforeUtcTicks,
                         DateTime.UtcNow.AddMilliseconds(MasterBadSettleMs).Ticks);
@@ -4729,10 +4724,8 @@ public sealed class TestViewModel : ObservableObject
                     Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
                     MasterState = MasterSequenceState.WaitingBadMaster;
                     ResetEngineWithoutChangedReentry();
-                    State = "ĐANG CHỜ LẮP MẪU SAI DÂY";
-                    MasterStatus = MasterDetectedFaultCount == 0
-                        ? $"CHỜ MASTER LỖI • 0/{MasterRequiredFaultCount}"
-                        : $"MASTER LỖI CHƯA ĐỦ • {MasterDetectedFaultCount}/{MasterRequiredFaultCount} • CHỜ LỖI CÒN THIẾU";
+                    State = $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
+                    MasterStatus = State;
                     AddLog($"MASTER BAD released khi mới {MasterDetectedFaultCount}/{MasterRequiredFaultCount}; không mở Production.");
                     break;
                 }
@@ -4817,8 +4810,8 @@ public sealed class TestViewModel : ObservableObject
             _masterDetectedFaultDetails[key] = fault;
             RebuildMasterFaultDisplayRows();
             SynchronizeFaultRows(BuildMasterFaultGridRows());
-            MasterStatus = $"ĐANG KIỂM TRA MẪU SAI DÂY • LỖI MASTER: {number}/{MasterRequiredFaultCount}";
-            State = "ĐANG KIỂM TRA MẪU SAI DÂY";
+            MasterStatus = $"MASTER LỖI {number}/{MasterRequiredFaultCount}";
+            State = MasterStatus;
             AddLog(
                 $"MASTER BAD FAULT {number}/{MasterRequiredFaultCount} " +
                 $"{FaultTypeCatalog.Code(fault.Type)} | {fault.Summary}");
@@ -5065,8 +5058,8 @@ public sealed class TestViewModel : ObservableObject
                 onPassStarted: () =>
                 {
                     masterPassAt ??= DateTime.Now;
-                    State = "MASTER ĐẠT - PASS\nĐANG ĐẨY MẪU RA";
-                    MasterStatus = "MASTER GOOD PASS • RELAY JIG TỰ ĐỘNG";
+                    State = "MASTER ĐẠT - PASS";
+                    MasterStatus = "MASTER ĐẠT - PASS";
                     _sound.PlayTestOk();
                 },
                 markingEnabled: false,
@@ -5094,8 +5087,8 @@ public sealed class TestViewModel : ObservableObject
             MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: true);
             MasterState = MasterSequenceState.EjectingGoodMaster;
-            State = "MASTER ĐẠT - PASS\nĐANG ĐẨY MẪU RA";
-            MasterStatus = "MASTER GOOD PASS / EJECT - CHỜ MẪU RA KHỎI JIG";
+            State = "MASTER ĐẠT - PASS";
+            MasterStatus = "MASTER ĐẠT - PASS";
             AddLog("MASTER GOOD PASS");
             AddLog("MASTER GOOD EJECT - Relay 1 JIG; không MARKING, không cộng sản lượng.");
 
@@ -5141,8 +5134,8 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
 
-        State = "ĐANG CHỜ LẮP MẪU SAI DÂY";
-        MasterStatus = $"MASTER GOOD OK • CHỜ MASTER LỖI • 0/{MasterRequiredFaultCount}";
+        State = $"MASTER LỖI 0/{MasterRequiredFaultCount}";
+        MasterStatus = State;
         AddLog("MASTER GOOD đã tháo khỏi JIG. Chuyển sang MASTER BAD tự động.");
         RaiseMasterState();
     }
@@ -5162,8 +5155,8 @@ public sealed class TestViewModel : ObservableObject
         {
             _masterFaultCollectionLocked = true;
             MasterState = MasterSequenceState.EjectingBadMaster;
-            State = $"MASTER LỖI OK\n{MasterDetectedFaultCount}/{MasterRequiredFaultCount}\nĐANG ĐẨY MẪU RA";
-            MasterStatus = $"MASTER BAD PASS • ĐỦ {MasterDetectedFaultCount}/{MasterRequiredFaultCount} LỖI DUY NHẤT";
+            State = $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount} - PASS";
+            MasterStatus = State;
             _sound.SetWiringFaultAlarm(false);
             AddLog($"MASTER BAD PASS - đủ {MasterDetectedFaultCount}/{MasterRequiredFaultCount} fault duy nhất.");
 

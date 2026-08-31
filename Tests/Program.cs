@@ -34,6 +34,7 @@ internal static class Program
             ("Production PASS gate minimal latency", TestProductionPassGateMinimalLatency),
             ("THT column semantics and string wire topology", TestThtColumnSemantics),
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
+            ("Learned diagnostic topology normalization and persistence", TestLearnedTopology),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
@@ -488,8 +489,10 @@ internal static class Program
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
-        Assert(enabledMasterVm.ResultStatusText == "CHỜ MASTER" && enabledMasterVm.StateBackground == "#FFF3A0",
-            "Waiting Master status is canonical yellow");
+        Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MASTER ĐẠT" &&
+               enabledMasterVm.State == "KIỂM TRA MASTER ĐẠT" &&
+               enabledMasterVm.StateBackground == "#FFF3A0",
+            "Waiting Master uses the compact production display and canonical yellow background");
 
         TestViewModel statusVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         statusVm.State = "PASS";
@@ -3506,9 +3509,17 @@ internal static class Program
                 .ToArray()));
 
         Assert(vm.HasInlineProbeContacts &&
-               vm.Faults.Any(row => row.Kind == FaultKind.Probe && row.Io == 1 && row.FaultType == "KIỂM TRA") &&
+               vm.Faults.Any(row => row.Kind == FaultKind.Probe &&
+                                    row.Io == 0 &&
+                                    row.WireName == "IO(1)" &&
+                                    row.FaultType.Length == 0 &&
+                                    row.Connector.Length == 0 &&
+                                    row.Pin.Length == 0 &&
+                                    row.Section.Length == 0 &&
+                                    row.Color.Length == 0 &&
+                                    row.Status.Length == 0) &&
                vm.Faults.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
-            "CASE B: Probe IO1 is displayed while the IO2 open row remains");
+            "CASE B: Probe shows only IO(1) in WireName while the IO2 open row remains");
 
         board.Publish(FrameSeq(12));
         Assert(!vm.HasInlineProbeContacts &&
@@ -3552,7 +3563,7 @@ internal static class Program
                 .Select(source => (source, new[] { 86 }))
                 .ToArray()));
         refreshFaults.Invoke(shortVm, []);
-        Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe && row.Io == 86) &&
+        Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe && row.WireName == "IO(86)") &&
                shortVm.Faults.Any(row => row.Kind == FaultKind.Short),
             "CASE D: Probe row and real SHORT row can coexist; SHORT remains visible");
 
@@ -3568,9 +3579,11 @@ internal static class Program
         Assert(unusedVm.HasInlineProbeContacts &&
                unusedVm.Faults.Any(row =>
                    row.Kind == FaultKind.Probe &&
-                   row.Io == 7 &&
-                   row.FaultType == "KIỂM TRA" &&
-                   row.Connector.Contains("KHÔNG SỬ DỤNG IO(7)", StringComparison.Ordinal)) &&
+                   row.Io == 0 &&
+                   row.WireName == "IO(7)" &&
+                   row.FaultType.Length == 0 &&
+                   row.Connector.Length == 0 &&
+                   row.Status.Length == 0) &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
             "CASE E: Unused probe IO is presentation-only and the frame still reaches Production TestEngine");
 
@@ -5307,6 +5320,64 @@ internal static class Program
             board.Publish(FrameSeq(5));
             Assert(!AppSoundService.Current.IsTestPointContactSoundActive,
                 "Blank THT Probe RELEASE stops TESTPOINT sound immediately");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void TestLearnedTopology()
+    {
+        LearnedTopologySnapshot snapshot = TopologyLearningService.BuildSnapshot(
+            FrameSeq(
+                80,
+                (1, new[] { 18 }),
+                (18, new[] { 1, 35 }),
+                (35, new[] { 18 }),
+                (2, new[] { 19 }),
+                (19, new[] { 2 })),
+            BoardCapacity.Create(1));
+
+        Assert(snapshot.Networks.Count == 2 &&
+               snapshot.Networks[0].Ios.SequenceEqual(new[] { 1, 18, 35 }) &&
+               snapshot.Networks[1].Ios.SequenceEqual(new[] { 2, 19 }) &&
+               snapshot.Rows[0].Connection == "IO(1) ↔ IO(18) ↔ IO(35)",
+            "Learning canonicalizes bidirectional edges into stable connected components");
+
+        string root = Path.Combine(Path.GetTempPath(), "JBZLearnedTopologyTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "SAMPLE.jbzscan.json");
+            var profile = new LearnedTopologyProfile
+            {
+                ProductCode = "SAMPLE",
+                CreatedAt = DateTime.Now,
+                ExpansionCardCount = 1,
+                FirstIo = 1,
+                LastIo = 64,
+                RequiredStableFrames = 20,
+                ObservedStableFrames = 20,
+                Networks = snapshot.Networks.Select(network => new LearnedTopologyNetwork
+                {
+                    Name = network.Name,
+                    Ios = network.Ios.ToList()
+                }).ToList()
+            };
+            TopologyLearningService.SaveAsync(path, profile).GetAwaiter().GetResult();
+            string json = File.ReadAllText(path);
+            Assert(json.Contains("\"ProfileType\": \"DiagnosticContinuity\"", StringComparison.Ordinal) &&
+                   json.Contains("\"ProductCode\": \"SAMPLE\"", StringComparison.Ordinal) &&
+                   !File.Exists(path + ".tmp"),
+                "Learned topology is atomically persisted as an explicitly diagnostic non-THT profile");
+
+            string mainXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));
+            string learningXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml"));
+            Assert(mainXaml.Contains("Content=\"QUÉT / HỌC MÃ\"", StringComparison.Ordinal) &&
+                   learningXaml.Contains("Không phải file THT", StringComparison.Ordinal) &&
+                   learningXaml.Contains("EnableRowVirtualization=\"True\"", StringComparison.Ordinal),
+                "MainWindow exposes the diagnostic learning workflow with a virtualized safety-labelled grid");
         }
         finally
         {

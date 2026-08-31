@@ -144,6 +144,31 @@ public partial class MainWindow : Window
         OpenTestWindowCore(allowViewWhenInsufficient: false);
     }
 
+    private void OpenTopologyLearning_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.Test.IsBoardConnected || _viewModel.Test.IsDeviceFault)
+        {
+            MessageBox.Show(this,
+                "Bo chưa kết nối hoặc đang lỗi. Không thể học topology.",
+                "Bo chưa sẵn sàng", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        if (_viewModel.Test.IsManualModeActive)
+        {
+            MessageBox.Show(this,
+                "Hãy tắt hoặc RESET relay tay trước khi học topology.",
+                "Đang ở Manual", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var window = new TopologyLearningWindow(_viewModel.Test)
+        {
+            Owner = this
+        };
+        window.ShowDialog();
+    }
+
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
         if (_viewModel.Model is null)
@@ -237,7 +262,8 @@ public partial class MainWindow : Window
     private void TestViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(TestViewModel.IsProductRemovalPending) or
-            nameof(TestViewModel.IsBoardConnected))
+            nameof(TestViewModel.IsBoardConnected) or
+            nameof(TestViewModel.IsDeviceFault))
             Dispatcher.BeginInvoke(UpdateProductRemovalGate);
     }
 
@@ -250,6 +276,7 @@ public partial class MainWindow : Window
         // khóa đổi mã hàng để bảo toàn chu kỳ production đang dở.
         StartTestButton.IsEnabled = _viewModel.Model is not null;
         SelectModelButton.IsEnabled = !blocked;
+        LearnTopologyButton.IsEnabled = _viewModel.Test.IsBoardConnected && !_viewModel.Test.IsDeviceFault;
     }
 
     private async void OpenSettings_Click(

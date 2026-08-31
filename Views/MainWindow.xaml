@@ -191,6 +191,14 @@
                     Style="{StaticResource FlatButton}"
                     Content="CHỌN MÃ HÀNG"/>
 
+            <Button x:Name="LearnTopologyButton"
+                    Grid.Column="4"
+                    Width="190"
+                    HorizontalAlignment="Left"
+                    Click="OpenTopologyLearning_Click"
+                    Style="{StaticResource FlatButton}"
+                    Content="QUÉT / HỌC MÃ"/>
+
             <Button Grid.Column="5"
                     Command="{Binding ExitCommand}"
                     Style="{StaticResource FlatButton}"
