@@ -15,6 +15,7 @@ public partial class HistoryPage : UserControl
 {
     private const int UiRowLimit = 2_000;
     private readonly ProductionSettings _settings;
+    private readonly Func<Task> _importLegacyHistoryAsync;
     private readonly string _historyPath;
     private readonly object _storeGate = new();
     private TestHistoryStore? _store;
@@ -23,11 +24,13 @@ public partial class HistoryPage : UserControl
 
     public event EventHandler? RequestClose;
 
-    public HistoryPage(ProductionSettings settings)
+    public HistoryPage(ProductionSettings settings, Func<Task> importLegacyHistoryAsync)
     {
         InitializeComponent();
         DataContext = this;
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _importLegacyHistoryAsync = importLegacyHistoryAsync ??
+            throw new ArgumentNullException(nameof(importLegacyHistoryAsync));
 
         _historyPath = RuntimePaths.DatabaseFile;
 
@@ -66,12 +69,11 @@ public partial class HistoryPage : UserControl
     private async void ImportLegacy_Click(object sender, RoutedEventArgs e)
     {
         ImportLegacyButton.IsEnabled = false;
+        CloseButton.IsEnabled = false;
         SummaryText.Text = "Đang nhập lịch sử cũ — vui lòng chờ và chưa bắt đầu Production...";
         try
         {
-            await StartupBootstrapService.ImportLegacyHistoryForMaintenanceAsync(
-                GetStore(),
-                _settings);
+            await _importLegacyHistoryAsync();
             Reload();
         }
         catch (Exception ex)
@@ -81,6 +83,7 @@ public partial class HistoryPage : UserControl
         finally
         {
             ImportLegacyButton.IsEnabled = true;
+            CloseButton.IsEnabled = true;
         }
     }
 

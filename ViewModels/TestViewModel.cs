@@ -59,6 +59,7 @@ public sealed class TestViewModel : ObservableObject
     private Task _probePersistenceTask = Task.CompletedTask;
     private Task _removalPersistenceTask = Task.CompletedTask;
     private Task _masterPersistenceTask = Task.CompletedTask;
+    private Task _legacyHistoryImportTask = Task.CompletedTask;
     private long _statisticsLoadGeneration;
     private Task _statisticsLoadTask = Task.CompletedTask;
     private readonly bool _requireStartupIoClear;
@@ -1433,6 +1434,18 @@ public sealed class TestViewModel : ObservableObject
                     _productionSettings,
                     ProgramIdentityService.VersionText);
             }
+        }
+    }
+
+    public Task ImportLegacyHistoryForMaintenanceAsync()
+    {
+        lock (_historyStoreGate)
+        {
+            _legacyHistoryImportTask =
+                StartupBootstrapService.ImportLegacyHistoryForMaintenanceAsync(
+                    ProductionPersistence,
+                    AsyncFileLogService.Current);
+            return _legacyHistoryImportTask;
         }
     }
 
@@ -3679,6 +3692,7 @@ public sealed class TestViewModel : ObservableObject
         try { await _removalPersistenceTask; } catch { }
         try { await _masterPersistenceTask; } catch { }
         try { await _statisticsLoadTask; } catch { }
+        try { await _legacyHistoryImportTask; } catch { }
 
         _cycleActive = false;
         _waitForProductRelease = false;
@@ -7009,9 +7023,17 @@ public sealed class TestViewModel : ObservableObject
         string cycleId = string.IsNullOrWhiteSpace(_activeCycleId)
             ? Guid.NewGuid().ToString("N")
             : _activeCycleId;
-        bool shouldAutoPrint = ShouldAutoPrintLabel(
+        bool autoPrintRequested = ShouldAutoPrintLabel(
             passed,
             _productionSettings.AutoPrintLabelOnPass);
+        bool shouldAutoPrint = autoPrintRequested &&
+                               HasConfiguredLabelTransport(_productionSettings.Label);
+        if (autoPrintRequested && !shouldAutoPrint)
+        {
+            AddLog(
+                "LABEL SKIPPED: AutoPrintLabelOnPass đang bật nhưng chưa cấu hình " +
+                "PrinterName/PrinterCom/RawDestination/ExternalHelperPath; kết quả PASS vẫn được lưu bình thường.");
+        }
         long completedLot = shouldAutoPrint
             ? _lotSequence.ReserveForCycle(cycleId)
             : _lotSequence.NextLot;
@@ -7279,6 +7301,12 @@ public sealed class TestViewModel : ObservableObject
 
     private static bool ShouldAutoPrintLabel(bool passed, bool autoPrintEnabled) =>
         passed && autoPrintEnabled;
+
+    private static bool HasConfiguredLabelTransport(LabelSettings settings) =>
+        !string.IsNullOrWhiteSpace(settings.PrinterName) ||
+        !string.IsNullOrWhiteSpace(settings.PrinterCom) ||
+        !string.IsNullOrWhiteSpace(settings.RawDestination) ||
+        !string.IsNullOrWhiteSpace(settings.ExternalHelperPath);
 
     private void ApplyExtendedStatistics(ModelProductionStatistics stats)
     {

@@ -9,8 +9,26 @@ namespace JBZUniversalTester;
 
 public partial class App : Application
 {
+    private Mutex? _singleInstanceMutex;
+    private bool _ownsSingleInstanceMutex;
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        _singleInstanceMutex = new Mutex(
+            initiallyOwned: true,
+            name: @"Local\JBZUniversalTester.Production",
+            createdNew: out _ownsSingleInstanceMutex);
+        if (!_ownsSingleInstanceMutex)
+        {
+            MessageBox.Show(
+                "JBZ Universal Tester đang chạy. Không thể mở thêm phiên thứ hai vì bo và dữ liệu sản xuất chỉ được phép có một chủ sở hữu.",
+                "JBZ Universal Tester",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            Shutdown(2);
+            return;
+        }
+
         // Khởi tạo/migrate History và config trước để khóa log lấy đúng giá trị
         // đã lưu của trạm. History không phụ thuộc và không bị khóa bởi log.
         StartupBootstrapService.EnsureFastConfiguration();
@@ -123,6 +141,10 @@ public partial class App : Application
         TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
 
         AsyncFileLogService.Current.Dispose();
+        if (_ownsSingleInstanceMutex)
+            _singleInstanceMutex?.ReleaseMutex();
+        _singleInstanceMutex?.Dispose();
+        _singleInstanceMutex = null;
         base.OnExit(e);
     }
 

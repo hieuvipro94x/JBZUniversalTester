@@ -88,12 +88,10 @@ public static class StartupBootstrapService
     }
 
     public static Task ImportLegacyHistoryForMaintenanceAsync(
-        TestHistoryStore repository,
-        ProductionSettings production,
+        ProductionPersistenceService persistence,
         AsyncFileLogService? logger = null)
     {
-        ArgumentNullException.ThrowIfNull(repository);
-        ArgumentNullException.ThrowIfNull(production);
+        ArgumentNullException.ThrowIfNull(persistence);
         AsyncFileLogService log = logger ?? AsyncFileLogService.Current;
 
         lock (LegacyImportGate)
@@ -106,7 +104,7 @@ public static class StartupBootstrapService
             {
                 try
                 {
-                    await ImportLegacyHistoryOnceAsync(repository, production, log)
+                    await ImportLegacyHistoryOnceAsync(persistence, log)
                         .ConfigureAwait(false);
                     log.Application("Deferred legacy history import completed.");
                 }
@@ -143,12 +141,12 @@ public static class StartupBootstrapService
     }
 
     private static async Task ImportLegacyHistoryOnceAsync(
-        TestHistoryStore repository,
-        ProductionSettings production,
+        ProductionPersistenceService persistence,
         AsyncFileLogService log)
     {
         const string migrationKey = "LEGACY_PHT_UNDERSCORE_IMPORT_V1";
-        if (repository.IsRuntimeMigrationCompleted(migrationKey))
+        await persistence.Initialization.ConfigureAwait(false);
+        if (await persistence.IsRuntimeMigrationCompletedAsync(migrationKey).ConfigureAwait(false))
             return;
 
         var reader = new LegacyPhtHistoryReader(
@@ -156,22 +154,15 @@ public static class StartupBootstrapService
             RuntimePaths.LegacyErrorRoot);
         int imported = 0;
         int existing = 0;
-        await using (var persistence = new ProductionPersistenceService(
-                         repository,
-                         production,
-                         ProgramIdentityService.VersionText))
-        {
-            await persistence.Initialization.ConfigureAwait(false);
-            var importer = new LegacyPhtImportService(persistence, reader);
-            IReadOnlyList<LegacyImportResult> results =
-                await importer.ImportChangedFilesAsync().ConfigureAwait(false);
-            imported = results.Sum(result => result.ImportedRecords);
-            existing = results.Sum(result => result.ExistingRecords);
-        }
+        var importer = new LegacyPhtImportService(persistence, reader);
+        IReadOnlyList<LegacyImportResult> results =
+            await importer.ImportChangedFilesAsync().ConfigureAwait(false);
+        imported = results.Sum(result => result.ImportedRecords);
+        existing = results.Sum(result => result.ExistingRecords);
 
-        repository.CompleteRuntimeMigration(
+        await persistence.CompleteRuntimeMigrationAsync(
             migrationKey,
-            $"imported={imported}; existing={existing}");
+            $"imported={imported}; existing={existing}").ConfigureAwait(false);
         log.Application($"LEGACY_HISTORY_IMPORT imported={imported} existing={existing}");
     }
 }

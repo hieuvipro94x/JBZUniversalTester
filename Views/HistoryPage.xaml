@@ -163,7 +163,8 @@
                             Click="ExportXlsx_Click"
                             Background="#DDEFD9"
                             BorderBrush="#8AB681"/>
-                    <Button Content="ĐÓNG"
+                    <Button x:Name="CloseButton"
+                            Content="ĐÓNG"
                             Width="78"
                             Style="{StaticResource CompactButton}"
                             BorderBrush="#7F8790"

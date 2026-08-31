@@ -137,6 +137,21 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
         CancellationToken cancellationToken = default) =>
         EnqueueAsync(() => _repository.ImportLegacyFile(file, contentHash, records), cancellationToken);
 
+    public Task<bool> IsRuntimeMigrationCompletedAsync(
+        string migrationKey,
+        CancellationToken cancellationToken = default) =>
+        EnqueueAsync(() => _repository.IsRuntimeMigrationCompleted(migrationKey), cancellationToken);
+
+    public Task CompleteRuntimeMigrationAsync(
+        string migrationKey,
+        string details,
+        CancellationToken cancellationToken = default) =>
+        EnqueueAsync(() =>
+        {
+            _repository.CompleteRuntimeMigration(migrationKey, details);
+            return true;
+        }, cancellationToken);
+
     private Task<T> EnqueueAsync<T>(Func<T> action, CancellationToken cancellationToken = default)
     {
         if (_shutdown.IsCancellationRequested)

@@ -2574,17 +2574,26 @@ internal static class Program
         Assert(bootstrapSource.Contains("Critical filesystem bootstrap completed.", StringComparison.Ordinal) &&
                !bootstrapSource.Contains("StartLegacyHistoryImportInBackground(", StringComparison.Ordinal) &&
                bootstrapSource.Contains("ImportLegacyHistoryForMaintenanceAsync(", StringComparison.Ordinal) &&
+               !bootstrapSource.Contains("new ProductionPersistenceService(", StringComparison.Ordinal) &&
+               bootstrapSource.Contains("IsRuntimeMigrationCompletedAsync", StringComparison.Ordinal) &&
                bootstrapSource.Contains("Task.Run(async () =>", StringComparison.Ordinal) &&
                bootstrapSource.Contains("Deferred legacy history import completed.", StringComparison.Ordinal),
-            "Legacy C:\\Pass_/C:\\Error_ import cannot block board connection or operator controls at startup");
+            "Legacy import stays off startup and shares the production SQLite writer instead of creating a competing writer");
 
         string historyPageXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
         string historyPageSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml.cs"));
         Assert(historyPageXaml.Contains("Content=\"NHẬP LỊCH SỬ CŨ\"", StringComparison.Ordinal) &&
-               historyPageSource.Contains("ImportLegacyHistoryForMaintenanceAsync(", StringComparison.Ordinal),
-            "Legacy history migration runs only from the explicit maintenance action on the History page");
+               historyPageXaml.Contains("x:Name=\"CloseButton\"", StringComparison.Ordinal) &&
+               historyPageSource.Contains("await _importLegacyHistoryAsync();", StringComparison.Ordinal) &&
+               historyPageSource.Contains("CloseButton.IsEnabled = false", StringComparison.Ordinal),
+            "Legacy history migration is explicit, uses the shared writer, and cannot return to Production while import is active");
+
+        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
+        Assert(appSource.Contains("Local\\JBZUniversalTester.Production", StringComparison.Ordinal) &&
+               appSource.Contains("_ownsSingleInstanceMutex", StringComparison.Ordinal),
+            "A station cannot open two app processes that compete for the same board and SQLite database");
 
         var invalid = new ProductionSettings
         {
@@ -4554,6 +4563,15 @@ internal static class Program
         Assert(!(bool)(shouldAutoPrint.Invoke(null, [false, true]) ?? true) &&
                !(bool)(shouldAutoPrint.Invoke(null, [true, false]) ?? true),
             "NG/FAIL and disabled auto-print never create an automatic print transaction");
+
+        MethodInfo hasLabelTransport = typeof(TestViewModel).GetMethod(
+            "HasConfiguredLabelTransport",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Label transport eligibility helper not found.");
+        Assert(!(bool)(hasLabelTransport.Invoke(null, [new LabelSettings()]) ?? true) &&
+               (bool)(hasLabelTransport.Invoke(null, [new LabelSettings { PrinterCom = "COM3" }]) ?? false) &&
+               (bool)(hasLabelTransport.Invoke(null, [new LabelSettings { PrinterName = "ZDesigner" }]) ?? false),
+            "Auto-print is skipped on stations without a configured printer transport");
 
         DateTime finished = new(2026, 8, 10, 9, 8, 7, DateTimeKind.Local);
         var history = new TestHistoryRecord

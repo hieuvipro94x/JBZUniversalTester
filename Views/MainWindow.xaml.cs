@@ -331,7 +331,9 @@ public partial class MainWindow : Window
         {
             CloseInternalPage();
 
-            _historyPage = new HistoryPage(_viewModel.ProductionSettings);
+            _historyPage = new HistoryPage(
+                _viewModel.ProductionSettings,
+                _viewModel.Test.ImportLegacyHistoryForMaintenanceAsync);
             _historyPage.RequestClose += InternalPage_RequestClose;
 
             InternalPageHost.Content = _historyPage;
