@@ -1,0 +1,349 @@
+PHÂN TÍCH Htdrv3-KETQU2000 / UNIVERSALTESTER
+Ngày phân tích: 2026-09-02
+
+PHẠM VI VÀ GIỚI HẠN
+- File người dùng gửi có tên Htdrv3-KETQU2000.exe.
+- Trong phiên hiện tại đường dẫn mount /mnt/data/Htdrv3-KETQU2000.exe không tồn tại, nên chưa thể làm PE parsing, strings, imports, sections, resources hoặc disassembly trực tiếp trên chính binary này.
+- Báo cáo dưới đây dùng các bằng chứng đã trích được trước đó từ tài nguyên của chính phần mềm/project: Qt translation TS còn giữ source path + tên hàm C++ gốc, trace Htdrv, và source Windows tái dựng bám trace.
+- Các mục được phân biệt:
+  [GỐC] = bằng chứng từ metadata/source path/hàm của UniversalTester gốc.
+  [TRACE/TÁI DỰNG] = hành vi đã xác nhận từ trace và code tái dựng hiện tại; chưa coi là disassembly của EXE.
+
+============================================================
+1. DẤU VẾT MÃ NGUỒN GỐC [GỐC]
+============================================================
+
+Kiến trúc rất rõ là C++/Qt Widgets. File dịch Qt TS còn chứa đường dẫn source:
+- ../UniversalTester/mainwindow.cpp
+- ../UniversalTester/testdialog.cpp
+- ../UniversalTester/barcodedialog.cpp
+- ../UniversalTester/barcodeinputdialog.cpp
+- ../UniversalTester/modeldialog.cpp
+- ../UniversalTester/diagsdialog.cpp
+- ../UniversalTester/machinedialog.cpp
+- ../UniversalTester/reportdialog.cpp
+- ../UniversalTester/reportsetupdialog.cpp
+- ../UniversalTester/resistordialog.cpp
+- ../UniversalTester/calibrationdialog.cpp
+- ../UniversalTester/animationdialog.cpp
+
+Tên hàm/class gốc đã trích được:
+MainWindow:
+- MainWindow::readResistorReference
+
+BarCodeDialog:
+- BarCodeDialog::onChange
+- BarCodeDialog::downloadState
+- BarCodeDialog::downloadModel
+- BarCodeDialog::onError
+- BarCodeDialog::onTimeOut
+
+ModelDialog:
+- ModelDialog::initScreen
+- ModelDialog::onModelOpen
+- ModelDialog::setData
+- ModelDialog::makeComboData
+- ModelDialog::onResistorRef
+- ModelDialog::onResistorArray
+- ModelDialog::onResistorCellChanged
+- ModelDialog::onEnterID2
+- ModelDialog::onEnterID3
+- ModelDialog::onEnterID5
+- ModelDialog::onEnterID6
+
+TestDialog:
+- TestDialog::checkInterLock
+- TestDialog::stopInnerTest
+- TestDialog::makeTableHeader
+- TestDialog::onJobStart
+- TestDialog::onTimeOut
+- TestDialog::onRead
+- TestDialog::viewTestPin
+- TestDialog::resistorTest
+- TestDialog::resistorProcess
+- TestDialog::voltageTest
+- TestDialog::ampareTest
+- TestDialog::addInnerVoltageTable
+- TestDialog::finishNormalTest
+- TestDialog::addLogDB
+- TestDialog::addReportToTable
+
+PreTestDialog (nằm trong testdialog.cpp):
+- PreTestDialog::initScreen
+- PreTestDialog::onCellChanged
+- PreTestDialog::onInsert
+
+DiagsDialog:
+- DiagsDialog::initScreen
+- DiagsDialog::openProcess
+- DiagsDialog::clearOpenTable
+- DiagsDialog::otherClear
+- DiagsDialog::shortClear
+- DiagsDialog::viewTestPin
+- DiagsDialog::onTimeOut
+
+MachineDialog:
+- MachineDialog::onSave
+- MachineDialog::onClear
+
+ReportDialog:
+- ReportDialog::initScreen
+- ReportDialog::onExcel
+
+ResistorDialog:
+- ResistorDialog::onExec
+- ResistorDialog::temperatureProcess
+- ResistorDialog::onSave
+
+Global functions:
+- _Z9readModel7QString  => readModel(QString)
+- _Z9readSetup7QString => readSetup(QString)
+
+Điều này cho thấy có thể tái dựng khá sát cấu trúc source gốc ngay cả trước khi decompile binary.
+
+============================================================
+2. CƠ CHẾ ĐỔI MÃ HÀNG [GỐC + TRACE/TÁI DỰNG]
+============================================================
+
+[GỐC]
+BarCodeDialog để lại logic:
+1) onChange kiểm tra Model đã được cấu hình chưa.
+2) Nếu không có file cấu hình -> báo "No file has been configured".
+3) downloadState kiểm tra model cần tải có trùng model đang làm hay không.
+4) Nếu trùng vẫn có nhánh hỏi "Download anyway?".
+5) downloadModel mở cổng giao tiếp và tải model xuống.
+6) Có timeout/error riêng: onTimeOut, onError.
+=> Đổi mã bằng barcode không chỉ là đổi chữ trên UI; nó có kiểm tra file/model và có bước giao tiếp/download.
+
+ModelDialog:
+- onModelOpen mở model file.
+- readModel(QString) báo lỗi nếu model không tồn tại/không hợp lệ.
+- readSetup(QString) làm tương tự với Setup.
+- Có chuỗi onEnterID2..ID6 -> model có thể cấu hình nhiều bước barcode/ID.
+
+[TRACE/TÁI DỰNG HIỆN TẠI]
+Đường đổi model tối ưu đang làm:
+Validate path
+ -> tăng model generation
+ -> parse THT ở background
+ -> build logic TestEngine ở background
+ -> bỏ kết quả cũ nếu người dùng đã chọn model mới hơn
+ -> Commit SetModel
+ -> đổi requested scan range
+ -> nếu số card thực sự thay đổi mới reconcile STOP/START
+ -> nếu capacity giống nhau thì reuse scan đang chạy
+ -> cập nhật LastThtPath, LOT, thống kê và UI.
+
+Mục tiêu của generation là tránh lỗi race:
+model A load chậm không được hoàn tất sau rồi ghi đè model B mới chọn.
+
+============================================================
+3. CƠ CHẾ KHỞI ĐỘNG [TRACE/TÁI DỰNG, PHÙ HỢP HÀNH VI GỐC]
+============================================================
+
+Luồng hiện tại:
+Application
+ -> cấu hình/log/UI ban đầu
+ -> hiện MainWindow sớm
+ -> connect/handshake FTDI D2XX
+ -> nếu board OK thì load model gần nhất
+ -> chuẩn bị TestEngine/model
+ -> đảm bảo Production background scan
+ -> hardware monitor/reconnect nền
+ -> READY
+
+Lý do phiên bản hiện tại connect board trước rồi mới nạp THT:
+SetModel mở gate xử lý I/O. Nếu nạp model trong lúc D2XX/decoder đang initialize, frame cũ hoặc frame chưa ổn định có thể đi vào logic test.
+
+Các marker tốc độ đã có:
+- THT_PARSE
+- T8 MODEL_PARSE_DONE
+- ENGINE_MODEL_BUILD
+- T9 MODEL_LOGIC_READY
+- T10 MODEL_UI_READY
+- T12 STARTUP_READY
+
+Chưa có số ms cold-start của Htdrv3-KETQU2000.exe trong phiên này vì binary không mount và không có trace launch trực tiếp.
+
+============================================================
+4. GIAO TIẾP BOARD / SCAN [TRACE/TÁI DỰNG]
+============================================================
+
+Board:
+- FTDI D2XX
+- VID/PID ID: 0x04036001
+- Description: FT245R USB FIFO
+- Dùng ftd2xx.dll
+
+Các command quan trọng:
+- HANDSHAKE: 8A 01 01 01
+- STOP_SCAN: 8D 00 00 00
+- RESET_CLEAR: 80 00 00 00
+- START_SCAN: 8C 00 xx 00
+  xx = số scan unit/card active.
+
+Với 10 card:
+START_SCAN = 8C 00 0A 00
+
+Cách start:
+- Nếu board chưa prepared -> chạy PrepareScan.
+- Tạo decoder mới, set capacity + mode, Reset.
+- Purge RX/TX đúng trước START.
+- Gửi 8C 00 xx 00.
+- Tăng scan generation.
+- Tạo worker đọc FTDI.
+
+Cách stop:
+- Tăng generation trước để callback cũ vô hiệu.
+- Gửi STOP_SCAN trước.
+- Sau đó cancel reader.
+- Chờ worker chết thật.
+- Không đóng FTDI.
+- Giữ trạng thái prepared để START lại nhanh, không INIT lại ~700 ms.
+
+Luồng đọc:
+FT_EVENT_RXCHAR
+ -> FT_GetQueueStatus
+ -> FT_Read tối đa buffer 65536
+ -> BoardIoDecoder.Feed(raw bytes)
+ -> có thể trả 0, 1 hoặc nhiều complete ScanFrame
+ -> kiểm tra generation + mode
+ -> PublishFrame
+ -> TestViewModel/TestEngine xử lý.
+
+============================================================
+5. LUỒNG SCAN 10 CARD [TRACE/TÁI DỰNG]
+============================================================
+
+Dung lượng:
+- 10 scan card x 64 I/O = 640 I/O.
+- Global I/O: 1..640.
+- 641 bị loại.
+
+Frame Production tối thiểu khi đủ 640 source, không target:
+- 640 x 2 byte + terminator 2 byte
+= 1,282 byte.
+
+Terminator đã hỗ trợ:
+- C0 00
+- C0 01
+
+Decoder:
+- RX có thể cắt giữa frame.
+- C0 và byte terminator có thể bị chia sang hai FT_Read khác nhau.
+- Nhiều frame có thể cùng nằm trong một FT_Read.
+- Frame thiếu source vẫn có thể được nhận dạng diagnostic nhưng không được xem là complete/ARM.
+
+Luồng logic:
+START_SCAN
+ -> FT_Read
+ -> decoder ghép frame
+ -> xác nhận complete + expected coverage
+ -> map source/target thành I/O 1..640
+ -> tạo topology/connection components
+ -> lọc stale frame/generation/mode
+ -> Probe classifier chạy song song
+ -> TestEngine.ProcessFrame
+ -> chỉ khi trạng thái logic thay đổi mới đẩy cập nhật UI lớn.
+
+============================================================
+6. HIỆU NĂNG 10 CARD
+============================================================
+
+Synthetic benchmark hiện có:
+- 500 frame giả lập đủ 640 I/O:
+  41 ms tổng
+  ~0.082 ms/frame
+  ~31,782,188 byte allocated
+  ~63,564 byte/frame
+  UI Changed = 1
+  START/STOP dư = 0
+
+- 10,000 ProcessFrame giống nhau:
+  ~5 ms
+  ~3,122,040 byte allocated
+
+Điểm nóng:
+1) ToHashSet / ToDictionary / ToArray mỗi frame.
+2) Copy raw frame.
+3) Đồng bộ Fault UI có đường O(n^2).
+4) Probe classifier trên Production frame.
+5) Log queue có nguy cơ tăng khi consumer/UI chậm.
+6) Watchdog 10 card dài hơn.
+7) WPF DataGrid layout khi nhiều network đổi cùng lúc.
+
+Kết luận:
+CPU logic thuần không phải bottleneck lớn nhất.
+Rủi ro thực tế nằm ở FTDI stream + cấp phát bộ nhớ + UI + GC + logging.
+Cần benchmark 10-card hardware thật trước khi coi production-ready.
+
+============================================================
+7. ĐỌC/GHI DỮ LIỆU
+============================================================
+
+[GỐC]
+- readModel(QString)
+- readSetup(QString)
+- TestDialog::addLogDB
+- ReportDialog::onExcel
+- MachineDialog có DB Server IP / Save to Server.
+=> phần mềm gốc có lớp đọc model/setup, ghi log DB, xuất báo cáo và có tùy chọn server DB.
+
+[TRACE/TÁI DỰNG TƯƠNG THÍCH]
+Các đường dữ liệu hiện tại:
+- C:\ITEM                 : model/THT
+- C:\Pass                 : legacy PASS .dat
+- C:\Error                : legacy ERR .err
+- JBZUniversalTester.cfg  : cấu hình
+- PartCnt.txt             : counter tương thích legacy
+- Data\JBZUniversalTester.db : SQLite
+- JBZUniversalTester.log  : log chính
+- Crash\JBZUniversalTester.RPT : crash report
+
+Legacy PASS:
+- YearYYYY\MonthMM\DayDD.dat
+- record dạng pipe-delimited
+- LOT được pad 4 chữ số khi cần.
+
+Legacy FAIL:
+- YearYYYY\MonthMM\DayDD.err
+- có header + chi tiết IO Short/Open theo kiểu Hàn cũ
+- dữ liệu tương thích CP949 ở nhánh legacy đã kiểm chứng.
+
+============================================================
+8. NHỮNG GÌ CẦN LẤY TRỰC TIẾP TỪ EXE KHI MOUNT ĐƯỢC
+============================================================
+
+Khi file Htdrv3-KETQU2000.exe có thể truy cập trực tiếp, cần trích:
+1) PE/ELF header thực tế để xác nhận kiến trúc CPU và compiler.
+2) Import table:
+   Qt5Core/Qt5Widgets/Qt5SerialPort/Qt5Sql/VISA/FTDI hoặc thư viện khác.
+3) Strings:
+   đường dẫn file, SQL, serial command, timeout, config keys.
+4) Resource:
+   icon, WAV, qm, ui/resource bundle.
+5) Symbol/mangled strings:
+   class/function còn sót.
+6) Section entropy:
+   kiểm tra packed/UPX/strip.
+7) Disassembly các entry point:
+   startup/main,
+   load model/setup,
+   barcode model switch,
+   scan read callback,
+   DB write,
+   PASS/FAIL finalization.
+8) Call graph và offset:
+   hàm nào gọi hàm nào, địa chỉ RVA/VA cụ thể.
+9) Nếu là Linux ARM binary/ELF thay vì PE:
+   dynsym, relocations, Qt symbols, GCC mangled names, strings và objdump/Ghidra mapping.
+
+============================================================
+9. KẾT LUẬN NGẮN
+============================================================
+
+- Đã có bằng chứng rất mạnh để dựng lại skeleton source gốc C++/Qt nhờ Qt TS giữ source path và tên hàm.
+- Cơ chế đổi model gốc có validation + comparison + download qua communication, không phải chỉ đổi file.
+- Scan hiện được tái dựng theo FT245R/D2XX, START_SCAN 8C 00 xx 00, 10 card => xx=0A, capacity 640 I/O.
+- Kiến trúc scan tốt nhất là giữ background scan và chỉ restart khi capacity/mode thật sự thay đổi.
+- Synthetic logic 640 I/O rất nhanh, nhưng chưa thể kết luận tốc độ thực tế của Htdrv3-KETQU2000.exe hoặc production 10 card nếu chưa đo binary/hardware thật.

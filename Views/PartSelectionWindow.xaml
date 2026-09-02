@@ -1,0 +1,29 @@
+<Window x:Class="JBZUniversalTester.Views.PartSelectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="CHỌN PART TRONG FILE THT" Width="620" Height="420"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock Text="File này chứa nhiều Part. Chọn đúng mã hàng cần kiểm tra:"
+                   FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+        <ListBox x:Name="PartList" Grid.Row="1" MouseDoubleClick="PartList_MouseDoubleClick">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Margin="6">
+                        <TextBlock Text="{Binding PartNumber}" FontSize="17" FontWeight="Bold"/>
+                        <TextBlock Text="{Binding Description}" FontSize="14"/>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="HỦY" Width="100" Margin="0,0,8,0" IsCancel="True"/>
+            <Button Content="CHỌN" Width="120" IsDefault="True" Click="Select_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

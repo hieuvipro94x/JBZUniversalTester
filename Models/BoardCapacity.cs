@@ -27,6 +27,7 @@ public sealed record BoardCapacity
     public const int MaxPhysicalCardCount = MaxPortCount;
 
     public int ExpansionCardCount { get; init; }
+    public int StartCardNumber { get; init; } = 1;
     public int PortCount { get; init; }
     public int ScanCardCount { get; init; }
     public int TotalIoCapacity { get; init; }
@@ -34,17 +35,22 @@ public sealed record BoardCapacity
     // Compatibility properties for existing persistence/runtime consumers.
     public int ExpansionModuleCount => ExpansionCardCount;
     public int PhysicalCardCount => PortCount;
-    public int StartCardNumber => 1;
-
-    /// <summary>Byte xx hiện gửi trong lệnh 8C 00 xx 00.</summary>
+    /// <summary>
+    /// Firmware hiện quét từ card 1 tới card cuối cần dùng. Khi StartCard > 1,
+    /// decoder bỏ vùng trước offset và ánh xạ card bắt đầu thành logical IO1.
+    /// </summary>
     public int StartScanParameter => ScanCardCount;
 
     public int FirstGlobalIo => 1;
     public int LastGlobalIo => TotalIoCapacity;
+    public int FirstPhysicalIo => ((StartCardNumber - 1) * IoPerExpansionCard) + 1;
+    public int LastPhysicalIo => FirstPhysicalIo + TotalIoCapacity - 1;
 
     public bool IsRangeWithinSystem =>
         ExpansionCardCount is >= 1 and <= MaxExpansionCardCount &&
-        ScanCardCount == ExpansionCardCount &&
+        StartCardNumber is >= 1 and <= MaxExpansionCardCount &&
+        StartCardNumber + ExpansionCardCount - 1 <= MaxExpansionCardCount &&
+        ScanCardCount == StartCardNumber + ExpansionCardCount - 1 &&
         PortCount == ExpansionCardCount * PortsPerExpansionCard &&
         TotalIoCapacity == ExpansionCardCount * IoPerExpansionCard;
 
@@ -56,25 +62,29 @@ public sealed record BoardCapacity
             settings.ExpansionCardCount,
             1,
             MaxExpansionCardCount);
+        int start = Math.Clamp(settings.StartCardNumber, 1, MaxExpansionCardCount);
+        expansion = Math.Min(expansion, MaxExpansionCardCount - start + 1);
 
         // Byte xx của START_SCAN là số scan-unit 64 I/O đã xác nhận bởi
         // trace command=4 / diagnostic 256 I/O trong project.
-        int scan = expansion;
+        int scan = start + expansion - 1;
 
         return new BoardCapacity
         {
             ExpansionCardCount = expansion,
+            StartCardNumber = start,
             PortCount = expansion * PortsPerExpansionCard,
             ScanCardCount = scan,
             TotalIoCapacity = expansion * IoPerExpansionCard
         };
     }
 
-    public static BoardCapacity Create(int expansionCardCount)
+    public static BoardCapacity Create(int expansionCardCount, int startCardNumber = 1)
     {
         var settings = new ProductionSettings
         {
-            ExpansionCardCount = expansionCardCount
+            ExpansionCardCount = expansionCardCount,
+            StartCardNumber = startCardNumber
         };
         return FromSettings(settings);
     }
@@ -108,9 +118,28 @@ public sealed record BoardCapacity
         globalIo >= 1 &&
         globalIo <= MaxGlobalIo;
 
+    public bool TryMapPhysicalToLogical(int physicalIo, out int logicalIo)
+    {
+        logicalIo = physicalIo - FirstPhysicalIo + 1;
+        if (!ContainsGlobalIo(logicalIo) || physicalIo > LastPhysicalIo)
+        {
+            logicalIo = 0;
+            return false;
+        }
+        return true;
+    }
+
+    public int MapLogicalToPhysical(int logicalIo)
+    {
+        if (!ContainsGlobalIo(logicalIo))
+            throw new ArgumentOutOfRangeException(nameof(logicalIo));
+        return FirstPhysicalIo + logicalIo - 1;
+    }
+
     public override string ToString() =>
-        $"ExpansionCards={ExpansionCardCount}; Ports={PortCount}; Scan={ScanCardCount}; " +
-        $"IO={FirstGlobalIo}-{LastGlobalIo}; START_SCAN xx={StartScanParameter}";
+        $"ExpansionCards={ExpansionCardCount}; StartCard={StartCardNumber}; Ports={PortCount}; " +
+        $"ScanThrough={ScanCardCount}; LogicalIO={FirstGlobalIo}-{LastGlobalIo}; " +
+        $"PhysicalIO={FirstPhysicalIo}-{LastPhysicalIo}; START_SCAN xx={StartScanParameter}";
 }
 
 /// <summary>
@@ -154,7 +183,7 @@ public sealed record BoardScanCapacity
         int activeScanUnits = !scanAllInstalledIo && maxGlobalIo > 0 && fits
             ? required
             : installed.ScanCardCount;
-        BoardCapacity active = BoardCapacity.Create(activeScanUnits);
+        BoardCapacity active = BoardCapacity.Create(activeScanUnits, installed.StartCardNumber);
 
         return new BoardScanCapacity
         {

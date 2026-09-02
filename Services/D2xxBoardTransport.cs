@@ -73,6 +73,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
     int _activeRelay = -1;
     BoardScanMode _scanMode = BoardScanMode.Production;
     long _scanGeneration;
+    string _stableFrameSignature = string.Empty;
+    int _stableFrameCount;
+    bool _firstStableFrameConfirmed;
     int _controlWaiters;
     long _lastPerfAggregateTick;
     long _pollCount;
@@ -622,7 +625,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         _capacity = _scanCapacity.Active;
         _production.ExpansionCardCount = _installedCapacity.ExpansionCardCount;
         _production.CardCount = _installedCapacity.ScanCardCount;
-        _production.StartCardNumber = 1;
+        _production.StartCardNumber = _installedCapacity.StartCardNumber;
         _expectedIoCount = _capacity.TotalIoCapacity;
 
         string signature = $"{_scanCapacity}:{_scanCapacity.IsModelWithinInstalledCapacity}";
@@ -690,6 +693,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 await PrepareScanAsync(ct);
 
             _lastScanSignature = string.Empty;
+            _stableFrameSignature = string.Empty;
+            _stableFrameCount = 0;
+            _firstStableFrameConfirmed = false;
             _scanMode = mode;
 
             lock (_decoderGate)
@@ -891,11 +897,12 @@ public sealed class D2xxBoardTransport : IBoardTransport
     }
 
     private string BuildScanConfiguration(BoardScanMode mode) =>
-        $"{mode}:{_capacity.ExpansionCardCount}:{_capacity.StartScanParameter}";
+        $"{mode}:{_capacity.StartCardNumber}:{_capacity.ExpansionCardCount}:{_capacity.StartScanParameter}";
 
     private static bool HasSameScanRange(BoardCapacity? left, BoardCapacity right) =>
         left is not null &&
         left.StartScanParameter == right.StartScanParameter &&
+        left.StartCardNumber == right.StartCardNumber &&
         left.TotalIoCapacity == right.TotalIoCapacity;
 
     private static string FormatScanRange(BoardCapacity? capacity) => capacity is null
@@ -971,6 +978,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
             while (!ct.IsCancellationRequested)
             {
                 Interlocked.Increment(ref _pollCount);
+                // Chụp generation trước khi kiểm tra control waiter. Nếu một
+                // STOP/START bắt đầu ngay sau đây, buffer đang đọc vẫn mang
+                // generation cũ và bị loại trước khi publish.
+                long readGeneration = Volatile.Read(ref _scanGeneration);
 
                 if (Volatile.Read(ref _controlWaiters) > 0)
                 {
@@ -1055,12 +1066,17 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     if (ct.IsCancellationRequested)
                         break;
 
-                    if (!IsScanning || decoded.Mode != _scanMode)
+                    if (!IsScanning ||
+                        decoded.Mode != _scanMode ||
+                        readGeneration != Volatile.Read(ref _scanGeneration))
                     {
                         continue;
                     }
 
-                    PublishFrame(decoded);
+                    ScanFrame sessionFrame = decoded with { ScanGeneration = readGeneration };
+                    if (!ShouldPublishConfirmedFrame(sessionFrame))
+                        continue;
+                    PublishFrame(sessionFrame);
                 }
 
                 PublishPerfAggregateIfDue(_scanMode);
@@ -1209,6 +1225,43 @@ public sealed class D2xxBoardTransport : IBoardTransport
         }
 
         FrameReceived?.Invoke(this, decoded);
+    }
+
+    private bool ShouldPublishConfirmedFrame(ScanFrame frame)
+    {
+        if (frame.Mode != BoardScanMode.Production || !frame.Complete || frame.UnknownBytes != 0)
+            return true;
+
+        string signature = string.Join(
+            ";",
+            frame.Connections
+                .OrderBy(pair => pair.Key)
+                .Select(pair => $"{pair.Key}:{string.Join(',', pair.Value.Order())}"));
+        if (!string.Equals(signature, _stableFrameSignature, StringComparison.Ordinal))
+        {
+            _stableFrameSignature = signature;
+            _stableFrameCount = 1;
+        }
+        else
+        {
+            _stableFrameCount++;
+        }
+
+        int configured = _firstStableFrameConfirmed
+            ? _production.IoConfirmN
+            : _production.IoConfirm1;
+        int required = Math.Max(1, configured);
+        if (_stableFrameCount < required)
+            return false;
+
+        if (!_firstStableFrameConfirmed)
+        {
+            _firstStableFrameConfirmed = true;
+            AsyncFileLogService.Current.Performance(
+                $"IO_CONFIRM_READY generation={frame.ScanGeneration} required={required} " +
+                $"start_card={_capacity.StartCardNumber} scan_through={_capacity.StartScanParameter}");
+        }
+        return true;
     }
 
     async Task WriteAsync(

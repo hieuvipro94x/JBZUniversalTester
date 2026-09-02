@@ -168,76 +168,97 @@
                                   SelectionChanged="CardIoComboBox_SelectionChanged"
                                   ToolTip="S&#7889; card m&#7903; r&#7897;ng 64 IO; START_SCAN d&#249;ng c&#249;ng &#273;&#417;n v&#7883;"/>
 
-                        <TextBlock Grid.Row="1" Text="T&#7893;ng I/O" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBlock Grid.Row="1" Text="Card b&#7855;t &#273;&#7847;u" Style="{StaticResource FieldLabelStyle}"/>
+                        <ComboBox x:Name="StartCardComboBox"
+                                  Grid.Row="1"
+                                  Grid.Column="1"
+                                  SelectedItem="{Binding Settings.StartCardNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  SelectionChanged="CardIoComboBox_SelectionChanged"
+                                  ToolTip="Card v&#7853;t l&#253; ch&#7913;a logical IO1; c&#225;c card ph&#237;a tr&#432;&#7899;c kh&#244;ng tham gia test"/>
+
+                        <TextBlock Grid.Row="2" Text="T&#7893;ng I/O" Style="{StaticResource FieldLabelStyle}"/>
                         <TextBlock x:Name="TotalIoCapacityText"
-                                   Grid.Row="1"
+                                   Grid.Row="2"
                                    Grid.Column="1"
                                    VerticalAlignment="Center"
                                    FontWeight="Bold"
                                    ToolTip="T&#7921; t&#237;nh: s&#7889; card m&#7903; r&#7897;ng &#215; 64 IO"/>
 
-                        <TextBlock Grid.Row="2" Text="X&#225;c nh&#7853;n IO1" Style="{StaticResource FieldLabelStyle}"/>
-                        <ComboBox x:Name="IoConfirm1ComboBox" Grid.Row="2" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirm1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="3" Text="X&#225;c nh&#7853;n IO1" Style="{StaticResource FieldLabelStyle}"/>
+                        <ComboBox x:Name="IoConfirm1ComboBox" Grid.Row="3" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirm1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="3" Text="X&#225;c nh&#7853;n IOn" Style="{StaticResource FieldLabelStyle}"/>
-                        <ComboBox x:Name="IoConfirmNComboBox" Grid.Row="3" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirmN, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="4" Text="X&#225;c nh&#7853;n IOn" Style="{StaticResource FieldLabelStyle}"/>
+                        <ComboBox x:Name="IoConfirmNComboBox" Grid.Row="4" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirmN, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="4" Text="&#272;&#7897; tr&#7877; USB" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding Settings.UsbDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="5" Text="&#272;&#7897; tr&#7877; USB" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.UsbDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="5" Text="LOTNO bắt đầu" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="5"
+                        <TextBlock Grid.Row="6" Text="LOTNO bắt đầu" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="6"
                                  Grid.Column="1"
                                  Text="{Binding Settings.LotNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  ToolTip="LOTNO của sản phẩm PASS kế tiếp; cùng số này được ghi vào lịch sử test và in trên tem."/>
 
-                        <TextBlock Grid.Row="6" Text="T&#234;n thi&#7871;t b&#7883;" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.DeviceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="7" Text="T&#234;n thi&#7871;t b&#7883;" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.DeviceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="7" Text="S&#7889; thi&#7871;t b&#7883;" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.DeviceNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="8" Text="S&#7889; thi&#7871;t b&#7883;" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.DeviceNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="8" Text="C&#244;ng ty" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.OperatorCompany, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="9" Text="C&#244;ng ty" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Settings.OperatorCompany, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="9" Text="D&#226;y chuy&#7873;n" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Settings.ProductionLine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="10" Text="D&#226;y chuy&#7873;n" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Settings.ProductionLine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="10" Text="S&#7889; l&#7895;i Master t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="10"
+                        <TextBlock Grid.Row="11" Text="S&#7889; l&#7895;i Master t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="11"
                                  Grid.Column="1"
                                  Text="{Binding MasterFaultRequiredCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                  ToolTip="0 = b&#7887; ki&#7875;m tra Master. 1 tr&#7903; l&#234;n = s&#7889; l&#7895;i Master t&#7889;i thi&#7875;u c&#7847;n x&#225;c nh&#7853;n."/>
 
-                        <TextBlock Grid.Row="11" Text="Test pointer" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="11" Grid.Column="1" IsChecked="{Binding Settings.UseTestPointer, Mode=TwoWay}"/>
+                        <TextBlock Grid.Row="12" Text="Test pointer" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.UseTestPointer, Mode=TwoWay}"/>
 
-                        <TextBlock Grid.Row="12" Text="T&#7921; l&#432;u l&#7895;i" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="12"
+                        <TextBlock Grid.Row="13" Text="T&#7921; l&#432;u l&#7895;i" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="13"
                                   Grid.Column="1"
                                   IsChecked="{Binding Settings.AutoSaveErrors, Mode=TwoWay}"
                                   ToolTip="Chỉ tạo JSON lỗi sản phẩm khi Bật tất cả log hệ thống cũng đang bật."/>
 
-                        <TextBlock Grid.Row="13" Text="Bật tất cả log hệ thống" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="13"
+                        <TextBlock Grid.Row="14" Text="Bật tất cả log hệ thống" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="14"
                                   Grid.Column="1"
                                   IsChecked="{Binding Settings.EnableSystemLogs, Mode=TwoWay}"
                                   ToolTip="Tắt: không ghi Data/Logs và Data/ErrorLogs. Data/History vẫn luôn được lưu."/>
 
-                        <TextBlock Grid.Row="14" Text="Model g&#7847;n nh&#7845;t" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="14"
+                        <TextBlock Grid.Row="15" Text="Model g&#7847;n nh&#7845;t" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="15"
                                  Grid.Column="1"
                                  Text="{Binding Settings.LastThtPath, Mode=OneWay}"
                                  ToolTip="{Binding Settings.LastThtPath, Mode=OneWay}"
                                  IsReadOnly="True"/>
 
-                        <TextBlock Grid.Row="15"
+                        <TextBlock Grid.Row="16" Text="B&#7853;t qu&#233;t barcode" Style="{StaticResource FieldLabelStyle}"/>
+                        <CheckBox Grid.Row="16" Grid.Column="1"
+                                  IsChecked="{Binding Settings.BarcodeScannerEnabled, Mode=TwoWay}"/>
+
+                        <TextBlock Grid.Row="17" Text="COM barcode" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="17" Grid.Column="1"
+                                 Text="{Binding Settings.BarcodeScannerPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="V&#237; d&#7909; COM1; m&#225;y qu&#233;t ph&#7843;i g&#7917;i k&#7871;t th&#250;c CR/LF"/>
+
+                        <TextBlock Grid.Row="18" Text="Baud barcode" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="18" Grid.Column="1"
+                                 Text="{Binding Settings.BarcodeScannerBaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                        <TextBlock Grid.Row="19"
                                    Grid.ColumnSpan="2"
                                    Text="Relay tay dùng trực tiếp • không cần bật hoặc lưu Manual Mode"
                                    Foreground="{StaticResource TextMuted}"
                                    TextWrapping="Wrap"/>
 
-                        <Border Grid.Row="16"
+                        <Border Grid.Row="20"
                                 Grid.RowSpan="9"
                                 Grid.ColumnSpan="2"
                                 Margin="0,6,0,0"

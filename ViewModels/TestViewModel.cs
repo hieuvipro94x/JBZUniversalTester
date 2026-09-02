@@ -67,6 +67,7 @@ public sealed class TestViewModel : ObservableObject
     private TestHistoryStore? _historyStore;
     private ProductionPersistenceService? _productionPersistence;
     private readonly LabelPrintService _labelPrintService = new();
+    private readonly BarcodeScannerService _barcodeScanner = new();
     private readonly AppSoundService _sound = AppSoundService.Current;
     private readonly DiscardContactInterlock _discardInterlock = new();
     private readonly ThtModelParser _modelParser = new();
@@ -86,6 +87,7 @@ public sealed class TestViewModel : ObservableObject
     private string _state = "CHỜ CHỌN MÃ HÀNG";
     private string _lot = "0";
     private string _keysightResource;
+    private string _acceptedInputBarcode = string.Empty;
     private WaterProofModelSettings _waterProofProfile = new();
     private WaterProofStage _waterProofStage = WaterProofStage.Idle;
     private string _waterProofStageText = "CHỜ KIỂM TRA";
@@ -135,7 +137,9 @@ public sealed class TestViewModel : ObservableObject
     private int _firstLogicalStateLogged;
     private int _firstUiUpdateRenderedLogged;
     private long _lastObservedProductionFrameSequence;
+    private long _lastObservedProductionScanGeneration;
     private long _cycleStartFrameSequence;
+    private long _cycleStartScanGeneration;
     private int _freshFrameGateActive;
     // 0 = chờ frame sạch, 1 = đang chuyển trạng thái trên UI, 2 = đã mở khóa.
     // Frame không được đưa vào TestEngine trước khi đạt trạng thái 2.
@@ -953,6 +957,7 @@ public sealed class TestViewModel : ObservableObject
         _board.Log += OnBoardLog;
         _board.FrameReceived += OnBoardFrameReceived;
         _waterProof.Log += OnWaterProofLog;
+        _barcodeScanner.BarcodeReceived += OnBarcodeReceived;
 
         // FileSystemWatcher được tạo sau first-render trong InitializeCoreAsync,
         // không làm nặng constructor của MainWindow/TestViewModel.
@@ -1767,6 +1772,21 @@ public sealed class TestViewModel : ObservableObject
         // đoạn transport còn đang khởi tạo.
         await InitializeHardwareAsync();
 
+        if (_productionSettings.BarcodeScannerEnabled)
+        {
+            try
+            {
+                _barcodeScanner.Connect(
+                    _productionSettings.BarcodeScannerPort,
+                    _productionSettings.BarcodeScannerBaudRate);
+                AddLog($"BARCODE CONNECTED: {_productionSettings.BarcodeScannerPort}.");
+            }
+            catch (Exception ex)
+            {
+                AddLog($"BARCODE COM chưa kết nối: {ex.Message}");
+            }
+        }
+
         if (_board.IsConnected)
         {
             if (_model is null)
@@ -1822,21 +1842,49 @@ public sealed class TestViewModel : ObservableObject
         TestEngine.PreparedModelState preparedEngineModel;
         using (StartupPerformanceTrace.Measure("THT_MODEL_LOAD"))
         {
-            (model, preparedEngineModel) = await Task.Run(() =>
+            IReadOnlyList<ProductModel> candidates = await Task.Run(() =>
             {
                 long parseStarted = Stopwatch.GetTimestamp();
-                ProductModel parsed = _modelParser.Load(fullPath);
-                ModelFileIdentityService.Capture(parsed, fullPath);
+                IReadOnlyList<ProductModel> parsed = _modelParser.LoadAll(fullPath);
                 double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
                     $"MODEL_LOAD_PERF phase=THT_PARSE path={Path.GetFileName(fullPath)} duration_ms={parseMs:0.###}");
                 StartupPerformanceTrace.Mark("T8 MODEL_PARSE_DONE");
+                return parsed;
+            });
+
+            if (generation != Volatile.Read(ref _modelLoadGeneration))
+                return null;
+
+            if (candidates.Count > 1)
+            {
+                var dialog = new JBZUniversalTester.Views.PartSelectionWindow(
+                    candidates,
+                    _productionSettings.LastThtPartKey)
+                {
+                    Owner = Application.Current?.Windows.OfType<Window>().FirstOrDefault(window => window.IsActive)
+                };
+                if (dialog.ShowDialog() != true || dialog.SelectedModel is null)
+                {
+                    State = "ĐÃ HỦY CHỌN PART";
+                    return null;
+                }
+                model = dialog.SelectedModel;
+            }
+            else
+            {
+                model = candidates[0];
+            }
+
+            ModelFileIdentityService.Capture(model, fullPath);
+            preparedEngineModel = await Task.Run(() =>
+            {
                 long engineStarted = Stopwatch.GetTimestamp();
-                TestEngine.PreparedModelState prepared = _engine.PrepareModel(parsed);
+                TestEngine.PreparedModelState prepared = _engine.PrepareModel(model);
                 AsyncFileLogService.Current.Performance(
-                    $"MODEL_LOAD_PERF phase=ENGINE_MODEL_BUILD model={parsed.ModelName} duration_ms={Stopwatch.GetElapsedTime(engineStarted).TotalMilliseconds:0.###}");
+                    $"MODEL_LOAD_PERF phase=ENGINE_MODEL_BUILD model={model.ModelName} duration_ms={Stopwatch.GetElapsedTime(engineStarted).TotalMilliseconds:0.###}");
                 StartupPerformanceTrace.Mark("T9 MODEL_LOGIC_READY");
-                return (parsed, prepared);
+                return prepared;
             });
         }
 
@@ -1846,6 +1894,7 @@ public sealed class TestViewModel : ObservableObject
             return null;
 
         SetModel(model, preparedEngineModel);
+        _productionSettings.LastThtPartKey = JBZUniversalTester.Views.PartSelectionWindow.PartKey(model);
         // SetModel chỉ đổi requested active range. Nếu firmware đang chạy dải của
         // model trước, reconcile ngay tại đường load async trước khi MainWindow tự
         // mở TestView. Healthy same-capacity stream được supervisor giữ nguyên.
@@ -1907,7 +1956,11 @@ public sealed class TestViewModel : ObservableObject
             (ProductModel Model, TestEngine.PreparedModelState Prepared) startup = await Task.Run(() =>
             {
                 long parseStarted = Stopwatch.GetTimestamp();
-                ProductModel parsed = _modelParser.Load(fullPath);
+                IReadOnlyList<ProductModel> candidates = _modelParser.LoadAll(fullPath);
+                ProductModel parsed = candidates.FirstOrDefault(candidate =>
+                        JBZUniversalTester.Views.PartSelectionWindow.PartKey(candidate)
+                            .Equals(_productionSettings.LastThtPartKey, StringComparison.OrdinalIgnoreCase))
+                    ?? candidates[0];
                 ModelFileIdentityService.Capture(parsed, fullPath);
                 double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
@@ -2329,6 +2382,7 @@ public sealed class TestViewModel : ObservableObject
         }
 
         _cycleTestStartedAt = now < _cycleStartedAt ? _cycleStartedAt : now;
+        _ = PersistActiveCycleStageAsync("TEST_STARTED");
     }
 
     private void MarkProductRemovalStarted()
@@ -2416,6 +2470,29 @@ public sealed class TestViewModel : ObservableObject
         _lastWaterProofMeasurements = [];
     }
 
+    private async Task PersistActiveCycleStageAsync(string stage)
+    {
+        ProductModel? model = _model;
+        string cycleId = _activeCycleId;
+        if (model is null || string.IsNullOrWhiteSpace(cycleId))
+            return;
+        try
+        {
+            await ProductionPersistence.UpsertActiveCycleAsync(
+                cycleId,
+                model.PartNumber,
+                model.SourcePath,
+                _cycleStartedAt,
+                stage,
+                _lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể lưu tiến trình cycle {cycleId}/{stage}: {ex.Message}");
+        }
+    }
+
     private void ResetFullCycleAfterProductRemoved()
     {
         _engine.ResetProductCycle();
@@ -2436,6 +2513,7 @@ public sealed class TestViewModel : ObservableObject
         _lastPassRemainingSignature = string.Empty;
         _lastProductDetectSignature = string.Empty;
         _activeCycleId = Guid.NewGuid().ToString("N");
+        _acceptedInputBarcode = string.Empty;
         _cycleStartedAt = DateTime.Now;
         _cycleTestStartedAt = null;
         _cycleRemovalStartedAt = null;
@@ -2480,6 +2558,43 @@ public sealed class TestViewModel : ObservableObject
         AddLog($"[WATERPROOF] {text}");
     }
 
+    private void OnBarcodeReceived(object? sender, string barcode) =>
+        _ = ValidateInputBarcodeAsync(barcode);
+
+    private async Task ValidateInputBarcodeAsync(string barcode)
+    {
+        string value = barcode.Trim();
+        ProductModel? model = _model;
+        if (value.Length == 0 || model is null)
+            return;
+        try
+        {
+            static string Canonical(string text) => new(text.Where(char.IsLetterOrDigit)
+                .Select(char.ToUpperInvariant).ToArray());
+            string expected = Canonical(model.PartNumber);
+            string actual = Canonical(value);
+            if (expected.Length > 0 && !actual.Contains(expected, StringComparison.Ordinal))
+            {
+                InvokeUi(() => State = "BARCODE KHÔNG KHỚP MÃ HÀNG");
+                AddLog($"BARCODE REJECTED: part={model.PartNumber}; value={value}.");
+                return;
+            }
+            if (await ProductionPersistence.HasInputBarcodeAsync(value, _lifetimeCts.Token))
+            {
+                InvokeUi(() => State = "SẢN PHẨM ĐÃ ĐƯỢC KIỂM TRA");
+                AddLog($"BARCODE DUPLICATE: {value}.");
+                return;
+            }
+            _acceptedInputBarcode = value;
+            InvokeUi(() => State = "BARCODE HỢP LỆ • SẴN SÀNG KIỂM TRA");
+            AddLog($"BARCODE ACCEPTED: {value}.");
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể xác nhận barcode {value}: {ex.Message}");
+        }
+    }
+
     private void OnBoardFrameReceived(object? sender, ScanFrame frame)
     {
         if (IsDeviceFault || !_board.IsConnected)
@@ -2514,6 +2629,7 @@ public sealed class TestViewModel : ObservableObject
                 frame.Sequence > 0)
             {
                 Volatile.Write(ref _lastObservedProductionFrameSequence, frame.Sequence);
+                Volatile.Write(ref _lastObservedProductionScanGeneration, frame.ScanGeneration);
             }
 
             // _DISCARD là cặp tiếp điểm thùng hàng lỗi, không phải topology sản
@@ -2591,14 +2707,20 @@ public sealed class TestViewModel : ObservableObject
                 if (Volatile.Read(ref _freshFrameGateActive) != 0)
                 {
                     long cycleStartSequence = Volatile.Read(ref _cycleStartFrameSequence);
+                    long cycleStartGeneration = Volatile.Read(ref _cycleStartScanGeneration);
+                    bool sameScanSession = cycleStartGeneration == 0 ||
+                                           frame.ScanGeneration == 0 ||
+                                           frame.ScanGeneration == cycleStartGeneration;
                     if (cycleStartSequence > 0 &&
+                        sameScanSession &&
                         frame.Sequence > 0 &&
                         frame.Sequence <= cycleStartSequence)
                     {
                         if (Interlocked.CompareExchange(ref _stalePreCycleFrameLogged, 1, 0) == 0)
                         {
                             AsyncFileLogService.Current.Performance(
-                                $"PASS_GATE seq={frame.Sequence} cycleStartSeq={cycleStartSequence} scanMode={frame.Mode} " +
+                                $"PASS_GATE seq={frame.Sequence} cycleStartSeq={cycleStartSequence} " +
+                                $"generation={frame.ScanGeneration}/{cycleStartGeneration} scanMode={frame.Mode} " +
                                 $"frameComplete={frame.Complete} reason=STALE_PRE_CYCLE_FRAME action=ignored");
                         }
 
@@ -2609,7 +2731,8 @@ public sealed class TestViewModel : ObservableObject
 
                     Interlocked.Exchange(ref _freshFrameGateActive, 0);
                     AsyncFileLogService.Current.Performance(
-                        $"FRESH_FRAME_ACCEPTED seq={frame.Sequence} cycleStartSeq={cycleStartSequence}");
+                        $"FRESH_FRAME_ACCEPTED seq={frame.Sequence} cycleStartSeq={cycleStartSequence} " +
+                        $"generation={frame.ScanGeneration}/{cycleStartGeneration}");
                 }
 
                 // THT trống là chế độ lập bản đồ I/O tương thích Htdrv. Chỉ dựng
@@ -3860,6 +3983,8 @@ public sealed class TestViewModel : ObservableObject
         _engine.Changed -= OnEngineChanged;
         _board.Log -= OnBoardLog;
         _board.FrameReceived -= OnBoardFrameReceived;
+        _barcodeScanner.BarcodeReceived -= OnBarcodeReceived;
+        _barcodeScanner.Dispose();
 
         _lifetimeCts.Dispose();
     }
@@ -4046,6 +4171,13 @@ public sealed class TestViewModel : ObservableObject
                 "Chưa tải model .tht.");
         }
 
+        if (_productionSettings.BarcodeScannerEnabled && string.IsNullOrWhiteSpace(_acceptedInputBarcode))
+        {
+            State = "CHỜ QUÉT BARCODE SẢN PHẨM";
+            AddLog("BLOCKED: barcode scanner đang bật nhưng chưa nhận barcode hợp lệ.");
+            return;
+        }
+
         bool ioMappingMode = IsIoMappingMode;
 
         if (!_board.IsConnected)
@@ -4130,6 +4262,7 @@ public sealed class TestViewModel : ObservableObject
         _activeCycleId = Guid.NewGuid().ToString("N");
         _lastFaultRejectSignature = string.Empty;
         _cycleStartedAt = DateTime.Now;
+        _ = PersistActiveCycleStageAsync("ARMED");
         _cycleTestStartedAt = null;
         _cycleRemovalStartedAt = null;
         ResetCycleInspectionTrace();
@@ -4144,11 +4277,14 @@ public sealed class TestViewModel : ObservableObject
         SelectedOperationTabIndex = 0;
 
         long cycleStartSequence = Volatile.Read(ref _lastObservedProductionFrameSequence);
+        long cycleStartGeneration = Volatile.Read(ref _lastObservedProductionScanGeneration);
         Volatile.Write(ref _cycleStartFrameSequence, cycleStartSequence);
+        Volatile.Write(ref _cycleStartScanGeneration, cycleStartGeneration);
         Interlocked.Exchange(ref _freshFrameGateActive, cycleStartSequence > 0 ? 1 : 0);
         AsyncFileLogService.Current.Performance("TEST_START_SCAN_REUSED");
         AsyncFileLogService.Current.Performance(
-            $"FRESH_FRAME_GATE_ARMED active={cycleStartSequence > 0} cycleStartSeq={cycleStartSequence}");
+            $"FRESH_FRAME_GATE_ARMED active={cycleStartSequence > 0} cycleStartSeq={cycleStartSequence} " +
+            $"generation={cycleStartGeneration}");
         AddLog("Tái sử dụng scan nền Production đang chạy; ARM không gửi lệnh phần cứng.");
         InvokeUi(UpdateCardScanningState);
 
@@ -6035,6 +6171,7 @@ public sealed class TestViewModel : ObservableObject
                 _waterProofLivePressBaseline.Length);
 
             _cycleWaterProofStartedAt ??= DateTime.Now;
+            _ = PersistActiveCycleStageAsync("LEAK_STARTED");
             State = "ĐANG TEST LEAK";
             ShowWaterProofOperationPanel();
             SetWaterProofStage(WaterProofStage.Connecting, "ĐANG KẾT NỐI", "---");
@@ -6054,6 +6191,7 @@ public sealed class TestViewModel : ObservableObject
                     ApplyWaterProofProgress,
                     ct);
                 _cycleWaterProofCompletedAt = DateTime.Now;
+                _ = PersistActiveCycleStageAsync("LEAK_COMPLETED");
                 _cycleWaterProofSummary = BuildWaterProofHistorySummary(run);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -6216,6 +6354,7 @@ public sealed class TestViewModel : ObservableObject
             AsyncFileLogService.Current.Performance(
                 $"PASS_LATENCY T_POST_CONTINUITY_TASK_START cycle={_activeCycleId}");
             _cycleContinuityCompletedAt ??= DateTime.Now;
+            _ = PersistActiveCycleStageAsync("CONTINUITY_COMPLETED");
             AddLog("Toàn bộ mạng I/O đã đạt theo model THT.");
             AddLog($"[AUTO-R] Continuity complete = {_engine.ContinuityPassed}");
             AddLog($"[AUTO-R] Continuity passed = {_engine.ContinuityPassed}");
@@ -6239,6 +6378,7 @@ public sealed class TestViewModel : ObservableObject
                 }
 
                 _cycleResistanceStartedAt ??= DateTime.Now;
+                _ = PersistActiveCycleStageAsync("RESISTANCE_STARTED");
                 SetProductionPhase(ProductionPhase.Resistance);
                 State = "KIỂM TRA ĐIỆN TRỞ";
                 AddLog("[AUTO-R] Trigger automatic resistance = YES");
@@ -6261,6 +6401,7 @@ public sealed class TestViewModel : ObservableObject
 
                 UpdateResistanceRows(results);
                 _cycleResistanceCompletedAt = DateTime.Now;
+                _ = PersistActiveCycleStageAsync("RESISTANCE_COMPLETED");
 
                 AddLog(
                     $"Hoàn thành {Resistance.Count}/{configuredResistanceSteps.Count} " +
@@ -7333,6 +7474,7 @@ public sealed class TestViewModel : ObservableObject
             HtdrvName = ProgramIdentityService.BuildHtdrvName(),
             LotText = _productionSettings.Lot,
             InspectionTrace = BuildProductInspectionTrace(finished),
+            InputBarcode = _acceptedInputBarcode,
             OpenCount = openCount,
             WrongCount = wrongOnly,
             ShortCount = shortOnly,

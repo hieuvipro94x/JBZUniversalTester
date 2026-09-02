@@ -60,6 +60,24 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
             () => _repository.CommitResult(request, CurrentRunId),
             cancellationToken);
 
+    public Task<bool> UpsertActiveCycleAsync(
+        string cycleId,
+        string partNumber,
+        string modelPath,
+        DateTime startedAt,
+        string stage,
+        CancellationToken cancellationToken = default) =>
+        EnqueueAsync(() =>
+        {
+            _repository.UpsertActiveCycle(cycleId, partNumber, modelPath, startedAt, stage);
+            return true;
+        }, cancellationToken);
+
+    public Task<bool> HasInputBarcodeAsync(
+        string barcode,
+        CancellationToken cancellationToken = default) =>
+        EnqueueAsync(() => _repository.HasInputBarcode(barcode), cancellationToken);
+
     public Task<ProductionStatisticsSnapshot> GetStatisticsAsync(
         PartIdentitySnapshot part,
         DateTime now,

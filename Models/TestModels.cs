@@ -278,7 +278,8 @@ public sealed record ScanFrame(
     int SourceCount = 0,
     byte? EndMarkerCode = null,
     int ScanUnitCount = 0,
-    bool TerminatorKnown = true)
+    bool TerminatorKnown = true,
+    long ScanGeneration = 0)
 {
     public IReadOnlyDictionary<int, IReadOnlySet<int>> Connections =>
         ConnectionsBySource ?? new Dictionary<int, IReadOnlySet<int>>();

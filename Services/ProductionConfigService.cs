@@ -152,9 +152,13 @@ public static class ProductionConfigService
             $"[BoardMode]{settings.BoardMode}",
             $"[CardCount]{settings.CardCount}",
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
+            $"[StartCardNumber]{settings.StartCardNumber}",
             $"[IoConfirm1]{settings.IoConfirm1}",
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",
+            $"[BarcodeScannerEnabled]{settings.BarcodeScannerEnabled}",
+            $"[BarcodeScannerPort]{settings.BarcodeScannerPort}",
+            $"[BarcodeScannerBaudRate]{settings.BarcodeScannerBaudRate}",
             $"[UseTestPointer]{Bool(settings.UseTestPointer)}",
             $"[ManualModeEnabled]{Bool(settings.ManualModeEnabled)}",
             $"[AutoMasterSequence]{Bool(settings.AutoMasterSequence)}",
@@ -200,6 +204,7 @@ public static class ProductionConfigService
             $"[ShowConnector]{Bool(settings.ShowConnector)}",
 
             $"[LastThtPath]{settings.LastThtPath}",
+            $"[LastThtPartKey]{settings.LastThtPartKey}",
             $"[AutoPrintLabelOnPass]{Bool(settings.AutoPrintLabelOnPass)}",
             $"[HistoryDirectory]{settings.HistoryDirectory}",
 
@@ -467,6 +472,9 @@ public static class ProductionConfigService
         settings.IoConfirm1 = IAny(map, settings.IoConfirm1, "IoConfirm1", "IO1 확인");
         settings.IoConfirmN = IAny(map, settings.IoConfirmN, "IoConfirmN", "IOn 확인");
         settings.UsbDelay = IAny(map, settings.UsbDelay, "UsbDelay", "USB 지연");
+        settings.BarcodeScannerEnabled = B(map, "BarcodeScannerEnabled", settings.BarcodeScannerEnabled);
+        settings.BarcodeScannerPort = S(map, "BarcodeScannerPort", settings.BarcodeScannerPort);
+        settings.BarcodeScannerBaudRate = I(map, "BarcodeScannerBaudRate", settings.BarcodeScannerBaudRate);
         settings.StartCardNumber = I(map, "StartCardNumber", settings.StartCardNumber);
         settings.UseTestPointer = B(map, "UseTestPointer", settings.UseTestPointer);
         settings.ManualModeEnabled = B(map, "ManualModeEnabled", settings.ManualModeEnabled);
@@ -573,6 +581,7 @@ public static class ProductionConfigService
         settings.ShowConnector = B(map, "ShowConnector", settings.ShowConnector);
 
         settings.LastThtPath = S(map, "LastThtPath", settings.LastThtPath);
+        settings.LastThtPartKey = S(map, "LastThtPartKey", settings.LastThtPartKey);
         settings.AutoPrintLabelOnPass = B(map, "AutoPrintLabelOnPass", settings.AutoPrintLabelOnPass);
         settings.HistoryDirectory = S(map, "HistoryDirectory", settings.HistoryDirectory);
 
@@ -701,6 +710,8 @@ public static class ProductionConfigService
         }
         ProductionTimingPolicy.Normalize(settings);
         settings.UsbDelay = Math.Clamp(settings.UsbDelay, 1, 16);
+        settings.BarcodeScannerPort = (settings.BarcodeScannerPort ?? string.Empty).Trim();
+        settings.BarcodeScannerBaudRate = Math.Clamp(settings.BarcodeScannerBaudRate, 1200, 921600);
         settings.IoConfirm1 = Math.Clamp(settings.IoConfirm1, 0, 127);
         settings.IoConfirmN = Math.Clamp(settings.IoConfirmN, 0, 31);
         settings.ExpansionCardCount = Math.Clamp(
@@ -708,9 +719,13 @@ public static class ProductionConfigService
             1,
             BoardCapacity.MaxExpansionCardCount);
 
-        // Compatibility CFG cũ có thể chứa StartCardNumber. Không áp dụng offset
-        // chưa được protocol/trace chứng minh; runtime luôn bắt đầu từ card 1.
-        settings.StartCardNumber = 1;
+        settings.StartCardNumber = Math.Clamp(
+            settings.StartCardNumber,
+            1,
+            BoardCapacity.MaxExpansionCardCount);
+        settings.ExpansionCardCount = Math.Min(
+            settings.ExpansionCardCount,
+            BoardCapacity.MaxExpansionCardCount - settings.StartCardNumber + 1);
 
         BoardCapacity capacity = BoardCapacity.FromSettings(settings);
         settings.CardCount = capacity.ScanCardCount;

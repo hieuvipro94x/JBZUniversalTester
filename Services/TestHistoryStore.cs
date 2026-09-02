@@ -13,7 +13,7 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class TestHistoryStore
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
     private static readonly object SchemaGate = new();
     private readonly string _path;
 
@@ -51,6 +51,13 @@ public sealed class TestHistoryStore
     private DatabaseMigrationReport Initialize()
     {
         using SqliteConnection connection = Open();
+        int versionBeforeWrite = ReadExistingSchemaVersion(connection);
+        if (versionBeforeWrite > CurrentSchemaVersion)
+        {
+            throw new InvalidDataException(
+                $"Database schema v{versionBeforeWrite} mới hơn phần mềm hỗ trợ v{CurrentSchemaVersion}. " +
+                "Không mở bằng phiên bản cũ để tránh làm hỏng dữ liệu.");
+        }
         CreateMigrationBackupIfRequired(connection);
         using (SqliteCommand pragma = connection.CreateCommand())
         {
@@ -63,6 +70,7 @@ public sealed class TestHistoryStore
 
         using SqliteTransaction transaction = connection.BeginTransaction();
         CreateSchema(connection, transaction);
+        EnsureCurrentTestColumns(connection, transaction);
         int existingVersion = ReadSchemaVersion(connection, transaction);
         if (existingVersion < CurrentSchemaVersion &&
             TableExists(connection, transaction, "TestHistory"))
@@ -75,6 +83,40 @@ public sealed class TestHistoryStore
         WriteSchemaInfo(connection, transaction, report);
         transaction.Commit();
         return report;
+    }
+
+    private static void EnsureCurrentTestColumns(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        bool hasInputBarcode = false;
+        using (SqliteCommand info = connection.CreateCommand())
+        {
+            info.Transaction = transaction;
+            info.CommandText = "PRAGMA table_info(Tests);";
+            using SqliteDataReader reader = info.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.GetString(1).Equals("InputBarcode", StringComparison.OrdinalIgnoreCase))
+                    hasInputBarcode = true;
+            }
+        }
+        if (!hasInputBarcode)
+        {
+            using SqliteCommand alter = connection.CreateCommand();
+            alter.Transaction = transaction;
+            alter.CommandText = "ALTER TABLE Tests ADD COLUMN InputBarcode TEXT NOT NULL DEFAULT '';";
+            alter.ExecuteNonQuery();
+        }
+    }
+
+    private static int ReadExistingSchemaVersion(SqliteConnection connection)
+    {
+        using SqliteCommand table = connection.CreateCommand();
+        table.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='SchemaInfo' LIMIT 1;";
+        if (table.ExecuteScalar() is null)
+            return 0;
+        using SqliteCommand version = connection.CreateCommand();
+        version.CommandText = "SELECT COALESCE(MAX(SchemaVersion),0) FROM SchemaInfo;";
+        return Convert.ToInt32(version.ExecuteScalar() ?? 0, CultureInfo.InvariantCulture);
     }
 
     private void CreateMigrationBackupIfRequired(SqliteConnection source)
@@ -233,6 +275,7 @@ public sealed class TestHistoryStore
                 Result TEXT NOT NULL DEFAULT '',
                 ResultCode TEXT NOT NULL DEFAULT '',
                 Barcode TEXT NOT NULL DEFAULT '',
+                InputBarcode TEXT NOT NULL DEFAULT '',
                 LabelSerial TEXT NOT NULL DEFAULT '',
                 ResistanceSummary TEXT NOT NULL DEFAULT '',
                 WaterProofSummary TEXT NOT NULL DEFAULT '',
@@ -356,6 +399,16 @@ public sealed class TestHistoryStore
                 MigrationKey TEXT PRIMARY KEY,
                 CompletedAt TEXT NOT NULL,
                 Details TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS ActiveTestCycles
+            (
+                CycleId TEXT PRIMARY KEY,
+                PartNumber TEXT NOT NULL DEFAULT '',
+                ModelPath TEXT NOT NULL DEFAULT '',
+                StartedAt TEXT NOT NULL,
+                Stage TEXT NOT NULL DEFAULT '',
+                UpdatedAt TEXT NOT NULL
             );
 
             CREATE INDEX IF NOT EXISTS IX_Models_PartId ON Models(PartId);
@@ -797,7 +850,55 @@ public sealed class TestHistoryStore
             aggregate.ExecuteNonQuery();
         }
 
+        using (SqliteCommand clearActive = connection.CreateCommand())
+        {
+            clearActive.Transaction = transaction;
+            clearActive.CommandText = "DELETE FROM ActiveTestCycles WHERE CycleId=$CycleId;";
+            clearActive.Parameters.AddWithValue("$CycleId", request.CycleId);
+            clearActive.ExecuteNonQuery();
+        }
+
         return BuildCommitResult(connection, transaction, testId, false, partId, request.History);
+    }
+
+    public void UpsertActiveCycle(
+        string cycleId,
+        string partNumber,
+        string modelPath,
+        DateTime startedAt,
+        string stage)
+    {
+        if (string.IsNullOrWhiteSpace(cycleId))
+            return;
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO ActiveTestCycles(CycleId,PartNumber,ModelPath,StartedAt,Stage,UpdatedAt)
+            VALUES($Cycle,$Part,$Model,$Started,$Stage,$Updated)
+            ON CONFLICT(CycleId) DO UPDATE SET
+                PartNumber=excluded.PartNumber,
+                ModelPath=excluded.ModelPath,
+                Stage=excluded.Stage,
+                UpdatedAt=excluded.UpdatedAt;
+            """;
+        command.Parameters.AddWithValue("$Cycle", cycleId.Trim());
+        command.Parameters.AddWithValue("$Part", partNumber?.Trim() ?? string.Empty);
+        command.Parameters.AddWithValue("$Model", modelPath?.Trim() ?? string.Empty);
+        command.Parameters.AddWithValue("$Started", startedAt.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$Stage", stage?.Trim() ?? string.Empty);
+        command.Parameters.AddWithValue("$Updated", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
+        command.ExecuteNonQuery();
+    }
+
+    public bool HasInputBarcode(string barcode)
+    {
+        if (string.IsNullOrWhiteSpace(barcode))
+            return false;
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM Tests WHERE InputBarcode=$Barcode LIMIT 1;";
+        command.Parameters.AddWithValue("$Barcode", barcode.Trim());
+        return command.ExecuteScalar() is not null;
     }
 
     private static long UpsertPart(
@@ -815,13 +916,13 @@ public sealed class TestHistoryStore
             VALUES
             ($Key,$Number,$Name,$Vehicle,$Eco,$Nco,$Alc,$Customer,$At,$At,$At,$At)
             ON CONFLICT(PartKey) DO UPDATE SET
-                PartNumber=excluded.PartNumber,
-                PartName=excluded.PartName,
-                VehicleType=excluded.VehicleType,
-                Eco=excluded.Eco,
-                Nco=excluded.Nco,
-                Alc=excluded.Alc,
-                CustomerCode=excluded.CustomerCode,
+                PartNumber=CASE WHEN excluded.PartNumber<>'' THEN excluded.PartNumber ELSE Parts.PartNumber END,
+                PartName=CASE WHEN excluded.PartName<>'' THEN excluded.PartName ELSE Parts.PartName END,
+                VehicleType=CASE WHEN excluded.VehicleType<>'' THEN excluded.VehicleType ELSE Parts.VehicleType END,
+                Eco=CASE WHEN excluded.Eco<>'' THEN excluded.Eco ELSE Parts.Eco END,
+                Nco=CASE WHEN excluded.Nco<>'' THEN excluded.Nco ELSE Parts.Nco END,
+                Alc=CASE WHEN excluded.Alc<>'' THEN excluded.Alc ELSE Parts.Alc END,
+                CustomerCode=CASE WHEN excluded.CustomerCode<>'' THEN excluded.CustomerCode ELSE Parts.CustomerCode END,
                 LastUseAt=excluded.LastUseAt,
                 UpdatedAt=excluded.UpdatedAt
             RETURNING Id;
@@ -867,7 +968,7 @@ public sealed class TestHistoryStore
             RETURNING Id;
             """;
         command.Parameters.AddWithValue("$PartId", partId);
-        command.Parameters.AddWithValue("$Key", model.ModelKey);
+        command.Parameters.AddWithValue("$Key", $"PART:{partId}:{model.ModelKey}");
         command.Parameters.AddWithValue("$Path", model.FilePath);
         command.Parameters.AddWithValue("$File", model.FileName);
         command.Parameters.AddWithValue("$Hash", model.FileHash);
@@ -947,7 +1048,7 @@ public sealed class TestHistoryStore
             INSERT INTO Tests
             (LegacyHistoryId,CycleId,RunId,PartId,ModelId,ConfigId,InspectionType,Lot,
              ProductionCounter,StartedAt,InstallStartedAt,TestStartedAt,ResultAt,
-             RemovalStartedAt,RemovedAt,FinishedAt,Passed,Result,ResultCode,Barcode,
+             RemovalStartedAt,RemovedAt,FinishedAt,Passed,Result,ResultCode,Barcode,InputBarcode,
              LabelSerial,ResistanceSummary,WaterProofSummary,DeviceName,DeviceNumber,
              OperatorCompany,ProductionLine,AppVersion,HtdrvName,LotText,InspectionTrace,
              OpenCount,WrongCount,ShortCount,FaultType,FaultSummary,FaultDetailsJson,
@@ -956,7 +1057,7 @@ public sealed class TestHistoryStore
             VALUES
             ($Legacy,$Cycle,$Run,$Part,$Model,$Config,$Inspection,$Lot,$Counter,$Started,
              $Install,$TestStarted,$ResultAt,$RemovalStarted,$Removed,$Finished,$Passed,
-             $Result,$ResultCode,$Barcode,$LabelSerial,$Resistance,'',$DeviceName,$DeviceNumber,
+             $Result,$ResultCode,$Barcode,$InputBarcode,$LabelSerial,$Resistance,'',$DeviceName,$DeviceNumber,
              $Company,$Line,$App,$Htdrv,$LotText,$Trace,$Open,$Wrong,$Short,$FaultType,
              $FaultSummary,$FaultJson,$LabelProfile,$Template,$Payload,$PrintStatus,$PrintAt,
              $Printer,$Copies,$Reprints,$PrintMessage,$CreatedAt);
@@ -982,6 +1083,7 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$Result", h.Result);
         command.Parameters.AddWithValue("$ResultCode", h.FaultCode);
         command.Parameters.AddWithValue("$Barcode", h.BarcodeValue);
+        command.Parameters.AddWithValue("$InputBarcode", h.InputBarcode);
         command.Parameters.AddWithValue("$LabelSerial", h.LabelSerial);
         command.Parameters.AddWithValue("$Resistance", h.Resistance);
         command.Parameters.AddWithValue("$DeviceName", h.DeviceName);
@@ -1577,12 +1679,12 @@ public sealed class TestHistoryStore
         var clauses = new List<string>();
         if (criteria.From is DateTime from)
         {
-            clauses.Add("t.StartedAt >= $From");
+            clauses.Add("COALESCE(t.TestStartedAt,t.StartedAt) >= $From");
             command.Parameters.AddWithValue("$From", from.ToString("O", CultureInfo.InvariantCulture));
         }
         if (criteria.To is DateTime to)
         {
-            clauses.Add("t.StartedAt <= $To");
+            clauses.Add("COALESCE(t.TestStartedAt,t.StartedAt) <= $To");
             command.Parameters.AddWithValue("$To", to.ToString("O", CultureInfo.InvariantCulture));
         }
         if (criteria.LotNo is long lot)

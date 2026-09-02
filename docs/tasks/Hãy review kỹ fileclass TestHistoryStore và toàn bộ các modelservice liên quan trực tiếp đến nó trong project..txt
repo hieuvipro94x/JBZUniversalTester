@@ -1,0 +1,187 @@
+Hãy review kỹ file/class `TestHistoryStore` và toàn bộ các model/service liên quan trực tiếp đến nó trong project.
+
+Mục tiêu hiện tại: **CHỈ PHÂN TÍCH VÀ ĐÁNH GIÁ, TUYỆT ĐỐI CHƯA SỬA CODE, CHƯA TẠO PATCH, CHƯA COMMIT, CHƯA FORMAT LẠI FILE.**
+
+Hãy kiểm tra các vấn đề dưới đây dựa trên code thực tế của toàn project, không kết luận chỉ dựa vào riêng `TestHistoryStore`.
+
+1. Schema downgrade / compatibility
+
+* Kiểm tra logic `CurrentSchemaVersion`, `ReadSchemaVersion()`, `Initialize()`, `WriteSchemaInfo()`.
+* Xác minh trường hợp database có schema version lớn hơn `CurrentSchemaVersion` nhưng app cũ vẫn mở database.
+* Kiểm tra xem code hiện tại có thể ghi `SchemaInfo.SchemaVersion` từ version mới xuống version cũ hay không.
+* Tìm xem ở nơi khác có guard chống downgrade hay compatibility check chưa.
+* Kết luận: BUG / RISK / INTENTIONAL / SAFE.
+* Nếu nên sửa, mô tả cách sửa tối thiểu nhưng KHÔNG sửa code.
+
+2. Quan hệ `Models` và `Parts`
+
+* Kiểm tra schema `Models.ModelKey UNIQUE`.
+* Kiểm tra `UpsertModel()` có `ON CONFLICT(ModelKey) DO UPDATE SET PartId=excluded.PartId`.
+* Tìm toàn bộ nơi tạo `ModelKey` để xác định `ModelKey` có globally unique hay chỉ unique trong một Part.
+* Xác minh có khả năng một Model record đang thuộc Part A bị chuyển sang Part B hay không.
+* Kiểm tra consistency giữa `Tests.PartId`, `Tests.ModelId` và `Models.PartId`.
+* Kết luận có cần đổi unique key thành `(PartId, ModelKey)` hay không.
+* Chưa sửa code.
+
+3. `UpsertPart()` có overwrite metadata hay không
+
+* Kiểm tra tất cả nơi gọi `UpsertPart()`.
+* Đặc biệt kiểm tra các luồng chỉ đọc như `GetProbeCounter()` nhưng lại gọi `UpsertPart()`.
+* Xác minh snapshot `PartIdentitySnapshot` ở các call site có thể chứa chuỗi rỗng/null/default hay không.
+* Kiểm tra khả năng metadata đang tốt trong DB như `PartName`, `VehicleType`, `Eco`, `Nco`, `Alc`, `CustomerCode` bị overwrite bằng giá trị rỗng.
+* Kết luận: có bug thực tế hay chỉ là giả thuyết.
+* Nếu cần sửa, đề xuất chiến lược tối thiểu, ví dụ không overwrite bằng empty value hoặc tách Ensure/Update.
+* Chưa sửa code.
+
+4. SQLite BUSY/LOCKED retry
+
+* Comment trong `Open()` nói production writer retry cả transaction.
+* Tìm toàn project xem retry thực tế nằm ở đâu.
+* Kiểm tra `CommitResult()` và caller của nó.
+* Xác minh có retry toàn transaction khi gặp `SQLITE_BUSY` / `SQLITE_LOCKED` không.
+* Nếu chỉ có `busy_timeout=2000` mà không có retry, ghi rõ.
+* Đánh giá có cần thêm retry hay hiện tại đã đủ.
+* Chưa sửa code.
+
+5. Legacy duplicate detection
+
+* Review `FindEquivalentLegacyTest()`.
+* Đánh giá key hiện tại gồm PartKey, Lot, Passed, FinishedAt, InspectionType có đủ phân biệt record không.
+* Kiểm tra format/precision timestamp của dữ liệu legacy.
+* Tìm xem CycleId, ProductionCounter hoặc fingerprint/hash có thể dùng tốt hơn không.
+* Đánh giá nguy cơ bỏ sót record hợp lệ do false duplicate.
+* Chưa sửa code.
+
+6. Date/time consistency
+
+* Tìm toàn bộ nơi ghi DateTime vào SQLite.
+* Kiểm tra `DateTime.Now`, `UtcNow`, `DateTimeKind`, `.ToString("O")`, `ParseDate()`.
+* Xác minh database đang sử dụng local time thống nhất hay có khả năng trộn UTC/local/unspecified.
+* Kiểm tra việc SQL compare TEXT ISO timestamp có luôn đúng trong dữ liệu thực tế không.
+* Không đề xuất migration lớn nếu chưa cần thiết.
+* Chưa sửa code.
+
+7. History export / memory
+
+* Review `SearchCore()` và `SearchForExport()`.
+* Xác minh exportAll có load toàn bộ lịch sử vào `List<TestHistoryRecord>` hay không.
+* Tìm caller để xem dữ liệu thực tế có thể lớn tới mức nào.
+* Đánh giá nguy cơ memory/GC/UI freeze.
+* Nếu cần tối ưu, đề xuất streaming/batching nhưng chưa sửa.
+
+8. Performance của History query
+
+* Review các correlated subquery tới `TestFaults`.
+* Kiểm tra execution pattern/index hiện có.
+* Đánh giá có thực sự cần đổi sang JOIN/CTE hay optimization hiện tại chưa cần.
+* Review các filter dạng `LIKE '%keyword%'` và index liên quan.
+* Không tối ưu chỉ vì “có thể tối ưu”; chỉ đề xuất khi có lợi ích thực tế.
+
+9. Print state race condition
+
+* Review `TryBeginFirstPrint()`, `IncrementLabelReprint()`, `UpdateLabelPrintOutcome()` và toàn bộ caller.
+* Xác minh có khả năng callback/task cũ ghi đè trạng thái mới hơn hay không.
+* Kiểm tra printing có chạy async/concurrent/retry hay không.
+* Nếu không có race thực tế thì ghi SAFE.
+* Nếu có, mô tả state transition nên bảo vệ như thế nào.
+* Chưa sửa code.
+
+10. `ParseDate()` fallback
+
+* Review việc parse lỗi trả `DateTime.MinValue`.
+* Kiểm tra dữ liệu này được dùng tiếp ở đâu.
+* Đánh giá nên giữ fallback, log warning hay throw.
+* Không thay đổi nếu behavior hiện tại là intentional và an toàn.
+
+11. Migration/schema tổng thể
+
+* Kiểm tra các migration từ legacy `TestHistory` sang relational schema.
+* Kiểm tra backup trước migration.
+* Kiểm tra transaction boundary.
+* Kiểm tra migration có idempotent không.
+* Kiểm tra có tình huống migration chạy lại làm duplicate data/statistics không.
+* Kiểm tra `RebuildPartAggregates()`.
+* Kiểm tra `SchemaInfo`, `RuntimeMigrationState`, `LegacyImportState`.
+* Chưa sửa code.
+
+12. Data integrity tổng thể
+    Kiểm tra thêm những vấn đề tôi chưa nêu:
+
+* foreign key consistency
+* unique constraint
+* transaction/race condition
+* lost update
+* duplicate commit
+* aggregate counter sai
+* probe counter sai
+* master/product inspection bị cộng nhầm
+* partial write
+* stale update
+* SQL query sai logic
+* dữ liệu legacy bị mất
+* migration không backward-compatible
+* exception bị nuốt làm mất trace
+* bất kỳ bug production-critical nào khác.
+
+Yêu cầu cách làm:
+
+* Đọc implementation thực tế và caller/callee liên quan trước khi kết luận.
+* Không giả định một method có bug nếu contract ở nơi khác đảm bảo điều đó không xảy ra.
+* Với mỗi vấn đề, đưa bằng chứng bằng `file + method + đoạn code/line` nếu công cụ hỗ trợ.
+* Phân biệt rõ:
+
+  * CONFIRMED BUG
+  * REAL RISK
+  * POSSIBLE RISK / NEEDS CONTEXT
+  * SAFE / INTENTIONAL
+  * PERFORMANCE ONLY
+* Xếp severity: Critical / High / Medium / Low.
+* Ưu tiên data integrity và production reliability hơn code style.
+* Không đề xuất refactor lớn nếu một fix nhỏ giải quyết được vấn đề.
+
+Quan trọng:
+**KHÔNG ĐƯỢC sửa bất kỳ file nào trong lượt này.**
+**KHÔNG dùng apply_patch.**
+**KHÔNG tự động format.**
+**KHÔNG tạo migration mới.**
+**KHÔNG commit.**
+**KHÔNG thay đổi database schema.**
+
+Output cuối cùng theo format:
+
+## 1. Executive summary
+
+* Có bao nhiêu confirmed bug
+* Có bao nhiêu risk
+* Có vấn đề nào cần sửa ngay trước production không
+
+## 2. Findings
+
+Cho từng finding:
+
+* ID
+* Severity
+* Status: CONFIRMED BUG / RISK / SAFE...
+* Location
+* Current behavior
+* Vì sao có/không có vấn đề
+* Evidence từ code/call site
+* Production impact
+* Có nên sửa không: YES / NO / OPTIONAL
+* Cách sửa tối thiểu nếu YES
+* Rủi ro regression nếu sửa
+
+## 3. Những vấn đề ban đầu nhưng sau khi rà project thì KHÔNG cần sửa
+
+Giải thích vì sao safe.
+
+## 4. Thứ tự sửa đề xuất
+
+Chỉ liệt kê P0 / P1 / P2 / P3.
+
+## 5. Kế hoạch patch
+
+Chỉ mô tả file/method dự kiến cần thay đổi và test cần chạy.
+**Không thực hiện patch.**
+
+Cuối cùng dừng lại và chờ tôi phê duyệt trước khi sửa bất kỳ code nào.

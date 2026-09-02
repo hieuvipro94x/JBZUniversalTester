@@ -148,12 +148,12 @@ public sealed class BoardIoDecoder
             byte first = _buffer[_bufferOffset];
             byte second = _buffer[_bufferOffset + 1];
 
-            if (TryDecodeProtocolSource(first, second, out int sourceIo))
+            if (TryDecodeProtocolSource(first, second, out int physicalSourceIo))
             {
                 AppendRaw(first, second);
                 _bufferOffset += 2;
 
-                if (_capacity.ContainsGlobalIo(sourceIo))
+                if (_capacity.TryMapPhysicalToLogical(physicalSourceIo, out int sourceIo))
                 {
                     _currentSource = sourceIo;
                     _sourcesSeen.Add(sourceIo);
@@ -167,9 +167,9 @@ public sealed class BoardIoDecoder
                 continue;
             }
 
-            if (TryDecodeProtocolTarget(first, second, out int targetIo))
+            if (TryDecodeProtocolTarget(first, second, out int physicalTargetIo))
             {
-                if (_capacity.ContainsGlobalIo(targetIo) &&
+                if (_capacity.TryMapPhysicalToLogical(physicalTargetIo, out int targetIo) &&
                     _currentSource is int source)
                 {
                     _activeTargets.Add(targetIo);
@@ -273,12 +273,12 @@ public sealed class BoardIoDecoder
             byte first = _buffer[_bufferOffset];
             byte second = _buffer[_bufferOffset + 1];
 
-            if (TryDecodeProtocolProbeState(first, second, out int io, out bool active))
+            if (TryDecodeProtocolProbeState(first, second, out int physicalIo, out bool active))
             {
                 AppendRaw(first, second);
                 _bufferOffset += 2;
 
-                if (!_capacity.ContainsGlobalIo(io))
+                if (!_capacity.TryMapPhysicalToLogical(physicalIo, out int io))
                     continue;
 
                 // V12.9.2: protocol Probe được xử lý như event-based state.

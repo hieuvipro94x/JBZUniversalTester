@@ -55,13 +55,19 @@ public sealed class ThtModelParser
     }
 
     public ProductModel Load(string path)
+        => LoadAll(path).First();
+
+    public IReadOnlyList<ProductModel> LoadAll(string path)
     {
         ValidatePath(path);
 
         ThtArchiveDocument document = ReadArchive(path);
         ThtModelTables tables = ParseModelText(document.ModelText);
 
-        ProductModel model = BuildProductModel(path, tables, document.EmbeddedResistanceText);
+        int partCount = Math.Max(1, tables.Part.Rows.Count);
+        var models = new List<ProductModel>(partCount);
+        for (int partIndex = 0; partIndex < partCount; partIndex++)
+            models.Add(BuildProductModel(path, tables, document.EmbeddedResistanceText, partIndex));
 
         LastDiagnostics = new ThtLoadDiagnostics
         {
@@ -73,12 +79,12 @@ public sealed class ThtModelParser
             WireRowCount = tables.Wires.Rows.Count,
             FieldCount = document.Fields.Count,
             ViewCount = document.Views.Count,
-            ParsedPinCount = model.Pins.Count,
-            ParsedNetworkCount = model.Nets.Count,
-            ParsedResistanceStepCount = model.ResistanceSteps.Count
+            ParsedPinCount = models[0].Pins.Count,
+            ParsedNetworkCount = models[0].Nets.Count,
+            ParsedResistanceStepCount = models[0].ResistanceSteps.Count
         };
 
-        return model;
+        return models;
     }
 
     private static void ValidatePath(string path)
@@ -770,7 +776,8 @@ public sealed class ThtModelParser
     private static ProductModel BuildProductModel(
         string path,
         ThtModelTables tables,
-        string embeddedResistanceText)
+        string embeddedResistanceText,
+        int partIndex)
     {
         var model = new ProductModel
         {
@@ -778,7 +785,7 @@ public sealed class ThtModelParser
             SourcePath = Path.GetFullPath(path)
         };
 
-        ReadPartInformation(tables.Part, model);
+        ReadPartInformation(tables.Part, model, partIndex);
         model.LabelTemplate = new LabelTemplateDefinition(
             ExtractRawEplTemplate(tables.AllTables),
             1);
@@ -1155,9 +1162,12 @@ public sealed class ThtModelParser
 
     private static void ReadPartInformation(
         ThtTextTable partTable,
-        ProductModel model)
+        ProductModel model,
+        int partIndex)
     {
-        ThtTextRow? row = partTable.Rows.FirstOrDefault();
+        ThtTextRow? row = partTable.Rows.Count == 0
+            ? null
+            : partTable.Rows[Math.Clamp(partIndex, 0, partTable.Rows.Count - 1)];
 
         if (row is null)
         {

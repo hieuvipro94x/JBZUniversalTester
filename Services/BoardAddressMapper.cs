@@ -29,8 +29,8 @@ public sealed class BoardAddressMapper
         byte index,
         out int globalIo)
     {
-        if (!TryDecodeProtocolAddress(marker, markerBase, index, out globalIo) ||
-            !Capacity.ContainsGlobalIo(globalIo))
+        if (!TryDecodeProtocolAddress(marker, markerBase, index, out int physicalIo) ||
+            !Capacity.TryMapPhysicalToLogical(physicalIo, out globalIo))
         {
             globalIo = 0;
             return false;
@@ -72,7 +72,8 @@ public sealed class BoardAddressMapper
         if (!Capacity.ContainsGlobalIo(globalIo))
             return false;
 
-        int zeroBased = globalIo - 1;
+        int physicalIo = Capacity.MapLogicalToPhysical(globalIo);
+        int zeroBased = physicalIo - 1;
         int expansionCard = (zeroBased / BoardCapacity.IoPerExpansionCard) + 1;
         int port = ((zeroBased % BoardCapacity.IoPerExpansionCard) / BoardCapacity.IoPerPort) + 1;
         int localIo = (zeroBased % BoardCapacity.IoPerPort) + 1;

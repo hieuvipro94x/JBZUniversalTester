@@ -23,6 +23,9 @@ public sealed class ProductionSettings
     public int IoConfirmN { get; set; } = 1;
 
     public int UsbDelay { get; set; } = 1;
+    public bool BarcodeScannerEnabled { get; set; }
+    public string BarcodeScannerPort { get; set; } = string.Empty;
+    public int BarcodeScannerBaudRate { get; set; } = 9600;
 
     /// <summary>
     /// Trường chỉ để đọc tương thích CFG/database cũ. Runtime chuẩn luôn bắt đầu
@@ -217,6 +220,7 @@ public sealed class ProductionSettings
     // ============================================================
 
     public string LastThtPath { get; set; } = string.Empty;
+    public string LastThtPartKey { get; set; } = string.Empty;
 
     // ============================================================
     // ĐO ĐIỆN TRỞ R1-R10

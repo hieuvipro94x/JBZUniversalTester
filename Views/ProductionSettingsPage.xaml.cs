@@ -169,6 +169,9 @@ public partial class ProductionSettingsPage : UserControl
                 n,
                 n.ToString()))
             .ToArray();
+        StartCardComboBox.ItemsSource = Enumerable
+            .Range(1, BoardCapacity.MaxExpansionCardCount)
+            .ToArray();
 
         if (_vm.Settings.ExpansionCardCount <= 0)
         {
@@ -178,6 +181,10 @@ public partial class ProductionSettingsPage : UserControl
 
         _vm.Settings.ExpansionCardCount = Math.Clamp(
             _vm.Settings.ExpansionCardCount,
+            1,
+            BoardCapacity.MaxExpansionCardCount);
+        _vm.Settings.StartCardNumber = Math.Clamp(
+            _vm.Settings.StartCardNumber,
             1,
             BoardCapacity.MaxExpansionCardCount);
 
@@ -206,7 +213,14 @@ public partial class ProductionSettingsPage : UserControl
             ? selected
             : _vm.Settings.ExpansionCardCount;
         count = Math.Clamp(count, 1, BoardCapacity.MaxExpansionCardCount);
-        TotalIoCapacityText.Text = $"{count * BoardCapacity.IoPerExpansionCard} IO";
+        int start = StartCardComboBox?.SelectedItem is int selectedStart
+            ? selectedStart
+            : _vm.Settings.StartCardNumber;
+        start = Math.Clamp(start, 1, BoardCapacity.MaxExpansionCardCount);
+        int end = start + count - 1;
+        TotalIoCapacityText.Text = end <= BoardCapacity.MaxExpansionCardCount
+            ? $"{count * BoardCapacity.IoPerExpansionCard} IO • card {start}-{end}"
+            : $"VƯỢT GIỚI HẠN CARD {BoardCapacity.MaxExpansionCardCount}";
     }
 
     private async void RefreshPrinterPorts_Click(object sender, RoutedEventArgs e) =>
@@ -584,6 +598,13 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         }
 
+        if (_vm.Settings.StartCardNumber is < 1 or > BoardCapacity.MaxExpansionCardCount ||
+            _vm.Settings.StartCardNumber + _vm.Settings.ExpansionCardCount - 1 > BoardCapacity.MaxExpansionCardCount)
+        {
+            error = $"Card bắt đầu + số card mở rộng không được vượt card {BoardCapacity.MaxExpansionCardCount}.";
+            return false;
+        }
+
         BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
         if (!capacity.IsRangeWithinSystem)
         {
@@ -604,6 +625,14 @@ public partial class ProductionSettingsPage : UserControl
         if (_vm.Settings.UsbDelay is < 1 or > 16)
         {
             error = "USB Delay phải từ 1 đến 16 ms.";
+            return false;
+        }
+
+        if (_vm.Settings.BarcodeScannerEnabled &&
+            (string.IsNullOrWhiteSpace(_vm.Settings.BarcodeScannerPort) ||
+             _vm.Settings.BarcodeScannerBaudRate is < 1200 or > 921600))
+        {
+            error = "Barcode đang bật: phải nhập COM và baud 1200..921600.";
             return false;
         }
 
