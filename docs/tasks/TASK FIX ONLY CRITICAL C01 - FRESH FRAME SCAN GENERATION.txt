@@ -1,0 +1,575 @@
+TASK: FIX ONLY CRITICAL C01 - FRESH FRAME SCAN GENERATION
+
+Version hiện tại:
+V16.0.171
+
+C01 đã được READ-ONLY audit và CONFIRMED.
+
+MỤC TIÊU:
+Sửa race condition fresh-frame gate bằng scan generation/epoch.
+
+KHÔNG sửa bất kỳ issue nào khác.
+KHÔNG refactor ngoài phạm vi.
+KHÔNG thay TestEngine logic.
+KHÔNG thay protocol.
+KHÔNG thay scan timing.
+KHÔNG thay relay.
+KHÔNG thay Probe behavior.
+KHÔNG thay _DISCARD.
+KHÔNG tối ưu performance trong task này.
+
+==================================================
+ROOT CAUSE ĐÃ XÁC NHẬN
+==================================================
+
+BoardIoDecoder.Reset() reset:
+
+_sequence = 0
+
+nhưng TestViewModel vẫn giữ:
+
+_lastObservedProductionFrameSequence
+
+và khi ARM:
+
+_cycleStartFrameSequence =
+    _lastObservedProductionFrameSequence;
+
+Sau START_SCAN mới:
+
+stream cũ:
+Sequence = 50000
+
+decoder reset:
+Sequence = 0
+
+ARM trước frame mới:
+cycleStartSequence = 50000
+
+stream mới:
+Sequence = 1...
+
+Fresh-frame gate reject:
+
+frame.Sequence <= cycleStartSequence
+
+=> frame 1..50000 bị bỏ.
+
+Watchdog không phát hiện vì transport vẫn nhận complete frames.
+
+==================================================
+GIẢI PHÁP BẮT BUỘC
+==================================================
+
+Dùng SCAN GENERATION / STREAM EPOCH.
+
+Hiện D2xxBoardTransport đã có:
+
+_scanGeneration
+
+được tăng khi START_SCAN thật sự.
+
+Hãy tận dụng generation hiện có nếu kiến trúc cho phép,
+không tạo thêm một hệ generation thứ hai nếu không cần thiết.
+
+==================================================
+1. SCANFRAME PHẢI CÓ GENERATION
+==================================================
+
+Mở rộng ScanFrame để mang immutable:
+
+ScanGeneration
+
+hoặc tên tương đương rõ nghĩa.
+
+Một frame phải đại diện cho:
+
+(ScanGeneration, Sequence)
+
+Không thay semantics hiện tại của Sequence.
+
+==================================================
+2. GENERATION CHỈ TĂNG KHI CÓ STREAM MỚI THẬT
+==================================================
+
+Generation phải tăng khi:
+
+- một START_SCAN mới thực sự được tạo
+- decoder được reset để bắt đầu stream scan mới
+- reconnect tạo stream mới
+
+Không tăng khi:
+
+- EnsureProductionScanAsync chỉ reuse scan hiện tại
+- UI refresh
+- cycle ARM
+- model state update không restart hardware stream
+
+Audit lại caller để bảo đảm điều này.
+
+==================================================
+3. QUAN TRỌNG: FRAME CŨ KHÔNG ĐƯỢC NHẬN GENERATION MỚI
+==================================================
+
+Đây là phần concurrency quan trọng nhất.
+
+Nếu callback/frame của stream cũ đã được đọc/queued trước START_SCAN mới,
+nó phải giữ generation cũ.
+
+Không được làm kiểu:
+
+OnBoardFrameReceived(...)
+{
+    frame.Generation = _scanGeneration;
+}
+
+nếu _scanGeneration có thể đã đổi sau khi raw bytes của frame cũ được nhận.
+
+Generation phải được capture tại đúng boundary của stream/decoder.
+
+Hãy thiết kế sao cho:
+raw frame thuộc stream nào thì mang generation của stream đó.
+
+==================================================
+4. FRESH FRAME BASELINE
+==================================================
+
+TestViewModel không được chỉ lưu:
+
+cycleStartSequence
+
+mà phải lưu baseline:
+
+cycleStartGeneration
+cycleStartSequence
+
+hoặc struct/value tương đương.
+
+Khi ARM:
+
+baseline =
+(
+    lastObservedGeneration,
+    lastObservedSequence
+)
+
+==================================================
+5. ACCEPTANCE RULE
+==================================================
+
+Đối với Production frame:
+
+IF frame.Generation > baseline.Generation:
+    frame thuộc stream mới
+    => frame complete hợp lệ đầu tiên được phép mở fresh-frame gate
+
+ELSE IF frame.Generation == baseline.Generation:
+    chỉ accept nếu:
+    frame.Sequence > baseline.Sequence
+
+ELSE:
+    frame thuộc generation cũ/stale
+    => reject
+
+Không dùng Sequence để so sánh xuyên generation.
+
+==================================================
+6. GENERATION WRAP / INITIAL VALUE
+==================================================
+
+Kiểm tra kiểu dữ liệu generation.
+
+Ưu tiên long/ulong nếu phù hợp.
+
+Startup phải có behavior xác định rõ:
+
+Generation 0 hoặc initial generation
+không được vô tình làm frame đầu bị reject.
+
+Không cần over-engineer wrap nếu dùng 64-bit,
+nhưng logic không được dựa vào arithmetic dễ overflow.
+
+==================================================
+7. LAST OBSERVED FRAME
+==================================================
+
+_lastObservedProductionFrameSequence hiện tại phải được thay/mở rộng thành:
+
+last observed generation + sequence.
+
+Khi nhận frame Production hợp lệ:
+
+LastObserved =
+(frame.Generation, frame.Sequence)
+
+Không được để frame generation cũ chạy muộn
+ghi đè LastObserved của generation mới.
+
+Rule:
+
+Nếu generation mới hơn:
+    update
+
+Nếu cùng generation và sequence mới hơn:
+    update
+
+Nếu generation cũ:
+    ignore for baseline tracking.
+
+==================================================
+8. PROBE
+==================================================
+
+Probe hiện chạy trước fresh-frame gate.
+
+Giữ nguyên behavior.
+
+Không được vì thêm ScanGeneration mà:
+- làm Probe chậm
+- chặn Probe frame
+- thay DetectMany
+- thay Probe state machine
+
+Nhưng ScanFrame Probe vẫn nên mang generation đúng
+nếu cùng model/frame type sử dụng field chung.
+
+==================================================
+9. PRODUCT REMOVAL
+==================================================
+
+Giữ behavior hiện tại.
+
+Background removal xử lý trước gate:
+không được thay.
+
+Production removal downstream:
+sau fix phải tự nhiên nhận frame của generation mới đúng.
+
+Không viết workaround riêng cho removal.
+
+==================================================
+10. RECONNECT
+==================================================
+
+Bắt buộc test:
+
+old generation 10
+sequence 50000
+
+USB disconnect/reconnect
+
+new generation 11
+sequence 1
+
+Frame (11,1) phải được chấp nhận.
+
+Frame cũ (10,50001) đến muộn phải bị reject.
+
+==================================================
+11. CAPACITY CHANGE
+==================================================
+
+Test:
+
+10 card
+generation 20
+sequence 50000
+
+đổi model thành 2 card
+
+START stream mới:
+generation 21
+sequence 1
+
+ARM trước frame mới.
+
+Frame (21,1) phải mở gate ngay.
+
+Không chờ Sequence vượt 50000.
+
+==================================================
+12. SAME STREAM / NEW CYCLE
+==================================================
+
+Đây cũng rất quan trọng.
+
+Nếu KHÔNG restart scan:
+
+generation = 30
+sequence hiện tại = 1000
+
+ARM:
+baseline = (30,1000)
+
+frame:
+(30,1001)
+
+=> accept.
+
+Frame:
+(30,1000)
+
+=> reject stale.
+
+Như vậy fresh-frame protection cũ vẫn được giữ.
+
+==================================================
+13. REUSED SCAN
+==================================================
+
+Nếu EnsureProductionScanAsync nhận thấy scan hiện tại đã đúng:
+
+KHÔNG tạo stream mới
+KHÔNG tăng generation.
+
+Fresh-frame gate phải tiếp tục dùng Sequence trong cùng generation.
+
+==================================================
+14. START_SCAN FAILURE
+==================================================
+
+Nếu generation được increment nhưng START_SCAN thất bại:
+
+audit behavior rất kỹ.
+
+Không để ViewModel tin rằng stream mới tồn tại
+trong khi hardware chưa start.
+
+Generation publication phải có lifecycle rõ ràng.
+
+Nếu cần:
+reserve generation
+→ successful stream start
+→ publish/use generation
+
+Nhưng không redesign transport lớn.
+
+Chọn implementation tối thiểu và race-safe.
+
+==================================================
+REGRESSION TESTS BẮT BUỘC
+==================================================
+
+Thêm self-tests cho ít nhất:
+
+TEST 1:
+Same generation fresh sequence
+
+baseline:
+(G=5,S=100)
+
+frame:
+(G=5,S=101)
+
+=> ACCEPT
+
+TEST 2:
+Same generation stale sequence
+
+baseline:
+(G=5,S=100)
+
+frame:
+(G=5,S=100)
+
+=> REJECT
+
+TEST 3:
+New generation sequence reset
+
+baseline:
+(G=5,S=50000)
+
+frame:
+(G=6,S=1)
+
+=> ACCEPT
+
+Đây là regression chính của C01.
+
+TEST 4:
+Old generation delayed callback
+
+current/baseline:
+(G=6,S=5)
+
+late frame:
+(G=5,S=50001)
+
+=> REJECT
+
+TEST 5:
+New generation ARM-before-first-frame
+
+last observed:
+(G=10,S=50000)
+
+START new stream G=11
+ARM xảy ra trước frame mới
+
+frame:
+(G=11,S=1)
+
+=> ACCEPT
+
+TEST 6:
+No restart / same generation
+
+observed:
+(G=20,S=1000)
+
+ARM:
+baseline same
+
+frame:
+(G=20,S=1001)
+
+=> ACCEPT
+
+TEST 7:
+Reconnect generation boundary
+
+old:
+(G=30,S=9000)
+
+new:
+(G=31,S=1)
+
+=> ACCEPT
+
+TEST 8:
+Capacity change generation boundary
+
+10 card old generation
+→ capacity change
+→ 2 card new generation sequence 1
+
+=> ACCEPT
+
+TEST 9:
+Delayed old frame must not update LastObserved
+
+LastObserved:
+(G=40,S=5)
+
+late:
+(G=39,S=99999)
+
+LastObserved phải vẫn:
+(G=40,S=5)
+
+TEST 10:
+Scan reuse must not increment generation.
+
+==================================================
+PERFORMANCE REQUIREMENT
+==================================================
+
+Fix C01 nằm trong hot path.
+
+Không:
+- allocate object/frame chỉ để compare generation
+- LINQ/frame
+- lock nặng/frame
+- Dispatcher/frame
+- Task/frame
+
+Generation comparison phải gần O(1).
+
+Không làm tăng đáng kể allocation/frame.
+
+==================================================
+LOGGING
+==================================================
+
+Có thể bổ sung log Diagnostic tối thiểu khi:
+
+- stream generation mới bắt đầu
+- fresh gate ARM baseline
+- frame đầu generation mới mở gate
+- stale old-generation frame bị reject
+
+KHÔNG log mỗi frame.
+
+Ví dụ:
+
+[SCAN_GEN] START G=21 Cards=10
+[FRESH_GATE] ARM G=20 S=50000
+[FRESH_GATE] ACCEPT_NEW_GEN G=21 S=1
+
+Không spam.
+
+==================================================
+FILES
+==================================================
+
+Dự kiến chỉ sửa tối thiểu các file thực sự cần:
+
+Models/TestModels.cs
+Services/BoardIoDecoder.cs nếu cần truyền generation
+Services/D2xxBoardTransport.cs
+ViewModels/TestViewModel.cs
+Tests/Program.cs
+
+Nếu cần file khác:
+giải thích trước trong final report.
+
+Không tạo backup files.
+
+==================================================
+BUILD / TEST
+==================================================
+
+Sau sửa:
+
+dotnet build -c Release
+
+phải:
+0 warnings
+0 errors
+
+Chạy toàn bộ self-tests.
+
+42 test cũ phải tiếp tục PASS.
+
+Regression tests C01 mới phải PASS.
+
+Report tổng:
+ví dụ 52/52 PASS nếu thêm 10 test.
+
+==================================================
+VERSION
+==================================================
+
+Chỉ sau khi:
+- build PASS
+- tất cả tests PASS
+
+mới tăng version một lần theo convention hiện tại.
+
+Không tăng version nhiều lần trong quá trình sửa.
+
+==================================================
+FINAL REPORT
+==================================================
+
+Báo cáo:
+
+1. Root cause
+2. Files changed
+3. Exact generation ownership
+4. Khi nào generation increment
+5. Khi nào generation không increment
+6. Fresh-frame comparison rule mới
+7. Cách chống delayed old frame
+8. Reconnect behavior
+9. Capacity-change behavior
+10. Same-stream behavior
+11. Performance impact
+12. Regression tests
+13. Build result
+14. Self-test result
+15. Version mới
+16. git diff summary
+
+Không sửa C02/C03/C04 hoặc bất kỳ audit issue khác trong task này.

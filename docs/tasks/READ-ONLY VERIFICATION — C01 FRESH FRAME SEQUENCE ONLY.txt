@@ -1,0 +1,71 @@
+READ-ONLY VERIFICATION — C01 FRESH FRAME SEQUENCE ONLY
+
+KHÔNG SỬA CODE.
+KHÔNG tăng version.
+KHÔNG format/refactor.
+
+Audit lại duy nhất Critical C01 trong V16.0.171.
+
+Mục tiêu:
+Chứng minh hoặc bác bỏ rằng BoardIoDecoder.Reset() reset frame Sequence về 0
+trong khi TestViewModel fresh-frame baseline vẫn giữ sequence cũ.
+
+Phải trace chính xác:
+
+1. BoardIoDecoder.Reset()
+2. mọi caller của Reset()
+3. ConfigureActiveScanRange
+4. START/STOP/restart scan
+5. reconnect
+6. model change / capacity change
+7. Begin cycle / ARM
+8. _lastObservedProductionFrameSequence
+9. cycleStartSequence
+10. điều kiện:
+   frame.Sequence <= cycleStartSequence
+
+Tạo timeline cụ thể:
+
+Case:
+- scan lâu tới Sequence=50000
+- đổi model hoặc active card count
+- decoder.Reset()
+- START_SCAN mới
+- frame đầu Sequence=1
+
+Hãy chứng minh bằng code:
+
+A. frame 1 có bị reject không?
+B. frame 2...50000 có bị reject không?
+C. biến nào cuối cùng cho phép gate mở lại?
+D. có timeout/recovery nào reset baseline trước đó không?
+E. Probe có bị ảnh hưởng không?
+F. Product removal có bị ảnh hưởng không?
+G. reconnect có bị ảnh hưởng không?
+
+Tìm mọi nơi assign:
+
+_sequence
+_lastObservedProductionFrameSequence
+cycleStartSequence
+fresh-frame generation
+scan generation
+
+BÁO CÁO:
+
+- CONFIRMED CRITICAL
+hoặc
+- PARTIALLY CONFIRMED
+hoặc
+- FALSE POSITIVE
+
+Nếu CONFIRMED:
+ghi chính xác File/Class/Method/line và đề xuất fix concept tối thiểu.
+
+ĐẶC BIỆT:
+Đánh giá giải pháp scan-generation token thay vì chỉ set sequence=0.
+
+KHÔNG IMPLEMENT.
+
+Cuối task:
+git diff phải rỗng.

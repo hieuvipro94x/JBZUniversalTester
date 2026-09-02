@@ -1,0 +1,2911 @@
+TASK: FULL SYSTEM AUDIT - JBZUniversalTester V16.0.171
+
+CHỈ PHÂN TÍCH / TRACE / ĐÁNH GIÁ.
+TUYỆT ĐỐI KHÔNG SỬA CODE.
+
+Mục tiêu:
+Audit TOÀN BỘ phần mềm hiện tại như một hệ thống kiểm tra sản xuất thực tế,
+không chỉ riêng tính năng _DISCARD.
+
+Phải tìm:
+- lỗi logic
+- lỗi kiến trúc
+- race condition
+- deadlock
+- UI freeze
+- memory leak
+- resource leak
+- sai state machine
+- lỗi timing
+- stale frame
+- duplicate frame
+- lỗi reconnect
+- lỗi shutdown
+- lỗi model switching
+- lỗi PASS/FAIL
+- lỗi relay
+- lỗi scan
+- lỗi mapping IO
+- lỗi Master
+- lỗi Probe
+- lỗi Resistance
+- lỗi Leak
+- lỗi Label
+- lỗi History
+- lỗi Counter
+- lỗi _DISCARD
+- lỗi persistence
+- lỗi password/security
+- lỗi compatibility với model cũ
+- vấn đề performance
+- các điểm chưa tối ưu
+- các giới hạn sản xuất hiện tại
+
+==================================================
+0. QUY TẮC BẮT BUỘC
+==================================================
+
+KHÔNG:
+- edit file
+- apply patch
+- auto-fix
+- format code
+- refactor
+- rename
+- cleanup
+- tăng version
+- tạo backup
+- tạo migration
+- thay config
+- thay test
+
+Không được sửa dù phát hiện CRITICAL bug.
+
+Chỉ báo cáo và đề xuất hướng sửa.
+
+Trước khi kết luận:
+- đọc code thực tế
+- trace caller/callee
+- kiểm tra state
+- kiểm tra async/threading
+- kiểm tra lifecycle
+
+Không suy luận chỉ từ tên method/comment.
+
+==================================================
+1. STARTUP / APPLICATION LIFECYCLE
+==================================================
+
+Audit từ:
+
+Program/App startup
+  ->
+MainWindow
+  ->
+hardware initialization
+  ->
+board connection
+  ->
+model restore
+  ->
+background scan
+  ->
+TestWindow
+
+Kiểm tra:
+
+- startup race
+- model load trước BO
+- BO connect trước model
+- auto load model gần nhất
+- reconnect startup
+- duplicate initialization
+- InitializeHardwareAsync gọi nhiều lần
+- task cache sai
+- exception startup
+- startup offline
+- startup khi driver/BO mất
+- UI first render có bị block không
+- synchronous disk/database/audio work trên UI thread
+
+Đánh giá startup có deterministic hay không.
+
+==================================================
+2. BOARD CONNECTION / D2XX / SERIAL
+==================================================
+
+Audit toàn bộ:
+
+IBoardTransport
+D2XX implementation
+ConnectAsync
+DisconnectAsync
+FrameReceived
+Log
+StartScan
+StopScan
+Reset
+relay commands
+handshake
+
+Kiểm tra:
+
+- multiple ConnectAsync
+- reconnect cùng lúc
+- reconnect khi scan đang chạy
+- disconnect giữa frame
+- FT handle leak
+- stale handle
+- double close
+- command gửi sau disconnect
+- thread safety
+- cancellation
+- timeout
+- unexpected firmware response
+- partial frame
+- USB unplug/replug
+
+Xác định chính xác:
+IsConnected được thay đổi ở đâu.
+
+==================================================
+3. BOARD CAPACITY / 32-64-128 IO MAPPING
+==================================================
+
+Audit cực kỹ mapping.
+
+Mapping vật lý thực tế đã xác nhận:
+
+NHÌN TRỰC DIỆN:
+
+[ IO 1-32 ]     [ IO 65-96 ]
+
+[ IO 33-64 ]    [ IO 97-128 ]
+
+Tức:
+
+cột trái:
+1-32
+33-64
+
+cột phải:
+65-96
+97-128
+
+Kiểm tra:
+
+BoardCapacity
+IoPerExpansionCard
+ScanCardCount
+MaxExpansionCardCount
+TotalIoCapacity
+Global IO
+Local IO
+Protocol Bank
+card offset
+connector offset
+frame bank
+
+Không được giả định:
+1 connector 32 IO = 1 protocol bank.
+
+Kiểm tra boundary:
+
+1
+32
+33
+64
+65
+96
+97
+128
+129
+
+Tìm:
+- zero-based/one-based bug
+- overlap
+- gap
+- +32 sai
+- +64 sai
+- +128 sai
+- card đảo
+- bank đảo
+
+==================================================
+4. RAW FRAME DECODER
+==================================================
+
+Trace:
+
+raw FTDI bytes
+ ->
+frame parser
+ ->
+ScanFrame
+ ->
+ActiveIo / connections
+ ->
+TestEngine / Probe / Discard
+
+Audit:
+
+- source/target byte
+- bank
+- index
+- malformed frame
+- UnknownBytes
+- Complete
+- duplicate sequence
+- out-of-order sequence
+- stale pre-cycle frames
+- direction normalization
+
+Đối chiếu Production và Probe.
+
+Không được decode Probe như Production.
+
+==================================================
+5. SCAN SUPERVISOR
+==================================================
+
+Audit:
+
+ScanSupervisor
+EnsureProductionScanAsync
+StartProductionScanAndVerifyFrameAsync
+RecoverProductionScanStallAsync
+
+Kiểm tra:
+
+- scan range đúng MaxIo
+- scan range khi _DISCARD cao hơn product
+- restart scan
+- unnecessary STOP/START
+- scan mode reuse
+- stall watchdog
+- false stall detection
+- reconnect storm
+- multiple recovery chạy đồng thời
+- stale frame sau restart
+
+Đánh giá ảnh hưởng timing.
+
+==================================================
+6. MODEL SELECTION
+==================================================
+
+Audit:
+
+CHỌN MÃ HÀNG
+OpenFileDialog
+model path
+LastThtPath
+LoadSelectedModelFromPathAsync
+LoadLastTestedModelAsync
+
+Kiểm tra:
+
+- operator chọn model trong lúc auto-load model cũ
+- generation protection
+- chọn liên tục hai model
+- Cancel
+- file bị xóa giữa parse
+- malformed file
+- model reload
+- model A -> B
+- B -> A
+- model đang test có được đổi không
+
+Model cũ tuyệt đối không được ghi đè model mới.
+
+==================================================
+7. THT PARSER
+==================================================
+
+Audit toàn bộ parser:
+
+- Connector
+- Pin
+- IO
+- WireName
+- Color
+- Section
+- CLIP
+- A0/AO/a1/a2...
+- resistance
+- leak
+- label
+- _DISCARD
+- metadata
+
+Kiểm tra:
+
+- duplicate IO
+- duplicate wire
+- blank wire
+- numeric wire
+- alphanumeric wire
+- malformed row
+- Korean text
+- encoding
+- whitespace
+- duplicate connector
+- sparse IO
+
+Parser không được silently biến dữ liệu lỗi thành topology sai.
+
+==================================================
+8. CONNECTOR / PIN / GLOBAL IO DISPLAY
+==================================================
+
+Đối chiếu:
+
+THT parser
+ ->
+ProductModel
+ ->
+FindPinByIo / FindPinsByIo
+ ->
+TestWindow
+
+Kiểm tra:
+
+- một connector nhiều pin
+- duplicate IO mapping
+- cùng IO nhiều pin
+- WireName số/chữ
+- connector numbering
+- local pin vs Global IO
+
+Probe và Production phải cùng lookup mapping.
+
+==================================================
+9. CLIP / A0-A1-A2...
+==================================================
+
+Audit riêng topology nối chung.
+
+Expected:
+A0/AO = common
+a1/a2/a3 = branches
+
+Kiểm tra:
+
+- common IO
+- branch IO
+- branch removal
+- nhiều branch đang thông
+- chỉ một branch thông
+- duplicate branch
+- scan nhanh
+- release
+
+Không được biến CLIP thành short circuit giả.
+
+==================================================
+10. TESTENGINE
+==================================================
+
+Audit toàn bộ TestEngine nhưng KHÔNG sửa.
+
+Trace:
+
+ScanFrame
+ ->
+debounce/stability
+ ->
+expected nets
+ ->
+passed nets
+ ->
+fault candidate
+ ->
+fault confirmation
+ ->
+continuity pass
+
+Kiểm tra:
+
+- stable frame logic
+- transient contact
+- duplicate frames
+- missed frames
+- product activity
+- product removal
+- candidate -> confirmed
+- confirmed -> reset
+- stale candidate
+- cycle reset
+
+Phải xác định mọi điều kiện tạo:
+Wrong
+Short
+Open/Missing
+ContinuityPassed.
+
+==================================================
+11. OPEN / MISSING CONNECTION
+==================================================
+
+Hiện Production được thiết kế:
+missing/open không tạo product FAIL.
+
+Audit xem có path nào còn:
+
+OPEN
+ ->
+FaultGrid
+ ->
+FAIL
+ ->
+popup
+ ->
+history
+
+ngoài legacy/master context không.
+
+Nếu Production còn path tạo OPEN FAIL:
+report HIGH/CRITICAL.
+
+==================================================
+12. WRONG WIRING
+==================================================
+
+Trace từ raw frame đến:
+
+candidate
+ ->
+confirmation
+ ->
+FAIL
+ ->
+history
+ ->
+password
+ ->
+JIG
+ ->
+discard nếu enabled
+ ->
+product removal
+ ->
+new cycle
+
+Kiểm tra:
+- duplicate popup
+- double FAIL
+- duplicate history
+- repeated sound
+- relay double pulse
+- race với Probe
+
+==================================================
+13. SHORT CIRCUIT
+==================================================
+
+Làm tương tự WRONG.
+
+Đặc biệt:
+- Probe fanout không được thành SHORT
+- CLIP không được thành SHORT
+- _DISCARD không được thành SHORT
+
+==================================================
+14. PROBE / TEST PIN
+==================================================
+
+Audit:
+
+ProbeContactClassifier
+ProbeStateTracker
+inline Probe
+ProbeContacts
+FaultGrid integration
+sound
+
+Kiểm tra:
+
+- TOUCH
+- RELEASE
+- 1 IO
+- 2 IO
+- rapid touch
+- rapid release
+- fanout
+- false short
+- stale probe
+- contact giữ lâu
+- production đang chạy đồng thời
+
+Probe chỉ là observer.
+Không được đổi production result.
+
+==================================================
+15. PROBE RELAY INTERLOCK
+==================================================
+
+Audit 40ms release debounce.
+
+Kiểm tra:
+
+- PASS đang chuẩn bị relay nhưng Probe vừa release
+- relay được kích quá sớm
+- debounce quá dài
+- stale timestamp
+- tick overflow không vấn đề
+- cancellation
+
+==================================================
+16. MASTER GOOD
+==================================================
+
+Audit toàn state machine:
+
+WaitingGoodMaster
+TestingGoodMaster
+EjectingGoodMaster
+
+Kiểm tra:
+- GOOD có wiring fault
+- resistance fail
+- remove sớm
+- pass
+- eject
+- scan restart
+- duplicate master history
+- production counters
+
+MASTER không được tăng LOT/Pass/Fail production.
+
+==================================================
+17. MASTER BAD
+==================================================
+
+Audit:
+
+WaitingBadMaster
+TestingBadMaster
+EjectingBadMaster
+
+Kiểm tra:
+- unique fault count
+- cùng lỗi lặp frame
+- Short -> Wrong detail upgrade
+- settle delay
+- removal
+- N/N gate
+- duplicate eject
+- premature Production unlock
+
+MASTER BAD fault là expected evidence,
+không phải product FAIL.
+
+==================================================
+18. MASTER -> PRODUCTION TRANSITION
+==================================================
+
+Audit:
+
+CompleteMasterValidation
+
+Kiểm tra:
+- reset engine reentry
+- production phase
+- scan
+- MasterApproved
+- stale master fault
+- FaultGrid cleanup
+- first production frame
+
+==================================================
+19. PRODUCTION CYCLE STATE MACHINE
+==================================================
+
+Vẽ chính xác state machine hiện tại:
+
+WaitingProduct
+Continuity
+Resistance
+WaterProof
+WaitingFaultConfirmation
+WaitingProductRemoval
+Completed
+EquipmentError
+
+Tìm:
+- impossible state
+- missing transition
+- transition không atomic
+- state overwrite
+- async continuation ghi state cũ
+
+==================================================
+20. PRODUCT DETECTION
+==================================================
+
+Audit:
+HasProductActivity
+ProductStable
+ReadyToEvaluateProductFaults
+
+Kiểm tra:
+- lắp một phần
+- lắp từ từ
+- tháo một phần
+- rung contact
+- sản phẩm chỉ có 1-2 net
+- product false-positive từ Probe/_DISCARD
+
+==================================================
+21. PRODUCT REMOVAL
+==================================================
+
+Audit:
+
+IsProductReleased
+ProductRemovalPending
+_waitForProductRelease
+_waitForFaultProductRemoval
+
+Kiểm tra:
+
+- mất 1 net không được coi là tháo hoàn toàn
+- chỉ khi toàn bộ product continuity mất
+- background removal monitoring
+- quay Main khi sản phẩm còn JIG
+- reopen TestWindow
+- double reset
+- cycle rearm quá sớm
+
+==================================================
+22. AUTOMATIC PASS FLOW
+==================================================
+
+Trace:
+
+ContinuityPassed
+ ->
+Resistance optional
+ ->
+Leak optional
+ ->
+Probe relay interlock
+ ->
+CompletePassAsync
+ ->
+Marking
+ ->
+JIG
+ ->
+history
+ ->
+label
+ ->
+removal
+
+Audit từng await.
+
+PASS chỉ được commit một lần.
+
+==================================================
+23. PASS RELAY / MARKING
+==================================================
+
+CRITICAL.
+
+Audit:
+RelayWiringMode
+PassMarkingRelayEnabled
+JigEjectRelayEnabled
+
+Kiểm tra:
+
+- đúng relay vật lý
+- pulse đúng 1 lần
+- MARKING chỉ PASS
+- FAIL không được MARKING
+- Master không MARKING
+- manual không để relay sót ON
+- exception -> OFF
+
+Bất kỳ path FAIL -> MARKING:
+CRITICAL.
+
+==================================================
+24. FAIL JIG EJECT
+==================================================
+
+Audit:
+Wrong
+Short
+Resistance
+Leak
+
+Kiểm tra:
+- JIG relay đúng
+- không marking
+- pulse đúng 1 lần
+- exception
+- scan restart
+- removal monitor
+
+==================================================
+25. RESISTANCE TEST
+==================================================
+
+Audit:
+
+ResistanceMeasurementPlan
+Keysight connection
+MeasureResistanceAsync
+stability
+range comparison
+units
+OPEN handling
+
+Kiểm tra:
+- min/max
+- boundary equal
+- NaN
+- infinity
+- timeout
+- Keysight disconnect
+- retry
+- multiple channels
+- async cancellation
+
+Resistance FAIL phải đi đúng FAIL flow.
+
+==================================================
+26. TEMPERATURE / NTC
+==================================================
+
+Nếu code hiện tại còn temperature:
+audit:
+
+ADC
+ ->
+R
+ ->
+table
+ ->
+temperature
+
+Kiểm tra:
+- đúng bảng NTC
+- units
+- interpolation
+- range
+- invalid ADC
+- divide by zero
+
+Nếu không dùng Production:
+ghi rõ inactive.
+
+==================================================
+27. WATERPROOF / LEAK
+==================================================
+
+Audit:
+
+COM
+machine profile
+pressurize
+wait
+measure
+evaluation
+RESULT
+channel states
+
+Kiểm tra:
+- COM disconnect
+- malformed line
+- timeout
+- retry
+- multiple tests liên tục
+- stale result
+- baseline
+- UI update
+- cancellation
+- cleanup
+
+Leak FAIL phải:
+- FAIL đúng một lần
+- không MARKING
+- đi discard nếu configured
+
+==================================================
+28. _DISCARD
+==================================================
+
+Audit đầy đủ module V16.0.171.
+
+Bao gồm:
+
+parser
+2 IO exact
+scan range
+TestEngine isolation
+frame direction 97->98 / 98->97
+OPEN->CLOSED->OPEN
+sensor initially closed
+DRIP
+password
+product removal
+unlock
+board disconnect
+model change
+restart
+RAM-only limitation
+
+Đặc biệt kiểm tra:
+_FAIL + discard không bao giờ chạy MARKING_.
+
+==================================================
+29. DISCARD PASSWORD
+==================================================
+
+Audit:
+DiscardPassword CFG
+
+- empty
+- null
+- wrong password
+- cancel
+- close dialog
+- log exposure
+- plaintext
+- reload settings
+- legacy CFG
+
+Password không được tự complete discard state.
+
+==================================================
+30. FAULT CONFIRMATION WINDOW
+==================================================
+
+Audit:
+
+Wrong
+Short
+Resistance
+Leak
+Discard Password
+
+Kiểm tra:
+- modal owner
+- close X
+- cancel
+- multiple dialogs
+- stale window
+- UI freeze
+- popup duplicate
+
+==================================================
+31. SOUND SYSTEM
+==================================================
+
+Audit:
+
+CLICK
+TICK
+START
+TESTPOINT
+STAGEOK
+DRIP
+DINGDONG*
+etc.
+
+Kiểm tra:
+- missing WAV
+- exception
+- overlapping sounds
+- repeated playback
+- background thread
+- cleanup
+
+Sound failure không được thay đổi logic test.
+
+==================================================
+32. 4 STATUS LED
+==================================================
+
+Audit:
+
+Yellow
+White
+Green
+Red
+
+Expected current behavior:
+
+Yellow:
+real scan activity
+
+White:
+communication activity
+
+Green:
+BO disconnected -> OFF
+BO connected -> ON
+PASS -> blink 3 lần -> trở lại ON nếu BO connected
+
+Red:
+FAIL -> ON
+new cycle -> OFF
+
+Kiểm tra:
+- timer leak
+- task leak
+- duplicate handlers
+- window reopen
+- board disconnect during blink
+- PASS rapid
+- UI Dispatcher flooding
+
+LED chỉ presentation.
+
+==================================================
+33. BOARD CONNECTION STATUS UI
+==================================================
+
+Audit riêng ô:
+CHƯA KẾT NỐI BO
+
+Không được lẫn với Green/Red LED nhỏ.
+
+==================================================
+34. TESTWINDOW
+==================================================
+
+Audit:
+- layout
+- DataGrid
+- responsive scaling
+- scrolling
+- FaultGrid
+- Probe rows
+- Master rows
+- clock
+- status banner
+- UI Dispatcher
+
+Tìm:
+- UI freeze
+- layout thrashing
+- update quá thường
+- Dispatcher backlog
+
+==================================================
+35. MAINWINDOW
+==================================================
+
+Audit:
+- chọn model
+- start test
+- history
+- settings
+- navigation
+- button locks
+- offline mode
+
+Không được mở Test nếu state không hợp lệ.
+
+==================================================
+36. OFFLINE MODE
+==================================================
+
+Audit:
+XEM MÃ HÀNG OFFLINE
+
+Phải:
+- không scan
+- không relay
+- không PASS/FAIL
+- không history
+- không counter
+
+Chỉ xem model/UI.
+
+==================================================
+37. HISTORY
+==================================================
+
+Audit:
+
+SQLite
+legacy PHT
+production result
+master result
+removal timing
+
+Kiểm tra:
+- duplicate commit
+- transaction
+- crash giữa commit
+- partial history
+- failed persistence
+- history exception làm dừng test
+- cycle id uniqueness
+
+==================================================
+38. COUNTERS / LOT
+==================================================
+
+Audit:
+
+Total
+Pass
+Fail
+Rate
+Daily
+Monthly
+Lifetime
+Probe counter
+Lot sequence
+
+Kiểm tra:
+- increment đúng 1 lần
+- MASTER không tăng
+- Probe không tăng production
+- _DISCARD không tăng thêm
+- failed DB không duplicate khi retry
+
+==================================================
+39. LABEL PRINTING
+==================================================
+
+Audit:
+
+PASS label
+printer connect
+COM
+retry
+reprint
+preview
+EPL
+
+Kiểm tra:
+- label chỉ PASS
+- FAIL không print PASS
+- duplicate print
+- print failure
+- retry
+- history print status
+- printer exception
+
+Label error không được gọi _DISCARD.
+
+==================================================
+40. LABEL TEMPLATE / EXTERNAL COORDINATES
+==================================================
+
+Nếu hiện tại còn hỗ trợ:
+audit cách lấy tọa độ/template ngoài.
+
+Không được silently in sai layout.
+
+==================================================
+41. SETTINGS
+==================================================
+
+Audit:
+
+Production Settings
+Board
+Relay
+Leak
+Resistance
+Label
+DiscardPassword
+Master
+
+Kiểm tra:
+- validation
+- save
+- reload
+- defaults
+- legacy CFG
+- missing key
+- corrupted CFG
+
+==================================================
+42. SINGLE CFG RULE
+==================================================
+
+Kiểm tra có thực sự chỉ một nguồn CFG production không.
+
+Tìm:
+- duplicated CFG
+- old path
+- local path
+- runtime path
+- startup path
+
+Nếu hai config khác nhau có thể được load:
+HIGH.
+
+==================================================
+43. MANUAL MODE
+==================================================
+
+Audit:
+
+Relay1
+Relay2
+AllOff
+Reset
+Manual resistance
+
+Kiểm tra:
+- entry interlock
+- production running
+- Probe
+- FAIL pending
+- discard pending
+- relay safe OFF
+- return production scan
+
+Manual không được bypass safety gate.
+
+==================================================
+44. DEVICE FAULT
+==================================================
+
+Audit:
+
+EnterDeviceFault
+dialog
+hardware lock
+restart requirement
+
+Kiểm tra:
+- multiple dialog
+- multiple state transition
+- recovery
+- relay OFF
+- scan stop
+- history corruption
+
+==================================================
+45. BOARD STALL WATCHDOG
+==================================================
+
+Audit:
+LastFrameTimestamp
+timeout
+recover
+DeviceFault escalation
+
+Kiểm tra:
+- false positive trên board chậm
+- no frame idle
+- stall during relay
+- stall during Leak/Resistance
+- reconnect overlap
+
+==================================================
+46. ASYNC / CANCELLATION
+==================================================
+
+Toàn project tìm:
+
+async void
+Task.Run
+Task.Delay
+CancellationTokenSource
+.Wait()
+.Result
+Thread.Sleep
+Dispatcher.Invoke
+Dispatcher.BeginInvoke
+
+Đánh giá từng nơi nguy hiểm.
+
+Tìm:
+- fire-and-forget exception
+- disposed CTS
+- stale task ghi UI
+- cycle cũ ảnh hưởng cycle mới
+
+==================================================
+47. THREAD SAFETY
+==================================================
+
+Audit shared fields giữa:
+
+FrameReceived thread
+UI thread
+hardware monitor
+FAIL async flow
+resistance
+leak
+master
+discard
+
+Tìm:
+- bool không synchronized
+- collection access cross-thread
+- stale reads
+- double command
+- double history commit
+
+==================================================
+48. DEADLOCK / UI FREEZE
+==================================================
+
+Tìm tất cả:
+.Wait()
+.Result
+Dispatcher.Invoke
+lock + await
+SemaphoreSlim
+synchronous COM/D2XX call trên UI
+
+Lập danh sách path có thể freeze.
+
+==================================================
+49. MEMORY / RESOURCE LEAK
+==================================================
+
+Audit:
+
+events
+Timers
+CTS
+SerialPort
+FTDI handles
+VISA
+SQLite
+FileSystemWatcher
+audio
+Window refs
+
+TestWindow mở/đóng 100 lần không được duplicate handler.
+
+==================================================
+50. PERFORMANCE HOT PATH
+==================================================
+
+Đặc biệt:
+
+OnBoardFrameReceived
+TestEngine.ProcessFrame
+Probe classifier
+Discard detection
+UI scheduling
+logging
+
+Tìm:
+- LINQ/frame
+- allocation/frame
+- string/frame
+- JSON/frame
+- Dispatcher/frame
+- disk log/frame
+- Task/frame
+
+Chấm nguy cơ giảm scan rate.
+
+==================================================
+51. LOGGING
+==================================================
+
+Audit:
+AsyncFileLogService
+
+Kiểm tra:
+- log flood
+- disk growth
+- production performance
+- password leak
+- sensitive data
+- exception loop
+
+==================================================
+52. ERROR HANDLING
+==================================================
+
+Tìm catch {} và catch Exception.
+
+Phân loại:
+- intentionally best effort
+- dangerous swallowed exception
+
+Không được nuốt lỗi làm máy tiếp tục test với hardware state không biết.
+
+==================================================
+53. RESTART / CRASH / POWER LOSS
+==================================================
+
+Audit toàn bộ state cần persist:
+
+- result committed
+- product removal pending
+- discard pending
+- master state
+- label retry
+- lot
+- counters
+
+Đánh giá mỗi state nếu:
+- End Task
+- power loss
+- PC restart
+
+==================================================
+54. MODEL CHANGE DURING SPECIAL STATES
+==================================================
+
+Test model change khi:
+
+- product còn JIG
+- FAIL pending
+- discard pending
+- Master active
+- resistance running
+- leak running
+- label retry
+- device fault
+
+Tìm bypass.
+
+==================================================
+55. LEGACY COMPATIBILITY
+==================================================
+
+Audit model cũ:
+
+- không _DISCARD
+- không Leak
+- không Resistance
+- không CLIP
+- 64 IO
+- 128 IO
+
+V16.0.171 không được thay behavior ngoài feature tương ứng.
+
+==================================================
+56. SECURITY / OPERATOR BYPASS
+==================================================
+
+Tìm operator có thể bypass bằng:
+
+- Close dialog
+- Back Main
+- change model
+- Manual
+- restart TestWindow
+- restart app
+- disconnect BO
+- remove/reconnect USB
+- cancel password
+- switch model without discard
+
+Phân loại severity.
+
+==================================================
+57. SELF TEST QUALITY
+==================================================
+
+Audit self-tests hiện có.
+
+Lập bảng:
+feature nào có test
+feature nào chưa có test
+
+Đặc biệt:
+- mapping
+- Master
+- Probe
+- Wrong/Short
+- Resistance
+- Leak
+- Discard
+- cycle reset
+- reconnect
+- relay safety
+
+==================================================
+58. VERSION / BUILD
+==================================================
+
+Xác minh:
+V16.0.171
+
+Kiểm tra:
+Version.props
+assembly/file/informational version
+
+Chỉ phân tích.
+Không tăng version.
+
+==================================================
+SEVERITY
+==================================================
+
+CRITICAL:
+- false PASS
+- missed FAIL
+- marking hàng lỗi
+- relay unsafe
+- bypass discard
+- sai IO gây quality escape
+- duplicate production result nghiêm trọng
+
+HIGH:
+- production lock/bypass edge case
+- reconnect corruption
+- wrong model
+- history/counter duplication
+- crash recovery problem
+
+MEDIUM:
+- UI inconsistency
+- recoverable freeze
+- performance
+- wrong sound
+- operator confusion
+
+LOW:
+- maintainability
+- naming
+- redundant code
+- minor UI
+
+==================================================
+CHẤM ĐIỂM
+==================================================
+
+Mỗi subsystem chấm 0-10:
+
+Startup
+Board transport
+IO mapping
+Frame decoder
+Scan supervisor
+THT parser
+Model lifecycle
+TestEngine
+Product detection
+Wrong
+Short
+Probe
+CLIP
+Master Good
+Master Bad
+Production state machine
+Product removal
+Resistance
+Leak
+Discard
+Relay safety
+Password/security
+History
+Counter
+Label
+Sound
+Status LEDs
+MainWindow
+TestWindow
+Offline mode
+Settings
+Persistence
+Reconnect
+Shutdown
+Crash recovery
+Thread safety
+Async safety
+Performance
+Legacy compatibility
+Operator bypass resistance
+Self-test coverage
+
+==================================================
+OUTPUT BẮT BUỘC
+==================================================
+
+A. EXECUTIVE SUMMARY
+
+Production readiness: X/10
+
+CRITICAL count:
+HIGH count:
+MEDIUM count:
+LOW count:
+
+Verdict:
+- READY FOR HARDWARE VALIDATION
+hoặc
+- NEEDS FIX BEFORE HARDWARE VALIDATION
+hoặc
+- NOT SAFE FOR PRODUCTION
+
+==================================================
+
+B. SYSTEM SCORECARD
+
+Subsystem | Score | Highest Severity | Status | Main concern
+
+==================================================
+
+C. TOP 10 RISK
+
+Sắp thứ tự nguy hiểm nhất.
+
+Mỗi risk ghi:
+
+- Severity
+- File
+- Class
+- Method
+- Current behavior
+- Trigger
+- Consequence
+- Probability
+- Recommended fix concept
+
+KHÔNG sửa.
+
+==================================================
+
+D. CRITICAL ISSUES
+
+Chi tiết từng issue.
+
+==================================================
+
+E. HIGH ISSUES
+
+Chi tiết từng issue.
+
+==================================================
+
+F. MEDIUM / LOW ISSUES
+
+Ngắn hơn.
+
+==================================================
+
+G. STATE MACHINE MAP
+
+Vẽ các state machine THỰC TẾ:
+
+1. Startup/Board
+2. Production
+3. Master
+4. PASS
+5. FAIL
+6. Product removal
+7. Discard
+8. Leak
+
+==================================================
+
+H. HARDWARE COMMAND SAFETY
+
+Liệt kê mọi path có thể gọi:
+
+START SCAN
+STOP SCAN
+RESET
+Relay 1
+Relay 2
+AllRelaysOff
+MARKING
+JIG EJECT
+
+và state nào cho phép.
+
+==================================================
+
+I. RESULT COMMIT SAFETY
+
+Trace:
+
+PASS
+FAIL
+MASTER
+
+đến:
+History
+Counter
+Lot
+Label
+
+Tìm duplicate commit.
+
+==================================================
+
+J. OPERATOR BYPASS MATRIX
+
+Action:
+Back
+Close
+Alt+F4
+Change Model
+Manual
+Restart
+Disconnect USB
+Wrong password
+
+Đối chiếu state:
+PASS pending
+FAIL pending
+Discard pending
+Product-removal pending
+Master
+
+==================================================
+
+K. RESTART / POWER LOSS MATRIX
+
+State nào survive restart?
+State nào mất?
+
+Đánh giá consequence.
+
+==================================================
+
+L. PERFORMANCE HOTSPOTS
+
+Top CPU/allocation/Dispatcher/log risks.
+
+==================================================
+
+M. MISSING TESTS
+
+Liệt kê self-test cần bổ sung theo priority:
+
+P0
+P1
+P2
+
+CHỈ ĐỀ XUẤT, chưa viết test.
+
+==================================================
+
+N. HARDWARE VALIDATION PLAN
+
+Viết checklist test trên máy thật theo thứ tự nguy hiểm nhất trước.
+
+Bao gồm ít nhất:
+
+- IO boundaries 1/32/33/64/65/96/97/128
+- wrong both directions
+- short
+- Probe
+- CLIP
+- Master Good
+- Master Bad
+- PASS relay
+- FAIL relay
+- Resistance
+- Leak
+- Discard 97/98 both directions
+- unplug/replug BO
+- rapid repeated cycles
+- product removal
+- restart
+
+==================================================
+
+O. FINAL RECOMMENDATION
+
+Chia thành:
+
+MUST FIX BEFORE PRODUCTION
+SHOULD FIX
+CAN WAIT
+
+Không sửa.
+
+==================================================
+QUY TẮC CUỐI
+==================================================
+
+Đây là READ-ONLY AUDIT.
+
+Sau audit:
+git diff phải không có thay đổi mới do task này.
+
+Nếu phát hiện code lỗi:
+CHỈ BÁO CÁO.
+
+Không được dùng lý do:
+"minor cleanup"
+"while here"
+"easy fix"
+
+để sửa code.
+
+Tôi sẽ chọn từng issue để sửa sau.
+
+
+BỔ SUNG FULL PERFORMANCE / LATENCY / SCALABILITY AUDIT
+
+Đây là phần BẮT BUỘC của audit V16.0.171.
+
+CHỈ PHÂN TÍCH / ĐO / TRACE.
+KHÔNG SỬA CODE.
+KHÔNG tối ưu code trong task này.
+KHÔNG thêm instrumentation nếu phải sửa source.
+
+Mục tiêu:
+Đánh giá phần mềm có còn nhanh và ổn định khi chạy mã hàng lớn,
+đặc biệt trường hợp cấu hình tới 10 CARD.
+
+Không chỉ nhìn CPU chung.
+Phải trace latency end-to-end:
+
+BO
+ -> USB/D2XX
+ -> frame decoder
+ -> ScanFrame
+ -> TestViewModel
+ -> TestEngine
+ -> fault confirmation
+ -> UI
+ -> PASS/FAIL
+
+và:
+
+Probe contact
+ -> frame
+ -> classifier
+ -> ProbeStateTracker
+ -> Dispatcher
+ -> TestWindow
+
+==================================================
+1. XÁC ĐỊNH CHÍNH XÁC "10 CARD"
+==================================================
+
+Không tự giả định 1 Card = 32/64/128 I/O.
+
+Đọc BoardCapacity và report:
+
+- IoPerExpansionCard
+- ScanCardCount
+- MaxExpansionCardCount
+- TotalIoCapacity
+- protocol bank size
+- physical connector relationship
+
+Sau đó tính chính xác:
+
+1 card = ? IO
+2 card = ? IO
+4 card = ? IO
+10 card = ? IO
+
+Phân biệt rõ:
+- physical connector
+- expansion card
+- scan card
+- protocol bank
+
+==================================================
+2. STARTUP PERFORMANCE
+==================================================
+
+Trace từ process start tới khi:
+
+- MainWindow render
+- BO connected
+- handshake complete
+- model parsed
+- TestEngine model prepared
+- scan started
+- first valid frame received
+- TestWindow usable
+- production ready
+
+Tìm các marker hiện có như:
+
+StartupPerformanceTrace
+T4
+T5
+T6
+T7
+T8
+T9
+T10
+T12
+
+Report thời gian/đường code cho:
+
+PROCESS START
+  ->
+FIRST WINDOW
+  ->
+BOARD READY
+  ->
+MODEL READY
+  ->
+SCANNER READY
+  ->
+PRODUCTION READY
+
+Audit các nguyên nhân startup chậm:
+
+- FileSystemWatcher
+- SQLite
+- history load
+- CFG load
+- audio initialization
+- D2XX enumeration
+- FT_Open
+- handshake
+- model parser
+- TestEngine.PrepareModel
+- label printer auto connect
+- VISA
+- WATERPROOF COM
+- Dispatcher work
+
+Phân loại:
+UI-blocking hay background.
+
+Đặc biệt kiểm tra:
+mã hàng càng lớn thì startup/model load có tăng tuyến tính hay không.
+
+==================================================
+3. APP CLOSE / SHUTDOWN PERFORMANCE
+==================================================
+
+Trace:
+
+Close
+ ->
+StopView
+ ->
+cycle cancel
+ ->
+scan cleanup
+ ->
+relay safe state
+ ->
+persistence completion
+ ->
+board disconnect
+ ->
+VISA dispose
+ ->
+label dispose
+ ->
+SQLite dispose
+ ->
+process exit
+
+Tìm mọi await có thể làm app đóng lâu:
+
+_hardwareMonitorTask
+_modelPersistenceTask
+_probePersistenceTask
+_removalPersistenceTask
+_masterPersistenceTask
+_statisticsLoadTask
+DisconnectAsync
+SerialPort close
+VISA dispose
+SQLite
+label printer
+
+Report:
+
+- có thể treo vô thời hạn không
+- timeout ở đâu
+- hardware unplug có làm close chậm không
+- COM Read/Write đang block thì sao
+- D2XX đang scan thì sao
+- Leak đang chạy thì sao
+- Resistance đang đo thì sao
+
+Tìm:
+.Wait()
+.Result
+Thread.Sleep
+Dispatcher.Invoke
+lock + await
+
+Đánh giá khả năng:
+"bấm thoát nhưng app 5–20 giây mới đóng"
+hoặc
+"không đóng được".
+
+==================================================
+4. SCAN SCALABILITY 1 -> 10 CARD
+==================================================
+
+Đây là phần ưu tiên CAO.
+
+Phân tích với:
+
+1 Card
+2 Card
+4 Card
+6 Card
+8 Card
+10 Card
+
+Với mỗi cấu hình xác định:
+
+- Total IO
+- scan command/range
+- expected raw frame size
+- số bytes/frame
+- expected frame frequency nếu suy ra được
+- decoder work/frame
+- TestEngine work/frame
+- UI work/frame
+
+Nếu không thể xác định tốc độ thực từ code:
+ghi rõ:
+
+CALCULATED / INFERRED
+và
+REQUIRES HARDWARE MEASUREMENT
+
+Không được bịa throughput.
+
+==================================================
+5. FRAME RATE
+==================================================
+
+Tìm:
+
+FramesReceived
+ProductionFramesReceived
+ProductionFramesProcessed
+ProductionFramesDropped
+LastFrameTimestampUtc
+LastFrameSequence
+
+Phân tích:
+
+RX frames/sec
+processed frames/sec
+dropped frames/sec
+
+Nếu 10 Card làm frame lớn hơn:
+đánh giá scanner có giảm frames/sec không.
+
+Tìm nơi software chủ động giới hạn:
+- delays
+- polling interval
+- scan cadence
+- debounce
+- stable frames
+- Dispatcher coalescing
+
+==================================================
+6. D2XX READ PERFORMANCE
+==================================================
+
+Audit low-level receive:
+
+- buffer size
+- read size
+- latency timer
+- USB transfer size
+- polling
+- ReadAsync/Read
+- QueueStatus
+- FT_GetQueueStatus nếu có
+
+Kiểm tra:
+
+- đọc từng byte hay block
+- allocation mỗi read
+- copy buffer bao nhiêu lần
+- parse nhiều lần
+- lock trên receive path
+
+Với 10 Card:
+raw RX có thể backlog không?
+
+==================================================
+7. FRAME DECODER COMPLEXITY
+==================================================
+
+Đánh giá decoder theo:
+
+O(bytes)
+O(IO)
+O(connections)
+O(cards)
+
+Tìm:
+- LINQ/frame
+- ToArray/frame
+- Distinct/frame
+- OrderBy/frame
+- Dictionary mới/frame
+- List mới/frame
+- string format/frame
+
+Ước lượng allocations/frame.
+
+Nếu 10 Card làm frame lớn:
+GC pressure tăng thế nào?
+
+==================================================
+8. TESTENGINE HOT PATH
+==================================================
+
+Audit:
+
+TestEngine.ProcessFrame(frame)
+
+Đây là critical hot path.
+
+Tìm complexity theo:
+
+- ExpectedNetCount
+- physical IO count
+- active connections
+- CLIP branches
+- fault candidates
+
+Kiểm tra có pattern nguy hiểm:
+
+foreach expected net
+    foreach frame connection
+
+hay không.
+
+Nếu có:
+đánh giá O(N*M).
+
+Tìm:
+- HashSet
+- Dictionary
+- lookup precompute
+- LINQ
+- sorting
+- allocations
+
+Report xem model 10 Card có làm ProcessFrame tăng mạnh không.
+
+==================================================
+9. FAULT DETECTION LATENCY
+==================================================
+
+Phải tính end-to-end cho:
+
+WRONG
+SHORT
+
+Từ:
+
+electrical fault xuất hiện trên BO
+ ->
+raw frame RX
+ ->
+decode
+ ->
+TestEngine candidate
+ ->
+stable confirmation
+ ->
+Faults update
+ ->
+UI FAIL visible
+ ->
+sound/dialog
+
+Tìm:
+
+RequiredStableFrames
+fault confirmation gate
+scan cadence
+Dispatcher delay
+
+Report công thức:
+
+FaultDetectionLatency ≈
+frame interval
+× required confirmation frames
++ decode
++ engine
++ UI dispatch
+
+Không chỉ report CPU time.
+
+==================================================
+10. 10 CARD WRONG/SHORT SPEED
+==================================================
+
+Đánh giá riêng:
+
+mã hàng nhỏ:
+ExpectedNetCount thấp
+
+vs
+
+mã hàng 10 Card:
+ExpectedNetCount rất lớn
+
+Question:
+
+- Wrong detection có chậm theo số network không?
+- Short detection có scan toàn topology không?
+- confirmation có cần nhiều full frames không?
+- UI có chờ xử lý toàn bộ FaultGrid trước khi hiện lỗi không?
+
+Tìm trường hợp:
+logic đã nhận lỗi nhanh nhưng UI hiển thị chậm.
+
+==================================================
+11. PASS LATENCY
+==================================================
+
+Trace:
+
+last required network connected
+ ->
+frame received
+ ->
+TestEngine ContinuityPassed
+ ->
+RunAutomaticPostContinuityAsync
+ ->
+Resistance optional
+ ->
+Leak optional
+ ->
+PASS commit
+ ->
+relay
+
+Đối với model chỉ continuity:
+đánh giá thời gian từ chân cuối cùng thông tới PASS.
+
+Phải tách:
+
+SCAN LATENCY
+ENGINE LATENCY
+CONFIRMATION LATENCY
+UI LATENCY
+RELAY LATENCY
+
+==================================================
+12. PROBE / TEST PIN LATENCY
+==================================================
+
+Đây là ưu tiên CRITICAL cho trải nghiệm vận hành.
+
+Trace:
+
+người dùng chạm Probe
+ ->
+BO phát frame
+ ->
+D2XX receive
+ ->
+OnBoardFrameReceived
+ ->
+ProbeContactClassifier
+ ->
+ProbeStateTracker
+ ->
+InvokeUi
+ ->
+FaultGrid/Probe bar
+ ->
+người dùng nhìn thấy IO
+
+Tận dụng marker hiện có:
+
+PROBE_LATENCY
+RX->VM
+VM->UI
+
+Audit:
+
+ProbeContactClassifier.DetectMany
+
+Complexity có phụ thuộc:
+- số I/O
+- number of nets
+- number of cards
+- model size
+
+Với 10 Card:
+Probe có chậm hơn model 1 Card không?
+
+==================================================
+13. PROBE RELEASE LATENCY
+==================================================
+
+Trace:
+
+nhấc đầu dò
+ ->
+first release frame
+ ->
+tracker clear
+ ->
+UI clear
+
+Expected:
+không dùng TTL dài.
+
+Kiểm tra:
+ProbeRelayReleaseDebounceMs = 40 ms
+
+Phân biệt:
+
+UI RELEASE latency
+và
+relay safety debounce 40 ms.
+
+UI không được giữ contact 40ms nếu thiết kế hiện tại yêu cầu release ngay.
+
+==================================================
+14. PROBE WITH 10 CARD
+==================================================
+
+Đánh giá cụ thể:
+
+Nếu model 10 Card / hàng trăm network:
+
+DetectMany có search toàn model mỗi frame không?
+
+Tìm code dạng:
+
+model.Nets.FirstOrDefault(...)
+model.Pins.Where(...)
+foreach model net...
+
+trên mọi Probe frame.
+
+Nếu có:
+estimate ảnh hưởng.
+
+Tìm khả năng pre-index hiện có.
+
+==================================================
+15. UI DISPATCHER LOAD
+==================================================
+
+Audit mọi:
+
+Dispatcher.BeginInvoke
+Dispatcher.Invoke
+InvokeUi
+PropertyChanged
+CollectionChanged
+
+trong hot path.
+
+Đặc biệt:
+
+OnBoardFrameReceived
+
+Không được schedule một UI callback/frame nếu frame rate cao.
+
+Kiểm tra cơ chế coalescing:
+
+_engineUiUpdateQueued
+_logUiFlushQueued
+_statusPulseDispatchQueued
+
+Xác minh chúng thực sự ngăn backlog.
+
+==================================================
+16. FAULTGRID PERFORMANCE
+==================================================
+
+Mã hàng lớn có thể tạo nhiều rows.
+
+Audit:
+
+Faults.Clear
+Faults.Add
+SynchronizeFaultRows
+ScrollIntoView
+CollectionChanged
+
+Kiểm tra:
+- clear/rebuild mỗi frame
+- row equality
+- sort
+- virtualization
+- Auto column sizing
+- DataGrid layout
+
+Tìm trường hợp TestEngine nhanh nhưng DataGrid làm UI lag.
+
+==================================================
+17. 4 STATUS LED PERFORMANCE
+==================================================
+
+Audit LED vừa thêm:
+
+BoardFrameActivity?.Invoke
+
+Yellow/White pulse
+Green PASS blink
+Red
+
+Đảm bảo:
+
+- không Task/frame
+- không Dispatcher/frame nếu đã pending
+- timer reuse
+- event cleanup
+- không làm chậm OnBoardFrameReceived
+
+Nếu listener LED ném exception:
+frame processing không được hỏng.
+
+==================================================
+18. _DISCARD PERFORMANCE
+==================================================
+
+Discard detection chạy mỗi frame.
+
+Audit:
+
+- allocation/frame
+- pair search/frame
+- LINQ/frame
+- Dispatcher/frame
+- DRIP check/frame
+
+Với discard chỉ 2 IO:
+phải gần O(1).
+
+Nếu implementation scan toàn connection list:
+report cost.
+
+==================================================
+19. CLIP PERFORMANCE
+==================================================
+
+Model có nhiều A0/a1/a2...
+
+Audit:
+- branch matching
+- topology lookup
+- passed branch tracking
+- release
+
+Xem complexity tăng theo số CLIP branches.
+
+==================================================
+20. PRODUCT REMOVAL PERFORMANCE
+==================================================
+
+Sau PASS/FAIL software vẫn quét để xác nhận tháo sản phẩm.
+
+Với model 10 Card:
+IsProductReleased có cần scan toàn topology không?
+
+Đánh giá latency từ:
+tháo hoàn toàn
+ ->
+UI ready/new cycle.
+
+==================================================
+21. MASTER PERFORMANCE
+==================================================
+
+Audit:
+
+Good Master
+Bad Master
+
+Bad Master unique fault collection:
+
+HashSet
+Dictionary
+FaultGrid
+
+Với nhiều I/O:
+có sort/rebuild lớn theo mỗi frame không?
+
+==================================================
+22. RESISTANCE PERFORMANCE
+==================================================
+
+Đo riêng:
+
+- Keysight connect latency
+- channel switching
+- sample stabilization
+- number of samples
+- number of channels
+- UI updates
+
+Không gộp thời gian instrument với scan performance.
+
+==================================================
+23. LEAK PERFORMANCE
+==================================================
+
+Đo riêng:
+
+- COM request latency
+- PRESS
+- WAIT
+- result read
+- channel count
+- timeout
+
+Kiểm tra Leak đang chạy có làm:
+
+- UI freeze
+- board scan stop lâu
+- watchdog false trigger
+
+==================================================
+24. SOUND PERFORMANCE
+==================================================
+
+Audit AppSoundService.
+
+PlaySound không được:
+- block UI
+- block frame thread
+- open WAV from disk mỗi frame
+- create excessive threads
+
+TESTPOINT contact giữ lâu:
+sound loop không được làm CPU tăng.
+
+==================================================
+25. LOGGING PERFORMANCE
+==================================================
+
+Đây là phần rất quan trọng.
+
+Audit:
+
+OnBoardLog
+AsyncFileLogService
+Performance logs
+Diagnostic logs
+
+Với 10 Card frame rate cao:
+không được write disk sync/frame.
+
+Kiểm tra:
+- queue size
+- flush cadence
+- backpressure
+- file rotation
+- string creation
+
+Report nếu log có thể là bottleneck.
+
+==================================================
+26. HISTORY / SQLITE PERFORMANCE
+==================================================
+
+Đảm bảo DB write không nằm trong scan hot path.
+
+Audit:
+
+CommitTestResultAsync
+UpdateRemovalTimingAsync
+statistics load
+
+Kiểm tra:
+- semaphore contention
+- UI await
+- transaction
+- disk slow
+
+==================================================
+27. COUNTER PERFORMANCE
+==================================================
+
+ProbeCounter/PartCounter load/save có block cycle mới không?
+
+Đặc biệt HDD/SSD chậm.
+
+==================================================
+28. MODEL LOAD SCALABILITY
+==================================================
+
+So sánh model:
+
+small
+medium
+10-card large
+
+Phân tích:
+
+ThtModelParser.Load
+ModelFileIdentityService.Capture
+TestEngine.PrepareModel
+lookup creation
+
+Complexity theo:
+- pins
+- nets
+- connectors
+- clip branches
+- resistance rows
+
+Tìm nested LINQ O(N²).
+
+==================================================
+29. MEMORY / GC
+==================================================
+
+Ước lượng allocations:
+
+per frame
+per second
+per cycle
+
+Tìm:
+
+new []
+ToArray()
+ToList()
+Select()
+Where()
+Distinct()
+OrderBy()
+string interpolation
+
+trong hot path.
+
+Đặc biệt Gen0 GC frequency khi scan 10 Card.
+
+Report nguy cơ:
+GC pause -> missed frame -> delayed fault/probe.
+
+==================================================
+30. CPU SCALING
+==================================================
+
+Phân biệt:
+
+transport CPU
+decoder CPU
+engine CPU
+probe CPU
+UI CPU
+logging CPU
+
+Report subsystem nào sẽ tăng mạnh nhất từ:
+
+1 Card -> 10 Card.
+
+==================================================
+31. LONG RUN / STRESS
+==================================================
+
+Phân tích khả năng chạy:
+
+8 giờ
+12 giờ
+24 giờ
+
+với scan liên tục.
+
+Tìm:
+- growing collection
+- growing log queue
+- task accumulation
+- CTS leak
+- event duplicate
+- database handles
+- sound handles
+- frame backlog
+
+==================================================
+32. RAPID PRODUCTION CYCLES
+==================================================
+
+Giả lập logic:
+
+PASS
+remove
+new product
+PASS
+remove...
+
+liên tục hàng nghìn chu kỳ.
+
+Tìm:
+- stale tasks
+- generation leak
+- cycle CTS
+- result queue
+- history backlog
+
+==================================================
+33. RAPID FAULT TEST
+==================================================
+
+Wrong/Short liên tục:
+
+fault
+confirm
+remove
+re-arm
+
+Kiểm tra:
+- sound
+- popup
+- discard
+- history
+- relay
+- scan restart
+
+có tích lũy latency theo số chu kỳ không.
+
+==================================================
+34. RECONNECT PERFORMANCE
+==================================================
+
+Unplug/replug BO.
+
+Đo/ước lượng:
+
+disconnect detection latency
+reconnect retry interval
+FTDI reconnect
+scan restart
+first valid frame
+
+Không được reconnect loop làm CPU cao.
+
+==================================================
+35. PERFORMANCE REGRESSION FROM NEW FEATURES
+==================================================
+
+Soát riêng các tính năng gần đây:
+
+- 4 LEDs
+- _DISCARD
+- Probe UI
+- Master automation
+- Offline mode
+- audio
+- persistence
+
+Xác định feature nào thêm code vào OnBoardFrameReceived.
+
+Mỗi feature phải ghi:
+COST PER FRAME
+hoặc
+COST PER EVENT.
+
+==================================================
+36. THRESHOLD / WATCHDOG REVIEW
+==================================================
+
+Đối chiếu:
+
+scan stall timeout
+stable frames
+probe debounce
+master settle
+fault confirmation
+
+với frame rate 10 Card.
+
+Ví dụ:
+nếu 1 Card = frame 5ms
+nhưng 10 Card = frame 30ms,
+
+RequiredStableFrames=3 sẽ đổi latency:
+15ms -> 90ms.
+
+Phải report ảnh hưởng này.
+
+==================================================
+37. KHÔNG ĐƯỢC ĐÁNH ĐỒNG
+==================================================
+
+Phải tách ba loại thời gian:
+
+A. SOFTWARE PROCESSING TIME
+CPU xử lý một frame.
+
+B. FRAME ARRIVAL INTERVAL
+firmware/USB bao lâu có frame mới.
+
+C. END-TO-END OPERATOR LATENCY
+từ điện thay đổi tới UI/result.
+
+Một ProcessFrame 0.5ms
+không có nghĩa fault latency 0.5ms
+nếu frame chỉ về mỗi 50ms.
+
+==================================================
+38. PERFORMANCE SCORE
+==================================================
+
+Chấm riêng 0-10:
+
+Startup
+Shutdown
+D2XX RX
+Frame decoder
+10-card scan scalability
+TestEngine
+Wrong detection
+Short detection
+PASS latency
+Probe touch latency
+Probe release latency
+Discard
+CLIP
+Product removal
+Master
+Resistance
+Leak
+UI Dispatcher
+FaultGrid
+Logging
+SQLite
+Memory/GC
+Long-run stability
+Reconnect
+
+==================================================
+39. TOP PERFORMANCE RISKS
+==================================================
+
+Liệt kê TOP 10 theo format:
+
+Rank
+Subsystem
+File
+Method
+Trigger
+Complexity
+Expected effect at 10 cards
+Severity
+Measured / Calculated / Inferred
+Suggested optimization concept
+
+KHÔNG IMPLEMENT.
+
+==================================================
+40. 10-CARD CAPACITY REPORT
+==================================================
+
+Bắt buộc trả lời trực tiếp:
+
+1. 10 Card tương đương chính xác bao nhiêu I/O?
+2. Firmware scan range command là gì?
+3. Một full frame lớn khoảng bao nhiêu byte?
+4. Software processing complexity/frame?
+5. Có nguy cơ frame backlog không?
+6. Wrong detection có chậm hơn không?
+7. Short detection có chậm hơn không?
+8. PASS có chậm hơn không?
+9. Probe touch có chậm hơn không?
+10. Probe release có chậm hơn không?
+11. UI có lag không?
+12. Logging có thành bottleneck không?
+13. CPU/GC subsystem nào nguy hiểm nhất?
+14. Có giới hạn thực tế trước 10 Card không?
+
+Nếu không thể chứng minh từ code:
+ghi rõ NEED HARDWARE MEASUREMENT.
+
+==================================================
+41. HARDWARE BENCHMARK PLAN
+==================================================
+
+Không sửa code.
+
+Dựa trên metric/log hiện có, viết procedure test:
+
+A. 1 Card
+B. 2 Card
+C. 4 Card
+D. 10 Card
+
+Mỗi cấu hình đo:
+
+- frames/sec
+- ProcessFrame ms average
+- ProcessFrame p95
+- ProcessFrame max
+- RX->VM Probe ms
+- VM->UI Probe ms
+- Wrong detection total latency
+- Short detection total latency
+- PASS total latency
+- CPU %
+- memory MB
+- Gen0/Gen1/Gen2 GC nếu đo được
+- Dispatcher responsiveness
+
+Test ít nhất:
+idle scan
+normal product
+Probe touch/release
+Wrong
+Short
+PASS
+remove product
+
+==================================================
+42. START/CLOSE BENCHMARK
+==================================================
+
+Đề xuất đo 10 lần:
+
+APP START:
+process launch -> production ready
+
+APP CLOSE:
+close click -> process terminated
+
+Report:
+min
+average
+p95/max
+
+Phân biệt:
+BO connected
+BO absent
+BO unplugged
+model small
+model 10 Card
+
+==================================================
+43. FINAL PERFORMANCE VERDICT
+==================================================
+
+Báo cáo cuối:
+
+PERFORMANCE READINESS: X/10
+
+Chọn một:
+
+READY FOR 10-CARD HARDWARE VALIDATION
+
+hoặc
+
+PERFORMANCE RISKS SHOULD BE FIXED BEFORE 10-CARD TEST
+
+hoặc
+
+NOT READY FOR LARGE-MODEL PRODUCTION
+
+Sau đó phân nhóm:
+
+MUST FIX
+SHOULD OPTIMIZE
+ACCEPTABLE
+NEEDS HARDWARE MEASUREMENT
+
+==================================================
+QUY TẮC CUỐI
+==================================================
+
+READ-ONLY.
+
+Có thể:
+- build
+- chạy existing self-tests
+- đọc existing performance logs
+- chạy existing benchmark nếu project đã có
+
+Không được:
+- sửa source để thêm benchmark
+- thay timer
+- giảm logging
+- cache thêm
+- tối ưu LINQ
+- thay scan cadence
+
+Nếu thấy optimization:
+chỉ báo cáo.
+
+Sau audit:
+git diff phải không có thay đổi mới do task này.
