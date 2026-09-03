@@ -53,8 +53,8 @@ public sealed class AsyncFileLogService : IDisposable
 
     public AppLogLevel Level { get; private set; } = AppLogLevel.Normal;
 
-    // Main log is always active. EnableSystemLogs controls diagnostic detail,
-    // not whether lifecycle/fault records are persisted.
+    // EnableSystemLogs is the master switch for the canonical runtime log.
+    // History and crash reports use separate persistence services.
     public bool FileLoggingEnabled => Volatile.Read(ref _fileLoggingEnabled) != 0;
 
     public void Configure(bool enabled, string? rootDirectory = null)
@@ -67,10 +67,10 @@ public sealed class AsyncFileLogService : IDisposable
             LogFilePath = Path.Combine(root, "JBZUniversalTester.log");
         }
 
-        // When enabled, include diagnostic/protocol details in the same main
-        // file. Normal production still records important state transitions.
+        // When disabled, do not enqueue or create the canonical runtime log.
+        // Re-enabling after startup initializes the writer on demand.
         Level = enabled ? AppLogLevel.ProtocolTrace : AppLogLevel.Normal;
-        Volatile.Write(ref _fileLoggingEnabled, 1);
+        Volatile.Write(ref _fileLoggingEnabled, enabled ? 1 : 0);
         Initialize();
     }
 

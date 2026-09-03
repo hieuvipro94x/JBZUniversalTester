@@ -116,8 +116,8 @@ public sealed class ProductionSettings
     public bool AutoSaveErrors { get; set; }
 
     /// <summary>
-    /// Enables diagnostic/protocol detail in the main log. Normal lifecycle
-    /// and error records are always written.
+    /// Enables the main diagnostic/protocol log. History and crash reports
+    /// are persisted independently.
     /// </summary>
     public bool EnableSystemLogs { get; set; }
 

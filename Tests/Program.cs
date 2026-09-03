@@ -2053,8 +2053,10 @@ internal static class Program
             {
                 logger.Configure(enabled: false, rootDirectory: logsRoot);
                 logger.Application("NORMAL_LIFECYCLE_RECORD");
-                Assert(logger.FileLoggingEnabled && logger.Level == AppLogLevel.Normal,
-                    "Normal production keeps the single lifecycle log enabled");
+                Assert(!logger.FileLoggingEnabled && logger.Level == AppLogLevel.Normal,
+                    "Disabled system logging blocks the canonical runtime log");
+                Assert(!Directory.Exists(logsRoot),
+                    "Disabled system logging does not create a log directory");
 
                 logger.Configure(enabled: true);
                 Assert(logger.FileLoggingEnabled && logger.Level == AppLogLevel.ProtocolTrace,
@@ -2063,6 +2065,8 @@ internal static class Program
 
                 logger.Configure(enabled: false);
                 logger.Error("NORMAL_ERROR_AFTER_DIAGNOSTIC_DISABLE");
+                Assert(!logger.FileLoggingEnabled,
+                    "Disabling system logging takes effect without restarting the application");
             }
             finally
             {
@@ -2073,10 +2077,10 @@ internal static class Program
             Assert(logFiles.Length == 1 && Path.GetFileName(logFiles[0]) == "JBZUniversalTester.log",
                 "Runtime writes one canonical main log instead of category/day files");
             string logText = File.ReadAllText(logFiles[0]);
-            Assert(logText.Contains("NORMAL_LIFECYCLE_RECORD", StringComparison.Ordinal) &&
+            Assert(!logText.Contains("NORMAL_LIFECYCLE_RECORD", StringComparison.Ordinal) &&
                    logText.Contains("ENABLED_PROTOCOL_TRACE", StringComparison.Ordinal) &&
-                   logText.Contains("NORMAL_ERROR_AFTER_DIAGNOSTIC_DISABLE", StringComparison.Ordinal),
-                "Main log preserves normal lifecycle/errors and explicitly enabled protocol trace");
+                   !logText.Contains("NORMAL_ERROR_AFTER_DIAGNOSTIC_DISABLE", StringComparison.Ordinal),
+                "Main log contains only records written while system logging is enabled");
 
             string historyPath = Path.Combine(root, "History", "test-history.db");
             var history = new TestHistoryStore(historyPath);
