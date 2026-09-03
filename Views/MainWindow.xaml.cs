@@ -300,7 +300,7 @@ public partial class MainWindow : Window
 
     private async Task ShowSettingsPageAsync()
     {
-        CloseInternalPage();
+        await CloseInternalPageAsync();
         long navigationGeneration = Volatile.Read(ref _internalPageGeneration);
         LogMemory("MEM BEFORE_SETTINGS");
 
@@ -355,16 +355,16 @@ public partial class MainWindow : Window
         }
 
         if (ReferenceEquals(_settingsPage, savedPage))
-            CloseInternalPage();
+            await CloseInternalPageAsync();
     }
 
-    private void OpenHistory_Click(
+    private async void OpenHistory_Click(
         object sender,
         RoutedEventArgs e)
     {
         try
         {
-            CloseInternalPage();
+            await CloseInternalPageAsync();
 
             _historyPage = new HistoryPage(
                 _viewModel.ProductionSettings,
@@ -385,20 +385,41 @@ public partial class MainWindow : Window
         }
     }
 
-    private void InternalPage_RequestClose(object? sender, EventArgs e) =>
-        CloseInternalPage();
+    private async void InternalPage_RequestClose(object? sender, EventArgs e)
+    {
+        try
+        {
+            await CloseInternalPageAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                $"Không thể RESET relay trước khi đóng trang Cài đặt.\n\n{ex.Message}",
+                "Lỗi an toàn relay",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
 
-    private void CloseInternalPage()
+    private async Task CloseInternalPageAsync()
     {
         Interlocked.Increment(ref _internalPageGeneration);
 
-        if (_settingsPage is not null)
+        ProductionSettingsPage? settingsPage = _settingsPage;
+        if (settingsPage is not null)
         {
-            _settingsPage.RequestClose -= InternalPage_RequestClose;
-            _settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
-            _settingsPage.ReleasePageResources();
-            _settingsPage = null;
-            LogMemory("MEM SETTINGS_CLOSE");
+            // Không tháo page khỏi visual tree trước khi board xác nhận chuỗi
+            // Manual RESET: OFF -> RESET_CLEAR -> OFF và Production scan phục hồi.
+            await settingsPage.ReleaseManualOutputsAsync();
+            if (ReferenceEquals(_settingsPage, settingsPage))
+            {
+                settingsPage.RequestClose -= InternalPage_RequestClose;
+                settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
+                settingsPage.ReleasePageResources();
+                _settingsPage = null;
+                LogMemory("MEM SETTINGS_CLOSE");
+            }
         }
 
         if (_historyPage is not null)
@@ -439,7 +460,17 @@ public partial class MainWindow : Window
 
         try
         {
-            CloseInternalPage();
+            try
+            {
+                await CloseInternalPageAsync();
+            }
+            catch (Exception ex)
+            {
+                // ShutdownAsync/DisconnectAsync vẫn phải chạy để thử OFF lần
+                // cuối và đóng handle, kể cả RESET của trang Cài đặt thất bại.
+                _viewModel.Test.AddExternalLog(
+                    $"Không thể RESET relay khi đóng trang Cài đặt lúc thoát: {ex.Message}");
+            }
             _uiStallWatchdog?.Dispose();
             _uiStallWatchdog = null;
             _viewModel.ExplicitModelLoaded -= ViewModel_ExplicitModelLoaded;

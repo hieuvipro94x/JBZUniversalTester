@@ -5,13 +5,15 @@ namespace JBZUniversalTester.Services;
 public enum DiscardContactTransition
 {
     None = 0,
-    Completed = 1
+    FirstPassDetected = 1,
+    Completed = 2
 }
 
 /// <summary>
-/// Theo dõi tiếp điểm thường mở của thùng hàng lỗi. Một lần THÔNG mới sau ARM
-/// xác nhận sản phẩm đã đi qua cảm biến. Nếu lúc ARM đang THÔNG, bắt buộc chờ
-/// NGẮT làm baseline rồi THÔNG lại để tiếp điểm kẹt không thể tự xác nhận.
+/// Theo dõi hai lần tác động cảm biến thùng hàng lỗi. Lần THÔNG thứ nhất khóa
+/// Production; cảm biến phải NGẮT rồi THÔNG lần thứ hai mới hoàn tất/mở khóa.
+/// Nếu lúc ARM đang THÔNG, bắt buộc chờ NGẮT làm baseline để tiếp điểm kẹt
+/// không thể tự tạo lần xác nhận thứ nhất.
 /// </summary>
 public sealed class DiscardContactInterlock
 {
@@ -19,7 +21,9 @@ public sealed class DiscardContactInterlock
     {
         Idle,
         AwaitingOpenBaseline,
-        AwaitingClosure,
+        AwaitingFirstPass,
+        AwaitingReleaseAfterFirstPass,
+        AwaitingSecondPass,
         Completed
     }
 
@@ -39,7 +43,7 @@ public sealed class DiscardContactInterlock
     public void Arm(bool contactClosed)
     {
         lock (_gate)
-            _state = contactClosed ? State.AwaitingOpenBaseline : State.AwaitingClosure;
+            _state = contactClosed ? State.AwaitingOpenBaseline : State.AwaitingFirstPass;
     }
 
     public void Reset()
@@ -55,9 +59,15 @@ public sealed class DiscardContactInterlock
             switch (_state)
             {
                 case State.AwaitingOpenBaseline when !contactClosed:
-                    _state = State.AwaitingClosure;
+                    _state = State.AwaitingFirstPass;
                     break;
-                case State.AwaitingClosure when contactClosed:
+                case State.AwaitingFirstPass when contactClosed:
+                    _state = State.AwaitingReleaseAfterFirstPass;
+                    return DiscardContactTransition.FirstPassDetected;
+                case State.AwaitingReleaseAfterFirstPass when !contactClosed:
+                    _state = State.AwaitingSecondPass;
+                    break;
+                case State.AwaitingSecondPass when contactClosed:
                     _state = State.Completed;
                     return DiscardContactTransition.Completed;
             }
@@ -66,15 +76,30 @@ public sealed class DiscardContactInterlock
         }
     }
 
-    public static bool IsContactClosed(ScanFrame frame, IReadOnlyList<int> contactIo)
+    public static bool IsContactClosed(ScanFrame frame, IReadOnlyList<int> contactIo) =>
+        GetActiveContactIo(frame, contactIo).Count > 0;
+
+    /// <summary>
+    /// Hai dòng _DISCARD là hai I/O cảm biến, không bắt buộc phải tạo đúng một
+    /// cạnh trực tiếp IO-A &lt;-&gt; IO-B. Một I/O được xem là tác động khi xuất hiện
+    /// ở ActiveIo, TargetHits, đầu nguồn có đích, hoặc làm đích của một nguồn.
+    /// </summary>
+    public static IReadOnlyList<int> GetActiveContactIo(
+        ScanFrame frame,
+        IReadOnlyList<int> contactIo)
     {
         if (!frame.Complete || frame.UnknownBytes != 0 || contactIo.Count != 2)
-            return false;
+            return [];
 
-        int first = contactIo[0];
-        int second = contactIo[1];
-        return HasDirectedConnection(frame, first, second) ||
-               HasDirectedConnection(frame, second, first);
+        return contactIo
+            .Where(io => io > 0)
+            .Distinct()
+            .Where(io =>
+                frame.ActiveIo.Contains(io) ||
+                frame.TargetHits.ContainsKey(io) ||
+                (frame.Connections.TryGetValue(io, out IReadOnlySet<int>? targets) && targets.Count > 0) ||
+                frame.Connections.Values.Any(targets => targets.Contains(io)))
+            .ToArray();
     }
 
     public static ScanFrame RemoveDiscardIo(ScanFrame frame, IReadOnlyCollection<int> discardIo)
@@ -112,8 +137,4 @@ public sealed class DiscardContactInterlock
             SourceCount = connections.Count
         };
     }
-
-    private static bool HasDirectedConnection(ScanFrame frame, int source, int target) =>
-        frame.Connections.TryGetValue(source, out IReadOnlySet<int>? targets) &&
-        targets.Contains(target);
 }

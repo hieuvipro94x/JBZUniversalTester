@@ -574,7 +574,7 @@ public partial class ProductionSettingsPage : UserControl
     public async Task ReleaseManualOutputsAsync()
     {
         if (_main?.Test.IsManualModeActive == true)
-            await _main.Test.ExitManualModeAsync();
+            await _main.Test.ResetManualOutputsAsync();
         _vm.SetManualRuntimeActive(false);
     }
 

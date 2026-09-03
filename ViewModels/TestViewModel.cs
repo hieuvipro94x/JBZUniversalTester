@@ -110,6 +110,7 @@ public sealed class TestViewModel : ObservableObject
     private int _faultProductRemoved;
     private int _discardRequiredForFault;
     private int _discardContactClosed;
+    private int _discardStandaloneLocked;
     private bool _waterProofEquipmentErrorAwaitingRemoval;
     private int _postContinuityStarted;
     private int _wiringFaultHandlingStarted;
@@ -2582,15 +2583,25 @@ public sealed class TestViewModel : ObservableObject
             // _DISCARD là cặp tiếp điểm thùng hàng lỗi, không phải topology sản
             // phẩm. Quan sát frame raw để phát âm/UI/interlock, rồi loại đúng hai
             // I/O này trước mọi startup/probe/continuity/fault engine.
+            bool discardBlocksProduction = false;
             if (frame.Mode == BoardScanMode.Production &&
                 _model is { DiscardContactIo.Count: > 0 } discardModel)
             {
                 if (discardModel.HasDiscardInterlock)
-                    ProcessDiscardContactFrame(frame, discardModel, generation, mode);
+                    discardBlocksProduction = ProcessDiscardContactFrame(
+                        frame,
+                        discardModel,
+                        generation,
+                        mode);
                 frame = DiscardContactInterlock.RemoveDiscardIo(
                     frame,
                     discardModel.DiscardContactIo);
             }
+
+            // Một lần tác động _DISCARD ngoài chu trình FAIL phải khóa cả scan
+            // logic. Chỉ lần tác động thứ hai (sau khi đã nhả) mới mở khóa.
+            if (discardBlocksProduction)
+                return;
 
             // MainWindow vẫn giữ scan D2XX chạy nền. Dùng snapshot hoàn chỉnh này
             // để khóa chọn mã/START nếu còn bất kỳ tiếp điểm sản phẩm hoặc pin kẹt,
@@ -2811,8 +2822,8 @@ public sealed class TestViewModel : ObservableObject
             AddLog(
                 $"[DISCARD] Đã ARM cặp IO({model.DiscardContactIo[0]})-IO({model.DiscardContactIo[1]}); " +
                 (currentlyClosed
-                    ? "tiếp điểm đang THÔNG, bắt buộc chờ NGẮT rồi THÔNG lại."
-                    : "chờ tiếp điểm THÔNG."));
+                    ? "cảm biến đang tác động, chờ nhả rồi bắt đầu đủ hai lần."
+                    : "chờ tác động lần 1, nhả, rồi tác động lần 2."));
         }
         else
         {
@@ -2829,7 +2840,7 @@ public sealed class TestViewModel : ObservableObject
         var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             faults,
             model.HasDiscardInterlock
-                ? "Bấm XÁC NHẬN để mở JIG, sau đó bắt buộc đưa hàng qua cảm biến thùng lỗi."
+                ? "Bấm XÁC NHẬN để mở JIG. Cảm biến thùng lỗi phải tác động đủ hai lần, có nhả giữa hai lần."
                 : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
             FindPinByIo);
         Window? resolvedOwner = owner ?? ResolveOperatorDialogOwner();
@@ -2840,7 +2851,7 @@ public sealed class TestViewModel : ObservableObject
 
     private static string FaultRemovalWaitingText(ProductModel model) =>
         model.HasDiscardInterlock
-            ? "THÁO SẢN PHẨM VÀ ĐƯA QUA CẢM BIẾN THÙNG LỖI"
+            ? "THÁO SẢN PHẨM VÀ TÁC ĐỘNG CẢM BIẾN THÙNG LỖI 2 LẦN"
             : "CHỜ THÁO SẢN PHẨM";
 
     private void TryCompleteFaultProductRemoval()
@@ -2862,7 +2873,7 @@ public sealed class TestViewModel : ObservableObject
         SetProductRemovalPending(false);
         bool returnedToMain =
             Interlocked.Exchange(ref _removalMonitoringFromMain, 0) != 0;
-        _discardInterlock.Reset();
+        _discardInterlock.Arm(Volatile.Read(ref _discardContactClosed) != 0);
         Interlocked.Exchange(ref _discardRequiredForFault, 0);
         ResetFullCycleAfterProductRemoved();
         if (returnedToMain)
@@ -2879,25 +2890,27 @@ public sealed class TestViewModel : ObservableObject
             : "Đã tháo sản phẩm lỗi - chờ lắp sản phẩm lại.");
     }
 
-    private void ProcessDiscardContactFrame(
+    private bool ProcessDiscardContactFrame(
         ScanFrame frame,
         ProductModel model,
         long generation,
         RuntimeMode mode)
     {
         if (!frame.Complete || frame.UnknownBytes != 0)
-            return;
+            return Volatile.Read(ref _discardStandaloneLocked) != 0;
 
-        bool closed = DiscardContactInterlock.IsContactClosed(
+        IReadOnlyList<int> activeDiscardIo = DiscardContactInterlock.GetActiveContactIo(
             frame,
             model.DiscardContactIo);
+        bool closed = activeDiscardIo.Count > 0;
         int previous = Interlocked.Exchange(ref _discardContactClosed, closed ? 1 : 0);
 
         if (closed && previous == 0)
         {
             _sound.PlayDiscardContact();
             AddLog(
-                $"[DISCARD] Tiếp điểm THÔNG IO({model.DiscardContactIo[0]})-IO({model.DiscardContactIo[1]}).");
+                $"[DISCARD] Cảm biến tác động: " +
+                string.Join(", ", activeDiscardIo.Select(io => $"IO({io})")) + ".");
         }
 
         if (mode == RuntimeMode.Production && previous != (closed ? 1 : 0))
@@ -2909,25 +2922,93 @@ public sealed class TestViewModel : ObservableObject
                     return;
 
                 if (displayIo.Length > 0)
-                    ShowInlineProbeContacts(displayIo);
+                    ShowDiscardContacts(displayIo);
                 else
                     ClearInlineProbeDisplay();
             });
         }
 
         DiscardContactTransition transition = _discardInterlock.Observe(closed);
-        if (transition == DiscardContactTransition.Completed)
+        if (transition == DiscardContactTransition.FirstPassDetected)
         {
-            AddLog("[DISCARD] Đã xác nhận tiếp điểm THÔNG.");
+            AddLog("[DISCARD] Lần 1 đã nhận - khóa TEST; chờ cảm biến nhả rồi tác động lần 2.");
+            if (_waitForFaultProductRemoval)
+            {
+                InvokeUi(() => State = "THÙNG LỖI LẦN 1 - ĐƯA QUA CẢM BIẾN LẦN 2");
+            }
+            else if (mode is RuntimeMode.Production or RuntimeMode.Background)
+            {
+                LockProductionForStandaloneDiscard(mode);
+            }
+        }
+        else if (transition == DiscardContactTransition.Completed)
+        {
+            AddLog("[DISCARD] Lần 2 đã nhận - đủ điều kiện mở khóa TEST.");
             InvokeUi(() =>
             {
                 if (_waitForFaultProductRemoval)
                 {
                     State = "ĐÃ XÁC NHẬN THÙNG HÀNG LỖI";
                     TryCompleteFaultProductRemoval();
+                    if (closed)
+                        ShowDiscardContacts(model.DiscardContactIo);
+                }
+                else if (Interlocked.Exchange(ref _discardStandaloneLocked, 0) != 0)
+                {
+                    UnlockProductionAfterStandaloneDiscard(mode, closed, model.DiscardContactIo);
                 }
             });
         }
+
+        return Volatile.Read(ref _discardStandaloneLocked) != 0;
+    }
+
+    private void LockProductionForStandaloneDiscard(RuntimeMode mode)
+    {
+        if (Interlocked.Exchange(ref _discardStandaloneLocked, 1) != 0)
+            return;
+
+        CancelCycleOperations();
+        _cycleActive = false;
+        _waitForProductRelease = false;
+        SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+        SetProductRemovalPending(true);
+        _engine.SetFrameProcessingEnabled(false);
+        ResetEngineWithoutChangedReentry();
+        InvokeUi(() =>
+        {
+            State = "THÙNG LỖI ĐÃ KHÓA - ĐƯA QUA CẢM BIẾN LẦN 2";
+            RefreshFaults();
+        });
+        AddLog($"[DISCARD] Khóa Production độc lập khi đang ở chế độ {mode}.");
+    }
+
+    private void UnlockProductionAfterStandaloneDiscard(
+        RuntimeMode mode,
+        bool contactClosed,
+        IReadOnlyList<int> displayIo)
+    {
+        SetProductRemovalPending(false);
+        _discardInterlock.Arm(contactClosed);
+
+        if (mode == RuntimeMode.Production)
+        {
+            BeginCycleOperations();
+            ResetFullCycleAfterProductRemoved();
+            _engine.SetFrameProcessingEnabled(!IsIoMappingMode);
+            State = MasterApproved ? "CHỜ LẮP SẢN PHẨM" : "KIỂM TRA MASTER ĐẠT";
+            if (contactClosed)
+                ShowDiscardContacts(displayIo);
+        }
+        else
+        {
+            _cycleActive = false;
+            SetProductionPhase(ProductionPhase.WaitingProduct);
+            _engine.SetFrameProcessingEnabled(false);
+            State = ReadyStateForCurrentModel();
+        }
+
+        AddLog("[DISCARD] Đã mở khóa Production sau đúng hai lần tác động cảm biến.");
     }
 
     private void PlayProductStartSoundOnce(
@@ -3587,6 +3668,33 @@ public sealed class TestViewModel : ObservableObject
         ];
     }
 
+    private void ShowDiscardContacts(IReadOnlyList<int> ios)
+    {
+        FaultRow[] rows = ios
+            .Where(io => io > 0)
+            .Distinct()
+            .Take(2)
+            .Select(io => new FaultRow
+            {
+                Kind = FaultKind.Probe,
+                Io = 0,
+                RelatedIos = [io],
+                WireName = $"_DISCARD IO({io})",
+                DisplayOrder = io
+            })
+            .ToArray();
+
+        ProbeContacts.Clear();
+        foreach (FaultRow row in rows)
+            ProbeContacts.Add(row);
+        SynchronizeInlineProbeFaultRows(rows);
+        UpdateProbeCardActivity(ios);
+        Raise(nameof(HasInlineProbeContacts));
+        Raise(nameof(ProbeModeText));
+        Raise(nameof(ProbeBarText));
+        Raise(nameof(ProbeBarBackground));
+    }
+
     private string ResolveProbeWireName(int io, PinRecord? touchedPin)
     {
         if (!string.IsNullOrWhiteSpace(touchedPin?.WireName))
@@ -4128,14 +4236,20 @@ public sealed class TestViewModel : ObservableObject
         // hoặc gate thuộc runtime Production vẫn giữ nguyên để tránh test trùng.
         bool resumeCurrentStartupModel =
             IsProductRemovalPending &&
+            Volatile.Read(ref _discardStandaloneLocked) == 0 &&
             !_requireStartupIoClear &&
             CurrentRuntimeMode == RuntimeMode.Background &&
             Volatile.Read(ref _resultRecordedThisCycle) == 0;
 
         if (IsProductRemovalPending && !resumeCurrentStartupModel)
         {
-            State = "VUI LÒNG THÁO SẢN PHẨM";
-            AddLog("BLOCKED: chưa thể bắt đầu kiểm tra vì sản phẩm chưa được tháo hoàn toàn khỏi JIG.");
+            bool discardLocked = Volatile.Read(ref _discardStandaloneLocked) != 0;
+            State = discardLocked
+                ? "THÙNG LỖI ĐÃ KHÓA - ĐƯA QUA CẢM BIẾN LẦN 2"
+                : "VUI LÒNG THÁO SẢN PHẨM";
+            AddLog(discardLocked
+                ? "BLOCKED: _DISCARD đã nhận lần 1; bắt buộc tác động cảm biến lần 2 để mở khóa."
+                : "BLOCKED: chưa thể bắt đầu kiểm tra vì sản phẩm chưa được tháo hoàn toàn khỏi JIG.");
             return;
         }
 
@@ -4315,6 +4429,23 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task StopTestAsync()
     {
+        if (Volatile.Read(ref _discardStandaloneLocked) != 0)
+        {
+            CancelCycleOperations();
+            Interlocked.Exchange(ref _removalMonitoringFromMain, 1);
+            _cycleActive = false;
+            SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+            SwitchRuntimeMode(RuntimeMode.Background);
+            _engine.SetFrameProcessingEnabled(false);
+            State = "THÙNG LỖI ĐÃ KHÓA - ĐƯA QUA CẢM BIẾN LẦN 2";
+
+            if (_board.IsConnected && !_board.IsScanning)
+                await EnsureContinuousProductionScanAsync();
+
+            AddLog("Đã về màn hình chính nhưng vẫn giữ khóa _DISCARD và giám sát lần tác động thứ hai.");
+            return;
+        }
+
         // Nếu người vận hành quay về Main khi sản phẩm đang lắp dở, chuyển sang
         // cùng removal gate với PASS/FAIL. Reset snapshot để frame mới xác nhận
         // việc tháo hoàn toàn; không suy diễn một cạnh vừa mất là ProductRemoved.
@@ -7033,6 +7164,7 @@ public sealed class TestViewModel : ObservableObject
         _sound.SetTestPointContactSound(false);
         _discardInterlock.Reset();
         Interlocked.Exchange(ref _discardContactClosed, 0);
+        Interlocked.Exchange(ref _discardStandaloneLocked, 0);
         Interlocked.Exchange(ref _faultProductRemoved, 0);
         Interlocked.Exchange(ref _discardRequiredForFault, 0);
 
@@ -7041,6 +7173,8 @@ public sealed class TestViewModel : ObservableObject
 
         _model = model ??
             throw new ArgumentNullException(nameof(model));
+        if (_model.HasDiscardInterlock)
+            _discardInterlock.Arm(contactClosed: false);
         _lotSequence.SelectProduct(
             ProductionConfigService.GetLotProductKey(_model),
             migrateLegacyLot);
@@ -7106,7 +7240,7 @@ public sealed class TestViewModel : ObservableObject
         {
             AddLog(
                 $"Thùng hàng lỗi _DISCARD: IO({model.DiscardContactIo[0]})-" +
-                $"IO({model.DiscardContactIo[1]}), tiếp điểm thường mở.");
+                $"IO({model.DiscardContactIo[1]}), khóa ở lần tác động 1 và mở ở lần 2.");
         }
 
         if (model.IsIoMappingTemplate)

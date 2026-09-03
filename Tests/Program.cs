@@ -192,17 +192,58 @@ internal static class Program
 
         var tracker = new DiscardContactInterlock();
         tracker.Arm(contactClosed: false);
-        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.Completed &&
-               tracker.IsCompleted,
-            "A fresh closed contact immediately confirms the NG-bin sensor");
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.FirstPassDetected &&
+               tracker.IsArmed && !tracker.IsCompleted,
+            "The first fresh NG-bin sensor activation locks Production");
         Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None,
-            "A held contact cannot retrigger the completed interlock");
+            "A held contact cannot count as the second activation");
+        Assert(tracker.Observe(contactClosed: false) == DiscardContactTransition.None &&
+               tracker.Observe(contactClosed: true) == DiscardContactTransition.Completed &&
+               tracker.IsCompleted,
+            "The sensor must release before the second activation completes the interlock");
 
         tracker.Arm(contactClosed: true);
         Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None &&
                tracker.Observe(contactClosed: false) == DiscardContactTransition.None &&
+               tracker.Observe(contactClosed: true) == DiscardContactTransition.FirstPassDetected &&
+               tracker.Observe(contactClosed: false) == DiscardContactTransition.None &&
                tracker.Observe(contactClosed: true) == DiscardContactTransition.Completed,
-            "A contact already closed at ARM must open before a fresh closure can confirm it");
+            "A sensor active at ARM must return open before two new activations can complete it");
+
+        ScanFrame inputStyleSensorFrame = FrameSeq(2, (12, new[] { 97 }));
+        Assert(DiscardContactInterlock.GetActiveContactIo(inputStyleSensorFrame, model.DiscardContactIo)
+                .SequenceEqual([97]),
+            "_DISCARD detection accepts a configured IO used as a target instead of requiring IO97<->IO98");
+
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            UseTestPointer = true
+        };
+        TestViewModel discardVm = CreateTestViewModel(production, out FakeBoard discardBoard);
+        var discardModel = Model(("PAIR", new[] { 1, 18 }));
+        discardModel.ModelName = "SELF-TEST-DISCARD-INTERLOCK";
+        discardModel.PartNumber = "SELF-TEST-DISCARD-INTERLOCK";
+        discardModel.DiscardContactIo = [97, 98];
+        discardVm.LoadPreparedModelAsync(discardModel).GetAwaiter().GetResult();
+        discardVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        int totalBeforeDiscard = discardVm.Total;
+        int failBeforeDiscard = discardVm.Fail;
+
+        discardBoard.Publish(FrameSeq(10, (12, new[] { 97 })));
+        Assert(discardVm.IsProductRemovalPending &&
+               discardVm.ProbeContacts.Select(row => row.WireName)
+                   .SequenceEqual(["_DISCARD IO(97)", "_DISCARD IO(98)"]),
+            "First _DISCARD activation locks TEST and temporarily shows both configured _DISCARD rows");
+        discardBoard.Publish(FrameSeq(11));
+        Assert(discardVm.IsProductRemovalPending,
+            "Releasing the sensor after pass one keeps TEST locked");
+        discardBoard.Publish(FrameSeq(12, (13, new[] { 98 })));
+        Assert(!discardVm.IsProductRemovalPending &&
+               discardVm.Total == totalBeforeDiscard &&
+               discardVm.Fail == failBeforeDiscard,
+            $"Second _DISCARD activation unlocks TEST without recording a product result " +
+            $"(pending={discardVm.IsProductRemovalPending}, total={discardVm.Total}, fail={discardVm.Fail}, state={discardVm.State})");
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
@@ -945,6 +986,19 @@ internal static class Program
 
         Assert(faultVm.IsDeviceFault, "Manual relay hardware failure latches DeviceFault");
         Assert(faultBoard.Commands.Contains("OFF"), "Manual relay failure attempts safe OFF");
+
+        string settingsPageSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml.cs"));
+        string mainWindowSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
+        string settingsXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        Assert(settingsPageSource.Contains("await _main.Test.ResetManualOutputsAsync();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("await settingsPage.ReleaseManualOutputsAsync();", StringComparison.Ordinal),
+            "Every Settings-page close path awaits Manual RESET before releasing the page");
+        Assert(settingsXaml.Contains("T&#7854;T T&#7844;T C&#7842;", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("ManualRelay2OffCommand", StringComparison.Ordinal),
+            "Manual relay UI exposes the proven mutually-exclusive R1/R2 selector and one ALL OFF command");
     }
 
     private static void TestStartupIoInterlock()
