@@ -2821,6 +2821,24 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    private void ShowFaultConfirmationDialog(
+        IReadOnlyList<FaultDetail> faults,
+        ProductModel model,
+        Window? owner = null)
+    {
+        var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
+            faults,
+            model.HasDiscardInterlock
+                ? "Nhập mật khẩu để mở JIG, sau đó đưa hàng qua cảm biến thùng lỗi."
+                : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
+            FindPinByIo,
+            model.HasDiscardInterlock ? _productionSettings.DiscardPassword : null);
+        Window? resolvedOwner = owner ?? ResolveOperatorDialogOwner();
+        if (resolvedOwner is not null)
+            dialog.Owner = resolvedOwner;
+        dialog.ShowDialog();
+    }
+
     private static string FaultRemovalWaitingText(ProductModel model) =>
         model.HasDiscardInterlock
             ? "THÁO SẢN PHẨM VÀ ĐƯA QUA CẢM BIẾN THÙNG LỖI"
@@ -4485,15 +4503,7 @@ public sealed class TestViewModel : ObservableObject
             $"CycleId={_activeCycleId} Reason=Committed{FaultTypeCatalog.Code(primaryType)} " +
             $"State={State} ReadyToTest={_engine.ReadyToEvaluateProductFaults} FrameValid={_engine.LastFrameValid}");
 
-        var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-            dialogFaults,
-            cycleModel.HasDiscardInterlock
-                ? "Nhập mật khẩu để mở JIG, sau đó đưa hàng qua cảm biến thùng lỗi."
-                : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
-            FindPinByIo,
-            cycleModel.HasDiscardInterlock ? _productionSettings.DiscardPassword : null);
-        faultDialog.Owner = Application.Current?.MainWindow;
-        faultDialog.ShowDialog();
+        ShowFaultConfirmationDialog(dialogFaults, cycleModel);
         SelectedOperationTabIndex = 0;
 
         // Sau xác nhận FAIL chỉ relay đã được người cài đặt thử và chọn là
@@ -6217,17 +6227,7 @@ public sealed class TestViewModel : ObservableObject
 
             await InvokeUiAsync(() =>
             {
-                var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-                    faults,
-                    cycleModel.HasDiscardInterlock
-                        ? "Nhập mật khẩu để mở JIG, sau đó đưa hàng qua cảm biến thùng lỗi."
-                        : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
-                    FindPinByIo,
-                    cycleModel.HasDiscardInterlock ? _productionSettings.DiscardPassword : null);
-                Window? owner = ResolveOperatorDialogOwner();
-                if (owner is not null)
-                    dialog.Owner = owner;
-                dialog.ShowDialog();
+                ShowFaultConfirmationDialog(faults, cycleModel, ResolveOperatorDialogOwner());
             });
 
             try
@@ -6382,15 +6382,7 @@ public sealed class TestViewModel : ObservableObject
                         .Where(item => !item.Passed)
                         .Select(CreateResistanceFaultDetail)
                         .ToArray();
-                    var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-                        resistanceFaults,
-                        cycleModel.HasDiscardInterlock
-                            ? "Nhập mật khẩu để mở JIG, sau đó đưa hàng qua cảm biến thùng lỗi."
-                            : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
-                        FindPinByIo,
-                        cycleModel.HasDiscardInterlock ? _productionSettings.DiscardPassword : null);
-                    faultDialog.Owner = Application.Current?.MainWindow;
-                    faultDialog.ShowDialog();
+                    ShowFaultConfirmationDialog(resistanceFaults, cycleModel);
                     SelectedOperationTabIndex = 0;
 
                     try
@@ -6667,12 +6659,7 @@ public sealed class TestViewModel : ObservableObject
             $"ContinuityPassed={_engine.ContinuityPassed} " +
             $"Resistance={Resistance.Count}/{ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count}");
 
-        var faultDialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-            faults,
-            "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
-            FindPinByIo);
-        faultDialog.Owner = Application.Current?.MainWindow;
-        faultDialog.ShowDialog();
+        ShowFaultConfirmationDialog(faults, cycleModel);
 
         try
         {
@@ -6680,17 +6667,13 @@ public sealed class TestViewModel : ObservableObject
             await _engine.EjectFaultProductAsync();
             AddLog($"Final PASS rejection đã xác nhận: {FaultJigRelayText()} pulse rồi OFF; không chạy MARKING PASS.");
 
-            _waitForFaultProductRemoval = true;
-            Interlocked.Exchange(ref _faultProductRemoved, 0);
-            Interlocked.Exchange(ref _discardRequiredForFault, 0);
-            _discardInterlock.Reset();
-            SetProductRemovalPending(true);
-            Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
-            SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+            ArmFaultProductRemoval(cycleModel);
             await StartProductionScanAndVerifyFrameAsync(
                 CurrentCycleToken(),
                 "FINAL_PASS_REJECT_CONFIRM_RELAY");
-            State = "LỖI - CHỜ THÁO TOÀN BỘ SẢN PHẨM";
+            State = _waitForFaultProductRemoval
+                ? FaultRemovalWaitingText(cycleModel)
+                : "SẴN SÀNG";
         }
         catch (Exception ex)
         {

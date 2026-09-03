@@ -206,6 +206,36 @@ internal static class Program
                tracker.Observe(contactClosed: true) == DiscardContactTransition.Closed &&
                tracker.Observe(contactClosed: false) == DiscardContactTransition.Completed,
             "A contact already closed at ARM must open and perform a fresh close-open cycle");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(
+            System.Text.RegularExpressions.Regex.Matches(
+                testViewModelSource,
+                "new JBZUniversalTester\\.Views\\.FaultConfirmationWindow\\(").Count == 1 &&
+            System.Text.RegularExpressions.Regex.Matches(
+                testViewModelSource,
+                "ShowFaultConfirmationDialog\\(").Count == 5,
+            "Every product FAIL path must use the centralized _DISCARD password dialog");
+
+        int finalRejectStart = testViewModelSource.IndexOf(
+            "private async Task HandleFinalPassRejectedAsync(",
+            StringComparison.Ordinal);
+        int nextMethodStart = testViewModelSource.IndexOf(
+            "private async Task RecoverAfterUncommittedFailAsync(",
+            finalRejectStart,
+            StringComparison.Ordinal);
+        string finalRejectMethod = testViewModelSource[finalRejectStart..nextMethodStart];
+        Assert(finalRejectMethod.Contains(
+                   "ShowFaultConfirmationDialog(faults, cycleModel);",
+                   StringComparison.Ordinal) &&
+               finalRejectMethod.Contains(
+                   "ArmFaultProductRemoval(cycleModel);",
+                   StringComparison.Ordinal) &&
+               !finalRejectMethod.Contains(
+                   "Interlocked.Exchange(ref _discardRequiredForFault, 0)",
+                   StringComparison.Ordinal),
+            "Final PASS rejection must require _DISCARD password and sensor completion like every other FAIL");
     }
 
     private static void TestProductionScanFirstFrameAfterSequenceReset()
