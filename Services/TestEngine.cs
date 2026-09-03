@@ -966,6 +966,18 @@ public sealed class TestEngine : IDisposable
 
                 bool targetMapped = componentByIo.TryGetValue(target, out int targetComponent);
 
+                // Hai đầu đều hoàn toàn không được khai báo trong THT chỉ là
+                // tiếp điểm quan sát ngoài model (giống Probe), không phải bằng
+                // chứng sản phẩm đấu sai/chập. Cạnh có ít nhất một đầu thuộc THT
+                // vẫn đi qua fault engine như cũ.
+                if (!sourceMapped &&
+                    !targetMapped &&
+                    !model.ContainsDeclaredIo(source) &&
+                    !model.ContainsDeclaredIo(target))
+                {
+                    continue;
+                }
+
                 if (!sourceMapped || !targetMapped || sourceComponent != targetComponent)
                     unexpectedNow.Add((source, target));
             }

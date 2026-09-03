@@ -2811,8 +2811,8 @@ public sealed class TestViewModel : ObservableObject
             AddLog(
                 $"[DISCARD] Đã ARM cặp IO({model.DiscardContactIo[0]})-IO({model.DiscardContactIo[1]}); " +
                 (currentlyClosed
-                    ? "tiếp điểm đang THÔNG, bắt buộc chờ NGẮT rồi đi qua lại."
-                    : "chờ tiếp điểm THÔNG rồi NGẮT."));
+                    ? "tiếp điểm đang THÔNG, bắt buộc chờ NGẮT rồi THÔNG lại."
+                    : "chờ tiếp điểm THÔNG."));
         }
         else
         {
@@ -2829,10 +2829,9 @@ public sealed class TestViewModel : ObservableObject
         var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             faults,
             model.HasDiscardInterlock
-                ? "Nhập mật khẩu để mở JIG, sau đó đưa hàng qua cảm biến thùng lỗi."
+                ? "Bấm XÁC NHẬN để mở JIG, sau đó bắt buộc đưa hàng qua cảm biến thùng lỗi."
                 : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
-            FindPinByIo,
-            model.HasDiscardInterlock ? _productionSettings.DiscardPassword : null);
+            FindPinByIo);
         Window? resolvedOwner = owner ?? ResolveOperatorDialogOwner();
         if (resolvedOwner is not null)
             dialog.Owner = resolvedOwner;
@@ -2917,17 +2916,9 @@ public sealed class TestViewModel : ObservableObject
         }
 
         DiscardContactTransition transition = _discardInterlock.Observe(closed);
-        if (transition == DiscardContactTransition.Closed)
+        if (transition == DiscardContactTransition.Completed)
         {
-            InvokeUi(() =>
-            {
-                if (_waitForFaultProductRemoval)
-                    State = "ĐÃ NHẬN CẢM BIẾN - CHỜ VẬT ĐI QUA";
-            });
-        }
-        else if (transition == DiscardContactTransition.Completed)
-        {
-            AddLog("[DISCARD] Hoàn tất chu trình tiếp điểm NGẮT -> THÔNG -> NGẮT.");
+            AddLog("[DISCARD] Đã xác nhận tiếp điểm THÔNG.");
             InvokeUi(() =>
             {
                 if (_waitForFaultProductRemoval)
@@ -3392,6 +3383,12 @@ public sealed class TestViewModel : ObservableObject
             return false;
         }
 
+        if (TryDetectUnmappedContactPair(frame, out ios))
+        {
+            Interlocked.Exchange(ref _inlineProbeLastSeenUtcTicks, DateTime.UtcNow.Ticks);
+            return true;
+        }
+
         IReadOnlyList<ProbeContactClassifier.Detection> detections =
             ProbeContactClassifier.DetectMany(
                 frame,
@@ -3420,6 +3417,36 @@ public sealed class TestViewModel : ObservableObject
         // không còn chữ ký Probe thì RELEASE được áp dụng ngay ở OnBoardFrameReceived.
         // Production có thể giữ stable-frame riêng trong TestEngine, nhưng Probe UI
         // không được chờ RequiredStableFrames hoặc timer 500-2000 ms.
+        return false;
+    }
+
+    private bool TryDetectUnmappedContactPair(ScanFrame frame, out int[] ios)
+    {
+        ios = Array.Empty<int>();
+        ProductModel? model = _model;
+        if (model is null || !frame.Complete || frame.UnknownBytes != 0)
+            return false;
+
+        BoardCapacity capacity = _board.Capacity;
+        foreach ((int source, IReadOnlySet<int> targets) in frame.Connections.OrderBy(pair => pair.Key))
+        {
+            if (!capacity.ContainsGlobalIo(source) || model.ContainsDeclaredIo(source))
+                continue;
+
+            foreach (int target in targets.OrderBy(value => value))
+            {
+                if (target == source ||
+                    !capacity.ContainsGlobalIo(target) ||
+                    model.ContainsDeclaredIo(target))
+                {
+                    continue;
+                }
+
+                ios = source < target ? [source, target] : [target, source];
+                return true;
+            }
+        }
+
         return false;
     }
 

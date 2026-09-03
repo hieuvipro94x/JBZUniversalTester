@@ -5,14 +5,13 @@ namespace JBZUniversalTester.Services;
 public enum DiscardContactTransition
 {
     None = 0,
-    Closed = 1,
-    Completed = 2
+    Completed = 1
 }
 
 /// <summary>
-/// Theo dõi đúng một chu trình tiếp điểm thường mở của thùng hàng lỗi:
-/// NGẮT -> THÔNG -> NGẮT. Nếu lúc ARM đang THÔNG, bắt buộc chờ NGẮT làm
-/// baseline trước để tiếp điểm kẹt không thể tự xác nhận hàng lỗi.
+/// Theo dõi tiếp điểm thường mở của thùng hàng lỗi. Một lần THÔNG mới sau ARM
+/// xác nhận sản phẩm đã đi qua cảm biến. Nếu lúc ARM đang THÔNG, bắt buộc chờ
+/// NGẮT làm baseline rồi THÔNG lại để tiếp điểm kẹt không thể tự xác nhận.
 /// </summary>
 public sealed class DiscardContactInterlock
 {
@@ -21,7 +20,6 @@ public sealed class DiscardContactInterlock
         Idle,
         AwaitingOpenBaseline,
         AwaitingClosure,
-        AwaitingRelease,
         Completed
     }
 
@@ -60,9 +58,6 @@ public sealed class DiscardContactInterlock
                     _state = State.AwaitingClosure;
                     break;
                 case State.AwaitingClosure when contactClosed:
-                    _state = State.AwaitingRelease;
-                    return DiscardContactTransition.Closed;
-                case State.AwaitingRelease when !contactClosed:
                     _state = State.Completed;
                     return DiscardContactTransition.Completed;
             }

@@ -380,7 +380,6 @@
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
                             <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Probe cycle" Style="{StaticResource FieldLabelStyle}"/>
@@ -434,10 +433,6 @@
                         <TextBlock Grid.Row="13" Text="L&#7895;i t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
                         <TextBox Grid.Row="13" Grid.Column="1" Text="{Binding Settings.MinimumErrorLogValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="14" Text="Mật khẩu thùng lỗi" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="14" Grid.Column="1"
-                                 Text="{Binding Settings.DiscardPassword, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="Dùng riêng cho mã hàng có đúng hai I/O _DISCARD."/>
                     </Grid>
 
                     <StackPanel Margin="0,14,0,0">

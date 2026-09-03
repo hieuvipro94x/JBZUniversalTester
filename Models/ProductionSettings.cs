@@ -194,7 +194,7 @@ public sealed class ProductionSettings
     /// </summary>
     public string Password { get; set; } = string.Empty;
 
-    /// <summary>Mật khẩu xác nhận đưa sản phẩm NG vào thùng lỗi của THT _DISCARD.</summary>
+    /// <summary>Legacy configuration compatibility; NG-bin confirmation no longer uses a password.</summary>
     public string DiscardPassword { get; set; } = string.Empty;
 
     // ============================================================

@@ -192,20 +192,17 @@ internal static class Program
 
         var tracker = new DiscardContactInterlock();
         tracker.Arm(contactClosed: false);
-        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.Closed,
-            "Open baseline followed by closure registers the bin sensor");
-        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None,
-            "A held contact cannot complete or retrigger the interlock");
-        Assert(tracker.Observe(contactClosed: false) == DiscardContactTransition.Completed &&
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.Completed &&
                tracker.IsCompleted,
-            "Only release after a detected closure completes the discard cycle");
+            "A fresh closed contact immediately confirms the NG-bin sensor");
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None,
+            "A held contact cannot retrigger the completed interlock");
 
         tracker.Arm(contactClosed: true);
         Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None &&
                tracker.Observe(contactClosed: false) == DiscardContactTransition.None &&
-               tracker.Observe(contactClosed: true) == DiscardContactTransition.Closed &&
-               tracker.Observe(contactClosed: false) == DiscardContactTransition.Completed,
-            "A contact already closed at ARM must open and perform a fresh close-open cycle");
+               tracker.Observe(contactClosed: true) == DiscardContactTransition.Completed,
+            "A contact already closed at ARM must open before a fresh closure can confirm it");
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
@@ -216,7 +213,24 @@ internal static class Program
             System.Text.RegularExpressions.Regex.Matches(
                 testViewModelSource,
                 "ShowFaultConfirmationDialog\\(").Count == 5,
-            "Every product FAIL path must use the centralized _DISCARD password dialog");
+            "Every product FAIL path must use the centralized _DISCARD confirmation dialog");
+
+        int confirmationStart = testViewModelSource.IndexOf(
+            "private void ShowFaultConfirmationDialog(",
+            StringComparison.Ordinal);
+        int waitingTextStart = testViewModelSource.IndexOf(
+            "private static string FaultRemovalWaitingText(",
+            confirmationStart,
+            StringComparison.Ordinal);
+        string confirmationMethod = testViewModelSource[confirmationStart..waitingTextStart];
+        Assert(!confirmationMethod.Contains("DiscardPassword", StringComparison.Ordinal),
+            "_DISCARD product FAIL confirmation must not request a password");
+
+        string settingsXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        Assert(!settingsXaml.Contains("Settings.DiscardPassword", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Mật khẩu thùng lỗi", StringComparison.Ordinal),
+            "Production settings no longer exposes an unused NG-bin password");
 
         int finalRejectStart = testViewModelSource.IndexOf(
             "private async Task HandleFinalPassRejectedAsync(",
@@ -3742,6 +3756,36 @@ internal static class Program
         Assert(!vm.HasInlineProbeContacts &&
                vm.Faults.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
             "CASE C: Probe release removes only Probe presentation and keeps production open row");
+
+        TestViewModel unmappedPairVm = CreateTestViewModel(production, out FakeBoard unmappedPairBoard);
+        unmappedPairVm.SetModel(model);
+        unmappedPairVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        unmappedPairBoard.Publish(FrameSeq(13));
+        unmappedPairBoard.Publish(FrameSeq(14, (23, new[] { 25 })));
+        FaultRow[] unmappedRows = unmappedPairVm.Faults
+            .Where(row => row.Kind == FaultKind.Probe)
+            .ToArray();
+        TestEngine unmappedPairEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(unmappedPairVm) ?? throw new InvalidOperationException("Unmapped-pair TestEngine not found"));
+        PassGateDiagnostics unmappedDiagnostics = unmappedPairEngine.GetPassGateDiagnostics();
+        Assert(unmappedPairVm.HasInlineProbeContacts &&
+               unmappedRows.Length == 2 &&
+               unmappedRows.Select(row => row.WireName).SequenceEqual(["IO(23)", "IO(25)"]) &&
+               unmappedRows.All(row =>
+                   row.Io == 0 &&
+                   row.FaultType.Length == 0 &&
+                   row.Connector.Length == 0 &&
+                   row.Pin.Length == 0 &&
+                   row.Section.Length == 0 &&
+                   row.Color.Length == 0 &&
+                   row.Status.Length == 0) &&
+               unmappedDiagnostics.WrongCandidateCount == 0 &&
+               unmappedDiagnostics.WrongConfirmedCount == 0 &&
+               unmappedDiagnostics.ShortCandidateCount == 0 &&
+               unmappedDiagnostics.ShortConfirmedCount == 0,
+            "CASE C2: two IO absent from THT appear as separate WireName-only Probe rows and never become a product fault");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings
