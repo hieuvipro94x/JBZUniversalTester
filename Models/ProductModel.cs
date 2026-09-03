@@ -131,18 +131,6 @@ public sealed class ProductModel
     public bool HasDiscardInterlock => DiscardContactIo.Count == 2;
 
     /// <summary>
-    /// Cho biết I/O có được khai báo ở bất kỳ vai trò nào trong THT hay không.
-    /// Dùng để phân biệt tiếp điểm sản phẩm thật với hai I/O hoàn toàn ngoài model.
-    /// </summary>
-    public bool ContainsDeclaredIo(int io) =>
-        io > 0 &&
-        (Pins.Any(pin => pin.IoNumber == io) ||
-         DiscardContactIo.Contains(io) ||
-         IgnoredIo.Contains(io) ||
-         Clip?.CommonIo == io ||
-         Clip?.Branches.Any(branch => branch.TargetIo == io) == true);
-
-    /// <summary>
     /// I/O đặc biệt không đủ thông tin để dựng topology. AO/aN hợp lệ sẽ được
     /// đưa vào ClipTopology, chỉ dữ liệu special bị thiếu/malformed mới nằm đây.
     /// </summary>

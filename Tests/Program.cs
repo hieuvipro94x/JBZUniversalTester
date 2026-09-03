@@ -1046,7 +1046,10 @@ internal static class Program
             production,
             out FakeBoard board,
             requireStartupIoClear: true);
-        vm.SetModel(Model(("PAIR", new[] { 1, 18 })));
+        ProductModel startupInterlockModel = Model(("PAIR", new[] { 1, 18 }));
+        startupInterlockModel.ModelName = "SELF-TEST-STARTUP-INTERLOCK";
+        startupInterlockModel.PartNumber = "SELF-TEST-STARTUP-INTERLOCK";
+        vm.SetModel(startupInterlockModel);
 
         board.Publish(duplicatedDirections);
         Assert(vm.IsProductRemovalPending &&
@@ -3811,35 +3814,26 @@ internal static class Program
                vm.Faults.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
             "CASE C: Probe release removes only Probe presentation and keeps production open row");
 
-        TestViewModel unmappedPairVm = CreateTestViewModel(production, out FakeBoard unmappedPairBoard);
-        unmappedPairVm.SetModel(model);
-        unmappedPairVm.StartProductionTestAsync().GetAwaiter().GetResult();
-        unmappedPairBoard.Publish(FrameSeq(13));
-        unmappedPairBoard.Publish(FrameSeq(14, (23, new[] { 25 })));
-        FaultRow[] unmappedRows = unmappedPairVm.Faults
-            .Where(row => row.Kind == FaultKind.Probe)
-            .ToArray();
-        TestEngine unmappedPairEngine = (TestEngine)(typeof(TestViewModel).GetField(
-            "_engine",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?.GetValue(unmappedPairVm) ?? throw new InvalidOperationException("Unmapped-pair TestEngine not found"));
+        ScanFrame unmappedPairFrame = FrameSeq(14, (23, new[] { 25 }));
+        Assert(ProbeContactClassifier.DetectMany(
+                   unmappedPairFrame,
+                   model,
+                   maxContacts: 2,
+                   boardCapacity: BoardCapacity.Create(10)).Count == 0,
+            "CASE C2: an ordinary IO23<->IO25 edge has no Probe signature");
+        using TestEngine unmappedPairEngine = CreateEngine(out _, production);
+        unmappedPairEngine.SetModel(model);
+        unmappedPairEngine.ProcessFrame(unmappedPairFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 20);
+        unmappedPairEngine.ProcessFrame(unmappedPairFrame with { Sequence = 15 });
         PassGateDiagnostics unmappedDiagnostics = unmappedPairEngine.GetPassGateDiagnostics();
-        Assert(unmappedPairVm.HasInlineProbeContacts &&
-               unmappedRows.Length == 2 &&
-               unmappedRows.Select(row => row.WireName).SequenceEqual(["IO(23)", "IO(25)"]) &&
-               unmappedRows.All(row =>
-                   row.Io == 0 &&
-                   row.FaultType.Length == 0 &&
-                   row.Connector.Length == 0 &&
-                   row.Pin.Length == 0 &&
-                   row.Section.Length == 0 &&
-                   row.Color.Length == 0 &&
-                   row.Status.Length == 0) &&
-               unmappedDiagnostics.WrongCandidateCount == 0 &&
-               unmappedDiagnostics.WrongConfirmedCount == 0 &&
-               unmappedDiagnostics.ShortCandidateCount == 0 &&
-               unmappedDiagnostics.ShortConfirmedCount == 0,
-            "CASE C2: two IO absent from THT appear as separate WireName-only Probe rows and never become a product fault");
+        Assert(unmappedDiagnostics.WrongConfirmedCount == 1 &&
+               unmappedPairEngine.HasWiringFault &&
+               unmappedPairEngine.WiringFaults.Any(fault =>
+                   fault.SourceIo == 23 &&
+                   fault.TargetIo == 25 &&
+                   fault.FaultType == ProductFaultType.WrongWiring),
+            "CASE C2: two IO absent from THT become confirmed WRONG and must enter the FAIL confirmation flow");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings
