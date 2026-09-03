@@ -1232,11 +1232,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         if (frame.Mode != BoardScanMode.Production || !frame.Complete || frame.UnknownBytes != 0)
             return true;
 
-        string signature = string.Join(
-            ";",
-            frame.Connections
-                .OrderBy(pair => pair.Key)
-                .Select(pair => $"{pair.Key}:{string.Join(',', pair.Value.Order())}"));
+        string signature = BuildStableFrameSignature(frame);
         if (!string.Equals(signature, _stableFrameSignature, StringComparison.Ordinal))
         {
             _stableFrameSignature = signature;
@@ -1262,6 +1258,23 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 $"start_card={_capacity.StartCardNumber} scan_through={_capacity.StartScanParameter}");
         }
         return true;
+    }
+
+    private static string BuildStableFrameSignature(ScanFrame frame)
+    {
+        string activeIo = string.Join(',', frame.ActiveIo.Order());
+        string connections = string.Join(
+            ";",
+            frame.Connections
+                .OrderBy(pair => pair.Key)
+                .Select(pair => $"{pair.Key}:{string.Join(',', pair.Value.Order())}"));
+        string targetHits = string.Join(
+            ",",
+            frame.TargetHits
+                .OrderBy(pair => pair.Key)
+                .Select(pair => $"{pair.Key}:{pair.Value}"));
+        return $"{frame.ExpectedIoCount}|{frame.SourceCount}|{frame.EndMarkerCode}|" +
+               $"{activeIo}|{connections}|{targetHits}";
     }
 
     async Task WriteAsync(

@@ -67,7 +67,6 @@ public sealed class TestViewModel : ObservableObject
     private TestHistoryStore? _historyStore;
     private ProductionPersistenceService? _productionPersistence;
     private readonly LabelPrintService _labelPrintService = new();
-    private readonly BarcodeScannerService _barcodeScanner = new();
     private readonly AppSoundService _sound = AppSoundService.Current;
     private readonly DiscardContactInterlock _discardInterlock = new();
     private readonly ThtModelParser _modelParser = new();
@@ -87,7 +86,6 @@ public sealed class TestViewModel : ObservableObject
     private string _state = "CHỜ CHỌN MÃ HÀNG";
     private string _lot = "0";
     private string _keysightResource;
-    private string _acceptedInputBarcode = string.Empty;
     private WaterProofModelSettings _waterProofProfile = new();
     private WaterProofStage _waterProofStage = WaterProofStage.Idle;
     private string _waterProofStageText = "CHỜ KIỂM TRA";
@@ -257,7 +255,8 @@ public sealed class TestViewModel : ObservableObject
     public ObservableCollection<BoardCardState> ActiveCards => Cards;
     public BoardCapacity BoardCapacity => _board.Capacity;
     public string BoardCapacityText =>
-        $"{BoardCapacity.ScanCardCount} CARD / " +
+        $"{BoardCapacity.ExpansionCardCount} CARD " +
+        $"({BoardCapacity.StartCardNumber}-{BoardCapacity.ScanCardCount}) / " +
         $"{BoardCapacity.TotalIoCapacity} I/O";
 
     public bool HasInlineProbeContacts => ProbeContacts.Count > 0;
@@ -957,7 +956,6 @@ public sealed class TestViewModel : ObservableObject
         _board.Log += OnBoardLog;
         _board.FrameReceived += OnBoardFrameReceived;
         _waterProof.Log += OnWaterProofLog;
-        _barcodeScanner.BarcodeReceived += OnBarcodeReceived;
 
         // FileSystemWatcher được tạo sau first-render trong InitializeCoreAsync,
         // không làm nặng constructor của MainWindow/TestViewModel.
@@ -1772,21 +1770,6 @@ public sealed class TestViewModel : ObservableObject
         // đoạn transport còn đang khởi tạo.
         await InitializeHardwareAsync();
 
-        if (_productionSettings.BarcodeScannerEnabled)
-        {
-            try
-            {
-                _barcodeScanner.Connect(
-                    _productionSettings.BarcodeScannerPort,
-                    _productionSettings.BarcodeScannerBaudRate);
-                AddLog($"BARCODE CONNECTED: {_productionSettings.BarcodeScannerPort}.");
-            }
-            catch (Exception ex)
-            {
-                AddLog($"BARCODE COM chưa kết nối: {ex.Message}");
-            }
-        }
-
         if (_board.IsConnected)
         {
             if (_model is null)
@@ -1893,8 +1876,8 @@ public sealed class TestViewModel : ObservableObject
         if (generation != Volatile.Read(ref _modelLoadGeneration))
             return null;
 
-        SetModel(model, preparedEngineModel);
         _productionSettings.LastThtPartKey = JBZUniversalTester.Views.PartSelectionWindow.PartKey(model);
+        SetModel(model, preparedEngineModel);
         // SetModel chỉ đổi requested active range. Nếu firmware đang chạy dải của
         // model trước, reconcile ngay tại đường load async trước khi MainWindow tự
         // mở TestView. Healthy same-capacity stream được supervisor giữ nguyên.
@@ -1976,6 +1959,8 @@ public sealed class TestViewModel : ObservableObject
 
             if (generation == Volatile.Read(ref _modelLoadGeneration) && _model is null)
             {
+                _productionSettings.LastThtPartKey =
+                    JBZUniversalTester.Views.PartSelectionWindow.PartKey(startup.Model);
                 SetModel(startup.Model, startup.Prepared);
                 StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
                 AddLog($"Đã tự tải model gần nhất: {Path.GetFileName(fullPath)}");
@@ -2513,7 +2498,6 @@ public sealed class TestViewModel : ObservableObject
         _lastPassRemainingSignature = string.Empty;
         _lastProductDetectSignature = string.Empty;
         _activeCycleId = Guid.NewGuid().ToString("N");
-        _acceptedInputBarcode = string.Empty;
         _cycleStartedAt = DateTime.Now;
         _cycleTestStartedAt = null;
         _cycleRemovalStartedAt = null;
@@ -2556,43 +2540,6 @@ public sealed class TestViewModel : ObservableObject
     {
         AsyncFileLogService.Current.Board($"WATERPROOF {text}", AppLogLevel.Normal);
         AddLog($"[WATERPROOF] {text}");
-    }
-
-    private void OnBarcodeReceived(object? sender, string barcode) =>
-        _ = ValidateInputBarcodeAsync(barcode);
-
-    private async Task ValidateInputBarcodeAsync(string barcode)
-    {
-        string value = barcode.Trim();
-        ProductModel? model = _model;
-        if (value.Length == 0 || model is null)
-            return;
-        try
-        {
-            static string Canonical(string text) => new(text.Where(char.IsLetterOrDigit)
-                .Select(char.ToUpperInvariant).ToArray());
-            string expected = Canonical(model.PartNumber);
-            string actual = Canonical(value);
-            if (expected.Length > 0 && !actual.Contains(expected, StringComparison.Ordinal))
-            {
-                InvokeUi(() => State = "BARCODE KHÔNG KHỚP MÃ HÀNG");
-                AddLog($"BARCODE REJECTED: part={model.PartNumber}; value={value}.");
-                return;
-            }
-            if (await ProductionPersistence.HasInputBarcodeAsync(value, _lifetimeCts.Token))
-            {
-                InvokeUi(() => State = "SẢN PHẨM ĐÃ ĐƯỢC KIỂM TRA");
-                AddLog($"BARCODE DUPLICATE: {value}.");
-                return;
-            }
-            _acceptedInputBarcode = value;
-            InvokeUi(() => State = "BARCODE HỢP LỆ • SẴN SÀNG KIỂM TRA");
-            AddLog($"BARCODE ACCEPTED: {value}.");
-        }
-        catch (Exception ex)
-        {
-            AddLog($"Không thể xác nhận barcode {value}: {ex.Message}");
-        }
     }
 
     private void OnBoardFrameReceived(object? sender, ScanFrame frame)
@@ -3767,9 +3714,15 @@ public sealed class TestViewModel : ObservableObject
         Cards.Clear();
         for (int cardNumber = 1; cardNumber <= BoardCapacity.MaxExpansionCardCount; cardNumber++)
         {
-            int firstIo = ((cardNumber - 1) * BoardCapacity.IoPerExpansionCard) + 1;
-            int lastIo = firstIo + BoardCapacity.IoPerExpansionCard - 1;
-            bool enabled = cardNumber <= capacity.ScanCardCount;
+            bool enabled = cardNumber >= capacity.StartCardNumber &&
+                           cardNumber <= capacity.ScanCardCount;
+            int logicalCardIndex = cardNumber - capacity.StartCardNumber;
+            int firstIo = enabled
+                ? (logicalCardIndex * BoardCapacity.IoPerExpansionCard) + 1
+                : 0;
+            int lastIo = enabled
+                ? firstIo + BoardCapacity.IoPerExpansionCard - 1
+                : 0;
 
             Cards.Add(new BoardCardState
             {
@@ -3983,9 +3936,7 @@ public sealed class TestViewModel : ObservableObject
         _engine.Changed -= OnEngineChanged;
         _board.Log -= OnBoardLog;
         _board.FrameReceived -= OnBoardFrameReceived;
-        _barcodeScanner.BarcodeReceived -= OnBarcodeReceived;
-        _barcodeScanner.Dispose();
-
+        _waterProof.Log -= OnWaterProofLog;
         _lifetimeCts.Dispose();
     }
 
@@ -4169,13 +4120,6 @@ public sealed class TestViewModel : ObservableObject
         {
             throw new InvalidOperationException(
                 "Chưa tải model .tht.");
-        }
-
-        if (_productionSettings.BarcodeScannerEnabled && string.IsNullOrWhiteSpace(_acceptedInputBarcode))
-        {
-            State = "CHỜ QUÉT BARCODE SẢN PHẨM";
-            AddLog("BLOCKED: barcode scanner đang bật nhưng chưa nhận barcode hợp lệ.");
-            return;
         }
 
         bool ioMappingMode = IsIoMappingMode;
@@ -7474,7 +7418,6 @@ public sealed class TestViewModel : ObservableObject
             HtdrvName = ProgramIdentityService.BuildHtdrvName(),
             LotText = _productionSettings.Lot,
             InspectionTrace = BuildProductInspectionTrace(finished),
-            InputBarcode = _acceptedInputBarcode,
             OpenCount = openCount,
             WrongCount = wrongOnly,
             ShortCount = shortOnly,

@@ -1,6 +1,7 @@
 ﻿using System.IO.Compression;
 using System.Diagnostics;
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -9,6 +10,7 @@ using JBZUniversalTester.Models;
 using JBZUniversalTester.Converters;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
+using JBZUniversalTester.Views;
 using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.SelfTests;
@@ -983,7 +985,9 @@ internal static class Program
                vm.Pass == passBeforeWarning &&
                vm.Fail == failBeforeWarning &&
                !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
-            "Startup IO warning cannot commit production or activate a relay");
+            $"Startup IO warning cannot commit production or activate a relay " +
+            $"(totals {totalBeforeWarning}/{passBeforeWarning}/{failBeforeWarning} -> " +
+            $"{vm.Total}/{vm.Pass}/{vm.Fail}; commands={string.Join(',', board.Commands)})");
 
         board.Publish(FrameSeq(103));
         Assert(!vm.IsProductRemovalPending &&
@@ -1756,6 +1760,50 @@ internal static class Program
             using SqliteDataReader reader = probe.ExecuteReader();
             Assert(reader.Read() && reader.GetInt32(0) == 1 && reader.GetInt32(1) == 1,
                 "Schema initialization preserves tables from a database without SchemaInfo");
+            reader.Close();
+            verify.Close();
+
+            string v3Path = Path.Combine(root, "schema-v3.db");
+            var v3Store = new TestHistoryStore(v3Path);
+            v3Store.Add(new TestHistoryRecord
+            {
+                Started = new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Local),
+                Finished = new DateTime(2026, 9, 1, 8, 0, 1, DateTimeKind.Local),
+                PartNumber = "V3-PART",
+                ModelName = "V3-MODEL",
+                ModelFile = "V3.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "v3-existing-cycle"
+            });
+            SqliteConnection.ClearAllPools();
+            using (var downgrade = new SqliteConnection($"Data Source={v3Path};Pooling=False"))
+            {
+                downgrade.Open();
+                using SqliteCommand command = downgrade.CreateCommand();
+                command.CommandText = """
+                    DROP TABLE ActiveTestCycles;
+                    UPDATE SchemaInfo SET SchemaVersion=3 WHERE Id=1;
+                    """;
+                command.ExecuteNonQuery();
+            }
+
+            var migratedV3 = new TestHistoryStore(v3Path);
+            Assert(File.Exists(v3Path + $".pre-schema-v{TestHistoryStore.CurrentSchemaVersion}.backup"),
+                "Schema v3 database is backed up before v4 migration");
+            using var migratedVerify = new SqliteConnection($"Data Source={v3Path};Pooling=False");
+            migratedVerify.Open();
+            using SqliteCommand migratedProbe = migratedVerify.CreateCommand();
+            migratedProbe.CommandText = """
+                SELECT
+                    (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ActiveTestCycles'),
+                    (SELECT COUNT(*) FROM Tests WHERE CycleId='v3-existing-cycle');
+                """;
+            using SqliteDataReader migratedReader = migratedProbe.ExecuteReader();
+            Assert(migratedReader.Read() && migratedReader.GetInt32(0) == 1 &&
+                   migratedReader.GetInt32(1) == 1 &&
+                   migratedV3.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "Schema v3 migration is idempotent and preserves existing test rows");
         }
         finally
         {
@@ -2225,33 +2273,60 @@ internal static class Program
                tenCardModel.StartScanParameter == 10,
             "A valid IO640 model fits exactly in ten cards without a capacity warning");
 
-        var legacyStart = new ProductionSettings
+        var offsetStart = new ProductionSettings
         {
             ExpansionCardCount = 4,
             StartCardNumber = 3
         };
-        BoardCapacity legacyCapacity = BoardCapacity.FromSettings(legacyStart);
-        Assert(legacyCapacity.FirstGlobalIo == 1 && legacyCapacity.LastGlobalIo == 256 &&
-               legacyCapacity.TotalIoCapacity == 256 && legacyCapacity.StartCardNumber == 1,
-            "Unverified legacy StartCardNumber cannot offset or reduce the configured 4-card capacity");
+        BoardCapacity offsetCapacity = BoardCapacity.FromSettings(offsetStart);
+        Assert(offsetCapacity.FirstGlobalIo == 1 && offsetCapacity.LastGlobalIo == 256 &&
+               offsetCapacity.TotalIoCapacity == 256 && offsetCapacity.StartCardNumber == 3 &&
+               offsetCapacity.ScanCardCount == 6 && offsetCapacity.StartScanParameter == 6 &&
+               offsetCapacity.FirstPhysicalIo == 129 && offsetCapacity.LastPhysicalIo == 384,
+            "StartCard=3 keeps logical IO1-256 and scans the physical card 3-6 range");
+
+        var offsetMapper = new BoardAddressMapper(offsetCapacity);
+        AssertAddress(offsetMapper, 1, 3, 1, 1);
+        AssertAddress(offsetMapper, 256, 6, 2, 32);
+        Assert(!offsetMapper.TryDecode(0x80, BoardIoDecoder.SourceBase, 127, out _) &&
+               offsetMapper.TryDecode(0x81, BoardIoDecoder.SourceBase, 0, out int firstOffsetIo) &&
+               firstOffsetIo == 1 &&
+               offsetMapper.TryDecode(0x82, BoardIoDecoder.SourceBase, 127, out int lastOffsetIo) &&
+               lastOffsetIo == 256,
+            "Decoder ignores cards before Start Card and maps the selected physical range to logical IO1-N");
+
+        BoardScanCapacity offsetModel = BoardScanCapacity.Create(offsetStart, 201);
+        BoardScanCapacity offsetSmallModel = BoardScanCapacity.Create(offsetStart, 37);
+        BoardScanCapacity offsetTooLarge = BoardScanCapacity.Create(offsetStart, 257);
+        Assert(offsetModel.IsModelWithinInstalledCapacity &&
+               offsetModel.Active.ExpansionCardCount == 4 &&
+               offsetModel.StartScanParameter == 6 &&
+               offsetSmallModel.IsModelWithinInstalledCapacity &&
+               offsetSmallModel.Active.ExpansionCardCount == 1 &&
+               offsetSmallModel.StartScanParameter == 3 &&
+               offsetSmallModel.ActiveIoCapacity == 64 &&
+               !offsetTooLarge.IsModelWithinInstalledCapacity,
+            "Start Card does not let a model exceed the configured logical card count");
 
         string settingsXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
         Assert(settingsXaml.Contains("Settings.ExpansionCardCount", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"TotalIoCapacityText\"", StringComparison.Ordinal) &&
-               !settingsXaml.Contains("Settings.StartCardNumber", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Settings.StartCardNumber", StringComparison.Ordinal) &&
                !settingsXaml.Contains("Settings.PhysicalCardCount", StringComparison.Ordinal) &&
                !settingsXaml.Contains("Settings.PortCount", StringComparison.Ordinal),
-            "Production Settings exposes only ExpansionCardCount and read-only Total IO for card capacity");
+            "Production Settings exposes Start Card, ExpansionCardCount and read-only Total IO");
 
         string cfgPath = Path.Combine(Path.GetTempPath(), $"jbz-card-capacity-{Guid.NewGuid():N}.cfg");
         try
         {
-            ProductionConfigService.SaveLegacyCfg(legacyStart, cfgPath);
+            ProductionConfigService.SaveLegacyCfg(offsetStart, cfgPath);
             string cfg = File.ReadAllText(cfgPath);
-            Assert(legacyStart.StartCardNumber == 1 &&
-                   !cfg.Contains("[StartCardNumber]", StringComparison.Ordinal),
-                "New CFG normalizes legacy start-card to 1 and persists only the expansion-card count");
+            Assert(offsetStart.StartCardNumber == 3 && offsetStart.CardCount == 6 &&
+                   cfg.Contains("[StartCardNumber]3", StringComparison.Ordinal) &&
+                   cfg.Contains("[ExpansionCardCount]4", StringComparison.Ordinal) &&
+                   cfg.Contains("[CardCount]6", StringComparison.Ordinal),
+                "CFG persists Start Card, logical card count and firmware scan-through consistently");
         }
         finally
         {
@@ -2394,6 +2469,33 @@ internal static class Program
                BoardCapacity.Create(4).StartScanParameter == 4,
             "START_SCAN parameter follows BoardCapacity, not a hard-coded 02");
 
+        decoder.ConfigureCapacity(BoardCapacity.Create(4, 3));
+        decoder.ConfigureMode(BoardScanMode.Production);
+        ScanFrame offsetFrame = decoder.Feed(
+            BuildProductionScanFrame(6, 0x01, (129, 130))).Single();
+        Assert(offsetFrame.Complete && offsetFrame.SourceCount == 256 &&
+               offsetFrame.ExpectedIoCount == 256 &&
+               offsetFrame.Connections.TryGetValue(1, out IReadOnlySet<int>? offsetTargets) &&
+               offsetTargets.SetEquals([2]),
+            "StartCard=3 discards physical cards 1-2 and exposes physical IO129 as logical IO1");
+
+        var confirmationSettings = new ProductionSettings { IoConfirm1 = 2, IoConfirmN = 3 };
+        var confirmationTransport = new D2xxBoardTransport(string.Empty, confirmationSettings);
+        MethodInfo shouldPublish = typeof(D2xxBoardTransport).GetMethod(
+            "ShouldPublishConfirmedFrame",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ShouldPublishConfirmedFrame method not found.");
+        bool Confirm(ScanFrame frame) => (bool)(shouldPublish.Invoke(confirmationTransport, [frame]) ?? false);
+        ScanFrame stableA = FrameSeq(1, (1, [2]));
+        ScanFrame stableB = FrameSeq(2, (1, [3]));
+        Assert(!Confirm(stableA) && !Confirm(stableB) && Confirm(stableB),
+            "IO Confirm 1/2 resets when the complete logical snapshot changes");
+        ScanFrame stableC = FrameSeq(3, (1, [4]));
+        Assert(!Confirm(stableC) && !Confirm(stableC) && Confirm(stableC),
+            "IO Confirm N=3 requires three consecutive matching snapshots after first confirmation");
+        confirmationTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        decoder.ConfigureCapacity(BoardCapacity.Create(4));
         decoder.ConfigureMode(BoardScanMode.Probe);
         ScanFrame touch5 = decoder.Feed([0xA0, 0x04]).Single();
         Assert(touch5.Mode == BoardScanMode.Probe && touch5.ActiveIo.SetEquals([5]), "Probe touch IO5");
@@ -3916,6 +4018,37 @@ internal static class Program
                NetIos(wh322244Extract, "BG16").SequenceEqual([16, 79]) &&
                NetIos(wh322244Extract, "NUT01").SequenceEqual([34, 35]),
             "WH322244 extracted networks are grouped by string WireName only");
+
+        const string multiPartText =
+            "파트번호\t파트명\tECO\tNCO\tALC\n" +
+            "PART-A\tPRODUCT A\tECO-A\tNCO-A\tALC-A\n" +
+            "PART-B\tPRODUCT B\tECO-B\tNCO-B\tALC-B\n\n" +
+            "번 호\t커넥터\t핀 수\n" +
+            "1\tCN1\t2\n\n" +
+            "커넥터\t선이름\tI/O\t핀번호\n" +
+            "CN1\tW1\t1\t1\n" +
+            "CN1\tW1\t2\t2\n\n" +
+            "선이름\t선연결\t굵기\t색깔\n" +
+            "W1\t\t0.5\tR";
+        string multiPartRoot = Path.Combine(
+            Path.GetTempPath(), "JBZMultiPartThtTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(multiPartRoot);
+        try
+        {
+            string multiPartPath = Path.Combine(multiPartRoot, "multi-part.tht");
+            File.WriteAllBytes(multiPartPath, BuildMinimalThtFile(multiPartText));
+            IReadOnlyList<ProductModel> parts = new ThtModelParser().LoadAll(multiPartPath);
+            Assert(parts.Count == 2 &&
+                   parts[0].PartNumber == "PART-A" && parts[0].ProductName == "PRODUCT A" &&
+                   parts[1].PartNumber == "PART-B" && parts[1].ProductName == "PRODUCT B" &&
+                   parts.All(part => part.Nets.Single().IoNumbers.SequenceEqual([1, 2])) &&
+                   PartSelectionWindow.PartKey(parts[0]) != PartSelectionWindow.PartKey(parts[1]),
+                "Multi-Part THT returns one explicit candidate per Part row without inferring topology conversion");
+        }
+        finally
+        {
+            Directory.Delete(multiPartRoot, recursive: true);
+        }
     }
 
     private static void TestRelayOrdering()
@@ -4101,7 +4234,26 @@ internal static class Program
             };
 
             var store = new TestHistoryStore(Path.Combine(root, "history.db"));
+            store.UpsertActiveCycle(
+                record.CycleId,
+                record.PartNumber,
+                record.ModelFile,
+                record.Started,
+                "TEST_STARTED");
+            Assert(CountActiveCycles(store.DatabasePath, record.CycleId) == 1,
+                "Active production cycle is persisted before final PASS/FAIL commit");
             store.Add(record);
+            Assert(CountActiveCycles(store.DatabasePath, record.CycleId) == 0,
+                "Final result atomically clears its active cycle");
+            store.UpsertActiveCycle(
+                record.CycleId,
+                record.PartNumber,
+                record.ModelFile,
+                record.Started,
+                "RETRY");
+            store.Add(record);
+            Assert(CountActiveCycles(store.DatabasePath, record.CycleId) == 0,
+                "Idempotent duplicate commit also clears a recreated active-cycle row");
             DateTime removalStarted = finished.AddMilliseconds(250);
             DateTime removedAt = removalStarted.AddSeconds(2);
             Assert(store.UpdateRemovalTiming(record.CycleId, removalStarted, null),
@@ -5252,6 +5404,16 @@ internal static class Program
     {
         using StreamReader reader = new(archive.GetEntry(name)?.Open() ?? throw new InvalidOperationException(name));
         return reader.ReadToEnd();
+    }
+
+    private static int CountActiveCycles(string databasePath, string cycleId)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM ActiveTestCycles WHERE CycleId=$CycleId;";
+        command.Parameters.AddWithValue("$CycleId", cycleId);
+        return Convert.ToInt32(command.ExecuteScalar() ?? 0, CultureInfo.InvariantCulture);
     }
 
     private static void Assert(bool condition, string message)

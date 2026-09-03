@@ -325,16 +325,17 @@ public sealed class MainViewModel : ObservableObject
         {
             BoardMode = _productionSettings.BoardMode,
             ExpansionCardCount = _productionSettings.ExpansionCardCount,
+            StartCardNumber = _productionSettings.StartCardNumber,
             UsbDelay = _productionSettings.UsbDelay,
             UseTestPointer = _productionSettings.UseTestPointer
         };
 
         ProductionConfigService.ReloadInto(_productionSettings);
         AsyncFileLogService.Current.Configure(_productionSettings.EnableSystemLogs);
-
         bool boardSelectionChanged = old.BoardMode != _productionSettings.BoardMode;
         bool scanHardwareChanged =
             old.ExpansionCardCount != _productionSettings.ExpansionCardCount ||
+            old.StartCardNumber != _productionSettings.StartCardNumber ||
             old.UsbDelay != _productionSettings.UsbDelay ||
             old.UseTestPointer != _productionSettings.UseTestPointer;
 

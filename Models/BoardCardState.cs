@@ -33,5 +33,5 @@ public sealed class BoardCardState : ObservableObject
 
     public string CardText => $"CARD {CardNumber}";
     public string StateText => !IsEnabled ? "TẮT" : IsScanning ? "ĐANG QUÉT" : "BẬT";
-    public string RangeText => $"IO {FirstGlobalIo}-{LastGlobalIo}";
+    public string RangeText => IsEnabled ? $"IO {FirstGlobalIo}-{LastGlobalIo}" : "—";
 }

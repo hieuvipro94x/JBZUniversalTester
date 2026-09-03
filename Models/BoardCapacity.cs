@@ -172,18 +172,15 @@ public sealed record BoardScanCapacity
         int required = BoardCapacity.RequiredScanUnitsForIo(maxGlobalIo);
         bool fits = installed.IsRangeWithinSystem &&
                     maxGlobalIo <= BoardCapacity.MaxGlobalIo &&
-                    required <= installed.ScanCardCount;
+                    required <= installed.ExpansionCardCount;
 
-        // Required chỉ dùng để validate model. Firmware phải quét đúng toàn bộ
-        // số card operator đã cấu hình, không tự thu nhỏ START_SCAN theo model.
-        // Without a model (or in blank-THT IO mapping), scan every installed
-        // card. With a valid model, scan only through its highest configured IO
-        // so a 10-card station does not pay the 640-source frame time for a
-        // product that uses only the first card.
-        int activeScanUnits = !scanAllInstalledIo && maxGlobalIo > 0 && fits
+        // Required là số card logic cần cho model. Không có model (hoặc THT trống)
+        // thì quét toàn bộ dải đã lắp. Có model hợp lệ thì chỉ dùng số card logic
+        // cần thiết, nhưng START_SCAN vẫn phải cộng offset vật lý Start Card.
+        int activeExpansionCards = !scanAllInstalledIo && maxGlobalIo > 0 && fits
             ? required
-            : installed.ScanCardCount;
-        BoardCapacity active = BoardCapacity.Create(activeScanUnits, installed.StartCardNumber);
+            : installed.ExpansionCardCount;
+        BoardCapacity active = BoardCapacity.Create(activeExpansionCards, installed.StartCardNumber);
 
         return new BoardScanCapacity
         {
@@ -199,7 +196,7 @@ public sealed record BoardScanCapacity
         ? $"MODEL_CAPACITY_EXCEEDED: Model Max IO={ModelMaxIo} vượt giới hạn " +
           $"{BoardCapacity.MaxGlobalIo} IO / {BoardCapacity.MaxExpansionCardCount} card mở rộng."
         : $"KHÔNG ĐỦ CARD MỞ RỘNG: {Installed.TotalIoCapacity} / {RequiredIoCapacity} IO. " +
-          $"Model cần {RequiredScanUnits} card, máy cấu hình {InstalledScanUnits} card.";
+          $"Model cần {RequiredScanUnits} card, máy cấu hình {Installed.ExpansionCardCount} card.";
 
     public override string ToString() =>
         $"installed={InstalledScanUnits} required={RequiredScanUnits} " +

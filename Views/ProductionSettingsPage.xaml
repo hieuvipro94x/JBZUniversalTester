@@ -239,26 +239,13 @@
                                  ToolTip="{Binding Settings.LastThtPath, Mode=OneWay}"
                                  IsReadOnly="True"/>
 
-                        <TextBlock Grid.Row="16" Text="B&#7853;t qu&#233;t barcode" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="16" Grid.Column="1"
-                                  IsChecked="{Binding Settings.BarcodeScannerEnabled, Mode=TwoWay}"/>
-
-                        <TextBlock Grid.Row="17" Text="COM barcode" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="17" Grid.Column="1"
-                                 Text="{Binding Settings.BarcodeScannerPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="V&#237; d&#7909; COM1; m&#225;y qu&#233;t ph&#7843;i g&#7917;i k&#7871;t th&#250;c CR/LF"/>
-
-                        <TextBlock Grid.Row="18" Text="Baud barcode" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="18" Grid.Column="1"
-                                 Text="{Binding Settings.BarcodeScannerBaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                        <TextBlock Grid.Row="19"
+                        <TextBlock Grid.Row="16"
                                    Grid.ColumnSpan="2"
                                    Text="Relay tay dùng trực tiếp • không cần bật hoặc lưu Manual Mode"
                                    Foreground="{StaticResource TextMuted}"
                                    TextWrapping="Wrap"/>
 
-                        <Border Grid.Row="20"
+                        <Border Grid.Row="17"
                                 Grid.RowSpan="9"
                                 Grid.ColumnSpan="2"
                                 Margin="0,6,0,0"

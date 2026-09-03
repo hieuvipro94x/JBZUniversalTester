@@ -2,6 +2,15 @@
 Ngày tạo: 2026-09-03
 Repo: D:\Code\JBZUniversalTester-NEW\JBZUniversalTester
 
+> CẬP NHẬT PHẠM VI 2026-09-03: Theo yêu cầu người dùng, toàn bộ chức năng
+> máy quét barcode đầu vào/COM và InputBarcode đã bị loại bỏ. Chỉ giữ barcode
+> đầu ra thuộc cấu hình in tem tự động. Mọi ghi chú barcode scanner bên dưới
+> là lịch sử của checkpoint, không phải việc cần khôi phục.
+>
+> HOÀN TẤT CODE REVIEW: V16.0.173 build Release PASS (0 warning/error),
+> self-test PASS 42/42 ở hai lượt liên tiếp và read-only binding audit PASS.
+> Chưa kiểm tra với bo D2XX/relay thật tại công ty.
+
 ## Mục tiêu phiên đang làm
 Codex đang triển khai tuần tự 8 nhóm:
 1. Sửa fresh-frame bằng scan-session generation và stale-frame guard.
@@ -99,6 +108,7 @@ Schema:
 Cần rà soát migration/schema/index/query thật kỹ trước khi coi hoàn tất.
 
 ### 6) Barcode scanner COM
+TRẠNG THÁI CUỐI: ĐÃ HỦY/LOẠI BỎ THEO YÊU CẦU NGƯỜI DÙNG. KHÔNG KHÔI PHỤC.
 Đã thêm:
 - Services\BarcodeScannerService.cs
 
@@ -214,6 +224,7 @@ Thử 1/n:
 - snapshot thay đổi phải reset counter đúng
 
 ### Barcode COM
+MỤC NÀY ĐÃ HỦY. Không cần test phần cứng máy quét barcode đầu vào.
 - mở đúng COM
 - reconnect
 - CR/LF framing

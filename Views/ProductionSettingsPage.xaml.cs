@@ -628,14 +628,6 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         }
 
-        if (_vm.Settings.BarcodeScannerEnabled &&
-            (string.IsNullOrWhiteSpace(_vm.Settings.BarcodeScannerPort) ||
-             _vm.Settings.BarcodeScannerBaudRate is < 1200 or > 921600))
-        {
-            error = "Barcode đang bật: phải nhập COM và baud 1200..921600.";
-            return false;
-        }
-
         if (_vm.Settings.Relay1JigPulseMs is < 50 or > 5000)
         {
             error = "R1 JIG phải từ 50 đến 5000 ms.";

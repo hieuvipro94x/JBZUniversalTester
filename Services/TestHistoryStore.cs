@@ -70,7 +70,6 @@ public sealed class TestHistoryStore
 
         using SqliteTransaction transaction = connection.BeginTransaction();
         CreateSchema(connection, transaction);
-        EnsureCurrentTestColumns(connection, transaction);
         int existingVersion = ReadSchemaVersion(connection, transaction);
         if (existingVersion < CurrentSchemaVersion &&
             TableExists(connection, transaction, "TestHistory"))
@@ -83,29 +82,6 @@ public sealed class TestHistoryStore
         WriteSchemaInfo(connection, transaction, report);
         transaction.Commit();
         return report;
-    }
-
-    private static void EnsureCurrentTestColumns(SqliteConnection connection, SqliteTransaction transaction)
-    {
-        bool hasInputBarcode = false;
-        using (SqliteCommand info = connection.CreateCommand())
-        {
-            info.Transaction = transaction;
-            info.CommandText = "PRAGMA table_info(Tests);";
-            using SqliteDataReader reader = info.ExecuteReader();
-            while (reader.Read())
-            {
-                if (reader.GetString(1).Equals("InputBarcode", StringComparison.OrdinalIgnoreCase))
-                    hasInputBarcode = true;
-            }
-        }
-        if (!hasInputBarcode)
-        {
-            using SqliteCommand alter = connection.CreateCommand();
-            alter.Transaction = transaction;
-            alter.CommandText = "ALTER TABLE Tests ADD COLUMN InputBarcode TEXT NOT NULL DEFAULT '';";
-            alter.ExecuteNonQuery();
-        }
     }
 
     private static int ReadExistingSchemaVersion(SqliteConnection connection)
@@ -275,7 +251,6 @@ public sealed class TestHistoryStore
                 Result TEXT NOT NULL DEFAULT '',
                 ResultCode TEXT NOT NULL DEFAULT '',
                 Barcode TEXT NOT NULL DEFAULT '',
-                InputBarcode TEXT NOT NULL DEFAULT '',
                 LabelSerial TEXT NOT NULL DEFAULT '',
                 ResistanceSummary TEXT NOT NULL DEFAULT '',
                 WaterProofSummary TEXT NOT NULL DEFAULT '',
@@ -821,6 +796,7 @@ public sealed class TestHistoryStore
         long existingId = FindTestId(connection, transaction, request.History.CycleId);
         if (existingId > 0)
         {
+            DeleteActiveCycle(connection, transaction, request.History.CycleId);
             return BuildCommitResult(connection, transaction, existingId, true, partId, request.History);
         }
 
@@ -850,15 +826,21 @@ public sealed class TestHistoryStore
             aggregate.ExecuteNonQuery();
         }
 
-        using (SqliteCommand clearActive = connection.CreateCommand())
-        {
-            clearActive.Transaction = transaction;
-            clearActive.CommandText = "DELETE FROM ActiveTestCycles WHERE CycleId=$CycleId;";
-            clearActive.Parameters.AddWithValue("$CycleId", request.CycleId);
-            clearActive.ExecuteNonQuery();
-        }
+        DeleteActiveCycle(connection, transaction, request.History.CycleId);
 
         return BuildCommitResult(connection, transaction, testId, false, partId, request.History);
+    }
+
+    private static void DeleteActiveCycle(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string cycleId)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "DELETE FROM ActiveTestCycles WHERE CycleId=$CycleId;";
+        command.Parameters.AddWithValue("$CycleId", cycleId);
+        command.ExecuteNonQuery();
     }
 
     public void UpsertActiveCycle(
@@ -888,17 +870,6 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$Stage", stage?.Trim() ?? string.Empty);
         command.Parameters.AddWithValue("$Updated", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
-    }
-
-    public bool HasInputBarcode(string barcode)
-    {
-        if (string.IsNullOrWhiteSpace(barcode))
-            return false;
-        using SqliteConnection connection = Open();
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT 1 FROM Tests WHERE InputBarcode=$Barcode LIMIT 1;";
-        command.Parameters.AddWithValue("$Barcode", barcode.Trim());
-        return command.ExecuteScalar() is not null;
     }
 
     private static long UpsertPart(
@@ -1048,7 +1019,7 @@ public sealed class TestHistoryStore
             INSERT INTO Tests
             (LegacyHistoryId,CycleId,RunId,PartId,ModelId,ConfigId,InspectionType,Lot,
              ProductionCounter,StartedAt,InstallStartedAt,TestStartedAt,ResultAt,
-             RemovalStartedAt,RemovedAt,FinishedAt,Passed,Result,ResultCode,Barcode,InputBarcode,
+             RemovalStartedAt,RemovedAt,FinishedAt,Passed,Result,ResultCode,Barcode,
              LabelSerial,ResistanceSummary,WaterProofSummary,DeviceName,DeviceNumber,
              OperatorCompany,ProductionLine,AppVersion,HtdrvName,LotText,InspectionTrace,
              OpenCount,WrongCount,ShortCount,FaultType,FaultSummary,FaultDetailsJson,
@@ -1057,7 +1028,7 @@ public sealed class TestHistoryStore
             VALUES
             ($Legacy,$Cycle,$Run,$Part,$Model,$Config,$Inspection,$Lot,$Counter,$Started,
              $Install,$TestStarted,$ResultAt,$RemovalStarted,$Removed,$Finished,$Passed,
-             $Result,$ResultCode,$Barcode,$InputBarcode,$LabelSerial,$Resistance,'',$DeviceName,$DeviceNumber,
+             $Result,$ResultCode,$Barcode,$LabelSerial,$Resistance,'',$DeviceName,$DeviceNumber,
              $Company,$Line,$App,$Htdrv,$LotText,$Trace,$Open,$Wrong,$Short,$FaultType,
              $FaultSummary,$FaultJson,$LabelProfile,$Template,$Payload,$PrintStatus,$PrintAt,
              $Printer,$Copies,$Reprints,$PrintMessage,$CreatedAt);
@@ -1083,7 +1054,6 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$Result", h.Result);
         command.Parameters.AddWithValue("$ResultCode", h.FaultCode);
         command.Parameters.AddWithValue("$Barcode", h.BarcodeValue);
-        command.Parameters.AddWithValue("$InputBarcode", h.InputBarcode);
         command.Parameters.AddWithValue("$LabelSerial", h.LabelSerial);
         command.Parameters.AddWithValue("$Resistance", h.Resistance);
         command.Parameters.AddWithValue("$DeviceName", h.DeviceName);

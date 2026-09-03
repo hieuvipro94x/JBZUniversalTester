@@ -73,11 +73,6 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
             return true;
         }, cancellationToken);
 
-    public Task<bool> HasInputBarcodeAsync(
-        string barcode,
-        CancellationToken cancellationToken = default) =>
-        EnqueueAsync(() => _repository.HasInputBarcode(barcode), cancellationToken);
-
     public Task<ProductionStatisticsSnapshot> GetStatisticsAsync(
         PartIdentitySnapshot part,
         DateTime now,

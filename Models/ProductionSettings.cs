@@ -11,10 +11,10 @@ public sealed class ProductionSettings
 
 
     /// <summary>
-    /// Số scan-unit mà firmware nhận ở byte thứ ba của START_SCAN.
+    /// Card vật lý cuối cùng mà firmware nhận ở byte thứ ba của START_SCAN.
     /// Trace Htdrv trong project xác nhận command xx=4 quét 256 I/O, vì vậy
-    /// 1 scan-unit = 64 I/O = 2 card vật lý x 32 I/O. Giá trị này được đồng
-    /// bộ tự động từ ExpansionCardCount.
+    /// mỗi scan-unit = 64 I/O = 2 port nội bộ x 32 I/O. Khi Start Card lớn hơn
+    /// 1, giá trị này là StartCardNumber + ExpansionCardCount - 1.
     /// </summary>
     public int CardCount { get; set; } = 2;
 
@@ -23,13 +23,9 @@ public sealed class ProductionSettings
     public int IoConfirmN { get; set; } = 1;
 
     public int UsbDelay { get; set; } = 1;
-    public bool BarcodeScannerEnabled { get; set; }
-    public string BarcodeScannerPort { get; set; } = string.Empty;
-    public int BarcodeScannerBaudRate { get; set; } = 9600;
-
     /// <summary>
-    /// Trường chỉ để đọc tương thích CFG/database cũ. Runtime chuẩn luôn bắt đầu
-    /// từ card 1; protocol hiện không có tham số start-card đã được xác minh.
+    /// Card vật lý đầu tiên của dải được lắp. Firmware vẫn quét từ card 1 tới
+    /// card cuối của dải; decoder bỏ vùng đứng trước và ánh xạ Start Card thành IO1.
     /// </summary>
     public int StartCardNumber { get; set; } = 1;
 

@@ -156,9 +156,6 @@ public static class ProductionConfigService
             $"[IoConfirm1]{settings.IoConfirm1}",
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",
-            $"[BarcodeScannerEnabled]{settings.BarcodeScannerEnabled}",
-            $"[BarcodeScannerPort]{settings.BarcodeScannerPort}",
-            $"[BarcodeScannerBaudRate]{settings.BarcodeScannerBaudRate}",
             $"[UseTestPointer]{Bool(settings.UseTestPointer)}",
             $"[ManualModeEnabled]{Bool(settings.ManualModeEnabled)}",
             $"[AutoMasterSequence]{Bool(settings.AutoMasterSequence)}",
@@ -472,9 +469,6 @@ public static class ProductionConfigService
         settings.IoConfirm1 = IAny(map, settings.IoConfirm1, "IoConfirm1", "IO1 확인");
         settings.IoConfirmN = IAny(map, settings.IoConfirmN, "IoConfirmN", "IOn 확인");
         settings.UsbDelay = IAny(map, settings.UsbDelay, "UsbDelay", "USB 지연");
-        settings.BarcodeScannerEnabled = B(map, "BarcodeScannerEnabled", settings.BarcodeScannerEnabled);
-        settings.BarcodeScannerPort = S(map, "BarcodeScannerPort", settings.BarcodeScannerPort);
-        settings.BarcodeScannerBaudRate = I(map, "BarcodeScannerBaudRate", settings.BarcodeScannerBaudRate);
         settings.StartCardNumber = I(map, "StartCardNumber", settings.StartCardNumber);
         settings.UseTestPointer = B(map, "UseTestPointer", settings.UseTestPointer);
         settings.ManualModeEnabled = B(map, "ManualModeEnabled", settings.ManualModeEnabled);
@@ -710,8 +704,6 @@ public static class ProductionConfigService
         }
         ProductionTimingPolicy.Normalize(settings);
         settings.UsbDelay = Math.Clamp(settings.UsbDelay, 1, 16);
-        settings.BarcodeScannerPort = (settings.BarcodeScannerPort ?? string.Empty).Trim();
-        settings.BarcodeScannerBaudRate = Math.Clamp(settings.BarcodeScannerBaudRate, 1200, 921600);
         settings.IoConfirm1 = Math.Clamp(settings.IoConfirm1, 0, 127);
         settings.IoConfirmN = Math.Clamp(settings.IoConfirmN, 0, 31);
         settings.ExpansionCardCount = Math.Clamp(

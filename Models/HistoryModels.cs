@@ -50,7 +50,6 @@ public sealed class TestHistoryRecord
     public string CycleId { get; set; } = string.Empty;
     public string LabelSerial { get; set; } = string.Empty;
     public string BarcodeValue { get; set; } = string.Empty;
-    public string InputBarcode { get; set; } = string.Empty;
     public string LabelProfile { get; set; } = string.Empty;
     public string LabelTemplateType { get; set; } = string.Empty;
     public string LabelPayload { get; set; } = string.Empty;

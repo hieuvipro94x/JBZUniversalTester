@@ -390,8 +390,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         Settings.ExpansionCardCount = Math.Min(
             Settings.ExpansionCardCount,
             BoardCapacity.MaxExpansionCardCount - Settings.StartCardNumber + 1);
-        Settings.CardCount = BoardIoDecoder.ScanCardCountFromExpansionCards(
-            Settings.ExpansionCardCount);
+        Settings.CardCount = BoardCapacity.FromSettings(Settings).ScanCardCount;
         Settings.ResistanceChannels = ResistanceChannels
             .Select(editor => editor.ToSetting())
             .ToArray();
