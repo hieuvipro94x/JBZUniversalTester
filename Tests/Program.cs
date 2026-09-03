@@ -935,18 +935,18 @@ internal static class Program
 
         board.Commands.Clear();
         int relay = vm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
-        Assert(relay == 1 && vm.IsManualModeActive && vm.State == "MANUAL" && !board.IsScanning,
-            "Manual Relay 1 ON holds one relay and keeps Production scan stopped");
+        Assert(relay == 0 && !vm.IsManualModeActive && board.IsScanning,
+            "Manual Relay 1 test pulse returns to OFF and resumes Production scan");
         Assert(board.Commands.Count(command => command == "OFF") >= 1 &&
-               board.Commands.Last() == "SET:1",
-            "Manual Relay 1 ON forces all relay OFF before selecting Relay 1");
+               board.Commands.Contains("SET:1") && board.Commands.Last() == "START",
+            "Manual Relay 1 test pulses Relay 1, forces OFF, then resumes scan");
 
         board.Commands.Clear();
         relay = vm.SetManualRelayAsync(2, true).GetAwaiter().GetResult();
-        Assert(relay == 2 && vm.IsManualModeActive && !board.IsScanning,
-            "Manual Relay 2 ON replaces Relay 1 while Manual remains active");
-        Assert(string.Join(",", board.Commands) == "OFF,SET:2",
-            "Manual relay switching is mutually exclusive: OFF before SET:2");
+        Assert(relay == 0 && !vm.IsManualModeActive && board.IsScanning,
+            "Manual Relay 2 test works independently and returns to OFF");
+        Assert(board.Commands.Contains("SET:2") && board.Commands.Last() == "START",
+            "Manual Relay 2 test pulses Relay 2, forces OFF, then resumes scan");
 
         board.Commands.Clear();
         relay = vm.SetManualRelayAsync(2, false).GetAwaiter().GetResult();

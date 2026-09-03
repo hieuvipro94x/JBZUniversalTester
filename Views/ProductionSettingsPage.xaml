@@ -462,11 +462,11 @@
                             </Grid.RowDefinitions>
 
                             <TextBlock Text="Relay 1" Style="{StaticResource FieldLabelStyle}"/>
-                            <Button Grid.Column="1" Grid.ColumnSpan="2" Content="B&#7852;T R1" Command="{Binding ManualRelay1OnCommand}"/>
+                            <Button Grid.Column="1" Grid.ColumnSpan="2" Content="TH&#7916; R1" Command="{Binding ManualRelay1OnCommand}"/>
                             <TextBlock Grid.Column="3" Text="{Binding ManualRelay1Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
 
                             <TextBlock Grid.Row="1" Text="Relay 2" Style="{StaticResource FieldLabelStyle}"/>
-                            <Button Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="B&#7852;T R2" Command="{Binding ManualRelay2OnCommand}"/>
+                            <Button Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="TH&#7916; R2" Command="{Binding ManualRelay2OnCommand}"/>
                             <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
 
                             <Button Grid.Row="2"
