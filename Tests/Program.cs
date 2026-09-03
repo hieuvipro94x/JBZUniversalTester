@@ -331,7 +331,10 @@ internal static class Program
                 File.ReadAllBytes(Path.Combine(target, "Data", "JBZUniversalTester.db"))
                     .SequenceEqual(new byte[] { 1, 2, 3, 4 }),
                 "Canonical SQLite database must be inherited");
-            Assert(migrated.Count == 3, "Only missing production files must be reported as migrated");
+            Assert(
+                !File.Exists(Path.Combine(target, "JBZUniversalTester.log")),
+                "Runtime logs must never be inherited from an older version");
+            Assert(migrated.Count == 2, "Only missing production state files must be reported as migrated");
         }
         finally
         {

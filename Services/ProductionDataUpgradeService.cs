@@ -15,7 +15,6 @@ public static class ProductionDataUpgradeService
     [
         "JBZUniversalTester.cfg",
         Path.Combine("Data", "JBZUniversalTester.db"),
-        "JBZUniversalTester.log",
         "PartCnt.txt"
     ];
 
