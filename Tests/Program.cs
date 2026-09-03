@@ -141,8 +141,8 @@ internal static class Program
             "커넥터\t선이름\tI/O\t핀번호\n" +
             "1\tMC01\t1\t1\n" +
             "1\tMC01\t2\t2\n" +
-            "_DISCARD\t\t97\t\n" +
-            "_DISCARD\t\t98\t\n\n" +
+            "_DISCARD\t\t97\t1\n" +
+            "_DISCARD\t\t98\t2\n\n" +
             "선이름\t선연결\t굵기\t색깔\n" +
             "MC01\t\t0.5\tB";
         string root = Path.Combine(
@@ -159,7 +159,7 @@ internal static class Program
                    parsed.HasDiscardInterlock &&
                    parsed.Pins.All(pin => pin.IoNumber is not 97 and not 98) &&
                    parsed.MaxIo == 98,
-                "THT parser must preserve exactly two _DISCARD IO while excluding them from product topology");
+                "THT parser must preserve two _DISCARD IO with PinNo 1/2 while excluding them from product topology");
         }
         finally
         {

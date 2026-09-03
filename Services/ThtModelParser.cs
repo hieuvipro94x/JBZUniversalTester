@@ -1346,10 +1346,13 @@ public sealed class ThtModelParser
                 "LinkedWire",
                 "WireConnection");
 
-            if (!string.IsNullOrWhiteSpace(connector) &&
-                !connector.Equals("_DISCARD", StringComparison.OrdinalIgnoreCase))
+            // Mọi connector được khai báo tường minh phải được giữ nguyên trên
+            // chính dòng đó. Riêng _DISCARD không trở thành lastConnector, nhưng
+            // PinNo 1/2 của cảm biến cũng không được làm nó rơi vào nhánh kế thừa.
+            if (!string.IsNullOrWhiteSpace(connector))
             {
-                lastConnector = connector;
+                if (!connector.Equals("_DISCARD", StringComparison.OrdinalIgnoreCase))
+                    lastConnector = connector;
             }
             else if (!IsSpecialA0Pin(pinType) &&
                      (!string.IsNullOrWhiteSpace(wireName) ||
