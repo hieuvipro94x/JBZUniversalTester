@@ -300,7 +300,7 @@ public partial class TestWindow : Window
         if (IsConfirmedFailLedState(viewModel, resultStatus))
             SetRedLed(true);
 
-        if (resultStatus == "ĐẠT" && _lastLedResultStatus != "ĐẠT")
+        if (resultStatus == "PASS" && _lastLedResultStatus != "PASS")
             _ = RestartGreenPassBlinkAsync(viewModel);
 
         _lastLedBoardConnected = boardConnected;

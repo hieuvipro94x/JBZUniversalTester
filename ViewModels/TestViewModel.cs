@@ -367,7 +367,7 @@ public sealed class TestViewModel : ObservableObject
                 return NormalizeSingleLine(value);
 
             if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
-                return "ĐẠT";
+                return "PASS";
 
             if (value.Contains("ĐANG TEST LEAK", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG TEST LEAK";

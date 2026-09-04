@@ -593,7 +593,7 @@
 
                         <CheckBox Grid.Row="1"
                                   Grid.ColumnSpan="2"
-                                  Content="Tự động in PASS"
+                                  Content="Sử dụng in Lable"
                                   IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
 
                         <TextBlock Grid.Row="1"
