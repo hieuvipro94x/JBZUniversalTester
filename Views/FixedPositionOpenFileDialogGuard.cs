@@ -8,22 +8,33 @@ using System.Windows.Threading;
 namespace JBZUniversalTester.Views;
 
 /// <summary>
-/// Sizes and centers one owner-bound native OpenFileDialog in the owner's monitor work area.
+/// Keeps one owner-bound native OpenFileDialog at a fixed size after layout.
 ///
-/// Behavior:
-/// - User cannot resize or maximize the dialog.
-/// - User can still move the dialog by dragging the title bar.
-/// - Preferred fixed size is 555 x 416 DIP.
-/// - On a smaller monitor / larger Windows DPI scaling, only the dimension that
-///   does not fit is reduced.
-/// - IMPORTANT: Windows is allowed to re-layout the native dialog controls first.
-///   The resize/maximize styles are removed only AFTER the final size has been applied.
+/// Goals:
+/// - User CANNOT resize or maximize.
+/// - User CAN move the dialog by dragging the title bar.
+/// - Start from the preferred compact size 555 x 416 DIP.
+/// - Adapt to monitor WorkArea and DPI.
+/// - Adapt to Windows language / system font automatically:
+///   after Shell lays out the native child controls, measure their REAL bounds.
+///   If localized controls (Open/Cancel/File name/File type/etc.) do not fit,
+///   enlarge only as much as necessary, while never exceeding WorkArea.
+/// - Lock the size only after the native layout is stable.
 /// </summary>
 internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 {
-    private const double OriginalDialogWidthDip = 555;
-    private const double OriginalDialogHeightDip = 416;
-    private const double SafeMarginDip = 8;
+    private const double PreferredDialogWidthDip = 555;
+    private const double PreferredDialogHeightDip = 416;
+
+    // Space between the dialog and monitor WorkArea.
+    private const double MonitorMarginDip = 8;
+
+    // Extra client padding after the furthest native child control.
+    private const double ContentPaddingDip = 8;
+
+    // Number of post-layout checks.
+    // Native Common Dialog can re-layout once more after WM_SIZE.
+    private const int LayoutCorrectionPasses = 3;
 
     private const int WhCbt = 5;
     private const int HcbtActivate = 5;
@@ -43,13 +54,29 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     private const int WsThickFrame = 0x00040000;
     private const int WsMaximizeBox = 0x00010000;
 
+    // Standard OK/Cancel IDs plus classic Common Dialog psh1/psh2 IDs.
+    private const int IdOk = 1;
+    private const int IdCancel = 2;
+    private const int Psh1 = 0x0400;
+    private const int Psh2 = 0x0401;
+
     private readonly IntPtr _ownerHandle;
     private readonly Dispatcher _dispatcher;
     private readonly double _ownerDpiScaleX;
     private readonly double _ownerDpiScaleY;
     private readonly HookProc _hookCallback;
 
+    // Keep delegate alive while EnumChildWindows is executing.
+    private readonly EnumWindowsProc _enumChildCallback;
+
     private IntPtr _hookHandle;
+
+    // Temporary measurement state used only on UI thread.
+    private IntPtr _measureDialogHandle;
+    private int _measureClientOriginX;
+    private int _measureClientOriginY;
+    private int _furthestChildRight;
+    private int _furthestChildBottom;
 
     public FixedPositionOpenFileDialogGuard(Window owner)
     {
@@ -63,6 +90,7 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         _ownerDpiScaleY = dpi.DpiScaleY;
 
         _hookCallback = HookCallback;
+        _enumChildCallback = EnumChildForMeasurement;
 
         if (_ownerHandle != IntPtr.Zero)
         {
@@ -79,46 +107,67 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         if (code == HcbtActivate &&
             IsOwnedCommonDialog(wParam))
         {
+            IntPtr dialogHandle = wParam;
+
             ReleaseCreationHook();
 
-            // QUAN TRỌNG:
-            // Chưa khóa resize tại đây.
-            //
-            // Để WS_THICKFRAME tồn tại trong lúc SetWindowPos thay đổi kích thước,
-            // Windows Common Dialog sẽ nhận WM_SIZE và tự re-layout:
-            // - danh sách file
-            // - ô tên file
-            // - nút Mở
-            // - nút Hủy
-            // - các control phía dưới/phía phải.
-            FitAndCenterWhileResizable(wParam);
+            // 1) Apply the normal compact target while resize style still exists.
+            //    This lets the Shell process WM_SIZE and perform native re-layout.
+            ApplyPreferredSizeWithinWorkArea(dialogHandle);
 
-            // Shell thường còn restore/layout thêm một lần ngay sau Activate.
-            // Chờ đến ApplicationIdle, áp kích thước lần cuối rồi mới khóa.
+            // 2) Wait until Shell finishes its own localization/layout work.
             _dispatcher.BeginInvoke(
                 DispatcherPriority.ApplicationIdle,
                 () =>
                 {
-                    if (!IsWindow(wParam))
+                    if (!IsWindow(dialogHandle))
                         return;
 
-                    // Lần cuối cùng cho Windows re-layout ở trạng thái resizable.
-                    FitAndCenterWhileResizable(wParam);
+                    ApplyPreferredSizeWithinWorkArea(dialogHandle);
 
-                    // Bây giờ layout đã đúng -> khóa kích thước.
-                    LockDialogSize(wParam);
-
-                    // Việc bỏ WS_THICKFRAME làm thay đổi non-client frame một vài pixel.
-                    // Chỉ căn giữa lại, TUYỆT ĐỐI không đổi size sau khi đã khóa.
-                    CenterCurrentSizeInOwnerMonitorWorkArea(wParam);
+                    // 3) Correct for real localized child-control geometry.
+                    RunLayoutCorrectionPass(
+                        dialogHandle,
+                        LayoutCorrectionPasses);
                 });
         }
 
         return CallNextHookEx(
-            _hookHandle,
+            IntPtr.Zero,
             code,
             wParam,
             lParam);
+    }
+
+    private void RunLayoutCorrectionPass(
+        IntPtr dialogHandle,
+        int remainingPasses)
+    {
+        if (!IsWindow(dialogHandle))
+            return;
+
+        bool changed = ExpandIfNativeControlsDoNotFit(dialogHandle);
+
+        if (changed && remainingPasses > 1)
+        {
+            // SetWindowPos sends WM_SIZE. Give the native dialog one message-loop
+            // cycle to reposition its children, then measure again.
+            _dispatcher.BeginInvoke(
+                DispatcherPriority.ApplicationIdle,
+                () => RunLayoutCorrectionPass(
+                    dialogHandle,
+                    remainingPasses - 1));
+
+            return;
+        }
+
+        // Final layout is now stable.
+        // Only NOW remove resize/maximize capability.
+        LockDialogSize(dialogHandle);
+
+        // Removing WS_THICKFRAME changes the non-client border by a few pixels.
+        // Re-center only; never resize after locking.
+        CenterCurrentSizeInOwnerMonitorWorkArea(dialogHandle);
     }
 
     private bool IsOwnedCommonDialog(IntPtr handle)
@@ -136,24 +185,19 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     }
 
     /// <summary>
-    /// Apply the preferred fixed dialog size while the dialog is still resizable.
-    /// This is intentional: native Common Dialog uses WM_SIZE to reposition
-    /// Open/Cancel and the other child controls.
+    /// Applies the normal preferred fixed size, limited independently by
+    /// the current monitor WorkArea.
+    ///
+    /// Width and Height are NOT proportionally scaled together.
+    /// If only one dimension does not fit, only that dimension is limited.
     /// </summary>
-    private void FitAndCenterWhileResizable(IntPtr dialogHandle)
+    private void ApplyPreferredSizeWithinWorkArea(
+        IntPtr dialogHandle)
     {
-        IntPtr monitor = MonitorFromWindow(
-            _ownerHandle,
-            MonitorDefaultToNearest);
-
-        var monitorInfo = new MonitorInfo
-        {
-            Size = (uint)Marshal.SizeOf<MonitorInfo>()
-        };
-
-        if (monitor == IntPtr.Zero ||
-            !GetMonitorInfo(monitor, ref monitorInfo) ||
-            !GetWindowRect(dialogHandle, out Rect windowRect))
+        if (!TryGetMonitorAndWindow(
+                dialogHandle,
+                out MonitorInfo monitorInfo,
+                out Rect windowRect))
         {
             return;
         }
@@ -163,41 +207,24 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             out double dpiScaleX,
             out double dpiScaleY);
 
-        Rect frameRect = GetVisibleFrameRect(
-            dialogHandle,
-            windowRect);
+        Rect visibleFrame =
+            GetVisibleFrameRect(dialogHandle, windowRect);
 
-        int hiddenFrameLeft =
-            Math.Max(0, frameRect.Left - windowRect.Left);
+        GetInvisibleFrameInsets(
+            windowRect,
+            visibleFrame,
+            out int insetLeft,
+            out int insetTop,
+            out int insetRight,
+            out int insetBottom);
 
-        int hiddenFrameTop =
-            Math.Max(0, frameRect.Top - windowRect.Top);
+        int marginX = DipToPixels(
+            MonitorMarginDip,
+            dpiScaleX);
 
-        int hiddenFrameRight =
-            Math.Max(0, windowRect.Right - frameRect.Right);
-
-        int hiddenFrameBottom =
-            Math.Max(0, windowRect.Bottom - frameRect.Bottom);
-
-        int preferredVisibleWidth = Math.Max(
-            1,
-            (int)Math.Round(
-                OriginalDialogWidthDip * dpiScaleX));
-
-        int preferredVisibleHeight = Math.Max(
-            1,
-            (int)Math.Round(
-                OriginalDialogHeightDip * dpiScaleY));
-
-        int marginX = Math.Max(
-            0,
-            (int)Math.Round(
-                SafeMarginDip * dpiScaleX));
-
-        int marginY = Math.Max(
-            0,
-            (int)Math.Round(
-                SafeMarginDip * dpiScaleY));
+        int marginY = DipToPixels(
+            MonitorMarginDip,
+            dpiScaleY);
 
         int maxVisibleWidth = Math.Max(
             1,
@@ -207,14 +234,14 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             1,
             monitorInfo.WorkArea.Height - (marginY * 2));
 
-        // KHÔNG scale đồng thời Width + Height.
-        //
-        // Ví dụ:
-        // màn hình chỉ thiếu chiều cao -> chỉ giảm Height.
-        // Width vẫn giữ nguyên để các label/nút không bị ép ngang.
-        //
-        // Dialog không bao giờ lớn hơn 555 x 416 DIP,
-        // nhưng nếu màn hình nhỏ thì mỗi chiều tự giới hạn theo WorkArea.
+        int preferredVisibleWidth = DipToPixels(
+            PreferredDialogWidthDip,
+            dpiScaleX);
+
+        int preferredVisibleHeight = DipToPixels(
+            PreferredDialogHeightDip,
+            dpiScaleY);
+
         int visibleWidth = Math.Min(
             preferredVisibleWidth,
             maxVisibleWidth);
@@ -223,24 +250,269 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             preferredVisibleHeight,
             maxVisibleHeight);
 
-        int outerWidth =
-            visibleWidth +
-            hiddenFrameLeft +
-            hiddenFrameRight;
-
-        int outerHeight =
-            visibleHeight +
-            hiddenFrameTop +
-            hiddenFrameBottom;
-
-        outerWidth = Math.Min(
+        int outerWidth = Math.Min(
             monitorInfo.WorkArea.Width,
-            Math.Max(1, outerWidth));
+            visibleWidth + insetLeft + insetRight);
 
-        outerHeight = Math.Min(
+        int outerHeight = Math.Min(
             monitorInfo.WorkArea.Height,
-            Math.Max(1, outerHeight));
+            visibleHeight + insetTop + insetBottom);
 
+        SetCenteredWindowSize(
+            dialogHandle,
+            monitorInfo,
+            outerWidth,
+            outerHeight,
+            visibleWidth,
+            visibleHeight,
+            insetLeft,
+            insetTop);
+    }
+
+    /// <summary>
+    /// Measures the REAL child-window positions produced by the current Windows
+    /// language/font/DPI. If any visible native control lies outside the dialog's
+    /// client area, enlarge the dialog just enough to include it.
+    ///
+    /// This is the important locale-aware part:
+    /// no Korean/Vietnamese/English string length is hard-coded.
+    /// </summary>
+    private bool ExpandIfNativeControlsDoNotFit(
+        IntPtr dialogHandle)
+    {
+        if (!TryGetMonitorAndWindow(
+                dialogHandle,
+                out MonitorInfo monitorInfo,
+                out Rect windowRect))
+        {
+            return false;
+        }
+
+        if (!GetClientRect(
+                dialogHandle,
+                out Rect clientRect))
+        {
+            return false;
+        }
+
+        var clientOrigin = new PointNative
+        {
+            X = 0,
+            Y = 0
+        };
+
+        if (!ClientToScreen(
+                dialogHandle,
+                ref clientOrigin))
+        {
+            return false;
+        }
+
+        GetDialogDpiScale(
+            dialogHandle,
+            out double dpiScaleX,
+            out double dpiScaleY);
+
+        int paddingX = DipToPixels(
+            ContentPaddingDip,
+            dpiScaleX);
+
+        int paddingY = DipToPixels(
+            ContentPaddingDip,
+            dpiScaleY);
+
+        _measureDialogHandle = dialogHandle;
+        _measureClientOriginX = clientOrigin.X;
+        _measureClientOriginY = clientOrigin.Y;
+
+        // Start with current client boundary.
+        _furthestChildRight =
+            clientOrigin.X + clientRect.Width;
+
+        _furthestChildBottom =
+            clientOrigin.Y + clientRect.Height;
+
+        // EnumChildWindows includes descendant child windows too.
+        EnumChildWindows(
+            dialogHandle,
+            _enumChildCallback,
+            IntPtr.Zero);
+
+        int currentClientRight =
+            clientOrigin.X + clientRect.Width;
+
+        int currentClientBottom =
+            clientOrigin.Y + clientRect.Height;
+
+        int overflowRight = Math.Max(
+            0,
+            _furthestChildRight - currentClientRight);
+
+        int overflowBottom = Math.Max(
+            0,
+            _furthestChildBottom - currentClientBottom);
+
+        // Add padding only when a native control is actually clipped.
+        // Controls that legitimately touch/anchor to the client edge must not
+        // cause the dialog to grow on every correction pass.
+        int missingRight =
+            overflowRight > 0
+                ? overflowRight + paddingX
+                : 0;
+
+        int missingBottom =
+            overflowBottom > 0
+                ? overflowBottom + paddingY
+                : 0;
+
+        _measureDialogHandle = IntPtr.Zero;
+
+        if (missingRight == 0 &&
+            missingBottom == 0)
+        {
+            return false;
+        }
+
+        Rect visibleFrame =
+            GetVisibleFrameRect(dialogHandle, windowRect);
+
+        GetInvisibleFrameInsets(
+            windowRect,
+            visibleFrame,
+            out int insetLeft,
+            out int insetTop,
+            out int insetRight,
+            out int insetBottom);
+
+        int marginX = DipToPixels(
+            MonitorMarginDip,
+            dpiScaleX);
+
+        int marginY = DipToPixels(
+            MonitorMarginDip,
+            dpiScaleY);
+
+        int maxVisibleWidth = Math.Max(
+            1,
+            monitorInfo.WorkArea.Width - (marginX * 2));
+
+        int maxVisibleHeight = Math.Max(
+            1,
+            monitorInfo.WorkArea.Height - (marginY * 2));
+
+        int currentVisibleWidth =
+            Math.Max(1, visibleFrame.Width);
+
+        int currentVisibleHeight =
+            Math.Max(1, visibleFrame.Height);
+
+        // Expand only the dimension that actually needs more space.
+        int targetVisibleWidth = Math.Min(
+            maxVisibleWidth,
+            currentVisibleWidth + missingRight);
+
+        int targetVisibleHeight = Math.Min(
+            maxVisibleHeight,
+            currentVisibleHeight + missingBottom);
+
+        // WorkArea cannot accommodate anything larger.
+        // In that case this is the maximum physically possible fixed dialog.
+        if (targetVisibleWidth == currentVisibleWidth &&
+            targetVisibleHeight == currentVisibleHeight)
+        {
+            return false;
+        }
+
+        int targetOuterWidth = Math.Min(
+            monitorInfo.WorkArea.Width,
+            targetVisibleWidth + insetLeft + insetRight);
+
+        int targetOuterHeight = Math.Min(
+            monitorInfo.WorkArea.Height,
+            targetVisibleHeight + insetTop + insetBottom);
+
+        SetCenteredWindowSize(
+            dialogHandle,
+            monitorInfo,
+            targetOuterWidth,
+            targetOuterHeight,
+            targetVisibleWidth,
+            targetVisibleHeight,
+            insetLeft,
+            insetTop);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Called by EnumChildWindows.
+    ///
+    /// We measure native controls that Windows considers visible.
+    /// WS_VISIBLE controls may still be clipped by the parent, which is exactly
+    /// what we need to detect.
+    /// </summary>
+    private bool EnumChildForMeasurement(
+        IntPtr childHandle,
+        IntPtr lParam)
+    {
+        if (_measureDialogHandle == IntPtr.Zero)
+            return false;
+
+        int controlId = GetDlgCtrlID(childHandle);
+
+        bool isPrimaryActionButton =
+            controlId == IdOk ||
+            controlId == IdCancel ||
+            controlId == Psh1 ||
+            controlId == Psh2;
+
+        // Normally measure visible controls. Also keep measuring Open/Cancel even
+        // if Shell temporarily hides them because the forced width is too small.
+        if (!IsWindowVisible(childHandle) &&
+            !isPrimaryActionButton)
+        {
+            return true;
+        }
+
+        if (!GetWindowRect(
+                childHandle,
+                out Rect childRect))
+        {
+            return true;
+        }
+
+        // Ignore zero-sized implementation windows.
+        if (childRect.Width <= 0 ||
+            childRect.Height <= 0)
+        {
+            return true;
+        }
+
+        // Only care about descendants whose geometry belongs around this dialog.
+        //
+        // Do not compare text/language here. Actual Windows geometry is the source
+        // of truth, so Korean, Vietnamese, English, Japanese, etc. all use one path.
+        _furthestChildRight = Math.Max(
+            _furthestChildRight,
+            childRect.Right);
+
+        _furthestChildBottom = Math.Max(
+            _furthestChildBottom,
+            childRect.Bottom);
+
+        return true;
+    }
+
+    private static void SetCenteredWindowSize(
+        IntPtr dialogHandle,
+        MonitorInfo monitorInfo,
+        int outerWidth,
+        int outerHeight,
+        int visibleWidth,
+        int visibleHeight,
+        int invisibleInsetLeft,
+        int invisibleInsetTop)
+    {
         int visibleX =
             monitorInfo.WorkArea.Left +
             ((monitorInfo.WorkArea.Width - visibleWidth) / 2);
@@ -249,25 +521,65 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             monitorInfo.WorkArea.Top +
             ((monitorInfo.WorkArea.Height - visibleHeight) / 2);
 
-        int x = visibleX - hiddenFrameLeft;
-        int y = visibleY - hiddenFrameTop;
+        int x = visibleX - invisibleInsetLeft;
+        int y = visibleY - invisibleInsetTop;
 
-        // Vì WS_THICKFRAME vẫn còn ở thời điểm này,
-        // native dialog có cơ hội xử lý WM_SIZE và di chuyển các child controls.
         SetWindowPos(
             dialogHandle,
             IntPtr.Zero,
             x,
             y,
-            outerWidth,
-            outerHeight,
+            Math.Max(1, outerWidth),
+            Math.Max(1, outerHeight),
             SwpNoZOrder | SwpNoActivate);
     }
 
-    /// <summary>
-    /// After the layout is stable, remove resizing/maximize functionality.
-    /// </summary>
-    private static void LockDialogSize(IntPtr dialogHandle)
+    private void CenterCurrentSizeInOwnerMonitorWorkArea(
+        IntPtr dialogHandle)
+    {
+        if (!TryGetMonitorAndWindow(
+                dialogHandle,
+                out MonitorInfo monitorInfo,
+                out Rect windowRect))
+        {
+            return;
+        }
+
+        Rect visibleFrame =
+            GetVisibleFrameRect(dialogHandle, windowRect);
+
+        int visibleWidth = Math.Max(
+            1,
+            visibleFrame.Width);
+
+        int visibleHeight = Math.Max(
+            1,
+            visibleFrame.Height);
+
+        int x =
+            monitorInfo.WorkArea.Left +
+            ((monitorInfo.WorkArea.Width - visibleWidth) / 2) -
+            (visibleFrame.Left - windowRect.Left);
+
+        int y =
+            monitorInfo.WorkArea.Top +
+            ((monitorInfo.WorkArea.Height - visibleHeight) / 2) -
+            (visibleFrame.Top - windowRect.Top);
+
+        SetWindowPos(
+            dialogHandle,
+            IntPtr.Zero,
+            x,
+            y,
+            0,
+            0,
+            SwpNoSize |
+            SwpNoZOrder |
+            SwpNoActivate);
+    }
+
+    private static void LockDialogSize(
+        IntPtr dialogHandle)
     {
         int style = GetWindowLong(
             dialogHandle,
@@ -300,62 +612,29 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             SwpFrameChanged);
     }
 
-    /// <summary>
-    /// Re-center the existing size without resizing it.
-    /// Used only after WS_THICKFRAME has been removed.
-    /// </summary>
-    private void CenterCurrentSizeInOwnerMonitorWorkArea(
-        IntPtr dialogHandle)
+    private bool TryGetMonitorAndWindow(
+        IntPtr dialogHandle,
+        out MonitorInfo monitorInfo,
+        out Rect windowRect)
     {
-        IntPtr monitor = MonitorFromWindow(
-            _ownerHandle,
-            MonitorDefaultToNearest);
-
-        var monitorInfo = new MonitorInfo
+        monitorInfo = new MonitorInfo
         {
             Size = (uint)Marshal.SizeOf<MonitorInfo>()
         };
 
-        if (monitor == IntPtr.Zero ||
-            !GetMonitorInfo(monitor, ref monitorInfo) ||
-            !GetWindowRect(dialogHandle, out Rect windowRect))
-        {
-            return;
-        }
+        windowRect = default;
 
-        Rect frameRect = GetVisibleFrameRect(
-            dialogHandle,
-            windowRect);
+        IntPtr monitor = MonitorFromWindow(
+            _ownerHandle,
+            MonitorDefaultToNearest);
 
-        int visibleWidth = Math.Max(
-            1,
-            frameRect.Width);
-
-        int visibleHeight = Math.Max(
-            1,
-            frameRect.Height);
-
-        int x =
-            monitorInfo.WorkArea.Left +
-            ((monitorInfo.WorkArea.Width - visibleWidth) / 2) -
-            (frameRect.Left - windowRect.Left);
-
-        int y =
-            monitorInfo.WorkArea.Top +
-            ((monitorInfo.WorkArea.Height - visibleHeight) / 2) -
-            (frameRect.Top - windowRect.Top);
-
-        // Không thay đổi size sau khi đã LockDialogSize.
-        SetWindowPos(
-            dialogHandle,
-            IntPtr.Zero,
-            x,
-            y,
-            0,
-            0,
-            SwpNoSize |
-            SwpNoZOrder |
-            SwpNoActivate);
+        return monitor != IntPtr.Zero &&
+               GetMonitorInfo(
+                   monitor,
+                   ref monitorInfo) &&
+               GetWindowRect(
+                   dialogHandle,
+                   out windowRect);
     }
 
     private void GetDialogDpiScale(
@@ -367,7 +646,6 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 
         if (dpi > 0)
         {
-            // Common Dialog dùng DPI vuông trên Windows hiện đại.
             dpiScaleX = dpi / 96.0;
             dpiScaleY = dpi / 96.0;
             return;
@@ -375,6 +653,15 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 
         dpiScaleX = _ownerDpiScaleX;
         dpiScaleY = _ownerDpiScaleY;
+    }
+
+    private static int DipToPixels(
+        double dip,
+        double dpiScale)
+    {
+        return Math.Max(
+            1,
+            (int)Math.Round(dip * dpiScale));
     }
 
     private static Rect GetVisibleFrameRect(
@@ -391,6 +678,31 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         }
 
         return windowRect;
+    }
+
+    private static void GetInvisibleFrameInsets(
+        Rect windowRect,
+        Rect visibleFrame,
+        out int left,
+        out int top,
+        out int right,
+        out int bottom)
+    {
+        left = Math.Max(
+            0,
+            visibleFrame.Left - windowRect.Left);
+
+        top = Math.Max(
+            0,
+            visibleFrame.Top - windowRect.Top);
+
+        right = Math.Max(
+            0,
+            windowRect.Right - visibleFrame.Right);
+
+        bottom = Math.Max(
+            0,
+            windowRect.Bottom - visibleFrame.Bottom);
     }
 
     private void ReleaseCreationHook()
@@ -428,9 +740,20 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         public uint Flags;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PointNative
+    {
+        public int X;
+        public int Y;
+    }
+
     private delegate IntPtr HookProc(
         int code,
         IntPtr wParam,
+        IntPtr lParam);
+
+    private delegate bool EnumWindowsProc(
+        IntPtr hWnd,
         IntPtr lParam);
 
     [DllImport(
@@ -471,6 +794,20 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         IntPtr handle);
 
     [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(
+        IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern int GetDlgCtrlID(
+        IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumChildWindows(
+        IntPtr parentHandle,
+        EnumWindowsProc callback,
+        IntPtr lParam);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(
         IntPtr handle,
         uint flags);
@@ -486,6 +823,16 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     private static extern bool GetWindowRect(
         IntPtr handle,
         out Rect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(
+        IntPtr handle,
+        out Rect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool ClientToScreen(
+        IntPtr handle,
+        ref PointNative point);
 
     [DllImport(
         "user32.dll",
