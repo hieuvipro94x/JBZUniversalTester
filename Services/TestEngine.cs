@@ -1517,7 +1517,7 @@ public sealed class TestEngine : IDisposable
                         Splice = pin.SpliceName,
                         Section = pin.Section,
                         Color = pin.Color,
-                        Status = "Không có cặp continuity trong THT"
+                        Status = "chưa cài IO"
                     });
                     continue;
                 }
