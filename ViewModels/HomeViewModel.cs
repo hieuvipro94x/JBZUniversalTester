@@ -1,10 +1,11 @@
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Interop;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.Views;
-using Microsoft.Win32;
+using WinForms = System.Windows.Forms;
 
 namespace JBZUniversalTester.ViewModels;
 
@@ -50,11 +51,13 @@ public sealed class HomeViewModel : ObservableObject
 
     private async Task LoadModelAsync()
     {
-        var dialog = new OpenFileDialog
+        using var dialog = new WinForms.OpenFileDialog
         {
             DefaultExt = ".tht",
             Filter = ProductFileFilter,
-            Multiselect = false
+            Multiselect = false,
+            AutoUpgradeEnabled = false,
+            RestoreDirectory = true
         };
 
         if (Directory.Exists(OriginalItemDirectory))
@@ -74,18 +77,18 @@ public sealed class HomeViewModel : ObservableObject
             .OfType<Window>()
             .FirstOrDefault(window => window.IsActive)
             ?? Application.Current?.MainWindow;
-        bool? accepted;
+        WinForms.DialogResult accepted;
         if (owner is not null)
         {
             using var positionGuard = new FixedPositionOpenFileDialogGuard(owner);
-            accepted = dialog.ShowDialog(owner);
+            accepted = dialog.ShowDialog(new NativeDialogOwner(owner));
         }
         else
         {
             accepted = dialog.ShowDialog();
         }
 
-        if (accepted != true)
+        if (accepted != WinForms.DialogResult.OK)
             return;
 
         string selectedFilePath = dialog.FileName;
@@ -133,6 +136,16 @@ public sealed class HomeViewModel : ObservableObject
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+    }
+
+    private sealed class NativeDialogOwner : WinForms.IWin32Window
+    {
+        public NativeDialogOwner(Window owner)
+        {
+            Handle = new WindowInteropHelper(owner).Handle;
+        }
+
+        public IntPtr Handle { get; }
     }
 
     private static bool IsSupportedProductFile(string path)

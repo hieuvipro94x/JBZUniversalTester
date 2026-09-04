@@ -6,6 +6,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
 
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -49,6 +50,12 @@
 
     <Platforms>AnyCPU;x86</Platforms>
   </PropertyGroup>
+
+  <!-- Keep WPF type resolution unchanged; WinForms is used only for the classic file dialog. -->
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
 
   <!-- V12.9: chan build neu Version.props bi cap nhat lech. -->
   <Target Name="ValidateVersionConfiguration" BeforeTargets="BeforeBuild">

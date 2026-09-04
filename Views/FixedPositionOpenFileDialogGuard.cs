@@ -64,16 +64,16 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             // activate. Căn ngay để tránh nháy, rồi căn lại một lần sau khi Shell
             // hoàn tất layout. Sau đó không giữ hook/subclass nên title vẫn kéo được.
             ReleaseCreationHook();
-            CenterInOwnerMonitorWorkArea(wParam);
             LockDialogSize(wParam);
+            CenterInOwnerMonitorWorkArea(wParam);
             _dispatcher.BeginInvoke(
                 DispatcherPriority.ApplicationIdle,
                 () =>
                 {
                     if (IsWindow(wParam))
                     {
-                        CenterInOwnerMonitorWorkArea(wParam);
                         LockDialogSize(wParam);
+                        CenterInOwnerMonitorWorkArea(wParam);
                     }
                 });
         }

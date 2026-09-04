@@ -118,9 +118,10 @@ internal static class Program
         Assert(pickerSource.Contains("DefaultExt = \".tht\"", StringComparison.Ordinal) &&
                pickerSource.Contains("OriginalItemDirectory = @\"C:\\Item\"", StringComparison.Ordinal) &&
                pickerSource.Contains("FirstOrDefault(window => window.IsActive)", StringComparison.Ordinal) &&
-               pickerSource.Contains("dialog.ShowDialog(owner)", StringComparison.Ordinal) &&
+               pickerSource.Contains("AutoUpgradeEnabled = false", StringComparison.Ordinal) &&
+               pickerSource.Contains("dialog.ShowDialog(new NativeDialogOwner(owner))", StringComparison.Ordinal) &&
                pickerSource.Contains("FixedPositionOpenFileDialogGuard(owner)", StringComparison.Ordinal),
-            "Product picker uses the original filter/directory and binds its native dialog to the active owner");
+            "Product picker uses the original filter/directory and owner-bound classic native dialog");
         Assert(pickerGuardSource.Contains("GetWindow(handle, GwOwner) == _ownerHandle", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("MonitorFromWindow(_ownerHandle, MonitorDefaultToNearest)", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("GetMonitorInfo(monitor, ref monitorInfo)", StringComparison.Ordinal) &&
