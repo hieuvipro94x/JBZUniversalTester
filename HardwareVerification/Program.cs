@@ -12,6 +12,9 @@ int passiveSeconds = IntValue("--passive-seconds", 0, 0, 86_400);
 int connectCycles = IntValue("--connect-cycles", 0, 0, 30);
 int scanCycles = IntValue("--scan-cycles", 0, 0, 100);
 int expansionCards = IntValue("--expansion-cards", 2, 1, BoardIoDecoder.MaxExpansionCardCount);
+int relayPulse = IntValue("--relay-pulse", 0, 0, 2);
+int relayPulseMs = IntValue("--relay-pulse-ms", 500, 50, 5_000);
+int relayResetTest = IntValue("--relay-reset-test", 0, 0, 2);
 bool routeResistance = Has("--route-resistance");
 bool measureResistance = Has("--measure-resistance");
 bool verifySupervisor = Has("--verify-supervisor");
@@ -134,8 +137,15 @@ if (!string.IsNullOrWhiteSpace(diagnosticModelPath))
 }
 
 if (passiveSeconds == 0 && connectCycles == 0 && scanCycles == 0 &&
+    relayPulse == 0 && relayResetTest == 0 &&
     !routeResistance && !measureResistance && !verifySupervisor)
     return 0;
+
+if (relayPulse > 0 && relayResetTest > 0)
+{
+    Console.Error.WriteLine("RELAY_ARGUMENT_FAIL: chỉ chạy một bài relay trong mỗi lần kết nối.");
+    return 11;
+}
 
 D2xxDeviceInfo[] targets = devices.Where(IsTargetBoard).ToArray();
 if (targets.Length == 0)
@@ -178,7 +188,8 @@ if (connectCycles > 0)
     }
 }
 
-if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance || verifySupervisor)
+if (scanCycles > 0 || passiveSeconds > 0 || relayPulse > 0 || relayResetTest > 0 ||
+    routeResistance || measureResistance || verifySupervisor)
 {
     await using var board = new D2xxBoardTransport(targets[0].Serial, production);
     StreamWriter? trace = null;
@@ -286,6 +297,46 @@ if (scanCycles > 0 || passiveSeconds > 0 || routeResistance || measureResistance
             ? diagnosticModel.MaxIo
             : checked(expansionCards * BoardCapacity.IoPerExpansionCard);
         board.ConfigureActiveScanRange(verificationMaxIo);
+
+        if (relayPulse > 0)
+        {
+            await board.StopScanAsync();
+            await board.AllRelaysOffAsync();
+            try
+            {
+                Console.WriteLine($"RELAY_PULSE R{relayPulse} ON durationMs={relayPulseMs}");
+                await board.SetRelayAsync(relayPulse);
+                await Task.Delay(relayPulseMs);
+            }
+            finally
+            {
+                await board.AllRelaysOffAsync(CancellationToken.None);
+                Console.WriteLine($"RELAY_PULSE R{relayPulse} OFF PASS");
+            }
+        }
+
+        if (relayResetTest > 0)
+        {
+            await board.StopScanAsync();
+            await board.AllRelaysOffAsync();
+            try
+            {
+                Console.WriteLine($"RELAY_RESET_TEST R{relayResetTest} ON durationMs={relayPulseMs}");
+                await board.SetRelayAsync(relayResetTest);
+                await Task.Delay(relayPulseMs);
+                await board.AllRelaysOffAsync();
+                Console.WriteLine("RELAY_RESET_TEST ALL_OFF_1 PASS");
+                await board.ResetClearAsync();
+                Console.WriteLine("RELAY_RESET_TEST RESET_CLEAR PASS");
+                await board.AllRelaysOffAsync();
+                Console.WriteLine("RELAY_RESET_TEST ALL_OFF_2 PASS");
+            }
+            finally
+            {
+                await board.AllRelaysOffAsync(CancellationToken.None);
+                Console.WriteLine($"RELAY_RESET_TEST R{relayResetTest} FINAL_OFF PASS");
+            }
+        }
 
         if (verifySupervisor)
         {
