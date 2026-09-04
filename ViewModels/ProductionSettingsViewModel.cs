@@ -222,7 +222,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             return;
 
         ManualStatus = turnOn
-            ? $"Đang thử Relay {relay}..."
+            ? $"Đang bật Relay {relay}..."
             : $"Đang tắt Relay {relay}...";
 
         try

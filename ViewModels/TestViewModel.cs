@@ -1116,7 +1116,8 @@ public sealed class TestViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Manual relay chỉ phát xung thử rồi luôn cưỡng bức cả hai relay OFF.
+    /// Manual relay tương thích JBZ I/O Monitor V1.9: BẬT giữ đúng một relay,
+    /// TẮT cưỡng bức cả hai relay OFF rồi mới khôi phục Production scan.
     /// </summary>
     public async Task<int> SetManualRelayAsync(int relay, bool turnOn)
     {
@@ -1145,17 +1146,18 @@ public sealed class TestViewModel : ObservableObject
 
             try
             {
+                // Mỗi lần BẬT luôn gửi OFF trước để relay đang giữ phải nhả
+                // hoàn toàn, sau đó mới chọn đúng một relay vật lý cần bật.
+                await _board.AllRelaysOffAsync();
                 if (turnOn)
-                    await _engine.PulsePhysicalRelayAsync(relay);
-                else
-                    await _board.AllRelaysOffAsync();
+                    await _board.SetRelayAsync(relay);
 
-                Volatile.Write(ref _manualActiveRelay, 0);
+                Volatile.Write(ref _manualActiveRelay, turnOn ? relay : 0);
                 double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
                     $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=ui_update elapsed_ms={elapsedMs:0.###}");
                 AddLog(turnOn
-                    ? $"MANUAL Relay {relay} pulse hoàn tất - tất cả relay OFF."
+                    ? $"MANUAL Relay {relay} ON - relay còn lại đã OFF."
                     : $"MANUAL Relay {relay} OFF - tất cả relay OFF.");
                 activeRelay = Volatile.Read(ref _manualActiveRelay);
             }
@@ -1173,7 +1175,10 @@ public sealed class TestViewModel : ObservableObject
             _manualRelayGate.Release();
         }
 
-        await ExitManualModeAsync(outputsAlreadyOff: true);
+        // Giữ Manual khi relay ON. Chỉ khi bấm TẮT mới thoát Manual và
+        // khôi phục scan Production.
+        if (!turnOn)
+            await ExitManualModeAsync(outputsAlreadyOff: true);
 
         return activeRelay;
     }
