@@ -367,7 +367,7 @@ public sealed class TestViewModel : ObservableObject
                 return NormalizeSingleLine(value);
 
             if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
-                return "PASS";
+                return "ĐẠT";
 
             if (value.Contains("ĐANG TEST LEAK", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG TEST LEAK";
@@ -805,7 +805,13 @@ public sealed class TestViewModel : ObservableObject
 
     public long ProbeReplacementThreshold => _probeReplacementThreshold;
 
-    public string ProbeCycleText => $"{ProbeCycleCount:N0} / {ProbeReplacementThreshold:N0}";
+    private static string FormatProbeCycleNumber(long value) =>
+        value.ToString(
+            "N0",
+            System.Globalization.CultureInfo.GetCultureInfo("vi-VN"));
+
+    public string ProbeCycleText =>
+        $"{FormatProbeCycleNumber(ProbeCycleCount)}/{FormatProbeCycleNumber(ProbeReplacementThreshold)}";
     public bool ProbeMaintenanceDue => ProbeCycleCount >= ProbeReplacementThreshold;
     public string ProbeMaintenanceStatus => ProbeMaintenanceDue
         ? "ĐẾN CHU KỲ THAY PROBE PIN"

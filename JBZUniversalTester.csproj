@@ -73,7 +73,9 @@
 
   <!-- Icon -->
   <ItemGroup>
+    <None Remove="Assets\reset_probe_cycle.png" />
     <None Remove="logo.ico" />
+    <Resource Include="Assets\reset_probe_cycle.png" />
     <Resource Include="logo.ico" />
   </ItemGroup>
 
