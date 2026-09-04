@@ -2,44 +2,48 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Threading;
 
 namespace JBZUniversalTester.Views;
 
 /// <summary>
-/// Centers one owner-bound native OpenFileDialog in the owner's monitor work area
-/// and prevents only whole-window move operations while that dialog is open.
+/// Sizes and centers one owner-bound native OpenFileDialog in the owner's monitor work area.
+/// The operator can move the dialog, but its compact original size remains fixed.
 /// </summary>
 internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 {
+    private const double OriginalDialogWidthDip = 555;
+    private const double OriginalDialogHeightDip = 408;
     private const int WhCbt = 5;
     private const int HcbtActivate = 5;
-    private const int GwlWndProc = -4;
+    private const int GwlStyle = -16;
     private const uint GwOwner = 4;
-    private const uint WmNcLButtonDown = 0x00A1;
-    private const uint WmSysCommand = 0x0112;
-    private const uint WmNcDestroy = 0x0082;
-    private const nuint HtCaption = 2;
-    private const nuint ScMove = 0xF010;
     private const uint MonitorDefaultToNearest = 0x00000002;
     private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
-    private const uint MfByCommand = 0x00000000;
-    private const uint MfGrayed = 0x00000001;
+    private const uint SwpFrameChanged = 0x0020;
+    private const int WsThickFrame = 0x00040000;
+    private const int WsMaximizeBox = 0x00010000;
 
     private readonly IntPtr _ownerHandle;
+    private readonly Dispatcher _dispatcher;
+    private readonly double _dpiScaleX;
+    private readonly double _dpiScaleY;
     private readonly HookProc _hookCallback;
-    private readonly WindowProc _dialogWindowProc;
     private IntPtr _hookHandle;
-    private IntPtr _dialogHandle;
-    private IntPtr _previousWindowProc;
 
     public FixedPositionOpenFileDialogGuard(Window owner)
     {
         ArgumentNullException.ThrowIfNull(owner);
         _ownerHandle = new WindowInteropHelper(owner).Handle;
+        _dispatcher = owner.Dispatcher;
+        DpiScale dpi = VisualTreeHelper.GetDpi(owner);
+        _dpiScaleX = dpi.DpiScaleX;
+        _dpiScaleY = dpi.DpiScaleY;
         _hookCallback = HookCallback;
-        _dialogWindowProc = DialogWindowProc;
 
         if (_ownerHandle != IntPtr.Zero)
         {
@@ -54,10 +58,24 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     private IntPtr HookCallback(int code, IntPtr wParam, IntPtr lParam)
     {
         if (code == HcbtActivate &&
-            _dialogHandle == IntPtr.Zero &&
             IsOwnedCommonDialog(wParam))
         {
-            Attach(wParam);
+            // Windows Shell có thể khôi phục vị trí dialog đã lưu ngay trong lúc
+            // activate. Căn ngay để tránh nháy, rồi căn lại một lần sau khi Shell
+            // hoàn tất layout. Sau đó không giữ hook/subclass nên title vẫn kéo được.
+            ReleaseCreationHook();
+            CenterInOwnerMonitorWorkArea(wParam);
+            LockDialogSize(wParam);
+            _dispatcher.BeginInvoke(
+                DispatcherPriority.ApplicationIdle,
+                () =>
+                {
+                    if (IsWindow(wParam))
+                    {
+                        CenterInOwnerMonitorWorkArea(wParam);
+                        LockDialogSize(wParam);
+                    }
+                });
         }
 
         return CallNextHookEx(_hookHandle, code, wParam, lParam);
@@ -71,28 +89,6 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
                GetWindow(handle, GwOwner) == _ownerHandle;
     }
 
-    private void Attach(IntPtr dialogHandle)
-    {
-        _dialogHandle = dialogHandle;
-        ReleaseCreationHook();
-        CenterInOwnerMonitorWorkArea(dialogHandle);
-
-        IntPtr callback = Marshal.GetFunctionPointerForDelegate(_dialogWindowProc);
-        _previousWindowProc = SetWindowLongPtr(dialogHandle, GwlWndProc, callback);
-        if (_previousWindowProc == IntPtr.Zero)
-        {
-            _dialogHandle = IntPtr.Zero;
-            return;
-        }
-
-        IntPtr systemMenu = GetSystemMenu(dialogHandle, false);
-        if (systemMenu != IntPtr.Zero)
-        {
-            EnableMenuItem(systemMenu, (uint)ScMove, MfByCommand | MfGrayed);
-            DrawMenuBar(dialogHandle);
-        }
-    }
-
     private void CenterInOwnerMonitorWorkArea(IntPtr dialogHandle)
     {
         IntPtr monitor = MonitorFromWindow(_ownerHandle, MonitorDefaultToNearest);
@@ -102,14 +98,17 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         };
 
         if (monitor == IntPtr.Zero ||
-            !GetMonitorInfo(monitor, ref monitorInfo) ||
-            !GetWindowRect(dialogHandle, out Rect dialogRect))
+            !GetMonitorInfo(monitor, ref monitorInfo))
         {
             return;
         }
 
-        int width = dialogRect.Right - dialogRect.Left;
-        int height = dialogRect.Bottom - dialogRect.Top;
+        int width = Math.Min(
+            monitorInfo.WorkArea.Width,
+            Math.Max(1, (int)Math.Round(OriginalDialogWidthDip * _dpiScaleX)));
+        int height = Math.Min(
+            monitorInfo.WorkArea.Height,
+            Math.Max(1, (int)Math.Round(OriginalDialogHeightDip * _dpiScaleY)));
         int x = monitorInfo.WorkArea.Left + ((monitorInfo.WorkArea.Width - width) / 2);
         int y = monitorInfo.WorkArea.Top + ((monitorInfo.WorkArea.Height - height) / 2);
 
@@ -118,36 +117,27 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             IntPtr.Zero,
             x,
             y,
-            0,
-            0,
-            SwpNoSize | SwpNoZOrder | SwpNoActivate);
+            width,
+            height,
+            SwpNoZOrder | SwpNoActivate);
     }
 
-    private IntPtr DialogWindowProc(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam)
+    private static void LockDialogSize(IntPtr dialogHandle)
     {
-        IntPtr previous = _previousWindowProc;
+        int style = GetWindowLong(dialogHandle, GwlStyle);
+        int fixedSizeStyle = style & ~WsThickFrame & ~WsMaximizeBox;
+        if (fixedSizeStyle == style)
+            return;
 
-        if (message == WmSysCommand && ((nuint)wParam & 0xFFF0u) == ScMove)
-            return IntPtr.Zero;
-
-        if (message == WmNcLButtonDown && (nuint)wParam == HtCaption)
-            return IntPtr.Zero;
-
-        if (message == WmNcDestroy)
-            RestoreDialogWindowProc();
-
-        return previous == IntPtr.Zero
-            ? DefWindowProc(handle, message, wParam, lParam)
-            : CallWindowProc(previous, handle, message, wParam, lParam);
-    }
-
-    private void RestoreDialogWindowProc()
-    {
-        if (_dialogHandle != IntPtr.Zero && _previousWindowProc != IntPtr.Zero)
-            SetWindowLongPtr(_dialogHandle, GwlWndProc, _previousWindowProc);
-
-        _previousWindowProc = IntPtr.Zero;
-        _dialogHandle = IntPtr.Zero;
+        SetWindowLong(dialogHandle, GwlStyle, fixedSizeStyle);
+        SetWindowPos(
+            dialogHandle,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            SwpNoSize | SwpNoMove | SwpNoZOrder | SwpNoActivate | SwpFrameChanged);
     }
 
     private void ReleaseCreationHook()
@@ -162,13 +152,7 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     public void Dispose()
     {
         ReleaseCreationHook();
-        RestoreDialogWindowProc();
     }
-
-    private static IntPtr SetWindowLongPtr(IntPtr handle, int index, IntPtr value) =>
-        IntPtr.Size == 8
-            ? SetWindowLongPtr64(handle, index, value)
-            : new IntPtr(SetWindowLong32(handle, index, value.ToInt32()));
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Rect
@@ -192,7 +176,6 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     }
 
     private delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
-    private delegate IntPtr WindowProc(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(int hook, HookProc callback, IntPtr module, uint threadId);
@@ -210,13 +193,19 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     private static extern IntPtr GetWindow(IntPtr handle, uint command);
 
     [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr handle);
+
+    [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(IntPtr handle, uint flags);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
 
-    [DllImport("user32.dll")]
-    private static extern bool GetWindowRect(IntPtr handle, out Rect rect);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int GetWindowLong(IntPtr handle, int index);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowLong(IntPtr handle, int index, int newValue);
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(
@@ -227,32 +216,6 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         int width,
         int height,
         uint flags);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetSystemMenu(IntPtr handle, bool revert);
-
-    [DllImport("user32.dll")]
-    private static extern uint EnableMenuItem(IntPtr menu, uint item, uint enable);
-
-    [DllImport("user32.dll")]
-    private static extern bool DrawMenuBar(IntPtr handle);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
-    private static extern int SetWindowLong32(IntPtr handle, int index, int value);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr", SetLastError = true)]
-    private static extern IntPtr SetWindowLongPtr64(IntPtr handle, int index, IntPtr value);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr CallWindowProc(
-        IntPtr previous,
-        IntPtr handle,
-        uint message,
-        IntPtr wParam,
-        IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr DefWindowProc(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
 
     [DllImport("kernel32.dll")]
     private static extern uint GetCurrentThreadId();

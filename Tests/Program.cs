@@ -124,11 +124,17 @@ internal static class Program
         Assert(pickerGuardSource.Contains("GetWindow(handle, GwOwner) == _ownerHandle", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("MonitorFromWindow(_ownerHandle, MonitorDefaultToNearest)", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("GetMonitorInfo(monitor, ref monitorInfo)", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("SwpNoSize | SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("message == WmSysCommand", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("message == WmNcLButtonDown", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("OriginalDialogWidthDip = 555", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("OriginalDialogHeightDip = 408", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("VisualTreeHelper.GetDpi(owner)", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("style & ~WsThickFrame & ~WsMaximizeBox", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("if (IsWindow(wParam))", StringComparison.Ordinal) &&
+               !pickerGuardSource.Contains("WmNcLButtonDown", StringComparison.Ordinal) &&
+               !pickerGuardSource.Contains("ScMove", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("ReleaseCreationHook();", StringComparison.Ordinal),
-            "OpenFileDialog guard centers in the owner monitor work area and locally blocks only move operations");
+            "OpenFileDialog has the original fixed DPI-scaled size, centers after Shell layout, and remains movable");
     }
 
     private static void TestDiscardContactInterlock()
