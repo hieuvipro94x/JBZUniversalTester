@@ -107,6 +107,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
     const int FinalInitDelayMs = 350;
     const int FinalInit2ToStopMs = 330;
     const int FinalStopToCloseMs = 130;
+    // Htdrv gốc giữ khoảng 100 ms sau lệnh điều khiển từ 0x8D trở lên.
+    // FT_Write hoàn tất chỉ xác nhận dữ liệu đã vào driver, không xác nhận firmware
+    // đã áp dụng trạng thái relay. Không được gửi RESET/START_SCAN đè ngay sau 0x8E.
+    const int RelayCommandSettleMs = 100;
 
     public bool IsConnected => _handle != IntPtr.Zero;
     public BoardConnectionState ConnectionState => (BoardConnectionState)Volatile.Read(ref _connectionState);
@@ -886,6 +890,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
         // thao tác này ngăn BO bỏ qua frame OFF 8E 00 00 00 trên một số máy.
         await WriteAsync(command, ct, purgeBeforeWrite: true);
         Volatile.Write(ref _activeRelay, relayState);
+
+        // Đặc biệt quan trọng với ALL OFF: Manual OFF/RESET và relay production
+        // phải cho firmware đủ thời gian chốt 00 trước lệnh điều khiển kế tiếp.
+        await Task.Delay(RelayCommandSettleMs, ct);
 
         // 0x8E chỉ điều khiển relay ngoài (JIG/MARKING), không thay đổi
         // routing 0x90/0x91 đã được INIT cho continuity scan. Trace production

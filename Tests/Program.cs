@@ -1002,6 +1002,12 @@ internal static class Program
         Assert(settingsXaml.Contains("T&#7854;T T&#7844;T C&#7842;", StringComparison.Ordinal) &&
                !settingsXaml.Contains("ManualRelay2OffCommand", StringComparison.Ordinal),
             "Manual relay UI exposes the proven mutually-exclusive R1/R2 selector and one ALL OFF command");
+
+        string d2xxSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "D2xxBoardTransport.cs"));
+        Assert(d2xxSource.Contains("const int RelayCommandSettleMs = 100;", StringComparison.Ordinal) &&
+               d2xxSource.Contains("await Task.Delay(RelayCommandSettleMs, ct);", StringComparison.Ordinal),
+            "D2XX waits for firmware to latch relay OFF before RESET or START_SCAN");
     }
 
     private static void TestStartupIoInterlock()
