@@ -14,10 +14,11 @@ namespace JBZUniversalTester.Views;
 internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 {
     private const double OriginalDialogWidthDip = 555;
-    private const double OriginalDialogHeightDip = 408;
+    private const double OriginalDialogHeightDip = 416;
     private const int WhCbt = 5;
     private const int HcbtActivate = 5;
     private const int GwlStyle = -16;
+    private const int DwmwaExtendedFrameBounds = 9;
     private const uint GwOwner = 4;
     private const uint MonitorDefaultToNearest = 0x00000002;
     private const uint SwpNoSize = 0x0001;
@@ -98,19 +99,37 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         };
 
         if (monitor == IntPtr.Zero ||
-            !GetMonitorInfo(monitor, ref monitorInfo))
+            !GetMonitorInfo(monitor, ref monitorInfo) ||
+            !GetWindowRect(dialogHandle, out Rect windowRect))
         {
             return;
         }
 
-        int width = Math.Min(
+        int visibleWidth = Math.Min(
             monitorInfo.WorkArea.Width,
             Math.Max(1, (int)Math.Round(OriginalDialogWidthDip * _dpiScaleX)));
-        int height = Math.Min(
+        int visibleHeight = Math.Min(
             monitorInfo.WorkArea.Height,
             Math.Max(1, (int)Math.Round(OriginalDialogHeightDip * _dpiScaleY)));
-        int x = monitorInfo.WorkArea.Left + ((monitorInfo.WorkArea.Width - width) / 2);
-        int y = monitorInfo.WorkArea.Top + ((monitorInfo.WorkArea.Height - height) / 2);
+
+        Rect frameRect = windowRect;
+        if (DwmGetWindowAttribute(
+                dialogHandle,
+                DwmwaExtendedFrameBounds,
+                out Rect measuredFrameRect,
+                Marshal.SizeOf<Rect>()) == 0)
+        {
+            frameRect = measuredFrameRect;
+        }
+
+        int hiddenFrameWidth = Math.Max(0, windowRect.Width - frameRect.Width);
+        int hiddenFrameHeight = Math.Max(0, windowRect.Height - frameRect.Height);
+        int width = Math.Min(monitorInfo.WorkArea.Width, visibleWidth + hiddenFrameWidth);
+        int height = Math.Min(monitorInfo.WorkArea.Height, visibleHeight + hiddenFrameHeight);
+        int x = monitorInfo.WorkArea.Left + ((monitorInfo.WorkArea.Width - visibleWidth) / 2) -
+                (frameRect.Left - windowRect.Left);
+        int y = monitorInfo.WorkArea.Top + ((monitorInfo.WorkArea.Height - visibleHeight) / 2) -
+                (frameRect.Top - windowRect.Top);
 
         SetWindowPos(
             dialogHandle,
@@ -201,11 +220,21 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo monitorInfo);
 
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr handle, out Rect rect);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int GetWindowLong(IntPtr handle, int index);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern int SetWindowLong(IntPtr handle, int index, int newValue);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(
+        IntPtr handle,
+        int attribute,
+        out Rect value,
+        int valueSize);
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(

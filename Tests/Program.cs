@@ -128,6 +128,9 @@ internal static class Program
                pickerGuardSource.Contains("OriginalDialogWidthDip = 555", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("OriginalDialogHeightDip = 408", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("VisualTreeHelper.GetDpi(owner)", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("DwmwaExtendedFrameBounds = 9", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("DwmGetWindowAttribute(", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("visibleWidth + hiddenFrameWidth", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("style & ~WsThickFrame & ~WsMaximizeBox", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
@@ -135,7 +138,7 @@ internal static class Program
                !pickerGuardSource.Contains("WmNcLButtonDown", StringComparison.Ordinal) &&
                !pickerGuardSource.Contains("ScMove", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("ReleaseCreationHook();", StringComparison.Ordinal),
-            "OpenFileDialog has the original fixed DPI-scaled size, centers after Shell layout, and remains movable");
+            "OpenFileDialog compensates the DWM frame for the original visible size, centers after Shell layout, and remains movable");
     }
 
     private static void TestDiscardContactInterlock()
