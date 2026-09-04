@@ -1065,7 +1065,9 @@ public sealed class TestEngine : IDisposable
             return new WiringFaultPair(
                 actualSource,
                 actualTarget,
-                $"Mong đợi IO{actualSource} -> IO{expectedTarget}; thực tế IO{actualSource} -> IO{actualTarget}",
+                // ExpectedSourceIo/ExpectedTargetIo vẫn giữ riêng bên dưới.
+                // Reason chỉ mô tả kết nối sai THỰC TẾ để UI/popup/history gọn.
+                $"IO{actualSource} đang nối nhầm IO{actualTarget}",
                 ProductFaultType.WrongWiring,
                 actualSource,
                 expectedTarget);
@@ -1584,7 +1586,10 @@ public sealed class TestEngine : IDisposable
                         ActualSourceIo = fault.SourceIo,
                         ActualTargetIo = fault.TargetIo,
                         RelatedIos = new[] { fault.SourceIo, fault.TargetIo },
-                        Status = $"{fault.Reason}; I/O {io} không có map pin trong THT"
+
+                        // FAIL DISPLAY: chỉ hiện đầu I/O thực tế đang nối với dòng này.
+                        // Không đưa Expected/Mong đợi vào cột Trạng thái.
+                        Status = BuildWiringFaultStatus(model, fault, io)
                     });
                 }
             }
@@ -1607,9 +1612,12 @@ public sealed class TestEngine : IDisposable
             item.SourceIo == pin.IoNumber || item.TargetIo == pin.IoNumber);
 
         ProductFaultType type = fault?.FaultType ?? ProductFaultType.WrongWiring;
+
+        // FAIL trên TestWindow chỉ hiển thị đầu I/O đang nối sai với dòng hiện tại.
+        // ExpectedSourceIo/ExpectedTargetIo vẫn giữ nguyên cho logic/history.
         string status = fault is null
-            ? $"I/O {pin.IoNumber} đấu sai cấu hình"
-            : fault.Reason;
+            ? $"IO {pin.IoNumber}"
+            : BuildWiringFaultStatus(_model!, fault, pin.IoNumber);
 
         return new FaultRow
         {
@@ -1635,6 +1643,65 @@ public sealed class TestEngine : IDisposable
             Color = pin.Color,
             Status = status
         };
+    }
+
+    /// <summary>
+    /// Chuẩn hiển thị FAIL ở cột Trạng thái.
+    /// Ví dụ: dòng IO14 nối sai với IO38, IO38 thuộc connector 2 / pin 7:
+    ///     IO 38 (CN 2 - PIN 7)
+    /// Dòng IO38 sẽ hiển thị ngược lại:
+    ///     IO 14 (CN 1 - PIN 14)
+    /// Nếu I/O đối diện không có map trong THT thì chỉ hiện "IO 38".
+    /// </summary>
+    private static string BuildWiringFaultStatus(
+        ProductModel model,
+        WiringFaultPair fault,
+        int currentIo)
+    {
+        int peerIo;
+
+        if (fault.SourceIo == currentIo)
+            peerIo = fault.TargetIo;
+        else if (fault.TargetIo == currentIo)
+            peerIo = fault.SourceIo;
+        else
+            peerIo = fault.TargetIo > 0 ? fault.TargetIo : fault.SourceIo;
+
+        return FormatFaultPeerIo(model, peerIo);
+    }
+
+    private static string FormatFaultPeerIo(ProductModel model, int io)
+    {
+        if (io <= 0)
+            return string.Empty;
+
+        // Một Global IO có thể xuất hiện nhiều row trong THT. Ưu tiên row có
+        // WireName thật và thứ tự gốc nhỏ nhất để kết quả hiển thị ổn định.
+        PinRecord? peerPin = model.Pins
+            .Where(pin => pin.IoNumber == io)
+            .OrderBy(pin => string.IsNullOrWhiteSpace(pin.WireName) ? 1 : 0)
+            .ThenBy(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
+            .FirstOrDefault();
+
+        if (peerPin is null)
+            return $"IO {io}";
+
+        string connector = (peerPin.Connector ?? string.Empty).Trim();
+        string pinNumber = (peerPin.PinNumber ?? string.Empty).Trim();
+
+        if (!string.IsNullOrWhiteSpace(connector) &&
+            !string.IsNullOrWhiteSpace(pinNumber))
+        {
+            return $"IO {io} (CN {connector} - PIN {pinNumber})";
+        }
+
+        if (!string.IsNullOrWhiteSpace(connector))
+            return $"IO {io} (CN {connector})";
+
+        if (!string.IsNullOrWhiteSpace(pinNumber))
+            return $"IO {io} (PIN {pinNumber})";
+
+        return $"IO {io}";
     }
 
     bool HasWiringFaultForNet(WireNet net)
@@ -1904,18 +1971,6 @@ public sealed class TestEngine : IDisposable
         return pin is null ? int.MaxValue : ResolveDisplayOrder(pin);
     }
 
-    private static string BuildJoinedText(IEnumerable<string?> values)
-    {
-        string[] parts = values
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value!.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        return parts.Length == 0
-            ? string.Empty
-            : string.Join(" <-> ", parts);
-    }
 
     /// <summary>
     /// Sau khi người vận hành XÁC NHẬN hàng lỗi, chỉ relay đã được cài là

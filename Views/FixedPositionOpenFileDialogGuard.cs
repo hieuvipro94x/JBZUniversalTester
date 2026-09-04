@@ -13,7 +13,7 @@ namespace JBZUniversalTester.Views;
 /// Goals:
 /// - User CANNOT resize or maximize.
 /// - User CAN move the dialog by dragging the title bar.
-/// - Start from the preferred compact size 555 x 416 DIP.
+/// - Start from a slightly wider classic-dialog size 640 x 440 DIP.
 /// - Adapt to monitor WorkArea and DPI.
 /// - Adapt to Windows language / system font automatically:
 ///   after Shell lays out the native child controls, measure their REAL bounds.
@@ -23,18 +23,23 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 {
-    private const double PreferredDialogWidthDip = 555;
-    private const double PreferredDialogHeightDip = 416;
+    // Hơi rộng hơn phần mềm gốc để tên file/đường dẫn không bị ép,
+    // nhưng vẫn giữ tỷ lệ compact của hộp thoại cổ điển.
+    private const double PreferredDialogWidthDip = 640;
+    private const double PreferredDialogHeightDip = 440;
 
     // Space between the dialog and monitor WorkArea.
-    private const double MonitorMarginDip = 8;
+    private const double MonitorMarginDip = 10;
 
     // Extra client padding after the furthest native child control.
-    private const double ContentPaddingDip = 8;
+    private const double ContentPaddingDip = 10;
+
+    // Khoảng trống tối thiểu giữ cụm nút Mở/Hủy nằm trọn trong client area.
+    private const double PrimaryButtonMarginDip = 10;
 
     // Number of post-layout checks.
     // Native Common Dialog can re-layout once more after WM_SIZE.
-    private const int LayoutCorrectionPasses = 3;
+    private const int LayoutCorrectionPasses = 5;
 
     private const int WhCbt = 5;
     private const int HcbtActivate = 5;
@@ -44,6 +49,8 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 
     private const uint GwOwner = 4;
     private const uint MonitorDefaultToNearest = 0x00000002;
+
+    private const int SwShow = 5;
 
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
@@ -162,6 +169,11 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         }
 
         // Final layout is now stable.
+        // Bảo đảm riêng hai nút thao tác chính (Mở/Hủy) luôn nằm trọn trong
+        // client area. Chỉ dịch cả cụm nút khi thực sự bị cắt, vì vậy bố cục
+        // chuẩn của Windows ở các máy bình thường vẫn giữ nguyên.
+        EnsurePrimaryActionButtonsVisible(dialogHandle);
+
         // Only NOW remove resize/maximize capability.
         LockDialogSize(dialogHandle);
 
@@ -503,6 +515,122 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Giữ nguyên bố cục native của Windows nếu hai nút Mở/Hủy đã nằm đúng chỗ.
+    /// Nếu do DPI/độ phân giải/ngôn ngữ làm cụm nút bị cắt ở mép phải hoặc mép
+    /// dưới, dịch NGUYÊN CỤM vào trong client area. Không đổi kích thước nút,
+    /// không đổi text và không xếp lại ngang/dọc, nên giao diện vẫn giống dialog gốc.
+    /// </summary>
+    private void EnsurePrimaryActionButtonsVisible(IntPtr dialogHandle)
+    {
+        if (!GetClientRect(dialogHandle, out Rect clientRect))
+            return;
+
+        var clientOrigin = new PointNative { X = 0, Y = 0 };
+        if (!ClientToScreen(dialogHandle, ref clientOrigin))
+            return;
+
+        IntPtr okButton = FindPrimaryButton(dialogHandle, IdOk, Psh1);
+        IntPtr cancelButton = FindPrimaryButton(dialogHandle, IdCancel, Psh2);
+
+        if (okButton == IntPtr.Zero && cancelButton == IntPtr.Zero)
+            return;
+
+        // Common Dialog đôi khi tạm ẩn button trong một vòng layout.
+        // Sau khi layout ổn định, hai nút thao tác chính luôn phải hiện.
+        if (okButton != IntPtr.Zero)
+            ShowWindow(okButton, SwShow);
+        if (cancelButton != IntPtr.Zero)
+            ShowWindow(cancelButton, SwShow);
+
+        var buttons = new List<(IntPtr Handle, Rect Rect)>();
+
+        if (okButton != IntPtr.Zero &&
+            GetWindowRect(okButton, out Rect okRect) &&
+            okRect.Width > 0 &&
+            okRect.Height > 0)
+        {
+            buttons.Add((okButton, okRect));
+        }
+
+        if (cancelButton != IntPtr.Zero &&
+            GetWindowRect(cancelButton, out Rect cancelRect) &&
+            cancelRect.Width > 0 &&
+            cancelRect.Height > 0)
+        {
+            buttons.Add((cancelButton, cancelRect));
+        }
+
+        if (buttons.Count == 0)
+            return;
+
+        GetDialogDpiScale(
+            dialogHandle,
+            out double dpiScaleX,
+            out double dpiScaleY);
+
+        int marginX = DipToPixels(
+            PrimaryButtonMarginDip,
+            dpiScaleX);
+
+        int marginY = DipToPixels(
+            PrimaryButtonMarginDip,
+            dpiScaleY);
+
+        int groupLeft = buttons.Min(item => item.Rect.Left) - clientOrigin.X;
+        int groupTop = buttons.Min(item => item.Rect.Top) - clientOrigin.Y;
+        int groupRight = buttons.Max(item => item.Rect.Right) - clientOrigin.X;
+        int groupBottom = buttons.Max(item => item.Rect.Bottom) - clientOrigin.Y;
+
+        int dx = 0;
+        int dy = 0;
+
+        int maxRight = Math.Max(marginX, clientRect.Width - marginX);
+        int maxBottom = Math.Max(marginY, clientRect.Height - marginY);
+
+        if (groupRight > maxRight)
+            dx = maxRight - groupRight;
+        else if (groupLeft < marginX)
+            dx = marginX - groupLeft;
+
+        if (groupBottom > maxBottom)
+            dy = maxBottom - groupBottom;
+        else if (groupTop < marginY)
+            dy = marginY - groupTop;
+
+        if (dx == 0 && dy == 0)
+            return;
+
+        foreach ((IntPtr handle, Rect rect) in buttons)
+        {
+            int x = (rect.Left - clientOrigin.X) + dx;
+            int y = (rect.Top - clientOrigin.Y) + dy;
+
+            SetWindowPos(
+                handle,
+                IntPtr.Zero,
+                x,
+                y,
+                0,
+                0,
+                SwpNoSize |
+                SwpNoZOrder |
+                SwpNoActivate);
+        }
+    }
+
+    private static IntPtr FindPrimaryButton(
+        IntPtr dialogHandle,
+        int standardId,
+        int classicId)
+    {
+        IntPtr handle = GetDlgItem(dialogHandle, standardId);
+        if (handle != IntPtr.Zero)
+            return handle;
+
+        return GetDlgItem(dialogHandle, classicId);
+    }
+
     private static void SetCenteredWindowSize(
         IntPtr dialogHandle,
         MonitorInfo monitorInfo,
@@ -796,6 +924,16 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(
         IntPtr handle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetDlgItem(
+        IntPtr dialogHandle,
+        int controlId);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(
+        IntPtr handle,
+        int command);
 
     [DllImport("user32.dll")]
     private static extern int GetDlgCtrlID(
