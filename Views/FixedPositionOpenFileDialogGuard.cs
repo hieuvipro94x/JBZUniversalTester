@@ -9,37 +9,46 @@ namespace JBZUniversalTester.Views;
 
 /// <summary>
 /// Sizes and centers one owner-bound native OpenFileDialog in the owner's monitor work area.
-/// The operator can move the dialog, but cannot resize/maximize it.
-/// On smaller screens or higher DPI, the fixed dialog size is reduced proportionally
-/// so the whole dialog remains inside the monitor work area.
+///
+/// Behavior:
+/// - User cannot resize or maximize the dialog.
+/// - User can still move the dialog by dragging the title bar.
+/// - Preferred fixed size is 555 x 416 DIP.
+/// - On a smaller monitor / larger Windows DPI scaling, only the dimension that
+///   does not fit is reduced.
+/// - IMPORTANT: Windows is allowed to re-layout the native dialog controls first.
+///   The resize/maximize styles are removed only AFTER the final size has been applied.
 /// </summary>
 internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 {
     private const double OriginalDialogWidthDip = 555;
     private const double OriginalDialogHeightDip = 416;
-
-    // Chừa một khoảng nhỏ với taskbar/cạnh màn hình.
-    private const double SafeMarginDip = 12;
+    private const double SafeMarginDip = 8;
 
     private const int WhCbt = 5;
     private const int HcbtActivate = 5;
+
     private const int GwlStyle = -16;
     private const int DwmwaExtendedFrameBounds = 9;
+
     private const uint GwOwner = 4;
     private const uint MonitorDefaultToNearest = 0x00000002;
+
     private const uint SwpNoSize = 0x0001;
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoZOrder = 0x0004;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpFrameChanged = 0x0020;
+
     private const int WsThickFrame = 0x00040000;
     private const int WsMaximizeBox = 0x00010000;
 
     private readonly IntPtr _ownerHandle;
     private readonly Dispatcher _dispatcher;
-    private readonly double _dpiScaleX;
-    private readonly double _dpiScaleY;
+    private readonly double _ownerDpiScaleX;
+    private readonly double _ownerDpiScaleY;
     private readonly HookProc _hookCallback;
+
     private IntPtr _hookHandle;
 
     public FixedPositionOpenFileDialogGuard(Window owner)
@@ -50,8 +59,8 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         _dispatcher = owner.Dispatcher;
 
         DpiScale dpi = VisualTreeHelper.GetDpi(owner);
-        _dpiScaleX = dpi.DpiScaleX;
-        _dpiScaleY = dpi.DpiScaleY;
+        _ownerDpiScaleX = dpi.DpiScaleX;
+        _ownerDpiScaleY = dpi.DpiScaleY;
 
         _hookCallback = HookCallback;
 
@@ -70,47 +79,72 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         if (code == HcbtActivate &&
             IsOwnedCommonDialog(wParam))
         {
-            // Giữ nguyên hành vi cũ:
-            // - khóa resize/maximize;
-            // - vẫn cho phép kéo dialog bằng title bar;
-            // - căn giữa monitor của owner.
-            //
-            // Điểm thay đổi duy nhất là kích thước fixed sẽ tự co theo WorkArea
-            // nếu màn hình hiện tại không đủ chỗ.
             ReleaseCreationHook();
 
-            LockDialogSize(wParam);
-            FitFixedSizeAndCenterInOwnerMonitorWorkArea(wParam);
+            // QUAN TRỌNG:
+            // Chưa khóa resize tại đây.
+            //
+            // Để WS_THICKFRAME tồn tại trong lúc SetWindowPos thay đổi kích thước,
+            // Windows Common Dialog sẽ nhận WM_SIZE và tự re-layout:
+            // - danh sách file
+            // - ô tên file
+            // - nút Mở
+            // - nút Hủy
+            // - các control phía dưới/phía phải.
+            FitAndCenterWhileResizable(wParam);
 
+            // Shell thường còn restore/layout thêm một lần ngay sau Activate.
+            // Chờ đến ApplicationIdle, áp kích thước lần cuối rồi mới khóa.
             _dispatcher.BeginInvoke(
                 DispatcherPriority.ApplicationIdle,
                 () =>
                 {
-                    if (IsWindow(wParam))
-                    {
-                        // Shell có thể restore layout/vị trí sau Activate,
-                        // nên áp dụng lại một lần khi layout đã ổn định.
-                        LockDialogSize(wParam);
-                        FitFixedSizeAndCenterInOwnerMonitorWorkArea(wParam);
-                    }
+                    if (!IsWindow(wParam))
+                        return;
+
+                    // Lần cuối cùng cho Windows re-layout ở trạng thái resizable.
+                    FitAndCenterWhileResizable(wParam);
+
+                    // Bây giờ layout đã đúng -> khóa kích thước.
+                    LockDialogSize(wParam);
+
+                    // Việc bỏ WS_THICKFRAME làm thay đổi non-client frame một vài pixel.
+                    // Chỉ căn giữa lại, TUYỆT ĐỐI không đổi size sau khi đã khóa.
+                    CenterCurrentSizeInOwnerMonitorWorkArea(wParam);
                 });
         }
 
-        return CallNextHookEx(_hookHandle, code, wParam, lParam);
+        return CallNextHookEx(
+            _hookHandle,
+            code,
+            wParam,
+            lParam);
     }
 
     private bool IsOwnedCommonDialog(IntPtr handle)
     {
         var className = new StringBuilder(64);
 
-        return GetClassName(handle, className, className.Capacity) > 0 &&
-               className.ToString().Equals("#32770", StringComparison.Ordinal) &&
+        return GetClassName(
+                   handle,
+                   className,
+                   className.Capacity) > 0 &&
+               className.ToString().Equals(
+                   "#32770",
+                   StringComparison.Ordinal) &&
                GetWindow(handle, GwOwner) == _ownerHandle;
     }
 
-    private void FitFixedSizeAndCenterInOwnerMonitorWorkArea(IntPtr dialogHandle)
+    /// <summary>
+    /// Apply the preferred fixed dialog size while the dialog is still resizable.
+    /// This is intentional: native Common Dialog uses WM_SIZE to reposition
+    /// Open/Cancel and the other child controls.
+    /// </summary>
+    private void FitAndCenterWhileResizable(IntPtr dialogHandle)
     {
-        IntPtr monitor = MonitorFromWindow(_ownerHandle, MonitorDefaultToNearest);
+        IntPtr monitor = MonitorFromWindow(
+            _ownerHandle,
+            MonitorDefaultToNearest);
 
         var monitorInfo = new MonitorInfo
         {
@@ -124,77 +158,89 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             return;
         }
 
-        // Kích thước fixed gốc theo DPI hiện tại.
-        int originalVisibleWidth = Math.Max(
-            1,
-            (int)Math.Round(OriginalDialogWidthDip * _dpiScaleX));
+        GetDialogDpiScale(
+            dialogHandle,
+            out double dpiScaleX,
+            out double dpiScaleY);
 
-        int originalVisibleHeight = Math.Max(
-            1,
-            (int)Math.Round(OriginalDialogHeightDip * _dpiScaleY));
+        Rect frameRect = GetVisibleFrameRect(
+            dialogHandle,
+            windowRect);
 
-        // Chừa khoảng an toàn để dialog không chạm taskbar/cạnh WorkArea.
+        int hiddenFrameLeft =
+            Math.Max(0, frameRect.Left - windowRect.Left);
+
+        int hiddenFrameTop =
+            Math.Max(0, frameRect.Top - windowRect.Top);
+
+        int hiddenFrameRight =
+            Math.Max(0, windowRect.Right - frameRect.Right);
+
+        int hiddenFrameBottom =
+            Math.Max(0, windowRect.Bottom - frameRect.Bottom);
+
+        int preferredVisibleWidth = Math.Max(
+            1,
+            (int)Math.Round(
+                OriginalDialogWidthDip * dpiScaleX));
+
+        int preferredVisibleHeight = Math.Max(
+            1,
+            (int)Math.Round(
+                OriginalDialogHeightDip * dpiScaleY));
+
         int marginX = Math.Max(
             0,
-            (int)Math.Round(SafeMarginDip * _dpiScaleX));
+            (int)Math.Round(
+                SafeMarginDip * dpiScaleX));
 
         int marginY = Math.Max(
             0,
-            (int)Math.Round(SafeMarginDip * _dpiScaleY));
+            (int)Math.Round(
+                SafeMarginDip * dpiScaleY));
 
-        int availableVisibleWidth = Math.Max(
+        int maxVisibleWidth = Math.Max(
             1,
             monitorInfo.WorkArea.Width - (marginX * 2));
 
-        int availableVisibleHeight = Math.Max(
+        int maxVisibleHeight = Math.Max(
             1,
             monitorInfo.WorkArea.Height - (marginY * 2));
 
-        // Chỉ CO NHỎ khi màn hình không đủ.
-        // Tuyệt đối không phóng lớn hơn kích thước fixed 555x416 DIP.
+        // KHÔNG scale đồng thời Width + Height.
         //
-        // Dùng cùng một tỷ lệ cho Width/Height để dialog không bị méo tỷ lệ.
-        double fitScale = Math.Min(
-            1.0,
-            Math.Min(
-                (double)availableVisibleWidth / originalVisibleWidth,
-                (double)availableVisibleHeight / originalVisibleHeight));
+        // Ví dụ:
+        // màn hình chỉ thiếu chiều cao -> chỉ giảm Height.
+        // Width vẫn giữ nguyên để các label/nút không bị ép ngang.
+        //
+        // Dialog không bao giờ lớn hơn 555 x 416 DIP,
+        // nhưng nếu màn hình nhỏ thì mỗi chiều tự giới hạn theo WorkArea.
+        int visibleWidth = Math.Min(
+            preferredVisibleWidth,
+            maxVisibleWidth);
 
-        int visibleWidth = Math.Max(
-            1,
-            (int)Math.Floor(originalVisibleWidth * fitScale));
+        int visibleHeight = Math.Min(
+            preferredVisibleHeight,
+            maxVisibleHeight);
 
-        int visibleHeight = Math.Max(
-            1,
-            (int)Math.Floor(originalVisibleHeight * fitScale));
+        int outerWidth =
+            visibleWidth +
+            hiddenFrameLeft +
+            hiddenFrameRight;
 
-        // DWM có phần border/frame vô hình.
-        // Tính phần này để phần dialog nhìn thấy thực sự nằm gọn trong WorkArea.
-        Rect frameRect = windowRect;
+        int outerHeight =
+            visibleHeight +
+            hiddenFrameTop +
+            hiddenFrameBottom;
 
-        if (DwmGetWindowAttribute(
-                dialogHandle,
-                DwmwaExtendedFrameBounds,
-                out Rect measuredFrameRect,
-                Marshal.SizeOf<Rect>()) == 0)
-        {
-            frameRect = measuredFrameRect;
-        }
-
-        int hiddenFrameLeft = Math.Max(0, frameRect.Left - windowRect.Left);
-        int hiddenFrameTop = Math.Max(0, frameRect.Top - windowRect.Top);
-        int hiddenFrameRight = Math.Max(0, windowRect.Right - frameRect.Right);
-        int hiddenFrameBottom = Math.Max(0, windowRect.Bottom - frameRect.Bottom);
-
-        int width = Math.Min(
+        outerWidth = Math.Min(
             monitorInfo.WorkArea.Width,
-            visibleWidth + hiddenFrameLeft + hiddenFrameRight);
+            Math.Max(1, outerWidth));
 
-        int height = Math.Min(
+        outerHeight = Math.Min(
             monitorInfo.WorkArea.Height,
-            visibleHeight + hiddenFrameTop + hiddenFrameBottom);
+            Math.Max(1, outerHeight));
 
-        // Căn giữa phần frame nhìn thấy, không phải border DWM vô hình.
         int visibleX =
             monitorInfo.WorkArea.Left +
             ((monitorInfo.WorkArea.Width - visibleWidth) / 2);
@@ -206,28 +252,39 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         int x = visibleX - hiddenFrameLeft;
         int y = visibleY - hiddenFrameTop;
 
+        // Vì WS_THICKFRAME vẫn còn ở thời điểm này,
+        // native dialog có cơ hội xử lý WM_SIZE và di chuyển các child controls.
         SetWindowPos(
             dialogHandle,
             IntPtr.Zero,
             x,
             y,
-            width,
-            height,
+            outerWidth,
+            outerHeight,
             SwpNoZOrder | SwpNoActivate);
     }
 
+    /// <summary>
+    /// After the layout is stable, remove resizing/maximize functionality.
+    /// </summary>
     private static void LockDialogSize(IntPtr dialogHandle)
     {
-        int style = GetWindowLong(dialogHandle, GwlStyle);
+        int style = GetWindowLong(
+            dialogHandle,
+            GwlStyle);
 
-        // Giữ nguyên hành vi cũ:
-        // người dùng không thể kéo resize và không thể maximize.
-        int fixedSizeStyle = style & ~WsThickFrame & ~WsMaximizeBox;
+        int fixedSizeStyle =
+            style &
+            ~WsThickFrame &
+            ~WsMaximizeBox;
 
         if (fixedSizeStyle == style)
             return;
 
-        SetWindowLong(dialogHandle, GwlStyle, fixedSizeStyle);
+        SetWindowLong(
+            dialogHandle,
+            GwlStyle,
+            fixedSizeStyle);
 
         SetWindowPos(
             dialogHandle,
@@ -241,6 +298,99 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             SwpNoZOrder |
             SwpNoActivate |
             SwpFrameChanged);
+    }
+
+    /// <summary>
+    /// Re-center the existing size without resizing it.
+    /// Used only after WS_THICKFRAME has been removed.
+    /// </summary>
+    private void CenterCurrentSizeInOwnerMonitorWorkArea(
+        IntPtr dialogHandle)
+    {
+        IntPtr monitor = MonitorFromWindow(
+            _ownerHandle,
+            MonitorDefaultToNearest);
+
+        var monitorInfo = new MonitorInfo
+        {
+            Size = (uint)Marshal.SizeOf<MonitorInfo>()
+        };
+
+        if (monitor == IntPtr.Zero ||
+            !GetMonitorInfo(monitor, ref monitorInfo) ||
+            !GetWindowRect(dialogHandle, out Rect windowRect))
+        {
+            return;
+        }
+
+        Rect frameRect = GetVisibleFrameRect(
+            dialogHandle,
+            windowRect);
+
+        int visibleWidth = Math.Max(
+            1,
+            frameRect.Width);
+
+        int visibleHeight = Math.Max(
+            1,
+            frameRect.Height);
+
+        int x =
+            monitorInfo.WorkArea.Left +
+            ((monitorInfo.WorkArea.Width - visibleWidth) / 2) -
+            (frameRect.Left - windowRect.Left);
+
+        int y =
+            monitorInfo.WorkArea.Top +
+            ((monitorInfo.WorkArea.Height - visibleHeight) / 2) -
+            (frameRect.Top - windowRect.Top);
+
+        // Không thay đổi size sau khi đã LockDialogSize.
+        SetWindowPos(
+            dialogHandle,
+            IntPtr.Zero,
+            x,
+            y,
+            0,
+            0,
+            SwpNoSize |
+            SwpNoZOrder |
+            SwpNoActivate);
+    }
+
+    private void GetDialogDpiScale(
+        IntPtr dialogHandle,
+        out double dpiScaleX,
+        out double dpiScaleY)
+    {
+        uint dpi = GetDpiForWindow(dialogHandle);
+
+        if (dpi > 0)
+        {
+            // Common Dialog dùng DPI vuông trên Windows hiện đại.
+            dpiScaleX = dpi / 96.0;
+            dpiScaleY = dpi / 96.0;
+            return;
+        }
+
+        dpiScaleX = _ownerDpiScaleX;
+        dpiScaleY = _ownerDpiScaleY;
+    }
+
+    private static Rect GetVisibleFrameRect(
+        IntPtr dialogHandle,
+        Rect windowRect)
+    {
+        if (DwmGetWindowAttribute(
+                dialogHandle,
+                DwmwaExtendedFrameBounds,
+                out Rect measuredFrameRect,
+                Marshal.SizeOf<Rect>()) == 0)
+        {
+            return measuredFrameRect;
+        }
+
+        return windowRect;
     }
 
     private void ReleaseCreationHook()
@@ -283,7 +433,9 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         IntPtr wParam,
         IntPtr lParam);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport(
+        "user32.dll",
+        SetLastError = true)]
     private static extern IntPtr SetWindowsHookEx(
         int hook,
         HookProc callback,
@@ -291,7 +443,8 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         uint threadId);
 
     [DllImport("user32.dll")]
-    private static extern bool UnhookWindowsHookEx(IntPtr hook);
+    private static extern bool UnhookWindowsHookEx(
+        IntPtr hook);
 
     [DllImport("user32.dll")]
     private static extern IntPtr CallNextHookEx(
@@ -300,7 +453,9 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         IntPtr wParam,
         IntPtr lParam);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [DllImport(
+        "user32.dll",
+        CharSet = CharSet.Unicode)]
     private static extern int GetClassName(
         IntPtr handle,
         StringBuilder className,
@@ -312,14 +467,17 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         uint command);
 
     [DllImport("user32.dll")]
-    private static extern bool IsWindow(IntPtr handle);
+    private static extern bool IsWindow(
+        IntPtr handle);
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromWindow(
         IntPtr handle,
         uint flags);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [DllImport(
+        "user32.dll",
+        CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(
         IntPtr monitor,
         ref MonitorInfo monitorInfo);
@@ -329,16 +487,24 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         IntPtr handle,
         out Rect rect);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport(
+        "user32.dll",
+        SetLastError = true)]
     private static extern int GetWindowLong(
         IntPtr handle,
         int index);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport(
+        "user32.dll",
+        SetLastError = true)]
     private static extern int SetWindowLong(
         IntPtr handle,
         int index,
         int newValue);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(
+        IntPtr handle);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(
