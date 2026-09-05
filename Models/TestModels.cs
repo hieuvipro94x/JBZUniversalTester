@@ -1,5 +1,8 @@
 ﻿using JBZUniversalTester.Core;
 using JBZUniversalTester.Converters;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows.Media;
 namespace JBZUniversalTester.Models;
@@ -8,6 +11,21 @@ public enum FaultKind { Start, Open, MissingConnection, WrongWiring, Short, Resi
 
 /// <summary>Chế độ giải mã cùng stream scan của bo.</summary>
 public enum BoardScanMode { Production, Probe }
+
+public sealed class FaultRowCollection : ObservableCollection<FaultRow>
+{
+    public void ReplaceAll(IReadOnlyList<FaultRow> rows)
+    {
+        Items.Clear();
+        foreach (FaultRow row in rows)
+            Items.Add(row);
+
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(
+            NotifyCollectionChangedAction.Reset));
+    }
+}
 
 public sealed class FaultRow : ObservableObject
 {
@@ -23,6 +41,7 @@ public sealed class FaultRow : ObservableObject
     private static readonly Brush WhiteBrush = Brushes.White;
 
     string _status = "";
+    string? _presentationKey;
     public FaultKind Kind { get; init; }
     public ProductFaultType ProductFaultType { get; init; } = ProductFaultType.None;
     public string FaultCode => FaultTypeCatalog.Code(ProductFaultType);
@@ -39,6 +58,7 @@ public sealed class FaultRow : ObservableObject
     public string Splice { get; init; } = "";
     public string Section { get; init; } = "";
     public string Color { get; init; } = "";
+    public string IoCnPnOverride { get; init; } = "";
     public int DisplayOrder { get; init; } = int.MaxValue;
 
     // Không bind enum/custom converter trực tiếp trong XAML để WPF Designer
@@ -47,7 +67,9 @@ public sealed class FaultRow : ObservableObject
     public string IoText => Io > 0
         ? Io.ToString(CultureInfo.InvariantCulture)
         : string.Empty;
-    public string IoCnPnText => Io > 0
+    public string IoCnPnText => !string.IsNullOrWhiteSpace(IoCnPnOverride)
+        ? IoCnPnOverride
+        : Io > 0
         ? string.Join("-", new[]
             {
                 Io.ToString(CultureInfo.InvariantCulture),
@@ -90,6 +112,9 @@ public sealed class FaultRow : ObservableObject
     public string ProbeIoText => $"IO ({Io})";
     public string ProbeWireText => string.IsNullOrWhiteSpace(WireName) ? string.Empty : $"Tên dây {WireName}";
     public string ProbeColorText => string.IsNullOrWhiteSpace(ColorName) ? string.Empty : $"Màu {ColorName}";
+    public string PresentationKey => _presentationKey ??=
+        $"{(int)Kind}|{(int)ProductFaultType}|{Io}|{Connector}|{Pin}|{WireName}|{Splice}|" +
+        $"{ExpectedSourceIo}|{ExpectedTargetIo}|{ActualSourceIo}|{ActualTargetIo}";
 
     public FaultDetail ToFaultDetail() => new()
     {

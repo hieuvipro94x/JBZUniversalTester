@@ -1,0 +1,1411 @@
+CODEx FINAL TASK
+PROJECT: JBZUniversalTester
+MỤC TIÊU: LÀM TESTWINDOW HIỂN THỊ GIỐNG CÁCH VẬN HÀNH PHẦN MỀM HTDRV GỐC, NHƯNG GIỮ GIAO DIỆN TIẾNG VIỆT, GIỮ LOGIC TEST HIỆN TẠI VÀ TỐI ƯU UI CHO TỚI 10 CARD.
+
+MARKER CHÍNH:
+HTDRV_TESTWINDOW_FINAL_2026-09-05
+
+YÊU CẦU NÀY LÀ FINAL.
+NẾU CODE/PATCH/YÊU CẦU CŨ MÂU THUẪN VỚI NỘI DUNG DƯỚI ĐÂY THÌ ƯU TIÊN NỘI DUNG NÀY.
+
+======================================================================
+1. PHẠM VI
+======================================================================
+
+Mục tiêu chính là sửa:
+
+- cách hiển thị TestWindow;
+- cách dựng các dòng continuity;
+- cách hiển thị wiring FAIL;
+- trạng thái chờ lắp sản phẩm;
+- trạng thái PASS;
+- cách hiển thị khi tháo sản phẩm;
+- cách cập nhật UI để nhanh với 10 card.
+
+KHÔNG viết lại TestEngine.
+KHÔNG thay đổi protocol phần cứng.
+KHÔNG refactor lan man.
+
+Trước khi sửa phải đọc đầy đủ luồng hiện tại:
+
+D2XX / Board
+→ ScanFrame
+→ TestEngine.ProcessFrame()
+→ PassedNets / WiringFaults / Connections
+→ TestViewModel
+→ FaultRows
+→ TestWindow
+
+Các file tối thiểu phải kiểm tra:
+
+Services/TestEngine.cs
+ViewModels/TestViewModel.cs
+Views/TestWindow.xaml
+Views/TestWindow.xaml.cs
+Models/FaultRow.cs hoặc file định nghĩa FaultRow
+FaultTypeCatalog và các helper display liên quan.
+
+Ưu tiên sửa ít file nhất có thể.
+
+======================================================================
+2. NHỮNG LOGIC PHẢI GIỮ NGUYÊN
+======================================================================
+
+TUYỆT ĐỐI không tự ý sửa:
+
+- D2XX protocol;
+- BoardIoDecoder;
+- định dạng ScanFrame;
+- START/STOP/INIT/RESET;
+- BoardCapacity;
+- CardCount;
+- ExpansionCardCount;
+- StartCardNumber;
+- cấu hình 10 card;
+- scanAllInstalledIo;
+- USB Delay;
+- runtime card synchronization;
+- probe/TestPin;
+- logic ngăn probe tạo wiring fault giả;
+- ProductionFaultConfirmationGate;
+- debounce/xác nhận lỗi;
+- điều kiện ContinuityPassed;
+- internal ProductFaultType;
+- WrongWiring;
+- ShortCircuit;
+- Resistance measurement;
+- giới hạn Min/Max điện trở;
+- Resistance PASS/FAIL;
+- Leak/WaterProof measurement;
+- Leak PASS/FAIL;
+- relay PASS;
+- relay FAIL;
+- relay MARKING;
+- relay JIG;
+- Manual relay;
+- printer;
+- label;
+- history;
+- counter;
+- popup FAIL hiện tại;
+- workflow xác nhận hàng lỗi;
+- 4 đèn trạng thái.
+
+Task này không được làm thay đổi khả năng phát hiện lỗi thật hiện tại.
+
+======================================================================
+3. THỨ TỰ CỘT TESTWINDOW GIỮ NGUYÊN
+======================================================================
+
+Giữ chính xác thứ tự:
+
+Loại
+| CONNECTOR
+| Chân
+| Tên dây
+| Cỡ dây
+| Màu
+| Trạng thái
+| IO-CN-PN
+
+Không thêm cột mới.
+Không đổi vị trí cột.
+
+======================================================================
+4. Ý NGHĨA CỘT "LOẠI" PHẢI GIỮ NGUYÊN
+======================================================================
+
+Cột Loại KHÔNG dùng để ghi lỗi.
+
+Cột Loại chỉ thể hiện topology sản phẩm:
+
+Đơn
+= kết nối dây thông thường 1-1.
+
+Nối chung
+= splice / điểm dập / CLIP / A0-aN / network nhiều nhánh.
+
+Khi xảy ra lỗi cũng phải cố giữ Loại gốc của network:
+
+Đơn
+hoặc
+Nối chung.
+
+KHÔNG đổi cột Loại thành:
+
+KIỂM TRA
+CHẬP
+HỞ MẠCH
+ĐẤU SAI
+
+Các nội dung lỗi phải chuyển sang cột TRẠNG THÁI.
+
+Ngoại lệ:
+
+Nếu một IO hoàn toàn không sử dụng trong THT và không thuộc network nào,
+không được bịa Loại Đơn/Nối chung.
+
+Có thể để Loại trống cho row IO không dùng.
+
+======================================================================
+5. Ý NGHĨA CỘT "TRẠNG THÁI"
+======================================================================
+
+Cột Trạng thái là nơi operator nhìn để biết lỗi gì.
+
+Sử dụng tiếng Việt rõ ràng.
+
+Normal:
+
+CHƯA KẾT NỐI
+
+Wrong wiring / cắm sai dây:
+
+SAI DÂY
+
+Short:
+
+CHẬP MẠCH
+
+Expected endpoint bị thiếu do kết nối sai:
+
+HỞ MẠCH
+
+IO không sử dụng nhưng bị nối vào:
+
+CHẬP MẠCH
+
+Không sử dụng chuỗi kỹ thuật IO dài ở cột Trạng thái.
+
+Ví dụ KHÔNG làm:
+
+"IO 39 (CN 2 - PIN 7)"
+
+ở cột Trạng thái.
+
+Thông tin IO kỹ thuật đã có cột IO-CN-PN.
+
+======================================================================
+6. OPERATOR ƯU TIÊN TÊN DÂY + MÀU
+======================================================================
+
+Operator sản xuất chủ yếu nhìn:
+
+1. Tên dây
+2. Màu
+3. Trạng thái
+4. Connector
+5. Chân
+
+Operator KHÔNG dùng số IO làm thông tin chính.
+
+Vì vậy khi tạo row bình thường hoặc row FAIL:
+
+- giữ đúng WireName thật từ THT;
+- giữ đúng Color thật;
+- giữ đúng Section/Cỡ dây;
+- giữ đúng Connector;
+- giữ đúng Pin.
+
+Không thay tên dây thật bằng:
+
+IO(39)
+IO39
+IO 39
+
+nếu IO đó có dữ liệu dây hợp lệ trong THT.
+
+Thông tin IO dành cho kỹ thuật phải giữ ở:
+
+IO-CN-PN.
+
+======================================================================
+7. KHI CHƯA LẮP SẢN PHẨM
+======================================================================
+
+Khi vừa vào Production TestWindow và chưa có bất kỳ product activity
+thật nào:
+
+FaultGrid phải hoàn toàn TRỐNG.
+
+Không hiện sẵn:
+
+Đơn
+Nối chung
+CHƯA KẾT NỐI
+
+Giữa vùng bảng hiển thị chữ lớn:
+
+LẮP SẢN PHẨM
+
+Không dùng MessageBox.
+
+Overlay:
+
+- nằm giữa vùng nội dung bảng;
+- không che header;
+- IsHitTestVisible=False;
+- không dùng animation nặng.
+
+Probe/TestPin KHÔNG được:
+
+- làm mất chữ LẮP SẢN PHẨM;
+- làm bảng hiện dây;
+- kích hoạt production cycle;
+- tạo wiring fault giả.
+
+Marker:
+
+HTDRV_WAIT_PRODUCT_2026-09-05
+
+======================================================================
+8. KHI CÓ KẾT NỐI SẢN PHẨM ĐẦU TIÊN
+======================================================================
+
+Ngay khi Production Scan hợp lệ phát hiện product activity thật đầu tiên:
+
+- ẩn ngay LẮP SẢN PHẨM;
+- bắt đầu presentation cycle;
+- lúc này mới hiện TOÀN BỘ network/CLIP chưa đạt của model.
+
+Sau khi cycle đã bắt đầu,
+không được vì một frame mất contact tạm thời mà quay ngay về:
+
+LẮP SẢN PHẨM.
+
+Phải dùng state/latch cycle hiện tại hoặc bổ sung một state presentation nhỏ.
+
+Chỉ reset state này sau khi sản phẩm cũ đã tháo hoàn toàn.
+
+======================================================================
+9. HIỂN THỊ BÌNH THƯỜNG KHI ĐANG TEST
+======================================================================
+
+Sau khi có product activity đầu tiên:
+
+Hiện toàn bộ network chưa đạt.
+
+Normal row vẫn đúng behavior hiện tại.
+
+Ví dụ dây 1-1:
+
+Loại:
+Đơn
+
+Trạng thái:
+CHƯA KẾT NỐI
+
+
+Điểm nối chung:
+
+Loại:
+Nối chung
+
+Trạng thái:
+CHƯA KẾT NỐI
+
+Không đổi normal row thành row lỗi nếu chưa có confirmed wiring fault.
+
+======================================================================
+10. NETWORK NÀO THÔNG ĐÚNG THÌ BIẾN MẤT
+======================================================================
+
+Ví dụ sau khi bắt đầu test đang có:
+
+BG01
+BG02
+BG03
+BG04
+BG05
+
+Khi BG01 thông đúng hoàn toàn:
+
+BG01 phải biến mất ngay.
+
+Còn:
+
+BG02
+BG03
+BG04
+BG05
+
+Khi BG03 thông:
+
+BG03 biến mất.
+
+Cứ giảm dần như vậy.
+
+Đây là behavior bắt buộc.
+
+Không xóa network khỏi ProductModel.
+
+Chỉ ẩn presentation.
+
+Nếu network mất kết nối đúng lại trước khi cycle kết thúc
+và logic hiện tại đánh giá nó chưa đạt:
+
+row phải hiện lại.
+
+======================================================================
+11. CHỈ WIRING FAULT CONFIRMED MỚI ĐỔI HIỂN THỊ
+======================================================================
+
+Không dùng candidate chưa confirmed để đổi UI FAIL.
+
+Chỉ khi wiring fault đã confirmed,
+ví dụ nằm trong:
+
+_wiringFaults
+
+thì mới thay presentation.
+
+Các network KHÔNG liên quan fault vẫn phải giữ:
+
+Đơn / Nối chung
+CHƯA KẾT NỐI.
+
+Chỉ các network/IO liên quan lỗi mới thay đổi Trạng thái.
+
+Marker:
+
+HTDRV_WIRING_FAIL_DISPLAY_2026-09-05
+
+======================================================================
+12. CÁCH HIỂN THỊ SAI DÂY
+======================================================================
+
+Ví dụ THT đúng:
+
+BG1:
+IO38 <-> IO50
+
+Thực tế:
+
+IO38 <-> IO39
+
+IO39 không phải endpoint đúng của BG1.
+
+Presentation phải giúp operator nhìn:
+
+BG1
+Màu BG1
+SAI DÂY
+
+và thấy đầu đúng còn thiếu:
+
+BG1
+Màu BG1
+HỞ MẠCH
+
+Nếu IO39 thuộc một dây khác trong THT,
+ví dụ BG2:
+
+row IO39 phải giữ:
+
+Tên dây = BG2
+Màu = màu BG2
+Connector = connector BG2
+Chân = pin BG2
+Trạng thái = CHẬP MẠCH
+
+Ví dụ tổng thể:
+
+Đơn | CN... | ... | BG1 | ... | ĐỎ   | SAI DÂY   | IO...
+Đơn | CN... | ... | BG2 | ... | TRẮNG| CHẬP MẠCH | IO...
+Đơn | CN... | ... | BG1 | ... | ĐỎ   | HỞ MẠCH   | IO...
+
+Operator sẽ nhìn:
+
+BG1 ĐỎ → SAI DÂY
+BG2 TRẮNG → CHẬP MẠCH
+BG1 ĐỎ → HỞ MẠCH
+
+Kỹ thuật nhìn IO-CN-PN.
+
+======================================================================
+13. IO KHÔNG SỬ DỤNG
+======================================================================
+
+Nếu actual wrong IO:
+
+- không tồn tại trong THT;
+hoặc
+- không có pin production hợp lệ;
+hoặc
+- không có WireName sử dụng thực tế;
+
+thì phải hiển thị giống tinh thần phần mềm gốc.
+
+Ví dụ IO39 không sử dụng:
+
+Loại:
+trống
+
+CONNECTOR:
+KHÔNG DÙNG IO(39)
+
+Chân:
+trống
+
+Tên dây:
+trống
+
+Cỡ dây:
+trống
+
+Màu:
+trống
+
+Trạng thái:
+CHẬP MẠCH
+
+IO-CN-PN:
+phải giữ tối thiểu thông tin IO39 cho kỹ thuật.
+
+TUYỆT ĐỐI không làm:
+
+Tên dây = IO(39)
+
+"KHÔNG DÙNG IO(39)" phải nằm ở cột CONNECTOR.
+
+Marker:
+
+HTDRV_UNUSED_IO_DISPLAY_2026-09-05
+
+======================================================================
+14. HỞ MẠCH TRONG TRƯỜNG HỢP ĐẤU SAI
+======================================================================
+
+Nếu network đúng:
+
+BG1:
+IO38 <-> IO50
+
+nhưng IO38 đang đi nhầm IO39,
+
+thì expected endpoint IO50 chưa nhận đúng connection.
+
+Row IO50 phải thể hiện:
+
+Loại:
+Đơn hoặc Nối chung đúng topology BG1
+
+Tên dây:
+BG1
+
+Màu:
+màu thật BG1
+
+Trạng thái:
+HỞ MẠCH
+
+Không thay bằng CHƯA KẾT NỐI khi đang nằm trong diagnostic group của
+confirmed wrong wiring.
+
+Nếu fault được sửa và network vẫn chưa hoàn thành bình thường,
+row có thể quay về:
+
+CHƯA KẾT NỐI.
+
+======================================================================
+15. TRƯỜNG HỢP HAI DÂY ĐẢO NHAU
+======================================================================
+
+Ví dụ THT:
+
+BG1 = IO10 <-> IO38
+BG2 = IO11 <-> IO39
+
+Thực tế:
+
+IO10 <-> IO39
+IO11 <-> IO38
+
+Không sửa internal fault classification.
+
+Presentation phải giúp operator thấy:
+
+BG1 → SAI DÂY
+BG2 → CHẬP MẠCH
+BG1 → HỞ MẠCH
+
+và nhóm còn lại tương ứng:
+
+BG2 → SAI DÂY
+BG1 → CHẬP MẠCH
+BG2 → HỞ MẠCH
+
+Nhưng phải chống duplicate vô nghĩa.
+
+Không tạo một row giống hệt nhau nhiều lần chỉ vì relation được nhìn
+từ cả hai phía.
+
+Deduplicate theo stable key có thể dựa trên:
+
+network
++
+IO
++
+display status
++
+relation
+
+hoặc thiết kế tương đương.
+
+Không thay ProductFaultType chỉ để phục vụ presentation.
+
+======================================================================
+16. CHẬP NHIỀU IO
+======================================================================
+
+Nếu một IO/network liên quan nhiều IO sai:
+
+không được sinh hàng loạt pair đảo:
+
+IO10→IO11
+IO11→IO10
+IO10→IO12
+IO12→IO10
+...
+
+Presentation phải nhóm hợp lý.
+
+Mỗi IO thực tế chỉ hiện số row cần thiết.
+
+Các row phải ưu tiên:
+
+Tên dây
+Màu
+Trạng thái
+
+cho operator.
+
+======================================================================
+17. KHI OPERATOR SỬA ĐÚNG LỖI
+======================================================================
+
+Khi confirmed wiring fault biến mất:
+
+các trạng thái:
+
+SAI DÂY
+CHẬP MẠCH
+HỞ MẠCH
+
+do fault đó tạo phải được loại bỏ ngay.
+
+Sau đó:
+
+Nếu network đã đúng hoàn toàn:
+→ network biến mất.
+
+Nếu network vẫn chưa hoàn thành:
+→ quay về:
+
+Loại = Đơn/Nối chung
+Trạng thái = CHƯA KẾT NỐI.
+
+Không để presentation FAIL bị treo sau khi lỗi điện thực tế đã mất.
+
+Không thay đổi popup/history latch hiện tại nếu workflow khác đang cần chúng.
+
+======================================================================
+18. FINAL PASS Ở GIỮA MÀN HÌNH
+======================================================================
+
+Cùng vùng overlay đang hiển thị:
+
+LẮP SẢN PHẨM
+
+sẽ dùng để hiển thị:
+
+PASS
+
+khi TOÀN BỘ sản phẩm FINAL PASS.
+
+Không hiện PASS sớm.
+
+Nếu model chỉ continuity:
+
+continuity PASS
+→ PASS.
+
+Nếu có Resistance:
+
+continuity PASS
+→ đo Resistance
+→ tất cả Resistance PASS
+→ mới PASS.
+
+Nếu có Leak:
+
+continuity
+→ các bước cần thiết
+→ Leak PASS
+→ mới PASS.
+
+Nếu có cả Resistance + Leak:
+
+tất cả phải PASS
+→ mới hiển thị PASS.
+
+Không sửa PASS gate.
+Chỉ bind overlay vào final cycle result hiện tại.
+
+Marker:
+
+HTDRV_CENTER_RESULT_2026-09-05
+
+======================================================================
+19. GIAI ĐOẠN THÁO SẢN PHẨM
+======================================================================
+
+Sau khi PASS/FAIL workflow đã mở JIG và chuyển sang chờ tháo sản phẩm:
+
+FaultGrid phải có khả năng hiển thị các connection VẪN CÒN trên jig.
+
+Logic lúc TEST:
+
+network chưa đạt
+→ HIỆN
+
+network đạt
+→ ẨN
+
+
+Logic lúc REMOVAL:
+
+connection còn tồn tại
+→ HIỆN
+
+connection mất do operator tháo
+→ ẨN.
+
+Ví dụ sau PASS còn:
+
+BG01
+BG02
+BG03
+
+Operator tháo BG01:
+
+BG01 phải biến mất ngay.
+
+Còn:
+
+BG02
+BG03
+
+Tháo BG03:
+
+BG03 biến mất.
+
+Còn BG02:
+
+BG02 vẫn phải hiện.
+
+Không được clear cả bảng ngay khi PASS.
+
+Marker:
+
+HTDRV_REMOVAL_DISPLAY_2026-09-05
+
+======================================================================
+20. THÁO HẾT MỚI QUAY VỀ LẮP SẢN PHẨM
+======================================================================
+
+Chỉ khi production state xác nhận sản phẩm đã tháo hoàn toàn:
+
+- clear remaining rows;
+- reset presentation cycle;
+- PASS cũ biến mất;
+- FaultGrid trống;
+- hiện lại:
+
+LẮP SẢN PHẨM.
+
+Không được hiện LẮP SẢN PHẨM nếu vẫn còn product connection thật.
+
+Audit:
+
+_currentConnections
+_currentActive
+ScanFrame.ActiveIo
+
+Nếu ActiveIo có thể xác nhận chân cuối cùng còn mắc,
+có thể sử dụng cho removal.
+
+Nhưng phải xác minh semantics từ decoder trước.
+
+Không tự đoán.
+
+Probe/TestPin tuyệt đối không được tính là product remaining activity.
+
+======================================================================
+21. TỐI ƯU UI CHO TỚI 10 CARD
+======================================================================
+
+Đây là yêu cầu bắt buộc.
+
+Không được tối ưu bằng cách giảm tốc độ scan BO.
+
+Không throttle D2XX.
+
+Không làm chậm TestEngine.
+
+Mục tiêu:
+
+- IO nhận connection nhanh;
+- network đúng biến mất nhanh;
+- giao diện không lag dù cấu hình 10 card.
+
+Marker:
+
+HTDRV_UI_DELTA_10CARD_2026-09-05
+
+----------------------------------------------------------------------
+21.1 KHÔNG FULL REBUILD FAULTGRID MỖI FRAME
+----------------------------------------------------------------------
+
+Audit TestViewModel.
+
+Nếu hiện tại mỗi Changed đang làm:
+
+BuildRows toàn model
+→ tạo toàn bộ FaultRow
+→ OrderBy
+→ Clear ObservableCollection
+→ Add lại tất cả
+
+thì phải tối ưu.
+
+Khi chỉ BG01 thay đổi:
+
+không được rebuild BG02...BG200.
+
+----------------------------------------------------------------------
+21.2 CACHE DỮ LIỆU TĨNH KHI LOAD THT
+----------------------------------------------------------------------
+
+Các dữ liệu:
+
+Connector
+Pin
+WireName
+Section
+Color
+IO-CN-PN
+DisplayOrder
+Loại Đơn/Nối chung
+network membership
+
+phải được cache/chuẩn bị khi model load.
+
+Không parse lại THT mỗi frame.
+
+Không format lại các chuỗi tĩnh mỗi frame.
+
+TestEngine hiện đã có nhiều lookup/cache,
+hãy tận dụng chúng thay vì tạo thêm logic trùng.
+
+----------------------------------------------------------------------
+21.3 UPDATE THEO DELTA
+----------------------------------------------------------------------
+
+Ưu tiên:
+
+BG01 vừa PASS
+→ remove đúng row BG01.
+
+BG03 quay lại chưa đạt
+→ add đúng row BG03.
+
+BG21 vừa wiring FAIL
+→ replace/update đúng nhóm liên quan BG21.
+
+BG21 hết fault
+→ restore đúng normal presentation nếu cần.
+
+Không Clear/Add lại toàn collection cho một thay đổi nhỏ.
+
+Có thể dùng stable row key/dictionary.
+
+----------------------------------------------------------------------
+21.4 COALESCE DISPATCHER
+----------------------------------------------------------------------
+
+Không queue một Dispatcher callback cho từng board frame.
+
+Phải đảm bảo tối đa một UI synchronization đang pending.
+
+Board/Engine cập nhật state ngay.
+
+Nếu trong lúc UI callback đang pending có thêm frame:
+
+không queue hàng chục callback cũ.
+
+Callback kế tiếp chỉ lấy state mới nhất.
+
+Không dùng Dispatcher.Invoke synchronous trên D2XX worker.
+
+Dùng BeginInvoke/InvokeAsync/coalescing phù hợp.
+
+----------------------------------------------------------------------
+21.5 UI LATENCY
+----------------------------------------------------------------------
+
+Engine không được delay.
+
+UI có thể coalesce khoảng:
+
+16–25 ms
+
+nếu thực sự cần để tránh Dispatcher storm.
+
+Không dùng delay 100–300 ms.
+
+Mục tiêu operator cảm thấy connection biến mất gần như tức thời.
+
+----------------------------------------------------------------------
+21.6 DATAGRID VIRTUALIZATION
+----------------------------------------------------------------------
+
+Kiểm tra TestWindow.xaml.
+
+Nếu phù hợp và chưa bật thì dùng:
+
+EnableRowVirtualization="True"
+EnableColumnVirtualization="True"
+VirtualizingPanel.IsVirtualizing="True"
+VirtualizingPanel.VirtualizationMode="Recycling"
+
+Không vô tình tắt virtualization bằng cấu hình ScrollViewer không phù hợp.
+
+----------------------------------------------------------------------
+21.7 KHÔNG SORT TOÀN BỘ MỖI FRAME
+----------------------------------------------------------------------
+
+Tận dụng DisplayOrder hiện tại.
+
+Không OrderBy hàng trăm row trên mỗi frame nếu chỉ một row/group thay đổi.
+
+Có thể insert theo DisplayOrder hoặc cache order.
+
+----------------------------------------------------------------------
+21.8 KHÔNG TẠO OBJECT/STRING THỪA
+----------------------------------------------------------------------
+
+Không tạo lại:
+
+WireName
+Color
+Connector
+Pin
+IO-CN-PN
+
+trên mỗi frame nếu chúng không đổi.
+
+Chỉ tạo/update text FAIL khi fault thực sự thay đổi.
+
+======================================================================
+22. KHÔNG ĐƯỢC TÔ XANH CẢ HÀNG
+======================================================================
+
+Giữ giao diện hiện tại.
+
+Network PASS:
+→ row biến mất.
+
+Không tô xanh toàn row.
+
+FAIL row có thể dùng style đỏ hiện tại.
+
+Không làm lại theme.
+
+======================================================================
+23. PHÂN TRÁCH NHIỆM
+======================================================================
+
+Không để TestWindow code-behind tự phân tích topology.
+
+TestEngine:
+
+- giữ topology;
+- current connection;
+- passed network;
+- confirmed wiring fault;
+- cung cấp data cần thiết.
+
+TestViewModel:
+
+- quyết định WAIT PRODUCT;
+- TEST;
+- POST TEST;
+- FINAL PASS;
+- REMOVAL;
+- Center overlay;
+- đồng bộ row;
+- UI delta/coalescing.
+
+TestWindow:
+
+- binding;
+- render;
+- virtualization.
+
+Không đưa logic điện vào View.
+
+======================================================================
+24. FLOW FINAL BẮT BUỘC
+======================================================================
+
+CHƯA LẮP:
+
+FaultGrid:
+TRỐNG
+
+Center:
+LẮP SẢN PHẨM
+
+
+↓ Product activity đầu tiên
+
+
+ĐANG TEST:
+
+Center:
+ẨN
+
+FaultGrid:
+toàn bộ network chưa đạt.
+
+Normal:
+
+Loại:
+Đơn / Nối chung
+
+Trạng thái:
+CHƯA KẾT NỐI
+
+
+↓ network thông đúng
+
+
+network đó biến mất.
+
+
+↓ wiring fault confirmed
+
+
+Chỉ network liên quan:
+
+Loại:
+vẫn Đơn/Nối chung nếu có topology
+
+Trạng thái:
+SAI DÂY
+CHẬP MẠCH
+HỞ MẠCH
+
+IO không dùng:
+
+CONNECTOR:
+KHÔNG DÙNG IO(n)
+
+Trạng thái:
+CHẬP MẠCH
+
+
+↓ lỗi được sửa
+
+
+Nếu network đúng:
+→ biến mất.
+
+Nếu chưa hoàn thành:
+→ quay về CHƯA KẾT NỐI.
+
+
+↓ tất cả continuity + Resistance + Leak cần thiết đều PASS
+
+
+FINAL PASS:
+
+Center:
+PASS
+
+
+↓ JIG mở / chờ tháo
+
+
+REMOVAL:
+
+connection còn:
+→ hiện.
+
+tháo connection:
+→ mất ngay.
+
+
+↓ tháo hết
+
+
+FaultGrid:
+TRỐNG
+
+Center:
+LẮP SẢN PHẨM.
+
+======================================================================
+25. TEST CASE BẮT BUỘC
+======================================================================
+
+CASE 1:
+Mở TestWindow chưa lắp gì.
+
+Expected:
+
+FaultGrid trống.
+LẮP SẢN PHẨM hiện giữa màn hình.
+
+
+CASE 2:
+Probe/TestPin khi chưa có hàng.
+
+Expected:
+
+LẮP SẢN PHẨM vẫn còn.
+Không tạo production rows.
+Không tạo wiring fault.
+
+
+CASE 3:
+Có connection sản phẩm đầu tiên.
+
+Expected:
+
+LẮP SẢN PHẨM mất ngay.
+Toàn bộ network chưa đạt xuất hiện.
+
+
+CASE 4:
+Normal network.
+
+Expected:
+
+Loại = Đơn/Nối chung.
+Trạng thái = CHƯA KẾT NỐI.
+
+
+CASE 5:
+Một network thông đúng.
+
+Expected:
+
+chỉ network đó biến mất nhanh.
+
+
+CASE 6:
+Cắm lần lượt nhiều network.
+
+Expected:
+
+bảng giảm dần.
+
+
+CASE 7:
+BG1 đấu sai sang IO không dùng.
+
+Expected:
+
+BG1:
+Trạng thái = SAI DÂY.
+
+Expected endpoint BG1:
+Trạng thái = HỞ MẠCH.
+
+IO không dùng:
+CONNECTOR = KHÔNG DÙNG IO(n)
+Trạng thái = CHẬP MẠCH.
+
+
+CASE 8:
+BG1 đấu sai sang IO thuộc BG2.
+
+Expected:
+
+BG1 + màu BG1:
+SAI DÂY.
+
+BG2 + màu BG2:
+CHẬP MẠCH.
+
+Expected endpoint BG1:
+HỞ MẠCH.
+
+
+CASE 9:
+Hai dây đảo nhau.
+
+Expected:
+
+operator nhìn Tên dây + Màu + Trạng thái là biết hai dây nào sai.
+
+Không duplicate row vô nghĩa.
+
+
+CASE 10:
+Chập nhiều IO.
+
+Expected:
+
+không tạo cặp đảo duplicate hàng loạt.
+
+
+CASE 11:
+Sửa wiring fault.
+
+Expected:
+
+SAI DÂY/CHẬP MẠCH/HỞ MẠCH biến mất ngay.
+
+Network đúng:
+→ mất.
+
+Network chưa đúng:
+→ CHƯA KẾT NỐI.
+
+
+CASE 12:
+Continuity PASS nhưng còn Resistance.
+
+Expected:
+
+chưa được hiện final PASS.
+
+
+CASE 13:
+Resistance FAIL.
+
+Expected:
+
+workflow hiện tại không thay đổi.
+
+
+CASE 14:
+Leak FAIL.
+
+Expected:
+
+workflow hiện tại không thay đổi.
+
+
+CASE 15:
+Final PASS.
+
+Expected:
+
+PASS lớn giữa màn hình.
+
+
+CASE 16:
+Sau PASS bắt đầu tháo.
+
+Expected:
+
+connection còn trên jig vẫn hiện.
+
+
+CASE 17:
+Tháo từng dây.
+
+Expected:
+
+tháo dây nào thì dòng đó biến mất nhanh.
+
+
+CASE 18:
+Còn connection cuối.
+
+Expected:
+
+vẫn còn row.
+Chưa hiện LẮP SẢN PHẨM.
+
+
+CASE 19:
+Tháo hết.
+
+Expected:
+
+FaultGrid trống.
+PASS mất.
+LẮP SẢN PHẨM trở lại.
+
+
+CASE 20:
+10 card.
+
+Expected:
+
+không block D2XX.
+không queue Dispatcher vô hạn.
+không Clear/Add toàn bảng cho mỗi frame.
+network vừa thông phải biến mất nhanh.
+UI không lag rõ rệt.
+
+======================================================================
+26. BUILD
+======================================================================
+
+Sau khi sửa phải chạy:
+
+dotnet build -c Release
+
+Nếu project có SelfTests:
+
+chạy toàn bộ SelfTests phù hợp.
+
+Không xóa test cũ chỉ để build xanh.
+
+Nếu phải cập nhật test presentation,
+giải thích chính xác behavior nào thay đổi.
+
+======================================================================
+27. MARKER PHẢI DÙNG
+======================================================================
+
+HTDRV_TESTWINDOW_FINAL_2026-09-05
+HTDRV_WAIT_PRODUCT_2026-09-05
+HTDRV_WIRING_FAIL_DISPLAY_2026-09-05
+HTDRV_UNUSED_IO_DISPLAY_2026-09-05
+HTDRV_CENTER_RESULT_2026-09-05
+HTDRV_REMOVAL_DISPLAY_2026-09-05
+HTDRV_UI_DELTA_10CARD_2026-09-05
+
+Chỉ đặt marker tại block chính.
+
+Không rải comment vô nghĩa khắp project.
+
+======================================================================
+28. BÁO CÁO SAU KHI CODEX SỬA
+======================================================================
+
+Không được chỉ trả lời:
+
+"Đã sửa xong."
+
+Phải báo:
+
+1. File nào đã sửa.
+2. Method nào đã sửa/thêm.
+3. Có sửa TestEngine detection hay không.
+4. Cách xác định chưa lắp sản phẩm.
+5. Vì sao probe không kích hoạt product cycle.
+6. Cách giữ bảng trống trước connection đầu tiên.
+7. Cách hiện toàn bộ network sau connection đầu tiên.
+8. Cách giữ Loại Đơn/Nối chung.
+9. Cách giữ CHƯA KẾT NỐI.
+10. Cách network đúng biến mất.
+11. Cách tạo trạng thái SAI DÂY.
+12. Cách tạo trạng thái CHẬP MẠCH.
+13. Cách tạo trạng thái HỞ MẠCH.
+14. Cách xác định KHÔNG DÙNG IO(n).
+15. Cách giữ Tên dây và Màu cho operator.
+16. Cách giữ IO-CN-PN cho kỹ thuật.
+17. Cách chống duplicate khi hai dây đảo/chập nhiều IO.
+18. Cách final PASS được xác định.
+19. Cách removal rows hoạt động.
+20. Cách xác định đã tháo hoàn toàn.
+21. Có dùng ActiveIo cho chân cuối cùng hay không, và bằng chứng.
+22. UI hiện cập nhật full rebuild hay delta.
+23. Cách Dispatcher được coalesce.
+24. DataGrid virtualization hiện ra sao.
+25. Kết quả build.
+26. Kết quả tests.
+27. Xác nhận KHÔNG sửa:
+    D2XX
+    Card
+    Probe
+    Relay
+    Resistance
+    Leak
+    Printer
+    History
+    LED.
+
+======================================================================
+MỤC TIÊU CUỐI CÙNG
+======================================================================
+
+OPERATOR:
+
+nhìn:
+
+Tên dây
++
+Màu
++
+Trạng thái
+
+để biết:
+
+CHƯA KẾT NỐI
+SAI DÂY
+CHẬP MẠCH
+HỞ MẠCH.
+
+KỸ THUẬT:
+
+nhìn:
+
+IO-CN-PN
+
+để kiểm tra sâu phần cứng.
+
+CỘT LOẠI:
+
+luôn giữ ý nghĩa topology:
+
+Đơn
+Nối chung.
+
+CHƯA LẮP:
+
+bảng trống
++
+LẮP SẢN PHẨM.
+
+BẮT ĐẦU LẮP:
+
+toàn bộ network chưa đạt xuất hiện.
+
+DÂY ĐÚNG:
+
+biến mất ngay.
+
+DÂY LỖI:
+
+Tên dây + Màu giữ nguyên,
+Trạng thái đổi đúng loại lỗi.
+
+FINAL PASS:
+
+PASS giữa màn hình.
+
+THÁO HÀNG:
+
+connection nào còn thì còn hiện,
+tháo connection nào thì mất.
+
+THÁO HẾT:
+
+trở lại LẮP SẢN PHẨM.
+
+10 CARD:
+
+UI vẫn phải phản hồi nhanh,
+không làm chậm BO,
+không rebuild toàn DataGrid theo từng frame.
+
+KHÔNG TỰ Ý THAY ĐỔI BẤT KỲ LOGIC TEST/PHẦN CỨNG NÀO NGOÀI PHẠM VI TRÊN.

@@ -857,6 +857,32 @@
                     <DataGridTextColumn Header="K&#7870;T QU&#7842;" Binding="{Binding ResultText}" Width="1.5*" CellStyle="{StaticResource PassFailResultCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>
+
+            <Border IsHitTestVisible="False"
+                    Panel.ZIndex="20"
+                    Margin="1,58,1,1"
+                    Background="Transparent"
+                    Visibility="{Binding IsCenterResultVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                <TextBlock Text="{Binding CenterResultText}"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           TextAlignment="Center"
+                           FontFamily="Malgun Gothic"
+                           FontWeight="Bold">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#555555"/>
+                            <Setter Property="FontSize" Value="64"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCenterPassPresentation}" Value="True">
+                                    <Setter Property="Foreground" Value="#006B1B"/>
+                                    <Setter Property="FontSize" Value="156"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Border>
         </Grid>
     </Grid>
 </Window>

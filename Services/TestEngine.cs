@@ -86,6 +86,9 @@ public sealed class TestEngine : IDisposable
     Dictionary<ClipBranch, string> _confirmationKeyByClip = new(ReferenceEqualityComparer.Instance);
     Dictionary<PinRecord, int> _displayOrderByPin = new(ReferenceEqualityComparer.Instance);
     Dictionary<WireNet, int> _displayOrderByNet = new(ReferenceEqualityComparer.Instance);
+    Dictionary<WireNet, FaultRow[]> _displayRowsByNet = new(ReferenceEqualityComparer.Instance);
+    Dictionary<ClipBranch, FaultRow> _displayRowByClip = new(ReferenceEqualityComparer.Instance);
+    FaultRow? _clipCommonDisplayRow;
     readonly Dictionary<string, bool> _expectedConnectionScratch = new(StringComparer.Ordinal);
     volatile bool _frameProcessingEnabled = true;
     bool _forceNextFrameChanged = true;
@@ -397,6 +400,21 @@ public sealed class TestEngine : IDisposable
             _displayOrderByNet = prepared.DisplayOrderByNet;
             _confirmationKeyByNet = prepared.ConfirmationKeyByNet;
             _confirmationKeyByClip = prepared.ConfirmationKeyByClip;
+            // Cache toàn bộ text/topology tĩnh
+            // một lần khi load THT; frame chỉ chọn row cần hiện, không tạo lại
+            // Connector/Pin/WireName/Color/IO-CN-PN cho hàng trăm endpoint.
+            _displayRowsByNet = new Dictionary<WireNet, FaultRow[]>(
+                ReferenceEqualityComparer.Instance);
+            foreach (WireNet net in prepared.Model.Nets)
+                _displayRowsByNet[net] = CreateNetworkMappingRowsCore(net);
+
+            _displayRowByClip = new Dictionary<ClipBranch, FaultRow>(
+                ReferenceEqualityComparer.Instance);
+            foreach (ClipBranch branch in prepared.Model.Clip?.Branches ?? [])
+                _displayRowByClip[branch] = CreateMissingClipConnectionRow(prepared.Model.Clip!, branch);
+            _clipCommonDisplayRow = prepared.Model.Clip is null
+                ? null
+                : CreateClipCommonDisplayRow(prepared.Model.Clip);
             _latchedClipKeys.Clear();
             ResetUnsafe();
         }
@@ -1459,81 +1477,21 @@ public sealed class TestEngine : IDisposable
 
         lock (_gate)
         {
-            foreach (PinRecord pin in model.Pins)
-            {
-                if (_unexpectedIo.Contains(pin.IoNumber))
-                {
-                    rows.Add(CreateWiringFaultRow(pin));
-                    continue;
-                }
-
-                // Chỉ bỏ chính row AO/aN special. Nếu cùng một I/O còn có
-                // row pin sản phẩm bình thường thì row đó vẫn phải được xử lý.
-                if (model.Clip?.IsSpecialPin(pin) == true)
-                    continue;
-
-                // Htdrv chỉ đưa lên bảng các pin có map dây thực sự. Những dòng
-                // trong THT không có Tên dây là dữ liệu pin/card nhưng không phải
-                // một dòng continuity để người vận hành xử lý. TestPin vẫn có thể
-                // hiển thị I/O vật lý của chúng khi chạm đầu dò.
-                if (string.IsNullOrWhiteSpace(pin.WireName))
-                    continue;
-
-                // Pin đặc biệt có tên dây vẫn được giữ để người vận hành nhìn thấy
-                // map THT, nhưng không tham gia điều kiện continuity/PASS.
-                if (model.IgnoredIo.Contains(pin.IoNumber))
-                {
-                    rows.Add(new FaultRow
-                    {
-                        Kind = FaultKind.Info,
-                        FaultType = "I/O đặc biệt",
-                        Io = pin.IoNumber,
-                        DisplayOrder = ResolveDisplayOrder(pin),
-                        Connector = pin.Connector,
-                        Pin = pin.PinNumber,
-                        WireName = pin.WireName,
-                        Splice = pin.SpliceName,
-                        Section = pin.Section,
-                        Color = pin.Color,
-                        Status = "Theo cấu hình THT - không tham gia thông mạch"
-                    });
-                    continue;
-                }
-
-                WireNet[] memberships =
-                    _netsByPin.GetValueOrDefault(pin) ?? Array.Empty<WireNet>();
-
-                if (memberships.Length == 0)
-                {
-                    rows.Add(new FaultRow
-                    {
-                        Kind = FaultKind.Info,
-                        FaultType = "Map pin",
-                        Io = pin.IoNumber,
-                        DisplayOrder = ResolveDisplayOrder(pin),
-                        Connector = pin.Connector,
-                        Pin = pin.PinNumber,
-                        WireName = pin.WireName,
-                        Splice = pin.SpliceName,
-                        Section = pin.Section,
-                        Color = pin.Color,
-                        Status = "chưa cài IO"
-                    });
-                    continue;
-                }
-
-                // Endpoint rows for normal production nets are emitted from
-                // model.Nets below so the UI list can hide/restore a whole
-                // network atomically while preserving model order.
-            }
+            // HTDRV_WIRING_FAIL_DISPLAY_2026-09-05: chỉ confirmed fault trong
+            // _wiringFaults được phép thay presentation. Candidate tuyệt đối
+            // không đi vào bảng operator.
+            HashSet<int> diagnosticIos = [];
+            rows.AddRange(BuildConfirmedWiringDisplayRows(model, diagnosticIos));
 
             // CLIP được kiểm tra riêng: mọi nhánh dùng chung A0 nhưng mỗi aN
             // phải đi tới đúng I/O được cấu hình trên row aN. Chỉ nhánh chưa
             // đạt mới còn trên bảng.
             if (model.Clip is not null)
             {
-                if (!AnyClipBranchLatched(model.Clip))
-                    rows.Add(CreateClipCommonDisplayRow(model.Clip));
+                if (!AnyClipBranchLatched(model.Clip) &&
+                    _clipCommonDisplayRow is not null &&
+                    !diagnosticIos.Contains(model.Clip.CommonIo))
+                    rows.Add(_clipCommonDisplayRow);
 
                 foreach (ClipBranch branch in OrderedClipBranches(model.Clip))
                 {
@@ -1543,7 +1501,9 @@ public sealed class TestEngine : IDisposable
                     if (_latchedClipKeys.Contains(ClipConfirmationKey(branch.NetName)))
                         continue;
 
-                    rows.Add(CreateMissingClipConnectionRow(model.Clip, branch));
+                    if (!diagnosticIos.Contains(branch.TargetIo) &&
+                        _displayRowByClip.TryGetValue(branch, out FaultRow? row))
+                        rows.Add(row);
                 }
             }
 
@@ -1556,54 +1516,224 @@ public sealed class TestEngine : IDisposable
                 if (!IsEligibleProductionNet(net))
                     continue;
 
-                bool netPassed = _passedNets.Contains(net.Name);
-                rows.AddRange(CreateNetworkMappingRows(net, netPassed));
-            }
+                if (_passedNets.Contains(net.Name) ||
+                    net.IoNumbers.Any(diagnosticIos.Contains))
+                    continue;
 
-            // Trường hợp source/target lỗi không có pin map trong THT.
-            foreach (WiringFaultPair fault in _wiringFaults
-                         .OrderBy(x => x.SourceIo)
-                         .ThenBy(x => x.TargetIo))
-            {
-                foreach (int io in new[] { fault.SourceIo, fault.TargetIo }.Distinct())
-                {
-                    if (model.Pins.Any(pin =>
-                            pin.IoNumber == io &&
-                            !string.IsNullOrWhiteSpace(pin.WireName)))
-                        continue;
-
-                    rows.Add(new FaultRow
-                    {
-                        Kind = fault.FaultType == ProductFaultType.ShortCircuit
-                            ? FaultKind.Short
-                            : FaultKind.WrongWiring,
-                        ProductFaultType = fault.FaultType,
-                        FaultType = FaultTypeCatalog.DisplayName(fault.FaultType),
-                        Io = io,
-                        DisplayOrder = int.MaxValue,
-                        ExpectedSourceIo = fault.ExpectedSourceIo,
-                        ExpectedTargetIo = fault.ExpectedTargetIo,
-                        ActualSourceIo = fault.SourceIo,
-                        ActualTargetIo = fault.TargetIo,
-                        RelatedIos = new[] { fault.SourceIo, fault.TargetIo },
-
-                        // FAIL DISPLAY: chỉ hiện đầu I/O thực tế đang nối với dòng này.
-                        // Không đưa Expected/Mong đợi vào cột Trạng thái.
-                        Status = BuildWiringFaultStatus(model, fault, io)
-                    });
-                }
+                if (_displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
+                    rows.AddRange(cachedRows);
             }
         }
 
-        // V11.4: lỗi đấu sai/chập luôn phải nằm ở đầu bảng để người vận hành
-        // nhìn thấy ngay. OrderBy của LINQ là stable nên thứ tự pin THT bên
-        // trong nhóm lỗi vẫn được giữ nguyên.
-        return rows
-            .OrderBy(row => row.ProductFaultType == ProductFaultType.None
-                ? 90
-                : FaultTypeCatalog.Priority(row.ProductFaultType))
-            .ThenBy(row => row.DisplayOrder)
-            .ToArray();
+        // Fault rows được thêm trước, các row tĩnh đã mang DisplayOrder từ lúc
+        // load model. Không OrderBy toàn bộ bảng theo từng frame.
+        return rows;
+    }
+
+    /// <summary>
+    /// Presentation riêng cho giai đoạn chờ tháo: quan hệ nào còn thật trên
+    /// jig thì còn row; tháo quan hệ nào thì row của network đó mất ngay.
+    /// Không thay đổi passed-net latch hay bất kỳ điều kiện PASS/FAIL nào.
+    /// </summary>
+    public IReadOnlyList<FaultRow> BuildRemovalRows()
+    {
+        ProductModel? model = _model;
+        if (model is null)
+            return [];
+
+        var rows = new List<FaultRow>();
+        lock (_gate)
+        {
+            HashSet<int> diagnosticIos = [];
+            rows.AddRange(BuildConfirmedWiringDisplayRows(model, diagnosticIos));
+
+            foreach (WireNet net in model.Nets)
+            {
+                if (IsEligibleProductionNet(net) &&
+                    !net.IoNumbers.Any(diagnosticIos.Contains) &&
+                    IsWireNetConnected(net, _currentConnections) &&
+                    _displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
+                    rows.AddRange(cachedRows);
+            }
+
+            if (model.Clip is not null)
+            {
+                foreach (ClipBranch branch in OrderedClipBranches(model.Clip))
+                {
+                    if (IsEligibleClipBranch(model.Clip, branch) &&
+                        IsClipBranchConnected(model.Clip, branch, _currentConnections) &&
+                        _displayRowByClip.TryGetValue(branch, out FaultRow? row))
+                        rows.Add(row);
+                }
+            }
+        }
+        return rows;
+    }
+
+    private IReadOnlyList<FaultRow> BuildConfirmedWiringDisplayRows(
+        ProductModel model,
+        HashSet<int> diagnosticIos)
+    {
+        var rows = new List<FaultRow>();
+        HashSet<string> keys = new(StringComparer.Ordinal);
+
+        foreach (WiringFaultPair fault in _wiringFaults
+                     .OrderBy(item => item.SourceIo)
+                     .ThenBy(item => item.TargetIo))
+        {
+            int[] relation = [fault.SourceIo, fault.TargetIo];
+            if (TryResolveExpectedDisplayRelation(
+                    model,
+                    fault,
+                    out int expectedSource,
+                    out int expectedTarget))
+            {
+                int wrongPeer = expectedSource == fault.SourceIo
+                    ? fault.TargetIo
+                    : fault.SourceIo;
+                AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
+                    expectedSource, "SAI DÂY", FaultKind.WrongWiring,
+                    ProductFaultType.WrongWiring, relation);
+                AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
+                    wrongPeer, "CHẬP MẠCH", FaultKind.Short,
+                    ProductFaultType.ShortCircuit, relation);
+                AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
+                    expectedTarget, "HỞ MẠCH", FaultKind.Open,
+                    ProductFaultType.OpenCircuit, relation);
+                continue;
+            }
+
+            AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
+                fault.SourceIo, "CHẬP MẠCH", FaultKind.Short,
+                ProductFaultType.ShortCircuit, relation);
+            AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
+                fault.TargetIo, "CHẬP MẠCH", FaultKind.Short,
+                ProductFaultType.ShortCircuit, relation);
+        }
+
+        return rows;
+    }
+
+    private static bool TryResolveExpectedDisplayRelation(
+        ProductModel model,
+        WiringFaultPair fault,
+        out int expectedSource,
+        out int expectedTarget)
+    {
+        if (fault.ExpectedSourceIo is int suppliedSource &&
+            fault.ExpectedTargetIo is int suppliedTarget)
+        {
+            expectedSource = suppliedSource;
+            expectedTarget = suppliedTarget;
+            return true;
+        }
+
+        // Firmware có thể báo cùng cạnh điện theo chiều ngược. Chỉ phục hồi
+        // metadata presentation từ source topology đã biết; không đổi internal
+        // ProductFaultType/classifier.
+        WireNet? sourceNet = model.Nets.FirstOrDefault(net =>
+            net.SourceIo == fault.SourceIo || net.SourceIo == fault.TargetIo);
+        if (sourceNet is not null)
+        {
+            expectedSource = sourceNet.SourceIo;
+            int actualPeer = expectedSource == fault.SourceIo
+                ? fault.TargetIo
+                : fault.SourceIo;
+            expectedTarget = sourceNet.ExpectedActiveIo.FirstOrDefault(io => io != actualPeer);
+            if (expectedTarget <= 0)
+                expectedTarget = sourceNet.ExpectedActiveIo.FirstOrDefault();
+            return expectedTarget > 0;
+        }
+
+        if (model.Clip is not null &&
+            (model.Clip.CommonIo == fault.SourceIo || model.Clip.CommonIo == fault.TargetIo))
+        {
+            expectedSource = model.Clip.CommonIo;
+            int actualPeer = expectedSource == fault.SourceIo
+                ? fault.TargetIo
+                : fault.SourceIo;
+            expectedTarget = model.Clip.Branches
+                .Select(branch => branch.TargetIo)
+                .FirstOrDefault(io => io > 0 && io != actualPeer);
+            return expectedTarget > 0;
+        }
+
+        expectedSource = 0;
+        expectedTarget = 0;
+        return false;
+    }
+
+    private void AddDiagnosticRow(
+        List<FaultRow> rows,
+        HashSet<string> keys,
+        HashSet<int> diagnosticIos,
+        ProductModel model,
+        WiringFaultPair fault,
+        int io,
+        string status,
+        FaultKind kind,
+        ProductFaultType productFaultType,
+        int[] relation)
+    {
+        if (io <= 0)
+            return;
+
+        PinRecord? pin = ResolveProductionDisplayPin(model, io);
+        string network = ResolveTopologyName(model, io);
+        string key = $"{network}|{io}|{status}|{Math.Min(relation[0], relation[1])}:{Math.Max(relation[0], relation[1])}";
+        if (!keys.Add(key))
+            return;
+
+        diagnosticIos.Add(io);
+        bool unused = pin is null;
+        rows.Add(new FaultRow
+        {
+            Kind = kind,
+            ProductFaultType = productFaultType,
+            FaultType = unused ? string.Empty : ResolveTopologyType(model, io),
+            Io = io,
+            DisplayOrder = pin is null ? int.MaxValue : ResolveDisplayOrder(pin),
+            ExpectedSourceIo = fault.ExpectedSourceIo,
+            ExpectedTargetIo = fault.ExpectedTargetIo,
+            ActualSourceIo = fault.SourceIo,
+            ActualTargetIo = fault.TargetIo,
+            RelatedIos = relation,
+            // HTDRV_UNUSED_IO_DISPLAY_2026-09-05
+            Connector = unused ? $"IO({io})" : pin!.Connector,
+            Pin = unused ? string.Empty : pin!.PinNumber,
+            WireName = unused ? string.Empty : pin!.WireName,
+            Splice = unused ? string.Empty : pin!.SpliceName,
+            Section = unused ? string.Empty : pin!.Section,
+            Color = unused ? string.Empty : pin!.Color,
+            IoCnPnOverride = unused ? $"IO{io}" : string.Empty,
+            Status = status
+        });
+    }
+
+    private PinRecord? ResolveProductionDisplayPin(ProductModel model, int io) =>
+        model.Pins
+            .Where(pin => pin.IoNumber == io && !string.IsNullOrWhiteSpace(pin.WireName))
+            .Where(pin => (_netsByPin.GetValueOrDefault(pin)?.Length ?? 0) > 0 ||
+                          model.Clip?.IsSpecialPin(pin) == true)
+            .OrderBy(ResolveDisplayOrder)
+            .FirstOrDefault();
+
+    private static string ResolveTopologyName(ProductModel model, int io) =>
+        model.Nets.FirstOrDefault(net => net.IoNumbers.Contains(io))?.Name ??
+        model.Clip?.Branches.FirstOrDefault(branch => branch.TargetIo == io)?.NetName ??
+        (model.Clip?.CommonIo == io ? "CLIP" : string.Empty);
+
+    private static string ResolveTopologyType(ProductModel model, int io)
+    {
+        WireNet? net = model.Nets.FirstOrDefault(item => item.IoNumbers.Contains(io));
+        if (net is not null)
+            return !net.IsSplice && net.IoNumbers.Where(value => value > 0).Distinct().Count() == 2
+                ? "Đơn"
+                : "Nối chung";
+        return model.Clip is not null &&
+               (model.Clip.CommonIo == io || model.Clip.Branches.Any(branch => branch.TargetIo == io))
+            ? "Nối chung"
+            : string.Empty;
     }
 
     FaultRow CreateWiringFaultRow(PinRecord pin)
@@ -1725,6 +1855,14 @@ public sealed class TestEngine : IDisposable
         if (connected)
             return [];
 
+        return _displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows)
+            ? cachedRows
+            : CreateNetworkMappingRowsCore(net);
+    }
+
+    private FaultRow[] CreateNetworkMappingRowsCore(WireNet net)
+    {
+
         PinRecord[] pins = net.Pins
             .Where(pin => pin.IoNumber > 0)
             .GroupBy(pin => pin.IoNumber)
@@ -1771,7 +1909,7 @@ public sealed class TestEngine : IDisposable
                     Splice = pin.SpliceName,
                     Section = pin.Section,
                     Color = pin.Color,
-                    Status = "CHƯA KẾT NỐI"
+                    Status = "CHỜ THÁO"
                 };
             })
             .ToArray();

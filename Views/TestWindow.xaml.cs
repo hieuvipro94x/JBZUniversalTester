@@ -25,7 +25,7 @@ public partial class TestWindow : Window
     private readonly DispatcherTimer _yellowPulseTimer;
     private readonly DispatcherTimer _whitePulseTimer;
     private NotifyCollectionChangedEventHandler? _faultsChangedHandler;
-    private CancellationTokenSource? _scrollCts;
+    private int _scrollDispatchQueued;
     private CancellationTokenSource? _greenBlinkCts;
     private Task _greenBlinkTask = Task.CompletedTask;
     private int _greenBlinkRequestGeneration;
@@ -467,10 +467,11 @@ public partial class TestWindow : Window
 
     private void ScheduleScrollToFirstFault(TestViewModel viewModel)
     {
-        _scrollCts?.Cancel();
-        _scrollCts?.Dispose();
-        _scrollCts = new CancellationTokenSource();
-        CancellationToken token = _scrollCts.Token;
+        // Một delta có thể phát vài CollectionChanged liên tiếp. Chỉ giữ một
+        // callback scroll pending để không tạo/hủy CTS và Dispatcher operation
+        // cho từng row trên model 10 card.
+        if (Interlocked.Exchange(ref _scrollDispatchQueued, 1) != 0)
+            return;
 
         _ = Dispatcher.InvokeAsync(async () =>
         {
@@ -478,12 +479,15 @@ public partial class TestWindow : Window
             {
                 int delay = viewModel.ScrollDelay;
                 if (delay > 0)
-                    await Task.Delay(delay, token);
-                if (token.IsCancellationRequested || viewModel.Faults.Count == 0)
+                    await Task.Delay(delay);
+                if (_closeInProgress || viewModel.Faults.Count == 0)
                     return;
                 FaultGrid.ScrollIntoView(viewModel.Faults[0]);
             }
-            catch (OperationCanceledException) { }
+            finally
+            {
+                Interlocked.Exchange(ref _scrollDispatchQueued, 0);
+            }
         }, DispatcherPriority.Background);
     }
 
@@ -574,9 +578,7 @@ public partial class TestWindow : Window
         _yellowPulseTimer.Tick -= YellowPulseTimer_Tick;
         _whitePulseTimer.Stop();
         _whitePulseTimer.Tick -= WhitePulseTimer_Tick;
-        _scrollCts?.Cancel();
-        _scrollCts?.Dispose();
-        _scrollCts = null;
+        Interlocked.Exchange(ref _scrollDispatchQueued, 0);
         Interlocked.Exchange(ref _statusLedHandlersAttached, 0);
         CancelGreenPassBlink(false);
         if (DataContext is TestViewModel vm)

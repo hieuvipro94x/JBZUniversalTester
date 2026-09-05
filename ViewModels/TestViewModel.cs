@@ -119,6 +119,7 @@ public sealed class TestViewModel : ObservableObject
     private int _selectedOperationTabIndex;
     private int _shutdownStarted;
     private bool _productDetectedThisCycle;
+    private bool _presentationCycleStarted;
     private int _productStartSoundPlayed;
     private int _probeSessionActive;
     private int _runtimeMode = (int)RuntimeMode.Background;
@@ -240,7 +241,7 @@ public sealed class TestViewModel : ObservableObject
     // model mới, vốn là nguyên nhân bảng TestView xuất hiện chậm/đổi model.
     private int _modelLoadGeneration;
 
-    public ObservableCollection<FaultRow> Faults { get; } = new();
+    public FaultRowCollection Faults { get; } = new();
 
     /// <summary>Danh sách fault duy nhất đã xác nhận trên MASTER NG.</summary>
     public ObservableCollection<MasterFaultDisplayRow> MasterFaults { get; } = new();
@@ -330,9 +331,51 @@ public sealed class TestViewModel : ObservableObject
                 Raise(nameof(ResultStatusText));
                 Raise(nameof(MasterBannerText));
                 Raise(nameof(IsMasterBannerVisible));
+                RaiseCenterPresentation();
                 RaiseActiveFault();
             }
         }
+    }
+
+    // HTDRV_TESTWINDOW_FINAL_2026-09-05
+    // HTDRV_WAIT_PRODUCT_2026-09-05: latch này chỉ nhận activity từ snapshot
+    // Production đã qua TestEngine; Probe không đi vào ProcessFrame nên không
+    // thể làm hiện bảng hoặc xóa lời nhắc lắp sản phẩm.
+    // HTDRV_CENTER_RESULT_2026-09-05
+    public string CenterResultText => IsFinalPassPresentation
+        ? "PASS"
+        : IsWaitingProductPresentation
+            ? "LẮP SẢN PHẨM"
+            : string.Empty;
+
+    public bool IsCenterResultVisible =>
+        IsFinalPassPresentation || IsWaitingProductPresentation;
+
+    public bool IsCenterPassPresentation => IsFinalPassPresentation;
+
+    private bool IsFinalPassPresentation =>
+        !IsDeviceFault &&
+        State.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
+        CurrentProductionPhase is ProductionPhase.Completed or ProductionPhase.WaitingProductRemoval;
+
+    private bool IsWaitingProductPresentation =>
+        !IsDeviceFault &&
+        MasterApproved &&
+        !_presentationCycleStarted &&
+        !IsProductRemovalPending &&
+        CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity;
+
+    private void RaiseCenterPresentation()
+    {
+        Raise(nameof(CenterResultText));
+        Raise(nameof(IsCenterResultVisible));
+        Raise(nameof(IsCenterPassPresentation));
+    }
+
+    private void ResetProductPresentationCycle()
+    {
+        _presentationCycleStarted = false;
+        RaiseCenterPresentation();
     }
 
     public string ResultStatusText
@@ -367,7 +410,7 @@ public sealed class TestViewModel : ObservableObject
                 return NormalizeSingleLine(value);
 
             if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
-                return "ĐẠT";
+                return "PASS";
 
             if (value.Contains("ĐANG TEST LEAK", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG TEST LEAK";
@@ -2503,6 +2546,7 @@ public sealed class TestViewModel : ObservableObject
         SetProductionPhase(ProductionPhase.Continuity);
         _waterProofEquipmentErrorAwaitingRemoval = false;
         _productDetectedThisCycle = false;
+        ResetProductPresentationCycle();
         Interlocked.Exchange(ref _productStartSoundPlayed, 0);
         _lastFaultRejectSignature = string.Empty;
         _lastPassGateSignature = string.Empty;
@@ -3785,6 +3829,8 @@ public sealed class TestViewModel : ObservableObject
         ProbeContacts.Clear();
         foreach (FaultRow row in rows)
             ProbeContacts.Add(row);
+        // Probe Pin luôn hiển thị độc lập với latch sản phẩm. Nó không bật
+        // production cycle và không đưa metadata dây vào fault presentation.
         SynchronizeInlineProbeFaultRows(rows);
 
         UpdateProbeCardActivity(ios);
@@ -4147,10 +4193,13 @@ public sealed class TestViewModel : ObservableObject
 
     public async Task StopProbeScanAsync()
     {
-        ClearInlineProbeContactsState(clearLastSeen: true);
-        InvokeUi(ClearInlineProbeDisplay);
-        await Task.CompletedTask;
-        AddLog("TESTPIN/Probe observer OFF - Production Test không đổi trạng thái.");
+        // Probe Pin là observer bắt buộc của TestWindow, không còn trạng thái
+        // OFF trong production. API legacy được giữ để caller cũ không lỗi,
+        // nhưng chỉ bảo đảm stream Production vẫn chạy.
+        await _scanSupervisor.EnsureProductionScanAsync(
+            _model?.MaxIo ?? 0,
+            _lifetimeCts.Token);
+        AddLog("TESTPIN/Probe observer luôn ON - yêu cầu OFF legacy được bỏ qua.");
     }
 
     /// <summary>
@@ -4323,6 +4372,7 @@ public sealed class TestViewModel : ObservableObject
             MasterStatus = "IO MAPPING MODE • KHÔNG PASS/FAIL";
         }
         _productDetectedThisCycle = false;
+        ResetProductPresentationCycle();
         Interlocked.Exchange(ref _productStartSoundPlayed, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
@@ -8180,9 +8230,36 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        IReadOnlyList<FaultRow> desiredRows = !MasterApproved && IsMasterBadPhase
-            ? BuildMasterFaultGridRows()
-            : _engine.BuildRows();
+        IReadOnlyList<FaultRow> desiredRows;
+        if (!MasterApproved && IsMasterBadPhase)
+        {
+            desiredRows = BuildMasterFaultGridRows();
+        }
+        else
+        {
+            if (!_presentationCycleStarted &&
+                _cycleActive &&
+                Volatile.Read(ref _inlineProbeContactIo) == 0 &&
+                _engine.HasProductActivity)
+            {
+                _presentationCycleStarted = true;
+                RaiseCenterPresentation();
+            }
+
+            if (_waitForProductRelease || _waitForFaultProductRemoval)
+            {
+                // HTDRV_REMOVAL_DISPLAY_2026-09-05: sau PASS/FAIL, đảo ý
+                // nghĩa bảng sang "connection còn trên jig". Engine chỉ đọc
+                // snapshot quan hệ hiện tại, không sửa detection/PASS latch.
+                desiredRows = _engine.BuildRemovalRows();
+            }
+            else
+            {
+                desiredRows = _presentationCycleStarted
+                    ? _engine.BuildRows()
+                    : Array.Empty<FaultRow>();
+            }
+        }
 
         FaultRow[] probeRows = ProbeContacts.ToArray();
         if (probeRows.Length > 0 && IsRuntimeMode(RuntimeMode.Production))
@@ -8215,11 +8292,45 @@ public sealed class TestViewModel : ObservableObject
     {
         try
         {
-            // DataGrid production có thể có 100-200+ pin. Clear()+Add() toàn bộ
-            // collection ở mỗi thay đổi I/O gây layout lại toàn bảng và làm cảm
-            // giác scan chậm. Đồng bộ vi sai theo từng vị trí. Không gom bằng
-            // Dictionary vì nhiều dòng CLIP/WRONG có thể có cùng RowKey; bản cũ
-            // làm mất dòng trùng rồi gọi Move tới index ngoài collection.
+            // HTDRV_UI_DELTA_10CARD_2026-09-05: collection được đồng bộ vi sai;
+            // không Clear/Add lại toàn bảng khi chỉ một network thay đổi.
+            // Lần đầu hiện model lớn chỉ gửi một Reset notification. Sau đó mọi
+            // frame đều chạy delta; không Reset lại DataGrid.
+            bool firstLargePresentation = desiredRows.Count >= 16 &&
+                (Faults.Count == 0 || Faults.All(row => row.Kind == FaultKind.Probe));
+            if (firstLargePresentation || desiredRows.Count == 0)
+            {
+                Faults.ReplaceAll(desiredRows);
+                return;
+            }
+
+            // Xóa key thừa TRƯỚC khi căn vị trí. Nếu BG01 ở đầu bảng PASS,
+            // cách cũ Move toàn bộ BG02..BG200 lên rồi mới xóa đuôi. Cách này
+            // chỉ phát đúng các Remove của BG01, các row sau tự dịch chỉ số.
+            Dictionary<string, int> desiredCounts = new(StringComparer.Ordinal);
+            foreach (FaultRow desired in desiredRows)
+            {
+                string key = RowKey(desired);
+                desiredCounts[key] = desiredCounts.GetValueOrDefault(key) + 1;
+            }
+
+            Dictionary<string, int> currentCounts = new(StringComparer.Ordinal);
+            foreach (FaultRow current in Faults)
+            {
+                string key = RowKey(current);
+                currentCounts[key] = currentCounts.GetValueOrDefault(key) + 1;
+            }
+
+            for (int currentIndex = Faults.Count - 1; currentIndex >= 0; currentIndex--)
+            {
+                string key = RowKey(Faults[currentIndex]);
+                int allowed = desiredCounts.GetValueOrDefault(key);
+                if (currentCounts[key] <= allowed)
+                    continue;
+
+                Faults.RemoveAt(currentIndex);
+                currentCounts[key]--;
+            }
 
             for (int desiredIndex = 0; desiredIndex < desiredRows.Count; desiredIndex++)
             {
@@ -8264,16 +8375,12 @@ public sealed class TestViewModel : ObservableObject
             // không yêu cầu operator khởi tạo lại thiết bị.
             AsyncFileLogService.Current.Error(
                 $"FAULT ROW UI RECOVERY desired={desiredRows.Count} current={Faults.Count}: {ex}");
-            Faults.Clear();
-            foreach (FaultRow row in desiredRows)
-                Faults.Add(row);
+            Faults.ReplaceAll(desiredRows);
             AddLog("Danh sách lỗi CLIP/I/O đã tự đồng bộ lại; thiết bị tiếp tục chạy, không cần khởi tạo lại.");
         }
     }
 
-    private static string RowKey(FaultRow row) =>
-        $"{(int)row.Kind}|{row.Io}|{row.Connector}|{row.Pin}|{row.WireName}|{row.Splice}|" +
-        $"{row.ExpectedSourceIo}|{row.ExpectedTargetIo}|{row.ActualSourceIo}|{row.ActualTargetIo}";
+    private static string RowKey(FaultRow row) => row.PresentationKey;
 
     private void RaiseTestStatistics()
     {

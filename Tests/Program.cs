@@ -34,6 +34,7 @@ internal static class Program
             ("500-cycle scan/probe/fault stress", TestFiveHundredCycleScanProbeFaultStress),
             ("Continuity/open/wrong/splice engine", TestEngineVectors),
             ("Pending continuity presentation and CLIP branch visibility", TestPendingContinuityPresentation),
+            ("Final Htdrv TestWindow presentation lifecycle", TestFinalHtdrvTestWindowPresentation),
             ("Production PASS gate minimal latency", TestProductionPassGateMinimalLatency),
             ("THT column semantics and string wire topology", TestThtColumnSemantics),
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
@@ -123,18 +124,19 @@ internal static class Program
                pickerSource.Contains("FixedPositionOpenFileDialogGuard(owner)", StringComparison.Ordinal),
             "Product picker uses the original filter/directory and owner-bound classic native dialog");
         Assert(pickerGuardSource.Contains("GetWindow(handle, GwOwner) == _ownerHandle", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("MonitorFromWindow(_ownerHandle, MonitorDefaultToNearest)", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("GetMonitorInfo(monitor, ref monitorInfo)", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("OriginalDialogWidthDip = 555", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("OriginalDialogHeightDip = 408", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("MonitorFromWindow(", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("GetMonitorInfo(", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("PreferredDialogWidthDip = 640", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("PreferredDialogHeightDip = 440", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("VisualTreeHelper.GetDpi(owner)", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DwmwaExtendedFrameBounds = 9", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DwmGetWindowAttribute(", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("visibleWidth + hiddenFrameWidth", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("style & ~WsThickFrame & ~WsMaximizeBox", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("visibleWidth + insetLeft + insetRight", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("~WsThickFrame &", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("~WsMaximizeBox", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("if (IsWindow(wParam))", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("if (!IsWindow(dialogHandle))", StringComparison.Ordinal) &&
                !pickerGuardSource.Contains("WmNcLButtonDown", StringComparison.Ordinal) &&
                !pickerGuardSource.Contains("ScMove", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("ReleaseCreationHook();", StringComparison.Ordinal),
@@ -674,8 +676,8 @@ internal static class Program
 
         TestViewModel statusVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         statusVm.State = "PASS";
-        Assert(statusVm.ResultStatusText == "PASS" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
-            "PASS status mapping");
+        Assert(statusVm.ResultStatusText == "ĐẠT" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
+            "PASS state keeps the existing Vietnamese ĐẠT header mapping");
         statusVm.State = "PASS - THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" && statusVm.StateBackground == "#2AA84A",
             "Committed PASS explicitly asks for product removal until ProductRemoved returns the UI to ready");
@@ -684,8 +686,8 @@ internal static class Program
                statusVm.StateBackground == "#FFF3A0",
             "Leak stage has an explicit in-progress presentation before PASS");
         statusVm.State = "CHƯA ĐẠT";
-        Assert(statusVm.ResultStatusText == "FAIL" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
-            "FAIL status mapping");
+        Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
+            "FAIL state keeps the existing Vietnamese KHÔNG ĐẠT header mapping");
         statusVm.State = "CHỜ THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" &&
                statusVm.StateBackground == "#FFF3A0" &&
@@ -751,10 +753,11 @@ internal static class Program
             .GetResult();
         publishRecoveryFrame.GetAwaiter().GetResult();
         Assert(recoveryVm.ResultStatusText == "SẴN SÀNG" &&
-               recoveryVm.Faults.Count == 2 &&
+               recoveryVm.Faults.Count == 0 &&
+               recoveryVm.CenterResultText == "LẮP SẢN PHẨM" &&
                !recoveryBoard.Commands.Contains("START") &&
                !recoveryBoard.Commands.Contains("SET:2"),
-            "Rejected FAIL commit reuses healthy removal scan, restores IO rows, and cannot remain latched at KHÔNG ĐẠT");
+            "Rejected FAIL commit reuses healthy removal scan, returns to the empty wait-product presentation, and cannot remain latched at KHÔNG ĐẠT");
 
         string xaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
         Assert(!xaml.Contains("ProbeToggleText", StringComparison.Ordinal) &&
@@ -2974,6 +2977,141 @@ internal static class Program
             "Latching CLIP a1 hides only common/a1 per existing common behavior; a2/a3 remain without false SHORT");
     }
 
+    private static void TestFinalHtdrvTestWindowPresentation()
+    {
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            ProductSettleTimeMs = 0,
+            WrongConnectionConfirmMs = 0,
+            ShortCircuitConfirmMs = 0
+        };
+        ProductModel model = Model(
+            ("BG1", new[] { 1, 3 }),
+            ("BG2", new[] { 2, 4 }));
+
+        TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
+        vm.SetModel(model);
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(vm.Faults.Count == 0 &&
+               vm.IsCenterResultVisible &&
+               vm.CenterResultText == "LẮP SẢN PHẨM",
+            "No product activity keeps FaultGrid empty and shows LẮP SẢN PHẨM");
+
+        board.Publish(FrameSeq(100, (1, new[] { 3 })));
+        Assert(!vm.IsCenterResultVisible &&
+               vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
+               !vm.Faults.Any(row => row.WireName == "BG1") &&
+               vm.Faults.All(row => row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
+            "First real product edge starts presentation and only the passed network disappears");
+
+        TestViewModel overlayVm = CreateTestViewModel(production);
+        typeof(TestViewModel).GetField("_productionPhase", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(overlayVm, 6);
+        overlayVm.State = "PASS";
+        Assert(overlayVm.IsCenterResultVisible &&
+               overlayVm.IsCenterPassPresentation &&
+               overlayVm.CenterResultText == "PASS",
+            "Center PASS appears only from the existing final Completed phase/state");
+
+        using TestEngine engine = CreateEngine(out _, production);
+        engine.SetModel(model);
+        ScanFrame crossed = FrameSeq(110, (1, new[] { 4 }));
+        engine.ProcessFrame(crossed);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(crossed with { Sequence = 111 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(crossed with { Sequence = 112 });
+        FaultRow[] crossedRows = engine.BuildRows().ToArray();
+        Assert(engine.HasWiringFault &&
+               crossedRows.Count(row => row.Io == 1 && row.WireName == "BG1" && row.Status == "SAI DÂY") == 1 &&
+               crossedRows.Count(row => row.Io == 4 && row.WireName == "BG2" && row.Status == "CHẬP MẠCH") == 1 &&
+               crossedRows.Count(row => row.Io == 3 && row.WireName == "BG1" && row.Status == "HỞ MẠCH") == 1 &&
+               crossedRows.Where(row => row.Io is 1 or 3 or 4).All(row => row.FaultType == "Đơn") &&
+               crossedRows.Where(row => row.Io is 1 or 3 or 4).All(row => !string.IsNullOrWhiteSpace(row.IoCnPnText)),
+            "Confirmed crossed wire preserves topology/operator metadata and emits SAI/CHẬP/HỞ exactly once. Rows=" +
+            string.Join(" | ", crossedRows.Select(row => $"{row.Io}/{row.WireName}/{row.FaultType}/{row.Status}/{row.IoCnPnText}")));
+
+        engine.SetModel(model);
+        ScanFrame unused = FrameSeq(120, (1, new[] { 40 }));
+        engine.ProcessFrame(unused);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(unused with { Sequence = 121 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(unused with { Sequence = 122 });
+        FaultRow unusedRow = engine.BuildRows().Single(row => row.Io == 40);
+        Assert(unusedRow.FaultType.Length == 0 &&
+               unusedRow.Connector == "IO(40)" &&
+               unusedRow.Pin.Length == 0 &&
+               unusedRow.WireName.Length == 0 &&
+               unusedRow.Section.Length == 0 &&
+               unusedRow.Color.Length == 0 &&
+               unusedRow.Status == "CHẬP MẠCH" &&
+               unusedRow.IoCnPnText == "IO40",
+            "Unused actual IO is identified in CONNECTOR while technical IO stays in IO-CN-PN");
+
+        engine.ProcessFrame(FrameSeq(123));
+        FaultRow[] repairedRows = engine.BuildRows().ToArray();
+        Assert(!engine.HasWiringFault &&
+               repairedRows.All(row => row.Status == "CHƯA KẾT NỐI") &&
+               !repairedRows.Any(row => row.Status is "SAI DÂY" or "CHẬP MẠCH" or "HỞ MẠCH"),
+            "Removing a confirmed physical fault immediately restores normal pending presentation");
+
+        engine.SetModel(model);
+        engine.ProcessFrame(FrameSeq(130, (1, new[] { 3 }), (2, new[] { 4 })));
+        Assert(engine.BuildRemovalRows().Count == 4,
+            "Removal presentation initially shows every connection still on the jig");
+        engine.ProcessFrame(FrameSeq(131, (2, new[] { 4 })));
+        FaultRow[] remaining = engine.BuildRemovalRows().ToArray();
+        Assert(remaining.Length == 2 && remaining.All(row => row.WireName == "BG2") && !engine.IsProductReleased,
+            "Removing one network hides only that network and retains the last real connection");
+        engine.ProcessFrame(FrameSeq(132));
+        Assert(engine.BuildRemovalRows().Count == 0 && engine.IsProductReleased,
+            "Only complete loss of product relations empties removal rows and confirms release");
+
+        string testWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
+        Assert(testWindowXaml.Contains("EnableRowVirtualization\" Value=\"True", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("EnableColumnVirtualization\" Value=\"True", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("VirtualizingPanel.IsVirtualizing\" Value=\"True", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("VirtualizingPanel.VirtualizationMode\" Value=\"Recycling", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("IsHitTestVisible=\"False\"", StringComparison.Ordinal),
+            "TestWindow keeps recycling virtualization and a non-interactive center overlay");
+
+        TestViewModel deltaVm = CreateTestViewModel(production);
+        MethodInfo synchronize = typeof(TestViewModel).GetMethod(
+            "SynchronizeFaultRows",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault row synchronizer not found");
+        FaultRow[] largeRows = Enumerable.Range(1, 200)
+            .Select(io => new FaultRow
+            {
+                Kind = FaultKind.MissingConnection,
+                Io = io,
+                WireName = $"BG{io:000}",
+                Status = "CHƯA KẾT NỐI"
+            })
+            .ToArray();
+        int collectionEvents = 0;
+        deltaVm.Faults.CollectionChanged += (_, _) => collectionEvents++;
+        synchronize.Invoke(deltaVm, [largeRows]);
+        Assert(collectionEvents == 1 && deltaVm.Faults.Count == 200,
+            "First large 10-card presentation reaches DataGrid with one collection reset");
+
+        collectionEvents = 0;
+        synchronize.Invoke(deltaVm, [largeRows.Skip(2).ToArray()]);
+        Assert(collectionEvents == 2 &&
+               deltaVm.Faults.Count == 198 &&
+               deltaVm.Faults[0].Io == 3,
+            "Passing the first network removes only its two rows instead of moving the remaining 198 rows");
+
+        string testWindowCode = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml.cs"));
+        Assert(testWindowCode.Contains("_scrollDispatchQueued", StringComparison.Ordinal) &&
+               testWindowCode.Contains("Interlocked.Exchange(ref _scrollDispatchQueued, 1)", StringComparison.Ordinal),
+            "Fault-grid auto-scroll coalesces collection bursts into one pending Dispatcher callback");
+    }
+
     private static void TestProductionFaultConfirmation()
     {
         var settings = new ProductionSettings
@@ -3770,8 +3908,9 @@ internal static class Program
             new Dictionary<int, IReadOnlySet<int>>(),
             new Dictionary<int, int> { [113] = 1 },
             BoardScanMode.Production));
-        Assert(!pointerDisabledVm.HasInlineProbeContacts,
-            "UseTestPointer=false disables inline Probe display");
+        Assert(pointerDisabledVm.HasInlineProbeContacts,
+            "Legacy UseTestPointer=false is normalized to always-on Probe observation");
+        disabledBoard.Publish(FrameSeq(2));
 
         MethodInfo waitMethod = typeof(TestViewModel).GetMethod(
             "WaitForProbeRelayInterlockAsync",
@@ -3780,7 +3919,7 @@ internal static class Program
         Stopwatch sw = Stopwatch.StartNew();
         ((Task)waitMethod.Invoke(pointerDisabledVm, [CancellationToken.None])!).GetAwaiter().GetResult();
         sw.Stop();
-        Assert(sw.ElapsedMilliseconds < 50, "UseTestPointer=false disables Probe relay interlock");
+        Assert(sw.ElapsedMilliseconds < 100, "Released always-on Probe adds no production PASS delay");
     }
 
     private static void TestHtdrvEndpointProbeDisplayCases()
@@ -3816,22 +3955,18 @@ internal static class Program
                 .ToArray()));
 
         Assert(vm.HasInlineProbeContacts &&
-               vm.Faults.Any(row => row.Kind == FaultKind.Probe &&
-                                    row.Io == 0 &&
-                                    row.WireName == "IO(1)" &&
-                                    row.FaultType.Length == 0 &&
-                                    row.Connector.Length == 0 &&
-                                    row.Pin.Length == 0 &&
-                                    row.Section.Length == 0 &&
-                                    row.Color.Length == 0 &&
-                                    row.Status.Length == 0) &&
-               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
-            "CASE B: Probe shows only IO(1) in WireName while the IO2 open row remains");
+               vm.Faults.Count == 1 &&
+               vm.Faults[0].Kind == FaultKind.Probe &&
+               vm.Faults[0].WireName == "IO(1)" &&
+               vm.IsCenterResultVisible &&
+               vm.CenterResultText == "LẮP SẢN PHẨM",
+            "CASE B: always-on Probe remains visible without starting product presentation");
 
         board.Publish(FrameSeq(12));
         Assert(!vm.HasInlineProbeContacts &&
-               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
-            "CASE C: Probe release removes only Probe presentation and keeps production open row");
+               vm.Faults.Count == 0 &&
+               vm.CenterResultText == "LẮP SẢN PHẨM",
+            "CASE C: Probe release leaves the not-installed product presentation unchanged");
 
         ScanFrame unmappedPairFrame = FrameSeq(14, (23, new[] { 25 }));
         Assert(ProbeContactClassifier.DetectMany(
@@ -3905,15 +4040,12 @@ internal static class Program
                 .Select(source => (source, new[] { 7 }))
                 .ToArray()));
         Assert(unusedVm.HasInlineProbeContacts &&
-               unusedVm.Faults.Any(row =>
-                   row.Kind == FaultKind.Probe &&
-                   row.Io == 0 &&
-                   row.WireName == "IO(7)" &&
-                   row.FaultType.Length == 0 &&
-                   row.Connector.Length == 0 &&
-                   row.Status.Length == 0) &&
+               unusedVm.Faults.Count == 1 &&
+               unusedVm.Faults[0].Kind == FaultKind.Probe &&
+               unusedVm.Faults[0].WireName == "IO(7)" &&
+               unusedVm.CenterResultText == "LẮP SẢN PHẨM" &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
-            "CASE E: Unused probe IO is presentation-only and the frame still reaches Production TestEngine");
+            "CASE E: always-on Probe shows unused IO without starting the product cycle");
 
         TestViewModel testPinVm = CreateTestViewModel(production, out FakeBoard testPinBoard);
         testPinVm.SetModel(model);
