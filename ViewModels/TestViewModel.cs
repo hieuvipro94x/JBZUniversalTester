@@ -72,10 +72,8 @@ public sealed class TestViewModel : ObservableObject
     private readonly ThtModelParser _modelParser = new();
     private readonly object _initializationGate = new();
     private readonly object _cycleTokenGate = new();
-    private readonly object _pendingLogGate = new();
     private readonly object _labelStateGate = new();
     private readonly SemaphoreSlim _manualRelayGate = new(1, 1);
-    private readonly Queue<string> _pendingUiLogs = new();
     private readonly CancellationTokenSource _lifetimeCts = new();
     private CancellationTokenSource? _cycleCts;
 
@@ -126,8 +124,8 @@ public sealed class TestViewModel : ObservableObject
     private int _productionPhase = (int)ProductionPhase.WaitingProduct;
     private long _runtimeGeneration;
     private int _engineUiUpdateQueued;
-    private int _logUiFlushQueued;
     private int _deviceFault;
+    private int _boardUnavailablePresentationApplied;
     private int _manualModeActive;
     private int _deviceFaultDialogShown;
     private int _deviceFaultTransitionCount;
@@ -270,8 +268,6 @@ public sealed class TestViewModel : ObservableObject
     public string ProbeBarBackground => HasInlineProbeContacts ? "#23D9D9" : "#F8F8F6";
     public ObservableCollection<ResistanceResult> Resistance { get; } = new();
     public ObservableCollection<WaterProofChannelResult> WaterProofChannels { get; } = new();
-    public ObservableCollection<string> Logs { get; } = new();
-
     public bool IsWaterProofCardVisible => _model is not null && _waterProofProfile.Enabled;
     public string WaterProofStageText => _waterProofStageText;
     public string WaterProofOverallResult => _waterProofOverallResult;
@@ -1412,6 +1408,7 @@ public sealed class TestViewModel : ObservableObject
         CancelCycleOperations();
         _sound.SetWiringFaultAlarm(false);
         _engine.SetFrameProcessingEnabled(false);
+        ShowBoardUnavailablePresentation(force: true);
         State = "LỖI THIẾT BỊ";
         RaiseDeviceFaultState();
 
@@ -1681,6 +1678,7 @@ public sealed class TestViewModel : ObservableObject
                 {
                     if (!_board.IsConnected)
                     {
+                        ShowBoardUnavailablePresentation();
                         await InitializeHardwareAsync();
                     }
                     else if (!_board.IsScanning)
@@ -2037,44 +2035,6 @@ public sealed class TestViewModel : ObservableObject
                 ? "SẴN SÀNG"
                 : "LỖI KẾT NỐI BO";
             AddLog($"Không thể tải model gần nhất: {ex.Message}");
-        }
-    }
-
-    private void SaveLastTestedModel()
-    {
-        var sourcePath = CurrentModelPath;
-
-        if (string.IsNullOrWhiteSpace(sourcePath))
-        {
-            sourcePath = _model?.SourcePath;
-        }
-
-        if (string.IsNullOrWhiteSpace(sourcePath))
-        {
-            AddLog("Không lưu được model gần nhất vì model không có SourcePath.");
-            return;
-        }
-
-        try
-        {
-            var fullPath = ResolveModelPath(sourcePath);
-            if (string.Equals(
-                    ResolveOptionalModelPath(_productionSettings.LastThtPath),
-                    fullPath,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                CurrentModelPath = fullPath;
-                return;
-            }
-            _productionSettings.LastThtPath = fullPath;
-            ProductionConfigService.Save(_productionSettings);
-            CurrentModelPath = fullPath;
-            AddLog($"Đã lưu model kiểm tra gần nhất: {Path.GetFileName(fullPath)}");
-        }
-        catch (Exception ex)
-        {
-            // Không làm gián đoạn chu kỳ kiểm tra chỉ vì không ghi được CFG.
-            AddLog($"Không thể lưu model gần nhất: {ex.Message}");
         }
     }
 
@@ -2588,9 +2548,6 @@ public sealed class TestViewModel : ObservableObject
             ? AppLogLevel.Diagnostic
             : AppLogLevel.Normal;
         AsyncFileLogService.Current.Board(text, level);
-
-        // Không tạo một Dispatcher callback riêng cho từng log D2XX.
-        QueueUiLogLine($"{DateTime.Now:HH:mm:ss.fff}  {text}");
     }
 
     private void OnWaterProofLog(object? sender, string text)
@@ -2603,6 +2560,8 @@ public sealed class TestViewModel : ObservableObject
     {
         if (IsDeviceFault || !_board.IsConnected)
             return;
+
+        bool restoreBoardPresentation = false;
 
         // BoardFrameActivity chỉ là telemetry cho UI LED. Subscriber presentation
         // không được phép làm gián đoạn hot path nhận/giải mã frame của bo.
@@ -2634,6 +2593,8 @@ public sealed class TestViewModel : ObservableObject
             {
                 Volatile.Write(ref _lastObservedProductionFrameSequence, frame.Sequence);
                 Volatile.Write(ref _lastObservedProductionScanGeneration, frame.ScanGeneration);
+                restoreBoardPresentation =
+                    Interlocked.Exchange(ref _boardUnavailablePresentationApplied, 0) != 0;
             }
 
             // _DISCARD là cặp tiếp điểm thùng hàng lỗi, không phải topology sản
@@ -2834,6 +2795,12 @@ public sealed class TestViewModel : ObservableObject
                 long processStarted = Stopwatch.GetTimestamp();
                 bool engineChanged = _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
                 Interlocked.Increment(ref _productionFramesProcessed);
+                if (restoreBoardPresentation && !engineChanged)
+                {
+                    // UI đã xóa snapshot lúc mất bo. Frame đầu tiên sau reconnect
+                    // phải dựng lại presentation kể cả topology vật lý không đổi.
+                    OnEngineChanged(_engine, EventArgs.Empty);
+                }
                 PlayProductStartSoundOnce(generation, preserveProductionFaultsForProbe);
                 double processMs = Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
                 // Diagnostic topology có thể lớn hàng trăm network. Chỉ dựng khi
@@ -3278,16 +3245,6 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    private static string FormatStartupIoEndpoint(int io, PinRecord? pin)
-    {
-        if (pin is null)
-            return $"IO{io}";
-
-        string connector = string.IsNullOrWhiteSpace(pin.Connector) ? "—" : pin.Connector.Trim();
-        string localPin = string.IsNullOrWhiteSpace(pin.PinNumber) ? "—" : pin.PinNumber.Trim();
-        return $"IO{io} (CN {connector} / PIN {localPin})";
-    }
-
     private static void LogProbeLatency(ScanFrame frame, DateTime uiRequestedAt, IReadOnlyList<int> ios)
     {
         DateTime renderedAt = DateTime.Now;
@@ -3710,118 +3667,6 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(ProbeBarBackground));
     }
 
-    private string ResolveProbeWireName(int io, PinRecord? touchedPin)
-    {
-        if (!string.IsNullOrWhiteSpace(touchedPin?.WireName))
-            return touchedPin.WireName.Trim();
-
-        ProductModel? model = _model;
-        if (model is null)
-            return string.Empty;
-
-        WireNet? net = model.Nets.FirstOrDefault(candidate => candidate.IoNumbers.Contains(io));
-        if (net is not null)
-        {
-            string? mappedWire = net.Pins
-                .Select(candidate => candidate.WireName)
-                .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-
-            if (!string.IsNullOrWhiteSpace(mappedWire))
-                return mappedWire.Trim();
-
-            if (!string.IsNullOrWhiteSpace(net.Name))
-                return net.Name.Trim();
-        }
-
-        if (model.Clip is not null)
-        {
-            if (io == model.Clip.CommonIo)
-            {
-                string? branchWire = model.Clip.Branches
-                    .Select(branch => branch.TargetPin?.WireName)
-                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-                if (!string.IsNullOrWhiteSpace(branchWire))
-                    return branchWire.Trim();
-            }
-            else
-            {
-                ClipBranch? branch = model.Clip.Branches.FirstOrDefault(item => item.TargetIo == io);
-                if (!string.IsNullOrWhiteSpace(branch?.TargetPin?.WireName))
-                    return branch.TargetPin.WireName.Trim();
-            }
-        }
-
-        return string.Empty;
-    }
-
-    private string ResolveProbeColor(int io, PinRecord? touchedPin, string wireName)
-    {
-        if (!string.IsNullOrWhiteSpace(touchedPin?.Color))
-            return touchedPin.Color.Trim();
-
-        ProductModel? model = _model;
-        if (model is null)
-            return string.Empty;
-
-        WireNet? net = model.Nets.FirstOrDefault(candidate => candidate.IoNumbers.Contains(io));
-        if (net is not null)
-        {
-            PinRecord? colored = net.Pins.FirstOrDefault(candidate =>
-                !string.IsNullOrWhiteSpace(candidate.Color) &&
-                (string.IsNullOrWhiteSpace(wireName) ||
-                 string.Equals(candidate.WireName?.Trim(), wireName.Trim(), StringComparison.OrdinalIgnoreCase)));
-
-            colored ??= net.Pins.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.Color));
-            if (!string.IsNullOrWhiteSpace(colored?.Color))
-                return colored.Color.Trim();
-        }
-
-        if (model.Clip is not null)
-        {
-            if (io == model.Clip.CommonIo)
-            {
-                string? branchColor = model.Clip.Branches
-                    .Select(branch => branch.TargetPin?.Color)
-                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-                if (!string.IsNullOrWhiteSpace(branchColor))
-                    return branchColor.Trim();
-            }
-            else
-            {
-                ClipBranch? branch = model.Clip.Branches.FirstOrDefault(item => item.TargetIo == io);
-                if (!string.IsNullOrWhiteSpace(branch?.TargetPin?.Color))
-                    return branch.TargetPin.Color.Trim();
-            }
-        }
-
-        return string.Empty;
-    }
-
-    private string? BuildClipProbeStatus(int io)
-    {
-        ClipTopology? clip = _model?.Clip;
-        if (clip is null)
-            return null;
-
-        if (io == clip.CommonIo)
-        {
-            string branches = string.Join(
-                ", ",
-                clip.Branches.Select(branch => $"{branch.Name}->IO({branch.TargetIo})"));
-            return $"CLIP A0/AO CHUNG IO({clip.CommonIo}): {branches}";
-        }
-
-        ClipBranch[] matches = clip.Branches
-            .Where(branch => branch.TargetIo == io)
-            .ToArray();
-
-        if (matches.Length == 0)
-            return null;
-
-        string names = string.Join("/", matches.Select(branch => branch.Name));
-        return $"CLIP {names}: A0/AO IO({clip.CommonIo}) -> IO({io})";
-    }
-
     private void ShowInlineProbeContacts(IReadOnlyList<int> ios)
     {
         IReadOnlyList<FaultRow> rows = BuildProbeDisplayRows(ios);
@@ -3985,6 +3830,7 @@ public sealed class TestViewModel : ObservableObject
                 ? "BO CHƯA KẾT NỐI"
                 : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
 
+            ShowBoardUnavailablePresentation();
             AddLog($"Chưa kết nối được board: {ex.Message}");
             Raise(nameof(IsBoardConnected));
 
@@ -4298,6 +4144,7 @@ public sealed class TestViewModel : ObservableObject
 
         if (!_board.IsConnected)
         {
+            ShowBoardUnavailablePresentation();
             if (string.IsNullOrWhiteSpace(BoardConnectionMessage))
             {
                 BoardConnectionMessage =
@@ -4708,20 +4555,6 @@ public sealed class TestViewModel : ObservableObject
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
-    }
-
-    private string DescribeIoForPopup(int io)
-    {
-        IReadOnlyList<PinRecord> pins = FindPinsByIo(io);
-        if (pins.Count == 0)
-            return $"I/O {io} (không có map trong THT)";
-
-        string mapped = string.Join(
-            " / ",
-            pins.Take(3).Select(pin =>
-                $"I/O {io} - {EmptyAsDash(pin.Connector)} - chân {EmptyAsDash(pin.PinNumber)} - dây {EmptyAsDash(pin.WireName)}"));
-
-        return mapped;
     }
 
     private string DescribeIoCompact(int io)
@@ -7785,13 +7618,6 @@ public sealed class TestViewModel : ObservableObject
         !string.IsNullOrWhiteSpace(settings.RawDestination) ||
         !string.IsNullOrWhiteSpace(settings.ExternalHelperPath);
 
-    private void ApplyExtendedStatistics(ModelProductionStatistics stats)
-    {
-        DailyTestCount = stats.DailyTestCount;
-        MonthlyTestCount = stats.MonthlyTestCount;
-        LifetimeTestCount = stats.LifetimeTestCount;
-    }
-
     private void ApplyDailyProductionStatistics(ModelProductionStatistics stats)
     {
         Total = checked((int)stats.DailyTestCount);
@@ -8415,73 +8241,23 @@ public sealed class TestViewModel : ObservableObject
     private void AddLog(string text)
     {
         AsyncFileLogService.Current.Test(text);
-        QueueUiLogLine($"{DateTime.Now:HH:mm:ss.fff}  {text}");
     }
 
-    private void QueueUiLogLine(string line)
+    private void ShowBoardUnavailablePresentation(bool force = false)
     {
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null)
-        {
-            InsertLogLine(line);
+        int alreadyApplied = Interlocked.Exchange(ref _boardUnavailablePresentationApplied, 1);
+        if (!force && alreadyApplied != 0)
             return;
-        }
 
-        lock (_pendingLogGate)
-            _pendingUiLogs.Enqueue(line);
-
-        if (Interlocked.Exchange(ref _logUiFlushQueued, 1) == 0)
-            dispatcher.BeginInvoke(
-                new Action(FlushPendingUiLogs),
-                System.Windows.Threading.DispatcherPriority.Background);
-    }
-
-    private void FlushPendingUiLogs()
-    {
-        const int MaxBatch = 50;
-        int count = 0;
-
-        while (count < MaxBatch)
+        InvokeUi(() =>
         {
-            string? line;
-            lock (_pendingLogGate)
-            {
-                line = _pendingUiLogs.Count > 0
-                    ? _pendingUiLogs.Dequeue()
-                    : null;
-            }
-
-            if (line is null)
-                break;
-
-            InsertLogLine(line);
-            count++;
-        }
-
-        bool hasMore;
-        lock (_pendingLogGate)
-            hasMore = _pendingUiLogs.Count > 0;
-
-        if (hasMore)
-        {
-            Application.Current?.Dispatcher.BeginInvoke(new Action(FlushPendingUiLogs), System.Windows.Threading.DispatcherPriority.Background);
-            return;
-        }
-
-        Interlocked.Exchange(ref _logUiFlushQueued, 0);
-
-        lock (_pendingLogGate)
-            hasMore = _pendingUiLogs.Count > 0;
-
-        if (hasMore && Interlocked.Exchange(ref _logUiFlushQueued, 1) == 0)
-            Application.Current?.Dispatcher.BeginInvoke(new Action(FlushPendingUiLogs), System.Windows.Threading.DispatcherPriority.Background);
-    }
-
-    private void InsertLogLine(string line)
-    {
-        Logs.Insert(0, line);
-        while (Logs.Count > 300)
-            Logs.RemoveAt(Logs.Count - 1);
+            // Snapshot frame cuối không còn đáng tin cậy sau khi bo mất kết nối.
+            // Giữ bảng continuity/header hiện hữu nhưng không để row cũ khiến
+            // người vận hành hiểu nhầm là trạng thái phần cứng hiện tại.
+            SelectedOperationTabIndex = 0;
+            Faults.Clear();
+            ResetProductPresentationCycle();
+        });
     }
 
     private static void InvokeUi(Action action)

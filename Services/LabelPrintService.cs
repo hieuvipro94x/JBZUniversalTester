@@ -283,16 +283,6 @@ public sealed class LabelPrintService : IAsyncDisposable
         return new LabelPrintTransportResult(true, $"External helper completed. Print file: {printFile}");
     }
 
-    private static string SafeFilePart(string? value)
-    {
-        HashSet<char> invalid = Path.GetInvalidFileNameChars().ToHashSet();
-        string safe = new((value ?? string.Empty)
-            .Where(character => !invalid.Contains(character))
-            .Take(60)
-            .ToArray());
-        return string.IsNullOrWhiteSpace(safe) ? "NO_PART_NUMBER" : safe;
-    }
-
     private static string ResolveTransportName(LabelPrintRequest request) =>
         request.Profile.Mode == LabelPrintMode.ExternalHelper ? "ExternalHelper" :
         !string.IsNullOrWhiteSpace(request.PrinterCom) ? "COM" :
@@ -333,15 +323,6 @@ public sealed class LabelPrintService : IAsyncDisposable
                 $"Label payload contains characters unsupported by encoding '{encoding.WebName}'.", ex);
         }
     }
-
-    private static string ResolvePreviewExtension(LabelPrintRequest request) => request.Profile.Mode switch
-    {
-        LabelPrintMode.RawZpl => ".zpl",
-        LabelPrintMode.RawEpl or LabelPrintMode.StoredForm => ".epl",
-        _ when Path.GetExtension(request.Profile.TemplatePath).Equals(".zpl", StringComparison.OrdinalIgnoreCase) => ".zpl",
-        _ when Path.GetExtension(request.Profile.TemplatePath).Equals(".epl", StringComparison.OrdinalIgnoreCase) => ".epl",
-        _ => ".txt"
-    };
 
     private static class RawPrinter
     {

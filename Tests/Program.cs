@@ -572,8 +572,19 @@ internal static class Program
                BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
                BrushHex(openBlueRow.WireColorForegroundBrush) == "#FFFFFF",
             "Single Màu cell matches original green/blue background and readable text");
+        var cachedRow = new FaultRow { Io = 42, Connector = " CN1 ", Pin = " 7 ", Color = "L" };
+        string cachedIoCnPn = cachedRow.IoCnPnText;
+        Brush cachedForeground = cachedRow.WireColorForegroundBrush;
+        Assert(cachedIoCnPn == "42-CN1-7" && ReferenceEquals(cachedIoCnPn, cachedRow.IoCnPnText),
+            "FaultRow caches the formatted IO-CN-PN text after first access");
+        Assert(BrushHex(cachedForeground) == "#FFFFFF" &&
+               ReferenceEquals(cachedForeground, cachedRow.WireColorForegroundBrush),
+            "FaultRow caches the wire-color foreground after first access");
         Assert(new FaultRow { Color = "B/G" }.WireColorBrush is LinearGradientBrush,
             "Multi-color wire is combined into one striped Màu cell");
+
+        Assert(typeof(TestViewModel).GetProperty("Logs") is null,
+            "TestViewModel does not maintain an unused UI log collection");
 
         var disabled = new ResistanceChannelEditor(
             new ResistanceChannelSetting { Enabled = true, Name = "R3", Channel = 3, MinOhm = 1, MaxOhm = 2 },
@@ -823,10 +834,19 @@ internal static class Program
             "Production startup accepts the first live frame for the remembered model without requiring a clean baseline");
 
         Assert(xaml.Contains("x:Name=\"OperationTablesHost\"", StringComparison.Ordinal) &&
-               testWindowSource.Contains("OperationTablesHost.Visibility = Visibility.Collapsed;", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Lo&#7841;i\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"CONNECTOR\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Ch&#226;n\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"T&#234;n d&#226;y\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"C&#7905; d&#226;y\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Tr&#7841;ng th&#225;i\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"IO-CN-PN\"", StringComparison.Ordinal) &&
+               !testWindowSource.Contains("OperationTablesHost.Visibility = Visibility.Collapsed;", StringComparison.Ordinal) &&
+               testWindowSource.Contains("viewModel.SelectedOperationTabIndex = 0;", StringComparison.Ordinal) &&
                testWindowSource.Contains("XEM MÃ HÀNG OFFLINE - BO CHƯA KẾT NỐI", StringComparison.Ordinal) &&
                testWindowSource.Contains("if (_autoStartProduction && !_offlinePreview)", StringComparison.Ordinal),
-            "Offline TestWindow hides all operation tables and cannot ARM production testing");
+            "Offline TestWindow keeps the complete continuity header visible with no Production ARM");
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
@@ -902,6 +922,13 @@ internal static class Program
 
         TestViewModel deviceFaultVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         deviceFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
+        deviceFaultVm.SelectedOperationTabIndex = 3;
+        deviceFaultVm.Faults.Add(new FaultRow
+        {
+            Kind = FaultKind.MissingConnection,
+            Io = 1,
+            Status = "CHƯA KẾT NỐI"
+        });
         MethodInfo reportDeviceFault = typeof(TestViewModel).GetMethod(
             "ReportDeviceFaultForTest",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -915,6 +942,8 @@ internal static class Program
                deviceFaultVm.StateBackground == "#C62828" &&
                deviceFaultVm.StateForeground == "#FFFFFF",
             "DeviceFault status mapping");
+        Assert(deviceFaultVm.SelectedOperationTabIndex == 0 && deviceFaultVm.Faults.Count == 0,
+            "DeviceFault returns to the empty continuity grid so headers remain visible without stale frame rows");
 
         reportDeviceFault.Invoke(deviceFaultVm, [new InvalidOperationException("second episode"), -1]);
         Assert(deviceFaultVm.IsDeviceFault &&
@@ -3010,6 +3039,18 @@ internal static class Program
                vm.Faults.All(row => row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
             "First real product edge starts presentation and only the passed network disappears");
 
+        MethodInfo showBoardUnavailable = typeof(TestViewModel).GetMethod(
+            "ShowBoardUnavailablePresentation",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Board-unavailable presentation method not found");
+        showBoardUnavailable.Invoke(vm, [false]);
+        Assert(vm.SelectedOperationTabIndex == 0 && vm.Faults.Count == 0,
+            "Transient board loss clears stale rows but leaves the continuity table selected");
+        board.Publish(FrameSeq(101, (1, new[] { 3 })));
+        Assert(vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
+               !vm.Faults.Any(row => row.WireName == "BG1"),
+            "First complete frame after reconnect rebuilds rows even when physical topology is unchanged");
+
         TestViewModel overlayVm = CreateTestViewModel(production);
         typeof(TestViewModel).GetField("_productionPhase", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(overlayVm, 6);
@@ -3086,6 +3127,8 @@ internal static class Program
                testWindowXaml.Contains("VirtualizingPanel.VirtualizationMode\" Value=\"Recycling", StringComparison.Ordinal) &&
                testWindowXaml.Contains("IsHitTestVisible=\"False\"", StringComparison.Ordinal),
             "TestWindow keeps recycling virtualization and a non-interactive center overlay");
+        Assert(!testWindowXaml.Contains("DropShadowEffect", StringComparison.Ordinal),
+            "Wire-color cells avoid per-row DropShadowEffect rendering");
 
         TestViewModel deltaVm = CreateTestViewModel(production);
         MethodInfo synchronize = typeof(TestViewModel).GetMethod(
@@ -3117,8 +3160,9 @@ internal static class Program
         string testWindowCode = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml.cs"));
         Assert(testWindowCode.Contains("_scrollDispatchQueued", StringComparison.Ordinal) &&
-               testWindowCode.Contains("Interlocked.Exchange(ref _scrollDispatchQueued, 1)", StringComparison.Ordinal),
-            "Fault-grid auto-scroll coalesces collection bursts into one pending Dispatcher callback");
+               testWindowCode.Contains("Interlocked.Exchange(ref _scrollDispatchQueued, 1)", StringComparison.Ordinal) &&
+               testWindowCode.Contains("IsFaultRowVisible(firstFault)", StringComparison.Ordinal),
+            "Fault-grid auto-scroll coalesces collection bursts and skips rows already in view");
     }
 
     private static void TestProductionFaultConfirmation()
@@ -5572,19 +5616,6 @@ internal static class Program
                 new ConnectorPin("1", 1, "1", pin1),
                 new ConnectorPin("2", 2, "1", pin2)
             ]));
-        return model;
-    }
-
-    private static ProductModel HtdrvShortModel()
-    {
-        var model = new ProductModel { ModelName = "HTDRV-SHORT", PartNumber = "HTDRV-SHORT" };
-        var a1 = new PinRecord("7", "A", 7, "1", Section: "0.5", Color: "R", OriginalOrder: 1);
-        var a2 = new PinRecord("7", "A", 8, "2", Section: "0.5", Color: "R", OriginalOrder: 2);
-        var b1 = new PinRecord("9", "B", 9, "1", Section: "0.5", Color: "B", OriginalOrder: 3);
-        var b2 = new PinRecord("9", "B", 10, "2", Section: "0.5", Color: "B", OriginalOrder: 4);
-        model.Pins.AddRange([a1, a2, b1, b2]);
-        model.Nets.Add(new WireNet("A", [7, 8], [a1, a2]));
-        model.Nets.Add(new WireNet("B", [9, 10], [b1, b2]));
         return model;
     }
 

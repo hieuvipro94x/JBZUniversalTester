@@ -1315,17 +1315,6 @@ public sealed class TestEngine : IDisposable
             .All(reachable.Contains);
     }
 
-    private bool IsEndpointConnectedWithinNet(
-        WireNet net,
-        int endpoint,
-        IReadOnlyDictionary<int, HashSet<int>> connections)
-    {
-        if (endpoint == net.SourceIo)
-            return IsWireNetConnected(net, connections);
-
-        return BuildReachableNetEndpoints(net, connections).Contains(endpoint);
-    }
-
     private int CountDisconnectedEndpoints(
         WireNet net,
         IReadOnlyDictionary<int, HashSet<int>> connections)
@@ -1752,130 +1741,6 @@ public sealed class TestEngine : IDisposable
             : string.Empty;
     }
 
-    FaultRow CreateWiringFaultRow(PinRecord pin)
-    {
-        WiringFaultPair? fault = _wiringFaults.FirstOrDefault(item =>
-            item.SourceIo == pin.IoNumber || item.TargetIo == pin.IoNumber);
-
-        ProductFaultType type = fault?.FaultType ?? ProductFaultType.WrongWiring;
-
-        // FAIL trên TestWindow chỉ hiển thị đầu I/O đang nối sai với dòng hiện tại.
-        // ExpectedSourceIo/ExpectedTargetIo vẫn giữ nguyên cho logic/history.
-        string status = fault is null
-            ? $"IO {pin.IoNumber}"
-            : BuildWiringFaultStatus(_model!, fault, pin.IoNumber);
-
-        return new FaultRow
-        {
-            Kind = type == ProductFaultType.ShortCircuit
-                ? FaultKind.Short
-                : FaultKind.WrongWiring,
-            ProductFaultType = type,
-            FaultType = FaultTypeCatalog.DisplayName(type),
-            Io = pin.IoNumber,
-            DisplayOrder = ResolveDisplayOrder(pin),
-            ExpectedSourceIo = fault?.ExpectedSourceIo,
-            ExpectedTargetIo = fault?.ExpectedTargetIo,
-            ActualSourceIo = fault?.SourceIo,
-            ActualTargetIo = fault?.TargetIo,
-            RelatedIos = fault is null
-                ? new[] { pin.IoNumber }
-                : new[] { fault.SourceIo, fault.TargetIo },
-            Connector = pin.Connector,
-            Pin = pin.PinNumber,
-            WireName = pin.WireName,
-            Splice = pin.SpliceName,
-            Section = pin.Section,
-            Color = pin.Color,
-            Status = status
-        };
-    }
-
-    /// <summary>
-    /// Chuẩn hiển thị FAIL ở cột Trạng thái.
-    /// Ví dụ: dòng IO14 nối sai với IO38, IO38 thuộc connector 2 / pin 7:
-    ///     IO 38 (CN 2 - PIN 7)
-    /// Dòng IO38 sẽ hiển thị ngược lại:
-    ///     IO 14 (CN 1 - PIN 14)
-    /// Nếu I/O đối diện không có map trong THT thì chỉ hiện "IO 38".
-    /// </summary>
-    private static string BuildWiringFaultStatus(
-        ProductModel model,
-        WiringFaultPair fault,
-        int currentIo)
-    {
-        int peerIo;
-
-        if (fault.SourceIo == currentIo)
-            peerIo = fault.TargetIo;
-        else if (fault.TargetIo == currentIo)
-            peerIo = fault.SourceIo;
-        else
-            peerIo = fault.TargetIo > 0 ? fault.TargetIo : fault.SourceIo;
-
-        return FormatFaultPeerIo(model, peerIo);
-    }
-
-    private static string FormatFaultPeerIo(ProductModel model, int io)
-    {
-        if (io <= 0)
-            return string.Empty;
-
-        // Một Global IO có thể xuất hiện nhiều row trong THT. Ưu tiên row có
-        // WireName thật và thứ tự gốc nhỏ nhất để kết quả hiển thị ổn định.
-        PinRecord? peerPin = model.Pins
-            .Where(pin => pin.IoNumber == io)
-            .OrderBy(pin => string.IsNullOrWhiteSpace(pin.WireName) ? 1 : 0)
-            .ThenBy(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
-            .FirstOrDefault();
-
-        if (peerPin is null)
-            return $"IO {io}";
-
-        string connector = (peerPin.Connector ?? string.Empty).Trim();
-        string pinNumber = (peerPin.PinNumber ?? string.Empty).Trim();
-
-        if (!string.IsNullOrWhiteSpace(connector) &&
-            !string.IsNullOrWhiteSpace(pinNumber))
-        {
-            return $"IO {io} (CN {connector} - PIN {pinNumber})";
-        }
-
-        if (!string.IsNullOrWhiteSpace(connector))
-            return $"IO {io} (CN {connector})";
-
-        if (!string.IsNullOrWhiteSpace(pinNumber))
-            return $"IO {io} (PIN {pinNumber})";
-
-        return $"IO {io}";
-    }
-
-    bool HasWiringFaultForNet(WireNet net)
-    {
-        HashSet<int> endpoints = net.IoNumbers
-            .Where(io => io > 0)
-            .Distinct()
-            .ToHashSet();
-
-        if (endpoints.Count == 0)
-            return false;
-
-        return _candidateWiringFaults.Any(fault =>
-                   endpoints.Contains(fault.SourceIo) || endpoints.Contains(fault.TargetIo)) ||
-               _wiringFaults.Any(fault =>
-                   endpoints.Contains(fault.SourceIo) || endpoints.Contains(fault.TargetIo));
-    }
-
-    IReadOnlyList<FaultRow> CreateNetworkMappingRows(WireNet net, bool connected)
-    {
-        if (connected)
-            return [];
-
-        return _displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows)
-            ? cachedRows
-            : CreateNetworkMappingRowsCore(net, PendingConnectionStatus);
-    }
-
     private FaultRow[] CreateNetworkMappingRowsCore(WireNet net, string status)
     {
 
@@ -1999,10 +1864,6 @@ public sealed class TestEngine : IDisposable
         _displayOrderByNet.TryGetValue(net, out int baseOrder)
             ? baseOrder + Math.Clamp(endpointIndex, 0, 999)
             : ResolveDisplayOrder(pin);
-
-    // Giữ method compatibility cho code/test cũ nếu còn gọi trực tiếp.
-    FaultRow CreateMissingConnectionRow(WireNet net) =>
-        CreateNetworkMappingRows(net, connected: false).First();
 
     FaultRow CreateMissingClipConnectionRow(ClipTopology clip, ClipBranch branch, string status)
     {

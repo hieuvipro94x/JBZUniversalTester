@@ -247,19 +247,6 @@ public sealed class LotSequenceService
         }
     }
 
-    private void TryPersistNewProductLocked(string productKey)
-    {
-        try
-        {
-            _persist(_settings);
-        }
-        catch (Exception ex)
-        {
-            AsyncFileLogService.Current.Error(
-                $"Không thể lưu LOTNO ban đầu cho {productKey}: {ex.Message}");
-        }
-    }
-
     private ProductLotSettings ActiveLotLocked() =>
         ProductionConfigService.GetOrCreateProductLot(
             _settings, _activeProductKey, migrateCurrentLot: true);

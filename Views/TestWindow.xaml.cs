@@ -61,7 +61,10 @@ public partial class TestWindow : Window
 
         if (_offlinePreview)
         {
-            OperationTablesHost.Visibility = Visibility.Collapsed;
+            // Offline/mất bo vẫn giữ nguyên khung và header bảng dây để người
+            // vận hành biết đúng cấu trúc mã hàng. Chỉ dữ liệu row bị để trống;
+            // guard _offlinePreview bên dưới vẫn tuyệt đối không ARM Production.
+            viewModel.SelectedOperationTabIndex = 0;
             viewModel.State = "XEM MÃ HÀNG OFFLINE - BO CHƯA KẾT NỐI";
         }
         else if (!_autoStartProduction)
@@ -477,18 +480,50 @@ public partial class TestWindow : Window
         {
             try
             {
+                if (_closeInProgress || viewModel.Faults.Count == 0)
+                    return;
+
+                FaultRow firstFault = viewModel.Faults[0];
+                if (IsFaultRowVisible(firstFault))
+                    return;
+
                 int delay = viewModel.ScrollDelay;
                 if (delay > 0)
                     await Task.Delay(delay);
                 if (_closeInProgress || viewModel.Faults.Count == 0)
                     return;
-                FaultGrid.ScrollIntoView(viewModel.Faults[0]);
+
+                firstFault = viewModel.Faults[0];
+                if (!IsFaultRowVisible(firstFault))
+                    FaultGrid.ScrollIntoView(firstFault);
             }
             finally
             {
                 Interlocked.Exchange(ref _scrollDispatchQueued, 0);
             }
         }, DispatcherPriority.Background);
+    }
+
+    private bool IsFaultRowVisible(FaultRow row)
+    {
+        if (FaultGrid.ItemContainerGenerator.ContainerFromItem(row) is not FrameworkElement container ||
+            !container.IsVisible ||
+            container.ActualHeight <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            Point topLeft = container.TranslatePoint(new Point(0, 0), FaultGrid);
+            double bottom = topLeft.Y + container.ActualHeight;
+            return bottom > FaultGrid.ColumnHeaderHeight && topLeft.Y < FaultGrid.ActualHeight;
+        }
+        catch (InvalidOperationException)
+        {
+            // Container có thể vừa bị recycle giữa hai lần cập nhật collection.
+            return false;
+        }
     }
 
     private async void ResetProbeCounter_Click(object sender, RoutedEventArgs e)

@@ -2,7 +2,6 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Versioning;
 
@@ -128,17 +127,6 @@ public static class ProductionConfigService
         AtomicWrite(ConfigPath, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
-    private static string SerializeSettingsForSave(ProductionSettings settings)
-    {
-        JsonNode? node = JsonSerializer.SerializeToNode(settings, JsonOptions);
-        if (node is not JsonObject root)
-            return JsonSerializer.Serialize(settings, JsonOptions);
-
-        foreach (string key in LegacyTimingKeys)
-            root.Remove(key);
-
-        return root.ToJsonString(JsonOptions);
-    }
     /// <summary>
     /// V12: UniversalTester.cfg dùng tên key tiếng Anh 100% và ghi ĐẦY ĐỦ
     /// mọi trường trên màn Cài đặt. Tên method được giữ để code cũ vẫn gọi được.

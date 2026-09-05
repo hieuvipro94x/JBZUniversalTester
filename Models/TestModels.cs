@@ -41,7 +41,9 @@ public sealed class FaultRow : ObservableObject
     private static readonly Brush WhiteBrush = Brushes.White;
 
     string _status = "";
+    string? _ioCnPnText;
     string? _presentationKey;
+    Brush? _wireColorForegroundBrush;
     public FaultKind Kind { get; init; }
     public ProductFaultType ProductFaultType { get; init; } = ProductFaultType.None;
     public string FaultCode => FaultTypeCatalog.Code(ProductFaultType);
@@ -67,19 +69,10 @@ public sealed class FaultRow : ObservableObject
     public string IoText => Io > 0
         ? Io.ToString(CultureInfo.InvariantCulture)
         : string.Empty;
-    public string IoCnPnText => !string.IsNullOrWhiteSpace(IoCnPnOverride)
-        ? IoCnPnOverride
-        : Io > 0
-        ? string.Join("-", new[]
-            {
-                Io.ToString(CultureInfo.InvariantCulture),
-                string.IsNullOrWhiteSpace(Connector) ? null : Connector.Trim(),
-                string.IsNullOrWhiteSpace(Pin) ? null : Pin.Trim()
-            }.Where(value => !string.IsNullOrWhiteSpace(value)))
-        : string.Empty;
+    public string IoCnPnText => _ioCnPnText ??= BuildIoCnPnText();
     public string WireColorText => WireColorToBrushConverter.ToDisplayCode(Color);
     public Brush WireColorBrush => WireColorToBrushConverter.ToBrush(Color);
-    public Brush WireColorForegroundBrush => ResolveWireColorForeground();
+    public Brush WireColorForegroundBrush => _wireColorForegroundBrush ??= ResolveWireColorForeground();
     public Brush Color1Brush => TokenBrush(0);
     public Brush Color2Brush => TokenBrush(1);
     public Brush Color3Brush => TokenBrush(2);
@@ -138,6 +131,17 @@ public sealed class FaultRow : ObservableObject
     };
 
     public string Status { get => _status; set => Set(ref _status, value); }
+
+    private string BuildIoCnPnText() => !string.IsNullOrWhiteSpace(IoCnPnOverride)
+        ? IoCnPnOverride
+        : Io > 0
+        ? string.Join("-", new[]
+            {
+                Io.ToString(CultureInfo.InvariantCulture),
+                string.IsNullOrWhiteSpace(Connector) ? null : Connector.Trim(),
+                string.IsNullOrWhiteSpace(Pin) ? null : Pin.Trim()
+            }.Where(value => !string.IsNullOrWhiteSpace(value)))
+        : string.Empty;
 
     private Brush TokenBrush(int index)
     {

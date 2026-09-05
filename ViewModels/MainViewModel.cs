@@ -304,9 +304,6 @@ public sealed class MainViewModel : ObservableObject
         return model;
     }
 
-    private static string NormalizeModelKey(string? value) =>
-        new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
-
     public void ReloadProductionSettings()
     {
         ProductionConfigService.ReloadInto(_productionSettings);

@@ -1444,22 +1444,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
         return -1;
     }
 
-    static byte[] ParseFrame(string text, byte[] fallback)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-            return fallback;
-
-        byte[] values = text
-            .Split([' ', '-', ','], StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => Convert.ToByte(x, 16))
-            .ToArray();
-
-        if (values.Length != 4)
-            throw new InvalidDataException($"Frame phải có 4 byte: {text}");
-
-        return values;
-    }
-
     void PublishProtocolTrace(string direction, ReadOnlySpan<byte> data)
     {
         EventHandler<D2xxProtocolTrace>? handler = ProtocolTrace;
