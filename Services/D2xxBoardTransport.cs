@@ -624,7 +624,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         _scanCapacity = BoardScanCapacity.Create(
             _production,
             maxIo,
-            scanAllInstalledIo: _production.UseTestPointer);
+            scanAllInstalledIo: true);
         _installedCapacity = _scanCapacity.Installed;
         _capacity = _scanCapacity.Active;
         _production.ExpansionCardCount = _installedCapacity.ExpansionCardCount;
@@ -793,9 +793,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     public async Task EnterIdleAsync(CancellationToken ct = default)
     {
-        // Dùng khi đóng TestView/TestPin nhưng vẫn giữ app/FTDI mở:
-        // STOP -> relay OFF -> RESET. Không INIT lại, không FT_Close.
-        // Trace gốc cho thấy board có thể START_SCAN trực tiếp sau chuỗi này.
+        // CARD_SYNC_2026-09-05:
+        // IDLE không được giả lập rằng capacity hiện tại đã được INIT.
+        // Nếu CARD vừa thay đổi, StartScanAsync phải nhìn thấy
+        // _preparedScanCapacity cũ và tự RESET->INIT theo capacity mới.
         await _scanSwitchLock.WaitAsync(ct);
         try
         {
@@ -812,10 +813,17 @@ public sealed class D2xxBoardTransport : IBoardTransport
             await ResetClearAsync(ct);
             await PurgeAsync(ct);
 
-            _scanPrepared = true;
-            _preparedScanCapacity = _capacity;
-            Volatile.Write(ref _connectionState, (int)BoardConnectionState.Ready);
-            Log?.Invoke(this, "Board đã về IDLE sạch, giữ FTDI mở và sẵn sàng START_SCAN lại.");
+            // KHÔNG:
+            // _scanPrepared = true;
+            // _preparedScanCapacity = _capacity;
+
+            Volatile.Write(
+                ref _connectionState,
+                (int)BoardConnectionState.Ready);
+
+            Log?.Invoke(
+                this,
+                "Board đã về IDLE sạch, giữ FTDI mở và sẵn sàng START_SCAN lại.");
         }
         finally
         {

@@ -950,6 +950,13 @@ public sealed class TestViewModel : ObservableObject
         _waterProof = waterProof;
         _settings = settings;
         _productionSettings = productionSettings;
+
+        // ALWAYS_PROBE_2026-09-05:
+        // Test pointer không còn là tùy chọn vận hành. Que dò luôn hoạt động.
+        // Giữ property legacy = true để các service/code cũ còn đọc UseTestPointer
+        // cũng nhận đúng hành vi, nhưng UI không còn cho bật/tắt nữa.
+        _productionSettings.UseTestPointer = true;
+
         _legacyHistory = legacyHistory ?? new LegacyPhtHistoryService();
         _requireStartupIoClear = requireStartupIoClear;
         _lotSequence = new LotSequenceService(_productionSettings);
@@ -2082,10 +2089,9 @@ public sealed class TestViewModel : ObservableObject
     /// </summary>
     public void PrepareProbeUiMode()
     {
-        // Probe/TestPin trong TestWindow là lớp quan sát song song trên stream
-        // production đã xác minh. Không đổi runtime/cycle/engine/transport.
-        if (!_productionSettings.UseTestPointer)
-            ClearInlineProbeContactsState(clearLastSeen: true);
+        // ALWAYS_PROBE_2026-09-05:
+        // Probe/TestPin luôn là lớp quan sát song song trên stream Production.
+        // Không còn trạng thái bật/tắt từ Production Settings.
         InvokeUi(RaiseTestStatistics);
     }
 
@@ -2722,8 +2728,7 @@ public sealed class TestViewModel : ObservableObject
                 bool probeChanged;
                 bool preserveProductionFaultsForProbe = false;
                 int[] displayedProbeIos;
-                if (_productionSettings.UseTestPointer &&
-                    TryDetectInlineProbeContacts(frame, out int[] touchedIos))
+                if (TryDetectInlineProbeContacts(frame, out int[] touchedIos))
                 {
                     Interlocked.Increment(ref _productionFramesRoutedToProbe);
                     preserveProductionFaultsForProbe = true;
@@ -2763,9 +2768,7 @@ public sealed class TestViewModel : ObservableObject
                         _model is { HasDiscardInterlock: true };
                     probeChanged = discardContactClosed
                         ? false
-                        : _productionSettings.UseTestPointer
-                            ? UpdateInlineProbeContacts(Array.Empty<int>())
-                            : ClearInlineProbeContactsState(clearLastSeen: true);
+                        : UpdateInlineProbeContacts(Array.Empty<int>());
 
                     if (probeChanged)
                     {
@@ -3556,9 +3559,7 @@ public sealed class TestViewModel : ObservableObject
 
     private bool IsProbeRelayInterlockActive()
     {
-        if (!_productionSettings.UseTestPointer)
-            return false;
-
+        // ALWAYS_PROBE_2026-09-05: interlock que dò luôn có hiệu lực.
         if (Volatile.Read(ref _probeSessionActive) != 0 ||
             Volatile.Read(ref _inlineProbeContactIo) != 0)
         {
@@ -4105,14 +4106,7 @@ public sealed class TestViewModel : ObservableObject
         PrepareProbeUiMode();
         try
         {
-            if (!_productionSettings.UseTestPointer)
-            {
-                ClearInlineProbeContactsState(clearLastSeen: true);
-                InvokeUi(ClearInlineProbeDisplay);
-                AddLog("TESTPIN/Probe đang tắt theo Production Settings.UseTestPointer=false.");
-                return;
-            }
-
+            // ALWAYS_PROBE_2026-09-05: không còn nhánh Probe OFF.
             if (!_board.IsConnected)
                 await InitializeHardwareAsync();
 
@@ -7095,11 +7089,10 @@ public sealed class TestViewModel : ObservableObject
         lock (_historyStoreGate)
             _historyStore = null;
         UpdateDailyLotDisplay();
-        if (!_productionSettings.UseTestPointer &&
-            ClearInlineProbeContactsState(clearLastSeen: true))
-        {
-            InvokeUi(ClearInlineProbeDisplay);
-        }
+
+        // ALWAYS_PROBE_2026-09-05: nếu file cấu hình cũ còn UseTestPointer=false,
+        // bỏ qua giá trị đó và giữ chức năng que dò luôn bật.
+        _productionSettings.UseTestPointer = true;
 
         Raise(nameof(ItemHeight));
         Raise(nameof(ScrollDelay));

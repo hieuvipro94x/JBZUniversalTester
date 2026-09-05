@@ -315,7 +315,7 @@ public partial class TestWindow : Window
         if (viewModel.IsDeviceFault || viewModel.IsMasterSequenceActive)
             return false;
 
-        if (resultStatus.Equals("KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase))
+        if (resultStatus.Equals("FAIL", StringComparison.OrdinalIgnoreCase))
             return true;
 
         string state = viewModel.State ?? string.Empty;

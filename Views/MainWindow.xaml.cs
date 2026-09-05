@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -335,12 +335,10 @@ public partial class MainWindow : Window
                 await savedPage.ReleaseManualOutputsAsync();
             await _viewModel.ReloadProductionSettingsAsync();
 
-            MessageBox.Show(
-                this,
-                "Đã lưu và đồng bộ cấu hình với BO.",
-                "JBZ",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            // SETTINGS_SAVE_SILENT_2026-09-05:
+            // Lưu và đồng bộ runtime thành công thì đóng trang Cài đặt luôn.
+            // Không hiện popup "Đã lưu/đã đồng bộ với BO".
+            // Popup lỗi bên dưới vẫn giữ nguyên nếu đồng bộ thật sự thất bại.
         }
         catch (Exception ex)
         {

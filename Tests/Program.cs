@@ -674,7 +674,7 @@ internal static class Program
 
         TestViewModel statusVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         statusVm.State = "PASS";
-        Assert(statusVm.ResultStatusText == "ĐẠT" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
+        Assert(statusVm.ResultStatusText == "PASS" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
             "PASS status mapping");
         statusVm.State = "PASS - THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" && statusVm.StateBackground == "#2AA84A",
@@ -684,7 +684,7 @@ internal static class Program
                statusVm.StateBackground == "#FFF3A0",
             "Leak stage has an explicit in-progress presentation before PASS");
         statusVm.State = "CHƯA ĐẠT";
-        Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
+        Assert(statusVm.ResultStatusText == "FAIL" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
             "FAIL status mapping");
         statusVm.State = "CHỜ THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" &&
