@@ -233,7 +233,7 @@ public sealed class TestViewModel : ObservableObject
     private string _masterHistoryInspectionType = string.Empty;
     private TestHistoryStore? _masterRecordedHistoryStore;
     private const int MasterBadSettleMs = 120;
-    private string _masterStatus = "KIỂM TRA MASTER ĐẠT";
+    private string _masterStatus = "KIỂM TRA MASTER PASS";
 
     // Mỗi lần người vận hành chọn model mới sẽ tăng generation. Tác vụ
     // auto-load model gần nhất lúc startup chỉ được áp dụng nếu generation
@@ -1334,7 +1334,7 @@ public sealed class TestViewModel : ObservableObject
             return "CHỜ ĐỒNG BỘ DỮ LIỆU BO";
         return MasterApproved
             ? "CHỜ LẮP SẢN PHẨM"
-            : "KIỂM TRA MASTER ĐẠT";
+            : "KIỂM TRA MASTER PASS";
     }
 
     private string PassRelaySequenceText()
@@ -3049,7 +3049,7 @@ public sealed class TestViewModel : ObservableObject
             BeginCycleOperations();
             ResetFullCycleAfterProductRemoved();
             _engine.SetFrameProcessingEnabled(!IsIoMappingMode);
-            State = MasterApproved ? "CHỜ LẮP SẢN PHẨM" : "KIỂM TRA MASTER ĐẠT";
+            State = MasterApproved ? "CHỜ LẮP SẢN PHẨM" : "KIỂM TRA MASTER PASS";
             if (contactClosed)
                 ShowDiscardContacts(displayIo);
         }
@@ -3228,7 +3228,7 @@ public sealed class TestViewModel : ObservableObject
         }
         else
         {
-            State = "KIỂM TRA MASTER ĐẠT";
+            State = "KIỂM TRA MASTER PASS";
             AddLog("STARTUP IO INTERLOCK: frame sạch, bắt đầu chuỗi MASTER.");
             _ = StartAutomaticMasterSequenceAsync();
         }
@@ -4938,8 +4938,8 @@ public sealed class TestViewModel : ObservableObject
         }
 
         MasterState = MasterSequenceState.WaitingGoodMaster;
-        MasterStatus = "KIỂM TRA MASTER ĐẠT";
-        State = "KIỂM TRA MASTER ĐẠT";
+        MasterStatus = "KIỂM TRA MASTER PASS";
+        State = "KIỂM TRA MASTER PASS";
         RaiseMasterState();
     }
 
@@ -5006,8 +5006,8 @@ public sealed class TestViewModel : ObservableObject
         RefreshFaults();
 
         MasterState = MasterSequenceState.WaitingGoodMaster;
-        State = "KIỂM TRA MASTER ĐẠT";
-        MasterStatus = "KIỂM TRA MASTER ĐẠT";
+        State = "KIỂM TRA MASTER PASS";
+        MasterStatus = "KIỂM TRA MASTER PASS";
         AddLog("MASTER GOOD START - production gate LOCKED; không cộng LOT/Pass/Fail.");
 
         await _scanSupervisor.EnsureProductionScanAsync(
@@ -5049,8 +5049,8 @@ public sealed class TestViewModel : ObservableObject
                 {
                     BeginMasterHistoryCycle(HistoryInspectionType.MasterGood);
                     MasterState = MasterSequenceState.TestingGoodMaster;
-                    State = "KIỂM TRA MASTER ĐẠT";
-                    MasterStatus = "KIỂM TRA MASTER ĐẠT";
+                    State = "KIỂM TRA MASTER PASS";
+                    MasterStatus = "KIỂM TRA MASTER PASS";
                     AddLog("MASTER GOOD: phát hiện mẫu, bắt đầu kiểm tra tự động.");
                 }
                 break;
@@ -5062,16 +5062,16 @@ public sealed class TestViewModel : ObservableObject
                     Interlocked.Exchange(ref _masterPostStarted, 0);
                     MasterState = MasterSequenceState.WaitingGoodMaster;
                     ResetEngineWithoutChangedReentry();
-                    State = "KIỂM TRA MASTER ĐẠT";
-                    MasterStatus = "KIỂM TRA MASTER ĐẠT";
+                    State = "KIỂM TRA MASTER PASS";
+                    MasterStatus = "KIỂM TRA MASTER PASS";
                     AddLog("MASTER GOOD chưa PASS và đã tháo; giữ gate LOCKED, chờ kiểm tra lại.");
                     break;
                 }
 
                 if (_engine.HasWiringFault)
                 {
-                    State = "MASTER ĐẠT - FAIL";
-                    MasterStatus = "MẪU MASTER ĐẠT ĐANG CÓ LỖI DÂY - KIỂM TRA / THÁO MẪU";
+                    State = "MASTER PASS - FAIL";
+                    MasterStatus = "MẪU MASTER PASS ĐANG CÓ LỖI DÂY - KIỂM TRA / THÁO MẪU";
                     // Không alarm/eject theo logic Product FAIL. Good master chỉ được eject sau PASS thật.
                     _sound.SetWiringFaultAlarm(false);
                     if (Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
@@ -5425,8 +5425,8 @@ public sealed class TestViewModel : ObservableObject
 
             if (!resistancePassed)
             {
-                State = "MASTER ĐẠT - FAIL";
-                MasterStatus = "MASTER ĐẠT: ĐIỆN TRỞ KHÔNG ĐẠT - KHÔNG MỞ PRODUCTION";
+                State = "MASTER PASS - FAIL";
+                MasterStatus = "MASTER PASS: ĐIỆN TRỞ KHÔNG ĐẠT - KHÔNG MỞ PRODUCTION";
                 AddLog("MASTER GOOD FAIL - resistance out of range; không eject tự động.");
                 RecordMasterHistory(
                     HistoryInspectionType.MasterGood,
@@ -5442,8 +5442,8 @@ public sealed class TestViewModel : ObservableObject
             await WaitForProbeRelayInterlockAsync(ct);
             if (!_engine.ContinuityPassed || _engine.HasWiringFault)
             {
-                State = "MASTER ĐẠT - FAIL";
-                MasterStatus = "MASTER ĐẠT MẤT ĐIỀU KIỆN PASS - KIỂM TRA LẠI";
+                State = "MASTER PASS - FAIL";
+                MasterStatus = "MASTER PASS MẤT ĐIỀU KIỆN PASS - KIỂM TRA LẠI";
                 AddLog("MASTER GOOD FAIL - continuity không còn PASS trước relay.");
                 RecordMasterHistory(
                     HistoryInspectionType.MasterGood,
@@ -5458,8 +5458,8 @@ public sealed class TestViewModel : ObservableObject
                 onPassStarted: () =>
                 {
                     masterPassAt ??= DateTime.Now;
-                    State = "MASTER ĐẠT - PASS";
-                    MasterStatus = "MASTER ĐẠT - PASS";
+                    State = "MASTER PASS";
+                    MasterStatus = "MASTER PASS";
                     _sound.PlayTestOk();
                 },
                 markingEnabled: false,
@@ -5467,8 +5467,8 @@ public sealed class TestViewModel : ObservableObject
 
             if (!ok)
             {
-                State = "MASTER ĐẠT - FAIL";
-                MasterStatus = "MASTER ĐẠT KHÔNG HOÀN THÀNH PASS - KIỂM TRA LẠI";
+                State = "MASTER PASS - FAIL";
+                MasterStatus = "MASTER PASS KHÔNG HOÀN THÀNH PASS - KIỂM TRA LẠI";
                 AddLog("MASTER GOOD FAIL - CompletePassAsync trả false.");
                 RecordMasterHistory(
                     HistoryInspectionType.MasterGood,
@@ -5490,8 +5490,8 @@ public sealed class TestViewModel : ObservableObject
             MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: true);
             MasterState = MasterSequenceState.EjectingGoodMaster;
-            State = "MASTER ĐẠT - PASS";
-            MasterStatus = "MASTER ĐẠT - PASS";
+            State = "MASTER PASS";
+            MasterStatus = "MASTER PASS";
             AddLog("MASTER GOOD PASS");
             AddLog("MASTER GOOD EJECT - Relay 1 JIG; không MARKING, không cộng sản lượng.");
 
@@ -5507,7 +5507,7 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             State = "LỖI THIẾT BỊ - MASTER";
-            MasterStatus = $"LỖI KIỂM TRA MASTER ĐẠT: {ex.Message}";
+            MasterStatus = $"LỖI KIỂM TRA MASTER PASS: {ex.Message}";
             AddLog(MasterStatus);
         }
         finally
@@ -6102,7 +6102,7 @@ public sealed class TestViewModel : ObservableObject
             }
 
             _waterProofStage = result.Passed ? WaterProofStage.Passed : WaterProofStage.Failed;
-            _waterProofStageText = result.Passed ? "KÍN NƯỚC ĐẠT" : "KÍN NƯỚC KHÔNG ĐẠT";
+            _waterProofStageText = result.Passed ? "KÍN NƯỚC PASS" : "KÍN NƯỚC KHÔNG ĐẠT";
             _waterProofOverallResult = result.Passed ? "PASS" : "FAIL";
             SelectedOperationTabIndex = 3;
             Raise(nameof(WaterProofStageText));

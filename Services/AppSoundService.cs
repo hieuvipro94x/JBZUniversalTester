@@ -200,7 +200,7 @@ public sealed class AppSoundService : IDisposable
         EnsureInitialized();
 
         // DINGDONG phải tiếp tục phát xuyên suốt các cập nhật UI
-        // ĐẠT -> THÁO SẢN PHẨM -> SẴN SÀNG. SoundPlayer dùng chung
+        // PASS -> THÁO SẢN PHẨM -> SẴN SÀNG. SoundPlayer dùng chung
         // PlaySound của Windows, vì vậy Stop() trên player Probe/fault khác
         // cũng có thể cắt âm PASS nếu không có khoảng bảo vệ này.
         if (Interlocked.CompareExchange(ref _testOkPlaybackActive, 1, 0) != 0)

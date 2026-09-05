@@ -57,6 +57,8 @@ public sealed class TestEngine : IDisposable
         internal Dictionary<ClipBranch, string> ConfirmationKeyByClip { get; init; } = null!;
     }
     const int ClipDisplayOrderBase = -1_000_000;
+    const string PendingConnectionStatus = "CHƯA KẾT NỐI";
+    const string RemovalConnectionStatus = "CHỜ THÁO";
     public const int JigEjectRelay = 1;
     public const int MarkingRelay = 2;
 
@@ -87,7 +89,9 @@ public sealed class TestEngine : IDisposable
     Dictionary<PinRecord, int> _displayOrderByPin = new(ReferenceEqualityComparer.Instance);
     Dictionary<WireNet, int> _displayOrderByNet = new(ReferenceEqualityComparer.Instance);
     Dictionary<WireNet, FaultRow[]> _displayRowsByNet = new(ReferenceEqualityComparer.Instance);
+    Dictionary<WireNet, FaultRow[]> _removalDisplayRowsByNet = new(ReferenceEqualityComparer.Instance);
     Dictionary<ClipBranch, FaultRow> _displayRowByClip = new(ReferenceEqualityComparer.Instance);
+    Dictionary<ClipBranch, FaultRow> _removalDisplayRowByClip = new(ReferenceEqualityComparer.Instance);
     FaultRow? _clipCommonDisplayRow;
     readonly Dictionary<string, bool> _expectedConnectionScratch = new(StringComparer.Ordinal);
     volatile bool _frameProcessingEnabled = true;
@@ -405,16 +409,28 @@ public sealed class TestEngine : IDisposable
             // Connector/Pin/WireName/Color/IO-CN-PN cho hàng trăm endpoint.
             _displayRowsByNet = new Dictionary<WireNet, FaultRow[]>(
                 ReferenceEqualityComparer.Instance);
+            _removalDisplayRowsByNet = new Dictionary<WireNet, FaultRow[]>(
+                ReferenceEqualityComparer.Instance);
             foreach (WireNet net in prepared.Model.Nets)
-                _displayRowsByNet[net] = CreateNetworkMappingRowsCore(net);
+            {
+                _displayRowsByNet[net] = CreateNetworkMappingRowsCore(net, PendingConnectionStatus);
+                _removalDisplayRowsByNet[net] = CreateNetworkMappingRowsCore(net, RemovalConnectionStatus);
+            }
 
             _displayRowByClip = new Dictionary<ClipBranch, FaultRow>(
                 ReferenceEqualityComparer.Instance);
+            _removalDisplayRowByClip = new Dictionary<ClipBranch, FaultRow>(
+                ReferenceEqualityComparer.Instance);
             foreach (ClipBranch branch in prepared.Model.Clip?.Branches ?? [])
-                _displayRowByClip[branch] = CreateMissingClipConnectionRow(prepared.Model.Clip!, branch);
+            {
+                _displayRowByClip[branch] = CreateMissingClipConnectionRow(
+                    prepared.Model.Clip!, branch, PendingConnectionStatus);
+                _removalDisplayRowByClip[branch] = CreateMissingClipConnectionRow(
+                    prepared.Model.Clip!, branch, RemovalConnectionStatus);
+            }
             _clipCommonDisplayRow = prepared.Model.Clip is null
                 ? null
-                : CreateClipCommonDisplayRow(prepared.Model.Clip);
+                : CreateClipCommonDisplayRow(prepared.Model.Clip, PendingConnectionStatus);
             _latchedClipKeys.Clear();
             ResetUnsafe();
         }
@@ -1552,7 +1568,7 @@ public sealed class TestEngine : IDisposable
                 if (IsEligibleProductionNet(net) &&
                     !net.IoNumbers.Any(diagnosticIos.Contains) &&
                     IsWireNetConnected(net, _currentConnections) &&
-                    _displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
+                    _removalDisplayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
                     rows.AddRange(cachedRows);
             }
 
@@ -1562,7 +1578,7 @@ public sealed class TestEngine : IDisposable
                 {
                     if (IsEligibleClipBranch(model.Clip, branch) &&
                         IsClipBranchConnected(model.Clip, branch, _currentConnections) &&
-                        _displayRowByClip.TryGetValue(branch, out FaultRow? row))
+                        _removalDisplayRowByClip.TryGetValue(branch, out FaultRow? row))
                         rows.Add(row);
                 }
             }
@@ -1857,10 +1873,10 @@ public sealed class TestEngine : IDisposable
 
         return _displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows)
             ? cachedRows
-            : CreateNetworkMappingRowsCore(net);
+            : CreateNetworkMappingRowsCore(net, PendingConnectionStatus);
     }
 
-    private FaultRow[] CreateNetworkMappingRowsCore(WireNet net)
+    private FaultRow[] CreateNetworkMappingRowsCore(WireNet net, string status)
     {
 
         PinRecord[] pins = net.Pins
@@ -1909,7 +1925,7 @@ public sealed class TestEngine : IDisposable
                     Splice = pin.SpliceName,
                     Section = pin.Section,
                     Color = pin.Color,
-                    Status = "CHỜ THÁO"
+                    Status = status
                 };
             })
             .ToArray();
@@ -1988,7 +2004,7 @@ public sealed class TestEngine : IDisposable
     FaultRow CreateMissingConnectionRow(WireNet net) =>
         CreateNetworkMappingRows(net, connected: false).First();
 
-    FaultRow CreateMissingClipConnectionRow(ClipTopology clip, ClipBranch branch)
+    FaultRow CreateMissingClipConnectionRow(ClipTopology clip, ClipBranch branch, string status)
     {
         PinRecord displayPin = branch.TargetPin ?? branch.ClipPin;
         return new FaultRow
@@ -2006,11 +2022,11 @@ public sealed class TestEngine : IDisposable
             Splice = displayPin.SpliceName,
             Section = displayPin.Section,
             Color = displayPin.Color,
-            Status = "CHƯA KẾT NỐI"
+            Status = status
         };
     }
 
-    FaultRow CreateClipCommonDisplayRow(ClipTopology clip)
+    FaultRow CreateClipCommonDisplayRow(ClipTopology clip, string status)
     {
         PinRecord common = clip.CommonPin;
         return new FaultRow
@@ -2026,7 +2042,7 @@ public sealed class TestEngine : IDisposable
             Splice = common.SpliceName,
             Section = common.Section,
             Color = common.Color,
-            Status = "CHƯA KẾT NỐI"
+            Status = status
         };
     }
 

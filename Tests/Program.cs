@@ -669,15 +669,15 @@ internal static class Program
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
-        Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MASTER ĐẠT" &&
-               enabledMasterVm.State == "KIỂM TRA MASTER ĐẠT" &&
+        Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MASTER PASS" &&
+               enabledMasterVm.State == "KIỂM TRA MASTER PASS" &&
                enabledMasterVm.StateBackground == "#FFF3A0",
             "Waiting Master uses the compact production display and canonical yellow background");
 
         TestViewModel statusVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         statusVm.State = "PASS";
-        Assert(statusVm.ResultStatusText == "ĐẠT" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
-            "PASS state keeps the existing Vietnamese ĐẠT header mapping");
+        Assert(statusVm.ResultStatusText == "PASS" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
+            "PASS state keeps the canonical PASS header mapping");
         statusVm.State = "PASS - THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" && statusVm.StateBackground == "#2AA84A",
             "Committed PASS explicitly asks for product removal until ProductRemoved returns the UI to ready");
@@ -1601,7 +1601,7 @@ internal static class Program
             "Resistance and Leak result columns must share green PASS/red FAIL cell presentation");
         Assert(xaml.Contains("<Viewbox Margin=\"10\"", StringComparison.Ordinal) &&
                xaml.Contains("StretchDirection=\"DownOnly\"", StringComparison.Ordinal),
-            "Large result text scales down to keep ĐẠT/KHÔNG ĐẠT/SẴN SÀNG inside its box");
+            "Large result text scales down to keep PASS/KHÔNG ĐẠT/SẴN SÀNG inside its box");
 
         ProductModel connectorModel = HtdrvTwoEndpointModel();
         using TestEngine connectorEngine = CreateEngine(out _);
@@ -2975,6 +2975,11 @@ internal static class Program
                remainingClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI") &&
                !engine.HasWiringFault,
             "Latching CLIP a1 hides only common/a1 per existing common behavior; a2/a3 remain without false SHORT");
+        FaultRow[] clipRemovalRows = engine.BuildRemovalRows().ToArray();
+        Assert(clipRemovalRows.Length == 1 &&
+               clipRemovalRows[0].Io == 202 &&
+               clipRemovalRows[0].Status == "CHỜ THÁO",
+            "Connected CLIP removal rows use the removal-only CHỜ THÁO presentation");
     }
 
     private static void TestFinalHtdrvTestWindowPresentation()
@@ -3059,11 +3064,15 @@ internal static class Program
 
         engine.SetModel(model);
         engine.ProcessFrame(FrameSeq(130, (1, new[] { 3 }), (2, new[] { 4 })));
-        Assert(engine.BuildRemovalRows().Count == 4,
+        FaultRow[] connectedRemovalRows = engine.BuildRemovalRows().ToArray();
+        Assert(connectedRemovalRows.Length == 4 &&
+               connectedRemovalRows.All(row => row.Status == "CHỜ THÁO"),
             "Removal presentation initially shows every connection still on the jig");
         engine.ProcessFrame(FrameSeq(131, (2, new[] { 4 })));
         FaultRow[] remaining = engine.BuildRemovalRows().ToArray();
-        Assert(remaining.Length == 2 && remaining.All(row => row.WireName == "BG2") && !engine.IsProductReleased,
+        Assert(remaining.Length == 2 &&
+               remaining.All(row => row.WireName == "BG2" && row.Status == "CHỜ THÁO") &&
+               !engine.IsProductReleased,
             "Removing one network hides only that network and retains the last real connection");
         engine.ProcessFrame(FrameSeq(132));
         Assert(engine.BuildRemovalRows().Count == 0 && engine.IsProductReleased,
