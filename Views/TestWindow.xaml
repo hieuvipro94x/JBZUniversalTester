@@ -37,6 +37,15 @@
         <SolidColorBrush x:Key="PiBlueTextBrush" Color="#0026D9"/>
         <SolidColorBrush x:Key="PiStopButtonBrush" Color="#F1B8B8"/>
         <SolidColorBrush x:Key="PiMaintenanceButtonBrush" Color="#F6D38B"/>
+        <SolidColorBrush x:Key="LabelRetryBackground" Color="#FFF4E5"/>
+        <SolidColorBrush x:Key="LabelRetryForeground" Color="#8A4B08"/>
+        <SolidColorBrush x:Key="LabelRetryBorder" Color="#D9A441"/>
+        <SolidColorBrush x:Key="LabelReprintBackground" Color="#E5F5F3"/>
+        <SolidColorBrush x:Key="LabelReprintForeground" Color="#0F766E"/>
+        <SolidColorBrush x:Key="LabelReprintBorder" Color="#86C8C1"/>
+        <SolidColorBrush x:Key="TestExitBackground" Color="#FFF0F0"/>
+        <SolidColorBrush x:Key="TestExitForeground" Color="#A61B1B"/>
+        <SolidColorBrush x:Key="TestExitBorder" Color="#D97979"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <sys:Double x:Key="TestGridBaseFontSize">18</sys:Double>
         <sys:Double x:Key="TestFaultGridFontSize">20</sys:Double>
@@ -57,6 +66,82 @@
             <Setter Property="Padding" Value="8,0"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="TestSemanticButtonBase"
+               TargetType="Button"
+               BasedOn="{StaticResource PiButtonStyle}">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="ButtonBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4"/>
+                            <Border x:Name="InteractionOverlay"
+                                    Background="#000000"
+                                    CornerRadius="4"
+                                    IsHitTestVisible="False"
+                                    Opacity="0"/>
+                            <ContentPresenter
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.08"/>
+                            </MultiTrigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsPressed" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.16"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#E5E7EB"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#CBD5E1"/>
+                                <Setter Property="Foreground" Value="#9CA3AF"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="LabelRetryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource TestSemanticButtonBase}">
+            <Setter Property="Background" Value="{StaticResource LabelRetryBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource LabelRetryForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LabelRetryBorder}"/>
+        </Style>
+
+        <Style x:Key="LabelReprintButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource TestSemanticButtonBase}">
+            <Setter Property="Background" Value="{StaticResource LabelReprintBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource LabelReprintForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource LabelReprintBorder}"/>
+        </Style>
+
+        <Style x:Key="TestExitButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource TestSemanticButtonBase}">
+            <Setter Property="Background" Value="{StaticResource TestExitBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TestExitForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource TestExitBorder}"/>
+            <Setter Property="FontWeight" Value="Bold"/>
         </Style>
 
         <Style x:Key="IndustrialLabelStyle" TargetType="TextBlock">
@@ -326,17 +411,22 @@
 
         <DataTemplate x:Key="WireColorCellTemplate">
             <Border Background="{Binding WireColorBrush}"
-                    BorderThickness="0"
+                    BorderBrush="#707070"
+                    BorderThickness="1"
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Stretch">
-                <TextBlock Text="{Binding WireColorText}"
-                           Foreground="{Binding WireColorForegroundBrush}"
-                           FontFamily="Malgun Gothic"
-                           FontSize="{DynamicResource TestFaultGridFontSize}"
-                           FontWeight="SemiBold"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"
-                           TextAlignment="Center"/>
+                <Border Background="#F2FFFFFF"
+                        CornerRadius="2"
+                        Padding="2,0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                    <TextBlock Text="{Binding WireColorText}"
+                               Foreground="{Binding WireColorForegroundBrush}"
+                               FontFamily="Malgun Gothic"
+                               FontSize="{DynamicResource TestFaultGridFontSize}"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"/>
+                </Border>
             </Border>
         </DataTemplate>
     </Window.Resources>
@@ -367,19 +457,25 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0" Margin="0,0,6,0">
-                <Grid Height="38">
-                    <Button Content="V&#7872; TRANG CH&#205;NH"
+                <Grid x:Name="HeaderNavigationRow" Height="38">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="160"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Content="TRANG CH&#205;NH"
                             Click="BackToMain_Click"
-                            Style="{StaticResource PiButtonStyle}"
-                            Width="166"
-                            HorizontalAlignment="Left"/>
+                            Style="{StaticResource TestExitButtonStyle}"
+                            Width="160"
+                            HorizontalAlignment="Stretch"/>
 
                     <!-- 4 đèn trạng thái: Vàng - Trắng - Xanh - Đỏ.
                          Giữ nguyên x:Name để không ảnh hưởng code-behind. -->
-                    <StackPanel Orientation="Horizontal"
+                    <StackPanel x:Name="StatusLedPanel"
+                                Grid.Column="1"
+                                Orientation="Horizontal"
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
-                                Margin="0,0,1,0">
+                                Margin="10,0,2,0">
                         <Ellipse x:Name="YellowStatusLed"
                                  Width="15" Height="15" Margin="0,0,4,0"
                                  Fill="#6B6240" Stroke="#4B5563" StrokeThickness="1"/>
@@ -394,27 +490,27 @@
                                  Fill="#5A3030" Stroke="#4B5563" StrokeThickness="1"/>
                     </StackPanel>
                 </Grid>
-                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                    <Button Content="TH&#7916; IN L&#7840;I"
+                <Grid x:Name="LabelActionButtonsPanel" Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Content="TH&#7916; L&#7840;I IN TEM"
                             Command="{Binding RetryLabelCommand}"
-                            Style="{StaticResource PiButtonStyle}"
-                            Width="112"
+                            Style="{StaticResource LabelRetryButtonStyle}"
                             Height="30"
-                            FontSize="11"/>
-                    <Button Content="IN L&#7840;I TEM"
+                            FontSize="9.5"
+                            ToolTip="Ch&#7881; th&#7917; l&#7841;i l&#7847;n in &#273;&#7847;u &#273;&#227; th&#7845;t b&#7841;i; th&#224;nh c&#244;ng s&#7869; ho&#224;n t&#7845;t giao d&#7883;ch LOT."/>
+                    <Button Grid.Column="2"
+                            Content="IN TH&#202;M B&#7842;N SAO"
                             Command="{Binding ReprintLabelCommand}"
-                            Style="{StaticResource PiButtonStyle}"
-                            Width="112"
+                            Style="{StaticResource LabelReprintButtonStyle}"
                             Height="30"
-                            FontSize="11"
-                            Margin="6,0,0,0"/>
-                </StackPanel>
-                <TextBlock Text="{Binding LabelStatusText}"
-                           ToolTip="{Binding LabelStatusText}"
-                           Width="230"
-                           Margin="0,4,0,0"
-                           FontSize="10"
-                           TextTrimming="CharacterEllipsis"/>
+                            FontSize="9.5"
+                            ToolTip="In th&#234;m b&#7843;n sao c&#7911;a tem &#273;&#227; in th&#224;nh c&#244;ng; kh&#244;ng t&#259;ng LOT v&#224; c&#243; ghi l&#7883;ch s&#7917; reprint."/>
+                </Grid>
                 <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="132"/>
@@ -518,30 +614,26 @@
             </Grid>
 
             <Border Grid.Column="2"
-                    Width="300"
-                    Height="150"
+                    Width="282"
+                    Height="78"
                     Margin="0,0,14,0"
                     VerticalAlignment="Top"
-                    Background="{Binding WaterProofCardBackground}"
-                    BorderBrush="#BFC8D2"
-                    BorderThickness="1"
-                    CornerRadius="14"
+                    Background="White"
+                    ToolTip="{Binding WaterProofStageText}"
+                    SnapsToDevicePixels="True"
                     Visibility="{Binding IsWaterProofCardVisible, Converter={StaticResource BoolToVisibilityConverter}}">
-                <Grid Margin="12,8">
+                <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="30"/>
-                        <RowDefinition Height="78"/>
-                        <RowDefinition Height="24"/>
+                        <RowDefinition Height="48"/>
                     </Grid.RowDefinitions>
 
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                        <Ellipse Width="8" Height="8" Fill="{Binding WaterProofAccentBrush}" Margin="0,0,7,0"/>
-                        <TextBlock Text="ĐỘ RÒ RỈ"
-                                   FontSize="18"
-                                   FontWeight="Bold"
-                                   Foreground="#26344A"
-                                   VerticalAlignment="Center"/>
-                    </StackPanel>
+                    <TextBlock Text="ĐỘ RÒ RỈ"
+                               FontSize="17"
+                               FontWeight="SemiBold"
+                               Foreground="#111111"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"/>
 
                     <ItemsControl Grid.Row="1" ItemsSource="{Binding WaterProofChannels}" HorizontalAlignment="Center">
                         <ItemsControl.ItemsPanel>
@@ -551,61 +643,22 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Width="86" Margin="3,0" HorizontalAlignment="Center">
-                                    <TextBlock Text="{Binding ChannelText}"
-                                               FontSize="11"
+                                <Border Width="94"
+                                        Height="48"
+                                        Background="{Binding LiveCellBackground}"
+                                        BorderBrush="#222222"
+                                        BorderThickness="1">
+                                    <TextBlock Text="{Binding LiveMachineValueText}"
+                                               Foreground="#000000"
+                                               FontSize="18"
                                                FontWeight="SemiBold"
-                                               Foreground="#344054"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
                                                TextAlignment="Center"/>
-                                    <Border Height="42"
-                                            Margin="0,3,0,0"
-                                            Background="#66778D"
-                                            BorderBrush="#9BA8B8"
-                                            BorderThickness="1"
-                                            CornerRadius="10">
-                                        <StackPanel Orientation="Horizontal"
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding LeakText}"
-                                                       Foreground="White"
-                                                       FontSize="16"
-                                                       FontWeight="Bold"/>
-                                            <TextBlock Text=" kPa"
-                                                       Foreground="White"
-                                                       FontSize="10.5"
-                                                       Margin="2,0,0,1"
-                                                       VerticalAlignment="Bottom"/>
-                                        </StackPanel>
-                                    </Border>
-                                    <TextBlock Text="{Binding ResultText}"
-                                               FontSize="10.5"
-                                               FontWeight="SemiBold"
-                                               Foreground="#344054"
-                                               TextAlignment="Center"/>
-                                </StackPanel>
+                                </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-
-                    <Grid Grid.Row="2">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding WaterProofStageText}"
-                                   FontSize="10.5"
-                                   FontWeight="SemiBold"
-                                   Foreground="#344054"
-                                   VerticalAlignment="Center"
-                                   TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Grid.Column="1"
-                                   Text="{Binding WaterProofOverallResult}"
-                                   FontSize="11"
-                                   FontWeight="Bold"
-                                   Foreground="{Binding WaterProofAccentBrush}"
-                                   Margin="8,0,0,0"
-                                   VerticalAlignment="Center"/>
-                    </Grid>
                 </Grid>
             </Border>
 

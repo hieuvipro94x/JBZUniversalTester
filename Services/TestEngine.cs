@@ -1906,6 +1906,49 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// Xác nhận toàn bộ quan hệ continuity thuộc connector đã mất. Khác với
+    /// !IsConnectorConnected: chỉ một chân chập chờn/thiếu không được xem là
+    /// thao tác tháo connector để kích hoạt Leak retest.
+    /// </summary>
+    public bool IsConnectorDisconnected(string? connectorId)
+    {
+        if (string.IsNullOrWhiteSpace(connectorId))
+            return false;
+
+        lock (_gate)
+        {
+            if (_model is null)
+                return false;
+
+            ConnectorDefinition? connector = _model.Connectors.FirstOrDefault(item =>
+                string.Equals(item.ConnectorId, connectorId.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (connector is null)
+                return false;
+
+            WireNet[] requiredNets = _model.Nets
+                .Where(IsEligibleProductionNet)
+                .Where(net => net.Pins.Any(pin =>
+                    string.Equals(pin.Connector, connector.ConnectorId, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+
+            ClipBranch[] requiredClipBranches = _model.Clip?.Branches
+                .Where(branch => IsEligibleClipBranch(_model.Clip, branch))
+                .Where(branch =>
+                    string.Equals(branch.ClipPin.Connector, connector.ConnectorId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(branch.TargetPin?.Connector, connector.ConnectorId, StringComparison.OrdinalIgnoreCase))
+                .ToArray() ?? [];
+
+            int requiredRelationCount = requiredNets.Length + requiredClipBranches.Length;
+            if (requiredRelationCount == 0)
+                return false;
+
+            return requiredNets.All(net => !IsWireNetConnected(net, _currentConnections)) &&
+                   requiredClipBranches.All(branch =>
+                       !IsClipBranchConnected(_model.Clip!, branch, _currentConnections));
+        }
+    }
+
     int ResolveNetworkEndpointDisplayOrder(WireNet net, PinRecord pin, int endpointIndex) =>
         _displayOrderByNet.TryGetValue(net, out int baseOrder)
             ? baseOrder + Math.Clamp(endpointIndex, 0, 999)

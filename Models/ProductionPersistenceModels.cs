@@ -262,7 +262,7 @@ public sealed record ProductionResultCommitRequest(
                 item.SecondPressure,
                 item.Leak,
                 item.Passed)).ToArray() ?? [],
-            !HistoryInspectionType.IsMaster(history.InspectionType));
+            HistoryInspectionType.IsProduct(history.InspectionType));
     }
 }
 

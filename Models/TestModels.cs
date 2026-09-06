@@ -39,11 +39,11 @@ public sealed class FaultRow : ObservableObject
     private static readonly Brush PiFailBrush = Frozen(System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28));
     private static readonly Brush PiOpenTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x00, 0x26, 0xD9));
     private static readonly Brush WhiteBrush = Brushes.White;
+    private static readonly Brush WireColorTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x11, 0x11, 0x11));
 
     string _status = "";
     string? _ioCnPnText;
     string? _presentationKey;
-    Brush? _wireColorForegroundBrush;
     public FaultKind Kind { get; init; }
     public ProductFaultType ProductFaultType { get; init; } = ProductFaultType.None;
     public string FaultCode => FaultTypeCatalog.Code(ProductFaultType);
@@ -73,7 +73,7 @@ public sealed class FaultRow : ObservableObject
     public string IoCnPnText => _ioCnPnText ??= BuildIoCnPnText();
     public string WireColorText => WireColorToBrushConverter.ToDisplayCode(Color);
     public Brush WireColorBrush => WireColorToBrushConverter.ToBrush(Color);
-    public Brush WireColorForegroundBrush => _wireColorForegroundBrush ??= ResolveWireColorForeground();
+    public Brush WireColorForegroundBrush => WireColorTextBrush;
     public Brush Color1Brush => TokenBrush(0);
     public Brush Color2Brush => TokenBrush(1);
     public Brush Color3Brush => TokenBrush(2);
@@ -158,18 +158,6 @@ public sealed class FaultRow : ObservableObject
     {
         IReadOnlyList<string> tokens = WireColorToBrushConverter.Tokenize(Color);
         return index >= 0 && index < tokens.Count;
-    }
-
-    private Brush ResolveWireColorForeground()
-    {
-        Brush background = Color1Brush;
-        if (background is not SolidColorBrush solid || !HasColor1)
-            return RowForegroundBrush;
-
-        Color color = solid.Color;
-        double luminance =
-            (0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B) / 255.0;
-        return luminance >= 0.48 ? PiDarkTextBrush : WhiteBrush;
     }
 
     private static SolidColorBrush Frozen(Color color)

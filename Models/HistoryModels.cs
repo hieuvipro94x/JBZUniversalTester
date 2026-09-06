@@ -73,15 +73,16 @@ public sealed class TestHistoryRecord
     public string BarcodeOutputText => BarcodeValue ?? string.Empty;
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
     public string ExportLotText => LotText ?? string.Empty;
+    public bool IsProductionRecord => HistoryInspectionType.IsProduct(InspectionType);
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
     public string InspectionTypeText => HistoryInspectionType.KoreanName(InspectionType);
     public string ExportProgressText => Passed ? "1/1" : "0/1";
     public string ExportResultText => Passed ? "합격" : "불량";
-    public long? ExportAcceptedLotNo => !IsMasterRecord && Passed && LotNo > 0 ? LotNo : null;
+    public long? ExportAcceptedLotNo => IsProductionRecord && Passed && LotNo > 0 ? LotNo : null;
     public long? ExportSequenceNo => ExportAcceptedLotNo;
     public string ExportBarcodeInputText => string.Empty;
     public string ExportBarcodeText =>
-        !IsMasterRecord &&
+        IsProductionRecord &&
         Passed &&
         string.Equals(PrintStatus, LabelPrintStatus.Printed.ToString(), StringComparison.OrdinalIgnoreCase)
             ? BarcodeOutputText
@@ -210,8 +211,15 @@ public sealed class TestHistoryRecord
 public static class HistoryInspectionType
 {
     public const string Product = "PRODUCT";
+    public const string LeakRetest = "LEAK_RETEST";
     public const string MasterGood = "MASTER_GOOD";
     public const string MasterBad = "MASTER_BAD";
+
+    public static bool IsProduct(string? value) =>
+        string.Equals(value, Product, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsLeakRetest(string? value) =>
+        string.Equals(value, LeakRetest, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsMaster(string? value) =>
         string.Equals(value, MasterGood, StringComparison.OrdinalIgnoreCase) ||
@@ -221,6 +229,7 @@ public static class HistoryInspectionType
     {
         MasterGood => "마스터 합격품",
         MasterBad => "마스터 불량품",
+        LeakRetest => "LEAK RETEST",
         _ => "제품"
     };
 }

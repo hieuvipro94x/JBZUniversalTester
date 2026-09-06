@@ -629,7 +629,7 @@ public sealed class TestHistoryStore
             faults,
             [],
             [],
-            !HistoryInspectionType.IsMaster(row.InspectionType));
+            HistoryInspectionType.IsProduct(row.InspectionType));
     }
 
     private static ProductFaultType ParseFaultType(string? code) => code?.Trim().ToUpperInvariant() switch

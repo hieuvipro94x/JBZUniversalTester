@@ -40,6 +40,14 @@ public sealed class TestViewModel : ObservableObject
         EquipmentError = 7
     }
 
+    private enum WaterProofRetestConnectorState
+    {
+        Inactive = 0,
+        AwaitingConnectorRemoval = 1,
+        AwaitingConnectorReconnect = 2,
+        Running = 3
+    }
+
     private readonly MainViewModel _main;
     private readonly TestEngine _engine;
     private readonly IBoardTransport _board;
@@ -89,6 +97,8 @@ public sealed class TestViewModel : ObservableObject
     private string _waterProofStageText = "CHỜ KIỂM TRA";
     private string _waterProofOverallResult = "---";
     private int _waterProofRunning;
+    private int _waterProofRetestConnectorState;
+    private int _waterProofRetestAttempt;
     // Runtime-only baseline dùng để hiển thị độ rò realtime trong giai đoạn WAIT.
     // Không tham gia PASS/FAIL, history hoặc kết quả :RESULT cuối cùng.
     private readonly double?[] _waterProofLivePressBaseline = new double?[3];
@@ -2284,6 +2294,8 @@ public sealed class TestViewModel : ObservableObject
             }
 
             TryCompleteFaultProductRemoval();
+            if (_waitForFaultProductRemoval)
+                ObserveWaterProofRetestConnectorCycle(generation);
 
             return;
         }
@@ -2319,6 +2331,10 @@ public sealed class TestViewModel : ObservableObject
                 AddLog(wasWaterProofEquipmentRecovery
                     ? "Đã tháo sản phẩm sau lỗi thiết bị leak - ARM lại chu kỳ, leak COM sẽ reconnect ở lần chạy kế tiếp."
                     : "PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
+            }
+            else
+            {
+                ObserveWaterProofRetestConnectorCycle(generation);
             }
 
             return;
@@ -2558,6 +2574,10 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _postContinuityStarted, 0);
         Interlocked.Exchange(ref _waterProofRunning, 0);
+        Interlocked.Exchange(
+            ref _waterProofRetestConnectorState,
+            (int)WaterProofRetestConnectorState.Inactive);
+        Interlocked.Exchange(ref _waterProofRetestAttempt, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
         _cycleActive = true;
@@ -5911,6 +5931,10 @@ public sealed class TestViewModel : ObservableObject
         _waterProofProfile = ProductionConfigService.GetWaterProofProfileForPath(
             _productionSettings,
             CurrentModelPath ?? _model?.SourcePath);
+        Interlocked.Exchange(
+            ref _waterProofRetestConnectorState,
+            (int)WaterProofRetestConnectorState.Inactive);
+        Interlocked.Exchange(ref _waterProofRetestAttempt, 0);
         ResetWaterProofDisplay();
         Raise(nameof(IsWaterProofCardVisible));
         Raise(nameof(WaterProofLeakLimitText));
@@ -5995,6 +6019,7 @@ public sealed class TestViewModel : ObservableObject
                         continue;
 
                     double current = Math.Abs(progress.Values[i]);
+                    row.LiveMachineValue = current;
 
                     if (progress.Stage == WaterProofStage.Pressurizing)
                     {
@@ -6031,9 +6056,12 @@ public sealed class TestViewModel : ObservableObject
         });
     }
 
-    private Task ApplyWaterProofFinalResultAsync(WaterProofRunResult result)
+    private Task ApplyWaterProofFinalResultAsync(
+        WaterProofRunResult result,
+        bool captureForProductHistory = true)
     {
-        _lastWaterProofMeasurements = result.Channels.ToArray();
+        if (captureForProductHistory)
+            _lastWaterProofMeasurements = result.Channels.ToArray();
         return InvokeUiAsync(() =>
         {
             foreach (WaterProofChannelMeasurement measurement in result.Channels.Where(item => item.Enabled))
@@ -6054,6 +6082,7 @@ public sealed class TestViewModel : ObservableObject
                 row.FirstResultPressure = measurement.FirstPressure;
                 row.SecondResultPressure = measurement.SecondPressure;
                 row.Leak = measurement.Leak;
+                row.LiveMachineValue = measurement.Leak;
                 row.Passed = measurement.Passed;
                 row.IsMeasured = true;
             }
@@ -6076,6 +6105,7 @@ public sealed class TestViewModel : ObservableObject
         // đã được tháo trong popup thì không bị bỏ lỡ ProductRemoved.
         ResetEngineWithoutChangedReentry();
         _engine.SetFrameProcessingEnabled(true);
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
         if (_model is ProductModel model)
             ArmFaultProductRemoval(model);
         else
@@ -6091,6 +6121,7 @@ public sealed class TestViewModel : ObservableObject
         // Giữ bảng kết quả Leak trong suốt thời gian sản phẩm còn nối với
         // bất kỳ I/O nào. ResetFullCycleAfterProductRemoved() là nơi duy nhất
         // rời bảng kết quả sau frame xác nhận đã tháo toàn bộ sản phẩm.
+        ArmWaterProofRetestConnectorCycle();
     }
 
     private void ShowWaterProofOperationPanel() =>
@@ -6164,6 +6195,7 @@ public sealed class TestViewModel : ObservableObject
         // thấy kết quả cho tới khi D2XX xác nhận toàn bộ continuity đã mất.
         // ResetFullCycleAfterProductRemoved() sẽ chuyển tab về 0.
         State = "PASS - THÁO SẢN PHẨM";
+        ArmWaterProofRetestConnectorCycle();
     }
 
     private bool TryValidateWaterProofConnectorGate(
@@ -6198,6 +6230,311 @@ public sealed class TestViewModel : ObservableObject
 
         error = string.Empty;
         return true;
+    }
+
+    private string[] ConfiguredWaterProofConnectorIds() =>
+        Enumerable.Range(1, 3)
+            .Where(_waterProofProfile.IsChannelEnabled)
+            .Select(channel => _waterProofProfile.ConnectorForChannel(channel).Trim())
+            .Where(connectorId => connectorId.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    private void ArmWaterProofRetestConnectorCycle()
+    {
+        string[] connectorIds = ConfiguredWaterProofConnectorIds();
+        if (!IsWaterProofEnabledForCurrentModel() ||
+            _lastWaterProofMeasurements.Count == 0 ||
+            connectorIds.Length == 0 ||
+            (!_waitForProductRelease && !_waitForFaultProductRemoval))
+        {
+            Interlocked.Exchange(
+                ref _waterProofRetestConnectorState,
+                (int)WaterProofRetestConnectorState.Inactive);
+            return;
+        }
+
+        Interlocked.Exchange(
+            ref _waterProofRetestConnectorState,
+            (int)WaterProofRetestConnectorState.AwaitingConnectorRemoval);
+        AddLog(
+            $"[WATERPROOF-RETEST] Đã ARM; tháo rồi lắp lại connector " +
+            $"{string.Join(", ", connectorIds)} để chỉ chạy lại Leak trên cùng sản phẩm.");
+    }
+
+    private void ObserveWaterProofRetestConnectorCycle(long generation)
+    {
+        if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+            Volatile.Read(ref _removalMonitoringFromMain) != 0 ||
+            !IsWaterProofEnabledForCurrentModel() ||
+            (!_waitForProductRelease && !_waitForFaultProductRemoval) ||
+            _model is not ProductModel cycleModel)
+        {
+            return;
+        }
+
+        string[] connectorIds = ConfiguredWaterProofConnectorIds();
+        if (connectorIds.Length == 0)
+            return;
+
+        var current = (WaterProofRetestConnectorState)Volatile.Read(
+            ref _waterProofRetestConnectorState);
+        if (current == WaterProofRetestConnectorState.AwaitingConnectorRemoval)
+        {
+            bool allDisconnected = connectorIds.All(_engine.IsConnectorDisconnected);
+            if (!allDisconnected || !_engine.HasProductActivity)
+                return;
+
+            if (Interlocked.CompareExchange(
+                    ref _waterProofRetestConnectorState,
+                    (int)WaterProofRetestConnectorState.AwaitingConnectorReconnect,
+                    (int)WaterProofRetestConnectorState.AwaitingConnectorRemoval) ==
+                (int)WaterProofRetestConnectorState.AwaitingConnectorRemoval)
+            {
+                State = $"LẮP LẠI CONNECTOR LEAK {string.Join(", ", connectorIds)}";
+                AddLog(
+                    $"[WATERPROOF-RETEST] Đã xác nhận tháo connector {string.Join(", ", connectorIds)}; " +
+                    "sản phẩm vẫn còn trên JIG, chờ lắp lại.");
+            }
+            return;
+        }
+
+        if (current != WaterProofRetestConnectorState.AwaitingConnectorReconnect ||
+            !connectorIds.All(_engine.IsConnectorConnected))
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(
+                ref _waterProofRetestConnectorState,
+                (int)WaterProofRetestConnectorState.Running,
+                (int)WaterProofRetestConnectorState.AwaitingConnectorReconnect) !=
+            (int)WaterProofRetestConnectorState.AwaitingConnectorReconnect)
+        {
+            return;
+        }
+
+        AddLog(
+            $"[WATERPROOF-RETEST] Connector {string.Join(", ", connectorIds)} đã lắp lại; " +
+            "bắt đầu chu kỳ Leak-only.");
+        _ = RunWaterProofRetestOnlyAsync(cycleModel, generation);
+    }
+
+    private async Task RunWaterProofRetestOnlyAsync(
+        ProductModel cycleModel,
+        long generation)
+    {
+        CancellationToken ct = CurrentCycleToken();
+        bool ownsWaterProofRun = false;
+
+        try
+        {
+            // FAIL ban đầu ARM chờ tháo ngay trước khi method Leak gốc nhả cờ.
+            // Chờ ngắn có hủy để không thể tạo hai owner trên cùng Leak COM.
+            for (int attempt = 0; attempt < 40 && !ownsWaterProofRun; attempt++)
+            {
+                ownsWaterProofRun = Interlocked.CompareExchange(ref _waterProofRunning, 1, 0) == 0;
+                if (!ownsWaterProofRun)
+                    await Task.Delay(50, ct);
+            }
+
+            if (!ownsWaterProofRun)
+                throw new InvalidOperationException("Leak COM vẫn đang bận sau khi connector được lắp lại.");
+
+            if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                Volatile.Read(ref _removalMonitoringFromMain) != 0 ||
+                !ReferenceEquals(_model, cycleModel) ||
+                !IsWaterProofEnabledForCurrentModel() ||
+                (!_waitForProductRelease && !_waitForFaultProductRemoval))
+            {
+                return;
+            }
+
+            if (!TryValidateWaterProofConnectorGate(cycleModel, out string connectorGateError))
+                throw new InvalidOperationException(connectorGateError);
+
+            int retestAttempt = Interlocked.Increment(ref _waterProofRetestAttempt);
+            DateTime startedAt = DateTime.Now;
+            ResetWaterProofDisplay();
+            ShowWaterProofOperationPanel();
+            State = $"ĐANG TEST LEAK LẠI LẦN {retestAttempt}";
+            SetWaterProofStage(WaterProofStage.Connecting, "ĐANG KẾT NỐI", "---");
+            AddLog(
+                $"[WATERPROOF-RETEST] START attempt={retestAttempt} parentCycle={_activeCycleId}; " +
+                "không tăng LOT/sản lượng và không chạy relay.");
+
+            await PauseProductionScanForWaterProofAsync(ct);
+            WaterProofRunResult run = await _waterProof.RunTestAsync(
+                _productionSettings.WaterProofMachine,
+                _waterProofProfile,
+                ApplyWaterProofProgress,
+                ct);
+            DateTime finishedAt = DateTime.Now;
+
+            // Kết quả retest chỉ dùng cho màn hình và lịch sử riêng. Không ghi
+            // đè dữ liệu Leak của bản ghi PRODUCT đã commit trước đó.
+            await ApplyWaterProofFinalResultAsync(run, captureForProductHistory: false);
+            bool historySaved = await SaveWaterProofRetestHistoryAsync(
+                cycleModel,
+                run,
+                retestAttempt,
+                startedAt,
+                finishedAt);
+
+            string resultText = run.Passed ? "PASS" : "FAIL";
+            string removalText = _waitForFaultProductRemoval
+                ? FaultRemovalWaitingText(cycleModel)
+                : "THÁO TOÀN BỘ SẢN PHẨM ĐỂ KẾT THÚC";
+            State = historySaved
+                ? $"LEAK RETEST {resultText} - THÁO CONNECTOR ĐỂ TEST LẠI / {removalText}"
+                : $"LEAK RETEST {resultText} - LỖI LƯU LỊCH SỬ";
+            AddLog(
+                $"[WATERPROOF-RETEST] {resultText} attempt={retestAttempt}; " +
+                $"history={(historySaved ? "SAVED" : "FAILED")}; không chạy relay, không cộng sản lượng.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            AddLog("[WATERPROOF-RETEST] Đã hủy vì rời chu kỳ hiện tại.");
+        }
+        catch (Exception ex)
+        {
+            SetWaterProofStage(WaterProofStage.Error, "LỖI LEAK RETEST", "ERROR");
+            State = "LỖI LEAK RETEST - THÁO/LẮP CONNECTOR ĐỂ THỬ LẠI";
+            AddLog($"[WATERPROOF-RETEST] ERROR: {ex.Message}");
+            try
+            {
+                await _waterProof.DisconnectAsync();
+            }
+            catch (Exception disconnectEx)
+            {
+                AddLog($"[WATERPROOF-RETEST] Không thể disconnect Leak COM: {disconnectEx.Message}");
+            }
+        }
+        finally
+        {
+            if (ownsWaterProofRun)
+                Interlocked.Exchange(ref _waterProofRunning, 0);
+
+            if (IsRuntimeContext(RuntimeMode.Production, generation) &&
+                Volatile.Read(ref _removalMonitoringFromMain) == 0 &&
+                ReferenceEquals(_model, cycleModel) &&
+                IsWaterProofEnabledForCurrentModel() &&
+                (_waitForProductRelease || _waitForFaultProductRemoval))
+            {
+                ArmWaterProofRetestConnectorCycle();
+                try
+                {
+                    await StartProductionScanAndVerifyFrameAsync(
+                        CurrentCycleToken(),
+                        "WATERPROOF_RETEST_COMPLETE");
+                }
+                catch (Exception scanEx)
+                {
+                    AddLog($"[WATERPROOF-RETEST] Không thể restart D2XX chờ tháo/lắp: {scanEx.Message}");
+                    await EnsureContinuousProductionScanAsync();
+                }
+            }
+        }
+    }
+
+    private async Task<bool> SaveWaterProofRetestHistoryAsync(
+        ProductModel model,
+        WaterProofRunResult run,
+        int attempt,
+        DateTime startedAt,
+        DateTime finishedAt)
+    {
+        FaultDetail[] faults = run.Channels
+            .Where(channel => channel.Enabled && !channel.Passed)
+            .Select(channel => new FaultDetail
+            {
+                Type = ProductFaultType.WaterProofLeak,
+                WireName = $"CH{channel.Channel} • {_waterProofProfile.ConnectorForChannel(channel.Channel)}".TrimEnd(),
+                Message = $"CH{channel.Channel}: áp giữ {channel.SecondPressure:0.###}; " +
+                          $"độ rò {channel.Leak:0.###}; yêu cầu áp >= {_waterProofProfile.PressMin:0.###}, " +
+                          $"độ sụt <= {_waterProofProfile.LeakLimit:0.###}"
+            })
+            .ToArray();
+        var completed = new CompletedTestResult
+        {
+            Started = startedAt,
+            Finished = finishedAt,
+            Passed = run.Passed,
+            ResultText = run.Passed ? "PASS" : "FAIL",
+            Faults = faults
+        };
+        string summary = BuildWaterProofHistorySummary(run);
+        string parentCycleId = string.IsNullOrWhiteSpace(_activeCycleId)
+            ? Guid.NewGuid().ToString("N")
+            : _activeCycleId;
+        var history = new TestHistoryRecord
+        {
+            Started = startedAt,
+            Finished = finishedAt,
+            TestStartedAt = startedAt,
+            ResultAt = finishedAt,
+            InspectionType = HistoryInspectionType.LeakRetest,
+            PartName = model.ProductName,
+            PartNumber = model.PartNumber,
+            VehicleType = model.VehicleType,
+            Eco = model.Eco,
+            Nco = model.Nco,
+            Alc = model.Alc,
+            LotNo = 0,
+            ProductionCounter = 0,
+            Result = completed.ResultText,
+            Passed = completed.Passed,
+            ModelName = model.ModelName,
+            ModelFile = model.SourcePath,
+            HtdrvName = ProgramIdentityService.BuildHtdrvName(),
+            LotText = _productionSettings.Lot,
+            InspectionTrace =
+                $"{startedAt:HH:mm:ss}~{finishedAt:HH:mm:ss} LEAK RETEST #{attempt} {summary}",
+            DeviceName = _productionSettings.DeviceName,
+            DeviceNumber = _productionSettings.DeviceNumber,
+            OperatorCompany = _productionSettings.OperatorCompany,
+            ProductionLine = _productionSettings.ProductionLine,
+            FaultType = run.Passed
+                ? string.Empty
+                : FaultTypeCatalog.DisplayName(ProductFaultType.WaterProofLeak),
+            FaultCode = run.Passed
+                ? string.Empty
+                : FaultTypeCatalog.Code(ProductFaultType.WaterProofLeak),
+            FaultDetailsJson = completed.FaultDetailsJson,
+            FaultSummary = summary,
+            CycleId = $"{parentCycleId}-leak-retest-{attempt:D4}",
+            PrintStatus = LabelPrintStatus.NotRequested.ToString()
+        };
+
+        try
+        {
+            ProductionResultCommitRequest request = ProductionResultCommitRequest.Capture(
+                history,
+                model,
+                _productionSettings,
+                faults,
+                [],
+                run.Channels,
+                ProgramIdentityService.VersionText);
+            ProductionCommitResult result = await ProductionPersistence.CommitTestResultAsync(
+                request,
+                _lifetimeCts.Token);
+            AddLog(
+                $"[WATERPROOF-RETEST] History id={result.TestId} cycle={history.CycleId}" +
+                (result.AlreadyCommitted ? " (đã tồn tại)." : " đã lưu."));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AddLog($"[WATERPROOF-RETEST] LỖI LƯU LỊCH SỬ: {ex.Message}");
+            await InvokeUiAsync(() => MessageBox.Show(
+                ResolveOperatorDialogOwner(),
+                $"Leak retest đã có kết quả {completed.ResultText} nhưng chưa lưu được lịch sử.\n\n{ex.Message}",
+                "Lỗi lưu lịch sử Leak retest",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error));
+            return false;
+        }
     }
 
     private static bool ShouldRestartAfterPass(

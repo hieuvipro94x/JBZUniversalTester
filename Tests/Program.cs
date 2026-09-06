@@ -128,6 +128,8 @@ internal static class Program
                pickerGuardSource.Contains("GetMonitorInfo(", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("PreferredDialogWidthDip = 640", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("PreferredDialogHeightDip = 440", StringComparison.Ordinal) &&
+               !pickerGuardSource.Contains("DialogWidthWorkAreaRatio", StringComparison.Ordinal) &&
+               !pickerGuardSource.Contains("MaximumDialogWidthDip = 900", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("VisualTreeHelper.GetDpi(owner)", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DwmwaExtendedFrameBounds = 9", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DwmGetWindowAttribute(", StringComparison.Ordinal) &&
@@ -568,16 +570,18 @@ internal static class Program
                normalCheckRow.Status == "KIỂM TRA",
             "Normal KIỂM TRA row and status use the original dark operator text");
         Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
-               BrushHex(openGreenRow.WireColorForegroundBrush) == "#333333" &&
+               BrushHex(openGreenRow.WireColorForegroundBrush) == "#111111" &&
                BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
-               BrushHex(openBlueRow.WireColorForegroundBrush) == "#FFFFFF",
-            "Single Màu cell matches original green/blue background and readable text");
+               BrushHex(openBlueRow.WireColorForegroundBrush) == "#111111" &&
+               BrushHex(new FaultRow { Color = "R/W" }.WireColorForegroundBrush) == "#111111" &&
+               BrushHex(new FaultRow { Color = "W" }.WireColorForegroundBrush) == "#111111",
+            "Every Màu cell uses black code text over its neutral readability plate");
         var cachedRow = new FaultRow { Io = 42, Connector = " CN1 ", Pin = " 7 ", Color = "L" };
         string cachedIoCnPn = cachedRow.IoCnPnText;
         Brush cachedForeground = cachedRow.WireColorForegroundBrush;
         Assert(cachedIoCnPn == "42-CN1-7" && ReferenceEquals(cachedIoCnPn, cachedRow.IoCnPnText),
             "FaultRow caches the formatted IO-CN-PN text after first access");
-        Assert(BrushHex(cachedForeground) == "#FFFFFF" &&
+        Assert(BrushHex(cachedForeground) == "#111111" &&
                ReferenceEquals(cachedForeground, cachedRow.WireColorForegroundBrush),
             "FaultRow caches the wire-color foreground after first access");
         Assert(new FaultRow { Color = "B/G" }.WireColorBrush is LinearGradientBrush,
@@ -793,6 +797,8 @@ internal static class Program
                    StringComparison.Ordinal),
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
+               xaml.Contains("BorderBrush=\"#707070\"", StringComparison.Ordinal) &&
+               xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
@@ -802,6 +808,25 @@ internal static class Program
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
             "TestView uses responsive bold wiring text and a narrow original-style Màu column without #1..#4");
+        Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
+               xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&
+               xaml.Contains("Style=\"{StaticResource LabelReprintButtonStyle}\"", StringComparison.Ordinal) &&
+               xaml.Contains("kh&#244;ng t&#259;ng LOT", StringComparison.Ordinal) &&
+               !xaml.Contains("Text=\"{Binding LabelStatusText}\"", StringComparison.Ordinal),
+            "TestView clearly separates failed first-print retry from audited duplicate printing without showing LabelStatusText");
+        Assert(xaml.Contains("Click=\"BackToMain_Click\"", StringComparison.Ordinal) &&
+               xaml.Contains("Style=\"{StaticResource TestExitButtonStyle}\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"TestExitBackground\" Color=\"#FFF0F0\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"TestExitForeground\" Color=\"#A61B1B\"", StringComparison.Ordinal),
+            "TestView back navigation uses the shared light-red exit treatment");
+        Assert(xaml.Contains("x:Name=\"HeaderNavigationRow\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Name=\"StatusLedPanel\"", StringComparison.Ordinal) &&
+               xaml.Contains("Margin=\"10,0,2,0\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Name=\"LabelActionButtonsPanel\"", StringComparison.Ordinal) &&
+               xaml.Contains("<ColumnDefinition Width=\"6\"/>", StringComparison.Ordinal) &&
+               !xaml.Contains("Width=\"112\"", StringComparison.Ordinal),
+            "TestView separates the four status LEDs from navigation and gives both label actions responsive equal widths");
 
         string testWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml.cs"));
@@ -897,6 +922,21 @@ internal static class Program
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
+        System.Xml.Linq.XElement[] settingsButtons =
+            System.Xml.Linq.XDocument.Parse(settingsXaml)
+                .Descendants()
+                .Where(element => element.Name.LocalName == "Button")
+                .ToArray();
+        Assert(settingsButtons.Length == 15 &&
+               settingsButtons.All(button =>
+                   button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
+               settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsInfoButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsActionButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsWarningButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsExitButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal),
+            "Every Production Settings button uses the shared semantic palette and interaction template");
         Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
             "Production settings exposes the dedicated TEM BE QR selection");
 
@@ -1511,6 +1551,10 @@ internal static class Program
         Assert(passRow.ChannelText == "CH1 • CN-A" && passRow.ResultText == "PASS" &&
                failRow.ChannelText == "CH3 • CN-C" && failRow.ResultText == "FAIL",
             "Leak result rows identify both machine channel and mapped THT connector");
+        Assert(passRow.LiveCellBackground == "#2AA84A" &&
+               failRow.LiveCellBackground == "#C62828" &&
+               new WaterProofChannelResult().LiveCellBackground == "#FFFFFF",
+            "Compact Leak cells stay white while live, then use product green for PASS and red for FAIL");
 
         passRow.PressPressure = 83.9;
         passRow.WaitPressure = 81.8;
@@ -1527,9 +1571,13 @@ internal static class Program
 
         Assert(
             xaml.Contains("Text=\"ĐỘ RÒ RỈ\"", StringComparison.Ordinal) &&
-            xaml.Contains("Text=\"{Binding LeakText}\"", StringComparison.Ordinal) &&
-            xaml.Contains("Text=\" kPa\"", StringComparison.Ordinal),
-            "Leak summary card displays realtime leak value in kPa");
+            xaml.Contains("Width=\"282\"", StringComparison.Ordinal) &&
+            xaml.Contains("Height=\"78\"", StringComparison.Ordinal) &&
+            xaml.Contains("Text=\"{Binding LiveMachineValueText}\"", StringComparison.Ordinal) &&
+            xaml.Contains("Background=\"{Binding LiveCellBackground}\"", StringComparison.Ordinal) &&
+            xaml.Contains("Foreground=\"#000000\"", StringComparison.Ordinal) &&
+            xaml.Contains("Width=\"94\"", StringComparison.Ordinal),
+            "Leak summary uses three compact cells bound to realtime machine values");
 
         // Regression: :PRESS lưu áp cuối làm baseline, từng :WAIT phải cập nhật
         // Leak ngay trên UI nhưng tuyệt đối chưa được chốt PASS/FAIL trước :RESULT.
@@ -1582,6 +1630,9 @@ internal static class Program
             Math.Abs(realtimeLeakVm.WaterProofChannels[0].PressPressure.GetValueOrDefault() - 84.1) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[1].PressPressure.GetValueOrDefault() - 84.2) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[2].PressPressure.GetValueOrDefault() - 84.0) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].LiveMachineValueText == "84.1" &&
+            realtimeLeakVm.WaterProofChannels[1].LiveMachineValueText == "84.2" &&
+            realtimeLeakVm.WaterProofChannels[2].LiveMachineValueText == "84.0" &&
             realtimeLeakVm.WaterProofChannels[0].FirstPressureText == "84.1" &&
             realtimeLeakVm.WaterProofChannels[0].SecondPressureText == "---" &&
             realtimeLeakVm.WaterProofChannels.All(row => Math.Abs(row.Leak.GetValueOrDefault()) < 0.0001) &&
@@ -1601,6 +1652,9 @@ internal static class Program
             Math.Abs(realtimeLeakVm.WaterProofChannels[0].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[1].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].LiveMachineValueText == "84.0" &&
+            realtimeLeakVm.WaterProofChannels[1].LiveMachineValueText == "84.1" &&
+            realtimeLeakVm.WaterProofChannels[2].LiveMachineValueText == "83.9" &&
             realtimeLeakVm.WaterProofChannels[0].SecondPressureText == "84.0" &&
             realtimeLeakVm.WaterProofStageText == "ĐANG ĐO ĐỘ RÒ",
             "First WAIT frame updates displayed hold pressure and Leak immediately for all channels");
@@ -1617,8 +1671,11 @@ internal static class Program
         Assert(
             Math.Abs(realtimeLeakVm.WaterProofChannels[0].Leak.GetValueOrDefault() - 0.6) < 0.0001 &&
             Math.Abs(realtimeLeakVm.WaterProofChannels[1].Leak.GetValueOrDefault() - 0.5) < 0.0001 &&
-            Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.6) < 0.0001,
-            "Later WAIT frames continuously replace the realtime Leak values");
+            Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.6) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].LiveMachineValueText == "83.5" &&
+            realtimeLeakVm.WaterProofChannels[1].LiveMachineValueText == "83.7" &&
+            realtimeLeakVm.WaterProofChannels[2].LiveMachineValueText == "83.4",
+            "Later WAIT frames continuously replace both calculated Leak and compact live values");
 
         Assert(
             realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured) &&
@@ -1645,13 +1702,33 @@ internal static class Program
         ProductModel connectorModel = HtdrvTwoEndpointModel();
         using TestEngine connectorEngine = CreateEngine(out _);
         connectorEngine.SetModel(connectorModel);
-        Assert(!connectorEngine.IsConnectorConnected("1"),
-            "Leak connector gate remains closed before the selected connector is fitted");
+        Assert(!connectorEngine.IsConnectorConnected("1") &&
+               connectorEngine.IsConnectorDisconnected("1"),
+            "Leak connector gate remains closed and confirms full disconnection before fitting");
         connectorEngine.ProcessFrame(FrameSeq(1, (1, new[] { 2 })));
         Assert(connectorEngine.IsConnectorConnected("1") &&
+               !connectorEngine.IsConnectorDisconnected("1") &&
                !connectorEngine.IsConnectorConnected("2") &&
                !connectorEngine.IsConnectorConnected(string.Empty),
             "Leak connector gate opens only for the exact connected THT connector");
+
+        ProductModel multiNetConnectorModel = TopologyModel(
+            new Terminal(1, "LEAK", "1", "2", "A"),
+            new Terminal(2, "OTHER-A", "1", "1", "A"),
+            new Terminal(3, "LEAK", "2", "2", "B"),
+            new Terminal(4, "OTHER-B", "1", "1", "B"));
+        using TestEngine multiNetConnectorEngine = CreateEngine(out _);
+        multiNetConnectorEngine.SetModel(multiNetConnectorModel);
+        multiNetConnectorEngine.ProcessFrame(FrameSeq(2, (1, new[] { 2 }), (3, new[] { 4 })));
+        Assert(multiNetConnectorEngine.IsConnectorConnected("LEAK"),
+            "All Leak connector relations fitted report connected");
+        multiNetConnectorEngine.ProcessFrame(FrameSeq(3, (1, new[] { 2 })));
+        Assert(!multiNetConnectorEngine.IsConnectorConnected("LEAK") &&
+               !multiNetConnectorEngine.IsConnectorDisconnected("LEAK"),
+            "One missing Leak contact is neither connected nor fully removed and cannot trigger retest");
+        multiNetConnectorEngine.ProcessFrame(FrameSeq(4));
+        Assert(multiNetConnectorEngine.IsConnectorDisconnected("LEAK"),
+            "Leak connector removal requires every mapped continuity relation to disappear");
 
         TestViewModel removalVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -1807,6 +1884,59 @@ internal static class Program
         Assert((bool)(shouldRestart.Invoke(null, [false, true]) ?? false) &&
                !(bool)(shouldRestart.Invoke(null, [false, false]) ?? true),
             "Completed Leak always enters removal/reset lifecycle even when legacy auto-restart is disabled");
+
+        TestViewModel retestArmVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 });
+        retestArmVm.LoadPreparedModelAsync(HtdrvTwoEndpointModel())
+            .GetAwaiter()
+            .GetResult();
+        typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel1Connector = "1"
+            });
+        typeof(TestViewModel).GetField("_lastWaterProofMeasurements", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofChannelMeasurement[]
+            {
+                new(1, true, 84.0, 83.8, 0.2, true)
+            });
+        typeof(TestViewModel).GetField("_waitForProductRelease", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, true);
+        MethodInfo armLeakRetest = typeof(TestViewModel).GetMethod(
+            "ArmWaterProofRetestConnectorCycle",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak retest connector ARM method not found");
+        FieldInfo leakRetestState = typeof(TestViewModel).GetField(
+            "_waterProofRetestConnectorState",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak retest connector state not found");
+        armLeakRetest.Invoke(retestArmVm, null);
+        Assert((int)(leakRetestState.GetValue(retestArmVm) ?? 0) == 1,
+            "Completed Leak on an enabled THT arms connector remove/reinsert retest");
+        typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofModelSettings { Enabled = false });
+        armLeakRetest.Invoke(retestArmVm, null);
+        Assert((int)(leakRetestState.GetValue(retestArmVm) ?? -1) == 0,
+            "Models without Leak enabled cannot arm connector retest");
+        string testViewModelSource = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory,
+            "ViewModels",
+            "TestViewModel.cs"));
+        int retestMethodStart = testViewModelSource.IndexOf(
+            "private async Task RunWaterProofRetestOnlyAsync",
+            StringComparison.Ordinal);
+        int retestMethodEnd = testViewModelSource.IndexOf(
+            "private async Task<bool> SaveWaterProofRetestHistoryAsync",
+            retestMethodStart,
+            StringComparison.Ordinal);
+        string retestMethodSource = testViewModelSource[retestMethodStart..retestMethodEnd];
+        Assert(retestMethodSource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("EjectFaultProductAsync", StringComparison.Ordinal),
+            "Leak-only retest saves its own history but cannot enter production count or relay paths");
 
         var idleLeakService = new WaterProofSerialService();
         Stopwatch disposeWatch = Stopwatch.StartNew();
@@ -3326,6 +3456,14 @@ internal static class Program
                !mainWindowXaml.Contains("Value=\"#DDDDDA\"", StringComparison.Ordinal) &&
                !mainWindowXaml.Contains("Value=\"#CBCBC8\"", StringComparison.Ordinal),
             "MainWindow buttons use semantic colors and preserve them through shared hover feedback");
+        Assert(mainWindowXaml.Contains("x:Name=\"MainActionBar\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("UseLayoutRounding=\"True\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("SnapsToDevicePixels=\"True\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("<ColumnDefinition Width=\"1.25*\"/>", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("<ColumnDefinition Width=\"0.75*\"/>", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("<Setter Property=\"Width\" Value=\"260\"/>", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("<ColumnDefinition Width=\"230\"/>", StringComparison.Ordinal),
+            "MainWindow action buttons use DPI-safe proportional columns without fixed-width border clipping");
 
         string bootstrapSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Services", "StartupBootstrapService.cs"));
@@ -3363,6 +3501,21 @@ internal static class Program
                historyPageSource.Contains("await _importLegacyHistoryAsync();", StringComparison.Ordinal) &&
                historyPageSource.Contains("CloseButton.IsEnabled = false", StringComparison.Ordinal),
             "Legacy history migration is explicit, uses the shared writer, and cannot return to Production while import is active");
+        System.Xml.Linq.XElement[] historyButtons =
+            System.Xml.Linq.XDocument.Parse(historyPageXaml)
+                .Descendants()
+                .Where(element => element.Name.LocalName == "Button")
+                .ToArray();
+        Assert(historyButtons.Length == 6 &&
+               historyButtons.All(button =>
+                   button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
+               historyPageXaml.Contains("HistoryImportButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("HistoryCsvButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("HistoryExcelButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("HistorySearchButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("HistoryCloseButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal),
+            "Every HistoryPage button uses the shared semantic palette and interaction template");
 
         string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
         Assert(appSource.Contains("Local\\JBZUniversalTester.Production", StringComparison.Ordinal) &&
@@ -4817,6 +4970,77 @@ internal static class Program
                    masterBad.ExportTestLogText.Contains("회로검사:FAIL", StringComparison.Ordinal) &&
                    masterBad.ExportTestLogText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal),
                 "MASTER BAD history is separate from production and preserves Korean fault evidence");
+
+            var leakRetestModel = new ProductModel
+            {
+                ModelName = "LEAK-RETEST-MODEL",
+                PartNumber = "LEAK-RETEST-PART",
+                ProductName = "LEAK RETEST PRODUCT",
+                SourcePath = Path.Combine(root, "LEAK-RETEST.tht")
+            };
+            var leakRetestRecord = new TestHistoryRecord
+            {
+                Started = finished.AddMinutes(1),
+                Finished = finished.AddMinutes(1).AddSeconds(3),
+                TestStartedAt = finished.AddMinutes(1),
+                ResultAt = finished.AddMinutes(1).AddSeconds(3),
+                InspectionType = HistoryInspectionType.LeakRetest,
+                PartName = leakRetestModel.ProductName,
+                PartNumber = leakRetestModel.PartNumber,
+                Result = "FAIL",
+                Passed = false,
+                ModelName = leakRetestModel.ModelName,
+                ModelFile = leakRetestModel.SourcePath,
+                LotNo = 0,
+                LotText = "LOT GỐC",
+                CycleId = "history-cycle-leak-retest-0001",
+                InspectionTrace = "14:08:08~14:08:11 LEAK RETEST #1 [CH1/CN1: 84→83 Δ1≤0.5:FAIL]",
+                FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.WaterProofLeak),
+                FaultCode = FaultTypeCatalog.Code(ProductFaultType.WaterProofLeak),
+                BarcodeValue = "MUST-NOT-EXPORT",
+                PrintStatus = LabelPrintStatus.Printed.ToString()
+            };
+            var leakRetestFault = new FaultDetail
+            {
+                Type = ProductFaultType.WaterProofLeak,
+                WireName = "CH1 • CN1",
+                Message = "Leak retest FAIL"
+            };
+            leakRetestRecord.FaultDetailsJson = JsonSerializer.Serialize(new[] { leakRetestFault });
+            var leakRetestMeasurement = new WaterProofChannelMeasurement(1, true, 84, 83, 1, false);
+            ProductionResultCommitRequest leakRetestRequest = ProductionResultCommitRequest.Capture(
+                leakRetestRecord,
+                leakRetestModel,
+                new ProductionSettings(),
+                [leakRetestFault],
+                [],
+                [leakRetestMeasurement],
+                ProgramIdentityService.VersionText);
+            Assert(!leakRetestRequest.UpdateProductionTotals &&
+                   leakRetestRequest.WaterProof.Count == 1 &&
+                   !leakRetestRecord.IsProductionRecord &&
+                   !leakRetestRecord.IsMasterRecord &&
+                   leakRetestRecord.InspectionTypeText == "LEAK RETEST" &&
+                   leakRetestRecord.ExportAcceptedLotNo is null &&
+                   leakRetestRecord.ExportBarcodeText.Length == 0,
+                "Leak retest is a visible history type but never becomes a production LOT/barcode result");
+            store.CommitResult(leakRetestRequest, null);
+            IReadOnlyList<TestHistoryRecord> leakRetestRows = store.Search(new HistorySearchCriteria(
+                finished.Date,
+                finished.Date.AddDays(1),
+                null,
+                leakRetestModel.PartNumber,
+                "FAIL",
+                InspectionType: HistoryInspectionType.LeakRetest));
+            ProductionStatisticsSnapshot leakRetestStats = store.GetStatistics(
+                PartIdentitySnapshot.Capture(leakRetestModel),
+                finished);
+            Assert(leakRetestRows.Count == 1 &&
+                   leakRetestRows[0].InspectionType == HistoryInspectionType.LeakRetest &&
+                   leakRetestRows[0].Passed == false &&
+                   leakRetestStats.DailyTotal == 0 &&
+                   leakRetestStats.LifetimeTotal == 0,
+                "Leak retest PASS/FAIL persists in history without increasing product statistics");
 
             var normalProduct = new TestHistoryRecord
             {

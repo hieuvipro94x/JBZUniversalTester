@@ -8,6 +8,8 @@
         WindowStartupLocation="CenterScreen"
         Background="#FFFFFF"
         FontFamily="Segoe UI"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         Loaded="MainWindow_Loaded"
         Closing="MainWindow_Closing">
 
@@ -31,6 +33,7 @@
         <Style x:Key="FlatButton" TargetType="Button">
             <Setter Property="Height" Value="50"/>
             <Setter Property="Margin" Value="3"/>
+            <Setter Property="MinWidth" Value="0"/>
             <Setter Property="Padding" Value="12,6"/>
             <Setter Property="Background" Value="#EFEFEE"/>
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -106,7 +109,6 @@
         <Style x:Key="PrimaryButton"
                TargetType="Button"
                BasedOn="{StaticResource FlatButton}">
-            <Setter Property="Width" Value="260"/>
             <Setter Property="Height" Value="50"/>
             <Setter Property="Background" Value="{StaticResource BrandBlue}"/>
             <Setter Property="Foreground" Value="White"/>
@@ -227,16 +229,17 @@
         <!-- THANH CHỨC NĂNG                                        -->
         <!-- ====================================================== -->
 
-        <Grid Grid.Row="2"
+        <Grid x:Name="MainActionBar"
+              Grid.Row="2"
               Margin="4,0,4,4">
 
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="230"/>
-                <ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="1.25*"/>
+                <ColumnDefinition Width="1.00*"/>
+                <ColumnDefinition Width="1.00*"/>
+                <ColumnDefinition Width="1.05*"/>
+                <ColumnDefinition Width="1.10*"/>
+                <ColumnDefinition Width="0.75*"/>
             </Grid.ColumnDefinitions>
 
             <Button x:Name="StartTestButton"
@@ -265,8 +268,6 @@
 
             <Button x:Name="LearnTopologyButton"
                     Grid.Column="4"
-                    Width="190"
-                    HorizontalAlignment="Left"
                     Click="OpenTopologyLearning_Click"
                     Style="{StaticResource TopologyButtonStyle}"
                     Content="QUÉT / HỌC MÃ"/>

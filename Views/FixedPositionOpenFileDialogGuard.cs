@@ -13,8 +13,8 @@ namespace JBZUniversalTester.Views;
 /// Goals:
 /// - User CANNOT resize or maximize.
 /// - User CAN move the dialog by dragging the title bar.
-/// - Start from a slightly wider classic-dialog size 640 x 440 DIP.
-/// - Adapt to monitor WorkArea and DPI.
+/// - Keep a compact preferred size and shrink it when the owner monitor
+///   WorkArea is smaller.
 /// - Adapt to Windows language / system font automatically:
 ///   after Shell lays out the native child controls, measure their REAL bounds.
 ///   If localized controls (Open/Cancel/File name/File type/etc.) do not fit,
@@ -23,8 +23,9 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
 {
-    // Hơi rộng hơn phần mềm gốc để tên file/đường dẫn không bị ép,
-    // nhưng vẫn giữ tỷ lệ compact của hộp thoại cổ điển.
+    // Classic OpenFileDialog controls do not reliably stretch with their host
+    // window. Keep the useful compact size on 1366 px, 2K and larger monitors;
+    // WorkArea clamping below still shrinks either dimension on smaller screens.
     private const double PreferredDialogWidthDip = 640;
     private const double PreferredDialogHeightDip = 440;
 

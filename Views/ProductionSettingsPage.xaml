@@ -13,10 +13,22 @@
         <SolidColorBrush x:Key="BorderColor" Color="#C7C7C2"/>
         <SolidColorBrush x:Key="TextPrimary" Color="#333333"/>
         <SolidColorBrush x:Key="TextMuted" Color="#555555"/>
-        <SolidColorBrush x:Key="BrandBlue" Color="#243B8F"/>
+        <SolidColorBrush x:Key="BrandBlue" Color="#273F91"/>
         <SolidColorBrush x:Key="PassGreen" Color="#2AA84A"/>
         <SolidColorBrush x:Key="FailRed" Color="#D9363E"/>
         <SolidColorBrush x:Key="PendingAmber" Color="#D88400"/>
+        <SolidColorBrush x:Key="ButtonNeutralBackground" Color="#ECEFF1"/>
+        <SolidColorBrush x:Key="ButtonNeutralForeground" Color="#455A64"/>
+        <SolidColorBrush x:Key="ButtonNeutralBorder" Color="#B0BEC5"/>
+        <SolidColorBrush x:Key="ButtonInfoBackground" Color="#E8EDF5"/>
+        <SolidColorBrush x:Key="ButtonInfoBorder" Color="#AEBBD2"/>
+        <SolidColorBrush x:Key="ButtonActionTeal" Color="#0F766E"/>
+        <SolidColorBrush x:Key="ButtonWarningBackground" Color="#FFF4E5"/>
+        <SolidColorBrush x:Key="ButtonWarningForeground" Color="#8A4B08"/>
+        <SolidColorBrush x:Key="ButtonWarningBorder" Color="#D9A441"/>
+        <SolidColorBrush x:Key="ButtonExitBackground" Color="#FFF0F0"/>
+        <SolidColorBrush x:Key="ButtonExitForeground" Color="#A61B1B"/>
+        <SolidColorBrush x:Key="ButtonExitBorder" Color="#D97979"/>
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
@@ -68,17 +80,106 @@
             <Setter Property="FontSize" Value="13"/>
         </Style>
 
-        <Style TargetType="Button">
+        <Style x:Key="SettingsButtonBase" TargetType="Button">
             <Setter Property="Height" Value="34"/>
             <Setter Property="Margin" Value="4,0"/>
             <Setter Property="Padding" Value="12,4"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Background" Value="#EFEFEE"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="BorderBrush" Value="#777777"/>
+            <Setter Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource ButtonNeutralForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonNeutralBorder}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="ButtonBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4"/>
+                            <Border x:Name="InteractionOverlay"
+                                    Background="#000000"
+                                    CornerRadius="4"
+                                    IsHitTestVisible="False"
+                                    Opacity="0"/>
+                            <ContentPresenter
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.08"/>
+                            </MultiTrigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsPressed" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.16"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#E5E7EB"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#CBD5E1"/>
+                                <Setter Property="Foreground" Value="#9CA3AF"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Button" BasedOn="{StaticResource SettingsButtonBase}"/>
+
+        <Style x:Key="SettingsPrimaryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SettingsButtonBase}">
+            <Setter Property="Background" Value="{StaticResource BrandBlue}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#1E3278"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+
+        <Style x:Key="SettingsInfoButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SettingsButtonBase}">
+            <Setter Property="Background" Value="{StaticResource ButtonInfoBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonInfoBorder}"/>
+        </Style>
+
+        <Style x:Key="SettingsActionButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SettingsButtonBase}">
+            <Setter Property="Background" Value="{StaticResource ButtonActionTeal}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#0B5F59"/>
+        </Style>
+
+        <Style x:Key="SettingsWarningButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SettingsButtonBase}">
+            <Setter Property="Background" Value="{StaticResource ButtonWarningBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource ButtonWarningForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonWarningBorder}"/>
+        </Style>
+
+        <Style x:Key="SettingsExitButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SettingsButtonBase}">
+            <Setter Property="Background" Value="{StaticResource ButtonExitBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource ButtonExitForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ButtonExitBorder}"/>
         </Style>
 
         <Style x:Key="SettingsPanelStyle" TargetType="Border">
@@ -107,7 +208,9 @@
 
         <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,0,0,1">
             <Grid Margin="14,6">
-                <Button Width="160" HorizontalAlignment="Left" VerticalAlignment="Center" Content="V&#7872; TRANG CH&#205;NH" Click="Cancel_Click"/>
+                <Button Width="160" HorizontalAlignment="Left" VerticalAlignment="Center"
+                        Content="TRANG CH&#205;NH" Click="Cancel_Click"
+                        Style="{StaticResource SettingsExitButtonStyle}"/>
                 <TextBlock Text="C&#192;I &#272;&#7862;T PRODUCTION"
                            FontSize="24"
                            FontWeight="Bold"
@@ -299,6 +402,7 @@
                                             Margin="3,2,0,2"
                                             FontSize="9.5"
                                             Padding="1,0"
+                                            Style="{StaticResource SettingsInfoButtonStyle}"
                                             Click="RefreshWaterProofPorts_Click"/>
 
                                     <TextBlock Grid.Row="1" Text="Baudrate" Style="{StaticResource FieldLabelStyle}"/>
@@ -459,21 +563,27 @@
                             </Grid.RowDefinitions>
 
                             <TextBlock Text="Relay 1" Style="{StaticResource FieldLabelStyle}"/>
-                            <Button Grid.Column="1" Grid.ColumnSpan="2" Content="B&#7852;T R1" Command="{Binding ManualRelay1OnCommand}"/>
+                            <Button Grid.Column="1" Grid.ColumnSpan="2" Content="B&#7852;T R1"
+                                    Command="{Binding ManualRelay1OnCommand}"
+                                    Style="{StaticResource SettingsWarningButtonStyle}"/>
                             <TextBlock Grid.Column="3" Text="{Binding ManualRelay1Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
 
                             <TextBlock Grid.Row="1" Text="Relay 2" Style="{StaticResource FieldLabelStyle}"/>
-                            <Button Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="B&#7852;T R2" Command="{Binding ManualRelay2OnCommand}"/>
+                            <Button Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="B&#7852;T R2"
+                                    Command="{Binding ManualRelay2OnCommand}"
+                                    Style="{StaticResource SettingsWarningButtonStyle}"/>
                             <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
 
                             <Button Grid.Row="2"
                                      Grid.Column="1"
                                      Content="T&#7854;T T&#7844;T C&#7842;"
-                                     Command="{Binding ManualRelay1OffCommand}"/>
+                                     Command="{Binding ManualRelay1OffCommand}"
+                                     Style="{StaticResource SettingsExitButtonStyle}"/>
                             <Button Grid.Row="2"
                                      Grid.Column="2"
                                      Content="RESET"
-                                     Command="{Binding ManualResetCommand}"/>
+                                     Command="{Binding ManualResetCommand}"
+                                     Style="{StaticResource SettingsWarningButtonStyle}"/>
 
                             <TextBlock Grid.Row="3"
                                        Grid.ColumnSpan="4"
@@ -531,6 +641,7 @@
                                     Margin="0,2"
                                     Padding="4,1"
                                     Content="MỞ KHÓA"
+                                    Style="{StaticResource SettingsWarningButtonStyle}"
                                     Click="UnlockLabelSettings_Click"/>
                             <TextBlock x:Name="LabelUnlockErrorText"
                                        Grid.Row="1"
@@ -571,6 +682,7 @@
                                 Content="QUÉT"
                                 FontSize="11"
                                 Padding="2,0"
+                                Style="{StaticResource SettingsInfoButtonStyle}"
                                 Click="RefreshPrinterPorts_Click"/>
 
                         <TextBlock Grid.Column="3"
@@ -607,6 +719,7 @@
                                 HorizontalAlignment="Left"
                                 Padding="4,0"
                                 Content="KẾT NỐI"
+                                Style="{StaticResource SettingsActionButtonStyle}"
                                 Click="ConnectPrinter_Click"/>
                         <TextBlock x:Name="PrinterConnectionStatusText"
                                    Grid.Row="1"
@@ -633,9 +746,12 @@
                                     Grid.ColumnSpan="4"
                                     Orientation="Horizontal"
                                     HorizontalAlignment="Right">
-                            <Button Content="CH&#7880;NH TEM" Width="82" Height="28" Margin="2,2" Padding="3,0" Click="EditLabelTemplate_Click"/>
-                            <Button Content="XEM TR&#431;&#7898;C" Width="82" Height="28" Margin="2,2" Padding="3,0" Click="PreviewLabel_Click"/>
-                            <Button Content="IN TH&#7916;" Width="72" Height="28" Margin="2,2" Padding="3,0" Click="TestPrintLabel_Click"/>
+                            <Button Content="CH&#7880;NH TEM" Width="82" Height="28" Margin="2,2" Padding="3,0"
+                                    Style="{StaticResource SettingsInfoButtonStyle}" Click="EditLabelTemplate_Click"/>
+                            <Button Content="XEM TR&#431;&#7898;C" Width="82" Height="28" Margin="2,2" Padding="3,0"
+                                    Style="{StaticResource SettingsInfoButtonStyle}" Click="PreviewLabel_Click"/>
+                            <Button Content="IN TH&#7916;" Width="72" Height="28" Margin="2,2" Padding="3,0"
+                                    Style="{StaticResource SettingsWarningButtonStyle}" Click="TestPrintLabel_Click"/>
                         </StackPanel>
                     </Grid>
 
@@ -721,8 +837,7 @@
                                             Padding="4,0"
                                             Content="CHẠY ĐO"
                                             Command="{Binding ManualMeasureResistanceCommand}"
-                                            Background="{StaticResource BrandBlue}"
-                                            Foreground="White"/>
+                                            Style="{StaticResource SettingsActionButtonStyle}"/>
                                 </Grid>
 
                                 <TextBlock Grid.Row="2"
@@ -808,10 +923,9 @@
                     <Button Width="220"
                             Content="L&#431;U"
                             Click="Save_Click"
-                            Background="{StaticResource PassGreen}"
-                            Foreground="White"
-                            FontWeight="Bold"/>
-                    <Button Width="180" Content="TR&#7902; V&#7872;" FontWeight="Bold" Click="Cancel_Click"/>
+                            Style="{StaticResource SettingsPrimaryButtonStyle}"/>
+                    <Button Width="180" Content="TR&#7902; V&#7872;" FontWeight="Bold" Click="Cancel_Click"
+                            Style="{StaticResource SettingsExitButtonStyle}"/>
                 </StackPanel>
             </Grid>
         </Border>

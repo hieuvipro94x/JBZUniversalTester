@@ -122,10 +122,12 @@ public partial class HistoryPage : UserControl
             _records = rows;
             HistoryGrid.ItemsSource = rows;
 
-            int productCount = rows.Count(row => !row.IsMasterRecord);
-            int pass = rows.Count(row => !row.IsMasterRecord && row.Passed);
+            int productCount = rows.Count(row => row.IsProductionRecord);
+            int pass = rows.Count(row => row.IsProductionRecord && row.Passed);
             int fail = productCount - pass;
             int master = rows.Count(row => row.IsMasterRecord);
+            int leakRetest = rows.Count(row =>
+                HistoryInspectionType.IsLeakRetest(row.InspectionType));
 
             TotalCountText.Text = productCount.ToString("N0");
             PassCountText.Text = pass.ToString("N0");
@@ -133,7 +135,7 @@ public partial class HistoryPage : UserControl
 
             SummaryText.Text =
                 $"{rows.Count:N0} bản ghi hiển thị (tối đa {UiRowLimit:N0}) | SẢN PHẨM {productCount:N0} " +
-                $"(PASS {pass:N0} / FAIL {fail:N0}) | MASTER {master:N0} | DB: {_historyPath}";
+                $"(PASS {pass:N0} / FAIL {fail:N0}) | LEAK RETEST {leakRetest:N0} | MASTER {master:N0} | DB: {_historyPath}";
         }
         catch (Exception ex)
         {

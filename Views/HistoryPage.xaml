@@ -4,9 +4,22 @@
         Background="#EEF1F4"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
-        PreviewKeyDown="Page_PreviewKeyDown">
+    PreviewKeyDown="Page_PreviewKeyDown">
 
     <UserControl.Resources>
+        <SolidColorBrush x:Key="HistoryBrandBlue" Color="#273F91"/>
+        <SolidColorBrush x:Key="HistoryNeutralBackground" Color="#ECEFF1"/>
+        <SolidColorBrush x:Key="HistoryNeutralForeground" Color="#455A64"/>
+        <SolidColorBrush x:Key="HistoryNeutralBorder" Color="#B0BEC5"/>
+        <SolidColorBrush x:Key="HistoryImportBackground" Color="#FFF4E5"/>
+        <SolidColorBrush x:Key="HistoryImportForeground" Color="#8A4B08"/>
+        <SolidColorBrush x:Key="HistoryImportBorder" Color="#D9A441"/>
+        <SolidColorBrush x:Key="HistoryExportLightBackground" Color="#E5F5F3"/>
+        <SolidColorBrush x:Key="HistoryExportAction" Color="#0F766E"/>
+        <SolidColorBrush x:Key="HistoryExitBackground" Color="#FFF0F0"/>
+        <SolidColorBrush x:Key="HistoryExitForeground" Color="#A61B1B"/>
+        <SolidColorBrush x:Key="HistoryExitBorder" Color="#D97979"/>
+
         <Style x:Key="CompactButton"
                TargetType="Button"
                BasedOn="{StaticResource {x:Type Button}}">
@@ -15,7 +28,99 @@
             <Setter Property="Padding" Value="11,4"/>
             <Setter Property="Margin" Value="3,0"/>
             <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="{StaticResource HistoryNeutralBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryNeutralForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HistoryNeutralBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="ButtonBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4"/>
+                            <Border x:Name="InteractionOverlay"
+                                    Background="#000000"
+                                    CornerRadius="4"
+                                    IsHitTestVisible="False"
+                                    Opacity="0"/>
+                            <ContentPresenter
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.08"/>
+                            </MultiTrigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsPressed" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.16"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#E5E7EB"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#CBD5E1"/>
+                                <Setter Property="Foreground" Value="#9CA3AF"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HistoryImportButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryImportBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryImportForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HistoryImportBorder}"/>
+        </Style>
+
+        <Style x:Key="HistoryCsvButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryExportLightBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryExportAction}"/>
+            <Setter Property="BorderBrush" Value="#86C8C1"/>
+        </Style>
+
+        <Style x:Key="HistoryExcelButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryExportAction}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#0B5F59"/>
+        </Style>
+
+        <Style x:Key="HistorySearchButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryBrandBlue}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#1E3278"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+
+        <Style x:Key="HistoryCloseButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryExitBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryExitForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HistoryExitBorder}"/>
         </Style>
 
         <Style x:Key="FilterTextBox"
@@ -151,24 +256,20 @@
                     <Button x:Name="ImportLegacyButton"
                             Content="NHẬP LỊCH SỬ CŨ"
                             Width="122"
-                            Style="{StaticResource CompactButton}"
+                            Style="{StaticResource HistoryImportButtonStyle}"
                             Click="ImportLegacy_Click"/>
                     <Button Content="CSV"
                             Width="78"
-                            Style="{StaticResource CompactButton}"
+                            Style="{StaticResource HistoryCsvButtonStyle}"
                             Click="ExportCsv_Click"/>
                     <Button Content="XUẤT EXCEL"
                             Width="112"
-                            Style="{StaticResource CompactButton}"
-                            Click="ExportXlsx_Click"
-                            Background="#DDEFD9"
-                            BorderBrush="#8AB681"/>
+                            Style="{StaticResource HistoryExcelButtonStyle}"
+                            Click="ExportXlsx_Click"/>
                     <Button x:Name="CloseButton"
                             Content="ĐÓNG"
                             Width="78"
-                            Style="{StaticResource CompactButton}"
-                            BorderBrush="#7F8790"
-                            BorderThickness="1"
+                            Style="{StaticResource HistoryCloseButtonStyle}"
                             Click="Close_Click"/>
                 </StackPanel>
             </Grid>
@@ -243,10 +344,8 @@
                         Width="106"
                         Margin="0"
                         VerticalAlignment="Bottom"
-                        Style="{StaticResource CompactButton}"
+                        Style="{StaticResource HistorySearchButtonStyle}"
                         Click="Search_Click"
-                        Background="#DDEBF7"
-                        BorderBrush="#83A9C7"
                         FontWeight="Bold"/>
                 <Button Grid.Column="12"
                         Content="XÓA LỌC"
@@ -310,6 +409,7 @@
                     <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="100"/>
                     <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="90"/>
                     <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180"/>
+                    <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="120"/>
                     <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150"/>
                     <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150"/>
                     <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115"/>
