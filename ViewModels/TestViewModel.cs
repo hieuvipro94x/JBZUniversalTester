@@ -358,7 +358,6 @@ public sealed class TestViewModel : ObservableObject
 
     private bool IsWaitingProductPresentation =>
         !IsDeviceFault &&
-        MasterApproved &&
         !_presentationCycleStarted &&
         !IsProductRemovalPending &&
         CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity;
@@ -413,6 +412,12 @@ public sealed class TestViewModel : ObservableObject
 
             if (value.Contains("KẾT NỐI BO", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG KẾT NỐI BO";
+
+            if (!_presentationCycleStarted &&
+                !IsProductRemovalPending &&
+                CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity &&
+                !_engine.HasProductActivity)
+                return "LẮP SẢN PHẨM";
 
             if (IsMasterSequenceActive)
                 return NormalizeSingleLine(value);

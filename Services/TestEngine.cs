@@ -1828,16 +1828,13 @@ public sealed class TestEngine : IDisposable
         if (displayedPin.IoNumber <= 0)
             return string.Empty;
 
-        PinRecord canonical = model.Pins
-            .Where(pin => pin.IoNumber == displayedPin.IoNumber &&
-                          !string.IsNullOrWhiteSpace(pin.Connector) &&
-                          !string.IsNullOrWhiteSpace(pin.PinNumber))
-            .OrderBy(pin => NaturalSortKey(pin.Connector), StringComparer.OrdinalIgnoreCase)
-            .ThenBy(pin => NaturalSortKey(pin.PinNumber), StringComparer.OrdinalIgnoreCase)
-            .ThenBy(pin => pin.OriginalOrder)
-            .FirstOrDefault() ?? displayedPin;
-
-        return string.Join("-", displayedPin.IoNumber, canonical.Connector.Trim(), canonical.PinNumber.Trim());
+        // Htdrv's IO-CN-PN is the physical 32-I/O address, not the endpoint
+        // connector/pin stored on the WireNet row. IO122 is therefore
+        // 122-4-26 even when the displayed endpoint is CN8/14.
+        int zeroBased = displayedPin.IoNumber - 1;
+        int connector = (zeroBased / BoardCapacity.IoPerPort) + 1;
+        int pin = (zeroBased % BoardCapacity.IoPerPort) + 1;
+        return string.Join("-", displayedPin.IoNumber, connector, pin);
     }
 
     private static bool IsRetainerPair(WireNet net) =>
