@@ -1532,7 +1532,20 @@ public sealed class TestEngine : IDisposable
                     // endpoints; do not redraw the already-installed side
                     // beside its mate (for example L-L/G-G).
                     HashSet<int> reachable = BuildReachableNetEndpoints(net, _currentConnections);
-                    rows.AddRange(cachedRows.Where(row => !reachable.Contains(row.Io)));
+                    // A lone source word is only a scan/active indication, not
+                    // an electrical connection. Do not hide its row; the
+                    // original Htdrv keeps the complete wire pair visible
+                    // until an edge reaches at least two endpoints.
+                    if (reachable.Count < 2)
+                        reachable.Clear();
+                    // RET is different: it is a two-pin retainer pair located
+                    // adjacent on one connector. Htdrv always keeps both RET
+                    // rows together (RET(N)/RET(N+1)); never collapse one side
+                    // merely because the electrical edge was seen.
+                    bool retainerPair = IsRetainerPair(net);
+                    rows.AddRange(retainerPair
+                        ? cachedRows
+                        : cachedRows.Where(row => !reachable.Contains(row.Io)));
                 }
             }
         }
@@ -1826,6 +1839,11 @@ public sealed class TestEngine : IDisposable
 
         return string.Join("-", displayedPin.IoNumber, canonical.Connector.Trim(), canonical.PinNumber.Trim());
     }
+
+    private static bool IsRetainerPair(WireNet net) =>
+        net.IoNumbers.Count == 2 &&
+        net.Pins.Count >= 2 &&
+        net.Pins.All(pin => pin.WireName.StartsWith("RET", StringComparison.OrdinalIgnoreCase));
 
     public bool SuppressProbeRelatedWiringFaults(IReadOnlyCollection<int> probeIos)
     {
