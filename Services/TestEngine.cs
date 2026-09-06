@@ -1526,7 +1526,14 @@ public sealed class TestEngine : IDisposable
                     continue;
 
                 if (_displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
-                    rows.AddRange(cachedRows);
+                {
+                    // Htdrv removes endpoints as soon as that side is
+                    // electrically reached. Keep only the still-disconnected
+                    // endpoints; do not redraw the already-installed side
+                    // beside its mate (for example L-L/G-G).
+                    HashSet<int> reachable = BuildReachableNetEndpoints(net, _currentConnections);
+                    rows.AddRange(cachedRows.Where(row => !reachable.Contains(row.Io)));
+                }
             }
         }
 
