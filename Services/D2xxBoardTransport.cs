@@ -363,28 +363,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
             {
                 Volatile.Write(ref _connectionState, (int)BoardConnectionState.Connecting);
                 // AppliedScanCapacity chỉ mô tả START_SCAN đã thực sự gửi cho
-                // phiên FTDI hiện tại. Không mang state của handle cũ sang reconnect.
+                // phiên FTDI hiện tại. Không mang state giữa hai lần chạy ứng dụng.
                 _appliedScanCapacity = null;
                 _activeScanConfiguration = string.Empty;
-                FtdiCandidate? candidate = null;
-
-                // Windows/D2XX đôi khi cần vài chục ms sau khi app cũ vừa đóng.
-                // Retry rất ngắn, không khóa UI và không yêu cầu người dùng bấm lại.
-                for (int attempt = 1; attempt <= 6; attempt++)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    try
-                    {
-                        candidate = await Task.Run(FindTargetBoard, ct);
-                        break;
-                    }
-                    catch (InvalidOperationException) when (attempt < 6)
-                    {
-                        await Task.Delay(80, ct);
-                    }
-                }
-
-                candidate ??= await Task.Run(FindTargetBoard, ct);
+                FtdiCandidate candidate = await Task.Run(FindTargetBoard, ct);
 
                 await Task.Run(() =>
                 {
@@ -1114,8 +1096,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
             Log?.Invoke(this, $"Luồng quét FTDI dừng do lỗi: {ex.Message}");
 
             // Nếu driver/USB rơi giữa lúc quét, không giữ một handle giả
-            // IsConnected=true. Đóng handle dưới cùng D2XX lock để vòng
-            // auto-reconnect của ViewModel có thể mở lại bo mà không rút nguồn.
+            // IsConnected=true. Đóng handle dưới cùng D2XX lock; ViewModel sẽ
+            // khóa phiên và yêu cầu operator khởi động lại ứng dụng.
             _ioLock.Wait();
             try
             {
@@ -1413,7 +1395,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     async Task<byte[]> ReadUntilHandshakeAsync(int timeoutMs, CancellationToken ct)
     {
-        // Sau reconnect, một số firmware còn đẩy phần cuối frame scan dù STOP
+        // Sau khi tạo phiên scan mới, một số firmware còn đẩy phần cuối frame dù STOP
         // đã được gửi. Không kết luận handshake sai ngay ở hai byte đầu; tiếp
         // tục đọc trong chính timeout hiện có cho tới phản hồi 0F 00.
         var result = new List<byte>(64);

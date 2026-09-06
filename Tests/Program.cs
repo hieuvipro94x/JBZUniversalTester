@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Media;
@@ -46,6 +47,7 @@ internal static class Program
             ("Production SQLite writer retries a transient lock", TestProductionPersistenceRetriesTransientLock),
             ("SQLite interrupted transaction reopens without deleting database", TestHistoryInterruptedTransactionRecovery),
             ("Canonical runtime paths and SQLite PartCnt authority", TestCanonicalRuntimePersistence),
+            ("Machine fingerprint and JBZ1 license verification", TestMachineFingerprintAndLicenseVerification),
             ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
             ("THT label renderer and LOT lifecycle", TestThtLabelAndLotLifecycle),
@@ -284,8 +286,11 @@ internal static class Program
         string settingsXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
         Assert(!settingsXaml.Contains("Settings.DiscardPassword", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.Password", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("LabelSettingsLockPanel", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("LabelUnlockPasswordBox", StringComparison.Ordinal) &&
                !settingsXaml.Contains("Mật khẩu thùng lỗi", StringComparison.Ordinal),
-            "Production settings no longer exposes an unused NG-bin password");
+            "Production settings exposes neither NG-bin nor label-print passwords");
 
         int finalRejectStart = testViewModelSource.IndexOf(
             "private async Task HandleFinalPassRejectedAsync(",
@@ -304,7 +309,7 @@ internal static class Program
                !finalRejectMethod.Contains(
                    "Interlocked.Exchange(ref _discardRequiredForFault, 0)",
                    StringComparison.Ordinal),
-            "Final PASS rejection must require _DISCARD password and sensor completion like every other FAIL");
+            "Final PASS rejection must require _DISCARD sensor completion like every other FAIL");
     }
 
     private static void TestProductionScanFirstFrameAfterSequenceReset()
@@ -726,11 +731,11 @@ internal static class Program
                statusVm.StateBackground == "#FFF3A0" &&
                statusVm.StateForeground == "#222222",
             "Board connection progress must not be presented as production testing");
-        statusVm.State = "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
-        Assert(statusVm.ResultStatusText == "CHƯA KẾT NỐI BO" &&
+        statusVm.State = "LỖI THIẾT BỊ";
+        Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" &&
                statusVm.StateBackground == "#C62828" &&
                statusVm.StateForeground == "#FFFFFF",
-            "Disconnected board must never be presented as ready");
+            "A non-latched equipment error keeps the generic red error presentation");
 
         statusVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         MethodInfo buildFinalPassRejectionFaults = typeof(TestViewModel).GetMethod(
@@ -849,22 +854,22 @@ internal static class Program
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
-        Assert(mainWindowSource.Contains(
-                   "StartTestButton.IsEnabled = _viewModel.Model is not null;",
+        Assert(mainWindowSource.Contains("bool hardwareReady =", StringComparison.Ordinal) &&
+               mainWindowSource.Contains(
+                   "StartTestButton.IsEnabled = hardwareReady && _viewModel.Model is not null;",
                    StringComparison.Ordinal) &&
                mainWindowSource.Contains(
-                   "SelectModelButton.IsEnabled = !blocked;",
+                   "SelectModelButton.IsEnabled = hardwareReady && !blocked;",
                    StringComparison.Ordinal) &&
-               mainWindowSource.Contains("offlinePreview: offlinePreview", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("autoStartProduction: boardConnected && hasCapacity", StringComparison.Ordinal),
-            "Main actions allow offline model preview while production auto-start still requires a connected board");
+               !mainWindowSource.Contains("offlinePreview", StringComparison.Ordinal),
+            "Main hardware actions stay locked for the remainder of a disconnected session");
 
         string mainViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
-        Assert(!mainViewModelSource.Contains(
-                   "Chỉ được chọn mã hàng sau khi bo kết nối thành công.",
+        Assert(mainViewModelSource.Contains(
+                   "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG",
                    StringComparison.Ordinal),
-            "Selecting and parsing a model is allowed without a connected board");
+            "Main status directs the operator to restart instead of advertising an offline model");
         Assert(mainViewModelSource.Contains("requireStartupIoClear: false", StringComparison.Ordinal),
             "Production startup accepts the first live frame for the remembered model without requiring a clean baseline");
 
@@ -878,10 +883,9 @@ internal static class Program
                xaml.Contains("Header=\"Tr&#7841;ng th&#225;i\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"IO-CN-PN\"", StringComparison.Ordinal) &&
                !testWindowSource.Contains("OperationTablesHost.Visibility = Visibility.Collapsed;", StringComparison.Ordinal) &&
-               testWindowSource.Contains("viewModel.SelectedOperationTabIndex = 0;", StringComparison.Ordinal) &&
-               testWindowSource.Contains("XEM MÃ HÀNG OFFLINE - BO CHƯA KẾT NỐI", StringComparison.Ordinal) &&
-               testWindowSource.Contains("if (_autoStartProduction && !_offlinePreview)", StringComparison.Ordinal),
-            "Offline TestWindow keeps the complete continuity header visible with no Production ARM");
+               !testWindowSource.Contains("offlinePreview", StringComparison.Ordinal) &&
+               testWindowSource.Contains("if (_autoStartProduction)", StringComparison.Ordinal),
+            "TestWindow has no offline preview path; MainWindow must reject entry without a healthy board");
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
@@ -898,6 +902,15 @@ internal static class Program
             "Startup connects the board before loading the last product model");
 
         string settingsXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        string settingsSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml.cs"));
+        string labelPrintServiceSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "LabelPrintService.cs"));
+        string historySource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml.cs"));
+        string topologyLearningSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml.cs"));
+        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
         Assert(settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
@@ -927,7 +940,7 @@ internal static class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 15 &&
+        Assert(settingsButtons.Length == 14 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
@@ -940,6 +953,33 @@ internal static class Program
         Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
             "Production settings exposes the dedicated TEM BE QR selection");
 
+        Assert(System.Text.RegularExpressions.Regex.Matches(
+                   testViewModelSource,
+                   @"CrashReportService\.Write\(").Count == 1 &&
+               testViewModelSource.Contains("$\"Hardware.DeviceFault.{source}\"", StringComparison.Ordinal) &&
+               !labelPrintServiceSource.Contains("CrashReportService.Write", StringComparison.Ordinal) &&
+               !settingsSource.Contains("CrashReportService.Write", StringComparison.Ordinal),
+            "Within TestViewModel, RPT is limited to the latched main-tester DeviceFault; Leak and label-printer paths never create it");
+        Assert(testViewModelSource.Contains(
+                   "Mất kết nối máy Leak. Hãy rút/cắm lại cáp, chọn lại cổng COM rồi thử lại.",
+                   StringComparison.Ordinal) &&
+               labelPrintServiceSource.Contains(
+                   "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
+                   StringComparison.Ordinal),
+            "Leak and label-printer connection failures guide the operator to reconnect and reselect COM");
+        Assert(!appSource.Contains("$\"Chi tiết: {e.Exception.Message}\"", StringComparison.Ordinal) &&
+               !mainWindowSource.Contains("ex.ToString()", StringComparison.Ordinal) &&
+               !settingsSource.Contains("ShowMessage(ex.Message", StringComparison.Ordinal) &&
+               !historySource.Contains("| DB: {_historyPath}", StringComparison.Ordinal) &&
+               !topologyLearningSource.Contains("LearningStatusText.Text = ex.Message", StringComparison.Ordinal) &&
+               !testViewModelSource.Contains(
+                   "MasterStatus = $\"LỖI KIỂM TRA MASTER PASS: {ex.Message}\"",
+                   StringComparison.Ordinal) &&
+               !testViewModelSource.Contains(
+                   "MasterStatus = $\"LỖI EJECT MASTER: {ex.Message}\"",
+                   StringComparison.Ordinal),
+            "Operator-facing screens do not expose exception details or internal persistence paths");
+
         Assert(settingsXaml.Contains(
                    "Settings.EnableSystemLogs, Mode=TwoWay",
                    StringComparison.Ordinal) &&
@@ -948,7 +988,6 @@ internal static class Program
                    StringComparison.Ordinal),
             "Production settings exposes a system-log master switch that preserves History");
 
-        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
         string soundSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
         Assert(appSource.Contains("AppSoundService.Current.PlayStartup();", StringComparison.Ordinal) &&
                appSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
@@ -1000,12 +1039,33 @@ internal static class Program
                deviceFaultVm.DeviceFaultTransitionCount == 1 &&
                deviceFaultVm.DeviceFaultDialogCount == 1,
             "DeviceFault remains latched for the process lifetime and cannot be reset in-app");
+        Assert(deviceFaultVm.DeviceFaultMessage ==
+               "Mất kết nối với máy test. Vui lòng khởi động lại.",
+            "The single board-fault message is short and explicitly requests a restart");
+        Assert(testViewModelSource.Contains("ExitApplicationAfterDeviceFaultAsync", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("await _deviceFaultHardwareLockTask;", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("mainWindow.Close();", StringComparison.Ordinal) &&
+               testWindowSource.Contains("deviceFaultViewModel.IsDeviceFault", StringComparison.Ordinal),
+            "Acknowledging DeviceFault safely locks hardware and exits without a second TestWindow prompt");
 
         string testWindowXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
         Assert(!testWindowXaml.Contains("ResetDeviceFaultCommand", StringComparison.Ordinal) &&
                !testWindowXaml.Contains("KH&#7902;I T&#7840;O L&#7840;I", StringComparison.Ordinal),
             "DeviceFault UI has no reinitialize button; operator must restart the application");
+
+        TestViewModel startupFaultVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard startupFaultBoard);
+        startupFaultBoard.SetConnectionStateForTest(false);
+        startupFaultBoard.ThrowOnConnect = true;
+        startupFaultVm.InitializeHardwareAsync().GetAwaiter().GetResult();
+        startupFaultVm.InitializeHardwareAsync().GetAwaiter().GetResult();
+        Assert(startupFaultVm.IsDeviceFault &&
+               startupFaultVm.DeviceFaultTransitionCount == 1 &&
+               startupFaultVm.DeviceFaultDialogCount == 1 &&
+               startupFaultBoard.ConnectAttempts == 1,
+            "Startup board failure tries once, shows one fault episode, and never reconnects in the same process");
     }
 
     private static void TestManualModeInterlock()
@@ -2261,6 +2321,83 @@ internal static class Program
         }
     }
 
+    private static void TestMachineFingerprintAndLicenseVerification()
+    {
+        var baseline = new MachineIdentity(" win-guid-01 ", " cpu-id-01 ", " disk-id-01 ");
+        string registrationId = MachineFingerprintService.ComputeRegistrationId(baseline);
+        Assert(registrationId.Length == 32 && registrationId.All(Uri.IsHexDigit),
+            "Registration ID uses the first 16 SHA-256 bytes as 32 uppercase hex characters");
+        Assert(MachineFingerprintService.ComputeRegistrationId(
+                   new MachineIdentity("WIN-GUID-01", "CPU-ID-01", "DISK-ID-01")) == registrationId,
+            "Fingerprint normalization ignores casing, whitespace, and separators");
+        Assert(MachineFingerprintService.ComputeRegistrationId(
+                   baseline with { WindowsInstallationId = "WIN-GUID-02" }) != registrationId,
+            "Changing Windows installation identity changes Registration ID");
+        Assert(MachineFingerprintService.ComputeRegistrationId(
+                   baseline with { CpuId = "CPU-ID-02" }) != registrationId,
+            "Changing CPU identity changes Registration ID");
+        Assert(MachineFingerprintService.ComputeRegistrationId(
+                   baseline with { SystemDiskId = "DISK-ID-02" }) != registrationId,
+            "Changing system disk identity changes Registration ID");
+
+        using ECDsa testKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        string publicKeyPem = testKey.ExportSubjectPublicKeyInfoPem();
+        string machineId = MachineFingerprintService.Normalize(registrationId);
+        byte[] payload = Encoding.UTF8.GetBytes(
+            $"JBZ1|JBZUniversalTester|{machineId}|PERPETUAL|1700000000");
+        byte[] signature = testKey.SignData(
+            payload,
+            HashAlgorithmName.SHA256,
+            DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+        string activationCode = $"JBZ1.{Encode(payload)}.{Encode(signature)}";
+
+        Assert(LicenseVerificationService.VerifyActivationCode(
+                   activationCode, registrationId, publicKeyPem),
+            "A JBZ1 license for the current MachineId verifies");
+        Assert(!LicenseVerificationService.VerifyActivationCode(
+                   activationCode, new string('A', 32), publicKeyPem),
+            "A JBZ1 license for another MachineId is rejected");
+
+        byte[] tamperedPayload = payload.ToArray();
+        tamperedPayload[^1] ^= 1;
+        string tamperedCode = $"JBZ1.{Encode(tamperedPayload)}.{Encode(signature)}";
+        Assert(!LicenseVerificationService.VerifyActivationCode(
+                   tamperedCode, registrationId, publicKeyPem),
+            "Changing one signed payload byte invalidates the signature");
+
+        string licenseRoot = Path.Combine(Path.GetTempPath(), "JBZLicenseTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            string licenseFile = Path.Combine(licenseRoot, "license.dat");
+            var licenses = new LicenseVerificationService(publicKeyPem, licenseFile);
+            Assert(licenses.ActivateAndSave(activationCode, registrationId) &&
+                   licenses.ValidateStoredLicense(registrationId),
+                "Activation is verified before save and verified again from the saved license");
+        }
+        finally
+        {
+            if (Directory.Exists(licenseRoot))
+                Directory.Delete(licenseRoot, recursive: true);
+        }
+
+        string appXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml"));
+        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
+        int verifyIndex = appSource.IndexOf("ValidateStoredLicense(registrationId)", StringComparison.Ordinal);
+        int mainWindowIndex = appSource.IndexOf("new MainWindow()", StringComparison.Ordinal);
+        Assert(!appXaml.Contains("StartupUri", StringComparison.Ordinal) &&
+               verifyIndex >= 0 && mainWindowIndex > verifyIndex,
+            "MainWindow is constructed only after the startup license gate");
+        Assert(typeof(LicenseVerificationService).Assembly.GetManifestResourceNames().Contains(
+                   "JBZUniversalTester.Assets.License.jbz-license-public.pem",
+                   StringComparer.Ordinal) &&
+               !File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "JBZUniversalTester.csproj"))
+                   .Contains("jbz-license-private.pem", StringComparison.OrdinalIgnoreCase),
+            "Production embeds only the public license key");
+
+        static string Encode(ReadOnlySpan<byte> bytes) =>
+            Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
     private static void TestCanonicalRuntimePersistence()
     {
         Assert(Path.GetFileName(RuntimePaths.ConfigFile) == "JBZUniversalTester.cfg",
@@ -2622,10 +2759,19 @@ internal static class Program
             ProductionConfigService.SaveLegacyCfg(offsetStart, cfgPath);
             string cfg = File.ReadAllText(cfgPath);
             Assert(offsetStart.StartCardNumber == 3 && offsetStart.CardCount == 6 &&
-                   cfg.Contains("[StartCardNumber]3", StringComparison.Ordinal) &&
-                   cfg.Contains("[ExpansionCardCount]4", StringComparison.Ordinal) &&
-                   cfg.Contains("[CardCount]6", StringComparison.Ordinal),
+                    cfg.Contains("[StartCardNumber]3", StringComparison.Ordinal) &&
+                    cfg.Contains("[ExpansionCardCount]4", StringComparison.Ordinal) &&
+                    cfg.Contains("[CardCount]6", StringComparison.Ordinal),
                 "CFG persists Start Card, logical card count and firmware scan-through consistently");
+            Assert(!cfg.Contains("[Version]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[BoardMode]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[UseTestPointer]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[ManualModeEnabled]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[AutoMasterSequence]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[SettingsPassword]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[DiscardPassword]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[App.", StringComparison.OrdinalIgnoreCase),
+                "Operator CFG excludes internal board/code settings and password material");
         }
         finally
         {
@@ -3442,8 +3588,22 @@ internal static class Program
                !mainWindowXaml.Contains("Test.ConnectBoardCommand", StringComparison.Ordinal) &&
                mainWindowSource.Contains("StartupControlUnlockTimeout", StringComparison.Ordinal) &&
                mainWindowSource.Contains("Task.WhenAny(", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("ObserveDeferredStartupAsync(initialization)", StringComparison.Ordinal),
-            "Slow board startup unlocks product selection while board reconnect remains fully automatic");
+               mainWindowSource.Contains("ReportStartupBoardTimeout()", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("ObserveDeferredStartupAsync(initialization)", StringComparison.Ordinal) &&
+               !mainWindowSource.Contains("ĐANG TỰ THỬ LẠI", StringComparison.Ordinal),
+            "Slow board startup latches the session and requires an application restart");
+        string scanSupervisorSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "ScanSupervisor.cs"));
+        string d2xxTransportSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "D2xxBoardTransport.cs"));
+        Assert(!testViewModelSource.Contains("ConnectBoardWithRetryAsync", StringComparison.Ordinal) &&
+               !testViewModelSource.Contains("ReconnectBoardForSettingsAsync", StringComparison.Ordinal) &&
+               !testViewModelSource.Contains("PRODUCTION_RECONFIGURE_RECONNECT", StringComparison.Ordinal) &&
+               !testViewModelSource.Contains("RecoverProductionScanStallAsync", StringComparison.Ordinal) &&
+               !scanSupervisorSource.Contains("RecoverProductionScanStallAsync", StringComparison.Ordinal) &&
+               !scanSupervisorSource.Contains("_board.DisconnectAsync()", StringComparison.Ordinal) &&
+               !d2xxTransportSource.Contains("attempt <= 6", StringComparison.Ordinal),
+            "D2XX startup and watchdog have no retry, STOP/START recovery, or in-session reconnect path");
         Assert(mainWindowXaml.Contains("Color=\"#273F91\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Color=\"#B45309\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Color=\"#0F766E\"", StringComparison.Ordinal) &&
@@ -4906,7 +5066,7 @@ internal static class Program
             string[] sampleHeaders =
             [
                 "Ngày", "Thời gian", "File", "Tên sản phẩm", "Mã hàng", "Loại xe", "LOT",
-                "Kết quả", "Số thứ tự", "Hồ sơ kiểm tra", "Mã vạch", "200 %",
+                "Kết quả", "Số thứ tự", "Lịch sử kiểm tra", "Mã vạch", "200 %",
                 "Kiểm tra đầu vào", "Chương trình"
             ];
             int previousHeader = -1;
@@ -4920,7 +5080,7 @@ internal static class Program
                    historyXaml.Contains("CanUserReorderColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("CanUserSortColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Visible\"", StringComparison.Ordinal) &&
-                   historyXaml.Contains("Header=\"Hồ sơ kiểm tra\" Width=\"1200\"", StringComparison.Ordinal),
+                   historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"1200\"", StringComparison.Ordinal),
                 "History UI locks column layout and keeps the inspection record widest with horizontal scrolling");
 
             var failed = new TestHistoryRecord
@@ -6387,7 +6547,9 @@ internal static class Program
         public byte[] ReleaseResistanceFrames { get; private set; } = [];
         public int ReleaseResistanceRouteCount { get; private set; }
         public bool ThrowOnSetRelay { get; set; }
-        public bool IsConnected => true;
+        public bool ThrowOnConnect { get; set; }
+        public int ConnectAttempts { get; private set; }
+        public bool IsConnected { get; private set; } = true;
         public bool IsScanning { get; private set; } = true;
         public BoardScanMode CurrentScanMode { get; private set; } = BoardScanMode.Production;
         public BoardCapacity InstalledCapacity { get; private set; } = BoardCapacity.Create(10);
@@ -6408,6 +6570,8 @@ internal static class Program
             AppliedScanCapacity = BoardCapacity.Create(scanUnits);
         public void SetRequestedScanCapacityForTest(int scanUnits) =>
             Capacity = BoardCapacity.Create(scanUnits);
+        public void SetConnectionStateForTest(bool connected) =>
+            IsConnected = connected;
         public CancellationToken? LastStartScanToken { get; private set; }
         public Action<FakeBoard>? StartScanCallback { get; set; }
         private event EventHandler<ScanFrame>? FrameReceivedCore;
@@ -6429,8 +6593,15 @@ internal static class Program
             }
             FrameReceivedCore?.Invoke(this, frame);
         }
-        public Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default) => Task.FromResult(new BoardConnectionInfo("Fake", "Fake"));
-        public Task DisconnectAsync() { IsScanning = false; return Task.CompletedTask; }
+        public Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default)
+        {
+            ConnectAttempts++;
+            if (ThrowOnConnect)
+                throw new InvalidOperationException("Simulated board connection failure");
+            IsConnected = true;
+            return Task.FromResult(new BoardConnectionInfo("Fake", "Fake"));
+        }
+        public Task DisconnectAsync() { IsConnected = false; IsScanning = false; return Task.CompletedTask; }
         public Task HandshakeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ResetClearAsync(CancellationToken ct = default) { Commands.Add("RESET"); return Task.CompletedTask; }
         public void ConfigureActiveScanRange(int maxIo) { }

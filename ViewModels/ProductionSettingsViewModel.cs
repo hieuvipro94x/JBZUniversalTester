@@ -325,6 +325,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            AsyncFileLogService.Current.Error($"Manual resistance measurement failed: {ex}");
             for (int index = 0; index < ManualResistanceResults.Count; index++)
             {
                 ResistanceResult current = ManualResistanceResults[index];
@@ -340,7 +341,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                     MeasurementStatus = "LỖI"
                 };
             }
-            ManualResistanceStatus = $"LỖI ĐO: {ex.Message}";
+            ManualResistanceStatus = "MẤT KẾT NỐI MÁY TEST - VUI LÒNG KHỞI ĐỘNG LẠI";
             throw;
         }
         finally

@@ -601,60 +601,12 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
                     <TextBlock Text="TEM / &#272;I&#7878;N TR&#7902;" Style="{StaticResource SectionTitleStyle}"/>
 
-                    <Border x:Name="LabelSettingsLockPanel"
-                            Grid.Row="1"
-                            Margin="0,0,0,6"
-                            Padding="8"
-                            Background="#FFF4D6"
-                            BorderBrush="#D69E2E"
-                            BorderThickness="1"
-                            CornerRadius="3"
-                            Visibility="Collapsed">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="145"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="96"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="34"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Text="MỞ KHÓA IN TEM"
-                                       FontWeight="Bold"
-                                       Foreground="#8A5A00"/>
-                            <PasswordBox x:Name="LabelUnlockPasswordBox"
-                                         Grid.Column="1"
-                                         Height="30"
-                                         Margin="0,2,4,2"
-                                         Padding="6,2"
-                                         FontSize="13"
-                                         KeyDown="LabelUnlockPasswordBox_KeyDown"/>
-                            <Button Grid.Column="2"
-                                    Height="30"
-                                    Margin="0,2"
-                                    Padding="4,1"
-                                    Content="MỞ KHÓA"
-                                    Style="{StaticResource SettingsWarningButtonStyle}"
-                                    Click="UnlockLabelSettings_Click"/>
-                            <TextBlock x:Name="LabelUnlockErrorText"
-                                       Grid.Row="1"
-                                       Grid.Column="1"
-                                       Grid.ColumnSpan="2"
-                                       Margin="0,3,0,0"
-                                       Foreground="{StaticResource FailRed}"
-                                       Text="Mật khẩu khóa cài đặt in tem không đúng."
-                                       Visibility="Collapsed"/>
-                        </Grid>
-                    </Border>
-
-                    <Grid x:Name="LabelPrintSettingsForm" Grid.Row="2">
+                    <Grid x:Name="LabelPrintSettingsForm" Grid.Row="1">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="65"/>
                             <ColumnDefinition Width="110"/>
@@ -731,19 +683,10 @@
                                    TextTrimming="CharacterEllipsis"
                                    Text="CHƯA KẾT NỐI"/>
 
-                        <TextBlock Grid.Row="2"
-                                   Text="Mật khẩu"
-                                   Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox x:Name="LabelSettingsPasswordTextBox"
-                                 Grid.Row="2"
-                                 Grid.Column="1"
-                                 Text="{Binding Settings.Password, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="Để trống nếu không khóa; mật khẩu này chỉ bảo vệ phần cài đặt in tem."/>
-
                         <StackPanel x:Name="LabelPrintActionsPanel"
                                     Grid.Row="2"
-                                    Grid.Column="2"
-                                    Grid.ColumnSpan="4"
+                                    Grid.Column="0"
+                                    Grid.ColumnSpan="6"
                                     Orientation="Horizontal"
                                     HorizontalAlignment="Right">
                             <Button Content="CH&#7880;NH TEM" Width="82" Height="28" Margin="2,2" Padding="3,0"
@@ -755,7 +698,7 @@
                         </StackPanel>
                     </Grid>
 
-                    <Grid Grid.Row="3" Margin="0,3,0,1">
+                    <Grid Grid.Row="2" Margin="0,3,0,1">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="44"/>
                             <ColumnDefinition Width="54"/>
@@ -769,7 +712,7 @@
                         <TextBlock Grid.Column="4" Text="MAX &#937;" Style="{StaticResource MiniHeaderStyle}"/>
                     </Grid>
 
-                    <Grid Grid.Row="4">
+                    <Grid Grid.Row="3">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>

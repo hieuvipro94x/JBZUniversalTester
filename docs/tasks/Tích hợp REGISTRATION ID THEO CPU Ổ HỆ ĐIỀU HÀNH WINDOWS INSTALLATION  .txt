@@ -1,0 +1,482 @@
+CODEX TASK - TÍCH HỢP REGISTRATION ID THEO CPU + Ổ HỆ ĐIỀU HÀNH + WINDOWS INSTALLATION
+PROJECT: JBZUniversalTester
+
+ĐÃ CÓ:
+- project JBZLicenseGenerator độc lập
+- format license JBZ1
+- generator ký license bằng ECDSA P-256
+- JBZUniversalTester sau này chỉ được chứa PUBLIC KEY
+
+MỤC TIÊU:
+JBZUniversalTester tự sinh một ID ĐĂNG KÝ cố định theo máy.
+
+Người vận hành gửi ID này cho tôi.
+Tôi nhập ID vào JBZLicenseGenerator.
+Tool tạo MÃ ĐĂNG KÝ.
+Người vận hành nhập mã vào JBZUniversalTester.
+Mã đúng thì mới được vào MainWindow.
+
+==================================================
+1. QUY TẮC MACHINE ID BẮT BUỘC
+==================================================
+
+Registration ID phải phụ thuộc vào:
+
+1. CPU identity
+2. serial/identity của ổ đĩa đang chứa Windows
+3. Windows installation identity
+
+Mục tiêu hành vi:
+
+- restart máy:
+  ID KHÔNG đổi
+
+- update JBZUniversalTester:
+  ID KHÔNG đổi
+
+- update Windows thông thường:
+  ID KHÔNG đổi
+
+- cài lại Windows sạch:
+  ID PHẢI đổi
+
+- thay CPU:
+  ID PHẢI đổi
+
+- thay ổ đĩa hệ điều hành:
+  ID PHẢI đổi
+
+- copy phần mềm sang máy khác:
+  ID PHẢI đổi
+
+Không được dùng:
+- tên máy
+- username
+- MAC address
+làm thành phần chính vì chúng dễ thay đổi.
+
+==================================================
+2. WINDOWS INSTALLATION ID
+==================================================
+
+Để phân biệt việc cài lại Windows trên cùng CPU + cùng SSD,
+phải lấy Windows installation identity.
+
+Ưu tiên đọc:
+
+HKLM\SOFTWARE\Microsoft\Cryptography
+MachineGuid
+
+Nếu chạy process 32-bit trên Windows 64-bit,
+phải đọc đúng RegistryView.Registry64 nếu cần.
+
+Nếu MachineGuid không đọc được:
+- có fallback rõ ràng;
+- log lỗi kỹ thuật;
+- KHÔNG tự sinh GUID ngẫu nhiên mỗi lần chạy.
+
+MachineGuid phải ổn định giữa các lần reboot
+nhưng thay đổi sau clean install Windows.
+
+==================================================
+3. CPU ID
+==================================================
+
+Tạo service đọc CPU identity ổn định.
+
+Ưu tiên trên Windows:
+
+Win32_Processor.ProcessorId
+
+Nếu có nhiều CPU/package:
+- lấy tất cả ProcessorId hợp lệ
+- normalize
+- sort
+- join theo thứ tự ổn định
+
+Fallback nếu ProcessorId không đọc được:
+- dùng các thuộc tính CPU ổn định phù hợp
+- tuyệt đối không dùng giá trị ngẫu nhiên.
+
+Không log toàn bộ raw CPU serial ra log production nếu không cần.
+
+==================================================
+4. Ổ ĐĨA HỆ ĐIỀU HÀNH
+==================================================
+
+Không lấy "ổ C:" theo suy đoán cứng.
+
+Phải xác định volume chứa:
+
+Environment.SystemDirectory
+hoặc Windows directory
+
+sau đó map volume đó về physical disk tương ứng.
+
+Lấy identity ổ vật lý, ưu tiên:
+
+Win32_DiskDrive.SerialNumber
+
+hoặc hardware identifier ổn định tương đương.
+
+Phải trim:
+- khoảng trắng
+- null
+- ký tự control
+
+Normalize uppercase.
+
+Nếu ổ NVMe/SATA trả serial có khoảng trắng hoặc đảo format,
+normalize để cùng một ổ vẫn cho cùng kết quả.
+
+Nếu không lấy được serial:
+- dùng fallback phần cứng ổn định
+- báo rõ trong log
+- không sinh random ID.
+
+==================================================
+5. CANONICAL MACHINE FINGERPRINT
+==================================================
+
+Tạo class:
+
+MachineFingerprintService
+
+Hoặc tên phù hợp project.
+
+Dựng canonical string kiểu:
+
+JBZ-MACHINE-V1
+|WIN=<NORMALIZED_MACHINE_GUID>
+|CPU=<NORMALIZED_CPU_ID>
+|DISK=<NORMALIZED_SYSTEM_DISK_ID>
+
+Ví dụ:
+
+JBZ-MACHINE-V1|WIN=ABCDEF...|CPU=BFEBFBFF000906EA|DISK=S5GX...
+
+Sau đó:
+
+SHA256(canonical UTF8)
+
+Không dùng GetHashCode().
+Không dùng MD5.
+Không dùng thuật toán phụ thuộc locale.
+
+==================================================
+6. REGISTRATION ID HIỂN THỊ
+==================================================
+
+Không hiển thị raw CPU/disk serial cho operator.
+
+Từ SHA-256 lấy Registration ID dạng dễ đọc.
+
+Khuyến nghị:
+
+16 bytes đầu SHA-256
+=> 32 hex
+
+format:
+
+AB12-CD34-EF56-7890-1234-5678-9ABC-DEF0
+
+Hoặc ít nhất 16 hex nếu UI cần ngắn hơn.
+
+Không dùng chỉ 8 hex nếu không bắt buộc compatibility.
+
+Registration ID phải:
+- deterministic
+- uppercase
+- dễ copy
+- không chứa ký tự dễ nhầm.
+
+==================================================
+7. REGISTRATION WINDOW PHẢI CHẠY TRƯỚC MAINWINDOW
+==================================================
+
+Startup phải là:
+
+App.OnStartup
+    ↓
+MachineFingerprintService.GetRegistrationId()
+    ↓
+LicenseVerificationService.Validate(...)
+    ↓
+
+Nếu license hợp lệ:
+    mới new MainWindow()
+    rồi Show()
+
+Nếu license không hợp lệ:
+    mở RegistrationWindow trước
+
+MainWindow TUYỆT ĐỐI không được construct trước license validation.
+
+Lý do:
+không được khởi tạo:
+- MainViewModel
+- FTDI
+- BO
+- model
+- printer
+- production services
+
+khi máy chưa đăng ký.
+
+==================================================
+8. GIAO DIỆN REGISTRATIONWINDOW
+==================================================
+
+Tiếng Việt.
+
+Hiển thị:
+
+JBZ UNIVERSAL TESTER
+ĐĂNG KÝ PHẦN MỀM
+
+ID ĐĂNG KÝ:
+[AB12-CD34-EF56-...]
+
+[SAO CHÉP ID]
+
+MÃ ĐĂNG KÝ:
+[.................................]
+
+[ĐĂNG KÝ]
+
+Nếu mã sai:
+
+MÃ ĐĂNG KÝ KHÔNG HỢP LỆ
+
+Không đóng cửa sổ.
+Không vào MainWindow.
+
+Nếu mã đúng:
+- save license
+- verify lại
+- đóng RegistrationWindow
+- mở MainWindow ngay.
+
+==================================================
+9. TƯƠNG THÍCH VỚI JBZLICENSEGENERATOR
+==================================================
+
+Generator đã có format:
+
+JBZ1.<payload-base64url>.<signature-base64url>
+
+Payload canonical:
+
+JBZ1|JBZUniversalTester|MACHINE_ID|PERPETUAL|ISSUED_UNIX_SECONDS
+
+MACHINE_ID phải chính là Registration ID normalized
+từ MachineFingerprintService.
+
+Generator nhập:
+
+ID ĐĂNG KÝ
+
+ví dụ:
+
+AB12-CD34-EF56-7890-1234-5678-9ABC-DEF0
+
+RegistrationId.Normalize() của generator phải đưa về:
+
+AB12CD34EF567890123456789ABCDEF0
+
+App cũng phải normalize giống hệt.
+
+Không được để app và generator dùng hai format MachineId khác nhau.
+
+==================================================
+10. LICENSE VERIFY
+==================================================
+
+JBZUniversalTester chỉ chứa PUBLIC KEY.
+
+Verify:
+
+ECDSA P-256
+SHA-256
+DSASignatureFormat.IeeeP1363FixedFieldConcatenation
+
+Kiểm tra mỗi startup:
+
+- signature valid
+- Product == JBZUniversalTester
+- MachineId == current machine Registration ID normalized
+- LicenseType == PERPETUAL
+
+Nếu CPU / Windows install / system disk thay đổi:
+
+Registration ID mới
+→ MachineId trong license cũ không match
+→ RegistrationWindow hiện lại.
+
+==================================================
+11. LƯU LICENSE
+==================================================
+
+Không lưu:
+
+Registered=true
+
+Không chỉ dựa vào Registry flag.
+
+Lưu activation code đầy đủ tại đường dẫn app-data phù hợp.
+
+Ví dụ:
+
+%PROGRAMDATA%\JBZUniversalTester\license.dat
+
+hoặc đường dẫn configuration hiện tại của project nếu đã có quy chuẩn.
+
+Mỗi startup:
+- đọc license
+- verify chữ ký lại
+- verify MachineId lại.
+
+Nếu file bị sửa:
+→ verify fail
+→ RegistrationWindow.
+
+==================================================
+12. SECURITY
+==================================================
+
+TUYỆT ĐỐI:
+
+JBZUniversalTester KHÔNG được chứa:
+- private key
+- path private key
+- secret dùng để sinh license
+- code tạo signature
+
+Generator mới được có private key.
+
+App chỉ VERIFY.
+
+Không tạo cơ chế kiểu:
+
+code = hash(machineId + secret)
+
+trong app production.
+
+==================================================
+13. KHÔNG ĐƯỢC SỬA CÁC PHẦN KHÁC
+==================================================
+
+Không sửa:
+
+D2XX
+BoardIoDecoder
+TestEngine
+TestViewModel test logic
+TestWindow production logic
+CardCount
+ExpansionCardCount
+Probe/TestPin
+Relay
+Resistance
+Leak
+Label
+Printer
+History
+Counter
+LED
+Production PASS/FAIL logic
+
+Task này chỉ là LICENSE/REGISTRATION STARTUP GATE.
+
+==================================================
+14. SELF TEST BẮT BUỘC
+==================================================
+
+Thêm test cho MachineFingerprintService nếu có thể mock nguồn dữ liệu.
+
+Test:
+
+A:
+same WIN + CPU + DISK
+=> same Registration ID
+
+B:
+WIN changed
+=> Registration ID changed
+
+C:
+CPU changed
+=> Registration ID changed
+
+D:
+DISK changed
+=> Registration ID changed
+
+E:
+casing/whitespace của raw serial khác nhau nhưng dữ liệu phần cứng thực giống
+=> same normalized ID
+
+F:
+license đúng MachineId
+=> PASS verify
+
+G:
+license của MachineId khác
+=> FAIL verify
+
+H:
+license bị sửa 1 byte
+=> FAIL signature
+
+Không dùng production private key trong source test.
+Nếu cần roundtrip test:
+dùng temporary test ECDSA key được tạo trong test.
+
+==================================================
+15. BUILD
+==================================================
+
+Chạy:
+
+dotnet build -c Release
+
+và SelfTests hiện có.
+
+Không xóa test production cũ để build xanh.
+
+==================================================
+16. BÁO CÁO CUỐI
+==================================================
+
+Sau khi sửa báo rõ:
+
+1. file nào thêm/sửa
+2. method nào tạo Machine ID
+3. lấy Windows MachineGuid ở đâu
+4. lấy CPU ID bằng cách nào
+5. xác định system disk bằng cách nào
+6. lấy disk serial bằng cách nào
+7. fallback khi CPU/disk/MachineGuid thiếu
+8. canonical fingerprint chính xác
+9. SHA-256 được format thành Registration ID thế nào
+10. cài lại Windows vì sao ID đổi
+11. thay CPU vì sao ID đổi
+12. thay SSD hệ điều hành vì sao ID đổi
+13. license lưu ở đâu
+14. MainWindow có được construct trước verify hay không
+15. RegistrationWindow chạy trước MainWindow thế nào
+16. PUBLIC KEY nằm ở đâu
+17. xác nhận PRIVATE KEY không tồn tại trong app
+18. mã JBZLicenseGenerator tạo có verify được không
+19. kết quả build
+20. kết quả self-tests
+
+MARKER:
+
+JBZ_MACHINE_FINGERPRINT_2026-09-06
+JBZ_LICENSE_GATE_2026-09-06
+JBZ_REGISTRATION_WINDOW_2026-09-06
+
+KHÔNG tự ý sửa format JBZ1.
+Nếu phát hiện tool generator hiện tại không tương thích,
+hãy dừng và báo chính xác điểm không tương thích trước khi thay format.

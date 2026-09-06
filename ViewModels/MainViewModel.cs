@@ -112,7 +112,7 @@ public sealed class MainViewModel : ObservableObject
 
         // Việc tự nạp mã + tự kết nối bo được bắt đầu tại MainWindow.Loaded.
         // Không dùng fire-and-forget trong constructor để tránh race giữa WPF
-        // StartupUri/ShowDialog và quá trình recovery D2XX.
+        // StartupUri/ShowDialog và lần khởi tạo D2XX duy nhất của phiên.
         _page = Home;
 
         ShowHomeCommand = new RelayCommand(
@@ -170,14 +170,12 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
 
-        if (Test.IsBoardConnected && Model is not null)
-            Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName} - BO ĐÃ KẾT NỐI";
-        else if (Test.IsBoardConnected)
-            Status = "BO ĐÃ KẾT NỐI - CHƯA CÓ MÃ HÀNG";
+        if (Test.IsDeviceFault || !Test.IsBoardConnected)
+            Status = "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG";
         else if (Model is not null)
-            Status = $"ĐÃ NẠP {Model.ModelName} - BO CHƯA KẾT NỐI";
+            Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName} - BO ĐÃ KẾT NỐI";
         else
-            Status = "CHƯA CÓ MÃ HÀNG - BO CHƯA KẾT NỐI";
+            Status = "BO ĐÃ KẾT NỐI - CHƯA CÓ MÃ HÀNG";
     }
 
     private async Task ObservePrinterStartupAsync(Task printerConnectionTask)
@@ -340,7 +338,7 @@ public sealed class MainViewModel : ObservableObject
         _productionSettings.ManualModeEnabled = false;
 
         if (boardSelectionChanged)
-            await Test.ReconnectBoardForSettingsAsync();
+            Test.RequireApplicationRestartAfterBoardSettingsChange();
         else if (scanHardwareChanged)
             await Test.RefreshProductionConfigurationAsync(
                 forceNativeRestart: old.UsbDelay != _productionSettings.UsbDelay ||

@@ -43,9 +43,11 @@ public sealed class LabelPrintService : IAsyncDisposable
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             ClosePrinterPort();
+            AsyncFileLogService.Current.Error(
+                $"Label printer connection failed on {portName}: {ex}");
             return new LabelPrinterConnectionResult(
                 false,
-                $"KHÔNG KẾT NỐI ĐƯỢC {portName}: {ex.Message}");
+                "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
         }
         finally
         {

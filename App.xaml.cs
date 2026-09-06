@@ -4,6 +4,7 @@ using System.Windows.Threading;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.Versioning;
 using JBZUniversalTester.ViewModels;
+using JBZUniversalTester.Views;
 
 namespace JBZUniversalTester;
 
@@ -29,24 +30,55 @@ public partial class App : Application
             return;
         }
 
-        // Khởi tạo/migrate History và config trước để khóa log lấy đúng giá trị
-        // đã lưu của trạm. History không phụ thuộc và không bị khóa bởi log.
-        StartupBootstrapService.EnsureFastConfiguration();
-        var productionSettings = ProductionConfigService.Load();
-        AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
-        AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
-        StartupPerformanceTrace.Mark("T0 App.OnStartup");
-
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         base.OnStartup(e);
 
-        // Không load/khởi tạo audio đồng bộ trong OnStartup. Với StartupUri,
-        // MainWindow đã được tạo trong base.OnStartup nhưng Dispatcher chưa có
-        // cơ hội render frame đầu. Đẩy sound xuống ApplicationIdle để audio I/O
-        // không làm cửa sổ có cảm giác treo ngay khi vừa mở.
+        string registrationId;
+        var licenses = new LicenseVerificationService();
+        try
+        {
+            registrationId = new MachineFingerprintService().GetRegistrationId();
+        }
+        catch (Exception ex)
+        {
+            WriteCrashDiagnostics(ex, "License.MachineFingerprint");
+            MessageBox.Show(
+                "Chưa tạo được ID đăng ký. Vui lòng liên hệ bộ phận kỹ thuật.",
+                "CHƯA THỂ ĐĂNG KÝ",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            Shutdown(3);
+            return;
+        }
+
+        if (!licenses.ValidateStoredLicense(registrationId))
+        {
+            var registrationWindow = new RegistrationWindow(registrationId, licenses);
+            bool activated = registrationWindow.ShowDialog() == true;
+            if (!activated || !licenses.ValidateStoredLicense(registrationId))
+            {
+                Shutdown(4);
+                return;
+            }
+        }
+
+        // Production configuration and every hardware-owning ViewModel are initialized
+        // only after the stored activation code has passed a fresh startup verification.
+        StartupBootstrapService.EnsureFastConfiguration();
+        var productionSettings = ProductionConfigService.Load();
+        AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
+        AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
+        StartupPerformanceTrace.Mark("T0 App.OnStartup LICENSE_VALID");
+
+        var mainWindow = new MainWindow();
+        MainWindow = mainWindow;
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
+        mainWindow.Show();
+
+        // Defer audio I/O until the licensed MainWindow has rendered.
         _ = Dispatcher.BeginInvoke(
             new Action(() =>
             {
@@ -85,9 +117,8 @@ public partial class App : Application
             try
             {
                 MessageBox.Show(
-                    "Ứng dụng đã hết bộ nhớ và phải đóng để bảo đảm trạng thái phần cứng. " +
-                    "Vui lòng mở lại ứng dụng; báo cáo lỗi đã được ghi trong thư mục Crash.",
-                    "JBZ - LỖI BỘ NHỚ",
+                    "Phần mềm cần khởi động lại để tiếp tục. Báo cáo lỗi đã được lưu.",
+                    "VUI LÒNG KHỞI ĐỘNG LẠI",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
             }
@@ -106,10 +137,8 @@ public partial class App : Application
         try
         {
             MessageBox.Show(
-                "Ứng dụng gặp lỗi hệ thống và đã dừng thao tác hiện tại.\n\n" +
-                "Thao tác hiện tại đã dừng. Vui lòng xem log để xác định lỗi cấu hình, giao diện, thiết bị hoặc dữ liệu.\n\n" +
-                $"Chi tiết: {e.Exception.Message}",
-                "JBZ - LỖI HỆ THỐNG",
+                "Thao tác chưa hoàn thành. Vui lòng khởi động lại phần mềm.",
+                "THÔNG BÁO",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }

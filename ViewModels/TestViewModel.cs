@@ -68,6 +68,7 @@ public sealed class TestViewModel : ObservableObject
     private Task _removalPersistenceTask = Task.CompletedTask;
     private Task _masterPersistenceTask = Task.CompletedTask;
     private Task _legacyHistoryImportTask = Task.CompletedTask;
+    private Task _deviceFaultHardwareLockTask = Task.CompletedTask;
     private long _statisticsLoadGeneration;
     private Task _statisticsLoadTask = Task.CompletedTask;
     private readonly bool _requireStartupIoClear;
@@ -140,6 +141,7 @@ public sealed class TestViewModel : ObservableObject
     private int _deviceFault;
     private int _boardUnavailablePresentationApplied;
     private int _manualModeActive;
+    private int _hardwareReconfigurationActive;
     private int _deviceFaultDialogShown;
     private int _deviceFaultTransitionCount;
     private int _deviceFaultDialogCount;
@@ -200,7 +202,7 @@ public sealed class TestViewModel : ObservableObject
     private long _probeCycleCount;
     private long _probeReplacementThreshold = PartCounterStore.DefaultReplacementThreshold;
     private string _deviceFaultMessage =
-        "Hệ thống không nhận được tín hiệu ổn định từ bo kiểm tra. Máy đã dừng để tránh kết quả sai.";
+        "Mất kết nối với máy test. Vui lòng khởi động lại.";
     private LabelPrintContext? _failedLabelPrint;
     private LabelPrintContext? _lastSuccessfulLabelPrint;
     private string _labelStatusText = "TEM: CHỜ LẮP SẢN PHẨM";
@@ -970,7 +972,6 @@ public sealed class TestViewModel : ObservableObject
         set => Set(ref _selectedOperationTabIndex, value);
     }
 
-    public AsyncRelayCommand ConnectBoardCommand { get; }
     public AsyncRelayCommand ConnectKeysightCommand { get; }
     public AsyncRelayCommand StopCommand { get; }
     public AsyncRelayCommand MeasureCommand { get; }
@@ -1053,9 +1054,6 @@ public sealed class TestViewModel : ObservableObject
         // không làm nặng constructor của MainWindow/TestViewModel.
         RebuildActiveCards();
 
-        ConnectBoardCommand =
-            new AsyncRelayCommand(ConnectBoardAsync);
-
         ConnectKeysightCommand =
             new AsyncRelayCommand(ConnectKeysightAsync);
 
@@ -1111,22 +1109,9 @@ public sealed class TestViewModel : ObservableObject
     {
         if (!_board.IsConnected)
         {
-            string message =
-                $"Không thể {action} vì CHƯA KẾT NỐI VỚI BO MẠCH TEST.\n\n" +
-                "Phần mềm vẫn tiếp tục hoạt động. Hãy kiểm tra:\n" +
-                "• LOẠI BO MẠCH trong Cài đặt\n" +
-                "• D2XX: cáp USB/driver FTDI\n\n" +
-                "Sau khi bo được kết nối, hãy thử lại thao tác.";
-
-            BoardConnectionMessage = "CHƯA KẾT NỐI VỚI BO MẠCH TEST";
-            HardwareStatus = "Bo: CHƯA KẾT NỐI";
-            State = "CHƯA KẾT NỐI BO - CHỨC NĂNG PHẦN CỨNG BỊ KHÓA";
-            AddLog($"MANUAL BLOCKED: {action} - bo chưa kết nối.");
-            MessageBox.Show(
-                message,
-                "Chưa kết nối bo mạch test",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            EnterDeviceFault(
+                new InvalidOperationException($"Không thể {action}: bo kiểm tra không còn kết nối."),
+                $"Manual:{action}");
             return false;
         }
 
@@ -1345,6 +1330,15 @@ public sealed class TestViewModel : ObservableObject
                     $"{result.Name}/CH{result.Channel}={result.Display} {result.ResultText}")));
             return results;
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            EnterDeviceFault(ex, "ManualResistance");
+            throw;
+        }
         finally
         {
             _manualRelayGate.Release();
@@ -1432,8 +1426,17 @@ public sealed class TestViewModel : ObservableObject
         if (!firstTransition)
             return;
 
-        _deviceFaultMessage =
-            "Bo lỗi hoặc mất kết nối. Hãy thoát ứng dụng và mở lại sau khi kiểm tra cáp/nguồn.";
+        if (Application.Current is not null)
+        {
+            CrashReportService.Write(
+                exception,
+                $"Hardware.DeviceFault.{source}",
+                diagnostic);
+        }
+
+        _deviceFaultMessage = "Mất kết nối với máy test. Vui lòng khởi động lại.";
+        BoardConnectionMessage = _deviceFaultMessage;
+        HardwareStatus = "Máy test: MẤT KẾT NỐI";
         _cycleActive = false;
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
@@ -1443,6 +1446,8 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
+        Interlocked.Exchange(ref _manualModeActive, 0);
+        Volatile.Write(ref _manualActiveRelay, 0);
         SwitchRuntimeMode(RuntimeMode.Background);
         CancelCycleOperations();
         _sound.SetWiringFaultAlarm(false);
@@ -1451,7 +1456,7 @@ public sealed class TestViewModel : ObservableObject
         State = "LỖI THIẾT BỊ";
         RaiseDeviceFaultState();
 
-        _ = SafeLockHardwareForDeviceFaultAsync();
+        _deviceFaultHardwareLockTask = SafeLockHardwareForDeviceFaultAsync();
         ShowDeviceFaultDialogOnce();
     }
 
@@ -1482,26 +1487,45 @@ public sealed class TestViewModel : ObservableObject
         if (dispatcher is null)
             return;
 
-        dispatcher.BeginInvoke(new Action(() =>
+        dispatcher.BeginInvoke(new Action(async () =>
         {
             MessageBox.Show(
-                "Tín hiệu từ bo kiểm tra không ổn định.\n\n" +
-                "Máy đã dừng chu kỳ hiện tại để tránh kết quả sai.\n\n" +
-                "Hãy kiểm tra:\n" +
-                "- cáp USB nối với bo;\n" +
-                "- nguồn điện cấp cho bo;\n" +
-                "- đầu gá/JIG;\n" +
-                "- các dây kết nối.\n\n" +
-                "Sau khi kiểm tra, hãy THOÁT ỨNG DỤNG và mở lại để khởi tạo bo từ đầu.",
-                "LỖI HỆ THỐNG KIỂM TRA",
+                _deviceFaultMessage,
+                "MẤT KẾT NỐI",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+
+            await ExitApplicationAfterDeviceFaultAsync();
         }));
+    }
+
+    private async Task ExitApplicationAfterDeviceFaultAsync()
+    {
+        try
+        {
+            await _deviceFaultHardwareLockTask;
+            await ShutdownAsync();
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"DeviceFault shutdown failed: {ex}");
+        }
+
+        Application? application = Application.Current;
+        if (application?.MainWindow is Window mainWindow)
+            mainWindow.Close();
+        else
+            application?.Shutdown(1);
     }
 
     private void RaiseDeviceFaultState()
     {
         Raise(nameof(IsDeviceFault));
+        Raise(nameof(IsBoardConnected));
+        Raise(nameof(BoardConnectionMessage));
+        Raise(nameof(HasBoardConnectionError));
+        Raise(nameof(IsManualModeActive));
+        Raise(nameof(CanEnterManualMode));
         Raise(nameof(IsMasterBannerVisible));
         Raise(nameof(DeviceFaultMessage));
         Raise(nameof(DeviceFaultTransitionCount));
@@ -1613,44 +1637,15 @@ public sealed class TestViewModel : ObservableObject
     {
         lock (_initializationGate)
         {
+            if (IsDeviceFault)
+                return Task.CompletedTask;
+
             if (_board.IsConnected)
                 return EnsureContinuousProductionScanAsync();
 
-            // Không cache vĩnh viễn một lần kết nối thất bại. Nếu task cũ đã
-            // hoàn tất mà bo vẫn chưa Connected, lần gọi kế tiếp tự thử lại.
-            if (_hardwareInitializationTask is null ||
-                _hardwareInitializationTask.IsCompleted)
-            {
-                _hardwareInitializationTask = ConnectBoardWithRetryAsync();
-            }
-
-            return _hardwareInitializationTask;
-        }
-    }
-
-    private async Task ConnectBoardWithRetryAsync()
-    {
-        const int maxAttempts = 3;
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++)
-        {
-            await ConnectBoardAsync();
-
-            if (_board.IsConnected || _lifetimeCts.IsCancellationRequested)
-                return;
-
-            if (attempt < maxAttempts)
-            {
-                AddLog($"Tự kết nối bo lần {attempt} chưa thành công - thử lại nhanh...");
-                try
-                {
-                    await Task.Delay(120, _lifetimeCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-            }
+            // Một phiên ứng dụng chỉ được mở bo đúng một lần. Kết quả lỗi được
+            // cache suốt phiên; chỉ đóng/mở lại ứng dụng mới tạo lifecycle mới.
+            return _hardwareInitializationTask ??= ConnectBoardAsync();
         }
     }
 
@@ -1691,7 +1686,7 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AddLog($"Không khởi động được scan nền: {ex.Message}");
+            EnterDeviceFault(ex, "EnsureProductionScan");
         }
     }
 
@@ -1699,10 +1694,22 @@ public sealed class TestViewModel : ObservableObject
         CancellationToken ct,
         string reason)
     {
-        await _scanSupervisor.StartProductionScanAndVerifyFrameAsync(
-            _model?.MaxIo ?? 0,
-            ct,
-            reason);
+        try
+        {
+            await _scanSupervisor.StartProductionScanAndVerifyFrameAsync(
+                _model?.MaxIo ?? 0,
+                ct,
+                reason);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            EnterDeviceFault(ex, $"ProductionScan:{reason}");
+            throw;
+        }
     }
 
     private async Task HardwareMonitorLoopAsync(CancellationToken ct)
@@ -1711,18 +1718,34 @@ public sealed class TestViewModel : ObservableObject
         {
             try
             {
-                if (Volatile.Read(ref _probeSessionActive) == 0 &&
-                    Volatile.Read(ref _postContinuityStarted) == 0 &&
-                    Volatile.Read(ref _wiringFaultHandlingStarted) == 0)
+                if (IsDeviceFault)
+                    break;
+
+                // Mất handle là lỗi ngay cả khi Production đang chủ động dừng
+                // scan để đo Leak, chạy relay hoặc thao tác Manual.
+                if (!_board.IsConnected)
                 {
-                    if (!_board.IsConnected)
+                    EnterDeviceFault(
+                        new IOException("Bo D2XX đã mất kết nối trong khi ứng dụng đang chạy."),
+                        "HardwareMonitor.Disconnected");
+                    break;
+                }
+
+                if (!IsManualModeActive &&
+                    Volatile.Read(ref _hardwareReconfigurationActive) == 0 &&
+                    Volatile.Read(ref _waterProofRunning) == 0 &&
+                    Volatile.Read(ref _probeSessionActive) == 0 &&
+                    Volatile.Read(ref _postContinuityStarted) == 0 &&
+                    Volatile.Read(ref _wiringFaultHandlingStarted) == 0 &&
+                    Volatile.Read(ref _masterPostStarted) == 0 &&
+                    Volatile.Read(ref _masterEjectStarted) == 0)
+                {
+                    if (!_board.IsScanning)
                     {
-                        ShowBoardUnavailablePresentation();
-                        await InitializeHardwareAsync();
-                    }
-                    else if (!_board.IsScanning)
-                    {
-                        await EnsureContinuousProductionScanAsync();
+                        EnterDeviceFault(
+                            new IOException("Luồng quét D2XX đã dừng ngoài chu kỳ chuyển trạng thái cho phép."),
+                            "HardwareMonitor.ScanStopped");
+                        break;
                     }
                     else if (ShouldWatchProductionScan())
                     {
@@ -1746,11 +1769,12 @@ public sealed class TestViewModel : ObservableObject
                                 Interlocked.Exchange(
                                     ref _noProductionFrameObservedSinceTick,
                                     nowTick);
-                                await RecoverProductionScanStallAsync(
-                                    nowTick - observedSince,
-                                    _board.LastFrameSequence,
-                                    _board.FramesReceived,
-                                    ct);
+                                EnterDeviceFault(
+                                    new TimeoutException(
+                                        $"[SCAN-WATCHDOG] Không có frame đầu trong {nowTick - observedSince:0} ms; " +
+                                        $"seq={_board.LastFrameSequence}, frames={_board.FramesReceived}."),
+                                    "ScanWatchdog");
+                                break;
                             }
                         }
                         else
@@ -1759,11 +1783,12 @@ public sealed class TestViewModel : ObservableObject
                             double ageMs = (DateTime.UtcNow - lastFrameUtc).TotalMilliseconds;
                             if (ageMs > scanStallTimeoutMs)
                             {
-                                await RecoverProductionScanStallAsync(
-                                    ageMs,
-                                    _board.LastFrameSequence,
-                                    _board.FramesReceived,
-                                    ct);
+                                EnterDeviceFault(
+                                    new TimeoutException(
+                                        $"[SCAN-WATCHDOG] Frame đã dừng {ageMs:0} ms; " +
+                                        $"seq={_board.LastFrameSequence}, frames={_board.FramesReceived}."),
+                                    "ScanWatchdog");
+                                break;
                             }
                         }
                     }
@@ -1779,13 +1804,13 @@ public sealed class TestViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                AddLog($"Auto-reconnect/scan: {ex.Message}");
+                EnterDeviceFault(ex, "HardwareMonitor");
+                break;
             }
 
             try
             {
-                // SAFE OFFLINE MODE: không spam FTDI/COM khi máy chạy offline.
-                // Vẫn tự reconnect nhưng với nhịp đủ nhẹ cho production PC.
+                // Chỉ giám sát kết nối hiện tại; tuyệt đối không mở lại FTDI.
                 await Task.Delay(2000, ct);
             }
             catch (OperationCanceledException)
@@ -1816,37 +1841,6 @@ public sealed class TestViewModel : ObservableObject
             or ProductionPhase.WaitingProductRemoval;
     }
 
-    private async Task RecoverProductionScanStallAsync(
-        double ageMs,
-        long lastSequence,
-        long framesReceived,
-        CancellationToken ct)
-    {
-        try
-        {
-            bool recovered = await _scanSupervisor.RecoverProductionScanStallAsync(
-                ageMs,
-                lastSequence,
-                framesReceived,
-                _model?.MaxIo ?? 0,
-                InitializeHardwareAsync,
-                ct);
-            if (!recovered)
-            {
-                EnterDeviceFault(
-                    new InvalidOperationException("[SCAN-WATCHDOG] D2XX scan stalled after STOP/START and reconnect."),
-                    "ScanWatchdog");
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            EnterDeviceFault(ex, "ScanWatchdog");
-        }
-    }
-
     public Task InitializeAsync()
     {
         lock (_initializationGate)
@@ -1864,6 +1858,19 @@ public sealed class TestViewModel : ObservableObject
         // đoạn transport còn đang khởi tạo.
         await InitializeHardwareAsync();
 
+        if (IsDeviceFault || !_board.IsConnected)
+        {
+            if (!IsDeviceFault)
+            {
+                EnterDeviceFault(
+                    new IOException("Bo không còn kết nối sau bước khởi tạo."),
+                    "InitializeCore.NoBoard");
+            }
+            AddLog("Khởi động bo thất bại; phiên hiện tại bị khóa đến khi thoát và mở lại ứng dụng.");
+            StartupPerformanceTrace.Mark("T12 STARTUP_BOARD_FAULT");
+            return;
+        }
+
         if (_board.IsConnected)
         {
             if (_model is null)
@@ -1876,20 +1883,12 @@ public sealed class TestViewModel : ObservableObject
                 AddLog($"Giữ model đang chọn: {ModelName}");
             }
         }
-        else
-        {
-            AddLog("Chưa nạp mã hàng vì bo chưa kết nối; auto-reconnect vẫn tiếp tục chạy nền.");
-        }
+        await EnsureContinuousProductionScanAsync();
 
-        if (_board.IsConnected)
-            await EnsureContinuousProductionScanAsync();
-
-        // Theo dõi nhẹ: nếu USB/D2XX rơi, tự mở lại và khởi động scan nền.
+        // Watchdog chỉ khóa phiên khi mất bo/scan; không tự reconnect.
         _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeCts.Token);
 
-        State = _board.IsConnected
-            ? ReadyStateForCurrentModel()
-            : (_model is null ? "BO CHƯA KẾT NỐI" : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI");
+        State = ReadyStateForCurrentModel();
         StartupPerformanceTrace.Mark("T12 STARTUP_READY");
     }
 
@@ -1978,7 +1977,9 @@ public sealed class TestViewModel : ObservableObject
         if (_board.IsConnected)
             await EnsureContinuousProductionScanAsync();
         StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
-        State = _board.IsConnected ? ReadyStateForCurrentModel() : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
+        State = _board.IsConnected && !IsDeviceFault
+            ? ReadyStateForCurrentModel()
+            : "LỖI THIẾT BỊ";
         return model;
     }
 
@@ -1995,7 +1996,9 @@ public sealed class TestViewModel : ObservableObject
         SetModel(model, prepared);
         if (_board.IsConnected)
             await EnsureContinuousProductionScanAsync();
-        State = _board.IsConnected ? ReadyStateForCurrentModel() : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
+        State = _board.IsConnected && !IsDeviceFault
+            ? ReadyStateForCurrentModel()
+            : "LỖI THIẾT BỊ";
         return model;
     }
 
@@ -2064,9 +2067,9 @@ public sealed class TestViewModel : ObservableObject
                 AddLog($"Bỏ model startup {Path.GetFileName(fullPath)} vì người vận hành đã chọn model mới.");
             }
 
-            State = _board.IsConnected
+            State = _board.IsConnected && !IsDeviceFault
                 ? ReadyStateForCurrentModel()
-                : (_model is null ? "BO CHƯA KẾT NỐI" : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI");
+                : "LỖI THIẾT BỊ";
         }
         catch (Exception ex)
         {
@@ -2880,7 +2883,7 @@ public sealed class TestViewModel : ObservableObject
                 Interlocked.Increment(ref _productionFramesProcessed);
                 if (restoreBoardPresentation && !engineChanged)
                 {
-                    // UI đã xóa snapshot lúc mất bo. Frame đầu tiên sau reconnect
+                    // UI đã xóa snapshot lúc đổi lifecycle. Frame đầu tiên của phiên mới
                     // phải dựng lại presentation kể cả topology vật lý không đổi.
                     OnEngineChanged(_engine, EventArgs.Empty);
                 }
@@ -3895,6 +3898,9 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task ConnectBoardAsync()
     {
+        if (IsDeviceFault || _lifetimeCts.IsCancellationRequested)
+            return;
+
         try
         {
             if (_board.IsConnected)
@@ -3917,6 +3923,14 @@ public sealed class TestViewModel : ObservableObject
             if (_lifetimeCts.IsCancellationRequested)
                 return;
 
+            // MainWindow có thể đã chốt startup timeout trong lúc driver còn
+            // mở handle. Không cho kết nối hoàn tất muộn hồi sinh phiên đã lỗi.
+            if (IsDeviceFault)
+            {
+                await _board.DisconnectAsync();
+                return;
+            }
+
             BoardConnectionMessage = string.Empty;
             HardwareStatus =
                 $"Bo: {info.Description} [{info.SerialNumber}] - ĐÃ KẾT NỐI";
@@ -3938,23 +3952,27 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            // Đây là lỗi phần cứng có thể phục hồi. Không ném lại exception,
-            // để người dùng vẫn vào được màn hình Test và bấm kết nối lại sau.
-            BoardConnectionMessage = string.IsNullOrWhiteSpace(ex.Message)
-                ? "Không thể kết nối với bo JBZ."
-                : ex.Message.Trim();
-            HardwareStatus = "Bo: CHƯA KẾT NỐI";
-
-            State = _model is null
-                ? "BO CHƯA KẾT NỐI"
-                : "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
-
-            ShowBoardUnavailablePresentation();
-            AddLog($"Chưa kết nối được board: {ex.Message}");
-            Raise(nameof(IsBoardConnected));
-
+            EnterDeviceFault(ex, "BoardStartup");
         }
     }
+
+    public void ReportBoardUnavailableForOperatorAction(string source)
+    {
+        if (!IsDeviceFault)
+        {
+            EnterDeviceFault(
+                new InvalidOperationException("Bo kiểm tra chưa kết nối hoặc đã mất kết nối."),
+                source);
+            return;
+        }
+
+        ShowDeviceFaultDialogOnce();
+    }
+
+    public void ReportStartupBoardTimeout() =>
+        EnterDeviceFault(
+            new TimeoutException("Khởi tạo bo vượt quá thời gian cho phép."),
+            "BoardStartupTimeout");
 
     private async Task ConnectKeysightAsync()
     {
@@ -4117,10 +4135,6 @@ public sealed class TestViewModel : ObservableObject
         PrepareProbeUiMode();
         try
         {
-            // ALWAYS_PROBE_2026-09-05: không còn nhánh Probe OFF.
-            if (!_board.IsConnected)
-                await InitializeHardwareAsync();
-
             if (!_board.IsConnected)
                 throw new InvalidOperationException("Bo JBZ chưa kết nối.");
 
@@ -4136,23 +4150,7 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            if (!_board.IsConnected)
-            {
-                BoardConnectionMessage = "CHƯA KẾT NỐI VỚI BO MẠCH TEST";
-                HardwareStatus = "Bo: CHƯA KẾT NỐI";
-                State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST PROBE PIN";
-                AddLog($"TESTPIN không bắt đầu: {ex.Message}");
-                MessageBox.Show(
-                    "Không thể TEST PROBE PIN vì chưa kết nối với bo mạch test.\n\n" +
-                    "Phần mềm vẫn hoạt động bình thường. Hãy kết nối bo rồi thử lại.",
-                    "Chưa kết nối bo mạch test",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
-                return;
-            }
-
-            AddLog($"TESTPIN lỗi: {ex.Message}");
-            throw;
+            EnterDeviceFault(ex, "ProbeScan");
         }
     }
 
@@ -4161,9 +4159,9 @@ public sealed class TestViewModel : ObservableObject
         // Probe Pin là observer bắt buộc của TestWindow, không còn trạng thái
         // OFF trong production. API legacy được giữ để caller cũ không lỗi,
         // nhưng chỉ bảo đảm stream Production vẫn chạy.
-        await _scanSupervisor.EnsureProductionScanAsync(
-            _model?.MaxIo ?? 0,
-            _lifetimeCts.Token);
+        await EnsureContinuousProductionScanAsync();
+        if (IsDeviceFault)
+            return;
         AddLog("TESTPIN/Probe observer luôn ON - yêu cầu OFF legacy được bỏ qua.");
     }
 
@@ -4183,10 +4181,17 @@ public sealed class TestViewModel : ObservableObject
                 "Chỉ được học topology ở MainWindow khi không có chu kỳ Production đang chờ xử lý.");
         }
 
-        bool started = await _scanSupervisor.EnsureProductionScanAsync(0, _lifetimeCts.Token);
-        if (started)
-            InvokeUi(UpdateCardScanningState);
-        AddLog("TOPOLOGY LEARNING ON - quét toàn bộ card đã cấu hình, không ARM Production.");
+        try
+        {
+            bool started = await _scanSupervisor.EnsureProductionScanAsync(0, _lifetimeCts.Token);
+            if (started)
+                InvokeUi(UpdateCardScanningState);
+            AddLog("TOPOLOGY LEARNING ON - quét toàn bộ card đã cấu hình, không ARM Production.");
+        }
+        catch (Exception ex)
+        {
+            EnterDeviceFault(ex, "TopologyLearning");
+        }
     }
 
     public async Task StopTopologyLearningAsync()
@@ -4263,17 +4268,7 @@ public sealed class TestViewModel : ObservableObject
 
         if (!_board.IsConnected)
         {
-            ShowBoardUnavailablePresentation();
-            if (string.IsNullOrWhiteSpace(BoardConnectionMessage))
-            {
-                BoardConnectionMessage =
-                    "Chưa kết nối bo JBZ. Hãy kiểm tra LOẠI BO MẠCH trong Cài đặt; " +
-                    "D2XX: cáp/driver FTDI.";
-            }
-
-            State = "BO CHƯA KẾT NỐI";
-            HardwareStatus = "Bo: CHƯA KẾT NỐI";
-            AddLog("Chưa thể ARM kiểm tra vì bo JBZ chưa kết nối; bộ giám sát phần cứng sẽ tự phục hồi nền.");
+            ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
             return;
         }
 
@@ -4586,7 +4581,8 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AddLog($"Không thể dừng bo sau lỗi đấu sai: {ex.Message}");
+            EnterDeviceFault(ex, "WiringFault.StopBoard");
+            return;
         }
 
         // TestPin có thể được mở trong lúc handler production đang await
@@ -4698,15 +4694,7 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _waitForFaultProductRemoval = false;
-            SetProductionPhase(ProductionPhase.EquipmentError);
-            State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
-            AddLog($"Không thể eject/restart scan sau lỗi: {ex.Message}");
-            MessageBox.Show(
-                $"Không thể mở JIG hoặc khởi động lại scan sau lỗi.\nKhông chạy MARKING PASS.\n\n{ex.Message}",
-                "Lỗi thiết bị",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            EnterDeviceFault(ex, "WiringFault.EjectOrScan");
         }
     }
 
@@ -4967,12 +4955,8 @@ public sealed class TestViewModel : ObservableObject
         }
 
         if (!_board.IsConnected)
-            await InitializeHardwareAsync();
-
-        if (!_board.IsConnected)
         {
-            MasterStatus = "BO CHƯA KẾT NỐI - KHÔNG THỂ KIỂM TRA MASTER";
-            State = "LỖI THIẾT BỊ - MASTER BỊ KHÓA";
+            ReportBoardUnavailableForOperatorAction("MasterSequence.NoBoard");
             return;
         }
 
@@ -5005,9 +4989,9 @@ public sealed class TestViewModel : ObservableObject
         MasterStatus = "KIỂM TRA MASTER PASS";
         AddLog("MASTER GOOD START - production gate LOCKED; không cộng LOT/Pass/Fail.");
 
-        await _scanSupervisor.EnsureProductionScanAsync(
-            _model?.MaxIo ?? 0,
-            _lifetimeCts.Token);
+        await EnsureContinuousProductionScanAsync();
+        if (IsDeviceFault)
+            return;
 
         RaiseMasterState();
     }
@@ -5483,9 +5467,9 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            State = "LỖI THIẾT BỊ - MASTER";
-            MasterStatus = $"LỖI KIỂM TRA MASTER PASS: {ex.Message}";
-            AddLog(MasterStatus);
+            MasterStatus = "MẤT KẾT NỐI MÁY TEST - VUI LÒNG KHỞI ĐỘNG LẠI";
+            AddLog($"LỖI KIỂM TRA MASTER PASS: {ex}");
+            EnterDeviceFault(ex, "MasterGood");
         }
         finally
         {
@@ -5557,10 +5541,10 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            State = "LỖI THIẾT BỊ - MASTER";
-            MasterStatus = $"LỖI EJECT MASTER: {ex.Message}";
-            AddLog(MasterStatus);
+            MasterStatus = "MẤT KẾT NỐI MÁY TEST - VUI LÒNG KHỞI ĐỘNG LẠI";
+            AddLog($"LỖI EJECT MASTER: {ex}");
             Interlocked.Exchange(ref _masterEjectStarted, 0);
+            EnterDeviceFault(ex, "MasterBad");
         }
         finally
         {
@@ -6431,7 +6415,6 @@ public sealed class TestViewModel : ObservableObject
                 catch (Exception scanEx)
                 {
                     AddLog($"[WATERPROOF-RETEST] Không thể restart D2XX chờ tháo/lắp: {scanEx.Message}");
-                    await EnsureContinuousProductionScanAsync();
                 }
             }
         }
@@ -6529,8 +6512,8 @@ public sealed class TestViewModel : ObservableObject
             AddLog($"[WATERPROOF-RETEST] LỖI LƯU LỊCH SỬ: {ex.Message}");
             await InvokeUiAsync(() => MessageBox.Show(
                 ResolveOperatorDialogOwner(),
-                $"Leak retest đã có kết quả {completed.ResultText} nhưng chưa lưu được lịch sử.\n\n{ex.Message}",
-                "Lỗi lưu lịch sử Leak retest",
+                $"Đã có kết quả Leak retest {completed.ResultText} nhưng chưa lưu được lịch sử.",
+                "CHƯA LƯU ĐƯỢC KẾT QUẢ",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error));
             return false;
@@ -6623,6 +6606,14 @@ public sealed class TestViewModel : ObservableObject
             }
             catch (Exception ex)
             {
+                if (!_board.IsConnected)
+                {
+                    EnterDeviceFault(
+                        new IOException("Bo D2XX mất kết nối trong công đoạn Leak.", ex),
+                        "WaterProof.BoardDisconnected");
+                    return false;
+                }
+
                 SetWaterProofStage(WaterProofStage.Error, "LỖI THIẾT BỊ LEAK", "ERROR");
                 State = "LỖI THIẾT BỊ KÍN NƯỚC";
                 AddLog($"[WATERPROOF] DEVICE ERROR: {ex.Message}");
@@ -6640,9 +6631,8 @@ public sealed class TestViewModel : ObservableObject
 
                 await InvokeUiAsync(() => MessageBox.Show(
                     ResolveOperatorDialogOwner(),
-                    $"Không thể hoàn thành kiểm tra kín nước qua UART/RS232.\n\n{ex.Message}\n\n" +
-                    "Bo D2XX vẫn được giữ độc lập; hãy kiểm tra cổng COM/máy leak, tháo sản phẩm rồi chạy lại.",
-                    "Lỗi thiết bị kín nước",
+                    "Mất kết nối máy Leak. Hãy rút/cắm lại cáp, chọn lại cổng COM rồi thử lại.",
+                    "KIỂM TRA MÁY LEAK",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error));
 
@@ -6657,8 +6647,6 @@ public sealed class TestViewModel : ObservableObject
                 }
                 catch (Exception scanEx)
                 {
-                    _waitForProductRelease = false;
-                    State = "LỖI THIẾT BỊ LEAK - KHÔNG THỂ KHỞI ĐỘNG LẠI SCAN";
                     AddLog($"[WATERPROOF] Không thể restart D2XX sau lỗi Leak: {scanEx.Message}");
                 }
                 return false;
@@ -6714,16 +6702,7 @@ public sealed class TestViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                _waitForFaultProductRemoval = false;
-                SetProductionPhase(ProductionPhase.EquipmentError);
-                State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
-                AddLog($"Không thể eject/restart scan sau lỗi kín nước: {ex.Message}");
-                await InvokeUiAsync(() => MessageBox.Show(
-                    ResolveOperatorDialogOwner(),
-                    $"Không thể mở JIG hoặc khởi động lại scan sau lỗi kín nước.\n\n{ex.Message}",
-                    "Lỗi thiết bị",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error));
+                EnterDeviceFault(ex, "WaterProofFail.EjectOrScan");
             }
 
             return false;
@@ -6873,15 +6852,7 @@ public sealed class TestViewModel : ObservableObject
                     }
                     catch (Exception ex)
                     {
-                        _waitForFaultProductRemoval = false;
-                        SetProductionPhase(ProductionPhase.EquipmentError);
-                        State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
-                        AddLog($"Không thể eject/restart scan sau lỗi điện trở: {ex.Message}");
-                        MessageBox.Show(
-                            $"Không thể mở JIG hoặc khởi động lại scan sau lỗi điện trở.\nKhông chạy MARKING PASS.\n\n{ex.Message}",
-                            "Lỗi thiết bị",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Error);
+                        EnterDeviceFault(ex, "ResistanceFail.EjectOrScan");
                     }
                     return;
                 }
@@ -7036,12 +7007,9 @@ public sealed class TestViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                // PASS đã commit nên tuyệt đối không đổi thành FAIL. Giữ khóa
-                // ProductRemoved và thử khôi phục scan nền độc lập.
+                // PASS đã commit nên không đổi thành FAIL. DeviceFault khóa
+                // phiên và yêu cầu khởi động lại; không thử hồi sinh scan.
                 AddLog($"PASS đã lưu; restart scan chờ tháo chưa thành công: {ex.Message}");
-                await EnsureContinuousProductionScanAsync();
-                if (_waitForProductRelease)
-                    State = "PASS - THÁO SẢN PHẨM";
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -7056,26 +7024,7 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _cycleActive = false;
-            SetProductionPhase(ProductionPhase.EquipmentError);
-            _waitForProductRelease = false;
-
-            try
-            {
-                await _board.StopScanAsync();
-                await _board.AllRelaysOffAsync();
-            }
-            catch
-            {
-                // Giữ lỗi gốc của chu trình để chẩn đoán.
-            }
-
-            Interlocked.Exchange(ref _postContinuityStarted, 0);
-            await EnsureContinuousProductionScanAsync();
-
-            State = "LỖI CHU TRÌNH TEST";
-            AddLog($"Chu trình tự động bị dừng: {ex.Message}");
-            // Lỗi thiết bị/communication không tự cộng FAIL sản phẩm.
+            EnterDeviceFault(ex, "RunAutomaticPostContinuity");
         }
     }
 
@@ -7099,7 +7048,8 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AddLog($"Không thể dừng bo trước xác nhận NG cuối chu kỳ: {ex.Message}");
+            EnterDeviceFault(ex, "FinalPassRejected.StopBoard");
+            return;
         }
 
         FaultDetail[] faults = BuildFinalPassRejectionFaults(cycleModel);
@@ -7146,15 +7096,7 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _waitForFaultProductRemoval = false;
-            SetProductionPhase(ProductionPhase.EquipmentError);
-            State = "LỖI THIẾT BỊ - JIG KHÔNG MỞ";
-            AddLog($"Không thể eject/restart scan sau NG cuối chu kỳ: {ex.Message}");
-            MessageBox.Show(
-                $"Không thể mở JIG hoặc khởi động lại scan sau NG cuối chu kỳ.\nKhông chạy MARKING PASS.\n\n{ex.Message}",
-                "Lỗi thiết bị",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            EnterDeviceFault(ex, "FinalPassRejected.EjectOrScan");
         }
     }
 
@@ -7201,10 +7143,6 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _waitForProductRelease = false;
-            _cycleActive = false;
-            SetProductionPhase(ProductionPhase.EquipmentError);
-            State = "LỖI THIẾT BỊ - KHÔNG THỂ KHỞI ĐỘNG LẠI SCAN";
             AddLog($"Không thể phục hồi scan sau {reason}: {ex.Message}");
         }
     }
@@ -7236,37 +7174,12 @@ public sealed class TestViewModel : ObservableObject
         ];
     }
 
-    public async Task ReconnectBoardForSettingsAsync()
+    public void RequireApplicationRestartAfterBoardSettingsChange()
     {
-        _cycleActive = false;
-        SetProductionPhase(ProductionPhase.WaitingProduct);
-        CancelCycleOperations();
-        ClearInlineProbeContactsState(clearLastSeen: true);
-        InvokeUi(ClearInlineProbeDisplay);
-        _sound.SetWiringFaultAlarm(false);
-        _engine.SetFrameProcessingEnabled(false);
-
-        try
-        {
-            if (_board.IsConnected)
-                await _board.DisconnectAsync();
-        }
-        finally
-        {
-            lock (_initializationGate)
-                _hardwareInitializationTask = null;
-        }
-
-        BoardConnectionMessage = string.Empty;
-        HardwareStatus = "Bo: đang nhận dạng lại...";
-        State = "ĐANG NHẬN DẠNG LOẠI BO";
-        AddLog($"Áp dụng LOẠI BO MẠCH: {BoardModeCatalog.DisplayName(_productionSettings.BoardMode)}.");
-        await InitializeHardwareAsync();
-        if (_model is not null)
-        {
-            ResetMasterGateForModel();
-        }
-        RefreshProductionUiSettings();
+        EnterDeviceFault(
+            new InvalidOperationException(
+                "Loại bo đã thay đổi trong Cài đặt. Cần thoát và mở lại ứng dụng để áp dụng bằng lifecycle mới."),
+            "BoardSettingsChanged");
     }
 
     public void RefreshProductionConfiguration()
@@ -7313,118 +7226,90 @@ public sealed class TestViewModel : ObservableObject
     /// </summary>
     public async Task RefreshProductionConfigurationAsync(bool forceNativeRestart = false)
     {
-        int maxIo = _model?.MaxIo ?? 0;
-        bool wasScanning = _board.IsScanning;
-        bool usedFullReconnect = false;
-        RuntimeMode runtimeMode = CurrentRuntimeMode;
-        BoardScanMode resumeMode = runtimeMode == RuntimeMode.Probe
-            ? BoardScanMode.Probe
-            : BoardScanMode.Production;
+        if (IsDeviceFault)
+            return;
 
-        _board.ConfigureActiveScanRange(maxIo);
-        BoardCapacity requestedActiveCapacity = _board.Capacity;
-        BoardCapacity? appliedActiveCapacity = _board.AppliedScanCapacity;
-        bool activeCapacityChanged = appliedActiveCapacity is null ||
-            appliedActiveCapacity.StartScanParameter != requestedActiveCapacity.StartScanParameter ||
-            appliedActiveCapacity.TotalIoCapacity != requestedActiveCapacity.TotalIoCapacity;
-        bool restartRequired = activeCapacityChanged || forceNativeRestart;
-
-        ClearInlineProbeContactsState(clearLastSeen: true);
-        InvokeUi(ClearInlineProbeDisplay);
-        _sound.SetWiringFaultAlarm(false);
-        _engine.ClearTransientWiringFaults();
-
-        if (_board.IsConnected && wasScanning && restartRequired)
+        Interlocked.Exchange(ref _hardwareReconfigurationActive, 1);
+        try
         {
-            await _board.StopScanAsync();
-            await _board.AllRelaysOffAsync();
-        }
+            int maxIo = _model?.MaxIo ?? 0;
+            bool wasScanning = _board.IsScanning;
+            RuntimeMode runtimeMode = CurrentRuntimeMode;
+            BoardScanMode resumeMode = runtimeMode == RuntimeMode.Probe
+                ? BoardScanMode.Probe
+                : BoardScanMode.Production;
 
-        InvokeUi(RebuildActiveCards);
-        LoadWaterProofProfileForCurrentModel();
-        RefreshProductionUiSettings();
+            _board.ConfigureActiveScanRange(maxIo);
+            BoardCapacity requestedActiveCapacity = _board.Capacity;
+            BoardCapacity? appliedActiveCapacity = _board.AppliedScanCapacity;
+            bool activeCapacityChanged = appliedActiveCapacity is null ||
+                appliedActiveCapacity.StartScanParameter != requestedActiveCapacity.StartScanParameter ||
+                appliedActiveCapacity.TotalIoCapacity != requestedActiveCapacity.TotalIoCapacity;
+            bool restartRequired = activeCapacityChanged || forceNativeRestart;
 
-        if (_model is not null)
-        {
-            int configuredMasterFaults = ProductionConfigService.GetMasterFaultRequiredCount(_productionSettings, _model);
-            if (configuredMasterFaults != _masterRequiredFaultCount)
+            ClearInlineProbeContactsState(clearLastSeen: true);
+            InvokeUi(ClearInlineProbeDisplay);
+            _sound.SetWiringFaultAlarm(false);
+            _engine.ClearTransientWiringFaults();
+
+            if (_board.IsConnected && wasScanning && restartRequired)
             {
-                ResetMasterGateForModel();
-                AddLog($"Cấu hình Số lỗi Master thay đổi -> reset Master Gate về 0/{configuredMasterFaults}.");
+                await _board.StopScanAsync();
+                await _board.AllRelaysOffAsync();
             }
-        }
 
-        if (_board.IsConnected && wasScanning && restartRequired &&
-            _board.ScanCapacity.IsModelWithinInstalledCapacity)
-        {
-            try
+            InvokeUi(RebuildActiveCards);
+            LoadWaterProofProfileForCurrentModel();
+            RefreshProductionUiSettings();
+
+            if (_model is not null)
+            {
+                int configuredMasterFaults = ProductionConfigService.GetMasterFaultRequiredCount(
+                    _productionSettings,
+                    _model);
+                if (configuredMasterFaults != _masterRequiredFaultCount)
+                {
+                    ResetMasterGateForModel();
+                    AddLog($"Cấu hình Số lỗi Master thay đổi -> reset Master Gate về 0/{configuredMasterFaults}.");
+                }
+            }
+
+            if (_board.IsConnected && wasScanning && restartRequired &&
+                _board.ScanCapacity.IsModelWithinInstalledCapacity)
             {
                 if (resumeMode == BoardScanMode.Production)
+                {
                     await StartProductionScanAndVerifyFrameAsync(
                         _lifetimeCts.Token,
                         "PRODUCTION_RECONFIGURE");
+                }
                 else
-                    await _board.StartScanAsync(resumeMode);
-            }
-            catch (Exception liveReconfigureError) when
-                (!_lifetimeCts.IsCancellationRequested)
-            {
-                // Một số BO giữ nguyên độ dài frame cũ sau khi đổi byte xx của
-                // START_SCAN dù STOP/RESET/INIT đã chạy. Thử lại bằng lifecycle
-                // đầy đủ ngay trong lần Save để operator không phải tự thoát app.
-                AddLog(
-                    "Đổi số card tại chỗ chưa nhận đúng frame; tự reconnect BO " +
-                    $"với cấu hình mới. Lỗi đầu tiên: {liveReconfigureError.Message}");
-
-                try
                 {
-                    await ReconnectBoardForSettingsAsync();
-                    if (!_board.IsConnected)
-                    {
-                        throw new InvalidOperationException(
-                            "Không kết nối lại được BO sau khi đổi số card.");
-                    }
-
-                    _board.ConfigureActiveScanRange(maxIo);
-                    if (resumeMode == BoardScanMode.Production)
-                    {
-                        await StartProductionScanAndVerifyFrameAsync(
-                            _lifetimeCts.Token,
-                            "PRODUCTION_RECONFIGURE_RECONNECT");
-                    }
-                    else
-                    {
-                        await _board.StartScanAsync(resumeMode, _lifetimeCts.Token);
-                    }
-
-                    usedFullReconnect = true;
-                    AddLog("Đã đồng bộ số card sau khi tự reconnect BO.");
-                }
-                catch (Exception reconnectError) when
-                    (!_lifetimeCts.IsCancellationRequested)
-                {
-                    AddLog(
-                        "Không thể đồng bộ số card sau reconnect: " +
-                        reconnectError.Message);
-                    throw new InvalidOperationException(
-                        "Không thể đồng bộ số card mở rộng với BO. " +
-                        "Hãy thoát hoàn toàn ứng dụng, mở lại rồi kiểm tra kết nối BO.",
-                        new AggregateException(liveReconfigureError, reconnectError));
+                    await _board.StartScanAsync(resumeMode, _lifetimeCts.Token);
                 }
             }
+
+            // Chỉ Production đang ARM mới được nối lại engine. Background vẫn chỉ scan nền.
+            _engine.SetFrameProcessingEnabled(
+                runtimeMode == RuntimeMode.Production &&
+                Volatile.Read(ref _probeSessionActive) == 0 &&
+                (MasterApproved || IsMasterSequenceActive));
+
+            AddLog(
+                $"Đã reconfigure card runtime không đóng/mở FTDI: {_board.Capacity}; " +
+                $"resume={resumeMode}, wasScanning={wasScanning}, restart={restartRequired}.");
         }
-
-        // Chỉ Production đang ARM mới được nối lại engine. Background vẫn chỉ scan nền.
-        _engine.SetFrameProcessingEnabled(
-            runtimeMode == RuntimeMode.Production &&
-            Volatile.Read(ref _probeSessionActive) == 0 &&
-            (MasterApproved || IsMasterSequenceActive));
-
-        AddLog(
-            $"Đã reconfigure card runtime" +
-            (usedFullReconnect ? " sau reconnect BO" : " không đóng FTDI") +
-            $": {_board.Capacity}; " +
-            $"resume={resumeMode}, wasScanning={wasScanning}, restart={restartRequired}.");
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            EnterDeviceFault(ex, "ProductionReconfigure");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _hardwareReconfigurationActive, 0);
+        }
     }
 
     private void RefreshProductionUiSettings()
@@ -8281,7 +8166,8 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            return (false, $"Không thể lưu reset Probe Pin: {ex.Message}");
+            AddLog($"Không thể lưu reset Probe Pin: {ex.Message}");
+            return (false, "Chưa lưu được thay đổi Probe Pin. Vui lòng thử lại.");
         }
     }
 
@@ -8347,12 +8233,14 @@ public sealed class TestViewModel : ObservableObject
             if (commitUnknown)
             {
                 SetUnknownLabelStatus(request, result.Message);
-                ShowLabelWarning($"Tem LOT {request.Data.LotNo} có thể đã được in nhưng không thể commit LOT. Không tự retry để tránh in trùng.\n\n{result.Message}");
+                ShowLabelWarning(
+                    $"Tem LOT {request.Data.LotNo} có thể đã được in. Không tự in lại để tránh trùng tem.");
             }
             else if (!result.Printed)
             {
                 SetFailedLabelContext(new LabelPrintContext(request, historyStore, historyId), result.Message);
-                ShowLabelWarning($"Sản phẩm đã PASS nhưng chưa in được tem.\n\n{result.Message}");
+                ShowLabelWarning(
+                    "Sản phẩm đã PASS nhưng chưa in được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
             }
         }
         catch (OperationCanceledException)
@@ -8370,7 +8258,8 @@ public sealed class TestViewModel : ObservableObject
                 historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
             AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
             SetUnknownLabelStatus(request, message);
-            ShowLabelWarning($"Sản phẩm vẫn giữ kết quả PASS nhưng trạng thái in tem chưa xác định.\n\n{message}");
+            ShowLabelWarning(
+                "Sản phẩm vẫn PASS nhưng chưa xác định được trạng thái in tem. Không tự in lại để tránh trùng tem.");
         }
     }
 
@@ -8385,7 +8274,7 @@ public sealed class TestViewModel : ObservableObject
 
         if (!_lotSequence.TryRestoreReservation(context.Request.CycleId, context.Request.Data.LotNo))
         {
-            ShowLabelWarning($"Không thể khôi phục LOT {context.Request.Data.LotNo} cho cycle {context.Request.CycleId}.");
+            ShowLabelWarning($"Chưa thể thử in lại tem LOT {context.Request.Data.LotNo}.");
             return;
         }
 
@@ -8407,8 +8296,10 @@ public sealed class TestViewModel : ObservableObject
                 context.Request, _lifetimeCts.Token);
             if (!result.Printed)
             {
-                InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}: {result.Message}");
-                ShowLabelWarning($"Không thể in lại tem LOT {context.Request.Data.LotNo}.\n\n{result.Message}");
+                InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}");
+                ShowLabelWarning(
+                    $"Chưa in lại được tem LOT {context.Request.Data.LotNo}. " +
+                    "Hãy rút/cắm lại cáp và chọn lại cổng COM.");
                 return;
             }
 
@@ -8423,8 +8314,10 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}: {ex.Message}");
-            ShowLabelWarning($"Không thể in lại tem LOT {context.Request.Data.LotNo}.\n\n{ex.Message}");
+            AddLog($"LABEL REPRINT ERROR: {ex}");
+            InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}");
+            ShowLabelWarning(
+                $"Chưa in lại được tem LOT {context.Request.Data.LotNo}. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
         }
     }
 
@@ -8435,7 +8328,7 @@ public sealed class TestViewModel : ObservableObject
 
         InvokeUi(() =>
         {
-            LabelStatusText = $"LỖI IN TEM - LOT {context.Request.Data.LotNo}: {message}";
+            LabelStatusText = $"LỖI IN TEM - LOT {context.Request.Data.LotNo}";
             Raise(nameof(CanRetryLabel));
             RetryLabelCommand.RaiseCanExecuteChanged();
         });
@@ -8466,7 +8359,7 @@ public sealed class TestViewModel : ObservableObject
 
         InvokeUi(() =>
         {
-            LabelStatusText = $"TEM CHƯA XÁC ĐỊNH - LOT {request.Data.LotNo}: {message}";
+            LabelStatusText = $"TEM CHƯA XÁC ĐỊNH - LOT {request.Data.LotNo}";
             Raise(nameof(CanRetryLabel));
             RetryLabelCommand.RaiseCanExecuteChanged();
         });

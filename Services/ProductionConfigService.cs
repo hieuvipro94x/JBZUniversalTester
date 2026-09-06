@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using JBZUniversalTester.Models;
-using JBZUniversalTester.Versioning;
 
 namespace JBZUniversalTester.Services;
 
@@ -113,20 +112,6 @@ public static class ProductionConfigService
         SaveLegacyCfg(settings, ConfigPath);
     }
 
-    public static void SaveAppSettings(AppSettings settings)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        Directory.CreateDirectory(ConfigDirectory);
-
-        List<string> lines = File.Exists(ConfigPath)
-            ? File.ReadAllLines(ConfigPath, Encoding.UTF8)
-                .Where(line => !ParseCfgLine(line).Key.StartsWith("App.", StringComparison.OrdinalIgnoreCase))
-                .ToList()
-            : [];
-        lines.AddRange(settings.ToCfgLines());
-        AtomicWrite(ConfigPath, string.Join(Environment.NewLine, lines) + Environment.NewLine);
-    }
-
     /// <summary>
     /// V12: UniversalTester.cfg dùng tên key tiếng Anh 100% và ghi ĐẦY ĐỦ
     /// mọi trường trên màn Cài đặt. Tên method được giữ để code cũ vẫn gọi được.
@@ -136,17 +121,12 @@ public static class ProductionConfigService
         Normalize(settings);
         var lines = new List<string>
         {
-            $"[Version]{AppVersion.ProductVersion}",
-            $"[BoardMode]{settings.BoardMode}",
             $"[CardCount]{settings.CardCount}",
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
             $"[StartCardNumber]{settings.StartCardNumber}",
             $"[IoConfirm1]{settings.IoConfirm1}",
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",
-            $"[UseTestPointer]{Bool(settings.UseTestPointer)}",
-            $"[ManualModeEnabled]{Bool(settings.ManualModeEnabled)}",
-            $"[AutoMasterSequence]{Bool(settings.AutoMasterSequence)}",
             $"[MasterFaultRequiredCount]{settings.MasterFaultRequiredCount}",
             $"[WaterproofSerialPort]{settings.WaterproofSerialPort}",
             $"[WaterProofPortName]{settings.WaterProofMachine.PortName}",
@@ -179,9 +159,6 @@ public static class ProductionConfigService
             $"[OversizeWaitSeconds]{settings.OversizeWaitSeconds}",
             $"[ShieldDelayMs]{settings.ShieldDelay}",
             $"[ResistanceDelayMs]{settings.ResistanceDelayMs}",
-            $"[SettingsPassword]{settings.Password}",
-            $"[DiscardPassword]{settings.DiscardPassword}",
-
             $"[ItemHeight]{settings.ItemHeight}",
             $"[ScrollDelayMs]{settings.ScrollDelay}",
             $"[PageDelayMs]{settings.PageDelay}",
@@ -254,13 +231,6 @@ public static class ProductionConfigService
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
-
-        if (string.Equals(Path.GetFullPath(path), Path.GetFullPath(ConfigPath), StringComparison.OrdinalIgnoreCase) &&
-            File.Exists(ConfigPath))
-        {
-            lines.AddRange(File.ReadAllLines(ConfigPath, Encoding.UTF8)
-                .Where(line => ParseCfgLine(line).Key.StartsWith("App.", StringComparison.OrdinalIgnoreCase)));
-        }
 
         AtomicWrite(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
@@ -424,10 +394,18 @@ public static class ProductionConfigService
     {
         try
         {
-            if (!File.Exists(ConfigPath))
+            if (!File.Exists(ConfigPath) || File.ReadLines(ConfigPath, Encoding.UTF8)
+                    .Select(ParseCfgLine)
+                    .Any(item => IsInternalOnlyConfigKey(item.Key)))
+            {
                 Save(settings);
+            }
         }
-        catch { /* startup không được treo chỉ vì thư mục readonly */ }
+        catch (Exception ex)
+        {
+            // Không chặn startup khi thư mục chỉ đọc, nhưng vẫn phải lưu dấu vết lỗi.
+            AsyncFileLogService.Current.Error($"Sanitize production config failed: {ex.Message}");
+        }
     }
 
     private static ProductionSettings LoadEnglishCfg(string path)
@@ -444,9 +422,6 @@ public static class ProductionConfigService
         // (trace command=4 -> diagnostic 256 I/O), không phải card vật lý 32 I/O.
         // Nếu file mới có ExpansionCardCount thì ưu tiên key mới; nếu không dùng
         // CardCount/카드 수 làm số scan-unit 64 I/O.
-        string boardModeText = S(map, "BoardMode", settings.BoardMode.ToString());
-        if (Enum.TryParse(boardModeText, true, out BoardMode parsedBoardMode))
-            settings.BoardMode = parsedBoardMode;
         int legacyScanCount = IAny(map, settings.CardCount, "CardCount", "카드 수");
         int expansionModules = I(map, "ExpansionCardCount", legacyScanCount);
         settings.ExpansionCardCount = Math.Clamp(
@@ -458,9 +433,6 @@ public static class ProductionConfigService
         settings.IoConfirmN = IAny(map, settings.IoConfirmN, "IoConfirmN", "IOn 확인");
         settings.UsbDelay = IAny(map, settings.UsbDelay, "UsbDelay", "USB 지연");
         settings.StartCardNumber = I(map, "StartCardNumber", settings.StartCardNumber);
-        settings.UseTestPointer = B(map, "UseTestPointer", settings.UseTestPointer);
-        settings.ManualModeEnabled = B(map, "ManualModeEnabled", settings.ManualModeEnabled);
-        settings.AutoMasterSequence = B(map, "AutoMasterSequence", settings.AutoMasterSequence);
         settings.MasterFaultRequiredCount = I(map, "MasterFaultRequiredCount", settings.MasterFaultRequiredCount);
         settings.WaterproofSerialPort = I(map, "WaterproofSerialPort", settings.WaterproofSerialPort);
         settings.WaterProofMachine.PortName = S(map, "WaterProofPortName", settings.WaterProofMachine.PortName);
@@ -553,9 +525,6 @@ public static class ProductionConfigService
         settings.OversizeWaitSeconds = I(map, "OversizeWaitSeconds", settings.OversizeWaitSeconds);
         settings.ShieldDelay = I(map, "ShieldDelayMs", settings.ShieldDelay);
         settings.ResistanceDelayMs = I(map, "ResistanceDelayMs", settings.ResistanceDelayMs);
-        settings.Password = S(map, "SettingsPassword", settings.Password);
-        settings.DiscardPassword = S(map, "DiscardPassword", settings.DiscardPassword);
-
         settings.ItemHeight = I(map, "ItemHeight", settings.ItemHeight);
         settings.ScrollDelay = I(map, "ScrollDelayMs", settings.ScrollDelay);
         settings.PageDelay = I(map, "PageDelayMs", settings.PageDelay);
@@ -806,6 +775,16 @@ public static class ProductionConfigService
         if (close <= 1) return (string.Empty, string.Empty);
         return (line[1..close].Trim(), line[(close + 1)..].Trim());
     }
+
+    private static bool IsInternalOnlyConfigKey(string key) =>
+        key.StartsWith("App.", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("Version", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("BoardMode", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("UseTestPointer", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("ManualModeEnabled", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("AutoMasterSequence", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("SettingsPassword", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("DiscardPassword", StringComparison.OrdinalIgnoreCase);
 
     private static string S(Dictionary<string, string> map, string key, string fallback) => map.TryGetValue(key, out string? value) ? value : fallback;
     private static string SAny(Dictionary<string, string> map, string fallback, params string[] keys)

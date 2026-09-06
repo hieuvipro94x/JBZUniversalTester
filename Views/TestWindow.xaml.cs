@@ -20,7 +20,6 @@ public partial class TestWindow : Window
     private bool _initializationStarted;
     private bool _closeInProgress;
     private readonly bool _autoStartProduction;
-    private readonly bool _offlinePreview;
     private readonly DispatcherTimer _clockTimer;
     private readonly DispatcherTimer _yellowPulseTimer;
     private readonly DispatcherTimer _whitePulseTimer;
@@ -49,25 +48,15 @@ public partial class TestWindow : Window
 
     public TestWindow(
         TestViewModel viewModel,
-        bool autoStartProduction = true,
-        bool offlinePreview = false)
+        bool autoStartProduction = true)
     {
         InitializeComponent();
         Title = $"UniversalTester {AppVersion.DisplayVersion} - Màn hình kiểm tra";
         TestAppVersionText.Text = AppVersion.DisplayVersion;
         DataContext = viewModel;
         _autoStartProduction = autoStartProduction;
-        _offlinePreview = offlinePreview;
 
-        if (_offlinePreview)
-        {
-            // Offline/mất bo vẫn giữ nguyên khung và header bảng dây để người
-            // vận hành biết đúng cấu trúc mã hàng. Chỉ dữ liệu row bị để trống;
-            // guard _offlinePreview bên dưới vẫn tuyệt đối không ARM Production.
-            viewModel.SelectedOperationTabIndex = 0;
-            viewModel.State = "XEM MÃ HÀNG OFFLINE - BO CHƯA KẾT NỐI";
-        }
-        else if (!_autoStartProduction)
+        if (!_autoStartProduction)
             viewModel.State = "CẤU HÌNH CARD KHÔNG ĐỦ";
 
         _clockTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -159,22 +148,24 @@ public partial class TestWindow : Window
         ModelTitleText.Visibility = viewModel.ShowTitle ? Visibility.Visible : Visibility.Collapsed;
         ConnectorColumn.Visibility = Visibility.Visible;
 
-        if (!_offlinePreview)
-        {
-            _faultsChangedHandler = (_, _) => ScheduleScrollToFirstFault(viewModel);
-            viewModel.Faults.CollectionChanged += _faultsChangedHandler;
-        }
+        _faultsChangedHandler = (_, _) => ScheduleScrollToFirstFault(viewModel);
+        viewModel.Faults.CollectionChanged += _faultsChangedHandler;
 
         try
         {
             await Dispatcher.Yield(DispatcherPriority.Background);
-            if (_autoStartProduction && !_offlinePreview)
+            if (_autoStartProduction)
                 await viewModel.StartProductionTestAsync();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Màn hình Test đã mở nhưng có lỗi khi khởi tạo.\n\n{ex.Message}",
-                "Cảnh báo khởi tạo", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (viewModel.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"TestWindow initialization failed: {ex}");
+            MessageBox.Show(this,
+                "Chưa thể bắt đầu kiểm tra. Vui lòng quay về trang chính và thử lại.",
+                "CHƯA BẮT ĐẦU KIỂM TRA", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -574,6 +565,13 @@ public partial class TestWindow : Window
     {
         if (_allowClose)
         {
+            CleanupUiHandlers();
+            return;
+        }
+
+        if (DataContext is TestViewModel deviceFaultViewModel && deviceFaultViewModel.IsDeviceFault)
+        {
+            _allowClose = true;
             CleanupUiHandlers();
             return;
         }

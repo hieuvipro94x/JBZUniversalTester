@@ -109,30 +109,33 @@ public sealed class HomeViewModel : ObservableObject
         }
         catch (InvalidDataException ex)
         {
+            AsyncFileLogService.Current.Error(
+                $"MODEL_LOAD_INVALID path={selectedFilePath}: {ex}");
             MessageBox.Show(
-                $"Không thể đọc file mã hàng JBZ (.model/.tht).\n\n" +
-                $"File: {selectedFilePath}\n\n" +
-                $"{ex.Message}\n\n" +
-                "Hãy kiểm tra đúng file mã hàng gốc. Nếu file đang được phần mềm khác ghi/copy, " +
-                "đợi hoàn tất rồi chọn lại.",
-                "File model không hợp lệ",
+                $"Không đọc được mã hàng {Path.GetFileName(selectedFilePath)}. " +
+                "Vui lòng kiểm tra đúng file mã hàng và thử lại.",
+                "KHÔNG ĐỌC ĐƯỢC MÃ HÀNG",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
         catch (IOException ex)
         {
+            AsyncFileLogService.Current.Error(
+                $"MODEL_LOAD_IO path={selectedFilePath}: {ex}");
             MessageBox.Show(
-                $"Không thể mở file mã hàng vì file đang bận hoặc lỗi I/O.\n\n" +
-                $"File: {selectedFilePath}\n\n{ex.Message}",
-                "Không mở được file model",
+                $"Chưa mở được mã hàng {Path.GetFileName(selectedFilePath)}. " +
+                "Vui lòng chờ file sao chép xong rồi thử lại.",
+                "CHƯA MỞ ĐƯỢC MÃ HÀNG",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
         catch (Exception ex)
         {
+            AsyncFileLogService.Current.Error(
+                $"MODEL_LOAD_UNEXPECTED path={selectedFilePath}: {ex}");
             MessageBox.Show(
-                $"Không thể nạp mã hàng.\n\n{ex.Message}",
-                "Lỗi nạp model",
+                "Chưa nạp được mã hàng. Vui lòng chọn lại file và thử lại.",
+                "CHƯA NẠP ĐƯỢC MÃ HÀNG",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

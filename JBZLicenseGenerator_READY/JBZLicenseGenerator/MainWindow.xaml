@@ -1,0 +1,177 @@
+<Window x:Class="JBZLicenseGenerator.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="JBZ License Generator"
+        Width="820"
+        Height="620"
+        MinWidth="720"
+        MinHeight="540"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize">
+    <Grid Background="#FFE5E7EB">
+        <Border Margin="18"
+                Padding="22"
+                Background="White"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="JBZ LICENSE GENERATOR"
+                               FontSize="26"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource PrimaryBrush}"/>
+                    <TextBlock Margin="0,4,0,18"
+                               Text="Dán ID từ máy sản xuất → tạo mã → gửi mã về máy sản xuất"
+                               FontSize="14"
+                               Foreground="#FF4B5563"/>
+                </StackPanel>
+
+                <Border Grid.Row="1"
+                        Padding="12"
+                        Margin="0,0,0,16"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="TRẠNG THÁI KHÓA"
+                                       FontWeight="Bold"/>
+                            <TextBlock x:Name="KeyStatusText"
+                                       Margin="0,5,0,0"
+                                       FontSize="14"/>
+                            <TextBlock x:Name="KeyFingerprintText"
+                                       Margin="0,3,0,0"
+                                       FontFamily="Consolas"
+                                       FontSize="13"/>
+                        </StackPanel>
+
+                        <TextBlock Grid.Column="1"
+                                   Text="EXE CẤP PHÉP NỘI BỘ"
+                                   FontWeight="Bold"
+                                   Foreground="#FFB91C1C"
+                                   VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+
+                <Grid Grid.Row="2" Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock VerticalAlignment="Center"
+                               FontWeight="Bold"
+                               Text="ID ĐĂNG KÝ"/>
+                    <Grid Grid.Column="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="RegistrationIdTextBox"
+                                 FontFamily="Consolas"
+                                 CharacterCasing="Upper"
+                                 TextChanged="RegistrationIdTextBox_TextChanged"/>
+                        <Button Grid.Column="1" Content="DÁN ID" Click="PasteRegistrationId_Click"/>
+                        <Button Grid.Column="2" Content="XÓA" Click="ClearRegistration_Click"/>
+                    </Grid>
+                </Grid>
+
+                <StackPanel Grid.Row="3"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Right"
+                            Margin="0,0,0,14">
+                    <TextBlock x:Name="NormalizedIdText"
+                               VerticalAlignment="Center"
+                               Margin="0,0,12,0"
+                               Foreground="#FF4B5563"
+                               FontFamily="Consolas"/>
+                    <Button x:Name="GenerateButton"
+                            Content="TẠO MÃ ĐĂNG KÝ CHO ID NÀY"
+                            FontWeight="Bold"
+                            Click="Generate_Click"/>
+                </StackPanel>
+
+                <Grid Grid.Row="4" Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="170"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock VerticalAlignment="Top"
+                               Margin="0,10,0,0"
+                               FontWeight="Bold"
+                               Text="MÃ ĐĂNG KÝ"/>
+                    <TextBox x:Name="ActivationCodeTextBox"
+                             Grid.Column="1"
+                             Height="112"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto"
+                             FontFamily="Consolas"
+                             IsReadOnly="True"/>
+                </Grid>
+
+                <Border Grid.Row="5"
+                        Padding="12"
+                        Background="{StaticResource PanelBrush}"
+                        BorderBrush="{StaticResource BorderBrush}"
+                        BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock Text="PUBLIC KEY DÙNG CHO ỨNG DỤNG"
+                                   FontWeight="Bold"/>
+                        <TextBlock Margin="0,4,0,8"
+                                   Text="Sau này chỉ PUBLIC KEY này được nhúng vào JBZUniversalTester. Không bao giờ đưa PRIVATE KEY sang máy sản xuất."
+                                   TextWrapping="Wrap"
+                                   Foreground="#FF4B5563"/>
+                        <TextBox x:Name="PublicKeyTextBox"
+                                 Height="150"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 TextWrapping="NoWrap"
+                                 HorizontalScrollBarVisibility="Auto"
+                                 VerticalScrollBarVisibility="Auto"
+                                 FontFamily="Consolas"
+                                 FontSize="12"/>
+                    </StackPanel>
+                </Border>
+
+                <Grid Grid.Row="6" Margin="0,14,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock x:Name="StatusText"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap"
+                               Foreground="#FF374151"/>
+                    <StackPanel Grid.Column="1"
+                                Orientation="Horizontal">
+                        <Button Content="COPY PUBLIC KEY"
+                                Click="CopyPublicKey_Click"/>
+                        <Button Content="SAO CHÉP MÃ ĐĂNG KÝ"
+                                FontWeight="Bold"
+                                Click="CopyActivationCode_Click"/>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

@@ -5,7 +5,6 @@ using System.Text;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
@@ -20,7 +19,6 @@ public partial class ProductionSettingsPage : UserControl
 {
     private readonly MainViewModel? _main;
     private readonly ProductionSettingsViewModel _vm;
-    private readonly string _labelSettingsPasswordAtOpen;
     private int _released;
     private int _portRefreshGeneration;
 
@@ -43,11 +41,9 @@ public partial class ProductionSettingsPage : UserControl
     {
         _main = main;
         _vm = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
-        _labelSettingsPasswordAtOpen = _vm.Settings.Password ?? string.Empty;
         InitializeComponent();
         DataContext = _vm;
         InitializeComboBoxItems();
-        SetLabelSettingsUnlocked(string.IsNullOrEmpty(_labelSettingsPasswordAtOpen));
         Loaded += ProductionSettingsPage_Loaded;
     }
 
@@ -80,46 +76,6 @@ public partial class ProductionSettingsPage : UserControl
     private bool IsReleased => Volatile.Read(ref _released) != 0;
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
-
-    private void UnlockLabelSettings_Click(object sender, RoutedEventArgs e) =>
-        TryUnlockLabelSettings();
-
-    private void LabelUnlockPasswordBox_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter)
-            return;
-
-        TryUnlockLabelSettings();
-        e.Handled = true;
-    }
-
-    private void TryUnlockLabelSettings()
-    {
-        if (!AdminAuthenticationService.Verify(
-                _labelSettingsPasswordAtOpen,
-                LabelUnlockPasswordBox.Password))
-        {
-            LabelUnlockErrorText.Visibility = Visibility.Visible;
-            LabelUnlockPasswordBox.SelectAll();
-            LabelUnlockPasswordBox.Focus();
-            return;
-        }
-
-        LabelUnlockPasswordBox.Password = string.Empty;
-        LabelUnlockErrorText.Visibility = Visibility.Collapsed;
-        SetLabelSettingsUnlocked(true);
-        LabelSettingsPasswordTextBox.Focus();
-    }
-
-    private void SetLabelSettingsUnlocked(bool unlocked)
-    {
-        bool locked = !unlocked && !string.IsNullOrEmpty(_labelSettingsPasswordAtOpen);
-        LabelSettingsLockPanel.Visibility = locked ? Visibility.Visible : Visibility.Collapsed;
-        LabelPrintSettingsForm.IsEnabled = !locked;
-        LabelPrintActionsPanel.IsEnabled = !locked;
-        if (locked)
-            LabelUnlockPasswordBox.Focus();
-    }
 
     private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -257,14 +213,20 @@ public partial class ProductionSettingsPage : UserControl
             }
 
             ShowMessage(
-                result.Message,
+                result.Connected
+                    ? "Đã kết nối máy in."
+                    : "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "KẾT NỐI MÁY IN",
                 result.Connected ? MessageBoxImage.Information : MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
             PrinterConnectionStatusText.Text = "KẾT NỐI LỖI";
-            ShowMessage(ex.Message, "KẾT NỐI MÁY IN", MessageBoxImage.Warning);
+            AsyncFileLogService.Current.Error($"Label printer connection failed: {ex}");
+            ShowMessage(
+                "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
+                "KẾT NỐI MÁY IN",
+                MessageBoxImage.Warning);
         }
         finally
         {
@@ -288,7 +250,8 @@ public partial class ProductionSettingsPage : UserControl
         }
         catch (Exception ex)
         {
-            ShowMessage(ex.Message, "CHỈNH TEM", MessageBoxImage.Warning);
+            AsyncFileLogService.Current.Error($"Open label template editor failed: {ex}");
+            ShowMessage("Chưa mở được mẫu tem. Vui lòng thử lại.", "CHỈNH TEM", MessageBoxImage.Warning);
         }
     }
 
@@ -301,7 +264,7 @@ public partial class ProductionSettingsPage : UserControl
 
         var editor = new Window
         {
-            Title = $"CHỈNH TEM {templateType} - lưu trong JBZUniversalTester.cfg",
+            Title = $"CHỈNH TEM {templateType}",
             Owner = HostWindow,
             Width = 900,
             Height = 680,
@@ -316,7 +279,7 @@ public partial class ProductionSettingsPage : UserControl
 
         var note = new TextBlock
         {
-            Text = "Nội dung sửa sẽ được lưu trong CFG, không tạo file Labels. Dùng KHÔI PHỤC MẶC ĐỊNH để bỏ bản tùy chỉnh.",
+            Text = "Nội dung sửa sẽ được lưu cùng Cài đặt. Dùng KHÔI PHỤC MẶC ĐỊNH để bỏ bản tùy chỉnh.",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8)
         };
@@ -352,7 +315,7 @@ public partial class ProductionSettingsPage : UserControl
         {
             if (string.IsNullOrWhiteSpace(textBox.Text))
             {
-                MessageBox.Show(editor, "Template không được để trống.", "CHỈNH TEM", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(editor, "Mẫu tem không được để trống.", "CHỈNH TEM", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             editor.DialogResult = true;
@@ -373,7 +336,7 @@ public partial class ProductionSettingsPage : UserControl
             BuiltInLabelTemplateStore.SaveOverride(_vm.Settings.Label, templateType, textBox.Text);
 
         ShowMessage(
-            $"Đã áp dụng template {templateType}. Bấm LƯU CÀI ĐẶT để ghi vào JBZUniversalTester.cfg.",
+            "Đã áp dụng mẫu tem. Bấm LƯU CÀI ĐẶT để hoàn tất.",
             "CHỈNH TEM",
             MessageBoxImage.Information);
     }
@@ -397,7 +360,8 @@ public partial class ProductionSettingsPage : UserControl
         }
         catch (Exception ex)
         {
-            ShowMessage(ex.Message, "XEM TRƯỚC TEM", MessageBoxImage.Warning);
+            AsyncFileLogService.Current.Error($"Label preview failed: {ex}");
+            ShowMessage("Chưa xem trước được tem. Vui lòng kiểm tra mẫu tem.", "XEM TRƯỚC TEM", MessageBoxImage.Warning);
         }
     }
 
@@ -410,13 +374,19 @@ public partial class ProductionSettingsPage : UserControl
                 throw new InvalidOperationException("Trang Cài đặt chưa được nối với chương trình chính.");
             LabelPrintTransportResult result = await _main.Test.PrintSettingsLabelAsync(request);
             ShowMessage(
-                "TEST PRINT - không tăng LOT/production.\n\n" + result.Message,
+                result.Printed
+                    ? "Đã in thử tem. Không tăng LOT hoặc sản lượng."
+                    : "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
                 result.Printed ? MessageBoxImage.Information : MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
-            ShowMessage(ex.Message, "IN THỬ TEM", MessageBoxImage.Warning);
+            AsyncFileLogService.Current.Error($"Test label print failed: {ex}");
+            ShowMessage(
+                "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
+                "IN THỬ TEM",
+                MessageBoxImage.Warning);
         }
     }
 
@@ -507,8 +477,9 @@ public partial class ProductionSettingsPage : UserControl
             PrinterComComboBox.ItemsSource = new[] { new ComPortOption(string.Empty, "Không dùng COM") };
             PrinterComComboBox.SelectedIndex = 0;
             WaterProofComComboBox.ItemsSource = Array.Empty<string>();
+            AsyncFileLogService.Current.Error($"COM port enumeration failed: {ex}");
             ShowMessage(
-                $"Không thể quét cổng COM.\n\n{ex.Message}",
+                "Chưa đọc được danh sách cổng kết nối. Vui lòng thử lại.",
                 "Cổng COM",
                 MessageBoxImage.Warning);
         }
@@ -564,7 +535,8 @@ public partial class ProductionSettingsPage : UserControl
         }
         catch (Exception ex)
         {
-            ShowMessage(ex.ToString(), "Không thể lưu cài đặt", MessageBoxImage.Error);
+            AsyncFileLogService.Current.Error($"Save production settings failed: {ex}");
+            ShowMessage("Chưa lưu được Cài đặt. Vui lòng thử lại.", "CHƯA LƯU ĐƯỢC", MessageBoxImage.Error);
         }
     }
 

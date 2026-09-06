@@ -46,7 +46,8 @@ public partial class TopologyLearningWindow : Window
         catch (Exception ex)
         {
             DiagnoseButton.IsEnabled = false;
-            LearningStatusText.Text = ex.Message;
+            AsyncFileLogService.Current.Error($"Topology learning startup failed: {ex}");
+            LearningStatusText.Text = "MÁY TEST CHƯA SẴN SÀNG - VUI LÒNG KHỞI ĐỘNG LẠI";
         }
     }
 
@@ -236,8 +237,9 @@ public partial class TopologyLearningWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Không thể lưu cấu hình.\n\n{ex.Message}",
-                "Lỗi lưu file", MessageBoxButton.OK, MessageBoxImage.Error);
+            AsyncFileLogService.Current.Error($"Topology learning save failed: {ex}");
+            MessageBox.Show(this, "Chưa lưu được cấu hình. Vui lòng thử lại.",
+                "CHƯA LƯU ĐƯỢC", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {

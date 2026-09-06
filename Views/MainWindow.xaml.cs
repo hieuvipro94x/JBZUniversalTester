@@ -78,7 +78,7 @@ public partial class MainWindow : Window
 
         try
         {
-            // Tự nạp mã gần nhất và tự kết nối/recovery bo sau khi cửa sổ đã
+            // Tự nạp mã gần nhất và kết nối bo một lần sau khi cửa sổ đã
             // render. Các API bên dưới vẫn await bình thường nên Dispatcher
             // không bị giữ trong thời gian handshake/delay phần cứng.
             Task initialization = _viewModel.InitializeApplicationAsync();
@@ -88,14 +88,15 @@ public partial class MainWindow : Window
 
             if (completed != initialization)
             {
-                // Một số driver/D2XX trên máy production có thể giữ lời gọi mở
-                // thiết bị lâu bất thường. Không để lỗi phần cứng khóa luôn việc
-                // chọn THT/cài đặt. Tác vụ kết nối vẫn tiếp tục và được theo dõi.
+                // Driver/D2XX giữ lời gọi mở quá lâu được xem là lỗi phần cứng
+                // của phiên. Task muộn chỉ được quan sát để cleanup, không được
+                // mở khóa test hoặc hồi sinh kết nối.
+                _viewModel.Test.ReportStartupBoardTimeout();
                 _viewModel.Status =
-                    "KẾT NỐI BO ĐANG CHẬM - PHẦN MỀM ĐANG TỰ THỬ LẠI";
+                    "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG";
                 AsyncFileLogService.Current.Error(
                     $"STARTUP HARDWARE TIMEOUT after {StartupControlUnlockTimeout.TotalSeconds:0}s; " +
-                    "operator controls unlocked while initialization continues.");
+                    "session latched until application restart.");
                 _ = ObserveDeferredStartupAsync(initialization);
                 return;
             }
@@ -104,13 +105,16 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            // Startup phải luôn để MainWindow sử dụng được. Lỗi board/model đã
-            // được ViewModel ghi vào Status/HardwareStatus; popup này chỉ cho lỗi
-            // ngoài dự kiến.
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            // Startup phải luôn để MainWindow sử dụng được. Không đưa exception
+            // kỹ thuật lên giao diện vận hành.
+            AsyncFileLogService.Current.Error($"MainWindow startup failed: {ex}");
             MessageBox.Show(
                 this,
-                $"Khởi tạo ứng dụng chưa hoàn chỉnh.\n\n{ex.Message}",
-                "Cảnh báo khởi động",
+                "Phần mềm chưa sẵn sàng. Vui lòng khởi động lại.",
+                "CHƯA SẴN SÀNG",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
@@ -148,9 +152,7 @@ public partial class MainWindow : Window
     {
         if (!_viewModel.Test.IsBoardConnected || _viewModel.Test.IsDeviceFault)
         {
-            MessageBox.Show(this,
-                "Bo chưa kết nối hoặc đang lỗi. Không thể học topology.",
-                "Bo chưa sẵn sàng", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _viewModel.Test.ReportBoardUnavailableForOperatorAction("OpenTopologyLearning");
             return;
         }
 
@@ -171,6 +173,12 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
+        if (!_viewModel.Test.IsBoardConnected || _viewModel.Test.IsDeviceFault)
+        {
+            _viewModel.Test.ReportBoardUnavailableForOperatorAction("OpenTestWindow");
+            return;
+        }
+
         if (_viewModel.Model is null)
         {
             MessageBox.Show(
@@ -195,10 +203,9 @@ public partial class MainWindow : Window
         // cấu hình dù số card chưa đủ; chỉ KHÔNG ARM test. MainViewModel đã
         // cảnh báo thiếu card ngay sau khi load. Với nút BẮT ĐẦU thủ công thì
         // vẫn chặn như máy gốc.
-        bool boardConnected = _viewModel.Test.IsBoardConnected;
         bool hasCapacity = _viewModel.EnsureModelCardCapacity(
-            showWarning: boardConnected && !allowViewWhenInsufficient);
-        if (boardConnected && !hasCapacity && !allowViewWhenInsufficient)
+            showWarning: !allowViewWhenInsufficient);
+        if (!hasCapacity && !allowViewWhenInsufficient)
             return;
 
         if (_testWindow is { IsLoaded: true })
@@ -212,11 +219,9 @@ public partial class MainWindow : Window
 
         try
         {
-            bool offlinePreview = !boardConnected;
             _testWindow = new TestWindow(
                 _viewModel.Test,
-                autoStartProduction: boardConnected && hasCapacity,
-                offlinePreview: offlinePreview);
+                autoStartProduction: hasCapacity);
             _testWindow.Closed += TestWindow_Closed;
 
             // Faults đã được SetModel/BuildRows trước khi Show(), vì vậy DataGrid
@@ -233,9 +238,10 @@ public partial class MainWindow : Window
                 _testWindow = null;
             }
 
+            AsyncFileLogService.Current.Error($"Open TestWindow failed: {ex}");
             MessageBox.Show(
-                ex.ToString(),
-                "Không thể mở màn hình kiểm tra",
+                "Chưa mở được màn hình kiểm tra. Vui lòng thử lại.",
+                "CHƯA MỞ ĐƯỢC MÀN HÌNH KIỂM TRA",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -251,6 +257,9 @@ public partial class MainWindow : Window
             _testWindow = null;
         }
 
+        if (_shutdownStarted || _viewModel.Test.IsDeviceFault)
+            return;
+
         Show();
         LogMemory("MEM TESTWINDOW_CLOSE");
         WindowState = WindowState.Maximized;
@@ -264,19 +273,26 @@ public partial class MainWindow : Window
         if (e.PropertyName is nameof(TestViewModel.IsProductRemovalPending) or
             nameof(TestViewModel.IsBoardConnected) or
             nameof(TestViewModel.IsDeviceFault))
+        {
+            if (_viewModel.Test.IsDeviceFault)
+            {
+                _viewModel.Status =
+                    "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG";
+            }
             Dispatcher.BeginInvoke(UpdateProductRemovalGate);
+        }
     }
 
     private void UpdateProductRemovalGate()
     {
         bool blocked = _viewModel.Test.IsProductRemovalPending;
+        bool hardwareReady =
+            _viewModel.Test.IsBoardConnected &&
+            !_viewModel.Test.IsDeviceFault;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
-        // Cho phép chuẩn bị/xem mã hàng ở máy phát triển không có bo. TestWindow
-        // tự vào Offline Preview và không ARM scan/PASS/relay. Removal gate vẫn
-        // khóa đổi mã hàng để bảo toàn chu kỳ production đang dở.
-        StartTestButton.IsEnabled = _viewModel.Model is not null;
-        SelectModelButton.IsEnabled = !blocked;
-        LearnTopologyButton.IsEnabled = _viewModel.Test.IsBoardConnected && !_viewModel.Test.IsDeviceFault;
+        StartTestButton.IsEnabled = hardwareReady && _viewModel.Model is not null;
+        SelectModelButton.IsEnabled = hardwareReady && !blocked;
+        LearnTopologyButton.IsEnabled = hardwareReady;
     }
 
     private async void OpenSettings_Click(
@@ -289,10 +305,14 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"Open Settings failed: {ex}");
             MessageBox.Show(
                 this,
-                ex.ToString(),
-                "Không thể mở cài đặt",
+                "Chưa mở được Cài đặt. Vui lòng thử lại.",
+                "CHƯA MỞ ĐƯỢC CÀI ĐẶT",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -342,11 +362,14 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"Apply production settings failed: {ex}");
             MessageBox.Show(
                 this,
-                $"Không thể đồng bộ cấu hình mới với BO.\n" +
-                $"Hãy thoát hoàn toàn ứng dụng rồi mở lại.\n\n{ex.Message}",
-                "Lỗi đồng bộ BO",
+                "Chưa áp dụng được Cài đặt. Vui lòng khởi động lại phần mềm.",
+                "CHƯA ÁP DỤNG ĐƯỢC CÀI ĐẶT",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             return;
@@ -374,10 +397,14 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"Open History failed: {ex}");
             MessageBox.Show(
                 this,
-                ex.ToString(),
-                "Không thể mở lịch sử",
+                "Chưa mở được Lịch sử kiểm tra. Vui lòng thử lại.",
+                "CHƯA MỞ ĐƯỢC LỊCH SỬ",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
@@ -391,10 +418,18 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"Settings close relay safety failed: {ex}");
+            CrashReportService.Write(
+                ex,
+                "Hardware.SettingsCloseRelaySafety",
+                $"Model={_viewModel.Model?.ModelName ?? "(none)"}");
             MessageBox.Show(
                 this,
-                $"Không thể RESET relay trước khi đóng trang Cài đặt.\n\n{ex.Message}",
-                "Lỗi an toàn relay",
+                "Máy test chưa về trạng thái an toàn. Vui lòng khởi động lại phần mềm.",
+                "VUI LÒNG KHỞI ĐỘNG LẠI",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }

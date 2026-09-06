@@ -9,7 +9,6 @@ public sealed class ScanSupervisor
     private const int StallTimeoutMarginMs = 2_500;
     private readonly IBoardTransport _board;
     private readonly Action<string> _log;
-    private int _recoveryActive;
 
     public ScanSupervisor(IBoardTransport board, Action<string> log)
     {
@@ -68,7 +67,7 @@ public sealed class ScanSupervisor
                 return;
             }
 
-            _log($"SCAN KEEP-ALIVE sau {reason} không có frame mới - chuyển sang recovery STOP/START.");
+            throw new InvalidOperationException(BuildFrameTimeoutDiagnostic(reason));
         }
 
         long baselineFrameCount = _board.CompleteFramesReceived;
@@ -80,69 +79,7 @@ public sealed class ScanSupervisor
             return;
         }
 
-        _log($"START_SCAN sau {reason} chưa có frame đầu - tự recovery STOP/START một lần.");
-        await _board.StopScanAsync(CancellationToken.None);
-
-        baselineFrameCount = _board.CompleteFramesReceived;
-        _board.ConfigureActiveScanRange(maxIo);
-        await _board.StartScanAsync(BoardScanMode.Production, ct);
-
-        if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
-        {
-            _log($"Recovery scan OK sau {reason}: stream production đã trở lại.");
-            return;
-        }
-
         throw new InvalidOperationException(BuildFrameTimeoutDiagnostic(reason));
-    }
-
-    public async Task<bool> RecoverProductionScanStallAsync(
-        double ageMs,
-        long lastSequence,
-        long framesReceived,
-        int maxIo,
-        Func<Task> reconnectAsync,
-        CancellationToken ct)
-    {
-        if (Interlocked.CompareExchange(ref _recoveryActive, 1, 0) != 0)
-            return true;
-
-        try
-        {
-            _log(
-                $"[SCAN-WATCHDOG] STALL age={ageMs:0}ms seq={lastSequence} frames={framesReceived}; recovery STOP/START.");
-
-            long baselineFrameCount = _board.CompleteFramesReceived;
-            await _board.StopScanAsync(CancellationToken.None);
-            _board.ConfigureActiveScanRange(maxIo);
-            await _board.StartScanAsync(BoardScanMode.Production, ct);
-
-            int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
-            if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
-            {
-                _log($"[SCAN-WATCHDOG] recovery success first-frame seq={_board.LastFrameSequence}.");
-                return true;
-            }
-
-            _log("[SCAN-WATCHDOG] STOP/START không có frame mới; reconnect D2XX.");
-            await _board.DisconnectAsync();
-            await reconnectAsync();
-
-            baselineFrameCount = _board.CompleteFramesReceived;
-            await EnsureProductionScanAsync(maxIo, ct);
-            firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(_board.Capacity);
-            if (await WaitForNextProductionFrameAsync(baselineFrameCount, firstFrameTimeoutMs, ct))
-            {
-                _log($"[SCAN-WATCHDOG] reconnect recovery success first-frame seq={_board.LastFrameSequence}.");
-                return true;
-            }
-
-            return false;
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _recoveryActive, 0);
-        }
     }
 
     public static int ResolveFirstFrameTimeoutMs(BoardCapacity capacity)

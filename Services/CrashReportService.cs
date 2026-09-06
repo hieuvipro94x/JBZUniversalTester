@@ -6,7 +6,9 @@ namespace JBZUniversalTester.Services;
 
 /// <summary>
 /// Minimal crash-safe writer. The Crash directory and RPT are created lazily,
-/// only when an unhandled exception reaches the application boundary.
+/// only for a confirmed technical exception (unhandled application error or
+/// an actual failure of the main tester hardware). Leak-machine and label-printer
+/// connection errors are intentionally excluded from RPT reporting.
 /// </summary>
 public static class CrashReportService
 {

@@ -416,7 +416,7 @@
                     <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110"/>
                     <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Số thứ tự" Binding="{Binding ExportSequenceNo}" Width="100" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTemplateColumn Header="Hồ sơ kiểm tra" Width="1200">
+                    <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportTestLogText}"

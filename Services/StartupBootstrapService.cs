@@ -19,26 +19,13 @@ public static class StartupBootstrapService
                 log.Application($"Fast configuration inherited: {string.Join(", ", migrated)}");
 
             bool canonicalExisted = File.Exists(RuntimePaths.ConfigFile);
-            AppSettings appSettings = canonicalExisted
-                ? AppSettings.Load()
-                : AppSettings.LoadLegacyJson();
             ProductionSettings production = ProductionConfigService.Load();
-            bool migratedLastModel = string.IsNullOrWhiteSpace(production.LastThtPath) &&
-                                     !string.IsNullOrWhiteSpace(appSettings.Storage.LastTestedModelFile);
-            if (migratedLastModel)
-                production.LastThtPath = appSettings.Storage.LastTestedModelFile.Trim();
-
-            if (!canonicalExisted || migratedLastModel)
+            if (!canonicalExisted)
                 ProductionConfigService.Save(production);
             else
                 ProductionConfigService.EnsureSavedOnStartup(production);
-            if (!canonicalExisted || !File.ReadLines(RuntimePaths.ConfigFile)
-                    .Any(line => line.StartsWith("[App.", StringComparison.OrdinalIgnoreCase)))
-            {
-                appSettings.Save();
-            }
 
-            if (!canonicalExisted || migratedLastModel)
+            if (!canonicalExisted)
                 log.Application($"CONFIG_MIGRATION old -> {RuntimePaths.ConfigFile}");
         }
         catch (Exception ex)

@@ -78,7 +78,8 @@ public partial class HistoryPage : UserControl
         }
         catch (Exception ex)
         {
-            ShowMessage(ex.ToString(), "Không thể nhập lịch sử cũ", MessageBoxImage.Error);
+            AsyncFileLogService.Current.Error($"Legacy history import failed: {ex}");
+            ShowMessage("Chưa nhập được lịch sử cũ. Vui lòng thử lại.", "CHƯA NHẬP ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
         }
         finally
         {
@@ -135,7 +136,7 @@ public partial class HistoryPage : UserControl
 
             SummaryText.Text =
                 $"{rows.Count:N0} bản ghi hiển thị (tối đa {UiRowLimit:N0}) | SẢN PHẨM {productCount:N0} " +
-                $"(PASS {pass:N0} / FAIL {fail:N0}) | LEAK RETEST {leakRetest:N0} | MASTER {master:N0} | DB: {_historyPath}";
+                $"(PASS {pass:N0} / FAIL {fail:N0}) | LEAK RETEST {leakRetest:N0} | MASTER {master:N0}";
         }
         catch (Exception ex)
         {
@@ -143,7 +144,8 @@ public partial class HistoryPage : UserControl
             PassCountText.Text = "0";
             FailCountText.Text = "0";
             SummaryText.Text = "Không thể đọc dữ liệu lịch sử.";
-            ShowMessage(ex.ToString(), "Không thể đọc lịch sử", MessageBoxImage.Error);
+            AsyncFileLogService.Current.Error($"History search failed: {ex}");
+            ShowMessage("Chưa đọc được lịch sử kiểm tra. Vui lòng thử lại.", "CHƯA ĐỌC ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
         }
     }
 
@@ -197,7 +199,8 @@ public partial class HistoryPage : UserControl
         }
         catch (Exception ex)
         {
-            ShowMessage($"Không thể xuất CSV.\n\n{ex.Message}", "Lỗi xuất lịch sử", MessageBoxImage.Error);
+            AsyncFileLogService.Current.Error($"History CSV export failed: {ex}");
+            ShowMessage("Chưa xuất được file CSV. Vui lòng thử lại.", "CHƯA XUẤT ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
         }
     }
 
@@ -236,7 +239,8 @@ public partial class HistoryPage : UserControl
         }
         catch (Exception ex)
         {
-            ShowMessage($"Không thể xuất Excel.\n\n{ex.Message}", "Lỗi xuất lịch sử", MessageBoxImage.Error);
+            AsyncFileLogService.Current.Error($"History Excel export failed: {ex}");
+            ShowMessage("Chưa xuất được file Excel. Vui lòng thử lại.", "CHƯA XUẤT ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
         }
     }
 

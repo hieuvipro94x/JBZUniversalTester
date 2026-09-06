@@ -1,0 +1,49 @@
+JBZUniversalTester V16.0.241 - LICENSE GENERATOR PRODUCTION WORKFLOW
+
+- Generator có luồng rõ ràng: DÁN ID máy sản xuất, tạo mã cho đúng ID và sao chép mã trả về máy sản xuất.
+- Generator chỉ cho cấp mã khi PRIVATE/PUBLIC KEY khớp nhau và public-key fingerprint đúng với production.
+- Bỏ thao tác tạo/tạo lại khóa khỏi giao diện thường để không vô tình làm mất tương thích license đã cấp.
+- Build Generator xuất một EXE Windows x64 self-contained; khóa ký chỉ nhúng trong EXE Generator để chạy portable.
+- Cập nhật hướng dẫn vận hành hai máy và cảnh báo không đưa PRIVATE KEY sang máy sản xuất.
+
+JBZUniversalTester V16.0.240 - MACHINE-BOUND LICENSE GATE
+
+- Thêm Registration ID SHA-256 từ Windows MachineGuid, CPU identity và ổ vật lý chứa Windows.
+- Thêm xác minh license JBZ1 bằng ECDSA P-256/SHA-256/P1363 với public key nhúng trong EXE.
+- RegistrationWindow chạy trước MainWindow; chưa có license hợp lệ thì không khởi tạo ViewModel hoặc phần cứng production.
+- Activation code được lưu riêng trong LocalAppData và được xác minh lại ở mọi lần khởi động.
+- Thêm self-test cho fingerprint, thay Windows/CPU/disk, license đúng máy, sai máy và payload bị sửa.
+
+JBZUniversalTester V16.0.239 - OPERATOR MESSAGES / RPT SCOPE
+
+- Giao diện vận hành không còn hiển thị exception, stack trace, đường dẫn DB hoặc chi tiết kỹ thuật nội bộ.
+- RPT chỉ được tạo cho lỗi hệ thống chưa xử lý và lỗi thực sự của bo/phần cứng máy test chính.
+- Mất kết nối máy Leak hoặc máy in tem không tạo RPT; thông báo hướng dẫn rút/cắm lại cáp và chọn lại cổng COM.
+- Các lỗi dữ liệu, cấu hình, lịch sử và thao tác thông thường chỉ ghi log phù hợp, không tạo RPT.
+
+JBZUniversalTester V16.0.238 - DEVICE FAULT ACKNOWLEDGEMENT EXIT
+
+- Thông báo mất kết nối được rút gọn thành: "Mất kết nối với máy test. Vui lòng khởi động lại."
+- Sau khi người vận hành bấm OK, ứng dụng chờ đưa phần cứng về trạng thái an toàn,
+  chạy shutdown dùng chung rồi tự thoát; TestWindow không hỏi xác nhận lần thứ hai.
+
+JBZUniversalTester V16.0.237 - OPERATOR-ONLY CONFIG / NO LABEL PASSWORD
+
+- Đã bỏ toàn bộ ô nhập, khóa/mở khóa và kiểm tra mật khẩu trong phần cài đặt in tem.
+- CFG không còn đọc/ghi SettingsPassword hoặc DiscardPassword; khóa cũ được loại bỏ
+  khi phần mềm chuẩn hóa lại file cấu hình.
+- CFG không còn lưu Version, BoardMode, App.*, UseTestPointer, ManualModeEnabled hoặc
+  AutoMasterSequence. Các giá trị kỹ thuật AppSettings dùng mặc định đã biên dịch trong EXE.
+- Các cấu hình vận hành LOT/card/Leak/relay/điện trở/máy in tem vẫn tiếp tục được lưu.
+
+JBZUniversalTester V16.0.236 - BOARD CONNECTION FAIL-FAST
+
+- Bo D2XX chỉ được kết nối một lần khi khởi động ứng dụng.
+- Không tìm thấy bo, khởi động quá thời gian, mất kết nối hoặc mất frame scan
+  đều khóa phiên hiện tại bằng một DeviceFault duy nhất.
+- Người vận hành phải kiểm tra cáp/nguồn, thoát ứng dụng và mở lại để tạo phiên
+  phần cứng mới.
+- Đã bỏ retry kết nối lúc startup, offline preview, watchdog STOP/START recovery
+  và reconnect D2XX khi lưu cấu hình.
+- Các bước START scan có chủ đích sau Leak/relay/cập nhật card vẫn được giữ vì
+  đây là chuyển trạng thái trong chu kỳ, không phải đóng/mở kết nối bo.
