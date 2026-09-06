@@ -62,6 +62,7 @@ public sealed class FaultRow : ObservableObject
     public string Color { get; init; } = "";
     public string IoCnPnOverride { get; init; } = "";
     public int DisplayOrder { get; init; } = int.MaxValue;
+    public bool IsNetworkStart { get; init; }
 
     // Không bind enum/custom converter trực tiếp trong XAML để WPF Designer
     // có thể render ngay cả trước lần build đầu tiên.

@@ -1790,7 +1790,8 @@ public sealed class TestEngine : IDisposable
                     Splice = pin.SpliceName,
                     Section = pin.Section,
                     Color = pin.Color,
-                    Status = status
+                    Status = status,
+                    IsNetworkStart = endpointIndex == 0
                 };
             })
             .ToArray();
