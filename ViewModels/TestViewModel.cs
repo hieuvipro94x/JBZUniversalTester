@@ -261,7 +261,7 @@ public sealed class TestViewModel : ObservableObject
 
     public bool HasInlineProbeContacts => ProbeContacts.Count > 0;
     public string ProbeModeText => HasInlineProbeContacts
-        ? $"ĐANG DÒ ({ProbeContacts.Count})"
+        ? $"ĐANG DÒ ({SnapshotInlineProbeContacts().Length})"
         : "SẴN SÀNG";
     public string ProbeBarText => ProbeContacts.FirstOrDefault()?.Status
         ?? "SẴN SÀNG - BO TỰ PHÁT HIỆN ĐẦU DÒ TRONG CHU KỲ KIỂM TRA";
@@ -3625,20 +3625,55 @@ public sealed class TestViewModel : ObservableObject
 
     private IReadOnlyList<FaultRow> BuildProbeDisplayRows(int io)
     {
-        // Đầu dò chỉ là lớp quan sát: đúng một dòng cho mỗi IO chạm và chỉ
-        // hiển thị IO(n) tại cột Tên dây. Không đẩy metadata THT sang cột khác.
-        return
-        [
-            new FaultRow
+        ProductModel? model = _model;
+        if (model is null)
+            return BuildUnmappedProbeRow(io);
+
+        // Htdrv hiển thị đúng row TP của chính I/O đang chạm, không bung các
+        // endpoint còn lại cùng network. Giữ đủ duplicate mapping nếu một
+        // Global IO được khai báo tại nhiều connector/pin trong THT.
+        PinRecord[] pins = model.Pins
+            .Where(pin => pin.IoNumber == io)
+            .Distinct()
+            .OrderBy(pin => pin.OriginalOrder > 0 ? pin.OriginalOrder : int.MaxValue)
+            .ThenBy(pin => pin.Connector, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(pin => pin.PinNumber, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (pins.Length == 0)
+            return BuildUnmappedProbeRow(io);
+
+        return pins
+            .Select(pin => new FaultRow
             {
                 Kind = FaultKind.Probe,
-                Io = 0,
+                FaultType = "TP",
+                Io = pin.IoNumber,
                 RelatedIos = [io],
-                WireName = $"IO({io})",
-                DisplayOrder = io
-            }
-        ];
+                Connector = pin.Connector,
+                Pin = pin.PinNumber,
+                WireName = pin.WireName,
+                Splice = pin.SpliceName,
+                Section = pin.Section,
+                Color = pin.Color,
+                DisplayOrder = pin.OriginalOrder > 0
+                    ? pin.OriginalOrder
+                    : pin.IoNumber
+            })
+            .ToArray();
     }
+
+    private static IReadOnlyList<FaultRow> BuildUnmappedProbeRow(int io) =>
+    [
+        new FaultRow
+        {
+            Kind = FaultKind.Probe,
+            Io = 0,
+            RelatedIos = [io],
+            WireName = $"IO({io})",
+            DisplayOrder = io
+        }
+    ];
 
     private void ShowDiscardContacts(IReadOnlyList<int> ios)
     {

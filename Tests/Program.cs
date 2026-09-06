@@ -4001,6 +4001,10 @@ internal static class Program
         vm.SetModel(model);
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         board.Publish(FrameSeq(10, (1, Array.Empty<int>())));
+        int totalBeforeProbe = vm.Total;
+        int passBeforeProbe = vm.Pass;
+        int failBeforeProbe = vm.Fail;
+        int commandsBeforeProbe = board.Commands.Count;
         board.Publish(FrameSeq(
             11,
             Enumerable.Range(20, 20)
@@ -4010,16 +4014,53 @@ internal static class Program
         Assert(vm.HasInlineProbeContacts &&
                vm.Faults.Count == 1 &&
                vm.Faults[0].Kind == FaultKind.Probe &&
-               vm.Faults[0].WireName == "IO(1)" &&
+               vm.Faults[0].FaultType == "TP" &&
+               vm.Faults[0].Io == 1 &&
+               vm.Faults[0].Connector == "1" &&
+               vm.Faults[0].Pin == "1" &&
+               vm.Faults[0].WireName == "1" &&
+               vm.Faults[0].Section == "0.5" &&
+               vm.Faults[0].Color == "R" &&
+               vm.Faults[0].Status.Length == 0 &&
+               vm.Faults[0].IoCnPnText == "1-1-1" &&
                vm.IsCenterResultVisible &&
-               vm.CenterResultText == "LẮP SẢN PHẨM",
-            "CASE B: always-on Probe remains visible without starting product presentation");
+               vm.CenterResultText == "LẮP SẢN PHẨM" &&
+               vm.Total == totalBeforeProbe &&
+               vm.Pass == passBeforeProbe &&
+               vm.Fail == failBeforeProbe &&
+               board.Commands.Count == commandsBeforeProbe,
+            "CASE B: mapped Probe shows the complete touched THT row without production or relay side effects");
 
         board.Publish(FrameSeq(12));
         Assert(!vm.HasInlineProbeContacts &&
                vm.Faults.Count == 0 &&
                vm.CenterResultText == "LẮP SẢN PHẨM",
             "CASE C: Probe release leaves the not-installed product presentation unchanged");
+
+        var duplicateModel = new ProductModel
+        {
+            ModelName = "PROBE-DUPLICATE-MAPPING",
+            PartNumber = "PROBE-DUPLICATE-MAPPING"
+        };
+        var duplicateA1 = new PinRecord("CN-A", "WIRE-A", 5, "1", Section: "0.3", Color: "B", OriginalOrder: 1);
+        var duplicateA2 = new PinRecord("CN-B", "WIRE-A", 6, "2", Section: "0.3", Color: "B", OriginalOrder: 2);
+        var duplicateB1 = new PinRecord("CN-C", "WIRE-B", 5, "3", Section: "0.5", Color: "R", OriginalOrder: 3);
+        var duplicateB2 = new PinRecord("CN-D", "WIRE-B", 7, "4", Section: "0.5", Color: "R", OriginalOrder: 4);
+        var duplicateSingle = new PinRecord("CN-E", string.Empty, 5, "5", Section: "0.8", Color: "G", OriginalOrder: 5);
+        duplicateModel.Pins.AddRange([duplicateA1, duplicateA2, duplicateB1, duplicateB2, duplicateSingle]);
+        duplicateModel.Nets.Add(new WireNet("WIRE-A", [5, 6], [duplicateA1, duplicateA2]));
+        duplicateModel.Nets.Add(new WireNet("WIRE-B", [5, 7], [duplicateB1, duplicateB2]));
+        TestViewModel duplicateVm = CreateTestViewModel(production);
+        duplicateVm.SetModel(duplicateModel);
+        IReadOnlyList<FaultRow> duplicateRows = duplicateVm.GetProbeRows(5);
+        Assert(duplicateRows.Count == 3 &&
+               duplicateRows.All(row => row.Io == 5 && row.FaultType == "TP") &&
+               duplicateRows.Select(row => row.Connector).SequenceEqual(["CN-A", "CN-C", "CN-E"]) &&
+               duplicateRows.Any(row => row.Connector == "CN-E" &&
+                                        row.Pin == "5" &&
+                                        row.Section == "0.8" &&
+                                        row.Color == "G"),
+            "CASE C1: duplicate IO mapping shows every direct THT row without expanding peer endpoints");
 
         ScanFrame unmappedPairFrame = FrameSeq(14, (23, new[] { 25 }));
         Assert(ProbeContactClassifier.DetectMany(
@@ -4079,7 +4120,10 @@ internal static class Program
                 .Select(source => (source, new[] { 86 }))
                 .ToArray()));
         refreshFaults.Invoke(shortVm, []);
-        Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe && row.WireName == "IO(86)") &&
+        Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe &&
+                                        row.Io == 86 &&
+                                        row.WireName == "PAIR-A" &&
+                                        row.FaultType == "TP") &&
                shortVm.Faults.Any(row => row.Kind == FaultKind.Short),
             "CASE D: Probe row and real SHORT row can coexist; SHORT remains visible");
 
