@@ -41,6 +41,11 @@ public sealed class D2xxBoardTransport : IBoardTransport
     static readonly byte[] CmdInit2 = D2xxResistanceRouting.BuildReleaseRouteA();
     static readonly byte[] CmdStopScan = [0x8D, 0x00, 0x00, 0x00];
     static readonly byte[] CmdResetClear = [0x80, 0x00, 0x00, 0x00];
+    // Htdrv sends this model/scan context separator after RESET when the
+    // active scan range is rebuilt during a product change. Keep it distinct
+    // from RESET so the protocol trace remains faithful without changing the
+    // decoder semantics.
+    static readonly byte[] CmdModelContext = [0x9A, 0x01, 0x00, 0x00];
 
     readonly string _serial;
     string _connectedSerial = string.Empty;
@@ -689,6 +694,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     $"SCAN_CAPACITY_REPREPARE old={FormatScanRange(_preparedScanCapacity)} " +
                     $"new={FormatScanRange(_capacity)}; STOP->RESET->INIT trước START_SCAN.");
                 await ResetClearAsync(ct);
+                await WriteAsync(CmdModelContext, ct);
                 _scanPrepared = false;
                 _preparedScanCapacity = null;
             }
