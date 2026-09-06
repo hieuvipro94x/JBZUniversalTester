@@ -153,6 +153,7 @@ public sealed class TestViewModel : ObservableObject
     private long _engineUiUpdatesScheduled;
     private long _engineUiUpdatesRendered;
     private long _lastContinuousScanMetricsTick;
+    private string _immediatePresenceState = string.Empty;
     private long _noProductionFrameObservedSinceTick;
     private string _lastPassGateSignature = string.Empty;
     private string _lastFaultGateSignature = string.Empty;
@@ -4437,7 +4438,24 @@ public sealed class TestViewModel : ObservableObject
             CurrentProductionPhase is ProductionPhase.Completed or ProductionPhase.WaitingProductRemoval)
             return;
 
-        State = frame.ActiveIo.Count > 0 ? "ĐANG TEST" : "SẴN SÀNG";
+        string next = frame.ActiveIo.Count > 0 ? "ĐANG TEST" : "SẴN SÀNG";
+        string previous = Interlocked.Exchange(ref _immediatePresenceState, next);
+        if (string.Equals(previous, next, StringComparison.Ordinal))
+            return;
+
+        // BoardFrameReceived runs off the WPF thread. Queue only an edge
+        // transition, never every scan frame, so the UI remains responsive.
+        InvokeUi(() =>
+        {
+            if (_cycleActive &&
+                !_waitForProductRelease &&
+                !_waitForFaultProductRemoval &&
+                !IsProductRemovalPending &&
+                CurrentProductionPhase is not (ProductionPhase.Completed or ProductionPhase.WaitingProductRemoval))
+            {
+                State = next;
+            }
+        });
     }
 
     private bool IsProbeSessionActive =>
@@ -8185,9 +8203,13 @@ public sealed class TestViewModel : ObservableObject
             // không Clear/Add lại toàn bảng khi chỉ một network thay đổi.
             // Lần đầu hiện model lớn chỉ gửi một Reset notification. Sau đó mọi
             // frame đều chạy delta; không Reset lại DataGrid.
-            bool firstLargePresentation = desiredRows.Count >= 16 &&
-                (Faults.Count == 0 || Faults.All(row => row.Kind == FaultKind.Probe));
-            if (firstLargePresentation || desiredRows.Count == 0)
+            // Htdrv rebuilds its grid snapshot in one pass (delete-all then
+            // insert the current rows). For a large harness table this is
+            // faster than WPF Move/Insert/Remove notifications for every
+            // shifted row, and prevents the Dispatcher queue from growing.
+            // Keep delta updates only for small tables where they are cheaper.
+            bool rebuildLargeSnapshot = desiredRows.Count >= 512;
+            if (rebuildLargeSnapshot || desiredRows.Count == 0)
             {
                 Faults.ReplaceAll(desiredRows);
                 return;
