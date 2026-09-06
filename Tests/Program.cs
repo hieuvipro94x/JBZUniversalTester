@@ -3314,6 +3314,18 @@ internal static class Program
                mainWindowSource.Contains("Task.WhenAny(", StringComparison.Ordinal) &&
                mainWindowSource.Contains("ObserveDeferredStartupAsync(initialization)", StringComparison.Ordinal),
             "Slow board startup unlocks product selection while board reconnect remains fully automatic");
+        Assert(mainWindowXaml.Contains("Color=\"#273F91\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Color=\"#B45309\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Color=\"#0F766E\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource HistoryButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource SettingsButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource ModelButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource TopologyButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource ExitButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("Value=\"#DDDDDA\"", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("Value=\"#CBCBC8\"", StringComparison.Ordinal),
+            "MainWindow buttons use semantic colors and preserve them through shared hover feedback");
 
         string bootstrapSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Services", "StartupBootstrapService.cs"));

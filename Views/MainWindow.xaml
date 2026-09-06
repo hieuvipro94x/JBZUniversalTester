@@ -17,7 +17,16 @@
         <SolidColorBrush x:Key="TextPrimary" Color="#555555"/>
         <SolidColorBrush x:Key="TextMuted" Color="#777777"/>
         <SolidColorBrush x:Key="BrandBlue" Color="#273F91"/>
-        <SolidColorBrush x:Key="StatusPurple" Color="#8E44AD"/>
+        <SolidColorBrush x:Key="HistoryBackground" Color="#E8EDF5"/>
+        <SolidColorBrush x:Key="HistoryBorder" Color="#AEBBD2"/>
+        <SolidColorBrush x:Key="SettingsBackground" Color="#ECEFF1"/>
+        <SolidColorBrush x:Key="SettingsForeground" Color="#455A64"/>
+        <SolidColorBrush x:Key="SettingsBorder" Color="#B0BEC5"/>
+        <SolidColorBrush x:Key="ModelAction" Color="#B45309"/>
+        <SolidColorBrush x:Key="TopologyAction" Color="#0F766E"/>
+        <SolidColorBrush x:Key="ExitBackground" Color="#FFF0F0"/>
+        <SolidColorBrush x:Key="ExitForeground" Color="#A61B1B"/>
+        <SolidColorBrush x:Key="ExitBorder" Color="#D97979"/>
 
         <Style x:Key="FlatButton" TargetType="Button">
             <Setter Property="Height" Value="50"/>
@@ -36,34 +45,57 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="ButtonBorder"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}">
+                        <Grid>
+                            <Border x:Name="ButtonBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4"/>
+
+                            <!-- Lớp tương tác làm tối chính màu semantic của từng nút,
+                                 không thay tất cả button thành cùng một màu xám. -->
+                            <Border x:Name="InteractionOverlay"
+                                    Background="#000000"
+                                    CornerRadius="4"
+                                    IsHitTestVisible="False"
+                                    Opacity="0"/>
 
                             <ContentPresenter
                                 HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                 VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                                 Margin="{TemplateBinding Padding}"/>
-                        </Border>
+                        </Grid>
 
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Background"
-                                        Value="#DDDDDA"/>
-                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay"
+                                        Property="Opacity"
+                                        Value="0.08"/>
+                            </MultiTrigger>
 
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Background"
-                                        Value="#CBCBC8"/>
-                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsPressed" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay"
+                                        Property="Opacity"
+                                        Value="0.16"/>
+                            </MultiTrigger>
 
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonBorder"
-                                        Property="Opacity"
-                                        Value="0.42"/>
+                                        Property="Background"
+                                        Value="#E5E7EB"/>
+                                <Setter TargetName="ButtonBorder"
+                                        Property="BorderBrush"
+                                        Value="#CBD5E1"/>
+                                <Setter Property="Foreground" Value="#9CA3AF"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -76,11 +108,51 @@
                BasedOn="{StaticResource FlatButton}">
             <Setter Property="Width" Value="260"/>
             <Setter Property="Height" Value="50"/>
-            <Setter Property="Background" Value="{StaticResource StatusPurple}"/>
+            <Setter Property="Background" Value="{StaticResource BrandBlue}"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="BorderBrush" Value="#1E3278"/>
             <Setter Property="FontSize" Value="18"/>
             <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+
+        <Style x:Key="HistoryButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource FlatButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HistoryBorder}"/>
+        </Style>
+
+        <Style x:Key="SettingsButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource FlatButton}">
+            <Setter Property="Background" Value="{StaticResource SettingsBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource SettingsForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource SettingsBorder}"/>
+        </Style>
+
+        <Style x:Key="ModelButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource FlatButton}">
+            <Setter Property="Background" Value="{StaticResource ModelAction}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#92400E"/>
+        </Style>
+
+        <Style x:Key="TopologyButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource FlatButton}">
+            <Setter Property="Background" Value="{StaticResource TopologyAction}"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#0B5F59"/>
+        </Style>
+
+        <Style x:Key="ExitButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource FlatButton}">
+            <Setter Property="Background" Value="{StaticResource ExitBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource ExitForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ExitBorder}"/>
         </Style>
 
     </Window.Resources>
@@ -177,18 +249,18 @@
                  trong TestWindow nên người vận hành không cần chuyển chế độ. -->
             <Button Grid.Column="1"
                     Click="OpenHistory_Click"
-                    Style="{StaticResource FlatButton}"
+                    Style="{StaticResource HistoryButtonStyle}"
                     Content="LỊCH SỬ"/>
 
             <Button Grid.Column="2"
                     Click="OpenSettings_Click"
-                    Style="{StaticResource FlatButton}"
+                    Style="{StaticResource SettingsButtonStyle}"
                     Content="CÀI ĐẶT"/>
 
             <Button x:Name="SelectModelButton"
                     Grid.Column="3"
                     Command="{Binding Home.LoadModelCommand}"
-                    Style="{StaticResource FlatButton}"
+                    Style="{StaticResource ModelButtonStyle}"
                     Content="CHỌN MÃ HÀNG"/>
 
             <Button x:Name="LearnTopologyButton"
@@ -196,12 +268,12 @@
                     Width="190"
                     HorizontalAlignment="Left"
                     Click="OpenTopologyLearning_Click"
-                    Style="{StaticResource FlatButton}"
+                    Style="{StaticResource TopologyButtonStyle}"
                     Content="QUÉT / HỌC MÃ"/>
 
             <Button Grid.Column="5"
                     Command="{Binding ExitCommand}"
-                    Style="{StaticResource FlatButton}"
+                    Style="{StaticResource ExitButtonStyle}"
                     Content="KẾT THÚC"/>
         </Grid>
 
