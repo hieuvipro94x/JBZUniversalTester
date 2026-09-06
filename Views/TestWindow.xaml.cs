@@ -282,8 +282,7 @@ public partial class TestWindow : Window
 
         bool boardConnectionChanged = boardConnected != _lastLedBoardConnected;
         bool isNewCycle = state.Equals("CHỜ LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
-                          state.Equals("SẴN SÀNG SẢN XUẤT", StringComparison.OrdinalIgnoreCase) ||
-                          state.Equals("SẴN SÀNG", StringComparison.OrdinalIgnoreCase);
+                          state.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase);
 
         if (isNewCycle)
         {

@@ -190,7 +190,7 @@ public sealed class TestViewModel : ObservableObject
         "Hệ thống không nhận được tín hiệu ổn định từ bo kiểm tra. Máy đã dừng để tránh kết quả sai.";
     private LabelPrintContext? _failedLabelPrint;
     private LabelPrintContext? _lastSuccessfulLabelPrint;
-    private string _labelStatusText = "TEM: SẴN SÀNG";
+    private string _labelStatusText = "TEM: CHỜ LẮP SẢN PHẨM";
 
     // V11.9: nhận dạng đầu dò GND ngay cả khi TestView đang mở. Firmware có
     // chữ ký fan-out dày (một source kéo theo hàng chục target liên tiếp).
@@ -263,9 +263,9 @@ public sealed class TestViewModel : ObservableObject
     public bool HasInlineProbeContacts => ProbeContacts.Count > 0;
     public string ProbeModeText => HasInlineProbeContacts
         ? $"ĐANG DÒ ({SnapshotInlineProbeContacts().Length})"
-        : "SẴN SÀNG";
+        : "LẮP SẢN PHẨM";
     public string ProbeBarText => ProbeContacts.FirstOrDefault()?.Status
-        ?? "SẴN SÀNG - BO TỰ PHÁT HIỆN ĐẦU DÒ TRONG CHU KỲ KIỂM TRA";
+        ?? "LẮP SẢN PHẨM - BO TỰ PHÁT HIỆN ĐẦU DÒ TRONG CHU KỲ KIỂM TRA";
     public string ProbeBarBackground => HasInlineProbeContacts ? "#23D9D9" : "#F8F8F6";
     public ObservableCollection<ResistanceResult> Resistance { get; } = new();
     public ObservableCollection<WaterProofChannelResult> WaterProofChannels { get; } = new();
@@ -440,7 +440,7 @@ public sealed class TestViewModel : ObservableObject
             if (value.Contains("ĐANG", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG TEST";
 
-            return "SẴN SÀNG";
+            return "LẮP SẢN PHẨM";
         }
     }
 
@@ -493,7 +493,7 @@ public sealed class TestViewModel : ObservableObject
                 return "#FFF3A0";
             }
 
-            if (MasterApproved && value.Contains("SẴN SÀNG SẢN XUẤT", StringComparison.OrdinalIgnoreCase))
+            if (MasterApproved && value.Contains("CHỜ LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
                 return "#FFF3A0";
 
             if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
@@ -507,7 +507,7 @@ public sealed class TestViewModel : ObservableObject
             if (value.Contains("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
                 return "#FFF3A0";
 
-            if (value.Contains("SẴN SÀNG", StringComparison.OrdinalIgnoreCase) ||
+            if (value.Contains("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
                 value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase))
                 return "#FFF3A0";
 
@@ -926,7 +926,7 @@ public sealed class TestViewModel : ObservableObject
     public string MasterProgressText => IsMasterBadPhase
         ? $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
         : MasterApproved
-            ? "MASTER HOÀN TẤT • SẴN SÀNG SẢN XUẤT"
+            ? "MASTER HOÀN TẤT • CHỜ LẮP SẢN PHẨM"
             : string.Empty;
 
     public string MasterStatus
@@ -1342,7 +1342,7 @@ public sealed class TestViewModel : ObservableObject
         if (_model is null)
             return "CHỜ CHỌN MÃ HÀNG";
         if (IsIoMappingMode)
-            return "SẴN SÀNG LẬP BẢN ĐỒ IO";
+            return "ĐANG LẬP BẢN ĐỒ IO";
         if (_requireStartupIoClear && Volatile.Read(ref _startupIoInterlockState) != 2)
             return "CHỜ ĐỒNG BỘ DỮ LIỆU BO";
         return MasterApproved
@@ -2049,7 +2049,7 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             State = _board.IsConnected
-                ? "SẴN SÀNG"
+                ? "LẮP SẢN PHẨM"
                 : "LỖI KẾT NỐI BO";
             AddLog($"Không thể tải model gần nhất: {ex.Message}");
         }
@@ -2272,9 +2272,7 @@ public sealed class TestViewModel : ObservableObject
                     if (returnedToMain)
                         SwitchRuntimeMode(RuntimeMode.Background);
                 }
-                State = rearmAfterRemoval && !returnedToMain
-                    ? "CHỜ LẮP SẢN PHẨM"
-                    : "SẴN SÀNG";
+                State = "CHỜ LẮP SẢN PHẨM";
                 AddLog(wasWaterProofEquipmentRecovery
                     ? "Đã tháo sản phẩm sau lỗi thiết bị leak - ARM lại chu kỳ, leak COM sẽ reconnect ở lần chạy kế tiếp."
                     : "PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
@@ -2335,7 +2333,7 @@ public sealed class TestViewModel : ObservableObject
                 // Nếu còn dù chỉ một cạnh dây thường hoặc CLIP thì
                 // HasProductActivity vẫn true và tuyệt đối không vào nhánh này.
                 ResetFullCycleAfterProductRemoved();
-                State = "SẴN SÀNG";
+                State = "LẮP SẢN PHẨM";
                 AddLog("Đã tháo hoàn toàn sản phẩm đang lắp dở; reset dây thường và toàn bộ nhánh CLIP để lắp lại từ đầu.");
             }
             else if (_engine.HasProductActivity && !_productDetectedThisCycle)
@@ -2926,7 +2924,7 @@ public sealed class TestViewModel : ObservableObject
             _engine.SetFrameProcessingEnabled(false);
         }
 
-        State = returnedToMain ? "SẴN SÀNG" : "CHỜ LẮP SẢN PHẨM";
+        State = "CHỜ LẮP SẢN PHẨM";
         AddLog(discardRequired
             ? "Đã tháo sản phẩm và xác nhận thùng hàng lỗi - mở khóa chu kỳ mới."
             : "Đã tháo sản phẩm lỗi - chờ lắp sản phẩm lại.");
@@ -4218,7 +4216,7 @@ public sealed class TestViewModel : ObservableObject
         if (!_board.IsScanning || _board.CurrentScanMode != BoardScanMode.Production)
         {
             State = "BO ĐANG CHUẨN BỊ";
-            AddLog("Chưa thể ARM kiểm tra vì luồng quét nền chưa sẵn sàng; vui lòng chờ trạng thái SẴN SÀNG.");
+            AddLog("Chưa thể ARM kiểm tra vì luồng quét nền chưa sẵn sàng; vui lòng chờ trạng thái CHỜ LẮP SẢN PHẨM.");
             return;
         }
 
@@ -4632,7 +4630,7 @@ public sealed class TestViewModel : ObservableObject
                 "FAIL_CONFIRM_RELAY");
             State = _waitForFaultProductRemoval
                 ? FaultRemovalWaitingText(cycleModel)
-                : "SẴN SÀNG";
+                : "LẮP SẢN PHẨM";
         }
         catch (Exception ex)
         {
@@ -5794,7 +5792,7 @@ public sealed class TestViewModel : ObservableObject
         _engine.SetFrameProcessingEnabled(true);
         RefreshFaults();
 
-        State = "SẴN SÀNG SẢN XUẤT";
+        State = "CHỜ LẮP SẢN PHẨM";
         MasterStatus = "MASTER HOÀN TẤT • PRODUCTION ENABLED";
         AddLog("MASTER VALIDATION COMPLETED - MASTER GATE PASS, ProductionEnabled=true.");
         RaiseMasterState();
@@ -6499,7 +6497,7 @@ public sealed class TestViewModel : ObservableObject
                         // thái FAIL sau khi hộp thoại đã được người vận hành xác nhận.
                         State = _waitForFaultProductRemoval
                             ? FaultRemovalWaitingText(cycleModel)
-                            : "SẴN SÀNG";
+                            : "LẮP SẢN PHẨM";
                     }
                     catch (Exception ex)
                     {
@@ -6772,7 +6770,7 @@ public sealed class TestViewModel : ObservableObject
                 "FINAL_PASS_REJECT_CONFIRM_RELAY");
             State = _waitForFaultProductRemoval
                 ? FaultRemovalWaitingText(cycleModel)
-                : "SẴN SÀNG";
+                : "LẮP SẢN PHẨM";
         }
         catch (Exception ex)
         {

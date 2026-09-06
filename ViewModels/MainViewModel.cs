@@ -171,7 +171,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(HasEnoughCardsForModel));
 
         if (Test.IsBoardConnected && Model is not null)
-            Status = $"SẴN SÀNG - {Model.ModelName} - BO ĐÃ KẾT NỐI";
+            Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName} - BO ĐÃ KẾT NỐI";
         else if (Test.IsBoardConnected)
             Status = "BO ĐÃ KẾT NỐI - CHƯA CÓ MÃ HÀNG";
         else if (Model is not null)
