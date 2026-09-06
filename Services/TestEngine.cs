@@ -413,8 +413,8 @@ public sealed class TestEngine : IDisposable
                 ReferenceEqualityComparer.Instance);
             foreach (WireNet net in prepared.Model.Nets)
             {
-                _displayRowsByNet[net] = CreateNetworkMappingRowsCore(net, PendingConnectionStatus);
-                _removalDisplayRowsByNet[net] = CreateNetworkMappingRowsCore(net, RemovalConnectionStatus);
+                _displayRowsByNet[net] = CreateNetworkMappingRowsCore(prepared.Model, net, PendingConnectionStatus);
+                _removalDisplayRowsByNet[net] = CreateNetworkMappingRowsCore(prepared.Model, net, RemovalConnectionStatus);
             }
 
             _displayRowByClip = new Dictionary<ClipBranch, FaultRow>(
@@ -1741,7 +1741,7 @@ public sealed class TestEngine : IDisposable
             : string.Empty;
     }
 
-    private FaultRow[] CreateNetworkMappingRowsCore(WireNet net, string status)
+    private FaultRow[] CreateNetworkMappingRowsCore(ProductModel model, WireNet net, string status)
     {
 
         PinRecord[] pins = net.Pins
@@ -1791,10 +1791,33 @@ public sealed class TestEngine : IDisposable
                     Section = pin.Section,
                     Color = pin.Color,
                     Status = status,
+                    // Htdrv renders CONNECTOR/PIN from the network endpoint,
+                    // but IO-CN-PN from the canonical physical mapping of the
+                    // IO. These are not always the same PinRecord (for
+                    // example IO122 is displayed as CN8/14 but maps to
+                    // 122-4-26).
+                    IoCnPnOverride = BuildCanonicalIoCnPn(model, pin),
                     IsNetworkStart = endpointIndex == 0
                 };
             })
             .ToArray();
+    }
+
+    private static string BuildCanonicalIoCnPn(ProductModel model, PinRecord displayedPin)
+    {
+        if (displayedPin.IoNumber <= 0)
+            return string.Empty;
+
+        PinRecord canonical = model.Pins
+            .Where(pin => pin.IoNumber == displayedPin.IoNumber &&
+                          !string.IsNullOrWhiteSpace(pin.Connector) &&
+                          !string.IsNullOrWhiteSpace(pin.PinNumber))
+            .OrderBy(pin => NaturalSortKey(pin.Connector), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(pin => NaturalSortKey(pin.PinNumber), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(pin => pin.OriginalOrder)
+            .FirstOrDefault() ?? displayedPin;
+
+        return string.Join("-", displayedPin.IoNumber, canonical.Connector.Trim(), canonical.PinNumber.Trim());
     }
 
     public bool SuppressProbeRelatedWiringFaults(IReadOnlyCollection<int> probeIos)
