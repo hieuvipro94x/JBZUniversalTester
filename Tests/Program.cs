@@ -671,7 +671,7 @@ internal static class Program
         Assert(!disabledMasterVm.IsMasterSequenceActive && !disabledMasterVm.IsMasterBannerVisible,
             "Master min 0 must not show Master banner");
         Assert(disabledMasterVm.ProductionEnabled, "Master min 0 allows production");
-        Assert(disabledMasterVm.ResultStatusText == "SẴN SÀNG", "Ready result text is canonical");
+        Assert(disabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM", "Waiting-product result text is canonical");
         Assert(disabledMasterVm.StateBackground == "#FFF3A0" && disabledMasterVm.StateForeground == "#222222",
             "Ready status uses yellow/dark mapping");
 
@@ -680,10 +680,10 @@ internal static class Program
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
-        Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MASTER PASS" &&
+        Assert(enabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                enabledMasterVm.State == "KIỂM TRA MASTER PASS" &&
                enabledMasterVm.StateBackground == "#FFF3A0",
-            "Waiting Master uses the compact production display and canonical yellow background");
+            "Waiting Master uses the shared install-product display and canonical yellow background");
 
         TestViewModel statusVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         statusVm.State = "PASS";
@@ -703,7 +703,7 @@ internal static class Program
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" &&
                statusVm.StateBackground == "#FFF3A0" &&
                statusVm.StateForeground == "#222222",
-            "Removal interlock must not be presented as SẴN SÀNG");
+            "Removal interlock must not be presented as LẮP SẢN PHẨM");
         statusVm.State = "ĐANG KIỂM TRA...";
         Assert(statusVm.ResultStatusText == "ĐANG TEST" && statusVm.StateBackground == "#FFF3A0" && statusVm.StateForeground == "#222222",
             "Testing status mapping");
@@ -763,7 +763,7 @@ internal static class Program
             .GetAwaiter()
             .GetResult();
         publishRecoveryFrame.GetAwaiter().GetResult();
-        Assert(recoveryVm.ResultStatusText == "SẴN SÀNG" &&
+        Assert(recoveryVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                recoveryVm.Faults.Count == 0 &&
                recoveryVm.CenterResultText == "LẮP SẢN PHẨM" &&
                !recoveryBoard.Commands.Contains("START") &&
@@ -1115,7 +1115,7 @@ internal static class Program
             "START cannot arm production while the startup removal gate is locked");
 
         board.Publish(FrameSeq(101));
-        Assert(!vm.IsProductRemovalPending && vm.ResultStatusText == "SẴN SÀNG",
+        Assert(!vm.IsProductRemovalPending && vm.ResultStatusText == "LẮP SẢN PHẨM",
             "A complete clean background frame unlocks product selection and START");
 
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
@@ -1146,7 +1146,7 @@ internal static class Program
 
         board.Publish(FrameSeq(103));
         Assert(!vm.IsProductRemovalPending &&
-               vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "SẴN SÀNG",
+               vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "LẮP SẢN PHẨM",
             "A complete clean frame clears the startup interlock and arms Production");
     }
 
@@ -1630,7 +1630,7 @@ internal static class Program
             "Resistance and Leak result columns must share green PASS/red FAIL cell presentation");
         Assert(xaml.Contains("<Viewbox Margin=\"10\"", StringComparison.Ordinal) &&
                xaml.Contains("StretchDirection=\"DownOnly\"", StringComparison.Ordinal),
-            "Large result text scales down to keep PASS/KHÔNG ĐẠT/SẴN SÀNG inside its box");
+            "Large result text scales down to keep PASS/KHÔNG ĐẠT/LẮP SẢN PHẨM inside its box");
 
         ProductModel connectorModel = HtdrvTwoEndpointModel();
         using TestEngine connectorEngine = CreateEngine(out _);
@@ -1677,7 +1677,7 @@ internal static class Program
             "Leak FAIL must keep its result table while any product IO remains connected");
         removalBoard.Publish(FrameSeq(2));
         Assert(!(bool)(waitForFaultRemoval.GetValue(removalVm) ?? true) &&
-               removalVm.ResultStatusText == "SẴN SÀNG" &&
+               removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                removalVm.SelectedOperationTabIndex == 0,
             "Fresh empty frame after Leak FAIL resets the cycle instead of hanging on results");
 
@@ -1704,7 +1704,7 @@ internal static class Program
             "FAIL MainWindow removal lock remains while any product connection is present");
         faultMainBoard.Publish(FrameSeq(22));
         Assert(!faultMainVm.IsProductRemovalPending &&
-               faultMainVm.ResultStatusText == "SẴN SÀNG",
+               faultMainVm.ResultStatusText == "LẮP SẢN PHẨM",
             "FAIL MainWindow removal lock clears only after a complete empty frame");
 
         FieldInfo cycleActiveAfterLeakFail = typeof(TestViewModel).GetField(
@@ -1758,7 +1758,7 @@ internal static class Program
         Assert(!(bool)(waitForPassRemoval.GetValue(removalVm) ?? true) &&
                !removalVm.IsProductRemovalPending &&
                !(bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? true) &&
-               removalVm.ResultStatusText == "SẴN SÀNG" &&
+               removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                removalVm.SelectedOperationTabIndex == 0,
             "After committed Leak PASS, a fresh empty frame clears the MainWindow lock without auto-arming a new test");
 
@@ -2868,10 +2868,11 @@ internal static class Program
         IReadOnlyList<FaultDetail> confirmedSpliceOpen = engine.BuildConfirmedOpenFaults();
         Assert(confirmedSpliceOpen.Count == 0 &&
                !engine.BuildRows().Any(row => row.Kind == FaultKind.Open) &&
-               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 3 &&
+               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1 &&
+               engine.BuildRows().Single(row => row.Kind == FaultKind.MissingConnection).Io == 33 &&
                engine.BuildRows().Where(row => row.WireName == "SPLICE")
                    .All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI"),
-            "Splice missing target is display-only, not production OPEN");
+            "Splice hides reached endpoints and keeps only the missing target as display-only, not production OPEN");
 
         engine.SetModel(splice);
         ScanFrame splicePassFrame = Frame((5, new[] { 20, 33 }));
@@ -3157,6 +3158,37 @@ internal static class Program
                deltaVm.Faults[0].Io == 3,
             "Passing the first network removes only its two rows instead of moving the remaining 198 rows");
 
+        TestViewModel tenCardVm = CreateTestViewModel(production);
+        FaultRow[] tenCardRows = Enumerable.Range(1, 640)
+            .Select(io => new FaultRow
+            {
+                Kind = FaultKind.MissingConnection,
+                Io = io,
+                WireName = $"TEN{io:000}",
+                Status = "CHƯA KẾT NỐI"
+            })
+            .ToArray();
+        int tenCardEvents = 0;
+        tenCardVm.Faults.CollectionChanged += (_, _) => tenCardEvents++;
+        synchronize.Invoke(tenCardVm, [tenCardRows]);
+        Assert(tenCardEvents == 1 && tenCardVm.Faults.Count == 640,
+            "Initial 640-row presentation uses one collection reset");
+
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [tenCardRows.Skip(2).ToArray()]);
+        Assert(tenCardEvents == 2 && tenCardVm.Faults.Count == 638,
+            "Large active table removes only the changed endpoint rows without rebuilding all 638 rows");
+
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [Array.Empty<FaultRow>()]);
+        Assert(tenCardEvents == 1 && tenCardVm.Faults.Count == 0,
+            "Clearing a large presentation uses one collection reset");
+
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [Array.Empty<FaultRow>()]);
+        Assert(tenCardEvents == 0,
+            "An already empty presentation does not issue redundant DataGrid resets");
+
         string testWindowCode = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml.cs"));
         Assert(testWindowCode.Contains("_scrollDispatchQueued", StringComparison.Ordinal) &&
@@ -3393,14 +3425,14 @@ internal static class Program
             1,
             (1, new[] { 18 }),
             (201, new[] { 202, 203 })));
-        Assert(vm.PassedNetworkCount == 3 && vm.State != "SẴN SÀNG",
+        Assert(vm.PassedNetworkCount == 3 && vm.State != "LẮP SẢN PHẨM",
             "Normal wire and connected AO-aN branches are latched in the incomplete cycle");
 
         // Tháo dây thường nhưng AO-a1 vẫn còn: tuyệt đối chưa reset.
         board.Publish(FrameSeq(2, (201, new[] { 202 })));
         Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
         board.Publish(FrameSeq(3, (201, new[] { 202 })));
-        Assert(vm.PassedNetworkCount > 0 && vm.State != "SẴN SÀNG",
+        Assert(vm.PassedNetworkCount > 0 && vm.State != "LẮP SẢN PHẨM",
             "One remaining AO-a1 connection prevents cycle reset");
 
         // Chỉ khi không còn bất kỳ cặp dây thường/CLIP nào và trạng thái rỗng
@@ -3409,8 +3441,8 @@ internal static class Program
         Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
         board.Publish(FrameSeq(5));
         Assert(vm.PassedNetworkCount == 0 &&
-               vm.State == "SẴN SÀNG" &&
-               vm.ResultStatusText == "SẴN SÀNG",
+               vm.State == "LẮP SẢN PHẨM" &&
+               vm.ResultStatusText == "LẮP SẢN PHẨM",
             "Full stable release clears normal/CLIP latches and returns the cycle to ready");
     }
 

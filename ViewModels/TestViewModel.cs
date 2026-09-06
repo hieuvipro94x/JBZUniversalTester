@@ -124,6 +124,8 @@ public sealed class TestViewModel : ObservableObject
     private int _productionPhase = (int)ProductionPhase.WaitingProduct;
     private long _runtimeGeneration;
     private int _engineUiUpdateQueued;
+    private long _engineUiUpdateRevision;
+    private long _engineUiQueuedAtTimestamp;
     private int _deviceFault;
     private int _boardUnavailablePresentationApplied;
     private int _manualModeActive;
@@ -191,6 +193,11 @@ public sealed class TestViewModel : ObservableObject
     private LabelPrintContext? _failedLabelPrint;
     private LabelPrintContext? _lastSuccessfulLabelPrint;
     private string _labelStatusText = "TEM: CHỜ LẮP SẢN PHẨM";
+    private int _cachedOpenCount;
+    private int _cachedWrongCount;
+    private int _cachedShortCount;
+    private FaultDetail? _visiblePrimaryFaultSnapshot;
+    private bool _visiblePrimaryFaultSnapshotValid;
 
     // V11.9: nhận dạng đầu dò GND ngay cả khi TestView đang mở. Firmware có
     // chữ ký fan-out dày (một source kéo theo hàng chục target liên tiếp).
@@ -413,17 +420,18 @@ public sealed class TestViewModel : ObservableObject
             if (value.Contains("KẾT NỐI BO", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG KẾT NỐI BO";
 
-            if (!_presentationCycleStarted &&
-                !IsProductRemovalPending &&
-                CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity &&
-                !_engine.HasProductActivity)
-                return "LẮP SẢN PHẨM";
-
-            if (IsMasterSequenceActive)
-                return NormalizeSingleLine(value);
-
             if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
                 return "PASS";
+
+            if (IsMasterSequenceActive)
+            {
+                if (!_presentationCycleStarted &&
+                    !IsProductRemovalPending &&
+                    !_engine.HasProductActivity)
+                    return "LẮP SẢN PHẨM";
+
+                return NormalizeSingleLine(value);
+            }
 
             if (value.Contains("ĐANG TEST LEAK", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG TEST LEAK";
@@ -439,6 +447,12 @@ public sealed class TestViewModel : ObservableObject
 
             if (value.Contains("ĐANG", StringComparison.OrdinalIgnoreCase))
                 return "ĐANG TEST";
+
+            if (!_presentationCycleStarted &&
+                !IsProductRemovalPending &&
+                CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity &&
+                !_engine.HasProductActivity)
+                return "LẮP SẢN PHẨM";
 
             return "LẮP SẢN PHẨM";
         }
@@ -601,14 +615,11 @@ public sealed class TestViewModel : ObservableObject
 
     // Htdrv gốc hiển thị/đếm theo từng dòng pin map đang còn trên bảng.
     // Chưa nối là trạng thái hiển thị thao tác, không phải OPEN fault/FAIL.
-    public int OpenCount =>
-        Faults.Count(x => x.Kind == FaultKind.MissingConnection);
+    public int OpenCount => _cachedOpenCount;
 
-    public int WrongCount =>
-        Faults.Count(x => x.Kind == FaultKind.WrongWiring);
+    public int WrongCount => _cachedWrongCount;
 
-    public int ShortCount =>
-        Faults.Count(x => x.Kind == FaultKind.Short);
+    public int ShortCount => _cachedShortCount;
 
     public int WiringFaultCount => WrongCount + ShortCount;
 
@@ -2155,19 +2166,6 @@ public sealed class TestViewModel : ObservableObject
 
         long generation = Volatile.Read(ref _runtimeGeneration);
 
-        if (!MasterApproved)
-        {
-            try
-            {
-                HandleMasterEngineChanged(generation);
-            }
-            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
-            {
-                EnterDeviceFault(ex, "MasterEngineChanged");
-            }
-            return;
-        }
-
         try
         {
             ScheduleEngineUiUpdate(generation);
@@ -2180,13 +2178,14 @@ public sealed class TestViewModel : ObservableObject
 
     private void ScheduleEngineUiUpdate(long generation)
     {
+        Interlocked.Increment(ref _engineUiUpdateRevision);
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())
         {
             try
             {
                 Interlocked.Increment(ref _engineUiUpdatesRendered);
-                ProcessEngineChangedOnUi(generation);
+                ProcessScheduledEngineChangedOnUi(generation);
             }
             catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
             {
@@ -2195,23 +2194,54 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
+        QueueEngineUiDispatcher(dispatcher);
+    }
+
+    private void QueueEngineUiDispatcher(System.Windows.Threading.Dispatcher dispatcher)
+    {
         if (Interlocked.Exchange(ref _engineUiUpdateQueued, 1) != 0)
             return;
 
+        Volatile.Write(ref _engineUiQueuedAtTimestamp, Stopwatch.GetTimestamp());
         Interlocked.Increment(ref _engineUiUpdatesScheduled);
         dispatcher.BeginInvoke(new Action(() =>
         {
-            Interlocked.Exchange(ref _engineUiUpdateQueued, 0);
+            long renderedRevision = Volatile.Read(ref _engineUiUpdateRevision);
+            long queuedAt = Volatile.Read(ref _engineUiQueuedAtTimestamp);
             try
             {
                 Interlocked.Increment(ref _engineUiUpdatesRendered);
-                ProcessEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration));
+                ProcessScheduledEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration));
+                double dispatcherMs = Stopwatch.GetElapsedTime(queuedAt).TotalMilliseconds;
+                if (dispatcherMs > 16)
+                {
+                    AsyncFileLogService.Current.Performance(
+                        $"UI_PERF_WARNING phase=ENGINE_DISPATCHER duration_ms={dispatcherMs:0.###}");
+                }
             }
             catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
             {
                 EnterDeviceFault(ex, "ProcessEngineChangedOnUi.Dispatcher");
             }
+            finally
+            {
+                Interlocked.Exchange(ref _engineUiUpdateQueued, 0);
+
+                // Nếu frame mới tới trong lúc callback đang chạy, chỉ xếp thêm
+                // một callback để render snapshot mới nhất. Không phát lại mọi
+                // trạng thái trung gian và cũng không làm mất trạng thái cuối.
+                if (Volatile.Read(ref _engineUiUpdateRevision) != renderedRevision)
+                    QueueEngineUiDispatcher(dispatcher);
+            }
         }));
+    }
+
+    private void ProcessScheduledEngineChangedOnUi(long generation)
+    {
+        if (!MasterApproved)
+            ProcessMasterEngineChangedOnUi(generation);
+        else
+            ProcessEngineChangedOnUi(generation);
     }
 
     private void ProcessEngineChangedOnUi(long generation)
@@ -3155,6 +3185,7 @@ public sealed class TestViewModel : ObservableObject
         SetProductionPhase(ProductionPhase.WaitingProduct);
         SelectedOperationTabIndex = 0;
         Faults.Clear();
+        UpdateCachedFaultCounts(Array.Empty<FaultRow>());
 
         foreach (StartupIoContactPair pair in pairs)
         {
@@ -4809,6 +4840,9 @@ public sealed class TestViewModel : ObservableObject
 
     private FaultDetail? GetVisiblePrimaryFault()
     {
+        if (_visiblePrimaryFaultSnapshotValid)
+            return _visiblePrimaryFaultSnapshot;
+
         bool stateIsFault =
             State.Contains("LỖI", StringComparison.OrdinalIgnoreCase) ||
             State.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
@@ -4821,9 +4855,15 @@ public sealed class TestViewModel : ObservableObject
             State.Contains("KÍN NƯỚC", StringComparison.OrdinalIgnoreCase);
 
         if (!_productDetectedThisCycle && !_waitForFaultProductRemoval && !stateIsFault)
+        {
+            _visiblePrimaryFaultSnapshot = null;
+            _visiblePrimaryFaultSnapshotValid = true;
             return null;
+        }
 
-        return CaptureFaultDetails().FirstOrDefault();
+        _visiblePrimaryFaultSnapshot = CaptureFaultDetails().FirstOrDefault();
+        _visiblePrimaryFaultSnapshotValid = true;
+        return _visiblePrimaryFaultSnapshot;
     }
 
     private static string EmptyAsDash(string? value) =>
@@ -4937,24 +4977,6 @@ public sealed class TestViewModel : ObservableObject
             _lifetimeCts.Token);
 
         RaiseMasterState();
-    }
-
-    private void HandleMasterEngineChanged(long generation)
-    {
-        if (!IsRuntimeContext(RuntimeMode.Production, generation) || MasterApproved)
-            return;
-
-        InvokeUi(() =>
-        {
-            try
-            {
-                ProcessMasterEngineChangedOnUi(generation);
-            }
-            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
-            {
-                EnterDeviceFault(ex, "MasterEngineChanged.Dispatcher");
-            }
-        });
     }
 
     private void ProcessMasterEngineChangedOnUi(long generation)
@@ -8135,6 +8157,7 @@ public sealed class TestViewModel : ObservableObject
 
     private void RefreshFaults()
     {
+        long refreshStarted = Stopwatch.GetTimestamp();
         if (IsRuntimeMode(RuntimeMode.Probe) ||
             Volatile.Read(ref _probeSessionActive) != 0)
         {
@@ -8181,7 +8204,16 @@ public sealed class TestViewModel : ObservableObject
         if (probeRows.Length > 0 && IsRuntimeMode(RuntimeMode.Production))
             desiredRows = probeRows.Concat(desiredRows).ToArray();
 
+        long synchronizeStarted = Stopwatch.GetTimestamp();
         SynchronizeFaultRows(desiredRows);
+        double synchronizeMs = Stopwatch.GetElapsedTime(synchronizeStarted).TotalMilliseconds;
+        double refreshMs = Stopwatch.GetElapsedTime(refreshStarted).TotalMilliseconds;
+        if (synchronizeMs > 16 || refreshMs > 16)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"UI_PERF_WARNING phase=FAULT_ROWS rows={desiredRows.Count} " +
+                $"sync_ms={synchronizeMs:0.###} total_ms={refreshMs:0.###}");
+        }
 
         RaiseTestStatistics();
 
@@ -8206,21 +8238,27 @@ public sealed class TestViewModel : ObservableObject
 
     private void SynchronizeFaultRows(IReadOnlyList<FaultRow> desiredRows)
     {
+        UpdateCachedFaultCounts(desiredRows);
         try
         {
             // HTDRV_UI_DELTA_10CARD_2026-09-05: collection được đồng bộ vi sai;
             // không Clear/Add lại toàn bảng khi chỉ một network thay đổi.
             // Lần đầu hiện model lớn chỉ gửi một Reset notification. Sau đó mọi
             // frame đều chạy delta; không Reset lại DataGrid.
-            // Htdrv rebuilds its grid snapshot in one pass (delete-all then
-            // insert the current rows). For a large harness table this is
-            // faster than WPF Move/Insert/Remove notifications for every
-            // shifted row, and prevents the Dispatcher queue from growing.
-            // Keep delta updates only for small tables where they are cheaper.
-            bool rebuildLargeSnapshot = desiredRows.Count >= 512;
-            if (rebuildLargeSnapshot || desiredRows.Count == 0)
+            // Snapshot đầu tiên/xóa toàn bộ chỉ phát một Reset để DataGrid
+            // virtualized dựng hoặc giải phóng row đúng một lần. Sau đó giữ
+            // delta cho cả bảng lớn: một dây đạt chỉ Remove đúng endpoint của
+            // dây đó, không rebuild hàng trăm row còn lại.
+            if (Faults.Count == 0)
             {
-                Faults.ReplaceAll(desiredRows);
+                if (desiredRows.Count > 0)
+                    Faults.ReplaceAll(desiredRows);
+                return;
+            }
+
+            if (desiredRows.Count == 0)
+            {
+                Faults.ReplaceAll(Array.Empty<FaultRow>());
                 return;
             }
 
@@ -8239,6 +8277,38 @@ public sealed class TestViewModel : ObservableObject
             {
                 string key = RowKey(current);
                 currentCounts[key] = currentCounts.GetValueOrDefault(key) + 1;
+            }
+
+            int sharedRows = 0;
+            foreach ((string key, int desiredCount) in desiredCounts)
+                sharedRows += Math.Min(desiredCount, currentCounts.GetValueOrDefault(key));
+
+            int structuralChanges =
+                (Faults.Count - sharedRows) + (desiredRows.Count - sharedRows);
+            int largeChangeThreshold = Math.Max(32, Math.Max(Faults.Count, desiredRows.Count) / 4);
+            if (structuralChanges > largeChangeThreshold)
+            {
+                Faults.ReplaceAll(desiredRows);
+                return;
+            }
+
+            if (structuralChanges == 0)
+            {
+                bool reordered = false;
+                for (int index = 0; index < desiredRows.Count; index++)
+                {
+                    if (!string.Equals(RowKey(Faults[index]), RowKey(desiredRows[index]), StringComparison.Ordinal))
+                    {
+                        reordered = true;
+                        break;
+                    }
+                }
+
+                if (reordered)
+                {
+                    Faults.ReplaceAll(desiredRows);
+                    return;
+                }
             }
 
             for (int currentIndex = Faults.Count - 1; currentIndex >= 0; currentIndex--)
@@ -8302,12 +8372,48 @@ public sealed class TestViewModel : ObservableObject
 
     private static string RowKey(FaultRow row) => row.PresentationKey;
 
+    private void UpdateCachedFaultCounts(IReadOnlyList<FaultRow> rows)
+    {
+        int open = 0;
+        int wrong = 0;
+        int shortCount = 0;
+        foreach (FaultRow row in rows)
+        {
+            switch (row.Kind)
+            {
+                case FaultKind.MissingConnection:
+                    open++;
+                    break;
+                case FaultKind.WrongWiring:
+                    wrong++;
+                    break;
+                case FaultKind.Short:
+                    shortCount++;
+                    break;
+            }
+        }
+
+        bool openChanged = _cachedOpenCount != open;
+        bool wrongChanged = _cachedWrongCount != wrong;
+        bool shortChanged = _cachedShortCount != shortCount;
+        int previousWiring = _cachedWrongCount + _cachedShortCount;
+
+        _cachedOpenCount = open;
+        _cachedWrongCount = wrong;
+        _cachedShortCount = shortCount;
+
+        if (openChanged)
+            Raise(nameof(OpenCount));
+        if (wrongChanged)
+            Raise(nameof(WrongCount));
+        if (shortChanged)
+            Raise(nameof(ShortCount));
+        if (previousWiring != wrong + shortCount)
+            Raise(nameof(WiringFaultCount));
+    }
+
     private void RaiseTestStatistics()
     {
-        Raise(nameof(OpenCount));
-        Raise(nameof(WrongCount));
-        Raise(nameof(ShortCount));
-        Raise(nameof(WiringFaultCount));
         Raise(nameof(PassedNetworkCount));
         Raise(nameof(ExpectedNetworkCount));
         Raise(nameof(NetworkProgress));
@@ -8319,6 +8425,8 @@ public sealed class TestViewModel : ObservableObject
 
     private void RaiseActiveFault()
     {
+        _visiblePrimaryFaultSnapshotValid = false;
+        _visiblePrimaryFaultSnapshot = null;
         Raise(nameof(ResultStatusText));
         Raise(nameof(MasterBannerText));
         Raise(nameof(IsMasterBannerVisible));
@@ -8350,6 +8458,7 @@ public sealed class TestViewModel : ObservableObject
             // người vận hành hiểu nhầm là trạng thái phần cứng hiện tại.
             SelectedOperationTabIndex = 0;
             Faults.Clear();
+            UpdateCachedFaultCounts(Array.Empty<FaultRow>());
             ResetProductPresentationCycle();
         });
     }
