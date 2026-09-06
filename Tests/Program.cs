@@ -586,6 +586,16 @@ internal static class Program
         Assert(typeof(TestViewModel).GetProperty("Logs") is null,
             "TestViewModel does not maintain an unused UI log collection");
 
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.Contains(
+                   "ProcessScheduledEngineChangedOnUi(request.Generation)",
+                   StringComparison.Ordinal) &&
+               !testViewModelSource.Contains(
+                   "ProcessScheduledEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration))",
+                   StringComparison.Ordinal),
+            "Coalesced engine UI callbacks preserve the event generation and reject stale cycles");
+
         var disabled = new ResistanceChannelEditor(
             new ResistanceChannelSetting { Enabled = true, Name = "R3", Channel = 3, MinOhm = 1, MaxOhm = 2 },
             3)

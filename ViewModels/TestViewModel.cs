@@ -125,6 +125,7 @@ public sealed class TestViewModel : ObservableObject
     private long _runtimeGeneration;
     private int _engineUiUpdateQueued;
     private long _engineUiUpdateRevision;
+    private EngineUiUpdateRequest? _latestEngineUiUpdateRequest;
     private long _engineUiQueuedAtTimestamp;
     private int _deviceFault;
     private int _boardUnavailablePresentationApplied;
@@ -2178,7 +2179,10 @@ public sealed class TestViewModel : ObservableObject
 
     private void ScheduleEngineUiUpdate(long generation)
     {
-        Interlocked.Increment(ref _engineUiUpdateRevision);
+        long revision = Interlocked.Increment(ref _engineUiUpdateRevision);
+        Volatile.Write(
+            ref _latestEngineUiUpdateRequest,
+            new EngineUiUpdateRequest(revision, generation));
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())
         {
@@ -2206,12 +2210,19 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Increment(ref _engineUiUpdatesScheduled);
         dispatcher.BeginInvoke(new Action(() =>
         {
-            long renderedRevision = Volatile.Read(ref _engineUiUpdateRevision);
+            EngineUiUpdateRequest? request =
+                Volatile.Read(ref _latestEngineUiUpdateRequest);
             long queuedAt = Volatile.Read(ref _engineUiQueuedAtTimestamp);
             try
             {
-                Interlocked.Increment(ref _engineUiUpdatesRendered);
-                ProcessScheduledEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration));
+                if (request is not null)
+                {
+                    Interlocked.Increment(ref _engineUiUpdatesRendered);
+                    // Generation phải đi cùng event đã tạo request. Không lấy
+                    // generation hiện tại ở lúc Dispatcher chạy, vì operator có
+                    // thể đã rời/vào Test và tạo một cycle mới trong thời gian chờ.
+                    ProcessScheduledEngineChangedOnUi(request.Generation);
+                }
                 double dispatcherMs = Stopwatch.GetElapsedTime(queuedAt).TotalMilliseconds;
                 if (dispatcherMs > 16)
                 {
@@ -2230,11 +2241,13 @@ public sealed class TestViewModel : ObservableObject
                 // Nếu frame mới tới trong lúc callback đang chạy, chỉ xếp thêm
                 // một callback để render snapshot mới nhất. Không phát lại mọi
                 // trạng thái trung gian và cũng không làm mất trạng thái cuối.
-                if (Volatile.Read(ref _engineUiUpdateRevision) != renderedRevision)
+                if (Volatile.Read(ref _latestEngineUiUpdateRequest)?.Revision != request?.Revision)
                     QueueEngineUiDispatcher(dispatcher);
             }
         }));
     }
+
+    private sealed record EngineUiUpdateRequest(long Revision, long Generation);
 
     private void ProcessScheduledEngineChangedOnUi(long generation)
     {
