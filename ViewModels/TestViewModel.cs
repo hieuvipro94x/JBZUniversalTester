@@ -4436,14 +4436,19 @@ public sealed class TestViewModel : ObservableObject
 
     private void UpdateImmediateProductPresenceState(ScanFrame frame)
     {
-        if (!_cycleActive ||
+        bool masterArmed = IsMasterSequenceActive && !IsProductRemovalPending;
+        if ((!_cycleActive && !masterArmed) ||
             _waitForProductRelease ||
             _waitForFaultProductRemoval ||
             IsProductRemovalPending ||
             CurrentProductionPhase is ProductionPhase.Completed or ProductionPhase.WaitingProductRemoval)
             return;
 
-        string next = frame.ActiveIo.Count > 0 ? "ĐANG TEST" : "SẴN SÀNG";
+        // During an armed cycle an empty frame means "waiting for the sample",
+        // never station-ready. SẴN SÀNG is reserved for the idle screen after
+        // the cycle has been closed; this avoids showing READY while Master or
+        // production is waiting for the first jig contact.
+        string next = frame.ActiveIo.Count > 0 ? "ĐANG TEST" : "LẮP SẢN PHẨM";
         string previous = Interlocked.Exchange(ref _immediatePresenceState, next);
         if (string.Equals(previous, next, StringComparison.Ordinal))
             return;
@@ -4452,7 +4457,7 @@ public sealed class TestViewModel : ObservableObject
         // transition, never every scan frame, so the UI remains responsive.
         InvokeUi(() =>
         {
-            if (_cycleActive &&
+            if ((_cycleActive || (IsMasterSequenceActive && !IsProductRemovalPending)) &&
                 !_waitForProductRelease &&
                 !_waitForFaultProductRemoval &&
                 !IsProductRemovalPending &&
@@ -8149,8 +8154,9 @@ public sealed class TestViewModel : ObservableObject
         }
         else
         {
+            bool masterCycleActive = !MasterApproved && IsMasterSequenceActive;
             if (!_presentationCycleStarted &&
-                _cycleActive &&
+                (_cycleActive || masterCycleActive) &&
                 Volatile.Read(ref _inlineProbeContactIo) == 0 &&
                 _engine.HasProductActivity)
             {
