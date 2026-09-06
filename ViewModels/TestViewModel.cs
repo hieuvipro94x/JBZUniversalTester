@@ -352,7 +352,8 @@ public sealed class TestViewModel : ObservableObject
     private bool IsFinalPassPresentation =>
         !IsDeviceFault &&
         State.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
-        CurrentProductionPhase is ProductionPhase.Completed or ProductionPhase.WaitingProductRemoval;
+        CurrentProductionPhase == ProductionPhase.Completed &&
+        !IsProductRemovalPending;
 
     private bool IsWaitingProductPresentation =>
         !IsDeviceFault &&
@@ -382,6 +383,16 @@ public sealed class TestViewModel : ObservableObject
                 return "LỖI THIẾT BỊ";
 
             string value = State ?? string.Empty;
+
+            // After PASS the product-removal latch owns the operator message.
+            // Keep PASS out of the status box while the center result has
+            // already been shown once; this prevents repeated PASS display
+            // until the product is fully removed and the cycle is re-armed.
+            if (IsProductRemovalPending ||
+                CurrentProductionPhase == ProductionPhase.WaitingProductRemoval)
+                return value.Contains("VUI LÒNG", StringComparison.OrdinalIgnoreCase)
+                    ? "VUI LÒNG THÁO SẢN PHẨM"
+                    : "THÁO SẢN PHẨM";
 
             if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
                 return "MANUAL";
@@ -2793,6 +2804,11 @@ public sealed class TestViewModel : ObservableObject
                 }
 
                 long processStarted = Stopwatch.GetTimestamp();
+                // Htdrv changes the operator state from the physical snapshot,
+                // not from the slower fault/topology result. One active jig IO
+                // is enough for ĐANG TEST; an empty complete frame immediately
+                // returns to SẴN SÀNG. Removal/PASS latches remain authoritative.
+                UpdateImmediateProductPresenceState(frame);
                 bool engineChanged = _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
                 Interlocked.Increment(ref _productionFramesProcessed);
                 if (restoreBoardPresentation && !engineChanged)
@@ -4410,6 +4426,18 @@ public sealed class TestViewModel : ObservableObject
             State = ReadyStateForCurrentModel();
             AddLog("Đã rời TestView; scan I/O nền vẫn chạy liên tục.");
         }
+    }
+
+    private void UpdateImmediateProductPresenceState(ScanFrame frame)
+    {
+        if (!_cycleActive ||
+            _waitForProductRelease ||
+            _waitForFaultProductRemoval ||
+            IsProductRemovalPending ||
+            CurrentProductionPhase is ProductionPhase.Completed or ProductionPhase.WaitingProductRemoval)
+            return;
+
+        State = frame.ActiveIo.Count > 0 ? "ĐANG TEST" : "SẴN SÀNG";
     }
 
     private bool IsProbeSessionActive =>
