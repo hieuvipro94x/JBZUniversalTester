@@ -13,7 +13,8 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class TestHistoryStore
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
+    private const int LegacyMigrationBatchSize = 500;
     private static readonly object SchemaGate = new();
     private readonly string _path;
 
@@ -59,6 +60,8 @@ public sealed class TestHistoryStore
                 "Không mở bằng phiên bản cũ để tránh làm hỏng dữ liệu.");
         }
         CreateMigrationBackupIfRequired(connection);
+        if (versionBeforeWrite < CurrentSchemaVersion)
+            VerifyIntegrity(connection);
         using (SqliteCommand pragma = connection.CreateCommand())
         {
             // WAL lets History readers coexist with the serialized production
@@ -79,9 +82,21 @@ public sealed class TestHistoryStore
         DatabaseMigrationReport report = existingVersion < CurrentSchemaVersion
             ? MigrateLegacyHistory(connection, transaction)
             : ReadMigrationReport(connection, transaction);
+        EnsurePartModelRelations(connection, transaction);
+        if (existingVersion < CurrentSchemaVersion)
+            ReplaceRedundantIndexes(connection, transaction);
         WriteSchemaInfo(connection, transaction, report);
         transaction.Commit();
         return report;
+    }
+
+    private static void VerifyIntegrity(SqliteConnection connection)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA integrity_check;";
+        string result = Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
+        if (!string.Equals(result, "ok", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"SQLite integrity_check failed before migration: {result}");
     }
 
     private static int ReadExistingSchemaVersion(SqliteConnection connection)
@@ -183,6 +198,18 @@ public sealed class TestHistoryStore
                 CreatedAt TEXT NOT NULL,
                 UpdatedAt TEXT NOT NULL,
                 FOREIGN KEY (PartId) REFERENCES Parts(Id) ON DELETE RESTRICT
+            );
+
+            CREATE TABLE IF NOT EXISTS PartModels
+            (
+                PartId INTEGER NOT NULL,
+                ModelId INTEGER NOT NULL,
+                IsDefault INTEGER NOT NULL DEFAULT 0,
+                FirstUsedAt TEXT NULL,
+                LastUsedAt TEXT NULL,
+                PRIMARY KEY (PartId, ModelId),
+                FOREIGN KEY (PartId) REFERENCES Parts(Id) ON DELETE RESTRICT,
+                FOREIGN KEY (ModelId) REFERENCES Models(Id) ON DELETE RESTRICT
             );
 
             CREATE TABLE IF NOT EXISTS ProductionRuns
@@ -389,19 +416,55 @@ public sealed class TestHistoryStore
             CREATE INDEX IF NOT EXISTS IX_Models_PartId ON Models(PartId);
             CREATE INDEX IF NOT EXISTS IX_Models_FileHash ON Models(FileHash);
             CREATE INDEX IF NOT EXISTS IX_Models_FilePath ON Models(FilePath);
-            CREATE INDEX IF NOT EXISTS IX_Tests_ResultAt ON Tests(ResultAt DESC);
-            CREATE INDEX IF NOT EXISTS IX_Tests_Part_ResultAt ON Tests(PartId, ResultAt DESC);
-            CREATE INDEX IF NOT EXISTS IX_Tests_Result ON Tests(Result);
-            CREATE INDEX IF NOT EXISTS IX_Tests_InspectionType ON Tests(InspectionType);
+            CREATE INDEX IF NOT EXISTS IX_PartModels_ModelId_PartId ON PartModels(ModelId, PartId);
+            CREATE INDEX IF NOT EXISTS IX_Tests_ResultAt_Id ON Tests(ResultAt DESC, Id DESC);
+            CREATE INDEX IF NOT EXISTS IX_Tests_Part_Inspection_ResultAt_Id
+                ON Tests(PartId, InspectionType, ResultAt DESC, Id DESC);
+            CREATE INDEX IF NOT EXISTS IX_Tests_ModelId_ResultAt_Id
+                ON Tests(ModelId, ResultAt DESC, Id DESC);
             CREATE INDEX IF NOT EXISTS IX_Tests_Lot ON Tests(Lot);
-            CREATE INDEX IF NOT EXISTS IX_Tests_AppVersion ON Tests(AppVersion);
-            CREATE INDEX IF NOT EXISTS IX_TestFaults_TestId ON TestFaults(TestId);
-            CREATE INDEX IF NOT EXISTS IX_TestFaults_Type ON TestFaults(FaultType);
-            CREATE INDEX IF NOT EXISTS IX_TestFaults_ActualSourceIo ON TestFaults(ActualSourceIo);
-            CREATE INDEX IF NOT EXISTS IX_TestFaults_ActualTargetIo ON TestFaults(ActualTargetIo);
-            CREATE INDEX IF NOT EXISTS IX_TestFaults_ExpectedSourceIo ON TestFaults(ExpectedSourceIo);
-            CREATE INDEX IF NOT EXISTS IX_TestFaults_ExpectedTargetIo ON TestFaults(ExpectedTargetIo);
-            CREATE INDEX IF NOT EXISTS IX_TestFaults_WireName ON TestFaults(WireName);
+            CREATE INDEX IF NOT EXISTS IX_TestFaults_TestId_FaultOrder_Id
+                ON TestFaults(TestId, FaultOrder, Id);
+            CREATE INDEX IF NOT EXISTS IX_ResistanceMeasurements_TestId
+                ON ResistanceMeasurements(TestId);
+            CREATE INDEX IF NOT EXISTS IX_WaterProofMeasurements_TestId
+                ON WaterProofMeasurements(TestId);
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static void EnsurePartModelRelations(
+        SqliteConnection connection,
+        SqliteTransaction transaction)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT OR IGNORE INTO PartModels(PartId,ModelId,IsDefault,FirstUsedAt,LastUsedAt)
+            SELECT PartId,Id,0,FirstUsedAt,LastUsedAt FROM Models;
+            """;
+        command.ExecuteNonQuery();
+    }
+
+    private static void ReplaceRedundantIndexes(
+        SqliteConnection connection,
+        SqliteTransaction transaction)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DROP INDEX IF EXISTS IX_Tests_ResultAt;
+            DROP INDEX IF EXISTS IX_Tests_Part_ResultAt;
+            DROP INDEX IF EXISTS IX_Tests_Result;
+            DROP INDEX IF EXISTS IX_Tests_InspectionType;
+            DROP INDEX IF EXISTS IX_Tests_AppVersion;
+            DROP INDEX IF EXISTS IX_TestFaults_TestId;
+            DROP INDEX IF EXISTS IX_TestFaults_Type;
+            DROP INDEX IF EXISTS IX_TestFaults_ActualSourceIo;
+            DROP INDEX IF EXISTS IX_TestFaults_ActualTargetIo;
+            DROP INDEX IF EXISTS IX_TestFaults_ExpectedSourceIo;
+            DROP INDEX IF EXISTS IX_TestFaults_ExpectedTargetIo;
+            DROP INDEX IF EXISTS IX_TestFaults_WireName;
             """;
         command.ExecuteNonQuery();
     }
@@ -421,32 +484,46 @@ public sealed class TestHistoryStore
         if (!TableExists(connection, transaction, "TestHistory"))
             return BuildMigrationReport(connection, transaction, 0, 0, 0, 0, 0);
 
-        List<TestHistoryRecord> legacyRows = ReadLegacyRows(connection, transaction);
+        long legacyTests = 0;
         long migrated = 0;
         long faults = 0;
         long malformed = 0;
         long duplicates = 0;
-        foreach (TestHistoryRecord row in legacyRows)
+        long lastLegacyId = 0;
+        while (true)
         {
-            ProductionResultCommitRequest request = CreateLegacyRequest(row, ref malformed);
-            ProductionCommitResult result = CommitCore(
+            List<TestHistoryRecord> legacyRows = ReadLegacyRows(
                 connection,
                 transaction,
-                request,
-                runId: null,
-                legacyHistoryId: row.Id);
-            if (result.AlreadyCommitted)
-                duplicates++;
-            else
+                lastLegacyId,
+                LegacyMigrationBatchSize);
+            if (legacyRows.Count == 0)
+                break;
+
+            foreach (TestHistoryRecord row in legacyRows)
             {
-                migrated++;
-                faults += request.Faults.Count;
+                legacyTests++;
+                lastLegacyId = row.Id;
+                ProductionResultCommitRequest request = CreateLegacyRequest(row, ref malformed);
+                ProductionCommitResult result = CommitCore(
+                    connection,
+                    transaction,
+                    request,
+                    runId: null,
+                    legacyHistoryId: row.Id);
+                if (result.AlreadyCommitted)
+                    duplicates++;
+                else
+                {
+                    migrated++;
+                    faults += request.Faults.Count;
+                }
             }
         }
 
         RebuildPartAggregates(connection, transaction);
         return BuildMigrationReport(
-            connection, transaction, legacyRows.Count, migrated, faults, malformed, duplicates);
+            connection, transaction, legacyTests, migrated, faults, malformed, duplicates);
     }
 
     private static bool TableExists(
@@ -525,7 +602,9 @@ public sealed class TestHistoryStore
 
     private static List<TestHistoryRecord> ReadLegacyRows(
         SqliteConnection connection,
-        SqliteTransaction transaction)
+        SqliteTransaction transaction,
+        long afterId,
+        int limit)
     {
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -543,8 +622,13 @@ public sealed class TestHistoryStore
                 LabelTemplateType, LabelPayload,
                 InstallStartedAt, TestStartedAt, ResultAt, RemovalStartedAt, RemovedAt,
                 InspectionType, LotText, InspectionTrace
-            FROM TestHistory ORDER BY Id;
+            FROM TestHistory
+            WHERE Id > $AfterId
+            ORDER BY Id
+            LIMIT $Limit;
             """;
+        command.Parameters.AddWithValue("$AfterId", afterId);
+        command.Parameters.AddWithValue("$Limit", Math.Clamp(limit, 1, 5_000));
         using SqliteDataReader reader = command.ExecuteReader();
         var rows = new List<TestHistoryRecord>();
         while (reader.Read())
@@ -917,38 +1001,80 @@ public sealed class TestHistoryStore
         ModelIdentitySnapshot model,
         DateTime usedAt)
     {
-        using SqliteCommand command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = """
-            INSERT INTO Models
-            (PartId, ModelKey, FilePath, FileName, FileHash, FileLength, FileModifiedAt,
-             ModelName, MaxIo, FirstUsedAt, LastUsedAt, CreatedAt, UpdatedAt)
-            VALUES
-            ($PartId,$Key,$Path,$File,$Hash,$Length,$Modified,$Name,$MaxIo,$At,$At,$At,$At)
-            ON CONFLICT(ModelKey) DO UPDATE SET
-                PartId=excluded.PartId,
-                FilePath=excluded.FilePath,
-                FileName=excluded.FileName,
-                FileHash=excluded.FileHash,
-                FileLength=excluded.FileLength,
-                FileModifiedAt=excluded.FileModifiedAt,
-                ModelName=excluded.ModelName,
-                MaxIo=excluded.MaxIo,
-                LastUsedAt=excluded.LastUsedAt,
-                UpdatedAt=excluded.UpdatedAt
-            RETURNING Id;
-            """;
-        command.Parameters.AddWithValue("$PartId", partId);
-        command.Parameters.AddWithValue("$Key", $"PART:{partId}:{model.ModelKey}");
-        command.Parameters.AddWithValue("$Path", model.FilePath);
-        command.Parameters.AddWithValue("$File", model.FileName);
-        command.Parameters.AddWithValue("$Hash", model.FileHash);
-        command.Parameters.AddWithValue("$Length", model.FileLength);
-        AddNullable(command, "$Modified", model.FileModifiedAt?.ToString("O", CultureInfo.InvariantCulture));
-        command.Parameters.AddWithValue("$Name", model.ModelName);
-        command.Parameters.AddWithValue("$MaxIo", model.MaxIo);
-        command.Parameters.AddWithValue("$At", usedAt.ToString("O", CultureInfo.InvariantCulture));
-        return Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
+        string legacyKey = $"PART:{partId}:{model.ModelKey}";
+        long modelId;
+        using (SqliteCommand find = connection.CreateCommand())
+        {
+            find.Transaction = transaction;
+            find.CommandText = """
+                SELECT Id
+                FROM Models
+                WHERE ModelKey=$GlobalKey OR ModelKey=$LegacyKey
+                   OR ($Hash<>'' AND FileHash=$Hash)
+                   OR ($Path<>'' AND FilePath=$Path)
+                ORDER BY CASE
+                    WHEN ModelKey=$GlobalKey THEN 0
+                    WHEN ModelKey=$LegacyKey THEN 1
+                    WHEN $Hash<>'' AND FileHash=$Hash THEN 2
+                    ELSE 3 END,
+                    Id
+                LIMIT 1;
+                """;
+            find.Parameters.AddWithValue("$GlobalKey", model.ModelKey);
+            find.Parameters.AddWithValue("$LegacyKey", legacyKey);
+            find.Parameters.AddWithValue("$Hash", model.FileHash);
+            find.Parameters.AddWithValue("$Path", model.FilePath);
+            modelId = Convert.ToInt64(find.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
+        }
+
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = modelId > 0
+                ? """
+                    UPDATE Models SET
+                        FilePath=$Path,FileName=$File,FileHash=$Hash,FileLength=$Length,
+                        FileModifiedAt=$Modified,ModelName=$Name,MaxIo=$MaxIo,
+                        LastUsedAt=$At,UpdatedAt=$At
+                    WHERE Id=$Id
+                    RETURNING Id;
+                    """
+                : """
+                    INSERT INTO Models
+                    (PartId,ModelKey,FilePath,FileName,FileHash,FileLength,FileModifiedAt,
+                     ModelName,MaxIo,FirstUsedAt,LastUsedAt,CreatedAt,UpdatedAt)
+                    VALUES
+                    ($PartId,$GlobalKey,$Path,$File,$Hash,$Length,$Modified,$Name,$MaxIo,$At,$At,$At,$At)
+                    RETURNING Id;
+                    """;
+            command.Parameters.AddWithValue("$PartId", partId);
+            command.Parameters.AddWithValue("$GlobalKey", model.ModelKey);
+            command.Parameters.AddWithValue("$Path", model.FilePath);
+            command.Parameters.AddWithValue("$File", model.FileName);
+            command.Parameters.AddWithValue("$Hash", model.FileHash);
+            command.Parameters.AddWithValue("$Length", model.FileLength);
+            AddNullable(command, "$Modified", model.FileModifiedAt?.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$Name", model.ModelName);
+            command.Parameters.AddWithValue("$MaxIo", model.MaxIo);
+            command.Parameters.AddWithValue("$At", usedAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$Id", modelId);
+            modelId = Convert.ToInt64(command.ExecuteScalar() ?? 0L, CultureInfo.InvariantCulture);
+        }
+
+        using (SqliteCommand relation = connection.CreateCommand())
+        {
+            relation.Transaction = transaction;
+            relation.CommandText = """
+                INSERT INTO PartModels(PartId,ModelId,IsDefault,FirstUsedAt,LastUsedAt)
+                VALUES($Part,$Model,0,$At,$At)
+                ON CONFLICT(PartId,ModelId) DO UPDATE SET LastUsedAt=excluded.LastUsedAt;
+                """;
+            relation.Parameters.AddWithValue("$Part", partId);
+            relation.Parameters.AddWithValue("$Model", modelId);
+            relation.Parameters.AddWithValue("$At", usedAt.ToString("O", CultureInfo.InvariantCulture));
+            relation.ExecuteNonQuery();
+        }
+        return modelId;
     }
 
     private static long UpsertConfig(
@@ -1089,44 +1215,59 @@ public sealed class TestHistoryStore
         long testId,
         IReadOnlyList<FaultPersistenceSnapshot> faults)
     {
+        if (faults.Count == 0)
+            return;
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO TestFaults
+            (TestId,FaultOrder,FaultType,FaultCode,Message,ExpectedSourceIo,ExpectedTargetIo,
+             ActualSourceIo,ActualTargetIo,ConnectorFrom,PinFrom,ConnectorTo,PinTo,
+             ActualConnectorFrom,ActualPinFrom,ActualConnectorTo,ActualPinTo,WireName,
+             WireColor,RelatedIosJson,MeasuredResistance,ResistanceMin,ResistanceMax,CreatedAt)
+            VALUES
+            ($Test,$Order,$Type,$Code,$Message,$ES,$ET,$AS,$AT,$CF,$PF,$CT,$PT,
+             $ACF,$APF,$ACT,$APT,$Wire,$Color,$Related,$Measured,$Min,$Max,$At);
+            """;
+        command.Parameters.AddWithValue("$Test", testId);
+        string[] names =
+        [
+            "$Order", "$Type", "$Code", "$Message", "$ES", "$ET", "$AS", "$AT",
+            "$CF", "$PF", "$CT", "$PT", "$ACF", "$APF", "$ACT", "$APT",
+            "$Wire", "$Color", "$Related", "$Measured", "$Min", "$Max", "$At"
+        ];
+        foreach (string name in names)
+            command.Parameters.Add(name, SqliteType.Text);
+        foreach (string name in new[] { "$Order", "$ES", "$ET", "$AS", "$AT" })
+            command.Parameters[name].SqliteType = SqliteType.Integer;
+        foreach (string name in new[] { "$Measured", "$Min", "$Max" })
+            command.Parameters[name].SqliteType = SqliteType.Real;
+
         foreach (FaultPersistenceSnapshot fault in faults)
         {
-            using SqliteCommand command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                INSERT INTO TestFaults
-                (TestId,FaultOrder,FaultType,FaultCode,Message,ExpectedSourceIo,ExpectedTargetIo,
-                 ActualSourceIo,ActualTargetIo,ConnectorFrom,PinFrom,ConnectorTo,PinTo,
-                 ActualConnectorFrom,ActualPinFrom,ActualConnectorTo,ActualPinTo,WireName,
-                 WireColor,RelatedIosJson,MeasuredResistance,ResistanceMin,ResistanceMax,CreatedAt)
-                VALUES
-                ($Test,$Order,$Type,$Code,$Message,$ES,$ET,$AS,$AT,$CF,$PF,$CT,$PT,
-                 $ACF,$APF,$ACT,$APT,$Wire,$Color,$Related,$Measured,$Min,$Max,$At);
-                """;
-            command.Parameters.AddWithValue("$Test", testId);
-            command.Parameters.AddWithValue("$Order", fault.Order);
-            command.Parameters.AddWithValue("$Type", fault.Type.ToString());
-            command.Parameters.AddWithValue("$Code", fault.Code);
-            command.Parameters.AddWithValue("$Message", fault.Message);
-            AddNullable(command, "$ES", fault.ExpectedSourceIo);
-            AddNullable(command, "$ET", fault.ExpectedTargetIo);
-            AddNullable(command, "$AS", fault.ActualSourceIo);
-            AddNullable(command, "$AT", fault.ActualTargetIo);
-            command.Parameters.AddWithValue("$CF", fault.ConnectorFrom);
-            command.Parameters.AddWithValue("$PF", fault.PinFrom);
-            command.Parameters.AddWithValue("$CT", fault.ConnectorTo);
-            command.Parameters.AddWithValue("$PT", fault.PinTo);
-            command.Parameters.AddWithValue("$ACF", fault.ActualConnectorFrom);
-            command.Parameters.AddWithValue("$APF", fault.ActualPinFrom);
-            command.Parameters.AddWithValue("$ACT", fault.ActualConnectorTo);
-            command.Parameters.AddWithValue("$APT", fault.ActualPinTo);
-            command.Parameters.AddWithValue("$Wire", fault.WireName);
-            command.Parameters.AddWithValue("$Color", fault.WireColor);
-            command.Parameters.AddWithValue("$Related", fault.RelatedIosJson);
-            AddNullable(command, "$Measured", fault.MeasuredResistance);
-            AddNullable(command, "$Min", fault.ResistanceMin);
-            AddNullable(command, "$Max", fault.ResistanceMax);
-            command.Parameters.AddWithValue("$At", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters["$Order"].Value = fault.Order;
+            command.Parameters["$Type"].Value = fault.Type.ToString();
+            command.Parameters["$Code"].Value = fault.Code;
+            command.Parameters["$Message"].Value = fault.Message;
+            command.Parameters["$ES"].Value = fault.ExpectedSourceIo ?? (object)DBNull.Value;
+            command.Parameters["$ET"].Value = fault.ExpectedTargetIo ?? (object)DBNull.Value;
+            command.Parameters["$AS"].Value = fault.ActualSourceIo ?? (object)DBNull.Value;
+            command.Parameters["$AT"].Value = fault.ActualTargetIo ?? (object)DBNull.Value;
+            command.Parameters["$CF"].Value = fault.ConnectorFrom;
+            command.Parameters["$PF"].Value = fault.PinFrom;
+            command.Parameters["$CT"].Value = fault.ConnectorTo;
+            command.Parameters["$PT"].Value = fault.PinTo;
+            command.Parameters["$ACF"].Value = fault.ActualConnectorFrom;
+            command.Parameters["$APF"].Value = fault.ActualPinFrom;
+            command.Parameters["$ACT"].Value = fault.ActualConnectorTo;
+            command.Parameters["$APT"].Value = fault.ActualPinTo;
+            command.Parameters["$Wire"].Value = fault.WireName;
+            command.Parameters["$Color"].Value = fault.WireColor;
+            command.Parameters["$Related"].Value = fault.RelatedIosJson;
+            command.Parameters["$Measured"].Value = fault.MeasuredResistance ?? (object)DBNull.Value;
+            command.Parameters["$Min"].Value = fault.ResistanceMin ?? (object)DBNull.Value;
+            command.Parameters["$Max"].Value = fault.ResistanceMax ?? (object)DBNull.Value;
+            command.Parameters["$At"].Value = DateTime.Now.ToString("O", CultureInfo.InvariantCulture);
             command.ExecuteNonQuery();
         }
     }
@@ -1137,24 +1278,32 @@ public sealed class TestHistoryStore
         long testId,
         IReadOnlyList<ResistancePersistenceSnapshot> rows)
     {
+        if (rows.Count == 0)
+            return;
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO ResistanceMeasurements
+            (TestId,Channel,Name,MeasuredOhm,MinOhm,MaxOhm,Passed,SampleCount,StabilizationMs)
+            VALUES ($Test,$Channel,$Name,$Value,$Min,$Max,$Passed,$Samples,$Stabilization);
+            """;
+        command.Parameters.AddWithValue("$Test", testId);
+        foreach (string name in new[] { "$Channel", "$Name", "$Value", "$Min", "$Max", "$Passed", "$Samples", "$Stabilization" })
+            command.Parameters.Add(name, SqliteType.Text);
+        foreach (string name in new[] { "$Channel", "$Passed", "$Samples", "$Stabilization" })
+            command.Parameters[name].SqliteType = SqliteType.Integer;
+        foreach (string name in new[] { "$Value", "$Min", "$Max" })
+            command.Parameters[name].SqliteType = SqliteType.Real;
         foreach (ResistancePersistenceSnapshot row in rows)
         {
-            using SqliteCommand command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                INSERT INTO ResistanceMeasurements
-                (TestId,Channel,Name,MeasuredOhm,MinOhm,MaxOhm,Passed,SampleCount,StabilizationMs)
-                VALUES ($Test,$Channel,$Name,$Value,$Min,$Max,$Passed,$Samples,$Stabilization);
-                """;
-            command.Parameters.AddWithValue("$Test", testId);
-            command.Parameters.AddWithValue("$Channel", row.Channel);
-            command.Parameters.AddWithValue("$Name", row.Name);
-            AddNullable(command, "$Value", row.MeasuredOhm);
-            command.Parameters.AddWithValue("$Min", row.MinOhm);
-            command.Parameters.AddWithValue("$Max", row.MaxOhm);
-            command.Parameters.AddWithValue("$Passed", row.Passed ? 1 : 0);
-            command.Parameters.AddWithValue("$Samples", row.SampleCount);
-            command.Parameters.AddWithValue("$Stabilization", row.StabilizationMs);
+            command.Parameters["$Channel"].Value = row.Channel;
+            command.Parameters["$Name"].Value = row.Name;
+            command.Parameters["$Value"].Value = row.MeasuredOhm ?? (object)DBNull.Value;
+            command.Parameters["$Min"].Value = row.MinOhm;
+            command.Parameters["$Max"].Value = row.MaxOhm;
+            command.Parameters["$Passed"].Value = row.Passed ? 1 : 0;
+            command.Parameters["$Samples"].Value = row.SampleCount;
+            command.Parameters["$Stabilization"].Value = row.StabilizationMs;
             command.ExecuteNonQuery();
         }
     }
@@ -1165,22 +1314,30 @@ public sealed class TestHistoryStore
         long testId,
         IReadOnlyList<WaterProofPersistenceSnapshot> rows)
     {
+        if (rows.Count == 0)
+            return;
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            INSERT INTO WaterProofMeasurements
+            (TestId,Channel,Enabled,FirstPressure,SecondPressure,Leak,Passed)
+            VALUES ($Test,$Channel,$Enabled,$First,$Second,$Leak,$Passed);
+            """;
+        command.Parameters.AddWithValue("$Test", testId);
+        foreach (string name in new[] { "$Channel", "$Enabled", "$First", "$Second", "$Leak", "$Passed" })
+            command.Parameters.Add(name, SqliteType.Text);
+        foreach (string name in new[] { "$Channel", "$Enabled", "$Passed" })
+            command.Parameters[name].SqliteType = SqliteType.Integer;
+        foreach (string name in new[] { "$First", "$Second", "$Leak" })
+            command.Parameters[name].SqliteType = SqliteType.Real;
         foreach (WaterProofPersistenceSnapshot row in rows)
         {
-            using SqliteCommand command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
-                INSERT INTO WaterProofMeasurements
-                (TestId,Channel,Enabled,FirstPressure,SecondPressure,Leak,Passed)
-                VALUES ($Test,$Channel,$Enabled,$First,$Second,$Leak,$Passed);
-                """;
-            command.Parameters.AddWithValue("$Test", testId);
-            command.Parameters.AddWithValue("$Channel", row.Channel);
-            command.Parameters.AddWithValue("$Enabled", row.Enabled ? 1 : 0);
-            command.Parameters.AddWithValue("$First", row.FirstPressure);
-            command.Parameters.AddWithValue("$Second", row.SecondPressure);
-            command.Parameters.AddWithValue("$Leak", row.Leak);
-            command.Parameters.AddWithValue("$Passed", row.Passed ? 1 : 0);
+            command.Parameters["$Channel"].Value = row.Channel;
+            command.Parameters["$Enabled"].Value = row.Enabled ? 1 : 0;
+            command.Parameters["$First"].Value = row.FirstPressure;
+            command.Parameters["$Second"].Value = row.SecondPressure;
+            command.Parameters["$Leak"].Value = row.Leak;
+            command.Parameters["$Passed"].Value = row.Passed ? 1 : 0;
             command.ExecuteNonQuery();
         }
     }
@@ -1228,17 +1385,23 @@ public sealed class TestHistoryStore
         command.Transaction = transaction;
         command.CommandText = """
             SELECT
-                SUM(CASE WHEN t.ResultAt >= $DayStart AND t.ResultAt < $DayEnd THEN 1 ELSE 0 END),
-                SUM(CASE WHEN t.ResultAt >= $DayStart AND t.ResultAt < $DayEnd AND t.Passed=1 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN t.ResultAt >= $DayStart AND t.ResultAt < $DayEnd AND t.Passed=0 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN t.ResultAt >= $MonthStart AND t.ResultAt < $MonthEnd THEN 1 ELSE 0 END),
+                (SELECT COUNT(*) FROM Tests d
+                 WHERE d.PartId=p.Id AND d.InspectionType='PRODUCT'
+                   AND d.ResultAt >= $DayStart AND d.ResultAt < $DayEnd),
+                (SELECT COUNT(*) FROM Tests d
+                 WHERE d.PartId=p.Id AND d.InspectionType='PRODUCT' AND d.Passed=1
+                   AND d.ResultAt >= $DayStart AND d.ResultAt < $DayEnd),
+                (SELECT COUNT(*) FROM Tests d
+                 WHERE d.PartId=p.Id AND d.InspectionType='PRODUCT' AND d.Passed=0
+                   AND d.ResultAt >= $DayStart AND d.ResultAt < $DayEnd),
+                (SELECT COUNT(*) FROM Tests m
+                 WHERE m.PartId=p.Id AND m.InspectionType='PRODUCT'
+                   AND m.ResultAt >= $MonthStart AND m.ResultAt < $MonthEnd),
                 p.TotalTests,p.TotalPass,p.TotalFail,
                 COALESCE((SELECT Lot FROM Tests lt WHERE lt.PartId=p.Id AND lt.InspectionType='PRODUCT' ORDER BY lt.ResultAt DESC,lt.Id DESC LIMIT 1),0),
                 COALESCE((SELECT Result FROM Tests rt WHERE rt.PartId=p.Id AND rt.InspectionType='PRODUCT' ORDER BY rt.ResultAt DESC,rt.Id DESC LIMIT 1),'')
             FROM Parts p
-            LEFT JOIN Tests t ON t.PartId=p.Id AND t.InspectionType='PRODUCT'
-            WHERE p.Id=$PartId
-            GROUP BY p.Id;
+            WHERE p.Id=$PartId;
             """;
         command.Parameters.AddWithValue("$DayStart", dayStart.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$DayEnd", dayEnd.ToString("O", CultureInfo.InvariantCulture));
@@ -1295,6 +1458,63 @@ public sealed class TestHistoryStore
                 reader.GetInt64(2)));
         }
         return result;
+    }
+
+    public IReadOnlyList<PartModelRelationSnapshot> GetModelsForPart(string partKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(partKey);
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT p.Id,p.PartNumber,m.Id,m.ModelName,m.FilePath,
+                   pm.IsDefault,pm.FirstUsedAt,pm.LastUsedAt
+            FROM Parts p
+            JOIN PartModels pm ON pm.PartId=p.Id
+            JOIN Models m ON m.Id=pm.ModelId
+            WHERE p.PartKey=$PartKey
+            ORDER BY pm.IsDefault DESC,m.ModelName COLLATE NOCASE,m.Id;
+            """;
+        command.Parameters.AddWithValue("$PartKey", partKey.Trim());
+        return ReadPartModelRelations(command);
+    }
+
+    public IReadOnlyList<PartModelRelationSnapshot> GetPartsForModel(long modelId)
+    {
+        if (modelId <= 0)
+            return [];
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT p.Id,p.PartNumber,m.Id,m.ModelName,m.FilePath,
+                   pm.IsDefault,pm.FirstUsedAt,pm.LastUsedAt
+            FROM Models m
+            JOIN PartModels pm ON pm.ModelId=m.Id
+            JOIN Parts p ON p.Id=pm.PartId
+            WHERE m.Id=$ModelId
+            ORDER BY p.PartNumber COLLATE NOCASE,p.Id;
+            """;
+        command.Parameters.AddWithValue("$ModelId", modelId);
+        return ReadPartModelRelations(command);
+    }
+
+    private static IReadOnlyList<PartModelRelationSnapshot> ReadPartModelRelations(
+        SqliteCommand command)
+    {
+        using SqliteDataReader reader = command.ExecuteReader();
+        var rows = new List<PartModelRelationSnapshot>();
+        while (reader.Read())
+        {
+            rows.Add(new PartModelRelationSnapshot(
+                reader.GetInt64(0),
+                reader.GetString(1),
+                reader.GetInt64(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetInt64(5) != 0,
+                GetNullableDate(reader, 6),
+                GetNullableDate(reader, 7)));
+        }
+        return rows;
     }
 
     public int ImportPartCountersOnce(IReadOnlyList<PartCounterEntry> entries, string sourcePath)
@@ -1635,12 +1855,30 @@ public sealed class TestHistoryStore
     }
 
     public IReadOnlyList<TestHistoryRecord> Search(HistorySearchCriteria criteria) =>
-        SearchCore(criteria, exportAll: false);
+        SearchCore(criteria, exportAll: false, includeLabelPayload: true);
+
+    public IReadOnlyList<TestHistoryRecord> SearchSummary(HistorySearchCriteria criteria) =>
+        SearchCore(criteria, exportAll: false, includeLabelPayload: false);
 
     public IReadOnlyList<TestHistoryRecord> SearchForExport(HistorySearchCriteria criteria) =>
-        SearchCore(criteria, exportAll: true);
+        SearchCore(criteria, exportAll: true, includeLabelPayload: false);
 
-    private IReadOnlyList<TestHistoryRecord> SearchCore(HistorySearchCriteria criteria, bool exportAll)
+    public IEnumerable<TestHistoryRecord> EnumerateForExport(HistorySearchCriteria criteria)
+    {
+        ArgumentNullException.ThrowIfNull(criteria);
+        return EnumerateCore(criteria, exportAll: true, includeLabelPayload: false);
+    }
+
+    private IReadOnlyList<TestHistoryRecord> SearchCore(
+        HistorySearchCriteria criteria,
+        bool exportAll,
+        bool includeLabelPayload) =>
+        EnumerateCore(criteria, exportAll, includeLabelPayload).ToArray();
+
+    private IEnumerable<TestHistoryRecord> EnumerateCore(
+        HistorySearchCriteria criteria,
+        bool exportAll,
+        bool includeLabelPayload)
     {
         ArgumentNullException.ThrowIfNull(criteria);
         long started = Stopwatch.GetTimestamp();
@@ -1703,12 +1941,23 @@ public sealed class TestHistoryStore
             clauses.Add("t.AppVersion LIKE $AppVersion");
             command.Parameters.AddWithValue("$AppVersion", $"%{criteria.AppVersion.Trim()}%");
         }
+        if (!exportAll && criteria.BeforeResultAt is DateTime beforeResultAt &&
+            criteria.BeforeId is long beforeId)
+        {
+            clauses.Add("(t.ResultAt < $BeforeResultAt OR (t.ResultAt=$BeforeResultAt AND t.Id < $BeforeId))");
+            command.Parameters.AddWithValue(
+                "$BeforeResultAt",
+                beforeResultAt.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$BeforeId", beforeId);
+        }
 
         int limit = Math.Clamp(criteria.MaxRows, 1, 50_000);
         int offset = Math.Max(0, criteria.Offset);
         string order = exportAll
             ? "ORDER BY p.PartNumber COLLATE NOCASE,t.StartedAt,t.Id"
-            : $"ORDER BY t.FinishedAt DESC,t.Id DESC LIMIT {limit} OFFSET {offset}";
+            : $"ORDER BY t.ResultAt DESC,t.Id DESC LIMIT {limit}" +
+              (criteria.BeforeResultAt is null ? $" OFFSET {offset}" : string.Empty);
+        string labelPayloadColumn = includeLabelPayload ? "t.LabelPayload" : "''";
         command.CommandText = $"""
             SELECT
                 t.Id,t.StartedAt,t.FinishedAt,p.PartName,p.PartNumber,p.VehicleType,p.Eco,p.Nco,p.Alc,
@@ -1716,31 +1965,33 @@ public sealed class TestHistoryStore
                 t.OpenCount,t.WrongCount,t.ShortCount,t.ResistanceSummary,
                 t.DeviceName,t.DeviceNumber,t.OperatorCompany,t.ProductionLine,
                 t.FaultType,t.ResultCode,
-                (SELECT ExpectedSourceIo FROM TestFaults WHERE TestId=t.Id ORDER BY FaultOrder LIMIT 1),
-                (SELECT ExpectedTargetIo FROM TestFaults WHERE TestId=t.Id ORDER BY FaultOrder LIMIT 1),
-                (SELECT ActualSourceIo FROM TestFaults WHERE TestId=t.Id ORDER BY FaultOrder LIMIT 1),
-                (SELECT ActualTargetIo FROM TestFaults WHERE TestId=t.Id ORDER BY FaultOrder LIMIT 1),
+                f.ExpectedSourceIo,f.ExpectedTargetIo,f.ActualSourceIo,f.ActualTargetIo,
                 t.FaultDetailsJson,t.FaultSummary,
-                (SELECT MeasuredResistance FROM TestFaults WHERE TestId=t.Id ORDER BY FaultOrder LIMIT 1),
-                (SELECT ResistanceMin FROM TestFaults WHERE TestId=t.Id ORDER BY FaultOrder LIMIT 1),
-                (SELECT ResistanceMax FROM TestFaults WHERE TestId=t.Id ORDER BY FaultOrder LIMIT 1),
+                f.MeasuredResistance,f.ResistanceMin,f.ResistanceMax,
                 t.CycleId,t.LabelSerial,t.Barcode,t.LabelProfile,t.PrintStatus,t.PrintTimestamp,
-                t.Printer,t.LabelCopies,t.ReprintCount,t.PrintMessage,t.LabelTemplateType,t.LabelPayload,
+                t.Printer,t.LabelCopies,t.ReprintCount,t.PrintMessage,t.LabelTemplateType,{labelPayloadColumn},
                 t.InstallStartedAt,t.TestStartedAt,t.ResultAt,t.RemovalStartedAt,t.RemovedAt,
                 t.InspectionType,t.LotText,t.InspectionTrace
             FROM Tests t
             JOIN Parts p ON p.Id=t.PartId
             JOIN Models m ON m.Id=t.ModelId
+            LEFT JOIN TestFaults f ON f.Id=(
+                SELECT firstFault.Id FROM TestFaults firstFault
+                WHERE firstFault.TestId=t.Id
+                ORDER BY firstFault.FaultOrder,firstFault.Id
+                LIMIT 1)
             {(clauses.Count == 0 ? "" : "WHERE " + string.Join(" AND ", clauses))}
             {order};
             """;
         using SqliteDataReader reader = command.ExecuteReader();
-        var rows = new List<TestHistoryRecord>();
+        int rows = 0;
         while (reader.Read())
-            rows.Add(ReadRecord(reader));
+        {
+            rows++;
+            yield return ReadRecord(reader);
+        }
         AsyncFileLogService.Current.Performance(
-            $"HISTORY_QUERY rows={rows.Count} duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
-        return rows;
+            $"HISTORY_QUERY rows={rows} duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
     }
 
     public bool UpdateRemovalTiming(string cycleId, DateTime removalStartedAt, DateTime? removedAt)

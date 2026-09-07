@@ -18,8 +18,19 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
+        int benchmarkIndex = Array.FindIndex(
+            args,
+            value => value.Equals("--database-benchmark", StringComparison.OrdinalIgnoreCase));
+        if (benchmarkIndex >= 0)
+        {
+            int rows = benchmarkIndex + 1 < args.Length && int.TryParse(args[benchmarkIndex + 1], out int parsed)
+                ? parsed
+                : 100_000;
+            return DatabaseBenchmark.Run(Math.Clamp(rows, 100_000, 1_000_000));
+        }
+
         (string Name, Action Run)[] tests =
         [
             ("Board capacity/address boundaries", TestBoardCapacity),
@@ -43,6 +54,7 @@ internal static class Program
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
+            ("SQLite schema v5 many-to-many migration and query plans", TestDatabaseSchemaV5),
             ("History initialization waits for an active SQLite writer", TestHistoryInitializationWaitsForWriter),
             ("Production SQLite writer retries a transient lock", TestProductionPersistenceRetriesTransientLock),
             ("SQLite interrupted transaction reopens without deleting database", TestHistoryInterruptedTransactionRecovery),
@@ -2243,6 +2255,190 @@ internal static class Program
             if (Directory.Exists(root))
                 Directory.Delete(root, true);
         }
+    }
+
+    private static void TestDatabaseSchemaV5()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZDatabaseSchemaV5Tests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        try
+        {
+            Directory.CreateDirectory(root);
+            var initial = new TestHistoryStore(dbPath);
+            DateTime at = new(2026, 9, 7, 8, 0, 0, DateTimeKind.Local);
+
+            static ProductionResultCommitRequest Request(
+                string partNumber,
+                string cycleId,
+                DateTime at)
+            {
+                var model = new ProductModel
+                {
+                    PartNumber = partNumber,
+                    ProductName = partNumber,
+                    ModelName = "SHARED-HARNESS",
+                    SourcePath = @"C:\Models\shared.tht",
+                    SourceHash = new string('A', 64),
+                    SourceLength = 1234,
+                    SourceModifiedAt = at
+                };
+                var history = new TestHistoryRecord
+                {
+                    Started = at.AddSeconds(-1),
+                    TestStartedAt = at.AddMilliseconds(-500),
+                    ResultAt = at,
+                    Finished = at,
+                    PartName = partNumber,
+                    PartNumber = partNumber,
+                    ModelName = model.ModelName,
+                    ModelFile = model.SourcePath,
+                    Result = "PASS",
+                    Passed = true,
+                    CycleId = cycleId,
+                    InspectionType = HistoryInspectionType.Product,
+                    LabelPayload = new string('P', 4096)
+                };
+                return ProductionResultCommitRequest.Capture(
+                    history,
+                    model,
+                    new ProductionSettings(),
+                    [],
+                    [new ResistanceResult
+                    {
+                        Channel = 1,
+                        Name = "R1",
+                        ValueOhm = 100,
+                        MinOhm = 90,
+                        MaxOhm = 110,
+                        Passed = true,
+                        SampleCount = 3,
+                        StabilizationTimeMs = 5
+                    }],
+                    [new WaterProofChannelMeasurement(1, true, 84, 83.8, 0.2, true)],
+                    "SELF-TEST");
+            }
+
+            ProductionCommitResult first = initial.CommitResult(
+                Request("PART-M2M-A", "schema-v5-a", at),
+                null);
+            ProductionCommitResult second = initial.CommitResult(
+                Request("PART-M2M-B", "schema-v5-b", at.AddSeconds(1)),
+                null);
+            Assert(first.TestId > 0 && second.TestId > first.TestId,
+                "Two Parts using one harness both commit normally");
+
+            IReadOnlyList<PartModelRelationSnapshot> partA = initial.GetModelsForPart("PN:PART-M2M-A");
+            IReadOnlyList<PartModelRelationSnapshot> partB = initial.GetModelsForPart("PN:PART-M2M-B");
+            Assert(partA.Count == 1 && partB.Count == 1 && partA[0].ModelId == partB[0].ModelId,
+                "PartModels resolves one physical model for multiple Parts");
+            Assert(initial.GetPartsForModel(partA[0].ModelId).Count == 2,
+                "Reverse PartModels index resolves both Parts for one model");
+
+            IReadOnlyList<TestHistoryRecord> firstPage = initial.SearchSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 1));
+            Assert(firstPage.Count == 1 && firstPage[0].LabelPayload.Length == 0,
+                "History summary omits large label payloads");
+            IReadOnlyList<TestHistoryRecord> secondPage = initial.SearchSummary(
+                new HistorySearchCriteria(
+                    null,
+                    null,
+                    null,
+                    string.Empty,
+                    "ALL",
+                    MaxRows: 1,
+                    BeforeResultAt: firstPage[0].EffectiveResultAt,
+                    BeforeId: firstPage[0].Id));
+            Assert(secondPage.Count == 1 && secondPage[0].Id != firstPage[0].Id,
+                "History keyset cursor returns the next stable page without OFFSET");
+
+            SqliteConnection.ClearAllPools();
+            using (var downgrade = new SqliteConnection($"Data Source={dbPath};Pooling=False"))
+            {
+                downgrade.Open();
+                using SqliteCommand command = downgrade.CreateCommand();
+                command.CommandText = """
+                    DROP TABLE PartModels;
+                    DROP INDEX IF EXISTS IX_Tests_ResultAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_Part_Inspection_ResultAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_ModelId_ResultAt_Id;
+                    DROP INDEX IF EXISTS IX_TestFaults_TestId_FaultOrder_Id;
+                    DROP INDEX IF EXISTS IX_ResistanceMeasurements_TestId;
+                    DROP INDEX IF EXISTS IX_WaterProofMeasurements_TestId;
+                    CREATE INDEX IF NOT EXISTS IX_Tests_ResultAt ON Tests(ResultAt DESC);
+                    CREATE INDEX IF NOT EXISTS IX_Tests_Part_ResultAt ON Tests(PartId,ResultAt DESC);
+                    CREATE INDEX IF NOT EXISTS IX_TestFaults_TestId ON TestFaults(TestId);
+                    UPDATE SchemaInfo SET SchemaVersion=4 WHERE Id=1;
+                    """;
+                command.ExecuteNonQuery();
+            }
+
+            var migrated = new TestHistoryStore(dbPath);
+            var rerun = new TestHistoryStore(dbPath);
+            Assert(File.Exists(dbPath + $".pre-schema-v{TestHistoryStore.CurrentSchemaVersion}.backup"),
+                "Schema v4 is backed up before v5 migration");
+            Assert(migrated.SchemaVersion == 5 && rerun.SchemaVersion == 5,
+                "Schema v5 migration is idempotent");
+            Assert(migrated.GetModelsForPart("PN:PART-M2M-A").Count == 1 &&
+                   migrated.Search(new HistorySearchCriteria(
+                       null, null, null, "PART-M2M", "ALL", MaxRows: 10)).Count == 2,
+                "v4 Tests remain readable and legacy Models.PartId backfills without inferred relations");
+
+            using var verify = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            verify.Open();
+            using SqliteCommand probe = verify.CreateCommand();
+            probe.CommandText = """
+                SELECT
+                    (SELECT COUNT(*) FROM PartModels),
+                    (SELECT COUNT(*) FROM (SELECT PartId,ModelId FROM PartModels GROUP BY PartId,ModelId HAVING COUNT(*)>1)),
+                    (SELECT integrity_check FROM pragma_integrity_check LIMIT 1);
+                """;
+            using SqliteDataReader reader = probe.ExecuteReader();
+            Assert(reader.Read() && reader.GetInt32(0) == 1 && reader.GetInt32(1) == 0 && reader.GetString(2) == "ok",
+                "v5 relation data is unique and integrity_check remains clean");
+            reader.Close();
+
+            string latestPlan = ExplainPlan(
+                verify,
+                "SELECT Id FROM Tests ORDER BY ResultAt DESC,Id DESC LIMIT 200;");
+            string partPlan = ExplainPlan(
+                verify,
+                "SELECT Id FROM Tests WHERE PartId=1 AND InspectionType='PRODUCT' ORDER BY ResultAt DESC,Id DESC LIMIT 200;");
+            string resistancePlan = ExplainPlan(
+                verify,
+                $"SELECT * FROM ResistanceMeasurements WHERE TestId={first.TestId};");
+            string waterproofPlan = ExplainPlan(
+                verify,
+                $"SELECT * FROM WaterProofMeasurements WHERE TestId={first.TestId};");
+            string reversePlan = ExplainPlan(
+                verify,
+                $"SELECT PartId FROM PartModels WHERE ModelId={partA[0].ModelId};");
+            Assert(latestPlan.Contains("IX_Tests_ResultAt_Id", StringComparison.Ordinal) &&
+                   partPlan.Contains("IX_Tests_Part_Inspection_ResultAt_Id", StringComparison.Ordinal) &&
+                   resistancePlan.Contains("IX_ResistanceMeasurements_TestId", StringComparison.Ordinal) &&
+                   waterproofPlan.Contains("IX_WaterProofMeasurements_TestId", StringComparison.Ordinal) &&
+                   reversePlan.Contains("IX_PartModels_ModelId_PartId", StringComparison.Ordinal),
+                "EXPLAIN QUERY PLAN selects every v5 workload index");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    private static string ExplainPlan(SqliteConnection connection, string sql)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN QUERY PLAN " + sql;
+        using SqliteDataReader reader = command.ExecuteReader();
+        var details = new List<string>();
+        while (reader.Read())
+            details.Add(reader.GetString(3));
+        return string.Join(" | ", details);
     }
 
     private static void TestHistoryInitializationWaitsForWriter()

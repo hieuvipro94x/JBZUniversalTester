@@ -288,6 +288,16 @@ public sealed record ProbeCounterSnapshot(
     long ReplacementThreshold,
     long Counter);
 
+public sealed record PartModelRelationSnapshot(
+    long PartId,
+    string PartNumber,
+    long ModelId,
+    string ModelName,
+    string FilePath,
+    bool IsDefault,
+    DateTime? FirstUsedAt,
+    DateTime? LastUsedAt);
+
 public sealed record DatabaseMigrationReport(
     int SchemaVersion,
     long LegacyTests,

@@ -240,14 +240,16 @@ public sealed record HistorySearchCriteria(
     long? LotNo,
     string PartKeyword,
     string Result,
-    int MaxRows = 5000,
+    int MaxRows = 200,
     int Offset = 0,
     string InspectionType = "",
     string FaultType = "",
     int? Io = null,
     string WireName = "",
     string CycleId = "",
-    string AppVersion = "");
+    string AppVersion = "",
+    DateTime? BeforeResultAt = null,
+    long? BeforeId = null);
 
 public sealed record LabelPrintData(
     string PartName,

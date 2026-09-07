@@ -44,7 +44,7 @@ public static class HistoryExportService
         new("프로그램", 30, HistoryCellType.Text, r => r.HtdrvName)
     ];
 
-    public static void ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
+    public static int ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Encoding cp949 = Encoding.GetEncoding(
@@ -54,12 +54,17 @@ public static class HistoryExportService
         using var writer = new StreamWriter(path, false, cp949) { NewLine = "\n" };
         writer.WriteLine(string.Join(',', Columns.Select(column => EscapeCsv(column.Header))));
 
+        int count = 0;
         foreach (TestHistoryRecord record in records)
+        {
             writer.WriteLine(string.Join(',', Columns.Select(column =>
                 EscapeCsv(ToCsvValue(column, record)))));
+            count++;
+        }
+        return count;
     }
 
-    public static void ExportXlsx(string path, IReadOnlyList<TestHistoryRecord> records)
+    public static int ExportXlsx(string path, IEnumerable<TestHistoryRecord> records)
     {
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -76,7 +81,7 @@ public static class HistoryExportService
         WriteEntry(archive, "xl/workbook.xml", WorkbookXml());
         WriteEntry(archive, "xl/_rels/workbook.xml.rels", WorkbookRelsXml());
         WriteEntry(archive, "xl/styles.xml", StylesXml());
-        WriteEntry(archive, "xl/worksheets/sheet1.xml", SheetXml(records));
+        return WriteSheetEntry(archive, records);
     }
 
     private static string ToCsvValue(HistoryColumn column, TestHistoryRecord record)
@@ -110,8 +115,15 @@ public static class HistoryExportService
         writer.Write(text);
     }
 
-    private static string SheetXml(IReadOnlyList<TestHistoryRecord> records)
+    private static int WriteSheetEntry(
+        ZipArchive archive,
+        IEnumerable<TestHistoryRecord> records)
     {
+        ZipArchiveEntry entry = archive.CreateEntry(
+            "xl/worksheets/sheet1.xml",
+            CompressionLevel.Optimal);
+        using Stream stream = entry.Open();
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
         var sb = new StringBuilder(32_768);
         sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
         sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
@@ -123,18 +135,27 @@ public static class HistoryExportService
         sb.Append("</cols>");
         sb.Append("<sheetData>");
         AppendHeaderRow(sb);
+        writer.Write(sb);
+        sb.Clear();
 
-        for (int i = 0; i < records.Count; i++)
-            AppendDataRow(sb, i + 2, records[i]);
+        int count = 0;
+        foreach (TestHistoryRecord record in records)
+        {
+            AppendDataRow(sb, count + 2, record);
+            writer.Write(sb);
+            sb.Clear();
+            count++;
+        }
 
         sb.Append("</sheetData>");
-        if (records.Count >= 1)
+        if (count >= 1)
         {
             string lastColumn = ColumnName(Columns.Length);
-            sb.Append($"<autoFilter ref=\"A1:{lastColumn}{records.Count + 1}\"/>");
+            sb.Append($"<autoFilter ref=\"A1:{lastColumn}{count + 1}\"/>");
         }
         sb.Append("</worksheet>");
-        return sb.ToString();
+        writer.Write(sb);
+        return count;
     }
 
     private static void AppendHeaderRow(StringBuilder sb)

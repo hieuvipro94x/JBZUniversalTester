@@ -13,7 +13,7 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 public partial class HistoryPage : UserControl
 {
-    private const int UiRowLimit = 2_000;
+    private const int UiRowLimit = 200;
     private readonly ProductionSettings _settings;
     private readonly Func<Task> _importLegacyHistoryAsync;
     private readonly string _historyPath;
@@ -116,7 +116,7 @@ public partial class HistoryPage : UserControl
         {
             HistorySearchCriteria criteria = CreateSearchCriteria(UiRowLimit);
             IReadOnlyList<TestHistoryRecord> rows = await Task.Run(() =>
-                GetStore().Search(criteria));
+                GetStore().SearchSummary(criteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
 
@@ -188,9 +188,8 @@ public partial class HistoryPage : UserControl
         {
             int exportedCount = await Task.Run(() =>
             {
-                IReadOnlyList<TestHistoryRecord> rows = GetStore().SearchForExport(criteria);
-                HistoryExportService.ExportCsv(dialog.FileName, rows);
-                return rows.Count;
+                IEnumerable<TestHistoryRecord> rows = GetStore().EnumerateForExport(criteria);
+                return HistoryExportService.ExportCsv(dialog.FileName, rows);
             });
             ShowMessage(
                 $"Đã xuất toàn bộ {exportedCount:N0} bản ghi theo mã hàng và ngày/giờ.\n\n{dialog.FileName}",
@@ -228,9 +227,8 @@ public partial class HistoryPage : UserControl
         {
             int exportedCount = await Task.Run(() =>
             {
-                IReadOnlyList<TestHistoryRecord> rows = GetStore().SearchForExport(criteria);
-                HistoryExportService.ExportXlsx(dialog.FileName, rows);
-                return rows.Count;
+                IEnumerable<TestHistoryRecord> rows = GetStore().EnumerateForExport(criteria);
+                return HistoryExportService.ExportXlsx(dialog.FileName, rows);
             });
             ShowMessage(
                 $"Đã xuất toàn bộ {exportedCount:N0} bản ghi theo mã hàng và ngày/giờ.\n\n{dialog.FileName}",
