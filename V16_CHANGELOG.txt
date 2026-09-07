@@ -1,3 +1,9 @@
+JBZUniversalTester V16.0.247 - MASTER REMOVAL / BAD SAMPLE PRESENTATION
+
+- Xoa dung khoa "chua thao san pham" khi frame rong xac nhan mau da roi JIG sau luc quay ve Main giua bai Master.
+- Master loi cho lap san pham voi bang trong; chi hien cac dong loi da xac nhan sau khi mau duoc lap.
+- Dong Master sai day/chap/ho dung nhan va mau FaultGrid nhu loi san xuat, khong tang san luong va khong chay MARKING.
+
 JBZUniversalTester V16.0.246 - PROFESSIONAL LEAK DISPLAY
 
 - Lam moi the tom tat Leak: nhan kenh, gia tri realtime, mau trang thai va do tuong phan ro rang.

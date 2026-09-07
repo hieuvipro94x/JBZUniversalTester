@@ -2265,9 +2265,46 @@ public sealed class TestViewModel : ObservableObject
     private void ProcessScheduledEngineChangedOnUi(long generation)
     {
         if (!MasterApproved)
+        {
+            // Khi người vận hành đã rời TestView giữa chu trình Master, frame
+            // tiếp theo chỉ còn nhiệm vụ xác nhận đã tháo toàn bộ sản phẩm.
+            // Không đưa frame đó trở lại state machine Master vì snapshot cũ
+            // có thể đã làm StopView ARM removal gate ngay sau khi sản phẩm
+            // được tháo ngoài thực tế.
+            if (Volatile.Read(ref _removalMonitoringFromMain) != 0 &&
+                IsProductRemovalPending &&
+                _waitForProductRelease)
+            {
+                ProcessMasterRemovalAfterReturningToMain(generation);
+                return;
+            }
+
             ProcessMasterEngineChangedOnUi(generation);
+        }
         else
             ProcessEngineChangedOnUi(generation);
+    }
+
+    private void ProcessMasterRemovalAfterReturningToMain(long generation)
+    {
+        if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+            !_engine.IsProductReleased)
+        {
+            return;
+        }
+
+        _waitForProductRelease = false;
+        SetProductRemovalPending(false);
+        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
+        _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingProduct);
+        SwitchRuntimeMode(RuntimeMode.Background);
+        _engine.SetFrameProcessingEnabled(false);
+        ResetProductPresentationCycle();
+        MasterFaults.Clear();
+        SynchronizeFaultRows(Array.Empty<FaultRow>());
+        State = ReadyStateForCurrentModel();
+        AddLog("Đã xác nhận frame rỗng sau khi rời kiểm tra Master; xóa khóa tháo sản phẩm.");
     }
 
     private void ProcessEngineChangedOnUi(long generation)
@@ -5023,6 +5060,8 @@ public sealed class TestViewModel : ObservableObject
                     Interlocked.Exchange(ref _masterPostStarted, 0);
                     MasterState = MasterSequenceState.WaitingGoodMaster;
                     ResetEngineWithoutChangedReentry();
+                    ResetProductPresentationCycle();
+                    RefreshFaults();
                     State = "KIỂM TRA MASTER PASS";
                     MasterStatus = "KIỂM TRA MASTER PASS";
                     AddLog("MASTER GOOD chưa PASS và đã tháo; giữ gate LOCKED, chờ kiểm tra lại.");
@@ -5067,6 +5106,8 @@ public sealed class TestViewModel : ObservableObject
                 if (_engine.HasProductActivity)
                 {
                     BeginMasterHistoryCycle(HistoryInspectionType.MasterBad);
+                    _presentationCycleStarted = true;
+                    RaiseCenterPresentation();
                     MasterState = MasterSequenceState.TestingBadMaster;
                     State = $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
                     MasterStatus = State;
@@ -5085,8 +5126,10 @@ public sealed class TestViewModel : ObservableObject
                     Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
                     MasterState = MasterSequenceState.WaitingBadMaster;
                     ResetEngineWithoutChangedReentry();
-                    State = $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
-                    MasterStatus = State;
+                    ResetProductPresentationCycle();
+                    RefreshFaults();
+                    State = "LẮP SẢN PHẨM";
+                    MasterStatus = $"KIỂM TRA MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
                     AddLog($"MASTER BAD released khi mới {MasterDetectedFaultCount}/{MasterRequiredFaultCount}; không mở Production.");
                     break;
                 }
@@ -5252,13 +5295,9 @@ public sealed class TestViewModel : ObservableObject
 
         string status = fault.Type switch
         {
-            ProductFaultType.WrongWiring =>
-                $"Tiêu chuẩn: {DescribePair(fault.ExpectedSourceIo, fault.ExpectedTargetIo, "→")} | " +
-                $"Thực tế: {DescribePair(fault.ActualSourceIo, fault.ActualTargetIo, "→")}",
-            ProductFaultType.ShortCircuit =>
-                $"Chập mạch: {DescribeFaultIos(fault, "↔")}",
-            ProductFaultType.OpenCircuit =>
-                $"Chưa kết nối: {DescribeFaultIos(fault, "↔")}",
+            ProductFaultType.WrongWiring => "SAI DÂY",
+            ProductFaultType.ShortCircuit => "CHẬP MẠCH",
+            ProductFaultType.OpenCircuit => "HỞ MẠCH",
             _ => fault.Summary
         };
 
@@ -5290,33 +5329,6 @@ public sealed class TestViewModel : ObservableObject
             Color = pin?.Color ?? fault.WireColor,
             Status = status
         };
-    }
-
-    private string DescribePair(int? source, int? target, string separator)
-    {
-        if (source is int s && target is int t)
-            return $"{DescribeIoCompact(s)} {separator} {DescribeIoCompact(t)}";
-        return "—";
-    }
-
-    private string DescribeFaultIos(FaultDetail fault, string separator)
-    {
-        int[] ios = fault.RelatedIos
-            .Concat(new[]
-            {
-                fault.ExpectedSourceIo ?? 0,
-                fault.ExpectedTargetIo ?? 0,
-                fault.ActualSourceIo ?? 0,
-                fault.ActualTargetIo ?? 0
-            })
-            .Where(io => io > 0)
-            .Distinct()
-            .Take(6)
-            .ToArray();
-
-        return ios.Length == 0
-            ? fault.Summary
-            : string.Join($" {separator} ", ios.Select(DescribeIoCompact));
     }
 
     private MasterFaultDisplayRow BuildMasterFaultDisplayRow(int number, FaultDetail fault)
@@ -5498,8 +5510,10 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
 
-        State = $"MASTER LỖI 0/{MasterRequiredFaultCount}";
-        MasterStatus = State;
+        ResetProductPresentationCycle();
+        RefreshFaults();
+        State = "LẮP SẢN PHẨM";
+        MasterStatus = $"KIỂM TRA MASTER LỖI 0/{MasterRequiredFaultCount}";
         AddLog("MASTER GOOD đã tháo khỏi JIG. Chuyển sang MASTER BAD tự động.");
         RaiseMasterState();
     }
@@ -8414,7 +8428,11 @@ public sealed class TestViewModel : ObservableObject
         IReadOnlyList<FaultRow> desiredRows;
         if (!MasterApproved && IsMasterBadPhase)
         {
-            desiredRows = BuildMasterFaultGridRows();
+            // Master lỗi dùng cùng bảng lỗi sản xuất, nhưng trước khi có mẫu
+            // thật trên JIG bảng phải hoàn toàn trống.
+            desiredRows = _presentationCycleStarted
+                ? BuildMasterFaultGridRows()
+                : Array.Empty<FaultRow>();
         }
         else
         {

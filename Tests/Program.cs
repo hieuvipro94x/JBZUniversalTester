@@ -704,6 +704,66 @@ internal static class Program
                enabledMasterVm.StateBackground == "#FFF3A0",
             "Waiting Master uses the shared install-product display and canonical yellow background");
 
+        TestViewModel masterExitVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 1 },
+            out FakeBoard masterExitBoard);
+        ProductModel masterExitModel = Model(("MASTER-PAIR", new[] { 1, 18 }));
+        masterExitVm.LoadPreparedModelAsync(masterExitModel).GetAwaiter().GetResult();
+        typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(masterExitVm, 1);
+        TestEngine masterExitEngine =
+            (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(masterExitVm) ?? throw new InvalidOperationException("Master exit TestEngine not found"));
+        masterExitEngine.SetFrameProcessingEnabled(true);
+        masterExitBoard.Publish(FrameSeq(100, (1, new[] { 18 })));
+        Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster,
+            "Master sample activity starts the good-Master test");
+        masterExitVm.StopViewAsync().GetAwaiter().GetResult();
+        Assert(masterExitVm.IsProductRemovalPending,
+            "Returning to Main during Master keeps the removal gate until a fresh frame is received");
+        masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
+        Assert(masterExitVm.IsProductRemovalPending,
+            "Master removal gate remains locked while the sample is physically connected");
+        masterExitBoard.Publish(FrameSeq(102));
+        Assert(!masterExitVm.IsProductRemovalPending &&
+               masterExitVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+               masterExitVm.Faults.Count == 0,
+            "Fresh empty frame after leaving Master clears the stale removal latch and table");
+
+        FieldInfo masterGoodVerified = typeof(TestViewModel).GetField(
+            "_masterGoodVerified",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Master-good verification field not found");
+        masterGoodVerified.SetValue(enabledMasterVm, true);
+        MethodInfo transitionToBadMaster = typeof(TestViewModel).GetMethod(
+            "TransitionToBadMaster",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Bad-Master transition not found");
+        transitionToBadMaster.Invoke(enabledMasterVm, null);
+        Assert(enabledMasterVm.MasterState == MasterSequenceState.WaitingBadMaster &&
+               enabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+               enabledMasterVm.Faults.Count == 0,
+            "Bad Master starts with the shared install-product state and an empty production table");
+
+        MethodInfo buildMasterFaultGridRow = typeof(TestViewModel).GetMethod(
+            "BuildMasterFaultGridRow",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Master fault grid row builder not found");
+        FaultRow masterWrongWireRow = (FaultRow)(buildMasterFaultGridRow.Invoke(
+            enabledMasterVm,
+            [new FaultDetail
+            {
+                Type = ProductFaultType.WrongWiring,
+                ExpectedSourceIo = 1,
+                ExpectedTargetIo = 18,
+                ActualSourceIo = 1,
+                ActualTargetIo = 19,
+                RelatedIos = [1, 18, 19]
+            }]) ?? throw new InvalidOperationException("Master fault row was not built"));
+        Assert(masterWrongWireRow.Kind == FaultKind.WrongWiring &&
+               masterWrongWireRow.Status == "SAI DÂY",
+            "Confirmed bad-Master wrong wiring uses the same red SAI DÂY row semantics as production");
+
         TestViewModel statusVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         statusVm.State = "PASS";
         Assert(statusVm.ResultStatusText == "PASS" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
