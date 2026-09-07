@@ -3385,6 +3385,11 @@ public sealed class TestViewModel : ObservableObject
 
     private void LogContinuousScanMetricsIfDue()
     {
+        // Production mặc định tắt system log. Tránh đọc hàng loạt counter và
+        // dựng chuỗi metrics trên hot path khi writer chắc chắn sẽ bỏ bản ghi.
+        if (!AsyncFileLogService.Current.FileLoggingEnabled)
+            return;
+
         long now = Environment.TickCount64;
         long previous = Interlocked.Read(ref _lastContinuousScanMetricsTick);
         if (previous != 0 && now - previous < 5000)
@@ -3410,7 +3415,12 @@ public sealed class TestViewModel : ObservableObject
 
     private void LogPassGateAfterProductionFrame(ScanFrame frame, double processMs)
     {
-        if (!frame.Complete || frame.UnknownBytes > 0)
+        // GetPassGateDiagnostics dựng snapshot của toàn bộ network. Không làm
+        // việc đó trên mỗi thay đổi IO khi system log đang tắt; nhánh này chỉ
+        // phục vụ chẩn đoán, không tham gia PASS/FAIL hay điều khiển relay.
+        if (!AsyncFileLogService.Current.FileLoggingEnabled ||
+            !frame.Complete ||
+            frame.UnknownBytes > 0)
             return;
 
         PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
@@ -3467,6 +3477,11 @@ public sealed class TestViewModel : ObservableObject
 
     private void LogFaultGate(long generation)
     {
+        // Tránh dựng PassGateDiagnostics lần thứ hai trên UI thread khi không
+        // có nơi nhận log. Logic bắt lỗi đã hoàn tất trước khi vào hàm này.
+        if (!AsyncFileLogService.Current.FileLoggingEnabled)
+            return;
+
         PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
         ProductionPhase phase = CurrentProductionPhase;
         string signature =
@@ -3490,6 +3505,9 @@ public sealed class TestViewModel : ObservableObject
 
     private void AddFaultGateSuppressedLog(ProductionPhase phase)
     {
+        if (!AsyncFileLogService.Current.FileLoggingEnabled)
+            return;
+
         if (_cycleActive &&
             phase == ProductionPhase.Continuity &&
             _engine.ReadyToEvaluateProductFaults &&
@@ -3792,7 +3810,10 @@ public sealed class TestViewModel : ObservableObject
         new FaultRow
         {
             Kind = FaultKind.Probe,
-            Io = 0,
+            // Không có PinRecord trong THT: vẫn giữ IO vật lý do đầu dò phát
+            // hiện để cột IO chỉ đúng vị trí đang chạm. Các cột metadata THT
+            // tiếp tục để trống; không suy diễn Connector/Pin.
+            Io = io,
             RelatedIos = [io],
             WireName = $"IO({io})",
             DisplayOrder = io
@@ -3808,7 +3829,7 @@ public sealed class TestViewModel : ObservableObject
             .Select(io => new FaultRow
             {
                 Kind = FaultKind.Probe,
-                Io = 0,
+                Io = io,
                 RelatedIos = [io],
                 WireName = $"_DISCARD IO({io})",
                 DisplayOrder = io
@@ -8523,6 +8544,15 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
+            // Đường nóng Production: các row tĩnh được cache từ lúc SetModel.
+            // Khi một network PASS, desiredRows chỉ là collection hiện tại đã
+            // bỏ vài object nhưng vẫn giữ nguyên thứ tự. Xóa trực tiếp bằng
+            // reference để không dựng RowKey string và hai dictionary cho cả
+            // bảng 500/640 IO. Mọi trường hợp add/replace/reorder vẫn đi qua
+            // bộ đồng bộ tổng quát phía dưới, nên presentation không đổi.
+            if (TryRemoveMissingFaultRowsInOrder(desiredRows))
+                return;
+
             // Xóa key thừa TRƯỚC khi căn vị trí. Nếu BG01 ở đầu bảng PASS,
             // cách cũ Move toàn bộ BG02..BG200 lên rồi mới xóa đuôi. Cách này
             // chỉ phát đúng các Remove của BG01, các row sau tự dịch chỉ số.
@@ -8629,6 +8659,41 @@ public sealed class TestViewModel : ObservableObject
             Faults.ReplaceAll(desiredRows);
             AddLog("Danh sách lỗi CLIP/I/O đã tự đồng bộ lại; thiết bị tiếp tục chạy, không cần khởi tạo lại.");
         }
+    }
+
+    private bool TryRemoveMissingFaultRowsInOrder(IReadOnlyList<FaultRow> desiredRows)
+    {
+        if (desiredRows.Count >= Faults.Count)
+            return false;
+
+        int desiredIndex = 0;
+        for (int currentIndex = 0;
+             currentIndex < Faults.Count && desiredIndex < desiredRows.Count;
+             currentIndex++)
+        {
+            if (ReferenceEquals(Faults[currentIndex], desiredRows[desiredIndex]))
+                desiredIndex++;
+        }
+
+        // Không phải phép xóa thuần theo thứ tự: để thuật toán key-based hiện
+        // tại xử lý add/replace/move và các fault row động.
+        if (desiredIndex != desiredRows.Count)
+            return false;
+
+        desiredIndex = desiredRows.Count - 1;
+        for (int currentIndex = Faults.Count - 1; currentIndex >= 0; currentIndex--)
+        {
+            if (desiredIndex >= 0 &&
+                ReferenceEquals(Faults[currentIndex], desiredRows[desiredIndex]))
+            {
+                desiredIndex--;
+                continue;
+            }
+
+            Faults.RemoveAt(currentIndex);
+        }
+
+        return true;
     }
 
     private static string RowKey(FaultRow row) => row.PresentationKey;

@@ -1,5 +1,6 @@
 ﻿using System.IO.Compression;
 using System.Diagnostics;
+using System.Collections.Specialized;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Reflection;
@@ -870,12 +871,12 @@ internal static class Program
                xaml.IndexOf("Header=\"T&#234;n d&#226;y\"", StringComparison.Ordinal) <
                xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
                xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) <
-               xaml.IndexOf("Header=\"C&#7905; d&#226;y\"", StringComparison.Ordinal) &&
+               xaml.IndexOf("Header=\"Ti&#7871;t di&#7879;n\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#1\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
-            "TestView renders the original Tên dây-Màu-Cỡ dây order with a full-cell wire color and no #1..#4 columns");
+            "TestView renders the Tên dây-Màu-Tiết diện order with a full-cell wire color and no #1..#4 columns");
         Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&
@@ -937,10 +938,11 @@ internal static class Program
 
         Assert(xaml.Contains("x:Name=\"OperationTablesHost\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Lo&#7841;i\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"CONNECTOR\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"Ch&#226;n\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Ch&#226;n Connector\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"T&#234;n d&#226;y\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"C&#7905; d&#226;y\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Ti&#7871;t di&#7879;n\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Tr&#7841;ng th&#225;i\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"IO-CN-PN\"", StringComparison.Ordinal) &&
@@ -948,6 +950,13 @@ internal static class Program
                !testWindowSource.Contains("offlinePreview", StringComparison.Ordinal) &&
                testWindowSource.Contains("if (_autoStartProduction)", StringComparison.Ordinal),
             "TestWindow has no offline preview path; MainWindow must reject entry without a healthy board");
+        int typeColumnIndex = xaml.IndexOf("Header=\"Lo&#7841;i\"", StringComparison.Ordinal);
+        int ioColumnIndex = xaml.IndexOf("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal);
+        int connectorColumnIndex = xaml.IndexOf("Header=\"CONNECTOR\"", StringComparison.Ordinal);
+        Assert(typeColumnIndex >= 0 &&
+               ioColumnIndex > typeColumnIndex &&
+               connectorColumnIndex > ioColumnIndex,
+            "TestWindow places the THT IO column directly after Loại and before Connector");
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
@@ -3456,6 +3465,12 @@ internal static class Program
         Assert(tenCardEvents == 2 && tenCardVm.Faults.Count == 638,
             "Large active table removes only the changed endpoint rows without rebuilding all 638 rows");
 
+        string testViewModelCode = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelCode.Contains("TryRemoveMissingFaultRowsInOrder(desiredRows)", StringComparison.Ordinal) &&
+               testViewModelCode.Contains("ReferenceEquals(Faults[currentIndex], desiredRows[desiredIndex])", StringComparison.Ordinal),
+            "Large PASS-only deltas use the reference subsequence fast path without rebuilding row keys");
+
         tenCardEvents = 0;
         synchronize.Invoke(tenCardVm, [Array.Empty<FaultRow>()]);
         Assert(tenCardEvents == 1 && tenCardVm.Faults.Count == 0,
@@ -3472,6 +3487,33 @@ internal static class Program
                testWindowCode.Contains("Interlocked.Exchange(ref _scrollDispatchQueued, 1)", StringComparison.Ordinal) &&
                testWindowCode.Contains("IsFaultRowVisible(firstFault)", StringComparison.Ordinal),
             "Fault-grid auto-scroll coalesces collection bursts and skips rows already in view");
+
+        MethodInfo shouldAutoScroll = typeof(TestWindow).GetMethod(
+            "ShouldAutoScrollToFirstFault",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-grid auto-scroll filter not found");
+        bool scrollOnAdd = (bool)shouldAutoScroll.Invoke(
+            null,
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, new object())])!;
+        bool scrollOnReset = (bool)shouldAutoScroll.Invoke(
+            null,
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset)])!;
+        bool scrollOnPassRemoval = (bool)shouldAutoScroll.Invoke(
+            null,
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, new object(), 0)])!;
+        Assert(scrollOnAdd && scrollOnReset && !scrollOnPassRemoval,
+            "Passing a network removes rows without scheduling DataGrid ScrollIntoView/layout");
+
+        Assert(testViewModelCode.Contains(
+                   "if (!AsyncFileLogService.Current.FileLoggingEnabled ||",
+                   StringComparison.Ordinal) &&
+               testViewModelCode.Contains(
+                   "private void LogFaultGate(long generation)",
+                   StringComparison.Ordinal) &&
+               testViewModelCode.Contains(
+                   "Tránh dựng PassGateDiagnostics lần thứ hai trên UI thread",
+                   StringComparison.Ordinal),
+            "Disabled system logging skips full-network diagnostics on frame and UI hot paths");
     }
 
     private static void TestProductionFaultConfirmation()
@@ -4374,6 +4416,7 @@ internal static class Program
                vm.Faults[0].Kind == FaultKind.Probe &&
                vm.Faults[0].FaultType == "TP" &&
                vm.Faults[0].Io == 1 &&
+               vm.Faults[0].IoText == "1" &&
                vm.Faults[0].Connector == "1" &&
                vm.Faults[0].Pin == "1" &&
                vm.Faults[0].WireName == "1" &&
@@ -4497,10 +4540,12 @@ internal static class Program
         Assert(unusedVm.HasInlineProbeContacts &&
                unusedVm.Faults.Count == 1 &&
                unusedVm.Faults[0].Kind == FaultKind.Probe &&
+               unusedVm.Faults[0].Io == 7 &&
+               unusedVm.Faults[0].IoText == "7" &&
                unusedVm.Faults[0].WireName == "IO(7)" &&
                unusedVm.CenterResultText == "LẮP SẢN PHẨM" &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
-            "CASE E: always-on Probe shows unused IO without starting the product cycle");
+            "CASE E: always-on Probe shows an unmapped physical IO in the IO column without starting the product cycle");
 
         TestViewModel testPinVm = CreateTestViewModel(production, out FakeBoard testPinBoard);
         testPinVm.SetModel(model);

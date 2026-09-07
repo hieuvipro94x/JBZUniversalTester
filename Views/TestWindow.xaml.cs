@@ -148,7 +148,11 @@ public partial class TestWindow : Window
         ModelTitleText.Visibility = viewModel.ShowTitle ? Visibility.Visible : Visibility.Collapsed;
         ConnectorColumn.Visibility = Visibility.Visible;
 
-        _faultsChangedHandler = (_, _) => ScheduleScrollToFirstFault(viewModel);
+        _faultsChangedHandler = (_, args) =>
+        {
+            if (ShouldAutoScrollToFirstFault(args))
+                ScheduleScrollToFirstFault(viewModel);
+        };
         viewModel.Faults.CollectionChanged += _faultsChangedHandler;
 
         try
@@ -493,6 +497,14 @@ public partial class TestWindow : Window
             }
         }, DispatcherPriority.Background);
     }
+
+    private static bool ShouldAutoScrollToFirstFault(NotifyCollectionChangedEventArgs args) =>
+        // Remove là đường nóng khi một network PASS và biến mất. Không ép
+        // DataGrid ScrollIntoView/layout lại chỉ vì các row còn lại dịch lên.
+        // Add/Replace là fault mới; Reset dùng cho lần đầu dựng/xóa cả bảng.
+        args.Action is NotifyCollectionChangedAction.Add or
+            NotifyCollectionChangedAction.Replace or
+            NotifyCollectionChangedAction.Reset;
 
     private bool IsFaultRowVisible(FaultRow row)
     {
