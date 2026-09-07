@@ -1,3 +1,13 @@
+JBZUniversalTester V16.0.245 - WHITE WIRE TEXT CONTRAST
+
+- Day mot hoac nhieu mau co thanh phan trang luon hien ma mau bang chu den.
+- Ap dung cho ca W, R/W, W/R, B/W va cac thu tu mau tuong duong.
+
+JBZUniversalTester V16.0.244 - ORIGINAL WIRE COLOR COLUMN
+
+- Dat cot Mau ngay sau Ten day va truoc Co day theo dung thu tu Htdrv goc.
+- To mau tren toan bo o, bo lop nen trang che mau va tu dong chon mau chu tuong phan.
+
 JBZUniversalTester V16.0.243 - REMOVE LICENSE / REGISTRATION
 
 - Xoa hoan toan co che Registration ID, activation code va license gate khi khoi dong.

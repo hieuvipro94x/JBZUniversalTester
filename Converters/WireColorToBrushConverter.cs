@@ -98,6 +98,8 @@ namespace JBZUniversalTester.Converters
 
         private static readonly ConcurrentDictionary<string, Brush> BrushCache =
             new(StringComparer.OrdinalIgnoreCase);
+        private static readonly Brush DarkTextBrush = CreateSolidBrush(Color.FromRgb(0x11, 0x11, 0x11));
+        private static readonly Brush LightTextBrush = CreateSolidBrush(Color.FromRgb(0xF8, 0xF8, 0xF6));
 
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
@@ -200,6 +202,28 @@ namespace JBZUniversalTester.Converters
         }
 
         public static string ToDisplayCode(string? value) => (value ?? string.Empty).Trim();
+
+        /// <summary>
+        /// Chọn màu chữ tương phản trực tiếp trên nền màu dây như bảng Htdrv gốc.
+        /// Dây có thành phần trắng luôn dùng chữ đen; các trường hợp còn lại
+        /// dùng màu nền đầu tiên để chọn độ tương phản.
+        /// </summary>
+        public static Brush ToForegroundBrush(string? value)
+        {
+            IReadOnlyList<string> tokens = Tokenize(value);
+            if (tokens.Any(token =>
+                    TryGetColor(token, out Color tokenColor) && tokenColor == Colors.White))
+            {
+                return DarkTextBrush;
+            }
+
+            string? firstToken = tokens.FirstOrDefault();
+            if (firstToken is null || !TryGetColor(firstToken, out Color color))
+                return DarkTextBrush;
+
+            int perceivedBrightness = ((299 * color.R) + (587 * color.G) + (114 * color.B)) / 1000;
+            return perceivedBrightness >= 125 ? DarkTextBrush : LightTextBrush;
+        }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         {

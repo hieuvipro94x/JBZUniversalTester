@@ -573,18 +573,20 @@ internal static class Program
                normalCheckRow.Status == "KIỂM TRA",
             "Normal KIỂM TRA row and status use the original dark operator text");
         Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
-               BrushHex(openGreenRow.WireColorForegroundBrush) == "#111111" &&
+               BrushHex(openGreenRow.WireColorForegroundBrush) == "#F8F8F6" &&
                BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
-               BrushHex(openBlueRow.WireColorForegroundBrush) == "#111111" &&
+               BrushHex(openBlueRow.WireColorForegroundBrush) == "#F8F8F6" &&
                BrushHex(new FaultRow { Color = "R/W" }.WireColorForegroundBrush) == "#111111" &&
+               BrushHex(new FaultRow { Color = "W/R" }.WireColorForegroundBrush) == "#111111" &&
+               BrushHex(new FaultRow { Color = "B/W" }.WireColorForegroundBrush) == "#111111" &&
                BrushHex(new FaultRow { Color = "W" }.WireColorForegroundBrush) == "#111111",
-            "Every Màu cell uses black code text over its neutral readability plate");
+            "Màu cells use black text whenever the single/multi-color wire contains white");
         var cachedRow = new FaultRow { Io = 42, Connector = " CN1 ", Pin = " 7 ", Color = "L" };
         string cachedIoCnPn = cachedRow.IoCnPnText;
         Brush cachedForeground = cachedRow.WireColorForegroundBrush;
         Assert(cachedIoCnPn == "42-CN1-7" && ReferenceEquals(cachedIoCnPn, cachedRow.IoCnPnText),
             "FaultRow caches the formatted IO-CN-PN text after first access");
-        Assert(BrushHex(cachedForeground) == "#111111" &&
+        Assert(BrushHex(cachedForeground) == "#F8F8F6" &&
                ReferenceEquals(cachedForeground, cachedRow.WireColorForegroundBrush),
             "FaultRow caches the wire-color foreground after first access");
         Assert(new FaultRow { Color = "B/G" }.WireColorBrush is LinearGradientBrush,
@@ -800,17 +802,20 @@ internal static class Program
                    StringComparison.Ordinal),
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
-               xaml.Contains("BorderBrush=\"#707070\"", StringComparison.Ordinal) &&
-               xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"M&#224;u\" Width=\"0.60*\" MinWidth=\"64\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"M&#224;u\" Width=\"0.85*\" MinWidth=\"90\"", StringComparison.Ordinal) &&
+               xaml.IndexOf("Header=\"T&#234;n d&#226;y\"", StringComparison.Ordinal) <
+               xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
+               xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) <
+               xaml.IndexOf("Header=\"C&#7905; d&#226;y\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#1\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
-            "TestView uses responsive bold wiring text and a narrow original-style Màu column without #1..#4");
+            "TestView renders the original Tên dây-Màu-Cỡ dây order with a full-cell wire color and no #1..#4 columns");
         Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&
