@@ -82,7 +82,6 @@
   <!-- SQLite -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.12" />
-    <PackageReference Include="System.Management" Version="10.0.0" />
     <PackageReference Include="System.IO.Ports" Version="10.0.10" />
   </ItemGroup>
 
@@ -90,17 +89,6 @@
   <ItemGroup>
     <Compile Remove="Tests\**\*.cs" />
     <Compile Remove="HardwareVerification\**\*.cs" />
-    <Compile Remove="JBZLicenseGenerator_READY\**\*.cs" />
-    <Page Remove="JBZLicenseGenerator_READY\**\*.xaml" />
-    <ApplicationDefinition Remove="JBZLicenseGenerator_READY\**\*.xaml" />
-  </ItemGroup>
-
-  <!-- Only the public verification key is embedded in the production binary. -->
-  <ItemGroup>
-    <None Remove="Assets\License\jbz-license-public.pem" />
-    <EmbeddedResource Include="Assets\License\jbz-license-public.pem">
-      <LogicalName>JBZUniversalTester.Assets.License.jbz-license-public.pem</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
 
   <!-- Built-in label templates stay inside the single EXE. -->

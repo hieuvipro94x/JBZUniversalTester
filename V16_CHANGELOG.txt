@@ -1,3 +1,9 @@
+JBZUniversalTester V16.0.243 - REMOVE LICENSE / REGISTRATION
+
+- Xoa hoan toan co che Registration ID, activation code va license gate khi khoi dong.
+- Ung dung vao thang MainWindow sau khi kiem tra single-instance va nap cau hinh san xuat.
+- Xoa tool tao license, khoa ky, du lieu license, ma nguon, dependency va self-test lien quan.
+
 JBZUniversalTester V16.0.241 - LICENSE GENERATOR PRODUCTION WORKFLOW
 
 - Generator có luồng rõ ràng: DÁN ID máy sản xuất, tạo mã cho đúng ID và sao chép mã trả về máy sản xuất.

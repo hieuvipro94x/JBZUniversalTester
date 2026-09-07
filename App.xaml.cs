@@ -36,49 +36,18 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        string registrationId;
-        var licenses = new LicenseVerificationService();
-        try
-        {
-            registrationId = new MachineFingerprintService().GetRegistrationId();
-        }
-        catch (Exception ex)
-        {
-            WriteCrashDiagnostics(ex, "License.MachineFingerprint");
-            MessageBox.Show(
-                "Chưa tạo được ID đăng ký. Vui lòng liên hệ bộ phận kỹ thuật.",
-                "CHƯA THỂ ĐĂNG KÝ",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            Shutdown(3);
-            return;
-        }
-
-        if (!licenses.ValidateStoredLicense(registrationId))
-        {
-            var registrationWindow = new RegistrationWindow(registrationId, licenses);
-            bool activated = registrationWindow.ShowDialog() == true;
-            if (!activated || !licenses.ValidateStoredLicense(registrationId))
-            {
-                Shutdown(4);
-                return;
-            }
-        }
-
-        // Production configuration and every hardware-owning ViewModel are initialized
-        // only after the stored activation code has passed a fresh startup verification.
         StartupBootstrapService.EnsureFastConfiguration();
         var productionSettings = ProductionConfigService.Load();
         AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
         AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
-        StartupPerformanceTrace.Mark("T0 App.OnStartup LICENSE_VALID");
+        StartupPerformanceTrace.Mark("T0 App.OnStartup READY");
 
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         mainWindow.Show();
 
-        // Defer audio I/O until the licensed MainWindow has rendered.
+        // Defer audio I/O until MainWindow has rendered.
         _ = Dispatcher.BeginInvoke(
             new Action(() =>
             {

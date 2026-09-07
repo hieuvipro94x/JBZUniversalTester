@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Reflection;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Media;
@@ -47,7 +46,6 @@ internal static class Program
             ("Production SQLite writer retries a transient lock", TestProductionPersistenceRetriesTransientLock),
             ("SQLite interrupted transaction reopens without deleting database", TestHistoryInterruptedTransactionRecovery),
             ("Canonical runtime paths and SQLite PartCnt authority", TestCanonicalRuntimePersistence),
-            ("Machine fingerprint and JBZ1 license verification", TestMachineFingerprintAndLicenseVerification),
             ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
             ("THT label renderer and LOT lifecycle", TestThtLabelAndLotLifecycle),
@@ -2319,83 +2317,6 @@ internal static class Program
             if (Directory.Exists(root))
                 Directory.Delete(root, true);
         }
-    }
-
-    private static void TestMachineFingerprintAndLicenseVerification()
-    {
-        var baseline = new MachineIdentity(" win-guid-01 ", " cpu-id-01 ", " disk-id-01 ");
-        string registrationId = MachineFingerprintService.ComputeRegistrationId(baseline);
-        Assert(registrationId.Length == 32 && registrationId.All(Uri.IsHexDigit),
-            "Registration ID uses the first 16 SHA-256 bytes as 32 uppercase hex characters");
-        Assert(MachineFingerprintService.ComputeRegistrationId(
-                   new MachineIdentity("WIN-GUID-01", "CPU-ID-01", "DISK-ID-01")) == registrationId,
-            "Fingerprint normalization ignores casing, whitespace, and separators");
-        Assert(MachineFingerprintService.ComputeRegistrationId(
-                   baseline with { WindowsInstallationId = "WIN-GUID-02" }) != registrationId,
-            "Changing Windows installation identity changes Registration ID");
-        Assert(MachineFingerprintService.ComputeRegistrationId(
-                   baseline with { CpuId = "CPU-ID-02" }) != registrationId,
-            "Changing CPU identity changes Registration ID");
-        Assert(MachineFingerprintService.ComputeRegistrationId(
-                   baseline with { SystemDiskId = "DISK-ID-02" }) != registrationId,
-            "Changing system disk identity changes Registration ID");
-
-        using ECDsa testKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        string publicKeyPem = testKey.ExportSubjectPublicKeyInfoPem();
-        string machineId = MachineFingerprintService.Normalize(registrationId);
-        byte[] payload = Encoding.UTF8.GetBytes(
-            $"JBZ1|JBZUniversalTester|{machineId}|PERPETUAL|1700000000");
-        byte[] signature = testKey.SignData(
-            payload,
-            HashAlgorithmName.SHA256,
-            DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
-        string activationCode = $"JBZ1.{Encode(payload)}.{Encode(signature)}";
-
-        Assert(LicenseVerificationService.VerifyActivationCode(
-                   activationCode, registrationId, publicKeyPem),
-            "A JBZ1 license for the current MachineId verifies");
-        Assert(!LicenseVerificationService.VerifyActivationCode(
-                   activationCode, new string('A', 32), publicKeyPem),
-            "A JBZ1 license for another MachineId is rejected");
-
-        byte[] tamperedPayload = payload.ToArray();
-        tamperedPayload[^1] ^= 1;
-        string tamperedCode = $"JBZ1.{Encode(tamperedPayload)}.{Encode(signature)}";
-        Assert(!LicenseVerificationService.VerifyActivationCode(
-                   tamperedCode, registrationId, publicKeyPem),
-            "Changing one signed payload byte invalidates the signature");
-
-        string licenseRoot = Path.Combine(Path.GetTempPath(), "JBZLicenseTests", Guid.NewGuid().ToString("N"));
-        try
-        {
-            string licenseFile = Path.Combine(licenseRoot, "license.dat");
-            var licenses = new LicenseVerificationService(publicKeyPem, licenseFile);
-            Assert(licenses.ActivateAndSave(activationCode, registrationId) &&
-                   licenses.ValidateStoredLicense(registrationId),
-                "Activation is verified before save and verified again from the saved license");
-        }
-        finally
-        {
-            if (Directory.Exists(licenseRoot))
-                Directory.Delete(licenseRoot, recursive: true);
-        }
-
-        string appXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml"));
-        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
-        int verifyIndex = appSource.IndexOf("ValidateStoredLicense(registrationId)", StringComparison.Ordinal);
-        int mainWindowIndex = appSource.IndexOf("new MainWindow()", StringComparison.Ordinal);
-        Assert(!appXaml.Contains("StartupUri", StringComparison.Ordinal) &&
-               verifyIndex >= 0 && mainWindowIndex > verifyIndex,
-            "MainWindow is constructed only after the startup license gate");
-        Assert(typeof(LicenseVerificationService).Assembly.GetManifestResourceNames().Contains(
-                   "JBZUniversalTester.Assets.License.jbz-license-public.pem",
-                   StringComparer.Ordinal) &&
-               !File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "JBZUniversalTester.csproj"))
-                   .Contains("jbz-license-private.pem", StringComparison.OrdinalIgnoreCase),
-            "Production embeds only the public license key");
-
-        static string Encode(ReadOnlySpan<byte> bytes) =>
-            Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     private static void TestCanonicalRuntimePersistence()

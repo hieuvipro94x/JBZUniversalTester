@@ -16,11 +16,6 @@ public static class RuntimePaths
     public static string DatabaseFile => Path.Combine(DataDirectory, "JBZUniversalTester.db");
     public static string CrashDirectory => Path.Combine(AppDirectory, "Crash");
     public static string CrashReportFile => Path.Combine(CrashDirectory, "JBZUniversalTester.RPT");
-    public static string LicenseDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "JBZUniversalTester");
-    public static string LicenseFile => Path.Combine(LicenseDirectory, "license.dat");
-
     public static string ItemDirectory => @"C:\ITEM";
     public static string PassRoot => @"C:\Pass";
     public static string ErrorRoot => @"C:\Error";
