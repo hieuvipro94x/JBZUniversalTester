@@ -188,6 +188,7 @@ public sealed class WaterProofChannelResult : ObservableObject
             {
                 Raise(nameof(ResultText));
                 Raise(nameof(LiveCellBackground));
+                Raise(nameof(LiveCellForeground));
             }
         }
     }
@@ -201,6 +202,7 @@ public sealed class WaterProofChannelResult : ObservableObject
             {
                 Raise(nameof(ResultText));
                 Raise(nameof(LiveCellBackground));
+                Raise(nameof(LiveCellForeground));
             }
         }
     }
@@ -234,6 +236,8 @@ public sealed class WaterProofChannelResult : ObservableObject
         : Passed
             ? "#2AA84A"
             : "#C62828";
+
+    public string LiveCellForeground => IsMeasured ? "#FFFFFF" : "#0F172A";
 
     public string ResultText => !IsMeasured ? "---" : Passed ? "PASS" : "FAIL";
 

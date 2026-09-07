@@ -1,3 +1,9 @@
+JBZUniversalTester V16.0.246 - PROFESSIONAL LEAK DISPLAY
+
+- Lam moi the tom tat Leak: nhan kenh, gia tri realtime, mau trang thai va do tuong phan ro rang.
+- Lam moi bang chi tiet voi header cong nghiep, nhan manh do ro va o PASS/FAIL de doc.
+- Chi thay doi presentation; giu nguyen protocol, ket qua va chu trinh may Leak.
+
 JBZUniversalTester V16.0.245 - WHITE WIRE TEXT CONTRAST
 
 - Day mot hoac nhieu mau co thanh phan trang luon hien ma mau bang chu den.

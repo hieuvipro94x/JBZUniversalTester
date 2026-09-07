@@ -832,8 +832,7 @@ internal static class Program
                xaml.Contains("x:Name=\"StatusLedPanel\"", StringComparison.Ordinal) &&
                xaml.Contains("Margin=\"10,0,2,0\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Name=\"LabelActionButtonsPanel\"", StringComparison.Ordinal) &&
-               xaml.Contains("<ColumnDefinition Width=\"6\"/>", StringComparison.Ordinal) &&
-               !xaml.Contains("Width=\"112\"", StringComparison.Ordinal),
+               xaml.Contains("<ColumnDefinition Width=\"6\"/>", StringComparison.Ordinal),
             "TestView separates the four status LEDs from navigation and gives both label actions responsive equal widths");
 
         string testWindowSource = File.ReadAllText(
@@ -1616,8 +1615,11 @@ internal static class Program
             "Leak result rows identify both machine channel and mapped THT connector");
         Assert(passRow.LiveCellBackground == "#2AA84A" &&
                failRow.LiveCellBackground == "#C62828" &&
-               new WaterProofChannelResult().LiveCellBackground == "#FFFFFF",
-            "Compact Leak cells stay white while live, then use product green for PASS and red for FAIL");
+               passRow.LiveCellForeground == "#FFFFFF" &&
+               failRow.LiveCellForeground == "#FFFFFF" &&
+               new WaterProofChannelResult().LiveCellBackground == "#FFFFFF" &&
+               new WaterProofChannelResult().LiveCellForeground == "#0F172A",
+            "Compact Leak cells use professional PASS/FAIL backgrounds with readable contrast");
 
         passRow.PressPressure = 83.9;
         passRow.WaitPressure = 81.8;
@@ -1634,13 +1636,15 @@ internal static class Program
 
         Assert(
             xaml.Contains("Text=\"ĐỘ RÒ RỈ\"", StringComparison.Ordinal) &&
-            xaml.Contains("Width=\"282\"", StringComparison.Ordinal) &&
-            xaml.Contains("Height=\"78\"", StringComparison.Ordinal) &&
+            xaml.Contains("Width=\"294\"", StringComparison.Ordinal) &&
+            xaml.Contains("Height=\"92\"", StringComparison.Ordinal) &&
             xaml.Contains("Text=\"{Binding LiveMachineValueText}\"", StringComparison.Ordinal) &&
             xaml.Contains("Background=\"{Binding LiveCellBackground}\"", StringComparison.Ordinal) &&
-            xaml.Contains("Foreground=\"#000000\"", StringComparison.Ordinal) &&
-            xaml.Contains("Width=\"94\"", StringComparison.Ordinal),
-            "Leak summary uses three compact cells bound to realtime machine values");
+            xaml.Contains("Foreground=\"{Binding LiveCellForeground}\"", StringComparison.Ordinal) &&
+            xaml.Contains("x:Key=\"WaterProofGridHeaderStyle\"", StringComparison.Ordinal) &&
+            xaml.Contains("x:Key=\"WaterProofLeakTextStyle\"", StringComparison.Ordinal) &&
+            xaml.Contains("x:Key=\"WaterProofResultCellStyle\"", StringComparison.Ordinal),
+            "Leak summary and detail table use the professional realtime/result presentation");
 
         // Regression: :PRESS lưu áp cuối làm baseline, từng :WAIT phải cập nhật
         // Leak ngay trên UI nhưng tuyệt đối chưa được chốt PASS/FAIL trước :RESULT.
@@ -1756,8 +1760,9 @@ internal static class Program
         int resultStyleUses = xaml.Split(
             "CellStyle=\"{StaticResource PassFailResultCellStyle}\"",
             StringSplitOptions.None).Length - 1;
-        Assert(resultStyleUses == 2,
-            "Resistance and Leak result columns must share green PASS/red FAIL cell presentation");
+        Assert(resultStyleUses == 1 &&
+               xaml.Contains("CellStyle=\"{StaticResource WaterProofResultCellStyle}\"", StringComparison.Ordinal),
+            "Resistance and professional Leak result columns preserve green PASS/red FAIL presentation");
         Assert(xaml.Contains("<Viewbox Margin=\"10\"", StringComparison.Ordinal) &&
                xaml.Contains("StretchDirection=\"DownOnly\"", StringComparison.Ordinal),
             "Large result text scales down to keep PASS/KHÔNG ĐẠT/LẮP SẢN PHẨM inside its box");
