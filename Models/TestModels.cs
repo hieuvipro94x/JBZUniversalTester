@@ -72,7 +72,6 @@ public sealed class FaultRow : ObservableObject
     public string IoCnPnText => _ioCnPnText ??= BuildIoCnPnText();
     public string WireColorText => WireColorToBrushConverter.ToDisplayCode(Color);
     public Brush WireColorBrush => WireColorToBrushConverter.ToBrush(Color);
-    public Brush WireColorForegroundBrush => WireColorToBrushConverter.ToForegroundBrush(Color);
     public Brush Color1Brush => TokenBrush(0);
     public Brush Color2Brush => TokenBrush(1);
     public Brush Color3Brush => TokenBrush(2);

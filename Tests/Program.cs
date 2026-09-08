@@ -586,22 +586,14 @@ internal static class Program
                normalCheckRow.Status == "KIỂM TRA",
             "Normal KIỂM TRA row and status use the original dark operator text");
         Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
-               BrushHex(openGreenRow.WireColorForegroundBrush) == "#F8F8F6" &&
                BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
-               BrushHex(openBlueRow.WireColorForegroundBrush) == "#F8F8F6" &&
-               BrushHex(new FaultRow { Color = "R/W" }.WireColorForegroundBrush) == "#111111" &&
-               BrushHex(new FaultRow { Color = "W/R" }.WireColorForegroundBrush) == "#111111" &&
-               BrushHex(new FaultRow { Color = "B/W" }.WireColorForegroundBrush) == "#111111" &&
-               BrushHex(new FaultRow { Color = "W" }.WireColorForegroundBrush) == "#111111",
-            "Màu cells use black text whenever the single/multi-color wire contains white");
+               new FaultRow { Color = "Y/B" }.WireColorBrush is LinearGradientBrush &&
+               new FaultRow { Color = "W" }.WireColorBrush is SolidColorBrush,
+            "Single and striped wire-color backgrounds preserve their real colors");
         var cachedRow = new FaultRow { Io = 42, Connector = " CN1 ", Pin = " 7 ", Color = "L" };
         string cachedIoCnPn = cachedRow.IoCnPnText;
-        Brush cachedForeground = cachedRow.WireColorForegroundBrush;
         Assert(cachedIoCnPn == "42-CN1-7" && ReferenceEquals(cachedIoCnPn, cachedRow.IoCnPnText),
             "FaultRow caches the formatted IO-CN-PN text after first access");
-        Assert(BrushHex(cachedForeground) == "#F8F8F6" &&
-               ReferenceEquals(cachedForeground, cachedRow.WireColorForegroundBrush),
-            "FaultRow caches the wire-color foreground after first access");
         Assert(new FaultRow { Color = "B/G" }.WireColorBrush is LinearGradientBrush,
             "Multi-color wire is combined into one striped Màu cell");
 
@@ -876,6 +868,10 @@ internal static class Program
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
                !xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
+               xaml.Contains("views:OutlinedTextBlock Text=\"{Binding WireColorText}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Foreground=\"#FFFFFF\"", StringComparison.Ordinal) &&
+               xaml.Contains("Stroke=\"#111111\"", StringComparison.Ordinal) &&
+               xaml.Contains("StrokeThickness=\"1\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
@@ -888,7 +884,7 @@ internal static class Program
                !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
-            "TestView renders the Tên dây-Màu-Tiết diện order with a full-cell wire color and no #1..#4 columns");
+            "TestView renders full-cell wire colors with outlined readable codes and no #1..#4 columns");
         Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&

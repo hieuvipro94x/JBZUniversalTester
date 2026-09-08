@@ -1,3 +1,9 @@
+JBZUniversalTester V16.0.253 - OUTLINED WIRE COLOR CODE
+
+- Ve ma mau day bang chu trang co vien den nhu giao dien Htdrv tham chieu.
+- Giu nguyen nen mau that; W tren nen trang va ma kep nhu Y/B, R/W deu doc ro.
+- Khong dung DropShadowEffect tren tung dong DataGrid de bao toan hieu nang hien thi 10 card.
+
 JBZUniversalTester V16.0.247 - MASTER REMOVAL / BAD SAMPLE PRESENTATION
 
 - Xoa dung khoa "chua thao san pham" khi frame rong xac nhan mau da roi JIG sau luc quay ve Main giua bai Master.
