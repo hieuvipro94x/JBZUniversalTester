@@ -1140,6 +1140,16 @@ internal static class Program
                !labelPrintServiceSource.Contains("CrashReportService.Write", StringComparison.Ordinal) &&
                !settingsSource.Contains("CrashReportService.Write", StringComparison.Ordinal),
             "Within TestViewModel, RPT is limited to the latched main-tester DeviceFault; Leak and label-printer paths never create it");
+        string crashReportSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "CrashReportService.cs"));
+        Assert(crashReportSource.Contains("IsDeviceConnectionFault(source) &&", StringComparison.Ordinal) &&
+               crashReportSource.Contains("!AsyncFileLogService.Current.FileLoggingEnabled", StringComparison.Ordinal) &&
+               crashReportSource.Contains("Loại lỗi: LỖI KẾT NỐI THIẾT BỊ", StringComparison.Ordinal) &&
+               crashReportSource.Contains("BuildOperatorConnectionReport()", StringComparison.Ordinal) &&
+               !crashReportSource[crashReportSource.IndexOf("BuildOperatorConnectionReport() =>", StringComparison.Ordinal)..
+                   crashReportSource.IndexOf("private static string BuildTechnicalReport", StringComparison.Ordinal)]
+                   .Contains("Source:", StringComparison.Ordinal),
+            "Device-fault RPT hides technical details unless the operator explicitly enables all system logs");
         Assert(testViewModelSource.Contains(
                    "Mất kết nối máy Leak. Hãy rút/cắm lại cáp, chọn lại cổng COM rồi thử lại.",
                    StringComparison.Ordinal) &&
@@ -2716,6 +2726,23 @@ internal static class Program
                    report.Contains("AppVersion:", StringComparison.Ordinal),
                 "Crash RPT is created lazily with exception and runtime context");
             File.Delete(RuntimePaths.CrashReportFile);
+
+            bool loggingWasEnabled = AsyncFileLogService.Current.FileLoggingEnabled;
+            AsyncFileLogService.Current.Configure(false);
+            CrashReportService.Write(
+                new IOException("FTDI D2XX board secret detail"),
+                "Hardware.DeviceFault.BoardStartup",
+                "BoardGeneration=7; transport=D2XX");
+            string operatorReport = File.ReadAllText(RuntimePaths.CrashReportFile, Encoding.UTF8);
+            Assert(operatorReport.Contains("LỖI KẾT NỐI THIẾT BỊ", StringComparison.Ordinal) &&
+                   !operatorReport.Contains("Hardware.DeviceFault", StringComparison.Ordinal) &&
+                   !operatorReport.Contains("FTDI", StringComparison.OrdinalIgnoreCase) &&
+                   !operatorReport.Contains("D2XX", StringComparison.OrdinalIgnoreCase) &&
+                   !operatorReport.Contains("Board", StringComparison.OrdinalIgnoreCase) &&
+                   !operatorReport.Contains("StackTrace", StringComparison.Ordinal),
+                "Device connection RPT hides code, transport, and board details while system logs are disabled");
+            File.Delete(RuntimePaths.CrashReportFile);
+            AsyncFileLogService.Current.Configure(loggingWasEnabled);
             if (!crashDirectoryExisted && Directory.Exists(RuntimePaths.CrashDirectory) &&
                 !Directory.EnumerateFileSystemEntries(RuntimePaths.CrashDirectory).Any())
             {

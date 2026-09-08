@@ -20,27 +20,17 @@ public static class CrashReportService
 
         try
         {
-            var report = new StringBuilder()
-                .AppendLine("============================================================")
-                .Append("Crash Time: ").AppendLine(DateTime.Now.ToString("O"))
-                .Append("AppVersion: ").AppendLine(AppVersion.DisplayVersion)
-                .Append("Source: ").AppendLine(source ?? string.Empty)
-                .Append("ExceptionType: ").AppendLine(exception.GetType().FullName ?? exception.GetType().Name)
-                .Append("ExceptionMessage: ").AppendLine(exception.Message)
-                .Append("StackTrace: ").AppendLine(exception.StackTrace ?? string.Empty)
-                .Append("InnerException: ").AppendLine(exception.InnerException?.ToString() ?? string.Empty)
-                .Append("MachineName: ").AppendLine(Environment.MachineName)
-                .Append("OSVersion: ").AppendLine(Environment.OSVersion.ToString())
-                .Append("ProcessArchitecture: ").AppendLine(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString())
-                .Append("RuntimeContext: ").AppendLine(runtimeContext ?? string.Empty)
-                .AppendLine();
+            string report = IsDeviceConnectionFault(source) &&
+                            !AsyncFileLogService.Current.FileLoggingEnabled
+                ? BuildOperatorConnectionReport()
+                : BuildTechnicalReport(exception, source, runtimeContext);
 
             lock (Gate)
             {
                 Directory.CreateDirectory(RuntimePaths.CrashDirectory);
                 File.AppendAllText(
                     RuntimePaths.CrashReportFile,
-                    report.ToString(),
+                    report,
                     new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             }
         }
@@ -50,4 +40,37 @@ public static class CrashReportService
             // exception boundary. The main logger remains the secondary path.
         }
     }
+
+    private static bool IsDeviceConnectionFault(string? source) =>
+        source?.StartsWith("Hardware.DeviceFault.", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static string BuildOperatorConnectionReport() =>
+        new StringBuilder()
+            .AppendLine("============================================================")
+            .Append("Thời gian: ").AppendLine(DateTime.Now.ToString("O"))
+            .Append("Phiên bản: ").AppendLine(AppVersion.DisplayVersion)
+            .AppendLine("Loại lỗi: LỖI KẾT NỐI THIẾT BỊ")
+            .AppendLine("Hướng dẫn: Kiểm tra nguồn và cáp kết nối, sau đó khởi động lại chương trình.")
+            .AppendLine()
+            .ToString();
+
+    private static string BuildTechnicalReport(
+        Exception exception,
+        string? source,
+        string? runtimeContext) =>
+        new StringBuilder()
+            .AppendLine("============================================================")
+            .Append("Crash Time: ").AppendLine(DateTime.Now.ToString("O"))
+            .Append("AppVersion: ").AppendLine(AppVersion.DisplayVersion)
+            .Append("Source: ").AppendLine(source ?? string.Empty)
+            .Append("ExceptionType: ").AppendLine(exception.GetType().FullName ?? exception.GetType().Name)
+            .Append("ExceptionMessage: ").AppendLine(exception.Message)
+            .Append("StackTrace: ").AppendLine(exception.StackTrace ?? string.Empty)
+            .Append("InnerException: ").AppendLine(exception.InnerException?.ToString() ?? string.Empty)
+            .Append("MachineName: ").AppendLine(Environment.MachineName)
+            .Append("OSVersion: ").AppendLine(Environment.OSVersion.ToString())
+            .Append("ProcessArchitecture: ").AppendLine(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString())
+            .Append("RuntimeContext: ").AppendLine(runtimeContext ?? string.Empty)
+            .AppendLine()
+            .ToString();
 }
