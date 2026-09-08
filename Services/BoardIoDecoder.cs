@@ -20,6 +20,11 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class BoardIoDecoder
 {
+    private static readonly IReadOnlySet<int> EmptyTargets =
+        System.Collections.Frozen.FrozenSet<int>.Empty;
+    private static readonly IReadOnlyDictionary<int, int> EmptyTargetHits =
+        System.Collections.Frozen.FrozenDictionary<int, int>.Empty;
+
     // Card shown in Production Settings is one firmware scan-unit = 64 I/O.
     // The two internal 32-I/O physical boards remain an implementation detail.
     public const int IoPerCard = BoardCapacity.IoPerExpansionCard;
@@ -217,15 +222,15 @@ public sealed class BoardIoDecoder
                 frames.Add(new ScanFrame(
                     DateTime.Now,
                     CardCount,
-                    _activeTargets.ToHashSet(),
+                    _activeTargets.Count == 0 ? EmptyTargets : _activeTargets.ToHashSet(),
                     _frameRaw.ToArray(),
                     complete,
                     _unknownBytes,
                     _sequence,
-                    _connections.ToDictionary(
-                        pair => pair.Key,
-                        pair => (IReadOnlySet<int>)pair.Value.ToHashSet()),
-                    _targetHitCounts.ToDictionary(pair => pair.Key, pair => pair.Value),
+                    SnapshotConnections(),
+                    _targetHitCounts.Count == 0
+                        ? EmptyTargetHits
+                        : _targetHitCounts.ToDictionary(pair => pair.Key, pair => pair.Value),
                     BoardScanMode.Production,
                     ExpectedIoCount,
                     _sourcesSeen.Count,
@@ -261,6 +266,22 @@ public sealed class BoardIoDecoder
         }
 
         return true;
+    }
+
+    private IReadOnlyDictionary<int, IReadOnlySet<int>> SnapshotConnections()
+    {
+        var snapshot = new Dictionary<int, IReadOnlySet<int>>(_connections.Count);
+        foreach ((int source, HashSet<int> targets) in _connections)
+        {
+            // A complete 10-card frame normally has hundreds of sources with
+            // no target. One immutable empty set can safely represent all of
+            // them instead of allocating one HashSet per source and per frame.
+            snapshot[source] = targets.Count == 0
+                ? EmptyTargets
+                : targets.ToHashSet();
+        }
+
+        return snapshot;
     }
 
     IReadOnlyList<ScanFrame> FeedProbe(ReadOnlySpan<byte> data)

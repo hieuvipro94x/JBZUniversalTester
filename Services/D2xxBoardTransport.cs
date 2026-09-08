@@ -78,7 +78,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
     int _activeRelay = -1;
     BoardScanMode _scanMode = BoardScanMode.Production;
     long _scanGeneration;
-    string _stableFrameSignature = string.Empty;
+    ScanFrame? _stableFrameSnapshot;
     int _stableFrameCount;
     bool _firstStableFrameConfirmed;
     int _controlWaiters;
@@ -685,7 +685,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 await PrepareScanAsync(ct);
 
             _lastScanSignature = string.Empty;
-            _stableFrameSignature = string.Empty;
+            _stableFrameSnapshot = null;
             _stableFrameCount = 0;
             _firstStableFrameConfirmed = false;
             _scanMode = mode;
@@ -1236,10 +1236,30 @@ public sealed class D2xxBoardTransport : IBoardTransport
         if (frame.Mode != BoardScanMode.Production || !frame.Complete || frame.UnknownBytes != 0)
             return true;
 
-        string signature = BuildStableFrameSignature(frame);
-        if (!string.Equals(signature, _stableFrameSignature, StringComparison.Ordinal))
+        int configured = _firstStableFrameConfirmed
+            ? _production.IoConfirmN
+            : _production.IoConfirm1;
+        int required = Math.Max(1, configured);
+
+        // The production default is one frame. Preserve the latest exact
+        // snapshot in case settings change, but do not compare hundreds of IO
+        // entries when no repeated-frame confirmation was requested.
+        if (required == 1)
         {
-            _stableFrameSignature = signature;
+            _stableFrameSnapshot = frame;
+            _stableFrameCount = 1;
+            ConfirmFirstStableFrameIfNeeded(frame, required);
+            return true;
+        }
+
+        if (_stableFrameSnapshot is null ||
+            !HasSameStableFrameState(_stableFrameSnapshot, frame))
+        {
+            // ScanFrame owns detached collections created by BoardIoDecoder,
+            // so retaining the last snapshot is safe. Compare the exact state
+            // instead of sorting and serializing hundreds of IO entries into a
+            // temporary string for every complete frame.
+            _stableFrameSnapshot = frame;
             _stableFrameCount = 1;
         }
         else
@@ -1247,38 +1267,52 @@ public sealed class D2xxBoardTransport : IBoardTransport
             _stableFrameCount++;
         }
 
-        int configured = _firstStableFrameConfirmed
-            ? _production.IoConfirmN
-            : _production.IoConfirm1;
-        int required = Math.Max(1, configured);
         if (_stableFrameCount < required)
             return false;
 
-        if (!_firstStableFrameConfirmed)
-        {
-            _firstStableFrameConfirmed = true;
-            AsyncFileLogService.Current.Performance(
-                $"IO_CONFIRM_READY generation={frame.ScanGeneration} required={required} " +
-                $"start_card={_capacity.StartCardNumber} scan_through={_capacity.StartScanParameter}");
-        }
+        ConfirmFirstStableFrameIfNeeded(frame, required);
         return true;
     }
 
-    private static string BuildStableFrameSignature(ScanFrame frame)
+    private void ConfirmFirstStableFrameIfNeeded(ScanFrame frame, int required)
     {
-        string activeIo = string.Join(',', frame.ActiveIo.Order());
-        string connections = string.Join(
-            ";",
-            frame.Connections
-                .OrderBy(pair => pair.Key)
-                .Select(pair => $"{pair.Key}:{string.Join(',', pair.Value.Order())}"));
-        string targetHits = string.Join(
-            ",",
-            frame.TargetHits
-                .OrderBy(pair => pair.Key)
-                .Select(pair => $"{pair.Key}:{pair.Value}"));
-        return $"{frame.ExpectedIoCount}|{frame.SourceCount}|{frame.EndMarkerCode}|" +
-               $"{activeIo}|{connections}|{targetHits}";
+        if (_firstStableFrameConfirmed)
+            return;
+
+        _firstStableFrameConfirmed = true;
+        AsyncFileLogService.Current.Performance(
+            $"IO_CONFIRM_READY generation={frame.ScanGeneration} required={required} " +
+            $"start_card={_capacity.StartCardNumber} scan_through={_capacity.StartScanParameter}");
+    }
+
+    private static bool HasSameStableFrameState(ScanFrame previous, ScanFrame current)
+    {
+        if (previous.ExpectedIoCount != current.ExpectedIoCount ||
+            previous.SourceCount != current.SourceCount ||
+            previous.EndMarkerCode != current.EndMarkerCode ||
+            !previous.ActiveIo.SetEquals(current.ActiveIo) ||
+            previous.Connections.Count != current.Connections.Count ||
+            previous.TargetHits.Count != current.TargetHits.Count)
+        {
+            return false;
+        }
+
+        foreach ((int source, IReadOnlySet<int> targets) in previous.Connections)
+        {
+            if (!current.Connections.TryGetValue(source, out IReadOnlySet<int>? currentTargets) ||
+                !targets.SetEquals(currentTargets))
+            {
+                return false;
+            }
+        }
+
+        foreach ((int target, int hits) in previous.TargetHits)
+        {
+            if (!current.TargetHits.TryGetValue(target, out int currentHits) || currentHits != hits)
+                return false;
+        }
+
+        return true;
     }
 
     async Task WriteAsync(

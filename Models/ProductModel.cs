@@ -36,7 +36,7 @@ public sealed record WireNet(
 {
     public int SourceIo => IoNumbers.Count > 0 ? IoNumbers[0] : 0;
 
-    public IReadOnlyList<int> ExpectedActiveIo =>
+    public IReadOnlyList<int> ExpectedActiveIo { get; } =
         IoNumbers.Count <= 1
             ? Array.Empty<int>()
             : IoNumbers.Skip(1).Distinct().ToArray();

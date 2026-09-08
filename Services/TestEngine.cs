@@ -245,7 +245,7 @@ public sealed class TestEngine : IDisposable
                     if (!IsEligibleProductionNet(net))
                         continue;
 
-                    if (!IsWireNetConnected(net, _currentConnections))
+                    if (!IsWireNetConnected(net))
                         return true;
                 }
 
@@ -281,7 +281,7 @@ public sealed class TestEngine : IDisposable
                     if (!IsEligibleProductionNet(net))
                         return 0;
 
-                    return CountDisconnectedEndpoints(net, _currentConnections);
+                    return CountDisconnectedEndpoints(net);
                 });
 
                 int clipMissing = _model.Clip?.Branches.Count(branch =>
@@ -830,7 +830,7 @@ public sealed class TestEngine : IDisposable
                     if (!IsEligibleProductionNet(net))
                         continue;
 
-                    bool connected = IsWireNetConnected(net, _currentConnections);
+                    bool connected = IsWireNetConnected(net);
                     _expectedConnectionScratch[_confirmationKeyByNet[net]] = connected;
 
                     if (!connected)
@@ -1301,49 +1301,65 @@ public sealed class TestEngine : IDisposable
                (connections.TryGetValue(b, out HashSet<int>? fromB) && fromB.Contains(a));
     }
 
-    private bool IsWireNetConnected(
-        WireNet net,
-        IReadOnlyDictionary<int, HashSet<int>> connections)
+    private bool IsWireNetConnected(WireNet net)
     {
         if (!IsEligibleProductionNet(net))
             return false;
 
-        HashSet<int> reachable = BuildReachableNetEndpoints(net, connections);
-        return net.IoNumbers
-            .Where(io => io > 0)
-            .Distinct()
-            .All(reachable.Contains);
+        if (!_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent))
+            return false;
+
+        foreach (int endpoint in net.IoNumbers)
+        {
+            // Preserve the parser's existing compatibility behavior: blank or
+            // unmapped IO values are ignored for the all-connected decision.
+            if (endpoint <= 0)
+                continue;
+
+            if (!_actualComponentByIo.TryGetValue(endpoint, out int component) ||
+                component != sourceComponent)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
-    private int CountDisconnectedEndpoints(
-        WireNet net,
-        IReadOnlyDictionary<int, HashSet<int>> connections)
+    private int CountDisconnectedEndpoints(WireNet net)
     {
         if (!IsEligibleProductionNet(net))
             return 0;
 
-        HashSet<int> reachable = BuildReachableNetEndpoints(net, connections);
-        return net.ExpectedActiveIo.Count(io => !reachable.Contains(io));
+        if (!_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent))
+            return net.ExpectedActiveIo.Count;
+
+        int disconnected = 0;
+        foreach (int endpoint in net.ExpectedActiveIo)
+        {
+            if (!_actualComponentByIo.TryGetValue(endpoint, out int component) ||
+                component != sourceComponent)
+            {
+                disconnected++;
+            }
+        }
+
+        return disconnected;
     }
 
-    private HashSet<int> BuildReachableNetEndpoints(
-        WireNet net,
-        IReadOnlyDictionary<int, HashSet<int>> connections)
+    private HashSet<int> BuildReachableNetEndpoints(WireNet net)
     {
-        HashSet<int> endpoints = net.IoNumbers
-            .Where(io => io > 0)
-            .Distinct()
-            .ToHashSet();
         var reachable = new HashSet<int>();
-        if (net.SourceIo <= 0 || !endpoints.Contains(net.SourceIo))
+        if (net.SourceIo <= 0)
             return reachable;
 
         if (!_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent))
             return reachable;
 
-        foreach (int endpoint in endpoints)
+        foreach (int endpoint in net.IoNumbers)
         {
-            if (_actualComponentByIo.TryGetValue(endpoint, out int component) &&
+            if (endpoint > 0 &&
+                _actualComponentByIo.TryGetValue(endpoint, out int component) &&
                 component == sourceComponent)
                 reachable.Add(endpoint);
         }
@@ -1531,7 +1547,7 @@ public sealed class TestEngine : IDisposable
                     // electrically reached. Keep only the still-disconnected
                     // endpoints; do not redraw the already-installed side
                     // beside its mate (for example L-L/G-G).
-                    HashSet<int> reachable = BuildReachableNetEndpoints(net, _currentConnections);
+                    HashSet<int> reachable = BuildReachableNetEndpoints(net);
                     // A lone source word is only a scan/active indication, not
                     // an electrical connection. Do not hide its row; the
                     // original Htdrv keeps the complete wire pair visible
@@ -1576,7 +1592,7 @@ public sealed class TestEngine : IDisposable
             {
                 if (IsEligibleProductionNet(net) &&
                     !net.IoNumbers.Any(diagnosticIos.Contains) &&
-                    IsWireNetConnected(net, _currentConnections) &&
+                    IsWireNetConnected(net) &&
                     _removalDisplayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
                     rows.AddRange(cachedRows);
             }
@@ -1900,7 +1916,7 @@ public sealed class TestEngine : IDisposable
             if (requiredRelationCount == 0)
                 return false;
 
-            return requiredNets.All(net => IsWireNetConnected(net, _currentConnections)) &&
+            return requiredNets.All(IsWireNetConnected) &&
                    requiredClipBranches.All(branch =>
                        IsClipBranchConnected(_model.Clip!, branch, _currentConnections));
         }
@@ -1943,7 +1959,7 @@ public sealed class TestEngine : IDisposable
             if (requiredRelationCount == 0)
                 return false;
 
-            return requiredNets.All(net => !IsWireNetConnected(net, _currentConnections)) &&
+            return requiredNets.All(net => !IsWireNetConnected(net)) &&
                    requiredClipBranches.All(branch =>
                        !IsClipBranchConnected(_model.Clip!, branch, _currentConnections));
         }

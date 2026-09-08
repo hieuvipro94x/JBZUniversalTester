@@ -1,3 +1,10 @@
+JBZUniversalTester V16.0.254 - LARGE D2XX MODEL HOT PATH
+
+- Giu nguyen complete-frame/IO Confirm; bo so sanh khi confirm=1, cac muc >1 dung so sanh cau truc chinh xac thay chuoi/sap xep.
+- Dung chung tap target rong bat bien thay vi cap phat hang tram HashSet rong moi frame.
+- Cache endpoint receiver cua WireNet va bo cap phat trung gian khi kiem tra continuity.
+- Them hoi quy model 500 IO/250 network: tat ca mang dat, mot mang mat ket noi hien lai dung hai endpoint.
+
 JBZUniversalTester V16.0.253 - OUTLINED WIRE COLOR CODE
 
 - Ve ma mau day bang chu trang co vien den nhu giao dien Htdrv tham chieu.

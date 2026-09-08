@@ -668,6 +668,46 @@ internal static class Program
         Assert(changed <= 1, "Identical complete frames do not raise unbounded engine UI updates");
         Console.WriteLine(
             $"PERF: 10,000 identical ProcessFrame calls: {stopwatch.ElapsedMilliseconds} ms, {allocated:N0} bytes allocated");
+
+        (string Name, int[] Io)[] largeNetDefinitions = Enumerable.Range(0, 250)
+            .Select(index => ($"NET{index + 1:000}", new[] { (index * 2) + 1, (index * 2) + 2 }))
+            .ToArray();
+        ProductModel largeModel = Model(largeNetDefinitions);
+        Assert(ReferenceEquals(
+                largeModel.Nets[0].ExpectedActiveIo,
+                largeModel.Nets[0].ExpectedActiveIo),
+            "WireNet caches its receiver endpoint list instead of rebuilding it on every engine query");
+
+        (int Source, int[] Targets)[] largeConnections = largeNetDefinitions
+            .Select(net => (net.Io[0], new[] { net.Io[1] }))
+            .ToArray();
+        using TestEngine largeEngine = CreateEngine(out _);
+        largeEngine.SetModel(largeModel);
+        ScanFrame allConnected = FrameSeq(1, largeConnections);
+        largeEngine.ProcessFrame(allConnected);
+        Assert(largeEngine.ContinuityPassed && largeEngine.BuildRows().Count == 0,
+            "A 500-IO/250-network model still completes only when every required network is connected");
+
+        largeEngine.ProcessFrame(FrameSeq(2, largeConnections[..^1]));
+        FaultRow[] reopenedRows = largeEngine.BuildRows().ToArray();
+        Assert(!largeEngine.ContinuityPassed &&
+               reopenedRows.Length == 2 &&
+               reopenedRows.All(row => row.WireName == "NET250"),
+            "Removing one connection from a 500-IO model immediately reopens exactly that network");
+
+        largeEngine.ProcessFrame(allConnected with { Sequence = 3 });
+        ScanFrame repeatedLarge = allConnected with { Sequence = 4 };
+        long largeAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var largeStopwatch = Stopwatch.StartNew();
+        for (int index = 0; index < 2_000; index++)
+            largeEngine.ProcessFrame(repeatedLarge);
+        largeStopwatch.Stop();
+        long largeAllocated = GC.GetAllocatedBytesForCurrentThread() - largeAllocatedBefore;
+        Assert(largeEngine.ContinuityPassed && largeEngine.BuildRows().Count == 0,
+            "Repeated complete frames cannot lose a passed network in the optimized large-model path");
+        Console.WriteLine(
+            $"PERF: 2,000 identical 500-IO/250-network frames: {largeStopwatch.ElapsedMilliseconds} ms, " +
+            $"{largeAllocated:N0} bytes allocated");
     }
 
     private static void TestFinalTestStatusGuards()
@@ -3059,6 +3099,9 @@ internal static class Program
         Assert(large.Complete && large.SourceCount == 640 && large.ExpectedIoCount == 640 &&
                large.EndMarkerCode == 0x01 && large.UnknownBytes == 0,
             "Ten-card 640-source frame accepts C0 01 without unknown bytes");
+        Assert(large.Connections.Values.All(targets => targets.Count == 0) &&
+               ReferenceEquals(large.Connections[1], large.Connections[640]),
+            "Empty source targets share one immutable set instead of allocating 640 empty HashSets per frame");
 
         decoder.Reset();
         Assert(decoder.Feed(largeRaw.AsSpan(0, largeRaw.Length - 1)).Count == 0,
@@ -3131,6 +3174,35 @@ internal static class Program
         Assert(!Confirm(stableC) && !Confirm(stableC) && Confirm(stableC),
             "IO Confirm N=3 requires three consecutive matching snapshots after first confirmation");
         confirmationTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        var singleConfirmTransport = new D2xxBoardTransport(
+            string.Empty,
+            new ProductionSettings { IoConfirm1 = 1, IoConfirmN = 1 });
+        MethodInfo singleShouldPublish = typeof(D2xxBoardTransport).GetMethod(
+            "ShouldPublishConfirmedFrame",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ShouldPublishConfirmedFrame method not found.");
+        bool ConfirmSingle(ScanFrame frame) =>
+            (bool)(singleShouldPublish.Invoke(singleConfirmTransport, [frame]) ?? false);
+        Assert(ConfirmSingle(FrameSeq(4, (1, [2]))) &&
+               ConfirmSingle(FrameSeq(5, (1, [3]))),
+            "IO Confirm=1 publishes every complete state immediately without requiring a repeated snapshot");
+        singleConfirmTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        var orderTransport = new D2xxBoardTransport(
+            string.Empty,
+            new ProductionSettings { IoConfirm1 = 2, IoConfirmN = 2 });
+        MethodInfo orderShouldPublish = typeof(D2xxBoardTransport).GetMethod(
+            "ShouldPublishConfirmedFrame",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ShouldPublishConfirmedFrame method not found.");
+        bool ConfirmOrder(ScanFrame frame) =>
+            (bool)(orderShouldPublish.Invoke(orderTransport, [frame]) ?? false);
+        ScanFrame orderA = FrameSeq(10, (1, [2, 3]), (4, [5]));
+        ScanFrame orderB = FrameSeq(11, (4, [5]), (1, [3, 2]));
+        Assert(!ConfirmOrder(orderA) && ConfirmOrder(orderB),
+            "Stable-frame confirmation compares exact logical sets without depending on dictionary/target order");
+        orderTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
 
         decoder.ConfigureCapacity(BoardCapacity.Create(4));
         decoder.ConfigureMode(BoardScanMode.Probe);
