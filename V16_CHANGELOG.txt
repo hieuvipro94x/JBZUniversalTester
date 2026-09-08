@@ -1,3 +1,8 @@
+JBZUniversalTester V16.0.256 - CENTERED TEST GRID DATA
+
+- Can giua du lieu cac cot IO, CONNECTOR, Chan Pin, Ten day, Mau, Tiet dien va IO-CN-PN.
+- Chi thay doi presentation XAML; khong thay doi gia tri hoac logic mapping IO-CN-PN.
+
 JBZUniversalTester V16.0.255 - PROBE IO COLUMN PLACEMENT
 
 - Dua nhan IO chua co metadata ve dung cot IO; khong con dat IO(...) trong cot Connector/Ten day.

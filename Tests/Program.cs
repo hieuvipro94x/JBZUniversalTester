@@ -913,6 +913,9 @@ internal static class Program
                xaml.Contains("Stroke=\"#111111\"", StringComparison.Ordinal) &&
                xaml.Contains("StrokeThickness=\"1\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"HtdrvGridCenterTextStyle\"", StringComparison.Ordinal) &&
+               xaml.Contains("ElementStyle=\"{StaticResource HtdrvGridStrongCenterTextStyle}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"T&#234;n d&#226;y\" Binding=\"{Binding WireName}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource HtdrvGridCenterTextStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\" Width=\"0.85*\" MinWidth=\"90\"", StringComparison.Ordinal) &&
