@@ -566,7 +566,7 @@ internal static class Program
         AssertWireColorCells("UNKNOWN", "#F8F8F6", "#F8F8F6", "#F8F8F6", "#F8F8F6");
 
         var wrongRow = new FaultRow { Kind = FaultKind.WrongWiring, Color = "B/Br" };
-        Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#3446A8", "Wrong row uses Pi blue");
+        Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#4F63C5", "Wrong row uses a lighter readable blue");
         Assert(BrushHex(wrongRow.RowForegroundBrush) == "#FFFFFF", "Wrong row text is white");
         Assert(BrushHex(wrongRow.Color1Brush) == "#101010" && BrushHex(wrongRow.Color2Brush) == "#8A4300",
             "Wrong row color cells override semantic row background");
@@ -579,9 +579,11 @@ internal static class Program
         var openGreenRow = new FaultRow { Kind = FaultKind.MissingConnection, Color = "G" };
         var openBlueRow = new FaultRow { Kind = FaultKind.Open, Color = "L" };
         var normalCheckRow = new FaultRow { Kind = FaultKind.Start, Status = "KIỂM TRA" };
-        Assert(BrushHex(openGreenRow.RowForegroundBrush) == "#0026D9" &&
-               BrushHex(openBlueRow.RowForegroundBrush) == "#0026D9",
-            "Open/missing rows use the original Htdrv blue text");
+        Assert(BrushHex(openGreenRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(openBlueRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(openGreenRow.RowForegroundBrush) == "#111111" &&
+               BrushHex(openBlueRow.RowForegroundBrush) == "#111111",
+            "Open/missing rows use bold black text on a white background");
         Assert(BrushHex(normalCheckRow.RowForegroundBrush) == "#555555" &&
                normalCheckRow.Status == "KIỂM TRA",
             "Normal KIỂM TRA row and status use the original dark operator text");
@@ -928,6 +930,11 @@ internal static class Program
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
             "TestView renders full-cell wire colors with outlined readable codes and no #1..#4 columns");
+        Assert(xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"Open\">", StringComparison.Ordinal) &&
+               xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"MissingConnection\">", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#23E6E6\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,8,0,0\"/>", StringComparison.Ordinal),
+            "TestView uses bold open rows and a thick cyan separator between wire networks");
         Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&

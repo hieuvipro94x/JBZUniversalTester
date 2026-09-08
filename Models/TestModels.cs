@@ -32,12 +32,12 @@ public sealed class FaultRow : ObservableObject
     private static readonly Brush PiFieldBrush = Frozen(System.Windows.Media.Color.FromRgb(0xF8, 0xF8, 0xF6));
     private static readonly Brush PiTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x55, 0x55, 0x55));
     private static readonly Brush PiDarkTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x33, 0x33, 0x33));
-    private static readonly Brush PiWrongRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0x34, 0x46, 0xA8));
+    private static readonly Brush PiWrongRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0x4F, 0x63, 0xC5));
     private static readonly Brush PiProbeRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0xBD, 0xEE, 0xEE));
     private static readonly Brush PiNetworkPassRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0xDF, 0xF4, 0xE3));
     private static readonly Brush PiNetworkPassTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x14, 0x6B, 0x2E));
     private static readonly Brush PiFailBrush = Frozen(System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28));
-    private static readonly Brush PiOpenTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x00, 0x26, 0xD9));
+    private static readonly Brush BlackTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x11, 0x11, 0x11));
     private static readonly Brush WhiteBrush = Brushes.White;
 
     string _status = "";
@@ -90,6 +90,7 @@ public sealed class FaultRow : ObservableObject
     public Brush RowBackgroundBrush => Kind switch
     {
         FaultKind.WrongWiring or FaultKind.Short => PiWrongRowBrush,
+        FaultKind.Open or FaultKind.MissingConnection => WhiteBrush,
         FaultKind.Probe => PiProbeRowBrush,
         FaultKind.Resistance => PiFailBrush,
         FaultKind.Info when IsNetworkPassed => PiNetworkPassRowBrush,
@@ -98,7 +99,7 @@ public sealed class FaultRow : ObservableObject
     public Brush RowForegroundBrush => Kind switch
     {
         FaultKind.WrongWiring or FaultKind.Short or FaultKind.Resistance => WhiteBrush,
-        FaultKind.Open or FaultKind.MissingConnection => PiOpenTextBrush,
+        FaultKind.Open or FaultKind.MissingConnection => BlackTextBrush,
         FaultKind.Probe => PiDarkTextBrush,
         FaultKind.Info when IsNetworkPassed => PiNetworkPassTextBrush,
         _ => PiTextBrush

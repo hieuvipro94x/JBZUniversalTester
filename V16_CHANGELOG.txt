@@ -1,3 +1,9 @@
+JBZUniversalTester V16.0.260 - TEST GRID FAULT CONTRAST
+
+- OPEN/chua thong dung chu den dam tren nen trang de doc ro khi co nhieu IO.
+- Sai day/ngan mach dung chu trang tren nen xanh nhat hon.
+- Duong phan cach giua cac mang day doi sang cyan va tang tu 5 px len 8 px.
+
 JBZUniversalTester V16.0.259 - AUTOMATIC LABEL PRINTER COM SELECTION
 
 - Chon cong COM may in la luu va ket noi ngay; doi cong se dong owner cu va mo dung cong moi.

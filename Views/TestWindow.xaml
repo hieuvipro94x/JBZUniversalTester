@@ -340,8 +340,14 @@
                         <Setter Property="FontWeight" Value="Normal"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsNetworkStart}" Value="True">
-                                <Setter Property="BorderBrush" Value="#66E8E8"/>
-                                <Setter Property="BorderThickness" Value="0,5,0,0"/>
+                                <Setter Property="BorderBrush" Value="#23E6E6"/>
+                                <Setter Property="BorderThickness" Value="0,8,0,0"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding KindName}" Value="Open">
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding KindName}" Value="MissingConnection">
+                                <Setter Property="FontWeight" Value="Bold"/>
                             </DataTrigger>
                             <DataTrigger Binding="{Binding KindName}" Value="WrongWiring">
                                 <Setter Property="FontWeight" Value="SemiBold"/>
