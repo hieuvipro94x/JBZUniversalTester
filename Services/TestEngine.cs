@@ -1733,14 +1733,16 @@ public sealed class TestEngine : IDisposable
             ProductFaultType = productFaultType,
             FaultType = unused ? string.Empty : ResolveTopologyType(model, io),
             Io = io,
+            IoTextOverride = unused ? $"IO ({io})" : string.Empty,
             DisplayOrder = pin is null ? int.MaxValue : ResolveDisplayOrder(pin),
             ExpectedSourceIo = fault.ExpectedSourceIo,
             ExpectedTargetIo = fault.ExpectedTargetIo,
             ActualSourceIo = fault.SourceIo,
             ActualTargetIo = fault.TargetIo,
             RelatedIos = relation,
-            // HTDRV_UNUSED_IO_DISPLAY_2026-09-05
-            Connector = unused ? $"IO({io})" : pin!.Connector,
+            // IO không có PinRecord phải nằm ở cột IO. Không dùng cột
+            // Connector để chứa nhãn IO vì sẽ khiến người vận hành hiểu nhầm.
+            Connector = unused ? string.Empty : pin!.Connector,
             Pin = unused ? string.Empty : pin!.PinNumber,
             WireName = unused ? string.Empty : pin!.WireName,
             Splice = unused ? string.Empty : pin!.SpliceName,

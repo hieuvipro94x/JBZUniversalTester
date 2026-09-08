@@ -56,8 +56,7 @@ public static class IoMappingFramePresenter
             Kind = FaultKind.Probe,
             FaultType = "ĐẦU DÒ",
             Io = io,
-            Connector = "CHƯA CÀI CHÂN",
-            WireName = $"IO({io})",
+            IoTextOverride = $"IO ({io})",
             RelatedIos = [io],
             DisplayOrder = io,
             Status = $"PHÁT HIỆN IO({io})"

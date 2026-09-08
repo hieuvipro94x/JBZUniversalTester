@@ -48,6 +48,7 @@ public sealed class FaultRow : ObservableObject
     public string FaultCode => FaultTypeCatalog.Code(ProductFaultType);
     public string FaultType { get; init; } = "";
     public int Io { get; init; }
+    public string IoTextOverride { get; init; } = "";
     public int? ExpectedSourceIo { get; init; }
     public int? ExpectedTargetIo { get; init; }
     public int? ActualSourceIo { get; init; }
@@ -66,9 +67,11 @@ public sealed class FaultRow : ObservableObject
     // Không bind enum/custom converter trực tiếp trong XAML để WPF Designer
     // có thể render ngay cả trước lần build đầu tiên.
     public string KindName => Kind.ToString();
-    public string IoText => Io > 0
-        ? Io.ToString(CultureInfo.InvariantCulture)
-        : string.Empty;
+    public string IoText => !string.IsNullOrWhiteSpace(IoTextOverride)
+        ? IoTextOverride
+        : Io > 0
+            ? Io.ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
     public string IoCnPnText => _ioCnPnText ??= BuildIoCnPnText();
     public string WireColorText => WireColorToBrushConverter.ToDisplayCode(Color);
     public Brush WireColorBrush => WireColorToBrushConverter.ToBrush(Color);
@@ -105,7 +108,7 @@ public sealed class FaultRow : ObservableObject
     public string ProbeWireText => string.IsNullOrWhiteSpace(WireName) ? string.Empty : $"Tên dây {WireName}";
     public string ProbeColorText => string.IsNullOrWhiteSpace(ColorName) ? string.Empty : $"Màu {ColorName}";
     public string PresentationKey => _presentationKey ??=
-        $"{(int)Kind}|{(int)ProductFaultType}|{Io}|{Connector}|{Pin}|{WireName}|{Splice}|" +
+        $"{(int)Kind}|{(int)ProductFaultType}|{Io}|{IoTextOverride}|{Connector}|{Pin}|{WireName}|{Splice}|" +
         $"{ExpectedSourceIo}|{ExpectedTargetIo}|{ActualSourceIo}|{ActualTargetIo}";
 
     public FaultDetail ToFaultDetail() => new()

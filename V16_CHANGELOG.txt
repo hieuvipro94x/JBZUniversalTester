@@ -1,3 +1,9 @@
+JBZUniversalTester V16.0.255 - PROBE IO COLUMN PLACEMENT
+
+- Dua nhan IO chua co metadata ve dung cot IO; khong con dat IO(...) trong cot Connector/Ten day.
+- Pin co trong THT nhung chua dat ten day van hien dung IO, Connector va Chan Pin cua dong THT.
+- Pin da cau hinh ten day giu nguyen cach hien thi hien tai; khong thay doi logic Probe hay fault engine.
+
 JBZUniversalTester V16.0.254 - LARGE D2XX MODEL HOT PATH
 
 - Giu nguyen complete-frame/IO Confirm; bo so sanh khi confirm=1, cac muc >1 dung so sanh cau truc chinh xac thay chuoi/sap xep.

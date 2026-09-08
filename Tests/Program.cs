@@ -3638,14 +3638,15 @@ internal static class Program
         engine.ProcessFrame(unused with { Sequence = 122 });
         FaultRow unusedRow = engine.BuildRows().Single(row => row.Io == 40);
         Assert(unusedRow.FaultType.Length == 0 &&
-               unusedRow.Connector == "IO(40)" &&
+               unusedRow.IoText == "IO (40)" &&
+               unusedRow.Connector.Length == 0 &&
                unusedRow.Pin.Length == 0 &&
                unusedRow.WireName.Length == 0 &&
                unusedRow.Section.Length == 0 &&
                unusedRow.Color.Length == 0 &&
                unusedRow.Status == "CHẬP MẠCH" &&
                unusedRow.IoCnPnText == "IO40",
-            "Unused actual IO is identified in CONNECTOR while technical IO stays in IO-CN-PN");
+            "Unused actual IO is identified in the IO column while Connector stays empty");
 
         engine.ProcessFrame(FrameSeq(123));
         FaultRow[] repairedRows = engine.BuildRows().ToArray();
@@ -4727,6 +4728,22 @@ internal static class Program
                                         row.Color == "G"),
             "CASE C1: duplicate IO mapping shows every direct THT row without expanding peer endpoints");
 
+        var unnamedPinModel = new ProductModel
+        {
+            ModelName = "PROBE-UNNAMED-PIN",
+            PartNumber = "PROBE-UNNAMED-PIN"
+        };
+        unnamedPinModel.Pins.Add(new PinRecord("3", string.Empty, 10, "5", OriginalOrder: 1));
+        TestViewModel unnamedPinVm = CreateTestViewModel(production);
+        unnamedPinVm.SetModel(unnamedPinModel);
+        FaultRow unnamedPinRow = unnamedPinVm.GetProbeRows(10).Single();
+        Assert(unnamedPinRow.Io == 10 &&
+               unnamedPinRow.IoText == "IO (10)" &&
+               unnamedPinRow.Connector == "3" &&
+               unnamedPinRow.Pin == "5" &&
+               unnamedPinRow.WireName.Length == 0,
+            "CASE C1.1: unnamed THT pin shows IO (10) in IO, Connector 3 and Pin 5 in their own columns");
+
         ScanFrame unmappedPairFrame = FrameSeq(14, (23, new[] { 25 }));
         Assert(ProbeContactClassifier.DetectMany(
                    unmappedPairFrame,
@@ -4805,8 +4822,10 @@ internal static class Program
                unusedVm.Faults.Count == 1 &&
                unusedVm.Faults[0].Kind == FaultKind.Probe &&
                unusedVm.Faults[0].Io == 7 &&
-               unusedVm.Faults[0].IoText == "7" &&
-               unusedVm.Faults[0].WireName == "IO(7)" &&
+               unusedVm.Faults[0].IoText == "IO (7)" &&
+               unusedVm.Faults[0].Connector.Length == 0 &&
+               unusedVm.Faults[0].Pin.Length == 0 &&
+               unusedVm.Faults[0].WireName.Length == 0 &&
                unusedVm.CenterResultText == "LẮP SẢN PHẨM" &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
             "CASE E: always-on Probe shows an unmapped physical IO in the IO column without starting the product cycle");
@@ -6630,7 +6649,11 @@ internal static class Program
                 capacity);
             Assert(probeRows.Count == 1 &&
                    probeRows[0].Kind == FaultKind.Probe &&
-                   probeRows[0].Io == 7,
+                   probeRows[0].Io == 7 &&
+                   probeRows[0].IoText == "IO (7)" &&
+                   probeRows[0].Connector.Length == 0 &&
+                   probeRows[0].Pin.Length == 0 &&
+                   probeRows[0].WireName.Length == 0,
                 "Probe sweep in blank THT shows the touched IO instead of false wiring pairs");
 
             var production = new ProductionSettings

@@ -3791,6 +3791,12 @@ public sealed class TestViewModel : ObservableObject
                 Kind = FaultKind.Probe,
                 FaultType = "TP",
                 Io = pin.IoNumber,
+                // Pin vẫn thuộc bảng Pin của THT nên giữ Connector/Pin. Khi
+                // chưa đặt tên dây, đánh dấu IO vật lý ngay tại cột IO thay vì
+                // đưa chuỗi IO sang cột Connector hoặc Tên dây.
+                IoTextOverride = string.IsNullOrWhiteSpace(pin.WireName)
+                    ? $"IO ({pin.IoNumber})"
+                    : string.Empty,
                 RelatedIos = [io],
                 Connector = pin.Connector,
                 Pin = pin.PinNumber,
@@ -3814,8 +3820,8 @@ public sealed class TestViewModel : ObservableObject
             // hiện để cột IO chỉ đúng vị trí đang chạm. Các cột metadata THT
             // tiếp tục để trống; không suy diễn Connector/Pin.
             Io = io,
+            IoTextOverride = $"IO ({io})",
             RelatedIos = [io],
-            WireName = $"IO({io})",
             DisplayOrder = io
         }
     ];
