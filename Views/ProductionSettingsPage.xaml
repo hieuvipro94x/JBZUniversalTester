@@ -36,26 +36,26 @@
         </Style>
 
         <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
-            <Setter Property="Height" Value="24"/>
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="FontSize" Value="13.5"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
             <Setter Property="Background" Value="{StaticResource HeaderBackground}"/>
             <Setter Property="Padding" Value="8,0"/>
-            <Setter Property="Margin" Value="0,0,0,6"/>
+            <Setter Property="Margin" Value="0,0,0,4"/>
         </Style>
 
         <Style x:Key="FieldLabelStyle" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
             <Setter Property="Margin" Value="0,0,7,0"/>
         </Style>
 
         <Style TargetType="TextBox">
-            <Setter Property="Height" Value="28"/>
-            <Setter Property="Margin" Value="0,2"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Margin" Value="0,1"/>
             <Setter Property="Padding" Value="6,2"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="Background" Value="{StaticResource FieldBackground}"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
@@ -63,10 +63,10 @@
         </Style>
 
         <Style TargetType="ComboBox">
-            <Setter Property="Height" Value="28"/>
-            <Setter Property="Margin" Value="0,2"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Margin" Value="0,1"/>
             <Setter Property="Padding" Value="4,1"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="IsEditable" Value="False"/>
             <Setter Property="Background" Value="{StaticResource FieldBackground}"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
@@ -74,17 +74,17 @@
         </Style>
 
         <Style TargetType="CheckBox">
-            <Setter Property="Height" Value="28"/>
-            <Setter Property="Margin" Value="0,2"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Margin" Value="0,1"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12.5"/>
         </Style>
 
         <Style x:Key="SettingsButtonBase" TargetType="Button">
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="Margin" Value="4,0"/>
-            <Setter Property="Padding" Value="12,4"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Padding" Value="9,2"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
             <Setter Property="Foreground" Value="{StaticResource ButtonNeutralForeground}"/>
@@ -187,8 +187,8 @@
             <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="2"/>
-            <Setter Property="Padding" Value="8"/>
-            <Setter Property="Margin" Value="4"/>
+            <Setter Property="Padding" Value="6"/>
+            <Setter Property="Margin" Value="3"/>
         </Style>
 
         <Style x:Key="MiniHeaderStyle" TargetType="TextBlock">
@@ -201,18 +201,18 @@
 
     <Grid Background="{StaticResource PageBackground}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="52"/>
+            <RowDefinition Height="46"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="50"/>
+            <RowDefinition Height="44"/>
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0" Background="White" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,0,0,1">
-            <Grid Margin="14,6">
-                <Button Width="160" HorizontalAlignment="Left" VerticalAlignment="Center"
+            <Grid Margin="10,5">
+                <Button Width="138" HorizontalAlignment="Left" VerticalAlignment="Center"
                         Content="TRANG CH&#205;NH" Click="Cancel_Click"
                         Style="{StaticResource SettingsExitButtonStyle}"/>
                 <TextBlock Text="C&#192;I &#272;&#7862;T PRODUCTION"
-                           FontSize="24"
+                           FontSize="21"
                            FontWeight="Bold"
                            Foreground="{StaticResource BrandBlue}"
                            HorizontalAlignment="Center"
@@ -224,7 +224,7 @@
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Auto"
                       CanContentScroll="False">
-        <WrapPanel x:Name="SettingsPanelsHost" Margin="6" Orientation="Horizontal">
+        <WrapPanel x:Name="SettingsPanelsHost" Margin="4" Orientation="Horizontal">
 
             <Border x:Name="IoSettingsPanel" Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
                 <StackPanel>
@@ -235,22 +235,22 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
                             <RowDefinition Height="0"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
@@ -345,115 +345,6 @@
                                    Foreground="{StaticResource TextMuted}"
                                    TextWrapping="Wrap"/>
 
-                        <Border Grid.Row="17"
-                                Grid.RowSpan="9"
-                                Grid.ColumnSpan="2"
-                                Margin="0,6,0,0"
-                                Padding="7"
-                                Background="#F3F7FF"
-                                BorderBrush="#9CADCF"
-                                BorderThickness="1"
-                                CornerRadius="3">
-                            <StackPanel>
-                                <TextBlock Text="KIỂM TRA KÍN NƯỚC / TEST LEAK"
-                                           Style="{StaticResource SectionTitleStyle}"
-                                           Margin="0,0,0,2"/>
-                                <Grid Margin="0,0,0,3">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding WaterProofModelKey, StringFormat=Model: {0}}"
-                                               FontSize="11"
-                                               Foreground="{StaticResource TextMuted}"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <CheckBox Grid.Column="1"
-                                              Content="BẬT TEST LEAK"
-                                              IsChecked="{Binding WaterProof.Enabled, Mode=TwoWay}"
-                                              Height="26"
-                                              Margin="6,0,0,0"
-                                              FontWeight="Bold"/>
-                                </Grid>
-
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="112"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="68"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="32"/>
-                                        <RowDefinition Height="32"/>
-                                        <RowDefinition Height="32"/>
-                                        <RowDefinition Height="32"/>
-                                        <RowDefinition Height="32"/>
-                                        <RowDefinition Height="32"/>
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Text="COM RS232" Style="{StaticResource FieldLabelStyle}"/>
-                                    <ComboBox x:Name="WaterProofComComboBox"
-                                              Grid.Column="1"
-                                              Height="28"
-                                              IsEditable="True"
-                                              Text="{Binding Settings.WaterProofMachine.PortName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <Button Grid.Column="2"
-                                            Content="LÀM MỚI"
-                                            Height="28"
-                                            Margin="3,2,0,2"
-                                            FontSize="9.5"
-                                            Padding="1,0"
-                                            Style="{StaticResource SettingsInfoButtonStyle}"
-                                            Click="RefreshWaterProofPorts_Click"/>
-
-                                    <TextBlock Grid.Row="1" Text="Baudrate" Style="{StaticResource FieldLabelStyle}"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
-                                             Text="{Binding Settings.WaterProofMachine.BaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                                    <TextBlock Grid.Row="2" Text="Kênh / Connector" Style="{StaticResource FieldLabelStyle}"/>
-                                    <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <CheckBox Content="CH1" Height="28" IsChecked="{Binding WaterProof.Channel1Enabled, Mode=TwoWay}"/>
-                                        <ComboBox Grid.Column="1" Height="28" Margin="2,2,4,2" IsEditable="True"
-                                                  ItemsSource="{Binding WaterProofConnectorOptions}"
-                                                  Text="{Binding WaterProof.Channel1Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                        <CheckBox Grid.Column="2" Content="CH2" Height="28" IsChecked="{Binding WaterProof.Channel2Enabled, Mode=TwoWay}"/>
-                                        <ComboBox Grid.Column="3" Height="28" Margin="2,2,4,2" IsEditable="True"
-                                                  ItemsSource="{Binding WaterProofConnectorOptions}"
-                                                  Text="{Binding WaterProof.Channel2Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                        <CheckBox Grid.Column="4" Content="CH3" Height="28" IsChecked="{Binding WaterProof.Channel3Enabled, Mode=TwoWay}"/>
-                                        <ComboBox Grid.Column="5" Height="28" Margin="2,2,0,2" IsEditable="True"
-                                                  ItemsSource="{Binding WaterProofConnectorOptions}"
-                                                  Text="{Binding WaterProof.Channel3Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    </Grid>
-
-                                    <TextBlock Grid.Row="3" Text="Áp tối thiểu" Style="{StaticResource FieldLabelStyle}"/>
-                                    <TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
-                                             Text="{Binding WaterProof.PressMin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                                    <TextBlock Grid.Row="4" Text="Độ rò tối đa" Style="{StaticResource FieldLabelStyle}"/>
-                                    <TextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
-                                             Text="{Binding WaterProof.LeakLimit, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                                    <TextBlock Grid.Row="5" Text="Tạo / Giữ áp (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                                    <Grid Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="5"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBox Height="28" Text="{Binding WaterProof.PressTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                        <TextBox Grid.Column="2" Height="28" Text="{Binding WaterProof.WaitTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    </Grid>
-                                </Grid>
-                            </StackPanel>
-                        </Border>
                     </Grid>
                 </StackPanel>
             </Border>
@@ -467,20 +358,15 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
-                            <RowDefinition Height="34"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Probe cycle" Style="{StaticResource FieldLabelStyle}"/>
@@ -516,27 +402,119 @@
                         <TextBlock Grid.Row="7" Text="Resistance delay" Style="{StaticResource FieldLabelStyle}"/>
                         <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
-                        <TextBlock Grid.Row="8" Text="Item height" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ItemHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                        <TextBlock Grid.Row="9" Text="Scroll delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                        <TextBlock Grid.Row="10" Text="Page delay" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Settings.PageDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                        <TextBlock Grid.Row="11" Text="Show title" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="11" Grid.Column="1" IsChecked="{Binding Settings.ShowTitle, Mode=TwoWay}"/>
-
-                        <TextBlock Grid.Row="12" Text="Show connector" Style="{StaticResource FieldLabelStyle}"/>
-                        <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.ShowConnector, Mode=TwoWay}"/>
-
-                        <TextBlock Grid.Row="13" Text="L&#7895;i t&#7889;i thi&#7875;u" Style="{StaticResource FieldLabelStyle}"/>
-                        <TextBox Grid.Row="13" Grid.Column="1" Text="{Binding Settings.MinimumErrorLogValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <TextBlock Grid.Row="8" Text="Scroll delay (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                        <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
 
                     </Grid>
 
-                    <StackPanel Margin="0,14,0,0">
+                    <Border x:Name="WaterProofSettingsPanel"
+                            Margin="0,8,0,0"
+                            Padding="7"
+                            Background="#F3F7FF"
+                            BorderBrush="#9CADCF"
+                            BorderThickness="1"
+                            CornerRadius="3">
+                        <StackPanel>
+                            <TextBlock Text="KIỂM TRA KÍN NƯỚC / TEST LEAK"
+                                       Style="{StaticResource SectionTitleStyle}"
+                                       Margin="0,0,0,2"/>
+                            <Grid Margin="0,0,0,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding WaterProofModelKey, StringFormat=Model: {0}}"
+                                           FontSize="11"
+                                           Foreground="{StaticResource TextMuted}"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <CheckBox Grid.Column="1"
+                                          Content="BẬT TEST LEAK"
+                                          IsChecked="{Binding WaterProof.Enabled, Mode=TwoWay}"
+                                          Height="26"
+                                          Margin="6,0,0,0"
+                                          FontWeight="Bold"/>
+                            </Grid>
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="112"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="68"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="30"/>
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Text="COM RS232" Style="{StaticResource FieldLabelStyle}"/>
+                                <ComboBox x:Name="WaterProofComComboBox"
+                                          Grid.Column="1"
+                                          Height="28"
+                                          IsEditable="True"
+                                          Text="{Binding Settings.WaterProofMachine.PortName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <Button Grid.Column="2"
+                                        Content="LÀM MỚI"
+                                        Height="28"
+                                        Margin="3,2,0,2"
+                                        FontSize="9.5"
+                                        Padding="1,0"
+                                        Style="{StaticResource SettingsInfoButtonStyle}"
+                                        Click="RefreshWaterProofPorts_Click"/>
+
+                                <TextBlock Grid.Row="1" Text="Baudrate" Style="{StaticResource FieldLabelStyle}"/>
+                                <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
+                                         Text="{Binding Settings.WaterProofMachine.BaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                <TextBlock Grid.Row="2" Text="Kênh / Connector" Style="{StaticResource FieldLabelStyle}"/>
+                                <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <CheckBox Content="CH1" Height="28" IsChecked="{Binding WaterProof.Channel1Enabled, Mode=TwoWay}"/>
+                                    <ComboBox Grid.Column="1" Height="28" Margin="2,2,4,2" IsEditable="True"
+                                              ItemsSource="{Binding WaterProofConnectorOptions}"
+                                              Text="{Binding WaterProof.Channel1Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <CheckBox Grid.Column="2" Content="CH2" Height="28" IsChecked="{Binding WaterProof.Channel2Enabled, Mode=TwoWay}"/>
+                                    <ComboBox Grid.Column="3" Height="28" Margin="2,2,4,2" IsEditable="True"
+                                              ItemsSource="{Binding WaterProofConnectorOptions}"
+                                              Text="{Binding WaterProof.Channel2Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <CheckBox Grid.Column="4" Content="CH3" Height="28" IsChecked="{Binding WaterProof.Channel3Enabled, Mode=TwoWay}"/>
+                                    <ComboBox Grid.Column="5" Height="28" Margin="2,2,0,2" IsEditable="True"
+                                              ItemsSource="{Binding WaterProofConnectorOptions}"
+                                              Text="{Binding WaterProof.Channel3Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                </Grid>
+
+                                <TextBlock Grid.Row="3" Text="Áp tối thiểu" Style="{StaticResource FieldLabelStyle}"/>
+                                <TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
+                                         Text="{Binding WaterProof.PressMin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                <TextBlock Grid.Row="4" Text="Độ rò tối đa" Style="{StaticResource FieldLabelStyle}"/>
+                                <TextBox Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
+                                         Text="{Binding WaterProof.LeakLimit, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                <TextBlock Grid.Row="5" Text="Tạo / Giữ áp (ms)" Style="{StaticResource FieldLabelStyle}"/>
+                                <Grid Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="5"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Height="28" Text="{Binding WaterProof.PressTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    <TextBox Grid.Column="2" Height="28" Text="{Binding WaterProof.WaitTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                </Grid>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <StackPanel Margin="0,8,0,0">
                         <StackPanel.Style>
                             <Style TargetType="StackPanel">
                                 <Setter Property="Visibility" Value="Collapsed"/>
@@ -556,10 +534,10 @@
                                 <ColumnDefinition Width="54"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="42"/>
-                                <RowDefinition Height="42"/>
-                                <RowDefinition Height="42"/>
                                 <RowDefinition Height="34"/>
+                                <RowDefinition Height="34"/>
+                                <RowDefinition Height="34"/>
+                                <RowDefinition Height="30"/>
                             </Grid.RowDefinitions>
 
                             <TextBlock Text="Relay 1" Style="{StaticResource FieldLabelStyle}"/>
@@ -616,9 +594,9 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="32"/>
-                            <RowDefinition Height="32"/>
-                            <RowDefinition Height="32"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Cổng in" Style="{StaticResource FieldLabelStyle}"/>
@@ -730,9 +708,9 @@
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="36"/>
                                     <RowDefinition Height="32"/>
-                                    <RowDefinition Height="150"/>
+                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="130"/>
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Text="ĐO ĐIỆN TRỞ BẰNG TAY"
@@ -776,8 +754,8 @@
                                           GridLinesVisibility="Horizontal"
                                           HorizontalGridLinesBrush="#D8DEE9"
                                           AlternatingRowBackground="#F4F7FC"
-                                          RowHeight="30"
-                                          ColumnHeaderHeight="32"
+                                          RowHeight="27"
+                                          ColumnHeaderHeight="29"
                                           FontSize="12"
                                           FontWeight="SemiBold"
                                           SelectionMode="Single"
@@ -836,13 +814,13 @@
         </ScrollViewer>
 
         <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0">
-            <Grid Margin="12,7">
+            <Grid Margin="10,6">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <Button Width="220"
+                    <Button Width="190"
                             Content="L&#431;U"
                             Click="Save_Click"
                             Style="{StaticResource SettingsPrimaryButtonStyle}"/>
-                    <Button Width="180" Content="TR&#7902; V&#7872;" FontWeight="Bold" Click="Cancel_Click"
+                    <Button Width="150" Content="TR&#7902; V&#7872;" FontWeight="Bold" Click="Cancel_Click"
                             Style="{StaticResource SettingsExitButtonStyle}"/>
                 </StackPanel>
             </Grid>

@@ -152,6 +152,9 @@ internal static class Program
                pickerGuardSource.Contains("SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("if (!IsWindow(dialogHandle))", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("CorrectAndLockLayout(dialogHandle)", StringComparison.Ordinal) &&
+               !pickerGuardSource.Contains("LayoutCorrectionPasses", StringComparison.Ordinal) &&
+               !pickerGuardSource.Contains("RunLayoutCorrectionPass", StringComparison.Ordinal) &&
                !pickerGuardSource.Contains("WmNcLButtonDown", StringComparison.Ordinal) &&
                !pickerGuardSource.Contains("ScMove", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("ReleaseCreationHook();", StringComparison.Ordinal),
@@ -277,11 +280,11 @@ internal static class Program
         Assert(
             System.Text.RegularExpressions.Regex.Matches(
                 testViewModelSource,
-                "new JBZUniversalTester\\.Views\\.FaultConfirmationWindow\\(").Count == 1 &&
+                "new JBZUniversalTester\\.Views\\.FaultConfirmationWindow\\(").Count == 2 &&
             System.Text.RegularExpressions.Regex.Matches(
                 testViewModelSource,
                 "ShowFaultConfirmationDialog\\(").Count == 5,
-            "Every product FAIL path must use the centralized _DISCARD confirmation dialog");
+            "Product FAIL and device communication faults use the shared confirmation window");
 
         int confirmationStart = testViewModelSource.IndexOf(
             "private void ShowFaultConfirmationDialog(",
@@ -554,27 +557,22 @@ internal static class Program
         Assert(ReferenceEquals(stripe1, stripe2) && stripe1.IsFrozen, "Composite wire color brush is cached and frozen");
         AssertBalancedTwoColorBrush("R/W", "#ED0000", "#FFFFFF");
         AssertBalancedTwoColorBrush("W/R", "#FFFFFF", "#ED0000");
-
-        AssertWireColorCells("B", "#101010", "#F8F8F6", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("B/G", "#101010", "#00D000", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("B/L", "#101010", "#0077FF", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("Gr/Br", "#808080", "#8A4300", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("B/Y", "#101010", "#FFFF00", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("R/W/R", "#ED0000", "#FFFFFF", "#ED0000", "#F8F8F6");
-        AssertWireColorCells("B/G/L/Br", "#101010", "#00D000", "#0077FF", "#8A4300");
-        AssertWireColorCells("", "#F8F8F6", "#F8F8F6", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("UNKNOWN", "#F8F8F6", "#F8F8F6", "#F8F8F6", "#F8F8F6");
+        AssertBalancedTwoColorBrush("R/W/G", "#ED0000", "#FFFFFF");
 
         var wrongRow = new FaultRow { Kind = FaultKind.WrongWiring, Color = "B/Br" };
-        Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#4F63C5", "Wrong row uses a lighter readable blue");
-        Assert(BrushHex(wrongRow.RowForegroundBrush) == "#FFFFFF", "Wrong row text is white");
-        Assert(BrushHex(wrongRow.Color1Brush) == "#101010" && BrushHex(wrongRow.Color2Brush) == "#8A4300",
-            "Wrong row color cells override semantic row background");
+        Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(wrongRow.RowForegroundBrush) == "#C62828",
+            "Wrong wiring uses red text on an absolute white row");
 
         var probeRow = new FaultRow { Kind = FaultKind.Probe, Color = "B/L" };
-        Assert(BrushHex(probeRow.RowBackgroundBrush) == "#BDEEEE", "Probe row uses Pi cyan row");
-        Assert(BrushHex(probeRow.Color1Brush) == "#101010" && BrushHex(probeRow.Color2Brush) == "#0077FF",
-            "Probe row color cells override probe background");
+        Assert(BrushHex(probeRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(probeRow.RowForegroundBrush) == "#C62828",
+            "Probe uses red text on an absolute white row");
+
+        var connectedRow = new FaultRow { Kind = FaultKind.Info, FaultType = "THÔNG MẠCH" };
+        Assert(BrushHex(connectedRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(connectedRow.RowForegroundBrush) == "#111111",
+            "Connected network uses black text on an absolute white row");
 
         var openGreenRow = new FaultRow { Kind = FaultKind.MissingConnection, Color = "G" };
         var openBlueRow = new FaultRow { Kind = FaultKind.Open, Color = "L" };
@@ -585,8 +583,9 @@ internal static class Program
                BrushHex(openBlueRow.RowForegroundBrush) == "#111111",
             "Open/missing rows use bold black text on a white background");
         Assert(BrushHex(normalCheckRow.RowForegroundBrush) == "#555555" &&
+               BrushHex(normalCheckRow.RowBackgroundBrush) == "#FFFFFF" &&
                normalCheckRow.Status == "KIỂM TRA",
-            "Normal KIỂM TRA row and status use the original dark operator text");
+            "Normal KIỂM TRA row uses the original dark text on absolute white");
         Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
                BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
                new FaultRow { Color = "Y/B" }.WireColorBrush is LinearGradientBrush &&
@@ -598,6 +597,9 @@ internal static class Program
             "FaultRow caches the formatted IO-CN-PN text after first access");
         Assert(new FaultRow { Color = "B/G" }.WireColorBrush is LinearGradientBrush,
             "Multi-color wire is combined into one striped Màu cell");
+        Assert(typeof(FaultRow).GetProperty("Color1Brush") is null &&
+               typeof(FaultRow).GetProperty("Color4Brush") is null,
+            "FaultRow exposes only the single one-or-two-color cell presentation");
 
         Assert(typeof(TestViewModel).GetProperty("Logs") is null,
             "TestViewModel does not maintain an unused UI log collection");
@@ -734,8 +736,9 @@ internal static class Program
         disabledMasterVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         Assert(disabledMasterVm.MasterApproved, "Master min 0 unlocks production immediately");
         Assert(disabledMasterVm.MasterState == MasterSequenceState.Completed, "Master min 0 marks Master completed/disabled");
-        Assert(!disabledMasterVm.IsMasterSequenceActive && !disabledMasterVm.IsMasterBannerVisible,
-            "Master min 0 must not show Master banner");
+        Assert(!disabledMasterVm.IsMasterSequenceActive &&
+               typeof(TestViewModel).GetProperty("IsMasterBannerVisible") is null,
+            "Master workflow no longer exposes a separate Master banner");
         Assert(disabledMasterVm.ProductionEnabled, "Master min 0 allows production");
         Assert(disabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM", "Waiting-product result text is canonical");
         Assert(disabledMasterVm.StateBackground == "#FFF3A0" && disabledMasterVm.StateForeground == "#222222",
@@ -789,8 +792,17 @@ internal static class Program
         transitionToBadMaster.Invoke(enabledMasterVm, null);
         Assert(enabledMasterVm.MasterState == MasterSequenceState.WaitingBadMaster &&
                enabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+               enabledMasterVm.WrongCountText == "0/1" &&
                enabledMasterVm.Faults.Count == 0,
-            "Bad Master starts with the shared install-product state and an empty production table");
+            "Bad Master starts at 0/N in the wrong-wiring counter and keeps an empty table");
+
+        TestViewModel twoFaultMasterVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 2 });
+        twoFaultMasterVm.LoadPreparedModelAsync(model2).GetAwaiter().GetResult();
+        masterGoodVerified.SetValue(twoFaultMasterVm, true);
+        transitionToBadMaster.Invoke(twoFaultMasterVm, null);
+        Assert(twoFaultMasterVm.WrongCountText == "0/2",
+            "Two-fault bad Master displays 0/2 in the wrong-wiring counter");
 
         MethodInfo buildMasterFaultGridRow = typeof(TestViewModel).GetMethod(
             "BuildMasterFaultGridRow",
@@ -908,6 +920,13 @@ internal static class Program
                    "Text=\"{Binding ProbeCycleCount, Mode=OneWay}\" Style=\"{StaticResource PiCounterTextStyle}\"",
                    StringComparison.Ordinal),
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
+        Assert(xaml.Contains(
+                   "Text=\"{Binding WrongCountText, Mode=OneWay}\"",
+                   StringComparison.Ordinal) &&
+               !xaml.Contains("IsMasterBannerVisible", StringComparison.Ordinal) &&
+               !xaml.Contains("MasterBannerText", StringComparison.Ordinal) &&
+               !xaml.Contains("MasterProgressText", StringComparison.Ordinal),
+            "Master progress uses the wrong-wiring counter without a separate yellow banner");
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
                !xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
                xaml.Contains("views:OutlinedTextBlock Text=\"{Binding WireColorText}\"", StringComparison.Ordinal) &&
@@ -1018,6 +1037,12 @@ internal static class Program
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.Contains("HOÀN THÀNH MẪU MASTER ĐẠT", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("HOÀN THÀNH MẪU MASTER LỖI", StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "MasterDetectedFaultCount < MasterRequiredFaultCount",
+                   StringComparison.Ordinal),
+            "Master completion appears in the main status box and remains gated by the configured N/N fault count");
         Assert(testViewModelSource.Contains("resumeCurrentStartupModel", StringComparison.Ordinal) &&
                testViewModelSource.Contains("BoardFrameActivity?.Invoke(this, frame);", StringComparison.Ordinal),
             "Remembered-model START resumes real frame processing while UI LEDs observe the existing board frame stream");
@@ -1072,6 +1097,24 @@ internal static class Program
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
+        Assert(settingsSource.Contains("if (available >= 1160)", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<Setter Property=\"Height\" Value=\"30\"/>", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<RowDefinition Height=\"46\"/>", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<RowDefinition Height=\"44\"/>", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<RowDefinition Height=\"130\"/>", StringComparison.Ordinal),
+            "Production settings uses a compact responsive density at 1280x1024");
+        Assert(!settingsXaml.Contains("Settings.ItemHeight", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.PageDelay", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.ShowTitle", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.ShowConnector", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.MinimumErrorLogValue", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) &&
+               settingsXaml.IndexOf("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) >
+                   settingsXaml.IndexOf("x:Name=\"RelaySettingsPanel\"", StringComparison.Ordinal) &&
+               settingsXaml.IndexOf("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) <
+                   settingsXaml.IndexOf("Text=\"MANUAL RELAY\"", StringComparison.Ordinal) &&
+               !settingsSource.Contains("MoveWaterProofSettingsToRelayColumn", StringComparison.Ordinal),
+            "Unused legacy UI fields are hidden and TEST LEAK is grouped in the relay/maintenance column");
         System.Xml.Linq.XElement[] settingsButtons =
             System.Xml.Linq.XDocument.Parse(settingsXaml)
                 .Descendants()
@@ -1182,14 +1225,17 @@ internal static class Program
         Assert(testViewModelSource.Contains("ExitApplicationAfterDeviceFaultAsync", StringComparison.Ordinal) &&
                testViewModelSource.Contains("await _deviceFaultHardwareLockTask;", StringComparison.Ordinal) &&
                testViewModelSource.Contains("mainWindow.Close();", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("windowHeader: \"LỖI THIẾT BỊ\"", StringComparison.Ordinal) &&
                testWindowSource.Contains("deviceFaultViewModel.IsDeviceFault", StringComparison.Ordinal),
-            "Acknowledging DeviceFault safely locks hardware and exits without a second TestWindow prompt");
+            "DeviceFault uses the shared fault confirmation window, then safely locks hardware and exits");
 
         string testWindowXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
         Assert(!testWindowXaml.Contains("ResetDeviceFaultCommand", StringComparison.Ordinal) &&
-               !testWindowXaml.Contains("KH&#7902;I T&#7840;O L&#7840;I", StringComparison.Ordinal),
-            "DeviceFault UI has no reinitialize button; operator must restart the application");
+               !testWindowXaml.Contains("KH&#7902;I T&#7840;O L&#7840;I", StringComparison.Ordinal) &&
+               !testWindowXaml.Contains("Visibility=\"{Binding IsDeviceFault", StringComparison.Ordinal) &&
+               !testWindowXaml.Contains("Text=\"{Binding DeviceFaultMessage}\"", StringComparison.Ordinal),
+            "DeviceFault UI has no separate banner or reinitialize button");
 
         TestViewModel startupFaultVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -2211,16 +2257,6 @@ internal static class Program
 
         Assert(detections.Count == 1 && detections[0].Io == 113,
             "Target-only production probe touch appears on TestWindow instead of being ignored");
-    }
-
-    private static void AssertWireColorCells(string code, string one, string two, string three, string four)
-    {
-        var row = new FaultRow { Color = code };
-        Assert(row.WireColorText == code, $"Wire color text preserved for '{code}'");
-        Assert(BrushHex(row.Color1Brush) == one, $"Color #1 for '{code}'");
-        Assert(BrushHex(row.Color2Brush) == two, $"Color #2 for '{code}'");
-        Assert(BrushHex(row.Color3Brush) == three, $"Color #3 for '{code}'");
-        Assert(BrushHex(row.Color4Brush) == four, $"Color #4 for '{code}'");
     }
 
     private static void TestLegacyDatabaseWithoutSchemaInfo()
@@ -6765,6 +6801,11 @@ internal static class Program
 
     private static void TestLearnedTopology()
     {
+        var activeIoRow = new ActiveIoDiagnosticRow(42);
+        Assert(activeIoRow.IoText == "IO(42)" &&
+               activeIoRow.StatusText == "KẸT / CHƯA THÁO",
+            "Live diagnostic reports an active physical IO immediately without a THT model or time threshold");
+
         LearnedTopologySnapshot snapshot = TopologyLearningService.BuildSnapshot(
             FrameSeq(
                 80,
@@ -6812,8 +6853,13 @@ internal static class Program
             string learningXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml"));
             Assert(mainXaml.Contains("Content=\"QUÉT / HỌC MÃ\"", StringComparison.Ordinal) &&
                    learningXaml.Contains("Không phải file THT", StringComparison.Ordinal) &&
-                   learningXaml.Contains("EnableRowVirtualization=\"True\"", StringComparison.Ordinal),
-                "MainWindow exposes the diagnostic learning workflow with a virtualized safety-labelled grid");
+                   learningXaml.Contains("ItemsSource=\"{Binding ActiveIoRows}\"", StringComparison.Ordinal) &&
+                   learningXaml.Contains("KẸT / CHƯA THÁO", StringComparison.Ordinal) &&
+                   !learningXaml.Contains("THỜI GIAN", StringComparison.Ordinal) &&
+                   !learningXaml.Contains("3 giây", StringComparison.Ordinal) &&
+                   learningXaml.Contains("Không tác động relay", StringComparison.Ordinal) &&
+                   learningXaml.Contains("EnableRowVirtualization", StringComparison.Ordinal),
+                "MainWindow exposes THT-independent live IO and stuck-contact diagnostics without production actions");
         }
         finally
         {

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
@@ -25,6 +26,7 @@ public partial class TopologyLearningWindow : Window
     private LearnedTopologySnapshot? _capturedSnapshot;
 
     public ObservableCollection<LearnedTopologyRow> Rows { get; } = [];
+    public ObservableCollection<ActiveIoDiagnosticRow> ActiveIoRows { get; } = [];
 
     public TopologyLearningWindow(TestViewModel test)
     {
@@ -41,7 +43,7 @@ public partial class TopologyLearningWindow : Window
             _test.BoardFrameActivity += Test_BoardFrameActivity;
             _test.PropertyChanged += Test_PropertyChanged;
             UpdateBoardStatus();
-            LearningStatusText.Text = "Đang quan sát frame thật từ toàn bộ card đã cấu hình.";
+            LearningStatusText.Text = "Đang giám sát trực tiếp toàn bộ IO đã cấu hình.";
         }
         catch (Exception ex)
         {
@@ -110,6 +112,8 @@ public partial class TopologyLearningWindow : Window
     private void ProcessFrame(ScanFrame frame)
     {
         LearnedTopologySnapshot snapshot = TopologyLearningService.BuildSnapshot(frame, _test.BoardCapacity);
+        UpdateActiveIoDiagnostics(frame, snapshot);
+        NetworkCountText.Text = snapshot.Networks.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
         if (!string.Equals(snapshot.Signature, _displayedSignature, StringComparison.Ordinal))
         {
             _displayedSignature = snapshot.Signature;
@@ -151,6 +155,48 @@ public partial class TopologyLearningWindow : Window
         DiagnoseButton.Content = "CHẨN ĐOÁN LẠI";
         SaveButton.IsEnabled = true;
         LearningStatusText.Text = $"ĐÃ QUÉT XONG • {snapshot.Networks.Count} MẠNG • {_stableFrames}/{_requiredStableFrames} FRAME ỔN ĐỊNH";
+    }
+
+    private void UpdateActiveIoDiagnostics(ScanFrame frame, LearnedTopologySnapshot snapshot)
+    {
+        HashSet<int> activeIos = frame.ActiveIo
+            .Where(_test.BoardCapacity.ContainsGlobalIo)
+            .ToHashSet();
+
+        foreach ((int source, IReadOnlySet<int> targets) in frame.Connections)
+        {
+            if (_test.BoardCapacity.ContainsGlobalIo(source) && targets.Count > 0)
+                activeIos.Add(source);
+            foreach (int target in targets.Where(_test.BoardCapacity.ContainsGlobalIo))
+                activeIos.Add(target);
+        }
+
+        Dictionary<int, string> relatedByIo = snapshot.Networks
+            .SelectMany(network => network.Ios.Select(io => new
+            {
+                Io = io,
+                Related = string.Join(" ↔ ", network.Ios.Select(value => $"IO({value})"))
+            }))
+            .ToDictionary(item => item.Io, item => item.Related);
+
+        int[] displayedIos = ActiveIoRows.Select(row => row.Io).ToArray();
+        int[] desiredIos = activeIos.OrderBy(io => io).ToArray();
+        if (!displayedIos.SequenceEqual(desiredIos))
+        {
+            ActiveIoRows.Clear();
+            foreach (int io in desiredIos)
+                ActiveIoRows.Add(new ActiveIoDiagnosticRow(io));
+        }
+
+        foreach (ActiveIoDiagnosticRow row in ActiveIoRows)
+            row.RelatedText = relatedByIo.GetValueOrDefault(row.Io, "TÁC ĐỘNG ĐƠN");
+        UpdateDiagnosticCounters();
+    }
+
+    private void UpdateDiagnosticCounters()
+    {
+        ActiveIoCountText.Text = ActiveIoRows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        StuckIoCountText.Text = ActiveIoRows.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void UpdateLearningProgress(string text)
@@ -248,4 +294,27 @@ public partial class TopologyLearningWindow : Window
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
+}
+
+public sealed class ActiveIoDiagnosticRow : INotifyPropertyChanged
+{
+    private string _relatedText = string.Empty;
+
+    public ActiveIoDiagnosticRow(int io) => Io = io;
+
+    public int Io { get; }
+    public string IoText => $"IO({Io})";
+    public string StatusText => "KẸT / CHƯA THÁO";
+    public string RelatedText { get => _relatedText; set => Set(ref _relatedText, value); }
+    public Brush StatusBrush => Brushes.Firebrick;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void Set<T>(ref T field, T value)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+            return;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+    }
 }

@@ -1,79 +1,123 @@
 <Window x:Class="JBZUniversalTester.Views.TopologyLearningWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Học cấu hình sản phẩm"
-        Width="900" Height="650"
-        MinWidth="760" MinHeight="520"
-        WindowStartupLocation="CenterOwner"
-        Background="White"
-        Loaded="Window_Loaded"
-        Closed="Window_Closed">
-    <Grid Margin="18">
+        Title="Quét IO / Học cấu hình" Width="1120" Height="720"
+        MinWidth="900" MinHeight="600" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F3F5F8" FontFamily="Segoe UI"
+        Loaded="Window_Loaded" Closed="Window_Closed">
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Height" Value="38"/><Setter Property="Margin" Value="4,0"/>
+            <Setter Property="Padding" Value="12,4"/><Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+        <Style x:Key="PanelStyle" TargetType="Border">
+            <Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#D7DDE7"/>
+            <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="12"/>
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="AutoGenerateColumns" Value="False"/><Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="CanUserAddRows" Value="False"/><Setter Property="EnableRowVirtualization" Value="True"/>
+            <Setter Property="EnableColumnVirtualization" Value="True"/><Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/><Setter Property="AlternatingRowBackground" Value="#F8FAFC"/>
+            <Setter Property="RowHeight" Value="34"/><Setter Property="ColumnHeaderHeight" Value="36"/>
+            <Setter Property="FontSize" Value="14"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <StackPanel>
-            <TextBlock Text="HỌC TOPOLOGY / CHẨN ĐOÁN IO"
-                       FontSize="24" FontWeight="Bold" Foreground="#243B7A"/>
-            <TextBlock Margin="0,6,0,0"
-                       Text="Chỉ lưu quan hệ continuity. Không phải file THT; không PASS/FAIL, relay, điện trở, leak hoặc in tem."
-                       FontSize="14" Foreground="#8A3B00" TextWrapping="Wrap"/>
-        </StackPanel>
-
-        <Grid Grid.Row="1" Margin="0,16,0,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="220"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="90"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="Mã cấu hình" VerticalAlignment="Center" FontWeight="SemiBold"/>
-            <TextBox x:Name="ProductCodeTextBox" Grid.Column="1" Margin="8,0,18,0" Height="30"/>
-            <TextBlock Grid.Column="2" Text="Frame ổn định" VerticalAlignment="Center" FontWeight="SemiBold"/>
-            <TextBox x:Name="StableFrameCountTextBox" Grid.Column="3" Margin="8,0,18,0" Height="30" Text="20"/>
-            <TextBlock x:Name="BoardStatusText" Grid.Column="4" VerticalAlignment="Center"
-                       HorizontalAlignment="Right" FontWeight="Bold" Foreground="#8A3B00"/>
+        <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="QUÉT IO / HỌC CẤU HÌNH" FontSize="25" FontWeight="Bold" Foreground="#213A78"/>
+                <TextBlock Text="Chẩn đoán trực tiếp • Không phải file THT • Không PASS/FAIL • Không tác động relay"
+                           Margin="0,4,0,0" FontSize="13.5" Foreground="#8A3B00"/>
+            </StackPanel>
+            <Border Grid.Column="1" Padding="12,7" CornerRadius="5" Background="#E8F5EC"
+                    BorderBrush="#87B996" BorderThickness="1">
+                <TextBlock x:Name="BoardStatusText" FontWeight="Bold" Foreground="#176B35"/>
+            </Border>
         </Grid>
 
-        <DataGrid x:Name="TopologyGrid"
-                  Grid.Row="2"
-                  ItemsSource="{Binding Rows}"
-                  AutoGenerateColumns="False"
-                  IsReadOnly="True"
-                  CanUserAddRows="False"
-                  EnableRowVirtualization="True"
-                  EnableColumnVirtualization="True"
-                  HeadersVisibility="Column"
-                  GridLinesVisibility="Horizontal"
-                  FontSize="18"
-                  RowHeight="34">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="70"/>
-                <DataGridTextColumn Header="CÁC IO ĐANG NỐI VỚI NHAU" Binding="{Binding Connection}" Width="*"/>
-            </DataGrid.Columns>
-        </DataGrid>
+        <Grid Grid.Row="1" Margin="0,12,0,10">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <Border Style="{StaticResource PanelStyle}" Margin="0,0,6,0"><StackPanel>
+                <TextBlock Text="IO ĐANG TÁC ĐỘNG" Foreground="#5B6472"/>
+                <TextBlock x:Name="ActiveIoCountText" Text="0" FontSize="25" FontWeight="Bold" Foreground="#213A78"/>
+            </StackPanel></Border>
+            <Border Grid.Column="1" Style="{StaticResource PanelStyle}" Margin="6,0"><StackPanel>
+                <TextBlock Text="KẸT / CHƯA THÁO" Foreground="#5B6472"/>
+                <TextBlock x:Name="StuckIoCountText" Text="0" FontSize="25" FontWeight="Bold" Foreground="#C62828"/>
+            </StackPanel></Border>
+            <Border Grid.Column="2" Style="{StaticResource PanelStyle}" Margin="6,0,0,0"><StackPanel>
+                <TextBlock Text="MẠNG CONTINUITY" Foreground="#5B6472"/>
+                <TextBlock x:Name="NetworkCountText" Text="0" FontSize="25" FontWeight="Bold" Foreground="#0F766E"/>
+            </StackPanel></Border>
+        </Grid>
 
-        <Grid Grid.Row="3" Margin="0,14,0,0">
+        <Grid Grid.Row="2" Margin="0,0,0,10">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="150"/>
-                <ColumnDefinition Width="150"/>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="210"/><ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="75"/><ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
+            <TextBlock Text="Mã lưu (không bắt buộc)" VerticalAlignment="Center" FontWeight="SemiBold"/>
+            <TextBox x:Name="ProductCodeTextBox" Grid.Column="1" Margin="8,0,16,0" Height="30"/>
+            <TextBlock Grid.Column="2" Text="Frame ổn định" VerticalAlignment="Center" FontWeight="SemiBold"/>
+            <TextBox x:Name="StableFrameCountTextBox" Grid.Column="3" Margin="8,0,0,0" Height="30" Text="20"/>
+            <TextBlock Grid.Column="4" Margin="16,0,0,0" VerticalAlignment="Center"
+                       Text="IO còn nối hoặc tác động sẽ được báo ngay, không chờ thời gian." Foreground="#5B6472"/>
+        </Grid>
+
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="1.1*"/></Grid.ColumnDefinitions>
+            <Border Style="{StaticResource PanelStyle}"><Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <StackPanel Margin="0,0,0,8">
+                    <TextBlock Text="CHẨN ĐOÁN IO TRỰC TIẾP" FontSize="16" FontWeight="Bold" Foreground="#213A78"/>
+                    <TextBlock Text="Dò chân và báo ngay IO đang kẹt hoặc chưa tháo." Foreground="#5B6472"/>
+                </StackPanel>
+                <DataGrid x:Name="ActiveIoGrid" Grid.Row="1" ItemsSource="{Binding ActiveIoRows}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="70"/>
+                        <DataGridTextColumn Header="LIÊN KẾT" Binding="{Binding RelatedText}" Width="1.2*"/>
+                        <DataGridTextColumn Header="TRẠNG THÁI" Binding="{Binding StatusText}" Width="*">
+                            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock">
+                                <Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{Binding StatusBrush}"/>
+                            </Style></DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid></Border>
+            <Border Grid.Column="2" Style="{StaticResource PanelStyle}"><Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <StackPanel Margin="0,0,0,8">
+                    <TextBlock Text="CÁC CHÂN ĐANG NỐI VỚI NHAU" FontSize="16" FontWeight="Bold" Foreground="#0F766E"/>
+                    <TextBlock Text="Quan sát toàn bộ card; không cần chọn THT." Foreground="#5B6472"/>
+                </StackPanel>
+                <DataGrid x:Name="TopologyGrid" Grid.Row="1" ItemsSource="{Binding Rows}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="50"/>
+                        <DataGridTextColumn Header="KẾT NỐI HIỆN TẠI" Binding="{Binding Connection}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid></Border>
+        </Grid>
+
+        <Grid Grid.Row="4" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="145"/><ColumnDefinition Width="145"/><ColumnDefinition Width="105"/></Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center">
-                <TextBlock x:Name="LearningStatusText" FontSize="16" FontWeight="Bold" Foreground="#243B7A"/>
-                <ProgressBar x:Name="LearningProgress" Height="10" Margin="0,6,18,0" Minimum="0" Maximum="1"/>
+                <TextBlock x:Name="LearningStatusText" FontSize="14" FontWeight="Bold" Foreground="#213A78"/>
+                <ProgressBar x:Name="LearningProgress" Height="8" Margin="0,5,14,0" Minimum="0" Maximum="1"/>
             </StackPanel>
-            <Button x:Name="DiagnoseButton" Grid.Column="1" Margin="5,0" Height="42"
-                    Content="CHẨN ĐOÁN" Click="Diagnose_Click"/>
-            <Button x:Name="SaveButton" Grid.Column="2" Margin="5,0" Height="42"
-                    Content="LƯU CẤU HÌNH" Click="Save_Click" IsEnabled="False"/>
-            <Button Grid.Column="3" Margin="5,0" Height="42" Content="ĐÓNG" Click="Close_Click"/>
+            <Button x:Name="DiagnoseButton" Grid.Column="1" Content="CHỤP ỔN ĐỊNH" Click="Diagnose_Click"/>
+            <Button x:Name="SaveButton" Grid.Column="2" Content="LƯU CẤU HÌNH" Click="Save_Click" IsEnabled="False"
+                    Background="#213A78" Foreground="White"/>
+            <Button Grid.Column="3" Content="ĐÓNG" Click="Close_Click" Background="#FFF0F0" Foreground="#A61B1B"/>
         </Grid>
     </Grid>
 </Window>

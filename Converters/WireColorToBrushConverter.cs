@@ -128,6 +128,7 @@ namespace JBZUniversalTester.Converters
             string[] parts = Regex
                 .Split(code, @"[\/+,;|\-\s]+")
                 .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Take(2)
                 .ToArray();
 
             if (parts.Length >= 1 && TryGetColor(parts[0], out Color baseColor))
@@ -172,31 +173,6 @@ namespace JBZUniversalTester.Converters
                 .ToArray();
 
             return string.Join("/", names);
-        }
-
-        public static IReadOnlyList<string> Tokenize(string? value)
-        {
-            string code = value?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(code))
-                return Array.Empty<string>();
-
-            return Regex
-                .Split(code, @"[\/+,;|\-\s]+")
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x.Trim().Replace(".", string.Empty))
-                .Take(4)
-                .ToArray();
-        }
-
-        public static Brush ToTokenBrush(string? value, int index)
-        {
-            IReadOnlyList<string> tokens = Tokenize(value);
-            if (index < 0 || index >= tokens.Count)
-                return ToBrush(string.Empty);
-
-            return TryGetColor(tokens[index], out Color color)
-                ? ToBrush(tokens[index])
-                : ToBrush(string.Empty);
         }
 
         public static string ToDisplayCode(string? value) => (value ?? string.Empty).Trim();

@@ -38,10 +38,6 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     // Khoảng trống tối thiểu giữ cụm nút Mở/Hủy nằm trọn trong client area.
     private const double PrimaryButtonMarginDip = 10;
 
-    // Number of post-layout checks.
-    // Native Common Dialog can re-layout once more after WM_SIZE.
-    private const int LayoutCorrectionPasses = 5;
-
     private const int WhCbt = 5;
     private const int HcbtActivate = 5;
 
@@ -124,6 +120,9 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             ApplyPreferredSizeWithinWorkArea(dialogHandle);
 
             // 2) Wait until Shell finishes its own localization/layout work.
+            // Perform one correction only. Reapplying the preferred size and
+            // scheduling several idle passes made slower PCs visibly repaint
+            // and resize the dialog in stages.
             _dispatcher.BeginInvoke(
                 DispatcherPriority.ApplicationIdle,
                 () =>
@@ -131,12 +130,7 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
                     if (!IsWindow(dialogHandle))
                         return;
 
-                    ApplyPreferredSizeWithinWorkArea(dialogHandle);
-
-                    // 3) Correct for real localized child-control geometry.
-                    RunLayoutCorrectionPass(
-                        dialogHandle,
-                        LayoutCorrectionPasses);
+                    CorrectAndLockLayout(dialogHandle);
                 });
         }
 
@@ -147,27 +141,14 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             lParam);
     }
 
-    private void RunLayoutCorrectionPass(
-        IntPtr dialogHandle,
-        int remainingPasses)
+    private void CorrectAndLockLayout(IntPtr dialogHandle)
     {
         if (!IsWindow(dialogHandle))
             return;
 
-        bool changed = ExpandIfNativeControlsDoNotFit(dialogHandle);
-
-        if (changed && remainingPasses > 1)
-        {
-            // SetWindowPos sends WM_SIZE. Give the native dialog one message-loop
-            // cycle to reposition its children, then measure again.
-            _dispatcher.BeginInvoke(
-                DispatcherPriority.ApplicationIdle,
-                () => RunLayoutCorrectionPass(
-                    dialogHandle,
-                    remainingPasses - 1));
-
-            return;
-        }
+        // SetWindowPos processes WM_SIZE synchronously, so one measurement and
+        // correction is sufficient before the fixed-size style is applied.
+        ExpandIfNativeControlsDoNotFit(dialogHandle);
 
         // Final layout is now stable.
         // Bảo đảm riêng hai nút thao tác chính (Mở/Hủy) luôn nằm trọn trong

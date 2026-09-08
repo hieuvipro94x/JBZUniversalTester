@@ -314,7 +314,6 @@ public sealed class TestViewModel : ObservableObject
     public bool IsDeviceFault => Volatile.Read(ref _deviceFault) != 0;
     public bool IsManualModeActive => Volatile.Read(ref _manualModeActive) != 0;
     public bool CanEnterManualMode => !IsDeviceFault && !IsManualForbiddenWorkActive;
-    public bool IsMasterBannerVisible => IsMasterSequenceActive && !IsDeviceFault;
     public string DeviceFaultMessage => _deviceFaultMessage;
     public int DeviceFaultTransitionCount => Volatile.Read(ref _deviceFaultTransitionCount);
     public int DeviceFaultDialogCount => Volatile.Read(ref _deviceFaultDialogCount);
@@ -346,8 +345,6 @@ public sealed class TestViewModel : ObservableObject
                 Raise(nameof(StateBackground));
                 Raise(nameof(StateForeground));
                 Raise(nameof(ResultStatusText));
-                Raise(nameof(MasterBannerText));
-                Raise(nameof(IsMasterBannerVisible));
                 RaiseCenterPresentation();
                 RaiseActiveFault();
             }
@@ -468,23 +465,6 @@ public sealed class TestViewModel : ObservableObject
                 return "LẮP SẢN PHẨM";
 
             return "LẮP SẢN PHẨM";
-        }
-    }
-
-    public string MasterBannerText
-    {
-        get
-        {
-            if (!IsMasterBannerVisible)
-                return string.Empty;
-
-            string state = NormalizeSingleLine(State);
-            string status = NormalizeSingleLine(MasterStatus);
-
-            if (state.Equals(status, StringComparison.OrdinalIgnoreCase))
-                return state;
-
-            return string.Join("      ", new[] { state, status }.Where(x => !string.IsNullOrWhiteSpace(x)));
         }
     }
 
@@ -631,6 +611,10 @@ public sealed class TestViewModel : ObservableObject
     public int OpenCount => _cachedOpenCount;
 
     public int WrongCount => _cachedWrongCount;
+
+    public string WrongCountText => IsMasterBadPhase
+        ? $"{MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
+        : WrongCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public int ShortCount => _cachedShortCount;
 
@@ -906,12 +890,10 @@ public sealed class TestViewModel : ObservableObject
             if (Set(ref _masterSequenceState, value))
             {
                 Raise(nameof(IsMasterSequenceActive));
-                Raise(nameof(IsMasterBannerVisible));
                 Raise(nameof(IsMasterBadPhase));
                 Raise(nameof(ProductionEnabled));
-                Raise(nameof(MasterProgressText));
                 Raise(nameof(ResultStatusText));
-                Raise(nameof(MasterBannerText));
+                Raise(nameof(WrongCountText));
                 Raise(nameof(NetworkProgress));
                 RaiseActiveFault();
             }
@@ -926,11 +908,9 @@ public sealed class TestViewModel : ObservableObject
             if (Set(ref _masterApproved, value))
             {
                 Raise(nameof(IsMasterSequenceActive));
-                Raise(nameof(IsMasterBannerVisible));
                 Raise(nameof(ProductionEnabled));
-                Raise(nameof(MasterProgressText));
                 Raise(nameof(ResultStatusText));
-                Raise(nameof(MasterBannerText));
+                Raise(nameof(WrongCountText));
                 Raise(nameof(NetworkProgress));
                 RaiseActiveFault();
             }
@@ -947,11 +927,6 @@ public sealed class TestViewModel : ObservableObject
 
     public int MasterRequiredFaultCount => _masterRequiredFaultCount;
     public int MasterDetectedFaultCount => _masterDetectedFaultKeys.Count;
-    public string MasterProgressText => IsMasterBadPhase
-        ? $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
-        : MasterApproved
-            ? "MASTER HOÀN TẤT • CHỜ LẮP SẢN PHẨM"
-            : string.Empty;
 
     public string MasterStatus
     {
@@ -960,7 +935,6 @@ public sealed class TestViewModel : ObservableObject
         {
             if (Set(ref _masterStatus, value))
             {
-                Raise(nameof(MasterBannerText));
                 RaiseActiveFault();
             }
         }
@@ -1489,11 +1463,18 @@ public sealed class TestViewModel : ObservableObject
 
         dispatcher.BeginInvoke(new Action(async () =>
         {
-            MessageBox.Show(
-                _deviceFaultMessage,
-                "MẤT KẾT NỐI",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
+                [new FaultDetail
+                {
+                    Type = ProductFaultType.SystemDeviceError,
+                    Message = _deviceFaultMessage
+                }],
+                "Bấm XÁC NHẬN để đóng chương trình.",
+                windowHeader: "LỖI THIẾT BỊ");
+            Window? owner = ResolveOperatorDialogOwner();
+            if (owner is not null)
+                dialog.Owner = owner;
+            dialog.ShowDialog();
 
             await ExitApplicationAfterDeviceFaultAsync();
         }));
@@ -1526,7 +1507,6 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(HasBoardConnectionError));
         Raise(nameof(IsManualModeActive));
         Raise(nameof(CanEnterManualMode));
-        Raise(nameof(IsMasterBannerVisible));
         Raise(nameof(DeviceFaultMessage));
         Raise(nameof(DeviceFaultTransitionCount));
         Raise(nameof(DeviceFaultDialogCount));
@@ -5006,11 +4986,10 @@ public sealed class TestViewModel : ObservableObject
     {
         Raise(nameof(MasterRequiredFaultCount));
         Raise(nameof(MasterDetectedFaultCount));
-        Raise(nameof(MasterProgressText));
+        Raise(nameof(WrongCountText));
         Raise(nameof(NetworkProgress));
         Raise(nameof(IsMasterBadPhase));
         Raise(nameof(IsMasterSequenceActive));
-        Raise(nameof(IsMasterBannerVisible));
         Raise(nameof(ProductionEnabled));
         RaiseActiveFault();
     }
@@ -5148,7 +5127,7 @@ public sealed class TestViewModel : ObservableObject
                     _presentationCycleStarted = true;
                     RaiseCenterPresentation();
                     MasterState = MasterSequenceState.TestingBadMaster;
-                    State = $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
+                    State = "KIỂM TRA MẪU MASTER LỖI";
                     MasterStatus = State;
                     Interlocked.Exchange(
                         ref _masterBadCollectNotBeforeUtcTicks,
@@ -5168,7 +5147,7 @@ public sealed class TestViewModel : ObservableObject
                     ResetProductPresentationCycle();
                     RefreshFaults();
                     State = "LẮP SẢN PHẨM";
-                    MasterStatus = $"KIỂM TRA MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
+                    MasterStatus = "KIỂM TRA MẪU MASTER LỖI";
                     AddLog($"MASTER BAD released khi mới {MasterDetectedFaultCount}/{MasterRequiredFaultCount}; không mở Production.");
                     break;
                 }
@@ -5253,7 +5232,7 @@ public sealed class TestViewModel : ObservableObject
             _masterDetectedFaultDetails[key] = fault;
             RebuildMasterFaultDisplayRows();
             SynchronizeFaultRows(BuildMasterFaultGridRows());
-            MasterStatus = $"MASTER LỖI {number}/{MasterRequiredFaultCount}";
+            MasterStatus = "KIỂM TRA MẪU MASTER LỖI";
             State = MasterStatus;
             AddLog(
                 $"MASTER BAD FAULT {number}/{MasterRequiredFaultCount} " +
@@ -5470,8 +5449,8 @@ public sealed class TestViewModel : ObservableObject
                 onPassStarted: () =>
                 {
                     masterPassAt ??= DateTime.Now;
-                    State = "MASTER PASS";
-                    MasterStatus = "MASTER PASS";
+                    State = "HOÀN THÀNH MẪU MASTER ĐẠT";
+                    MasterStatus = State;
                     _sound.PlayTestOk();
                 },
                 markingEnabled: false,
@@ -5502,8 +5481,8 @@ public sealed class TestViewModel : ObservableObject
             MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: true);
             MasterState = MasterSequenceState.EjectingGoodMaster;
-            State = "MASTER PASS";
-            MasterStatus = "MASTER PASS";
+            State = "HOÀN THÀNH MẪU MASTER ĐẠT";
+            MasterStatus = State;
             AddLog("MASTER GOOD PASS");
             AddLog("MASTER GOOD EJECT - Relay 1 JIG; không MARKING, không cộng sản lượng.");
 
@@ -5552,7 +5531,7 @@ public sealed class TestViewModel : ObservableObject
         ResetProductPresentationCycle();
         RefreshFaults();
         State = "LẮP SẢN PHẨM";
-        MasterStatus = $"KIỂM TRA MASTER LỖI 0/{MasterRequiredFaultCount}";
+        MasterStatus = "KIỂM TRA MẪU MASTER LỖI";
         AddLog("MASTER GOOD đã tháo khỏi JIG. Chuyển sang MASTER BAD tự động.");
         RaiseMasterState();
     }
@@ -5572,7 +5551,7 @@ public sealed class TestViewModel : ObservableObject
         {
             _masterFaultCollectionLocked = true;
             MasterState = MasterSequenceState.EjectingBadMaster;
-            State = $"MASTER LỖI {MasterDetectedFaultCount}/{MasterRequiredFaultCount} - PASS";
+            State = "HOÀN THÀNH MẪU MASTER LỖI";
             MasterStatus = State;
             _sound.SetWiringFaultAlarm(false);
             AddLog($"MASTER BAD PASS - đủ {MasterDetectedFaultCount}/{MasterRequiredFaultCount} fault duy nhất.");
@@ -8749,7 +8728,10 @@ public sealed class TestViewModel : ObservableObject
         if (openChanged)
             Raise(nameof(OpenCount));
         if (wrongChanged)
+        {
             Raise(nameof(WrongCount));
+            Raise(nameof(WrongCountText));
+        }
         if (shortChanged)
             Raise(nameof(ShortCount));
         if (previousWiring != wrong + shortCount)
@@ -8763,7 +8745,7 @@ public sealed class TestViewModel : ObservableObject
         Raise(nameof(NetworkProgress));
         Raise(nameof(MasterDetectedFaultCount));
         Raise(nameof(MasterRequiredFaultCount));
-        Raise(nameof(MasterProgressText));
+        Raise(nameof(WrongCountText));
         RaiseActiveFault();
     }
 
@@ -8772,8 +8754,6 @@ public sealed class TestViewModel : ObservableObject
         _visiblePrimaryFaultSnapshotValid = false;
         _visiblePrimaryFaultSnapshot = null;
         Raise(nameof(ResultStatusText));
-        Raise(nameof(MasterBannerText));
-        Raise(nameof(IsMasterBannerVisible));
         Raise(nameof(ActiveFaultTitle));
         Raise(nameof(ActiveFaultMessage));
         Raise(nameof(ActiveFaultExpectedText));

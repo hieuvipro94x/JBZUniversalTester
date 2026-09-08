@@ -88,34 +88,34 @@ public partial class ProductionSettingsPage : UserControl
             return;
         }
 
-        // 1920x1080 là bố cục chính: ba panel dùng toàn bộ chiều rộng theo
-        // tỷ lệ 28/28/44. Không cưỡng chiều rộng 760px vì trên màn hình nhỏ
-        // hoặc DPI cao nó làm nội dung vượt viewport trong khi cuộn ngang tắt.
-        double available = Math.Max(320, e.NewSize.Width - 28);
-        if (available >= 1240)
+        // Ưu tiên ba nhóm chức năng trên cùng một hàng từ màn hình 1280 trở lên
+        // (kể cả khi Windows dành một phần chiều rộng cho chrome/sidebar).
+        // Tỷ lệ 28/28/44 vẫn dành nhiều chỗ nhất cho TEM / ĐIỆN TRỞ.
+        double available = Math.Max(320, e.NewSize.Width - 20);
+        if (available >= 1160)
         {
-            double content = available - 24;
+            double content = available - 18;
             IoSettingsPanel.Width = Math.Floor(content * 0.28);
             RelaySettingsPanel.Width = Math.Floor(content * 0.28);
             LabelSettingsPanel.Width = Math.Max(
-                500,
+                470,
                 content - IoSettingsPanel.Width - RelaySettingsPanel.Width);
             return;
         }
 
         if (available >= 760)
         {
-            double halfPanel = Math.Floor((available - 16) / 2);
+            double halfPanel = Math.Floor((available - 12) / 2);
             IoSettingsPanel.Width = halfPanel;
             RelaySettingsPanel.Width = halfPanel;
-            LabelSettingsPanel.Width = available - 8;
+            LabelSettingsPanel.Width = available - 6;
             return;
         }
 
         // Màn hình rất hẹp: mỗi panel một hàng. Giữ 500px tối thiểu để form
         // TEM không ép mất chữ; ScrollViewer chỉ hiện cuộn ngang ở trường hợp
         // ngoại lệ này thay vì cắt hẳn mép phải.
-        double singlePanel = Math.Max(500, available - 8);
+        double singlePanel = Math.Max(500, available - 6);
         IoSettingsPanel.Width = singlePanel;
         RelaySettingsPanel.Width = singlePanel;
         LabelSettingsPanel.Width = singlePanel;
@@ -272,6 +272,7 @@ public partial class ProductionSettingsPage : UserControl
             Height = 680,
             MinWidth = 640,
             MinHeight = 420,
+            ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner
         };
         var layout = new Grid { Margin = new Thickness(12) };

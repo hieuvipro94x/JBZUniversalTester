@@ -22,10 +22,8 @@ public static class RuntimePaths
 
     // Read-only migration inputs. New runtime writes never target these paths.
     public static string LegacyProductionJson => Path.Combine(AppDirectory, "production.settings.json");
-    public static string LegacyAppSettingsJson => Path.Combine(AppDirectory, "appsettings.json");
     public static string LegacyConfigFile => Path.Combine(AppDirectory, "UniversalTester.cfg");
     public static string LegacyDatabaseFile => Path.Combine(AppDirectory, "Data", "History", "test-history.db");
-    public static string LegacyStatisticsFile => Path.Combine(AppDirectory, "production.statistics.json");
     public static string LegacyPassRoot => @"C:\Pass_";
     public static string LegacyErrorRoot => @"C:\Error_";
 }

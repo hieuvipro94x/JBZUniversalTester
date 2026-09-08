@@ -29,13 +29,7 @@ public sealed class FaultRowCollection : ObservableCollection<FaultRow>
 
 public sealed class FaultRow : ObservableObject
 {
-    private static readonly Brush PiFieldBrush = Frozen(System.Windows.Media.Color.FromRgb(0xF8, 0xF8, 0xF6));
     private static readonly Brush PiTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x55, 0x55, 0x55));
-    private static readonly Brush PiDarkTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x33, 0x33, 0x33));
-    private static readonly Brush PiWrongRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0x4F, 0x63, 0xC5));
-    private static readonly Brush PiProbeRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0xBD, 0xEE, 0xEE));
-    private static readonly Brush PiNetworkPassRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0xDF, 0xF4, 0xE3));
-    private static readonly Brush PiNetworkPassTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x14, 0x6B, 0x2E));
     private static readonly Brush PiFailBrush = Frozen(System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28));
     private static readonly Brush BlackTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x11, 0x11, 0x11));
     private static readonly Brush WhiteBrush = Brushes.White;
@@ -75,33 +69,21 @@ public sealed class FaultRow : ObservableObject
     public string IoCnPnText => _ioCnPnText ??= BuildIoCnPnText();
     public string WireColorText => WireColorToBrushConverter.ToDisplayCode(Color);
     public Brush WireColorBrush => WireColorToBrushConverter.ToBrush(Color);
-    public Brush Color1Brush => TokenBrush(0);
-    public Brush Color2Brush => TokenBrush(1);
-    public Brush Color3Brush => TokenBrush(2);
-    public Brush Color4Brush => TokenBrush(3);
-    public bool HasColor1 => HasColorToken(0);
-    public bool HasColor2 => HasColorToken(1);
-    public bool HasColor3 => HasColorToken(2);
-    public bool HasColor4 => HasColorToken(3);
     public bool IsNetworkPassed =>
         Kind == FaultKind.Info &&
         string.Equals(FaultType, "THÔNG MẠCH", StringComparison.OrdinalIgnoreCase);
 
     public Brush RowBackgroundBrush => Kind switch
     {
-        FaultKind.WrongWiring or FaultKind.Short => PiWrongRowBrush,
-        FaultKind.Open or FaultKind.MissingConnection => WhiteBrush,
-        FaultKind.Probe => PiProbeRowBrush,
         FaultKind.Resistance => PiFailBrush,
-        FaultKind.Info when IsNetworkPassed => PiNetworkPassRowBrush,
-        _ => PiFieldBrush
+        _ => WhiteBrush
     };
     public Brush RowForegroundBrush => Kind switch
     {
-        FaultKind.WrongWiring or FaultKind.Short or FaultKind.Resistance => WhiteBrush,
+        FaultKind.WrongWiring or FaultKind.Short or FaultKind.Probe => PiFailBrush,
+        FaultKind.Resistance => WhiteBrush,
         FaultKind.Open or FaultKind.MissingConnection => BlackTextBrush,
-        FaultKind.Probe => PiDarkTextBrush,
-        FaultKind.Info when IsNetworkPassed => PiNetworkPassTextBrush,
+        FaultKind.Info when IsNetworkPassed => BlackTextBrush,
         _ => PiTextBrush
     };
     public string ColorName => WireColorToBrushConverter.ToVietnameseName(Color);
@@ -145,22 +127,6 @@ public sealed class FaultRow : ObservableObject
                 string.IsNullOrWhiteSpace(Pin) ? null : Pin.Trim()
             }.Where(value => !string.IsNullOrWhiteSpace(value)))
         : string.Empty;
-
-    private Brush TokenBrush(int index)
-    {
-        IReadOnlyList<string> tokens = WireColorToBrushConverter.Tokenize(Color);
-        if (index < 0 || index >= tokens.Count)
-            return PiFieldBrush;
-
-        Brush brush = WireColorToBrushConverter.ToTokenBrush(Color, index);
-        return brush == Brushes.Transparent ? PiFieldBrush : brush;
-    }
-
-    private bool HasColorToken(int index)
-    {
-        IReadOnlyList<string> tokens = WireColorToBrushConverter.Tokenize(Color);
-        return index >= 0 && index < tokens.Count;
-    }
 
     private static SolidColorBrush Frozen(Color color)
     {

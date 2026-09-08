@@ -32,7 +32,6 @@
         <SolidColorBrush x:Key="PiRunningBrush" Color="#A135A4"/>
         <SolidColorBrush x:Key="PiWarningBrush" Color="#E09B27"/>
         <SolidColorBrush x:Key="PiProbeBrush" Color="#23D9D9"/>
-        <SolidColorBrush x:Key="PiProbeRowBrush" Color="#BDEEEE"/>
         <SolidColorBrush x:Key="PiProbeButtonBrush" Color="#78D878"/>
         <SolidColorBrush x:Key="PiButtonBrush" Color="#ECECEC"/>
         <SolidColorBrush x:Key="PiBlueTextBrush" Color="#0026D9"/>
@@ -626,7 +625,7 @@
                     </Border>
                     <TextBlock Grid.Row="2" Text="S&#7889; l&#7895;i &#273;&#7845;u sai" Style="{StaticResource IndustrialCounterLabelStyle}"/>
                     <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource PiCounterValueBorderStyle}">
-                        <TextBlock Text="{Binding WrongCount, Mode=OneWay}" Foreground="{StaticResource PiFailBrush}" Style="{StaticResource PiCounterTextStyle}"/>
+                        <TextBlock Text="{Binding WrongCountText, Mode=OneWay}" Foreground="{StaticResource PiFailBrush}" Style="{StaticResource PiCounterTextStyle}"/>
                     </Border>
                     <TextBlock Grid.Row="3" Text="S&#7889; l&#7895;i" Style="{StaticResource IndustrialCounterLabelStyle}"/>
                     <Border Grid.Row="3" Grid.Column="1" Style="{StaticResource PiCounterValueBorderStyle}">
@@ -929,66 +928,6 @@
             </Grid>
         </Grid>
         </Viewbox>
-
-        <Grid Grid.Row="1">
-            <Border Height="54"
-                    Margin="0,0,0,2"
-                    Background="{StaticResource PiFailBrush}"
-                    BorderBrush="{StaticResource PiBorderBrush}"
-                    BorderThickness="1"
-                    Visibility="{Binding IsDeviceFault, Converter={StaticResource BoolToVisibilityConverter}}">
-                <Grid Margin="8,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="190"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="L&#7894;I THI&#7870;T B&#7882;"
-                               Foreground="White"
-                               FontSize="22"
-                               FontWeight="Bold"
-                               VerticalAlignment="Center"
-                               TextWrapping="NoWrap"/>
-                    <TextBlock Grid.Column="1"
-                               Text="{Binding DeviceFaultMessage}"
-                               Foreground="White"
-                               FontSize="13"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis"
-                               Margin="10,0"/>
-                </Grid>
-            </Border>
-
-            <Border Height="54"
-                    Margin="0,0,0,2"
-                    Background="#FFF3A0"
-                    BorderBrush="{StaticResource PiBorderBrush}"
-                    BorderThickness="1"
-                    Visibility="{Binding IsMasterBannerVisible, Converter={StaticResource BoolToVisibilityConverter}}">
-                <Grid Margin="8,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="180"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding MasterBannerText}"
-                               Foreground="#111111"
-                               FontSize="22"
-                               FontWeight="Bold"
-                               VerticalAlignment="Center"
-                               TextWrapping="NoWrap"
-                               TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Grid.Column="1"
-                               Text="{Binding MasterProgressText}"
-                               Foreground="#111111"
-                               FontSize="18"
-                               FontWeight="Bold"
-                               TextAlignment="Center"
-                               VerticalAlignment="Center"
-                               TextWrapping="NoWrap"
-                               TextTrimming="None"/>
-                </Grid>
-            </Border>
-        </Grid>
 
         <Grid x:Name="OperationTablesHost" Grid.Row="2">
             <DataGrid x:Name="FaultGrid"

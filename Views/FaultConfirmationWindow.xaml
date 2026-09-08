@@ -33,7 +33,8 @@
                                FontSize="20"
                                FontWeight="Bold"/>
                 </Border>
-                <TextBlock Text="SẢN PHẨM KHÔNG ĐẠT"
+                <TextBlock x:Name="WindowHeaderText"
+                           Text="SẢN PHẨM KHÔNG ĐẠT"
                            Foreground="White"
                            VerticalAlignment="Center"
                            FontSize="21"

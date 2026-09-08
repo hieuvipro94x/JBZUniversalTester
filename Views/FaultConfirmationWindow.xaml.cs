@@ -13,12 +13,18 @@ public partial class FaultConfirmationWindow : Window
         IReadOnlyList<FaultDetail> faults,
         string footer,
         Func<int, PinRecord?>? pinResolver = null,
-        string? requiredDiscardPassword = null)
+        string? requiredDiscardPassword = null,
+        string? windowHeader = null)
     {
         InitializeComponent();
 
         _pinResolver = pinResolver;
         _requiredDiscardPassword = requiredDiscardPassword;
+        if (!string.IsNullOrWhiteSpace(windowHeader))
+        {
+            Title = windowHeader;
+            WindowHeaderText.Text = windowHeader;
+        }
 
         if (requiredDiscardPassword is not null)
         {
@@ -57,6 +63,9 @@ public partial class FaultConfirmationWindow : Window
 
     private string BuildShortSummary(FaultDetail fault)
     {
+        if (fault.Type == ProductFaultType.SystemDeviceError)
+            return "LỖI GIAO TIẾP THIẾT BỊ\n\nVUI LÒNG KHỞI ĐỘNG LẠI";
+
         if (fault.Type != ProductFaultType.WrongWiring)
             return FaultDisplayFormatter.FormatOperator(fault).Title;
 
