@@ -1,3 +1,16 @@
+JBZUniversalTester V16.0.259 - AUTOMATIC LABEL PRINTER COM SELECTION
+
+- Chon cong COM may in la luu va ket noi ngay; doi cong se dong owner cu va mo dung cong moi.
+- Bo nut KET NOI va dong trang thai ket noi khoi trang Cai dat; khoi dong van tu ket noi cong da luu.
+- Chon Khong dung COM se dong SerialPort may in co kiem soat; in PASS van tu dong dung cong da chon.
+
+JBZUniversalTester V16.0.258 - TEM_TO ALC BARCODE-ONLY SUFFIX
+
+- Tach LOT hien thi va LOT ma vach: ALC /1 hoac /2 chi them hau to vao Data Matrix/barcode.
+- $LOTNO$, LOT_NO va SERIAL_TEXT luon giu LOT goc; vi du 2609082001WH, khong thanh 26090820011WH.
+- LOTNO TEM_TO/TEM_BE duoc dinh dang toi thieu 4 chu so; LOT tang sau khi in PASS thanh cong, hau to ALC giu nguyen.
+- Ho tro ca TEM_TO tich hop va bieu thuc TEM_TO cu duoc nhung trong THT.
+
 JBZUniversalTester V16.0.256 - CENTERED TEST GRID DATA
 
 - Can giua du lieu cac cot IO, CONNECTOR, Chan Pin, Ten day, Mau, Tiet dien va IO-CN-PN.

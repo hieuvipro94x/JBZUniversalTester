@@ -915,14 +915,14 @@ internal static class Program
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridCenterTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("ElementStyle=\"{StaticResource HtdrvGridStrongCenterTextStyle}\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"T&#234;n d&#226;y\" Binding=\"{Binding WireName}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource HtdrvGridCenterTextStyle}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireName}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource HtdrvGridCenterTextStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\" Width=\"0.85*\" MinWidth=\"90\"", StringComparison.Ordinal) &&
-               xaml.IndexOf("Header=\"T&#234;n d&#226;y\"", StringComparison.Ordinal) <
+               xaml.IndexOf("Header=\"Mã Dây\"", StringComparison.Ordinal) <
                xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
                xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) <
-               xaml.IndexOf("Header=\"Ti&#7871;t di&#7879;n\"", StringComparison.Ordinal) &&
+               xaml.IndexOf("Header=\"Tiết Diện\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#1\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
@@ -991,9 +991,9 @@ internal static class Program
                xaml.Contains("Header=\"Lo&#7841;i\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"CONNECTOR\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"Ch&#226;n Connector\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"T&#234;n d&#226;y\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"Ti&#7871;t di&#7879;n\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Chân Pin\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Mã Dây\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Tiết Diện\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Tr&#7841;ng th&#225;i\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"IO-CN-PN\"", StringComparison.Ordinal) &&
@@ -1033,10 +1033,18 @@ internal static class Program
         string topologyLearningSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml.cs"));
         string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
-        Assert(settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
-            "Production settings exposes reconnectable printer control and connection status");
+        Assert(settingsXaml.Contains(
+                   "SelectionChanged=\"PrinterComComboBox_SelectionChanged\"",
+                   StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("ProductionConfigService.Save(_vm.Settings);", StringComparison.Ordinal) &&
+               settingsSource.Contains("ConnectLabelPrinterAsync(_vm.Settings.Label)", StringComparison.Ordinal) &&
+               settingsSource.Contains("DisconnectLabelPrinterAsync()", StringComparison.Ordinal) &&
+               settingsSource.Contains("new ComPortOption(savedPort, savedPort)", StringComparison.Ordinal) &&
+               !settingsSource.Contains("$\"{savedPort} - chưa kết nối\"", StringComparison.Ordinal),
+            "Selecting a printer COM persists and applies it immediately without a connect button/status label");
         Assert(settingsXaml.Contains("<ColumnDefinition Width=\"110\"/>", StringComparison.Ordinal) &&
                (settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) ||
                 settingsXaml.Contains("Content=\"QUÉT\"", StringComparison.Ordinal)) &&
@@ -1062,7 +1070,7 @@ internal static class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 14 &&
+        Assert(settingsButtons.Length == 13 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
@@ -5932,11 +5940,64 @@ internal static class Program
             history.Finished = new DateTime(2026, 8, 27, 8, 9, 10);
             labelSettings.TemplateType = LabelSettings.LargeTemplate;
             LabelPrintRequest largeSuffix1 = LabelPrintRequest.Capture(history, model, labelSettings);
+            IReadOnlyDictionary<string, string> largeSuffix1Variables =
+                LabelVariableResolver.Resolve(model, largeSuffix1.Data, labelSettings);
             Assert(model.Alc == "12000/20430/1" &&
                    largeSuffix1.Data.Barcode == "KL375C100026082720011" &&
-                   largeSuffix1.Payload.Contains("26082720011WH", StringComparison.Ordinal) &&
+                   largeSuffix1Variables["LOT_NO"] == "2001" &&
+                   largeSuffix1Variables["LOT_NO_BARCODE"] == "20011" &&
+                   largeSuffix1.Payload.Contains("2608272001WH", StringComparison.Ordinal) &&
+                   !largeSuffix1.Payload.Contains("26082720011WH", StringComparison.Ordinal) &&
                    largeSuffix1.Payload.Contains("KL375C100026082720011", StringComparison.Ordinal),
-                "TEM_TO reads ALC /1 from THT and appends 1 immediately after LOTNO");
+                "TEM_TO reads ALC /1 from THT but appends it only to Data Matrix, never the printed LOTNO");
+
+            var customerSuffixModel = new ProductModel
+            {
+                ModelName = "1210040120",
+                PartNumber = "1210040120",
+                ProductName = model.ProductName,
+                Eco = model.Eco,
+                Nco = model.Nco,
+                Alc = "12100/40120/1"
+            };
+            history.LotNo = 2001;
+            history.Finished = new DateTime(2026, 9, 8, 8, 9, 10);
+            LabelPrintRequest customerSuffixLabel =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(customerSuffixLabel.Data.Barcode == "121004012026090820011" &&
+                   customerSuffixLabel.Payload.Contains("2609082001WH", StringComparison.Ordinal) &&
+                   !customerSuffixLabel.Payload.Contains("26090820011WH", StringComparison.Ordinal) &&
+                   customerSuffixLabel.Payload.Contains("121004012026090820011", StringComparison.Ordinal),
+                "ALC 12100/40120/1 keeps printed LOT 2001 and adds suffix 1 only to Data Matrix");
+
+            customerSuffixModel.LabelTemplate = new LabelTemplateDefinition(
+                "N\n?\n$DATA$$LOTNO$WH\n{PART_NUMBER}$DATA$$LOTNO$\nP1",
+                ProfileId: LabelSettings.LargeTemplate);
+            LabelPrintRequest embeddedLegacySuffixLabel =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(embeddedLegacySuffixLabel.Payload.Contains("2609082001WH", StringComparison.Ordinal) &&
+                   embeddedLegacySuffixLabel.Payload.Contains("121004012026090820011", StringComparison.Ordinal) &&
+                   !embeddedLegacySuffixLabel.Payload.Contains("26090820011WH", StringComparison.Ordinal),
+                "Embedded legacy TEM_TO expression is upgraded safely to the separated barcode value");
+
+            customerSuffixModel.Alc = "12100/40120/2";
+            LabelPrintRequest customerSuffix2Label =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(customerSuffix2Label.Data.Barcode == "121004012026090820012" &&
+                   customerSuffix2Label.Payload.Contains("2609082001WH", StringComparison.Ordinal) &&
+                   customerSuffix2Label.Payload.Contains("121004012026090820012", StringComparison.Ordinal) &&
+                   !customerSuffix2Label.Payload.Contains("26090820012WH", StringComparison.Ordinal),
+                "ALC /2 also remains barcode-only while printed LOTNO stays unchanged");
+
+            history.LotNo = 7;
+            customerSuffixModel.Alc = "12100/40120/1";
+            customerSuffixModel.LabelTemplate = new LabelTemplateDefinition();
+            LabelPrintRequest fourDigitLotLabel =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(fourDigitLotLabel.Data.Barcode == "121004012026090800071" &&
+                   fourDigitLotLabel.Payload.Contains("2609080007WH", StringComparison.Ordinal) &&
+                   !fourDigitLotLabel.Payload.Contains("26090800071WH", StringComparison.Ordinal),
+                "TEM_TO keeps LOTNO at four digits and leaves the ALC suffix outside the incrementing LOT");
 
             const string editedLargeTemplate = "N\nEDITED={PART_NUMBER}\nP1\n";
             BuiltInLabelTemplateStore.SaveOverride(
@@ -5953,11 +6014,11 @@ internal static class Program
             LabelIdentity suffix2Identity = EplLabelService.BuildIdentity(suffix2Data);
             LabelIdentity noSuffixIdentity = EplLabelService.BuildIdentity(
                 suffix2Data with { Alc = "12000/20430" });
-            Assert(suffix2Identity.SerialText == "26082720012WH" &&
+            Assert(suffix2Identity.SerialText == "2608272001WH" &&
                    suffix2Identity.BarcodeValue == "KL375C100026082720012" &&
                    noSuffixIdentity.SerialText == "2608272001WH" &&
                    noSuffixIdentity.BarcodeValue == "KL375C10002608272001",
-                "TEM_TO supports ALC /2 and keeps legacy output when ALC has no suffix");
+                "TEM_TO supports Data Matrix suffix /2 without changing printed LOTNO");
 
             var qrModel = new ProductModel
             {
@@ -6292,9 +6353,9 @@ internal static class Program
                qrCaptureArguments[3] is LabelPrintRequest capturedQrRequest &&
                capturedQrRequest.Data.Barcode == "K32000-22402,2608100001" &&
                qrCaptureArguments[4] is LabelIdentity capturedQrIdentity &&
-               capturedQrIdentity.SerialText == "2608101WH" &&
+               capturedQrIdentity.SerialText == "2608100001WH" &&
                capturedQrIdentity.BarcodeValue == "K32000-22402,2608100001",
-            "TEM_BE_QR PASS history keeps QR barcode and does not apply TEM_TO ALC suffix");
+            "TEM_BE_QR PASS history keeps four-digit LOT and does not apply TEM_TO ALC suffix");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);

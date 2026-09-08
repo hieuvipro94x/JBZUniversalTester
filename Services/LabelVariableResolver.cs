@@ -54,6 +54,9 @@ public static class LabelVariableResolver
             includeAlcLotSuffix: !usesFourDigitLot);
         string lot = usesFourDigitLot
             ? labelLotNo.ToString("D4", CultureInfo.InvariantCulture)
+            : EplLabelService.FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix: false);
+        string barcodeLot = usesFourDigitLot
+            ? lot
             : EplLabelService.FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix: true);
         string barcode = string.IsNullOrWhiteSpace(data.Barcode)
             ? identity.BarcodeValue
@@ -91,6 +94,7 @@ public static class LabelVariableResolver
         // Highest priority: immutable data captured for the completed cycle.
         values["LOT"] = lot;
         values["LOT_NO"] = lot;
+        values["LOT_NO_BARCODE"] = barcodeLot;
         values["LOT_NO_3"] = labelLotNo.ToString("D3", CultureInfo.InvariantCulture);
         values["SEQUENCE"] = lot;
         values["MODEL_FILE_NAME"] = Path.GetFileName(model.SourcePath ?? string.Empty);

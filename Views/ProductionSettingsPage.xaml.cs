@@ -21,6 +21,9 @@ public partial class ProductionSettingsPage : UserControl
     private readonly ProductionSettingsViewModel _vm;
     private int _released;
     private int _portRefreshGeneration;
+    private int _printerConnectionGeneration;
+    private bool _printerPortSelectionInitialized;
+    private bool _suppressPrinterPortSelection;
 
     public event EventHandler? SettingsSaved;
     public event EventHandler? RequestClose;
@@ -58,7 +61,7 @@ public partial class ProductionSettingsPage : UserControl
         await RefreshPortsAsync();
         if (IsReleased)
             return;
-        RefreshPrinterConnectionStatus();
+        _printerPortSelectionInitialized = true;
     }
 
     public void ReleasePageResources()
@@ -67,6 +70,7 @@ public partial class ProductionSettingsPage : UserControl
             return;
 
         Interlocked.Increment(ref _portRefreshGeneration);
+        Interlocked.Increment(ref _printerConnectionGeneration);
         Loaded -= ProductionSettingsPage_Loaded;
         DataContext = null;
         SettingsSaved = null;
@@ -182,9 +186,12 @@ public partial class ProductionSettingsPage : UserControl
     private async void RefreshPrinterPorts_Click(object sender, RoutedEventArgs e) =>
         await RefreshPortsAsync();
 
-    private async void ConnectPrinter_Click(object sender, RoutedEventArgs e)
+    private async void PrinterComComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        ConnectPrinterButton.IsEnabled = false;
+        if (!_printerPortSelectionInitialized || _suppressPrinterPortSelection || IsReleased)
+            return;
+
+        int generation = Interlocked.Increment(ref _printerConnectionGeneration);
         try
         {
             PrinterComComboBox
@@ -192,45 +199,40 @@ public partial class ProductionSettingsPage : UserControl
                 ?.UpdateSource();
 
             string portName = _vm.Settings.Label.PrinterCom?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(portName))
+            // Giống phần mềm gốc: lựa chọn COM có hiệu lực ngay và được lưu để
+            // lần PASS kế tiếp dùng đúng cổng, không cần một nút KẾT NỐI riêng.
+            try
             {
-                PrinterConnectionStatusText.Text = "CHƯA CHỌN COM";
-                ShowMessage("Hãy chọn cổng COM của máy in trước khi kết nối.", "MÁY IN", MessageBoxImage.Warning);
-                return;
+                ProductionConfigService.Save(_vm.Settings);
+            }
+            catch (Exception saveError)
+            {
+                AsyncFileLogService.Current.Error(
+                    $"Cannot persist automatic label printer port {portName}: {saveError}");
             }
 
             if (_main is null)
-                throw new InvalidOperationException("Trang Cài đặt chưa được nối với chương trình chính.");
+                return;
 
-            PrinterConnectionStatusText.Text = "ĐANG KẾT NỐI...";
-            LabelPrinterConnectionResult result = await _main.Test.ConnectLabelPrinterAsync(_vm.Settings.Label);
-            PrinterConnectionStatusText.Text = result.Connected ? $"ĐÃ NỐI {portName}" : "KẾT NỐI LỖI";
-
-            if (result.Connected)
+            if (string.IsNullOrWhiteSpace(portName))
             {
-                // Lưu ngay cổng vừa kết nối để lần mở chương trình sau tự kết nối.
-                ProductionConfigService.Save(_vm.Settings);
+                await _main.Test.DisconnectLabelPrinterAsync();
+                return;
             }
 
-            ShowMessage(
-                result.Connected
-                    ? "Đã kết nối máy in."
-                    : "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
-                "KẾT NỐI MÁY IN",
-                result.Connected ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            LabelPrinterConnectionResult result =
+                await _main.Test.ConnectLabelPrinterAsync(_vm.Settings.Label);
+            if (!result.Connected &&
+                !IsReleased &&
+                generation == Volatile.Read(ref _printerConnectionGeneration))
+            {
+                AsyncFileLogService.Current.Error(
+                    $"Automatic label printer selection failed on {portName}: {result.Message}");
+            }
         }
         catch (Exception ex)
         {
-            PrinterConnectionStatusText.Text = "KẾT NỐI LỖI";
-            AsyncFileLogService.Current.Error($"Label printer connection failed: {ex}");
-            ShowMessage(
-                "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
-                "KẾT NỐI MÁY IN",
-                MessageBoxImage.Warning);
-        }
-        finally
-        {
-            ConnectPrinterButton.IsEnabled = true;
+            AsyncFileLogService.Current.Error($"Automatic label printer selection failed: {ex}");
         }
     }
 
@@ -458,12 +460,20 @@ public partial class ProductionSettingsPage : UserControl
             if (!string.IsNullOrWhiteSpace(savedPort) &&
                 options.All(x => !string.Equals(x.PortName, savedPort, StringComparison.OrdinalIgnoreCase)))
             {
-                options.Insert(0, new ComPortOption(savedPort, $"{savedPort} - chưa kết nối"));
+                options.Insert(0, new ComPortOption(savedPort, savedPort));
             }
 
             options.Insert(0, new ComPortOption(string.Empty, "Không dùng COM / dùng Windows printer"));
-            PrinterComComboBox.ItemsSource = options;
-            PrinterComComboBox.SelectedValue = savedPort;
+            _suppressPrinterPortSelection = true;
+            try
+            {
+                PrinterComComboBox.ItemsSource = options;
+                PrinterComComboBox.SelectedValue = savedPort;
+            }
+            finally
+            {
+                _suppressPrinterPortSelection = false;
+            }
 
             string savedWaterProofPort = _vm.Settings.WaterProofMachine.PortName?.Trim() ?? string.Empty;
             WaterProofComComboBox.ItemsSource = ports;
@@ -474,8 +484,16 @@ public partial class ProductionSettingsPage : UserControl
             if (IsReleased || generation != Volatile.Read(ref _portRefreshGeneration))
                 return;
 
-            PrinterComComboBox.ItemsSource = new[] { new ComPortOption(string.Empty, "Không dùng COM") };
-            PrinterComComboBox.SelectedIndex = 0;
+            _suppressPrinterPortSelection = true;
+            try
+            {
+                PrinterComComboBox.ItemsSource = new[] { new ComPortOption(string.Empty, "Không dùng COM") };
+                PrinterComComboBox.SelectedIndex = 0;
+            }
+            finally
+            {
+                _suppressPrinterPortSelection = false;
+            }
             WaterProofComComboBox.ItemsSource = Array.Empty<string>();
             AsyncFileLogService.Current.Error($"COM port enumeration failed: {ex}");
             ShowMessage(
@@ -483,19 +501,6 @@ public partial class ProductionSettingsPage : UserControl
                 "Cổng COM",
                 MessageBoxImage.Warning);
         }
-    }
-
-    private void RefreshPrinterConnectionStatus()
-    {
-        if (_main?.Test.IsLabelPrinterConnected == true)
-        {
-            PrinterConnectionStatusText.Text = $"ĐÃ NỐI {_main.Test.LabelPrinterConnectedPort}";
-            return;
-        }
-
-        PrinterConnectionStatusText.Text = string.IsNullOrWhiteSpace(_vm.Settings.Label.PrinterCom)
-            ? "CHƯA CHỌN COM"
-            : "CHƯA KẾT NỐI";
     }
 
     private async void RefreshWaterProofPorts_Click(object sender, RoutedEventArgs e) =>

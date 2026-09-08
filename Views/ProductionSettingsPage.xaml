@@ -627,7 +627,8 @@
                                   Margin="0,2,4,2"
                                   DisplayMemberPath="Display"
                                   SelectedValuePath="PortName"
-                                  SelectedValue="{Binding Settings.Label.PrinterCom, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                  SelectedValue="{Binding Settings.Label.PrinterCom, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  SelectionChanged="PrinterComComboBox_SelectionChanged"/>
                         <Button Grid.Column="2"
                                 Height="28"
                                 Margin="0,2,4,2"
@@ -656,32 +657,6 @@
                                   Grid.ColumnSpan="2"
                                   Content="Sử dụng in Lable"
                                   IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
-
-                        <TextBlock Grid.Row="1"
-                                   Grid.Column="2"
-                                   Text="Máy in"
-                                   Style="{StaticResource FieldLabelStyle}"/>
-                        <Button x:Name="ConnectPrinterButton"
-                                Grid.Row="1"
-                                Grid.Column="3"
-                                Grid.ColumnSpan="2"
-                                Width="84"
-                                Height="28"
-                                Margin="0,2"
-                                HorizontalAlignment="Left"
-                                Padding="4,0"
-                                Content="KẾT NỐI"
-                                Style="{StaticResource SettingsActionButtonStyle}"
-                                Click="ConnectPrinter_Click"/>
-                        <TextBlock x:Name="PrinterConnectionStatusText"
-                                   Grid.Row="1"
-                                   Grid.Column="5"
-                                   Margin="4,0,0,0"
-                                   VerticalAlignment="Center"
-                                   FontSize="10"
-                                   TextAlignment="Left"
-                                   TextTrimming="CharacterEllipsis"
-                                   Text="CHƯA KẾT NỐI"/>
 
                         <StackPanel x:Name="LabelPrintActionsPanel"
                                     Grid.Row="2"

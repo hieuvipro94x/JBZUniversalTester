@@ -348,9 +348,23 @@ public sealed record LabelPrintRequest(
         }
         else if (!string.IsNullOrWhiteSpace(model.LabelTemplate.BarcodeTemplate))
         {
+            Dictionary<string, string> barcodeVariables = variables.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value,
+                StringComparer.OrdinalIgnoreCase);
+            if (barcodeVariables.TryGetValue("LOT_NO_BARCODE", out string? barcodeLot))
+            {
+                // BarcodeTemplate là ngữ cảnh mã vạch riêng. Giữ tương thích
+                // template cũ dùng LOT/LOTNO/SEQUENCE bằng cách chỉ đưa LOT có
+                // hậu tố ALC vào lần render này; payload chữ vẫn dùng LOT gốc.
+                barcodeVariables["LOT"] = barcodeLot;
+                barcodeVariables["LOT_NO"] = barcodeLot;
+                barcodeVariables["SEQUENCE"] = barcodeLot;
+            }
+
             string barcode = JBZUniversalTester.Services.LabelTemplateRenderer.Render(
                 model.LabelTemplate.BarcodeTemplate,
-                variables,
+                barcodeVariables,
                 model.PartNumber,
                 model.LabelTemplate.ProfileId);
             data = data with { Barcode = barcode, BarcodePrint = barcode };

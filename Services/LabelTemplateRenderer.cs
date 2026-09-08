@@ -57,7 +57,11 @@ public static partial class LabelTemplateRenderer
         ArgumentNullException.ThrowIfNull(variables);
 
         var unresolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        string rendered = BraceTokenRegex().Replace(template, match =>
+        // THT TEM_TO cũ truyền dòng Data Matrix bằng biểu thức ghép này. LOTNO
+        // nay luôn là LOT hiển thị không hậu tố; đổi riêng toàn bộ biểu thức mã
+        // vạch sang BARCODE để hậu tố ALC /1 hoặc /2 chỉ đi vào Data Matrix.
+        string normalizedTemplate = LegacyTemToBarcodeRegex().Replace(template, "{BARCODE}");
+        string rendered = BraceTokenRegex().Replace(normalizedTemplate, match =>
             Resolve(match, match.Groups["name"].Value, variables, unresolved));
         rendered = DollarTokenRegex().Replace(rendered, match =>
             Resolve(match, match.Groups["name"].Value, variables, unresolved));
@@ -111,4 +115,9 @@ public static partial class LabelTemplateRenderer
 
     [GeneratedRegex(@"\$(?<name>[A-Za-z][A-Za-z0-9_]*)(?:\$)?", RegexOptions.CultureInvariant)]
     private static partial Regex DollarTokenRegex();
+
+    [GeneratedRegex(
+        @"(?:\{PART_NUMBER\}|\$PARTNO\$?)\$DATA\$\$LOTNO\$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex LegacyTemToBarcodeRegex();
 }

@@ -55,6 +55,19 @@ public sealed class LabelPrintService : IAsyncDisposable
         }
     }
 
+    public async Task DisconnectAsync(CancellationToken ct = default)
+    {
+        await _printGate.WaitAsync(ct);
+        try
+        {
+            ClosePrinterPort();
+        }
+        finally
+        {
+            _printGate.Release();
+        }
+    }
+
     public async Task<LabelPrintTransportResult> PrintPassLabelAsync(
         LabelPrintRequest request,
         CancellationToken ct = default)

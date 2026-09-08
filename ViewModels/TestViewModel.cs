@@ -4189,6 +4189,18 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    public async Task DisconnectLabelPrinterAsync(CancellationToken ct = default)
+    {
+        await _labelPrintService.DisconnectAsync(ct);
+        InvokeUi(() =>
+        {
+            LabelStatusText = "TEM: KHÔNG DÙNG CỔNG COM";
+            Raise(nameof(IsLabelPrinterConnected));
+            Raise(nameof(LabelPrinterConnectedPort));
+        });
+        AddLog("LABEL PRINTER: đã đóng cổng COM theo lựa chọn của người vận hành.");
+    }
+
     public Task<LabelPrintTransportResult> PrintSettingsLabelAsync(
         LabelPrintRequest request,
         CancellationToken ct = default) =>
