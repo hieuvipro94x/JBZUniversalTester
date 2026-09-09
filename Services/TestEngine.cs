@@ -75,6 +75,10 @@ public sealed class TestEngine : IDisposable
     readonly Dictionary<string, int> _stableCounters = new(StringComparer.OrdinalIgnoreCase);
     readonly HashSet<int> _currentActive = [];
     readonly Dictionary<int, HashSet<int>> _currentConnections = [];
+    // Presentation-only overlay populated from changed SOURCE relations before C0.
+    // It never participates in PASS/FAIL, fault debounce, relay or counters.
+    readonly Dictionary<int, HashSet<int>> _continuityPreviewConnections = [];
+    long _continuityPreviewSequence;
     readonly HashSet<int> _unexpectedIo = [];
     readonly HashSet<WiringFaultPair> _wiringFaults = [];
     readonly HashSet<WiringFaultPair> _candidateWiringFaults = [];
@@ -730,6 +734,8 @@ public sealed class TestEngine : IDisposable
         _stableCounters.Clear();
         _currentActive.Clear();
         _currentConnections.Clear();
+        _continuityPreviewConnections.Clear();
+        _continuityPreviewSequence = 0;
         _actualComponentByIo.Clear();
         _unexpectedIo.Clear();
         _wiringFaults.Clear();
@@ -753,6 +759,109 @@ public sealed class TestEngine : IDisposable
             _latchedClipKeys.Clear();
 
         Reset();
+    }
+
+    /// <summary>
+    /// Applies one finalized SOURCE relation from the in-progress Production scan.
+    /// The overlay is presentation-only: expected topology edges are filtered here
+    /// and the authoritative continuity state remains untouched until a complete C0 frame.
+    /// </summary>
+    public bool ApplyContinuityPreviewSource(
+        int sourceIo,
+        IReadOnlyCollection<int> targets,
+        long sequence)
+    {
+        if (_disposed || sourceIo <= 0)
+            return false;
+
+        lock (_gate)
+        {
+            if (!_frameProcessingEnabled || _model is null ||
+                !_componentByIo.TryGetValue(sourceIo, out int expectedComponent))
+            {
+                return false;
+            }
+
+            if (_continuityPreviewSequence != 0 &&
+                sequence > 0 &&
+                sequence != _continuityPreviewSequence)
+            {
+                _continuityPreviewConnections.Clear();
+            }
+            if (sequence > 0)
+                _continuityPreviewSequence = sequence;
+
+            var filteredTargets = new HashSet<int>();
+            foreach (int target in targets)
+            {
+                if (target > 0 &&
+                    _componentByIo.TryGetValue(target, out int targetComponent) &&
+                    targetComponent == expectedComponent)
+                {
+                    filteredTargets.Add(target);
+                }
+            }
+
+            // If this preview matches the last authoritative C0 relation, remove any
+            // older override instead of keeping an unnecessary presentation overlay.
+            bool matchesAuthoritative = _currentConnections.TryGetValue(
+                sourceIo,
+                out HashSet<int>? authoritativeTargets)
+                ? FilterExpectedComponentTargetsUnsafe(
+                    authoritativeTargets,
+                    expectedComponent).SetEquals(filteredTargets)
+                : filteredTargets.Count == 0;
+
+            if (matchesAuthoritative)
+                return _continuityPreviewConnections.Remove(sourceIo);
+
+            if (_continuityPreviewConnections.TryGetValue(
+                    sourceIo,
+                    out HashSet<int>? existing) &&
+                existing.SetEquals(filteredTargets))
+            {
+                return false;
+            }
+
+            _continuityPreviewConnections[sourceIo] = filteredTargets;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Clears the presentation overlay when an authoritative complete frame is about
+    /// to be processed. Returns true only when the visible preview could have changed.
+    /// </summary>
+    public bool ClearContinuityPreview()
+    {
+        lock (_gate)
+        {
+            if (_continuityPreviewConnections.Count == 0)
+            {
+                _continuityPreviewSequence = 0;
+                return false;
+            }
+
+            _continuityPreviewConnections.Clear();
+            _continuityPreviewSequence = 0;
+            return true;
+        }
+    }
+
+    private HashSet<int> FilterExpectedComponentTargetsUnsafe(
+        IEnumerable<int> targets,
+        int expectedComponent)
+    {
+        var filtered = new HashSet<int>();
+        foreach (int target in targets)
+        {
+            if (_componentByIo.TryGetValue(target, out int component) &&
+                component == expectedComponent)
+            {
+                filtered.Add(target);
+            }
+        }
+        return filtered;
     }
 
     public bool ProcessFrame(ScanFrame frame, bool preserveConfirmedWiringFaults = false)
@@ -1301,12 +1410,17 @@ public sealed class TestEngine : IDisposable
                (connections.TryGetValue(b, out HashSet<int>? fromB) && fromB.Contains(a));
     }
 
-    private bool IsWireNetConnected(WireNet net)
+    private bool IsWireNetConnected(WireNet net) =>
+        IsWireNetConnected(net, _actualComponentByIo);
+
+    private static bool IsWireNetConnected(
+        WireNet net,
+        IReadOnlyDictionary<int, int> actualComponents)
     {
         if (!IsEligibleProductionNet(net))
             return false;
 
-        if (!_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent))
+        if (!actualComponents.TryGetValue(net.SourceIo, out int sourceComponent))
             return false;
 
         foreach (int endpoint in net.IoNumbers)
@@ -1316,7 +1430,7 @@ public sealed class TestEngine : IDisposable
             if (endpoint <= 0)
                 continue;
 
-            if (!_actualComponentByIo.TryGetValue(endpoint, out int component) ||
+            if (!actualComponents.TryGetValue(endpoint, out int component) ||
                 component != sourceComponent)
             {
                 return false;
@@ -1347,19 +1461,24 @@ public sealed class TestEngine : IDisposable
         return disconnected;
     }
 
-    private HashSet<int> BuildReachableNetEndpoints(WireNet net)
+    private HashSet<int> BuildReachableNetEndpoints(WireNet net) =>
+        BuildReachableNetEndpoints(net, _actualComponentByIo);
+
+    private static HashSet<int> BuildReachableNetEndpoints(
+        WireNet net,
+        IReadOnlyDictionary<int, int> actualComponents)
     {
         var reachable = new HashSet<int>();
         if (net.SourceIo <= 0)
             return reachable;
 
-        if (!_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent))
+        if (!actualComponents.TryGetValue(net.SourceIo, out int sourceComponent))
             return reachable;
 
         foreach (int endpoint in net.IoNumbers)
         {
             if (endpoint > 0 &&
-                _actualComponentByIo.TryGetValue(endpoint, out int component) &&
+                actualComponents.TryGetValue(endpoint, out int component) &&
                 component == sourceComponent)
                 reachable.Add(endpoint);
         }
@@ -1498,15 +1617,17 @@ public sealed class TestEngine : IDisposable
 
         lock (_gate)
         {
+            Dictionary<int, int>? previewComponents =
+                BuildContinuityPreviewComponentsUnsafe(out HashSet<int> previewExpectedComponents);
+
             // HTDRV_WIRING_FAIL_DISPLAY_2026-09-05: chỉ confirmed fault trong
             // _wiringFaults được phép thay presentation. Candidate tuyệt đối
             // không đi vào bảng operator.
             HashSet<int> diagnosticIos = [];
             rows.AddRange(BuildConfirmedWiringDisplayRows(model, diagnosticIos));
 
-            // CLIP được kiểm tra riêng: mọi nhánh dùng chung A0 nhưng mỗi aN
-            // phải đi tới đúng I/O được cấu hình trên row aN. Chỉ nhánh chưa
-            // đạt mới còn trên bảng.
+            // CLIP giữ nguyên semantics latch hiện hữu. Continuity preview chỉ
+            // tác động WireNet thường để không thay đổi workflow CLIP/PASS.
             if (model.Clip is not null)
             {
                 if (!AnyClipBranchLatched(model.Clip) &&
@@ -1528,36 +1649,28 @@ public sealed class TestEngine : IDisposable
                 }
             }
 
-            // NETWORK MAPPING là danh sách endpoint chưa hoàn thành.
-            // Một WireName vẫn là một logical network; khi network PASS sạch,
-            // endpoint rows chỉ biến mất khỏi presentation, không bị xóa khỏi
-            // model hay expected network state.
             foreach (WireNet net in model.Nets)
             {
                 if (!IsEligibleProductionNet(net))
                     continue;
 
-                if (_passedNets.Contains(net.Name) ||
-                    net.IoNumbers.Any(diagnosticIos.Contains))
+                bool previewAffected = previewComponents is not null &&
+                    IsNetAffectedByContinuityPreviewUnsafe(net, previewExpectedComponents);
+                bool electricallyComplete = previewAffected
+                    ? IsWireNetConnected(net, previewComponents!)
+                    : _passedNets.Contains(net.Name);
+
+                if (electricallyComplete || net.IoNumbers.Any(diagnosticIos.Contains))
                     continue;
 
                 if (_displayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
                 {
-                    // Htdrv removes endpoints as soon as that side is
-                    // electrically reached. Keep only the still-disconnected
-                    // endpoints; do not redraw the already-installed side
-                    // beside its mate (for example L-L/G-G).
-                    HashSet<int> reachable = BuildReachableNetEndpoints(net);
-                    // A lone source word is only a scan/active indication, not
-                    // an electrical connection. Do not hide its row; the
-                    // original Htdrv keeps the complete wire pair visible
-                    // until an edge reaches at least two endpoints.
+                    HashSet<int> reachable = previewAffected
+                        ? BuildReachableNetEndpoints(net, previewComponents!)
+                        : BuildReachableNetEndpoints(net);
                     if (reachable.Count < 2)
                         reachable.Clear();
-                    // RET is different: it is a two-pin retainer pair located
-                    // adjacent on one connector. Htdrv always keeps both RET
-                    // rows together (RET(N)/RET(N+1)); never collapse one side
-                    // merely because the electrical edge was seen.
+
                     bool retainerPair = IsRetainerPair(net);
                     rows.AddRange(retainerPair
                         ? cachedRows
@@ -1566,15 +1679,14 @@ public sealed class TestEngine : IDisposable
             }
         }
 
-        // Fault rows được thêm trước, các row tĩnh đã mang DisplayOrder từ lúc
-        // load model. Không OrderBy toàn bộ bảng theo từng frame.
         return rows;
     }
 
     /// <summary>
     /// Presentation riêng cho giai đoạn chờ tháo: quan hệ nào còn thật trên
     /// jig thì còn row; tháo quan hệ nào thì row của network đó mất ngay.
-    /// Không thay đổi passed-net latch hay bất kỳ điều kiện PASS/FAIL nào.
+    /// Continuity preview may accelerate only the table; removal completion still
+    /// requires the authoritative complete frame in the existing state machine.
     /// </summary>
     public IReadOnlyList<FaultRow> BuildRemovalRows()
     {
@@ -1585,16 +1697,27 @@ public sealed class TestEngine : IDisposable
         var rows = new List<FaultRow>();
         lock (_gate)
         {
+            Dictionary<int, int>? previewComponents =
+                BuildContinuityPreviewComponentsUnsafe(out HashSet<int> previewExpectedComponents);
             HashSet<int> diagnosticIos = [];
             rows.AddRange(BuildConfirmedWiringDisplayRows(model, diagnosticIos));
 
             foreach (WireNet net in model.Nets)
             {
-                if (IsEligibleProductionNet(net) &&
-                    !net.IoNumbers.Any(diagnosticIos.Contains) &&
-                    IsWireNetConnected(net) &&
+                if (!IsEligibleProductionNet(net) || net.IoNumbers.Any(diagnosticIos.Contains))
+                    continue;
+
+                bool previewAffected = previewComponents is not null &&
+                    IsNetAffectedByContinuityPreviewUnsafe(net, previewExpectedComponents);
+                bool connected = previewAffected
+                    ? IsWireNetConnected(net, previewComponents!)
+                    : IsWireNetConnected(net);
+
+                if (connected &&
                     _removalDisplayRowsByNet.TryGetValue(net, out FaultRow[]? cachedRows))
+                {
                     rows.AddRange(cachedRows);
+                }
             }
 
             if (model.Clip is not null)
@@ -1609,6 +1732,36 @@ public sealed class TestEngine : IDisposable
             }
         }
         return rows;
+    }
+
+    private Dictionary<int, int>? BuildContinuityPreviewComponentsUnsafe(
+        out HashSet<int> affectedExpectedComponents)
+    {
+        affectedExpectedComponents = [];
+        if (_continuityPreviewConnections.Count == 0)
+            return null;
+
+        var merged = new Dictionary<int, HashSet<int>>(
+            _currentConnections.Count + _continuityPreviewConnections.Count);
+        foreach ((int source, HashSet<int> targets) in _currentConnections)
+            merged[source] = targets.ToHashSet();
+
+        foreach ((int source, HashSet<int> targets) in _continuityPreviewConnections)
+        {
+            merged[source] = targets.ToHashSet();
+            if (_componentByIo.TryGetValue(source, out int expectedComponent))
+                affectedExpectedComponents.Add(expectedComponent);
+        }
+
+        return BuildActualComponents(merged);
+    }
+
+    private bool IsNetAffectedByContinuityPreviewUnsafe(
+        WireNet net,
+        IReadOnlySet<int> affectedExpectedComponents)
+    {
+        return _componentByIo.TryGetValue(net.SourceIo, out int expectedComponent) &&
+               affectedExpectedComponents.Contains(expectedComponent);
     }
 
     private IReadOnlyList<FaultRow> BuildConfirmedWiringDisplayRows(

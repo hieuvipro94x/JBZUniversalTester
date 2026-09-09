@@ -142,6 +142,11 @@ public sealed class TestViewModel : ObservableObject
     private long _engineUiUpdateRevision;
     private EngineUiUpdateRequest? _latestEngineUiUpdateRequest;
     private long _engineUiQueuedAtTimestamp;
+    // Separate presentation queue for pre-C0 continuity preview. It never runs
+    // ProcessEngineChangedOnUi, so no PASS/FAIL/relay state machine can be entered.
+    private int _continuityPreviewUiQueued;
+    private long _continuityPreviewUiRevision;
+    private long _continuityPreviewUiGeneration;
     private int _deviceFault;
     private int _boardUnavailablePresentationApplied;
     private int _manualModeActive;
@@ -2782,9 +2787,99 @@ public sealed class TestViewModel : ObservableObject
         AddLog($"[WATERPROOF] {text}");
     }
 
+    private static bool IsContinuityPreviewFrame(ScanFrame frame) =>
+        frame.Mode == BoardScanMode.Production &&
+        !frame.Complete &&
+        frame.UnknownBytes == 0 &&
+        frame.SourceCount == 1 &&
+        frame.Connections.Count == 1 &&
+        frame.EndMarkerCode is null &&
+        !frame.TerminatorKnown;
+
+    private bool TryHandleContinuityPreviewFrame(ScanFrame frame)
+    {
+        if (!IsContinuityPreviewFrame(frame))
+            return false;
+
+        // The sentinel frame is presentation-only. Always consume it here so it
+        // can never reach discard/startup/probe/PASS/FAIL/relay logic below.
+        if (!_board.IsScanning ||
+            !IsRuntimeMode(RuntimeMode.Production) ||
+            Volatile.Read(ref _probeSessionActive) != 0 ||
+            !MasterApproved ||
+            IsIoMappingMode ||
+            !_presentationCycleStarted ||
+            CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval))
+        {
+            return true;
+        }
+
+        var relation = frame.Connections.First();
+        int sourceIo = relation.Key;
+
+        IReadOnlyCollection<int> targets = relation.Value.ToArray();
+        if (_model is { DiscardContactIo.Count: > 0 } discardModel)
+        {
+            if (discardModel.DiscardContactIo.Contains(sourceIo))
+                return true;
+
+            targets = targets
+                .Where(io => !discardModel.DiscardContactIo.Contains(io))
+                .ToArray();
+        }
+
+        if (!_engine.ApplyContinuityPreviewSource(sourceIo, targets, frame.Sequence))
+            return true;
+
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        QueueContinuityPreviewUi(generation);
+        return true;
+    }
+
+    private void QueueContinuityPreviewUi(long generation)
+    {
+        Volatile.Write(ref _continuityPreviewUiGeneration, generation);
+        Interlocked.Increment(ref _continuityPreviewUiRevision);
+        if (Interlocked.CompareExchange(ref _continuityPreviewUiQueued, 1, 0) != 0)
+            return;
+
+        InvokeUi(ProcessContinuityPreviewUi);
+    }
+
+    private void ProcessContinuityPreviewUi()
+    {
+        long revision = Volatile.Read(ref _continuityPreviewUiRevision);
+        long generation = Volatile.Read(ref _continuityPreviewUiGeneration);
+        try
+        {
+            if (IsRuntimeContext(RuntimeMode.Production, generation) &&
+                Volatile.Read(ref _probeSessionActive) == 0 &&
+                !IsIoMappingMode &&
+                _presentationCycleStarted &&
+                CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval)
+            {
+                // RefreshFaults only synchronizes presentation rows. It does not
+                // evaluate TestEngine state or trigger result/relay side effects.
+                RefreshFaults();
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _continuityPreviewUiQueued, 0);
+            if (Volatile.Read(ref _continuityPreviewUiRevision) != revision &&
+                Interlocked.CompareExchange(ref _continuityPreviewUiQueued, 1, 0) == 0)
+            {
+                InvokeUi(ProcessContinuityPreviewUi);
+            }
+        }
+    }
+
     private void OnBoardFrameReceived(object? sender, ScanFrame frame)
     {
         if (IsDeviceFault || !_board.IsConnected)
+            return;
+
+        if (TryHandleContinuityPreviewFrame(frame))
             return;
 
         bool restoreBoardPresentation = false;
@@ -3022,6 +3117,10 @@ public sealed class TestViewModel : ObservableObject
                 }
 
                 long processStarted = Stopwatch.GetTimestamp();
+                // Drop only the presentation overlay immediately before the
+                // authoritative C0 snapshot is evaluated. PASS/FAIL state itself
+                // has never been changed by the preview path.
+                bool continuityPreviewCleared = _engine.ClearContinuityPreview();
                 // Htdrv changes the operator state from the physical snapshot,
                 // not from the slower fault/topology result. One active jig IO
                 // is enough for ĐANG TEST; an empty complete frame immediately
@@ -3029,6 +3128,8 @@ public sealed class TestViewModel : ObservableObject
                 UpdateImmediateProductPresenceState(frame);
                 bool engineChanged = _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
                 Interlocked.Increment(ref _productionFramesProcessed);
+                if (continuityPreviewCleared && !engineChanged)
+                    QueueContinuityPreviewUi(generation);
                 if (restoreBoardPresentation && !engineChanged)
                 {
                     // UI đã xóa snapshot lúc đổi lifecycle. Frame đầu tiên của phiên mới

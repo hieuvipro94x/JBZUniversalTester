@@ -54,6 +54,10 @@ public sealed class BoardIoDecoder
     readonly List<byte> _frameRaw = [];
     readonly List<ProductionProbePreview> _productionProbePreviews = [];
     int[] _lastProductionProbePreviewIo = [];
+    // Presentation-only continuity preview: remember the last finalized TARGET set
+    // for each SOURCE across complete scan cycles. We only emit a preview when a
+    // SOURCE relation actually changes, so unchanged 256/640-I/O scans stay silent.
+    readonly Dictionary<int, HashSet<int>> _lastProductionSourceTargets = [];
 
     int? _currentSource;
     long _sequence;
@@ -123,6 +127,7 @@ public sealed class BoardIoDecoder
         _buffer.Clear();
         _bufferOffset = 0;
         _productionProbePreviews.Clear();
+        _lastProductionSourceTargets.Clear();
         ResetFrameState(resetSequence: true);
     }
 
@@ -159,6 +164,12 @@ public sealed class BoardIoDecoder
 
             if (TryDecodeProtocolSource(first, second, out int physicalSourceIo))
             {
+                // A SOURCE is complete as soon as the next SOURCE word arrives:
+                // every TARGET belonging to it has already been received. Publish
+                // only a changed relation, never one event per protocol word.
+                if (_currentSource is int completedSource)
+                    QueueProductionContinuityPreviewIfChanged(frames, completedSource, emit: true);
+
                 AppendRaw(first, second);
                 _bufferOffset += 2;
 
@@ -215,6 +226,12 @@ public sealed class BoardIoDecoder
                     ResetFrameState();
                     continue;
                 }
+
+                // The last SOURCE has no following SOURCE boundary. Synchronize
+                // its comparison cache here, but do not emit a redundant preview
+                // immediately before the authoritative C0 frame.
+                if (_currentSource is int finalSource && terminator.IsKnown && _unknownBytes == 0)
+                    QueueProductionContinuityPreviewIfChanged(frames, finalSource, emit: false);
 
                 _sequence++;
 
@@ -294,6 +311,62 @@ public sealed class BoardIoDecoder
             requiredHits,
             targetHits,
             _sequence + 1));
+    }
+
+    private void QueueProductionContinuityPreviewIfChanged(
+        List<ScanFrame> frames,
+        int sourceIo,
+        bool emit)
+    {
+        if (_unknownBytes != 0 || sourceIo <= 0)
+            return;
+
+        HashSet<int> currentTargets = _connections.TryGetValue(sourceIo, out HashSet<int>? targets)
+            ? targets
+            : [];
+
+        bool hadPrevious = _lastProductionSourceTargets.TryGetValue(
+            sourceIo,
+            out HashSet<int>? previousTargets);
+        bool changed = hadPrevious
+            ? !previousTargets!.SetEquals(currentTargets)
+            : currentTargets.Count > 0;
+
+        // Keep the comparison cache synchronized even for empty/unchanged sources.
+        _lastProductionSourceTargets[sourceIo] = currentTargets.ToHashSet();
+
+        if (!emit || !changed)
+            return;
+
+        IReadOnlySet<int> targetSnapshot = currentTargets.Count == 0
+            ? EmptyTargets
+            : currentTargets.ToHashSet();
+        var connectionSnapshot = new Dictionary<int, IReadOnlySet<int>>(1)
+        {
+            [sourceIo] = targetSnapshot
+        };
+
+        // Sentinel for TestViewModel/D2xx transport:
+        // Production + Complete=false + SourceCount=1 + no C0 marker.
+        // This is presentation data only; it must never enter TestEngine.ProcessFrame.
+        frames.Add(new ScanFrame(
+            DateTime.Now,
+            CardCount,
+            targetSnapshot,
+            Array.Empty<byte>(),
+            false,
+            0,
+            _sequence + 1,
+            connectionSnapshot,
+            targetSnapshot.Count == 0
+                ? EmptyTargetHits
+                : targetSnapshot.ToDictionary(value => value, _ => 1),
+            BoardScanMode.Production,
+            ExpectedIoCount,
+            1,
+            null,
+            CardCount,
+            false));
     }
 
     private bool HasCompleteProductionCoverage()

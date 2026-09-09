@@ -1070,6 +1070,14 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     }
 
                     ScanFrame sessionFrame = decoded with { ScanGeneration = readGeneration };
+                    if (IsContinuityPreviewFrame(sessionFrame))
+                    {
+                        // Presentation-only preview must not touch watchdog/frame metrics,
+                        // LastFrameSequence, stable-frame confirmation or protocol logs.
+                        FrameReceived?.Invoke(this, sessionFrame);
+                        continue;
+                    }
+
                     if (!ShouldPublishConfirmedFrame(sessionFrame))
                         continue;
                     PublishFrame(sessionFrame);
@@ -1223,6 +1231,15 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
         FrameReceived?.Invoke(this, decoded);
     }
+
+    private static bool IsContinuityPreviewFrame(ScanFrame frame) =>
+        frame.Mode == BoardScanMode.Production &&
+        !frame.Complete &&
+        frame.UnknownBytes == 0 &&
+        frame.SourceCount == 1 &&
+        frame.Connections.Count == 1 &&
+        frame.EndMarkerCode is null &&
+        !frame.TerminatorKnown;
 
     private bool ShouldPublishConfirmedFrame(ScanFrame frame)
     {
