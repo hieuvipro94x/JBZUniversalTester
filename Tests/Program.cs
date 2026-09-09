@@ -113,11 +113,8 @@ internal static class Program
 
         Assert(Accepts("sample.tht"), ".tht must be visible");
         Assert(Accepts("sample.THT"), ".THT must be visible");
-        Assert(Accepts("sample.model"), ".model must be visible");
-        Assert(Accepts("sample.MODEL"), ".MODEL must be visible");
         Assert(!Accepts("sample.json"), ".json must be hidden");
         Assert(!Accepts("sample.jbzproduct.json"), ".jbzproduct.json must be hidden");
-        Assert(!Accepts("sample.setup"), ".setup must be hidden");
         Assert(
             string.Equals(
                 filterText.GetRawConstantValue()?.ToString(),
@@ -2071,6 +2068,18 @@ internal static class Program
         Assert(retTriggerEngine.HasConnectedRetWire("1") &&
                !retTriggerEngine.HasConnectedRetWire("UNKNOWN"),
             "RET1 connected to its matching RET1 topology through the selected connector starts Leak");
+
+        foreach (string supportedRetName in new[] { "RET1", "RET01", "RT1" })
+        {
+            ProductModel supportedRetModel = TopologyModel(
+                new Terminal(50, "LEAK", "1", "2", supportedRetName),
+                new Terminal(51, "OTHER", "1", "2", supportedRetName));
+            using TestEngine supportedRetEngine = CreateEngine(out _);
+            supportedRetEngine.SetModel(supportedRetModel);
+            supportedRetEngine.ProcessFrame(FrameSeq(4, (50, new[] { 51 })));
+            Assert(supportedRetEngine.HasConnectedRetWire("LEAK"),
+                $"{supportedRetName} must be accepted as a Leak trigger wire name");
+        }
 
         ProductModel multiNetConnectorModel = TopologyModel(
             new Terminal(1, "LEAK", "1", "2", "A"),

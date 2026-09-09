@@ -2023,7 +2023,7 @@ public sealed class TestViewModel : ObservableObject
         return model;
     }
 
-    /// <summary>V15: nhận model đã parse bởi backend-specific parser (.model của Pi).</summary>
+    /// <summary>Nhận model đã parse sẵn bởi caller nội bộ.</summary>
     public async Task<ProductModel?> LoadPreparedModelAsync(ProductModel model)
     {
         if (model is null) throw new ArgumentNullException(nameof(model));

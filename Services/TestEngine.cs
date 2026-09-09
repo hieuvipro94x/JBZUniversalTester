@@ -1917,8 +1917,8 @@ public sealed class TestEngine : IDisposable
     }
 
     /// <summary>
-    /// Leak chỉ được kích hoạt khi một mạng dây có mã RET + số (RET1,
-    /// RET02, RET02', RET15...) đã thông đúng toàn bộ topology và mạng đó
+    /// Leak chỉ được kích hoạt khi một mạng dây có mã RET/RT + số
+    /// (RET1, RET01, RT1, RET02', RT15...) đã thông đúng toàn bộ topology và mạng đó
     /// đi qua connector được cấu hình cho kênh Leak.
     /// </summary>
     public bool HasConnectedRetWire(string? connectorId)
@@ -1956,9 +1956,14 @@ public sealed class TestEngine : IDisposable
             return false;
 
         ReadOnlySpan<char> value = wireName.Trim().AsSpan();
-        return value.Length > 3 &&
-               value.StartsWith("RET", StringComparison.OrdinalIgnoreCase) &&
-               char.IsDigit(value[3]);
+        int numericIndex = value.StartsWith("RET", StringComparison.OrdinalIgnoreCase)
+            ? 3
+            : value.StartsWith("RT", StringComparison.OrdinalIgnoreCase)
+                ? 2
+                : -1;
+        return numericIndex >= 0 &&
+               value.Length > numericIndex &&
+               char.IsDigit(value[numericIndex]);
     }
 
     /// <summary>

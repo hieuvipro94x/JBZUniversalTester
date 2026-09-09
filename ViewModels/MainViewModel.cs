@@ -273,9 +273,9 @@ public sealed class MainViewModel : ObservableObject
                 throw new InvalidDataException($"Bundle {bundle.PartNumber} chưa có file .tht cho JBZ D2XX.");
             model = await Test.LoadSelectedModelFromPathAsync(bundle.D2xxThtPath);
         }
-        else if (extension == ".model")
+        else if (extension != ".tht")
         {
-            throw new InvalidDataException("Project này chỉ dùng bo JBZ D2XX và file mã hàng .tht.");
+            throw new InvalidDataException("Project này chỉ dùng file mã hàng .tht.");
         }
         else
         {

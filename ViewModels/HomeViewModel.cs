@@ -96,7 +96,7 @@ public sealed class HomeViewModel : ObservableObject
         {
             MessageBox.Show(
                 owner ?? Application.Current?.MainWindow,
-                "Chỉ có thể chọn file mã hàng .tht hoặc .model legacy.",
+                "Chỉ có thể chọn file mã hàng .tht.",
                 "File không được hỗ trợ",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -154,8 +154,7 @@ public sealed class HomeViewModel : ObservableObject
     private static bool IsSupportedProductFile(string path)
     {
         string extension = Path.GetExtension(path);
-        return extension.Equals(".tht", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".model", StringComparison.OrdinalIgnoreCase);
+        return extension.Equals(".tht", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Refresh()
