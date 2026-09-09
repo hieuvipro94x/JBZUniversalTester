@@ -3168,13 +3168,15 @@ public sealed class TestViewModel : ObservableObject
         if (IsDeviceFault ||
             !_board.IsScanning ||
             !IsRuntimeMode(RuntimeMode.Production) ||
-            Volatile.Read(ref _probeSessionActive) != 0)
+            Volatile.Read(ref _probeSessionActive) != 0 ||
+            !HasInstalledProductEvidenceForProbe())
         {
             return;
         }
 
         int[] probeIos = preview.ActiveIo
             .Where(_board.Capacity.ContainsGlobalIo)
+            .Where(IsMappedProbeIo)
             .Distinct()
             .Take(2)
             .OrderBy(value => value)
@@ -3862,10 +3864,40 @@ public sealed class TestViewModel : ObservableObject
         return "UNKNOWN";
     }
 
+    private bool HasInstalledProductEvidenceForProbe()
+    {
+        // Htdrv chỉ nhận TestPoint khi bộ dây/bo test thật đang hiện diện.
+        // Một tiếp xúc cơ thể người trên IO trống có thể tạo fan-in nhiễu, nhưng
+        // không thể làm thông một network kỳ vọng của model. Dùng snapshot đã
+        // xác nhận từ TestEngine làm gate; preview vẫn nhanh từ frame kế tiếp.
+        if (_model is null || IsIoMappingMode)
+            return false;
+
+        PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
+        return gate.ExpectedNetCount > 0 &&
+               gate.PassedNetCount > 0 &&
+               gate.LastFrameValid;
+    }
+
+    private bool IsMappedProbeIo(int io)
+    {
+        ProductModel? model = _model;
+        if (model is null || io <= 0)
+            return false;
+
+        if (model.Pins.Any(pin => pin.IoNumber == io))
+            return true;
+
+        return model.Clip is not null &&
+               (model.Clip.CommonIo == io ||
+                model.Clip.Branches.Any(branch => branch.TargetIo == io));
+    }
+
     private bool TryDetectInlineProbeContacts(ScanFrame frame, out int[] ios)
     {
         ios = Array.Empty<int>();
-        if (frame.Mode != BoardScanMode.Production)
+        if (frame.Mode != BoardScanMode.Production ||
+            !HasInstalledProductEvidenceForProbe())
         {
             return false;
         }

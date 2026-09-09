@@ -1,4 +1,4 @@
-using JBZUniversalTester.Models;
+﻿using JBZUniversalTester.Models;
 
 namespace JBZUniversalTester.Services;
 
@@ -49,8 +49,15 @@ public static class ProbeContactClassifier
         int maxContacts = 2,
         BoardCapacity? boardCapacity = null)
     {
+        // Chỉ classifier trên snapshot Production hoàn chỉnh và sạch.
+        // Partial/target-only data rất dễ bị nhiễu điện dung (ví dụ tay người chạm IO)
+        // và không đủ bằng chứng để kết luận đầu dò thật.
         if (maxContacts <= 0 ||
-            frame.Mode != BoardScanMode.Production)
+            model is null ||
+            frame.Mode != BoardScanMode.Production ||
+            !frame.Complete ||
+            frame.UnknownBytes != 0 ||
+            !frame.TerminatorKnown)
         {
             return Array.Empty<Detection>();
         }
@@ -75,6 +82,12 @@ public static class ProbeContactClassifier
         if (fanInByTarget.Count == 0 && frame.TargetHits.Count == 0)
             return Array.Empty<Detection>();
 
+        // Probe thật của JBZ chỉ được xét trong một sweep Production đủ rộng.
+        // Không dùng frame ngắn/khuyết để tránh biến nhiễu cục bộ thành Probe.
+        int minimumSweepSources = Math.Max(16, (capacityIo * 3) / 5);
+        if (sourceCount < minimumSweepSources)
+            return Array.Empty<Detection>();
+
         int repeatedThreshold = GetRepeatedTargetThreshold(sourceCount);
 
         Candidate[] candidates = fanInByTarget.Keys
@@ -95,25 +108,15 @@ public static class ProbeContactClassifier
                     (mapped ? 16 : 0) +
                     (sourceWordMissing ? 8 : 0);
 
-                bool targetOnlyProbeTouch =
-                    sourceCount == 0 &&
-                    hits > 0 &&
-                    frame.TargetHits.Count <= Math.Max(1, maxContacts);
-
+                // Không còn các nhánh permissive targetOnly/diagnostic/dominant.
+                // Chúng có thể nhận nhiễu cơ thể người chỉ vì một TARGET lặp lại.
+                // Probe hợp lệ phải là IO có trong model và có fan-in mạnh qua nhiều
+                // SOURCE độc lập. Trường hợp firmware thay SOURCE word bằng TARGET
+                // vẫn được chấp nhận khi chính source word của IO đó bị thiếu.
                 bool repeatedTarget =
-                    hits >= repeatedThreshold ||
-                    fanIn >= repeatedThreshold;
-
-                bool diagnosticSweep =
-                    sourceCount >= Math.Max(16, (capacityIo * 3) / 5) &&
-                    fanInByTarget.Count <= 6 &&
-                    edgeCount >= Math.Max(6, sourceCount / 5) &&
-                    (fanIn >= 6 || hits >= 6);
-
-                bool dominantTarget =
-                    edgeCount >= 8 &&
-                    fanIn >= 6 &&
-                    fanIn * 100 >= edgeCount * 28;
+                    mapped &&
+                    (fanIn >= repeatedThreshold ||
+                     (sourceWordMissing && hits >= repeatedThreshold));
 
                 return new Candidate(
                     io,
@@ -122,7 +125,7 @@ public static class ProbeContactClassifier
                     mapped,
                     sourceWordMissing,
                     score,
-                    targetOnlyProbeTouch || repeatedTarget || diagnosticSweep || dominantTarget);
+                    repeatedTarget);
             })
             .Where(candidate => candidate.IsProbeLike)
             .OrderByDescending(candidate => candidate.Score)
