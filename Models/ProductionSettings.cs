@@ -150,10 +150,10 @@ public sealed class ProductionSettings
     public int ShortConfirmMs { get; set; } = 0;
 
     /// <summary>Thời gian Relay 1 - MỞ/ĐẨY JIG giữ ON trước khi cưỡng bức OFF.</summary>
-    public int Relay1JigPulseMs { get; set; } = 250;
+    public int Relay1JigPulseMs { get; set; } = 120;
 
     /// <summary>Thời gian Relay 2 - MARKING giữ ON trước khi cưỡng bức OFF.</summary>
-    public int Relay2MarkingPulseMs { get; set; } = 250;
+    public int Relay2MarkingPulseMs { get; set; } = 120;
 
     /// <summary>Bật/tắt Relay 1 JIG trong chuỗi PASS/FAIL/Master.</summary>
     public bool JigEjectRelayEnabled { get; set; } = true;
@@ -177,7 +177,7 @@ public sealed class ProductionSettings
     public int FaultJigRelayNumber { get; set; } = 1;
 
     /// <summary>Khoảng chờ an toàn sau khi R2 MARKING OFF trước khi R1 JIG ON trong chu trình PASS.</summary>
-    public int PassMarkingToJigDelayMs { get; set; } = 430;
+    public int PassMarkingToJigDelayMs { get; set; } = 120;
 
     /// <summary>Compatibility V15.1 trở về trước: "R1,R2". V15.2 UI không còn dùng trực tiếp.</summary>
     public string StampDelay { get; set; } = "250,250";
