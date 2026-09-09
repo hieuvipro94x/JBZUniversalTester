@@ -48,7 +48,7 @@
         <SolidColorBrush x:Key="TestExitBorder" Color="#D97979"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <sys:Double x:Key="TestGridBaseFontSize">18</sys:Double>
-        <sys:Double x:Key="TestFaultGridFontSize">20</sys:Double>
+        <sys:Double x:Key="TestFaultGridFontSize">22</sys:Double>
         <sys:Double x:Key="TestGridHeaderFontSize">18</sys:Double>
         <sys:Double x:Key="TestFaultGridHeaderFontSize">20</sys:Double>
         <sys:Double x:Key="TestGridRowHeight">34</sys:Double>
@@ -252,6 +252,27 @@
             <Setter Property="FontWeight" Value="Bold"/>
         </Style>
 
+        <!-- Nhấn mạnh ba thông tin công nhân cần nhận dạng nhanh trên bảng test. -->
+        <Style x:Key="OperatorWireTextStyle"
+               TargetType="TextBlock"
+               BasedOn="{StaticResource HtdrvGridCenterTextStyle}">
+            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#67CFF5"/>
+        </Style>
+
+        <Style x:Key="OperatorConnectorTextStyle"
+               TargetType="TextBlock"
+               BasedOn="{StaticResource OperatorWireTextStyle}">
+            <Setter Property="FontSize" Value="22"/>
+        </Style>
+
+        <Style x:Key="OperatorStatusTextStyle"
+               TargetType="TextBlock"
+               BasedOn="{StaticResource HtdrvGridStrongTextStyle}">
+            <Setter Property="FontSize" Value="20"/>
+        </Style>
+
         <Style x:Key="PiGridCenterTextStyle" TargetType="TextBlock" BasedOn="{StaticResource PiGridTextStyle}">
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="TextAlignment" Value="Center"/>
@@ -418,12 +439,12 @@
                     HorizontalAlignment="Stretch"
                     VerticalAlignment="Stretch">
                 <views:OutlinedTextBlock Text="{Binding WireColorText}"
-                                         Foreground="#FFFFFF"
+                                         Foreground="#67CFF5"
                                          Stroke="#111111"
                                          StrokeThickness="1"
                                          FontFamily="Malgun Gothic"
-                                         FontSize="{DynamicResource TestFaultGridFontSize}"
-                                         FontWeight="SemiBold"/>
+                                         FontSize="22"
+                                         FontWeight="Bold"/>
             </Border>
         </DataTemplate>
     </Window.Resources>
@@ -843,12 +864,12 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Lo&#7841;i" Binding="{Binding FaultType}" Width="1.20*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongTextStyle}"/>
                     <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="0.55*" MinWidth="60" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongCenterTextStyle}"/>
-                    <DataGridTextColumn x:Name="ConnectorColumn" Header="CONNECTOR" Binding="{Binding Connector}" Width="0.80*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridCenterTextStyle}"/>
+                    <DataGridTextColumn x:Name="ConnectorColumn" Header="CONNECTOR" Binding="{Binding Connector}" Width="0.95*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource OperatorConnectorTextStyle}"/>
                     <DataGridTextColumn Header="Chân Pin" Binding="{Binding Pin}" Width="0.90*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridCenterTextStyle}"/>
-                    <DataGridTextColumn Header="Mã Dây" Binding="{Binding WireName}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="Mã Dây" Binding="{Binding WireName}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource OperatorWireTextStyle}"/>
                     <DataGridTemplateColumn Header="M&#224;u" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" CellTemplate="{StaticResource WireColorCellTemplate}"/>
                     <DataGridTextColumn Header="Tiết Diện" Binding="{Binding Section}" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridCenterTextStyle}"/>
-                    <DataGridTextColumn Header="Tr&#7841;ng th&#225;i" Binding="{Binding Status}" Width="1.30*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongTextStyle}"/>
+                    <DataGridTextColumn Header="Tr&#7841;ng th&#225;i" Binding="{Binding Status}" Width="1.30*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource OperatorStatusTextStyle}"/>
                     <DataGridTextColumn Header="IO-CN-PN" Binding="{Binding IoCnPnText}" Width="1.20*" MinWidth="120" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongCenterTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>
