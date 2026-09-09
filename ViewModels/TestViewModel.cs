@@ -230,7 +230,7 @@ public sealed class TestViewModel : ObservableObject
     private readonly object _inlineProbeGate = new();
     private int[] _inlineProbeContactIos = Array.Empty<int>();
     private long _inlineProbeLastSeenUtcTicks;
-    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 2, maxContacts: 1);
+    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 2, maxContacts: 64);
     private readonly ManualProbeSession _manualProbeSession = new(confirmFrames: 2, releaseFrames: 2);
     // V12.9.2: Probe UI tuyệt đối không dùng TTL/quarantine dài.
     // Timestamp chỉ còn phục vụ interlock relay chống rung cực ngắn sau RELEASE,
@@ -3909,20 +3909,15 @@ public sealed class TestViewModel : ObservableObject
             return false;
         }
 
-        IReadOnlyList<ProbeContactClassifier.Detection> detections =
-            ProbeContactClassifier.DetectMany(
-                frame,
-                _model,
-                maxContacts: 1,
-                boardCapacity: _board.Capacity);
+        IReadOnlyList<int> observedIos = TopologyLearningService.FindProbeObservationIo(
+            frame,
+            _board.Capacity);
 
-        if (detections.Count > 0)
+        if (observedIos.Count > 0)
         {
-            ios = detections
-                .Select(item => item.Io)
+            ios = observedIos
                 .Where(value => value > 0)
                 .Distinct()
-                .Take(2)
                 .OrderBy(value => value)
                 .ToArray();
 
@@ -4040,7 +4035,6 @@ public sealed class TestViewModel : ObservableObject
         int[] normalized = ios
             .Where(value => capacity.ContainsGlobalIo(value))
             .Distinct()
-            .Take(2)
             .OrderBy(value => value)
             .ToArray();
 
@@ -4141,7 +4135,6 @@ public sealed class TestViewModel : ObservableObject
         return ios
             .Where(io => io > 0)
             .Distinct()
-            .Take(2)
             .SelectMany(BuildProbeDisplayRows)
             .ToArray();
     }

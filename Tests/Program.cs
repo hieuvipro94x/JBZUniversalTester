@@ -5137,16 +5137,8 @@ internal static class Program
             "Wiring fault candidate exists before inline Probe frame");
         long processedBeforeProbe = vm.ProductionFramesProcessed;
 
-        board.Publish(FrameSeq(
-            22,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
-        board.Publish(FrameSeq(
-            23,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        board.Publish(ProbeFrameSeq(22, 1));
+        board.Publish(ProbeFrameSeq(23, 1));
 
         Assert(vm.HasInlineProbeContacts, "Inline Probe frame appears as transient UI state");
         Assert(vm.ProductionFramesProcessed > processedBeforeProbe,
@@ -5158,16 +5150,8 @@ internal static class Program
         TestViewModel cleanProbeVm = CreateTestViewModel(production, out FakeBoard cleanProbeBoard);
         cleanProbeVm.SetModel(model);
         cleanProbeVm.StartProductionTestAsync().GetAwaiter().GetResult();
-        cleanProbeBoard.Publish(FrameSeq(
-            24,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
-        cleanProbeBoard.Publish(FrameSeq(
-            25,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        cleanProbeBoard.Publish(ProbeFrameSeq(24, 1));
+        cleanProbeBoard.Publish(ProbeFrameSeq(25, 1));
         Assert(cleanProbeVm.HasInlineProbeContacts &&
                !cleanProbeVm.Faults.Any(row => row.Kind is FaultKind.WrongWiring or FaultKind.Short),
             "Inline Probe contact is display-only and cannot create a new WRONG/SHORT fault");
@@ -5183,16 +5167,8 @@ internal static class Program
         TestViewModel pointerDisabledVm = CreateTestViewModel(pointerDisabled, out FakeBoard disabledBoard);
         pointerDisabledVm.SetModel(model);
         pointerDisabledVm.StartProductionTestAsync().GetAwaiter().GetResult();
-        disabledBoard.Publish(FrameSeq(
-            30,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
-        disabledBoard.Publish(FrameSeq(
-            31,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        disabledBoard.Publish(ProbeFrameSeq(30, 1));
+        disabledBoard.Publish(ProbeFrameSeq(31, 1));
         Assert(pointerDisabledVm.HasInlineProbeContacts,
             "Legacy UseTestPointer=false is normalized to always-on Probe observation");
         disabledBoard.Publish(FrameSeq(32));
@@ -5216,16 +5192,8 @@ internal static class Program
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?.GetValue(transitionVm) ?? throw new InvalidOperationException("Transition engine not found"));
         long engineFramesBeforeProbe = transitionEngine.FramesProcessed;
-        transitionBoard.Publish(FrameSeq(
-            41,
-            Enumerable.Range(20, 12)
-                .Select(source => (source, new[] { 14 }))
-                .ToArray()));
-        transitionBoard.Publish(FrameSeq(
-            42,
-            Enumerable.Range(20, 5)
-                .Select(source => (source, new[] { 14 }))
-                .ToArray()));
+        transitionBoard.Publish(ProbeFrameSeq(41, 14, fanIn: 12));
+        transitionBoard.Publish(ProbeFrameSeq(42, 14, fanIn: 5));
         Assert(transitionEngine.FramesProcessed == engineFramesBeforeProbe &&
                !transitionEngine.HasProductActivity &&
                transitionEngine.GetPassGateDiagnostics().WrongCandidateCount == 0,
@@ -5263,16 +5231,8 @@ internal static class Program
         int failBeforeProbe = vm.Fail;
         int commandsBeforeProbe = board.Commands.Count;
         string centerBeforeProbe = vm.CenterResultText;
-        board.Publish(FrameSeq(
-            11,
-            Enumerable.Range(20, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
-        board.Publish(FrameSeq(
-            12,
-            Enumerable.Range(20, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        board.Publish(ProbeFrameSeq(11, 1));
+        board.Publish(ProbeFrameSeq(12, 1));
 
         Assert(vm.HasInlineProbeContacts &&
                vm.Faults.Any(row =>
@@ -5399,16 +5359,8 @@ internal static class Program
             "CASE D setup: real SHORT is confirmed before Probe observation. Rows=" +
             string.Join(" | ", shortVm.Faults.Select(row => $"{row.Kind}/{row.FaultType}/IO{row.Io}/{row.Status}")) +
             $" Diagnostics shortCandidate={shortDiagnostics.ShortCandidateCount} shortConfirmed={shortDiagnostics.ShortConfirmedCount} wrongCandidate={shortDiagnostics.WrongCandidateCount} wrongConfirmed={shortDiagnostics.WrongConfirmedCount}");
-        shortBoard.Publish(FrameSeq(
-            23,
-            Enumerable.Range(30, 20)
-                .Select(source => (source, new[] { 86 }))
-                .ToArray()));
-        shortBoard.Publish(FrameSeq(
-            24,
-            Enumerable.Range(30, 20)
-                .Select(source => (source, new[] { 86 }))
-                .ToArray()));
+        shortBoard.Publish(ProbeFrameSeq(23, 86));
+        shortBoard.Publish(ProbeFrameSeq(24, 86));
         refreshFaults.Invoke(shortVm, []);
         Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe &&
                                         row.Io == 86 &&
@@ -5421,16 +5373,8 @@ internal static class Program
         unusedVm.SetModel(model);
         unusedVm.StartProductionTestAsync().GetAwaiter().GetResult();
         long processedBeforeUnusedProbe = unusedVm.ProductionFramesProcessed;
-        unusedBoard.Publish(FrameSeq(
-            30,
-            Enumerable.Range(40, 20)
-                .Select(source => (source, new[] { 7 }))
-                .ToArray()));
-        unusedBoard.Publish(FrameSeq(
-            31,
-            Enumerable.Range(40, 20)
-                .Select(source => (source, new[] { 7 }))
-                .ToArray()));
+        unusedBoard.Publish(ProbeFrameSeq(30, 7));
+        unusedBoard.Publish(ProbeFrameSeq(31, 7));
         Assert(unusedVm.HasInlineProbeContacts &&
                unusedVm.Faults.Count == 1 &&
                unusedVm.Faults[0].Kind == FaultKind.Probe &&
@@ -5451,26 +5395,10 @@ internal static class Program
                testPinVm.State != "ĐANG DÒ CHÂN",
             "TestPin observer does not switch transport out of Production mode or change production state");
         long processedBeforeTestPin = testPinVm.ProductionFramesProcessed;
-        testPinBoard.Publish(FrameSeq(
-            40,
-            Enumerable.Range(60, 20)
-                .Select(source => (source, new[] { 7 }))
-                .ToArray()));
-        testPinBoard.Publish(FrameSeq(
-            41,
-            Enumerable.Range(60, 20)
-                .Select(source => (source, new[] { 7 }))
-                .ToArray()));
-        testPinBoard.Publish(FrameSeq(
-            42,
-            Enumerable.Range(60, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
-        testPinBoard.Publish(FrameSeq(
-            43,
-            Enumerable.Range(60, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        testPinBoard.Publish(ProbeFrameSeq(40, 7));
+        testPinBoard.Publish(ProbeFrameSeq(41, 7));
+        testPinBoard.Publish(ProbeFrameSeq(42, 1));
+        testPinBoard.Publish(ProbeFrameSeq(43, 1));
         Assert(testPinVm.HasInlineProbeContacts &&
                testPinVm.ProductionFramesProcessed > processedBeforeTestPin,
             "StartProbeScanAsync enables Probe/TestPin observation on Production stream");
@@ -7200,6 +7128,34 @@ internal static class Program
         Dictionary<int, int> hits = map.Values.SelectMany(values => values)
             .GroupBy(value => value).ToDictionary(group => group.Key, group => group.Count());
         return new ScanFrame(DateTime.Now, 1, active, [], true, 0, sequence, map, hits, BoardScanMode.Production);
+    }
+
+    private static ScanFrame ProbeFrameSeq(long sequence, int target, int fanIn = 20) =>
+        ProbeFrameSeq(sequence, [target], fanIn);
+
+    private static ScanFrame ProbeFrameSeq(long sequence, int[] targets, int fanIn = 20)
+    {
+        Dictionary<int, IReadOnlySet<int>> map = Enumerable.Range(230, fanIn)
+            .ToDictionary(
+                source => source,
+                _ => (IReadOnlySet<int>)targets.ToHashSet());
+        Dictionary<int, int> hits = targets.ToDictionary(io => io, _ => fanIn);
+        return new ScanFrame(
+            DateTime.Now,
+            4,
+            targets.ToHashSet(),
+            [],
+            true,
+            0,
+            sequence,
+            map,
+            hits,
+            BoardScanMode.Production,
+            256,
+            256,
+            0,
+            4,
+            true);
     }
 
     private static string ReadEntry(ZipArchive archive, string name)

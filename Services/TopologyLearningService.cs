@@ -40,6 +40,39 @@ public static class TopologyLearningService
             .ToArray();
     }
 
+    /// <summary>
+    /// Kết quả quan sát vật lý dùng chung với cửa sổ QUÉT/HỌC MÃ:
+    /// một active IO là tác động trực tiếp; từ hai active IO trở lên lấy đúng
+    /// các thành phần continuity mà BuildSnapshot đang hiển thị.
+    /// Chỉ mở nhánh continuity khi frame có chữ ký fan-in Probe mạnh, nên một
+    /// cạnh sản phẩm/wrong wiring thông thường không bị lấy khỏi TestEngine.
+    /// </summary>
+    public static IReadOnlyList<int> FindProbeObservationIo(
+        ScanFrame frame,
+        BoardCapacity capacity)
+    {
+        IReadOnlyList<int> direct = FindProbeContactIo(frame, capacity);
+        if (direct.Count > 0)
+            return direct;
+
+        if (frame.ActiveIo.Count < 2 ||
+            ProbeContactClassifier.DetectMany(
+                frame,
+                model: null,
+                maxContacts: Math.Max(2, frame.ActiveIo.Count),
+                boardCapacity: capacity).Count == 0)
+        {
+            return [];
+        }
+
+        return BuildSnapshot(frame, capacity).Networks
+            .SelectMany(network => network.Ios)
+            .Where(capacity.ContainsGlobalIo)
+            .Distinct()
+            .OrderBy(io => io)
+            .ToArray();
+    }
+
     public static LearnedTopologySnapshot BuildSnapshot(ScanFrame frame, BoardCapacity capacity)
     {
         ArgumentNullException.ThrowIfNull(frame);
