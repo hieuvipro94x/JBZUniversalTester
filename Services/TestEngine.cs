@@ -1883,6 +1883,85 @@ public sealed class TestEngine : IDisposable
     }
 
     /// <summary>
+    /// Xác nhận có ít nhất một cạnh continuity hiện tại chạm vào bất kỳ pin
+    /// nào của connector. Gate này chỉ dùng để khởi động Leak trước continuity;
+    /// nó không thay thế điều kiện PASS toàn bộ topology của sản phẩm.
+    /// </summary>
+    public bool HasConnectorActivity(string? connectorId)
+    {
+        if (string.IsNullOrWhiteSpace(connectorId))
+            return false;
+
+        lock (_gate)
+        {
+            if (_model is null)
+                return false;
+
+            ConnectorDefinition? connector = _model.Connectors.FirstOrDefault(item =>
+                string.Equals(item.ConnectorId, connectorId.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (connector is null)
+                return false;
+
+            HashSet<int> connectorIo = connector.Pins
+                .Select(pin => pin.PhysicalIo)
+                .Where(io => io > 0 && !_model.IgnoredIo.Contains(io))
+                .ToHashSet();
+            if (connectorIo.Count == 0)
+                return false;
+
+            return _currentConnections.Any(pair =>
+                pair.Value.Any(target =>
+                    IsProductActivityEdge(_model, pair.Key, target) &&
+                    (connectorIo.Contains(pair.Key) || connectorIo.Contains(target))));
+        }
+    }
+
+    /// <summary>
+    /// Leak chỉ được kích hoạt khi một mạng dây có mã RET + số (RET1,
+    /// RET02, RET02', RET15...) đã thông đúng toàn bộ topology và mạng đó
+    /// đi qua connector được cấu hình cho kênh Leak.
+    /// </summary>
+    public bool HasConnectedRetWire(string? connectorId)
+    {
+        if (string.IsNullOrWhiteSpace(connectorId))
+            return false;
+
+        string selectedConnector = connectorId.Trim();
+        lock (_gate)
+        {
+            if (_model is null || !_model.Connectors.Any(connector =>
+                    string.Equals(
+                        connector.ConnectorId,
+                        selectedConnector,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            return _model.Nets
+                .Where(IsEligibleProductionNet)
+                .Where(net => IsRetWireName(net.Name))
+                .Where(net => net.Pins.Any(pin =>
+                    string.Equals(
+                        pin.Connector,
+                        selectedConnector,
+                        StringComparison.OrdinalIgnoreCase)))
+                .Any(IsWireNetConnected);
+        }
+    }
+
+    private static bool IsRetWireName(string? wireName)
+    {
+        if (string.IsNullOrWhiteSpace(wireName))
+            return false;
+
+        ReadOnlySpan<char> value = wireName.Trim().AsSpan();
+        return value.Length > 3 &&
+               value.StartsWith("RET", StringComparison.OrdinalIgnoreCase) &&
+               char.IsDigit(value[3]);
+    }
+
+    /// <summary>
     /// Xác nhận connector được chọn cho máy Leak đang thực sự có continuity
     /// đúng theo topology THT. Không suy diễn kênh Leak từ số I/O/connector.
     /// </summary>

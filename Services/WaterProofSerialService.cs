@@ -112,10 +112,10 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(profile);
 
         if (!profile.Enabled)
-            throw new InvalidOperationException("Model hien tai chua bat kiem tra kin nuoc.");
+            throw new InvalidOperationException("HÃY BẬT TEST LEAK TRƯỚC.");
 
         if (profile.EnabledChannelCount == 0)
-            throw new InvalidOperationException("Kiem tra kin nuoc da bat nhung chua chon CH1/CH2/CH3.");
+            throw new InvalidOperationException("CHỌN KÊNH KIỂM TRA");
 
         // Capture the caller context (normally WPF DispatcherSynchronizationContext)
         // so progress updates are marshalled back to the UI thread safely.

@@ -287,18 +287,6 @@
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
 
-        <Style x:Key="WaterProofGridHeaderStyle"
-               TargetType="DataGridColumnHeader"
-               BasedOn="{StaticResource IndustrialGridHeaderStyle}">
-            <Setter Property="Background" Value="#163A59"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#315873"/>
-            <Setter Property="BorderThickness" Value="0,0,1,0"/>
-            <Setter Property="FontSize" Value="16"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="8,0"/>
-        </Style>
-
         <Style x:Key="PiFaultGridStyle" TargetType="DataGrid">
             <Setter Property="AutoGenerateColumns" Value="False"/>
             <Setter Property="CanUserAddRows" Value="False"/>
@@ -389,42 +377,6 @@
             </Style.Triggers>
         </Style>
 
-        <Style x:Key="WaterProofOperationGridStyle"
-               TargetType="DataGrid"
-               BasedOn="{StaticResource PiFaultGridStyle}">
-            <Setter Property="Visibility" Value="Collapsed"/>
-            <Setter Property="Background" Value="#F4F7FB"/>
-            <Setter Property="RowBackground" Value="White"/>
-            <Setter Property="AlternatingRowBackground" Value="#F7FAFC"/>
-            <Setter Property="HorizontalGridLinesBrush" Value="#D9E2EC"/>
-            <Setter Property="VerticalGridLinesBrush" Value="#D9E2EC"/>
-            <Setter Property="BorderBrush" Value="#B8C7D9"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="ColumnHeaderStyle" Value="{StaticResource WaterProofGridHeaderStyle}"/>
-            <Setter Property="ColumnHeaderHeight" Value="48"/>
-            <Setter Property="RowHeight" Value="56"/>
-            <Setter Property="RowStyle">
-                <Setter.Value>
-                    <Style TargetType="DataGridRow">
-                        <Setter Property="Background" Value="Transparent"/>
-                        <Setter Property="Foreground" Value="#162535"/>
-                        <Setter Property="FontWeight" Value="SemiBold"/>
-                        <Style.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Background" Value="#E7F0F8"/>
-                                <Setter Property="Foreground" Value="#162535"/>
-                            </Trigger>
-                        </Style.Triggers>
-                    </Style>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding SelectedOperationTabIndex}" Value="3">
-                    <Setter Property="Visibility" Value="Visible"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-
         <Style x:Key="IndustrialGridCellStyle" TargetType="DataGridCell">
             <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{Binding RowForegroundBrush}"/>
@@ -459,54 +411,6 @@
                     <Setter Property="Foreground" Value="White"/>
                 </DataTrigger>
             </Style.Triggers>
-        </Style>
-
-        <Style x:Key="WaterProofCellStyle" TargetType="DataGridCell" BasedOn="{StaticResource PiCenterCellStyle}">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="#162535"/>
-            <Setter Property="BorderBrush" Value="#D9E2EC"/>
-            <Setter Property="BorderThickness" Value="0,0,1,1"/>
-            <Setter Property="Padding" Value="8,0"/>
-        </Style>
-
-        <Style x:Key="WaterProofTextStyle" TargetType="TextBlock" BasedOn="{StaticResource PiGridCenterTextStyle}">
-            <Setter Property="Foreground" Value="#162535"/>
-            <Setter Property="FontSize" Value="18"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-        </Style>
-
-        <Style x:Key="WaterProofLeakTextStyle" TargetType="TextBlock" BasedOn="{StaticResource WaterProofTextStyle}">
-            <Setter Property="Foreground" Value="#0B5CAB"/>
-            <Setter Property="FontSize" Value="21"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding ResultText}" Value="PASS">
-                    <Setter Property="Foreground" Value="#197A3A"/>
-                </DataTrigger>
-                <DataTrigger Binding="{Binding ResultText}" Value="FAIL">
-                    <Setter Property="Foreground" Value="#C62828"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="WaterProofResultCellStyle" TargetType="DataGridCell" BasedOn="{StaticResource WaterProofCellStyle}">
-            <Setter Property="Background" Value="#EEF2F6"/>
-            <Setter Property="Foreground" Value="#64748B"/>
-            <Style.Triggers>
-                <DataTrigger Binding="{Binding ResultText}" Value="PASS">
-                    <Setter Property="Background" Value="#2AA84A"/>
-                    <Setter Property="Foreground" Value="White"/>
-                </DataTrigger>
-                <DataTrigger Binding="{Binding ResultText}" Value="FAIL">
-                    <Setter Property="Background" Value="#C62828"/>
-                    <Setter Property="Foreground" Value="White"/>
-                </DataTrigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="WaterProofResultTextStyle" TargetType="TextBlock" BasedOn="{StaticResource PiGridCenterTextStyle}">
-            <Setter Property="FontSize" Value="18"/>
-            <Setter Property="FontWeight" Value="Bold"/>
         </Style>
 
         <DataTemplate x:Key="WireColorCellTemplate">
@@ -950,7 +854,7 @@
             </DataGrid>
 
             <DataGrid x:Name="ResistanceGrid"
-                      ItemsSource="{Binding Resistance}"
+                      ItemsSource="{Binding ResistanceDisplayRows}"
                       HorizontalAlignment="Stretch"
                       VerticalAlignment="Stretch"
                       Style="{StaticResource ResistanceOperationGridStyle}"
@@ -962,21 +866,6 @@
                     <DataGridTextColumn Header="GI&#193; TR&#7882;" Binding="{Binding Display}" Width="2.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="MAX" Binding="{Binding MaxDisplayText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="K&#7870;T QU&#7842;" Binding="{Binding ResultText}" Width="1.5*" CellStyle="{StaticResource PassFailResultCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
-                </DataGrid.Columns>
-            </DataGrid>
-
-            <DataGrid x:Name="WaterProofGrid"
-                      ItemsSource="{Binding WaterProofChannels}"
-                      HorizontalAlignment="Stretch"
-                      VerticalAlignment="Stretch"
-                      Style="{StaticResource WaterProofOperationGridStyle}">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="K&#202;NH / CONNECTOR" Binding="{Binding ChannelText}" Width="1.7*" CellStyle="{StaticResource WaterProofCellStyle}" ElementStyle="{StaticResource WaterProofTextStyle}"/>
-                    <DataGridTextColumn Header="&#193;P BAN &#272;&#7846;U" Binding="{Binding FirstPressureText}" Width="1.6*" CellStyle="{StaticResource WaterProofCellStyle}" ElementStyle="{StaticResource WaterProofTextStyle}"/>
-                    <DataGridTextColumn Header="&#193;P GI&#7918;" Binding="{Binding SecondPressureText}" Width="1.6*" CellStyle="{StaticResource WaterProofCellStyle}" ElementStyle="{StaticResource WaterProofTextStyle}"/>
-                    <DataGridTextColumn Header="&#272;&#7896; R&#210; R&#7880;" Binding="{Binding LeakText}" Width="1.7*" CellStyle="{StaticResource WaterProofCellStyle}" ElementStyle="{StaticResource WaterProofLeakTextStyle}"/>
-                    <DataGridTextColumn Header="GI&#7898;I H&#7840;N" Binding="{Binding LeakLimitText}" Width="1.4*" CellStyle="{StaticResource WaterProofCellStyle}" ElementStyle="{StaticResource WaterProofTextStyle}"/>
-                    <DataGridTextColumn Header="K&#7870;T QU&#7842;" Binding="{Binding ResultText}" Width="1.4*" CellStyle="{StaticResource WaterProofResultCellStyle}" ElementStyle="{StaticResource WaterProofResultTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>
 

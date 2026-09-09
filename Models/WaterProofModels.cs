@@ -9,8 +9,10 @@ namespace JBZUniversalTester.Models;
 /// </summary>
 public sealed class WaterProofMachineSettings
 {
+    public const int DefaultBaudRate = 115200;
+
     public string PortName { get; set; } = string.Empty;
-    public int BaudRate { get; set; } = 115200;
+    public int BaudRate { get; set; } = DefaultBaudRate;
     public bool AutoConnect { get; set; } = true;
     public int ReadTimeoutMs { get; set; } = 1000;
     public int WriteTimeoutMs { get; set; } = 1000;

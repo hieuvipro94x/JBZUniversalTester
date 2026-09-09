@@ -19,10 +19,14 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private int _selectedManualResistanceChannel;
     private bool _manualResistanceRunning;
     private string _manualResistanceStatus = "Chọn TẤT CẢ hoặc một CH để đo";
+    private bool _manualWaterProofRunning;
+    private string _manualWaterProofStatus = "Chọn COM và bấm CHẠY TEST";
+    private readonly double?[] _manualWaterProofPressBaseline = new double?[3];
 
     public ProductionSettings Settings { get; }
     public ObservableCollection<ResistanceChannelEditor> ResistanceChannels { get; }
     public ObservableCollection<ResistanceResult> ManualResistanceResults { get; } = new();
+    public ObservableCollection<WaterProofChannelResult> ManualWaterProofResults { get; } = new();
     public WaterProofModelSettings WaterProof { get; }
     public IReadOnlyList<string> WaterProofConnectorOptions { get; }
     public string WaterProofModelKey =>
@@ -110,12 +114,19 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         private set => Set(ref _manualResistanceStatus, value);
     }
 
+    public string ManualWaterProofStatus
+    {
+        get => _manualWaterProofStatus;
+        private set => Set(ref _manualWaterProofStatus, value);
+    }
+
     public AsyncRelayCommand ManualRelay1OnCommand { get; }
     public AsyncRelayCommand ManualRelay1OffCommand { get; }
     public AsyncRelayCommand ManualRelay2OnCommand { get; }
     public AsyncRelayCommand ManualRelay2OffCommand { get; }
     public AsyncRelayCommand ManualResetCommand { get; }
     public AsyncRelayCommand ManualMeasureResistanceCommand { get; }
+    public AsyncRelayCommand ManualWaterProofTestCommand { get; }
 
     public ProductionSettingsViewModel(TestViewModel? test = null)
     {
@@ -144,6 +155,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                 new ResistanceChannelEditor(setting, index + 1)));
         WaterProof = ProductionConfigService.GetWaterProofProfileForPath(
             Settings, _modelPath);
+        ResetManualWaterProofResults(WaterProof);
         WaterProofConnectorOptions = LoadWaterProofConnectorOptions(test, _modelPath);
         _masterFaultRequiredCount = ProductionConfigService.GetMasterFaultRequiredCountForPath(
             Settings, _modelPath);
@@ -166,6 +178,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ManualMeasureResistanceCommand = new AsyncRelayCommand(
             RunManualResistanceAsync,
             CanUseManualResistance);
+        ManualWaterProofTestCommand = new AsyncRelayCommand(
+            RunManualWaterProofAsync,
+            CanUseManualWaterProof);
     }
 
     private static IReadOnlyList<string> LoadWaterProofConnectorOptions(
@@ -212,9 +227,166 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         _test is not null &&
         !_test.IsDeviceFault &&
         !_manualResistanceRunning &&
+        !_manualWaterProofRunning &&
         (_test.IsManualModeActive || _test.CanEnterManualMode);
 
     private bool CanUseManualResistance() => CanUseManualControls();
+
+    private bool CanUseManualWaterProof() => CanUseManualControls();
+
+    private async Task RunManualWaterProofAsync()
+    {
+        if (_test is null)
+            return;
+
+        string portName = Settings.WaterProofMachine.PortName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(portName))
+            throw new InvalidOperationException("Hãy chọn cổng COM UART/RS232 của máy Leak trước khi chạy test.");
+        if (!string.IsNullOrWhiteSpace(Settings.Label.PrinterCom) &&
+            string.Equals(portName, Settings.Label.PrinterCom.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"{portName} đang được cấu hình cho máy in tem. Máy Leak phải dùng một cổng COM riêng.");
+        }
+        if (WaterProof.EnabledChannelCount == 0)
+            throw new InvalidOperationException("Hãy bật ít nhất một kênh CH1/CH2/CH3 trước khi chạy test.");
+        if (WaterProof.PressTimeMs is < 1 or > 300000 ||
+            WaterProof.WaitTimeMs is < 1 or > 300000)
+        {
+            throw new InvalidOperationException("Thời gian tạo áp/giữ áp phải từ 1 đến 300000 ms.");
+        }
+
+        var machine = new WaterProofMachineSettings
+        {
+            PortName = portName,
+            BaudRate = WaterProofMachineSettings.DefaultBaudRate,
+            AutoConnect = Settings.WaterProofMachine.AutoConnect,
+            ReadTimeoutMs = Settings.WaterProofMachine.ReadTimeoutMs,
+            WriteTimeoutMs = Settings.WaterProofMachine.WriteTimeoutMs
+        };
+        WaterProofModelSettings profile = WaterProof.Clone();
+
+        _manualWaterProofRunning = true;
+        ResetManualWaterProofResults(profile);
+        ManualWaterProofStatus = $"ĐANG KẾT NỐI {portName} • 115200 8N1...";
+        RefreshManualCommands();
+
+        try
+        {
+            WaterProofRunResult result = await _test.TestManualWaterProofAsync(
+                machine,
+                profile,
+                progress => UpdateManualWaterProofProgress(portName, progress));
+            ApplyManualWaterProofResult(result);
+            string channels = string.Join(" • ", result.Channels
+                .Where(channel => channel.Enabled)
+                .Select(channel => $"CH{channel.Channel} {(channel.Passed ? "PASS" : "FAIL")} Δ{channel.Leak:0.###}"));
+            ManualWaterProofStatus =
+                $"TEST {(result.Passed ? "PASS" : "FAIL")} • {channels}";
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            ManualWaterProofStatus = $"{portName} ĐANG BỊ CHIẾM DỤNG";
+            throw new InvalidOperationException(
+                $"Không mở được {portName}: cổng đang bị chương trình khác chiếm dụng.",
+                ex);
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Manual Leak test failed: {ex}");
+            ManualWaterProofStatus = $"TEST LEAK LỖI • {ex.Message}";
+            throw;
+        }
+        finally
+        {
+            _manualWaterProofRunning = false;
+            ManualRuntimeActive = _test.IsManualModeActive;
+            RefreshManualCommands();
+        }
+    }
+
+    private void UpdateManualWaterProofProgress(string portName, WaterProofProgress progress)
+    {
+        string stage = progress.Stage switch
+        {
+            WaterProofStage.Pressurizing => "ĐANG TẠO ÁP",
+            WaterProofStage.Waiting => "ĐANG ĐO ĐỘ RÒ",
+            WaterProofStage.Evaluating => "ĐANG ĐÁNH GIÁ",
+            _ => "ĐANG TEST"
+        };
+        string values = progress.Values.Count == 0
+            ? string.Empty
+            : " • " + string.Join(" / ", progress.Values.Select(value =>
+                value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)));
+        ManualWaterProofStatus = $"{stage} {portName}{values}";
+
+        if (progress.Stage is not (WaterProofStage.Pressurizing or WaterProofStage.Waiting))
+            return;
+
+        int count = Math.Min(3, progress.Values.Count);
+        for (int index = 0; index < count; index++)
+        {
+            WaterProofChannelResult row = ManualWaterProofResults[index];
+            if (!row.Enabled)
+                continue;
+
+            double current = progress.Values[index];
+            row.LiveMachineValue = current;
+            if (progress.Stage == WaterProofStage.Pressurizing)
+            {
+                _manualWaterProofPressBaseline[index] = current;
+                row.PressPressure = current;
+                row.FirstResultPressure = current;
+                row.Leak = 0.0;
+            }
+            else
+            {
+                row.WaitPressure = current;
+                row.SecondResultPressure = current;
+                if (_manualWaterProofPressBaseline[index] is double baseline)
+                    row.Leak = Math.Abs(baseline - current);
+            }
+        }
+    }
+
+    private void ResetManualWaterProofResults(WaterProofModelSettings profile)
+    {
+        Array.Clear(_manualWaterProofPressBaseline, 0, _manualWaterProofPressBaseline.Length);
+        ManualWaterProofResults.Clear();
+        for (int channel = 1; channel <= 3; channel++)
+        {
+            ManualWaterProofResults.Add(new WaterProofChannelResult
+            {
+                Channel = channel,
+                Enabled = profile.IsChannelEnabled(channel),
+                Connector = profile.ConnectorForChannel(channel),
+                LeakLimit = profile.LeakLimit
+            });
+        }
+    }
+
+    private void ApplyManualWaterProofResult(WaterProofRunResult result)
+    {
+        foreach (WaterProofChannelMeasurement measurement in result.Channels)
+        {
+            if (!measurement.Enabled)
+                continue;
+
+            WaterProofChannelResult? row = ManualWaterProofResults.FirstOrDefault(
+                item => item.Channel == measurement.Channel);
+            if (row is null)
+                continue;
+
+            row.PressPressure = measurement.FirstPressure;
+            row.WaitPressure = measurement.SecondPressure;
+            row.FirstResultPressure = measurement.FirstPressure;
+            row.SecondResultPressure = measurement.SecondPressure;
+            row.Leak = measurement.Leak;
+            row.LiveMachineValue = measurement.Leak;
+            row.Passed = measurement.Passed;
+            row.IsMeasured = measurement.Enabled;
+        }
+    }
 
     private async Task RunManualRelayCommandAsync(int relay, bool turnOn)
     {
@@ -418,6 +590,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ManualRelay2OffCommand?.RaiseCanExecuteChanged();
         ManualResetCommand?.RaiseCanExecuteChanged();
         ManualMeasureResistanceCommand?.RaiseCanExecuteChanged();
+        ManualWaterProofTestCommand?.RaiseCanExecuteChanged();
     }
 }
 

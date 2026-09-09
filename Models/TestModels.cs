@@ -150,7 +150,14 @@ public sealed class ResistanceResult : ObservableObject
 
     public string Name { get; init; } = "";
     public int Channel { get; init; }
-    public string ChannelText => Channel > 0 ? $"CH{Channel}" : string.Empty;
+    public string ChannelTextOverride { get; init; } = string.Empty;
+    public string MinDisplayTextOverride { get; init; } = string.Empty;
+    public string MaxDisplayTextOverride { get; init; } = string.Empty;
+    public string DisplayOverride { get; init; } = string.Empty;
+    public string ResultTextOverride { get; init; } = string.Empty;
+    public string ChannelText => !string.IsNullOrWhiteSpace(ChannelTextOverride)
+        ? ChannelTextOverride
+        : Channel > 0 ? $"CH{Channel}" : string.Empty;
     public double? ValueOhm
     {
         get => _valueOhm;
@@ -216,11 +223,19 @@ public sealed class ResistanceResult : ObservableObject
     }
     public int SampleCount { get; set; }
     public long StabilizationTimeMs { get; set; }
-    public string MinDisplayText => FormatOhm(MinOhm, DisplayScale);
-    public string MaxDisplayText => FormatOhm(MaxOhm, DisplayScale);
+    public string MinDisplayText => !string.IsNullOrWhiteSpace(MinDisplayTextOverride)
+        ? MinDisplayTextOverride
+        : FormatOhm(MinOhm, DisplayScale);
+    public string MaxDisplayText => !string.IsNullOrWhiteSpace(MaxDisplayTextOverride)
+        ? MaxDisplayTextOverride
+        : FormatOhm(MaxOhm, DisplayScale);
     public string DisplayUnitText => DisplayScale.UnitLog;
-    public string Display => !_isMeasured ? "—" : IsOpen ? "OPEN" : ValueOhm is null ? "—" : FormatOhm(ValueOhm.Value, DisplayScale);
-    public string ResultText => !_isMeasured && MeasurementStatus != "—" ? MeasurementStatus : !_isMeasured ? "—" : MeasurementStatus == "UNSTABLE" ? "UNSTABLE" : Passed ? "PASS" : "FAIL";
+    public string Display => !string.IsNullOrWhiteSpace(DisplayOverride)
+        ? DisplayOverride
+        : !_isMeasured ? "—" : IsOpen ? "OPEN" : ValueOhm is null ? "—" : FormatOhm(ValueOhm.Value, DisplayScale);
+    public string ResultText => !string.IsNullOrWhiteSpace(ResultTextOverride)
+        ? ResultTextOverride
+        : !_isMeasured && MeasurementStatus != "—" ? MeasurementStatus : !_isMeasured ? "—" : MeasurementStatus == "UNSTABLE" ? "UNSTABLE" : Passed ? "PASS" : "FAIL";
 
     private ResistanceDisplayScale DisplayScale => ChooseDisplayScale(ValueOhm, MinOhm, MaxOhm);
 

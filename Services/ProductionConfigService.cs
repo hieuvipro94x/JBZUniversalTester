@@ -682,7 +682,9 @@ public static class ProductionConfigService
         settings.WaterProofMachine.PortName = (settings.WaterProofMachine.PortName ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(settings.WaterProofMachine.PortName) && settings.WaterproofSerialPort > 0)
             settings.WaterProofMachine.PortName = $"COM{settings.WaterproofSerialPort}";
-        settings.WaterProofMachine.BaudRate = Math.Clamp(settings.WaterProofMachine.BaudRate, 1200, 921600);
+        // Máy Leak dùng giao thức cố định 115200 8N1; không cho cấu hình cũ
+        // hoặc dữ liệu nhập tay làm runtime mở sai tốc độ.
+        settings.WaterProofMachine.BaudRate = WaterProofMachineSettings.DefaultBaudRate;
         settings.WaterProofMachine.ReadTimeoutMs = Math.Clamp(settings.WaterProofMachine.ReadTimeoutMs, 100, 30_000);
         settings.WaterProofMachine.WriteTimeoutMs = Math.Clamp(settings.WaterProofMachine.WriteTimeoutMs, 100, 30_000);
         if (settings.WaterProofMachine.PortName.StartsWith("COM", StringComparison.OrdinalIgnoreCase) &&

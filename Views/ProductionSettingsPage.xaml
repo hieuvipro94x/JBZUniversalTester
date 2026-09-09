@@ -221,9 +221,11 @@
         </Border>
 
         <ScrollViewer Grid.Row="1"
+                      x:Name="SettingsScrollViewer"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Auto"
-                      CanContentScroll="False">
+                      CanContentScroll="False"
+                      ScrollChanged="SettingsScrollViewer_ScrollChanged">
         <WrapPanel x:Name="SettingsPanelsHost" Margin="4" Orientation="Horizontal">
 
             <Border x:Name="IoSettingsPanel" Width="370" VerticalAlignment="Top" Style="{StaticResource SettingsPanelStyle}">
@@ -442,12 +444,14 @@
                                     <ColumnDefinition Width="68"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
+                                    <RowDefinition Height="32"/>
+                                    <RowDefinition Height="34"/>
+                                    <RowDefinition Height="96"/>
                                     <RowDefinition Height="30"/>
                                     <RowDefinition Height="30"/>
                                     <RowDefinition Height="30"/>
-                                    <RowDefinition Height="30"/>
-                                    <RowDefinition Height="30"/>
-                                    <RowDefinition Height="30"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
                                 <TextBlock Text="COM RS232" Style="{StaticResource FieldLabelStyle}"/>
@@ -465,30 +469,45 @@
                                         Style="{StaticResource SettingsInfoButtonStyle}"
                                         Click="RefreshWaterProofPorts_Click"/>
 
-                                <TextBlock Grid.Row="1" Text="Baudrate" Style="{StaticResource FieldLabelStyle}"/>
-                                <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Height="28"
-                                         Text="{Binding Settings.WaterProofMachine.BaudRate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <TextBlock Grid.Row="1" Text="Test máy Leak" Style="{StaticResource FieldLabelStyle}"/>
+                                <Button Grid.Row="1"
+                                        Grid.Column="1"
+                                        Grid.ColumnSpan="2"
+                                        Height="30"
+                                        Margin="0,2,0,2"
+                                        Content="CHẠY TEST"
+                                        Command="{Binding ManualWaterProofTestCommand}"
+                                        Style="{StaticResource SettingsActionButtonStyle}"
+                                        ToolTip="Chạy thử máy Leak bằng COM và thông số đang chọn; không tăng sản lượng và không chạy relay."/>
 
-                                <TextBlock Grid.Row="2" Text="Kênh / Connector" Style="{StaticResource FieldLabelStyle}"/>
-                                <Grid Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2">
+                                <TextBlock Grid.Row="2"
+                                           Text="Kênh / Connector"
+                                           VerticalAlignment="Top"
+                                           Margin="0,8,7,0"
+                                           Style="{StaticResource FieldLabelStyle}"/>
+                                <Grid x:Name="WaterProofChannelRows"
+                                      Grid.Row="2"
+                                      Grid.Column="1"
+                                      Grid.ColumnSpan="2">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="44"/>
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="32"/>
+                                        <RowDefinition Height="32"/>
+                                        <RowDefinition Height="32"/>
+                                    </Grid.RowDefinitions>
                                     <CheckBox Content="CH1" Height="28" IsChecked="{Binding WaterProof.Channel1Enabled, Mode=TwoWay}"/>
-                                    <ComboBox Grid.Column="1" Height="28" Margin="2,2,4,2" IsEditable="True"
+                                    <ComboBox Grid.Column="1" Height="28" Margin="2,2,0,2" IsEditable="True"
                                               ItemsSource="{Binding WaterProofConnectorOptions}"
                                               Text="{Binding WaterProof.Channel1Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <CheckBox Grid.Column="2" Content="CH2" Height="28" IsChecked="{Binding WaterProof.Channel2Enabled, Mode=TwoWay}"/>
-                                    <ComboBox Grid.Column="3" Height="28" Margin="2,2,4,2" IsEditable="True"
+                                    <CheckBox Grid.Row="1" Content="CH2" Height="28" IsChecked="{Binding WaterProof.Channel2Enabled, Mode=TwoWay}"/>
+                                    <ComboBox Grid.Row="1" Grid.Column="1" Height="28" Margin="2,2,0,2" IsEditable="True"
                                               ItemsSource="{Binding WaterProofConnectorOptions}"
                                               Text="{Binding WaterProof.Channel2Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <CheckBox Grid.Column="4" Content="CH3" Height="28" IsChecked="{Binding WaterProof.Channel3Enabled, Mode=TwoWay}"/>
-                                    <ComboBox Grid.Column="5" Height="28" Margin="2,2,0,2" IsEditable="True"
+                                    <CheckBox Grid.Row="2" Content="CH3" Height="28" IsChecked="{Binding WaterProof.Channel3Enabled, Mode=TwoWay}"/>
+                                    <ComboBox Grid.Row="2" Grid.Column="1" Height="28" Margin="2,2,0,2" IsEditable="True"
                                               ItemsSource="{Binding WaterProofConnectorOptions}"
                                               Text="{Binding WaterProof.Channel3Connector, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                 </Grid>
@@ -511,6 +530,67 @@
                                     <TextBox Height="28" Text="{Binding WaterProof.PressTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     <TextBox Grid.Column="2" Height="28" Text="{Binding WaterProof.WaitTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                 </Grid>
+
+                                <TextBlock Grid.Row="6"
+                                           Grid.ColumnSpan="3"
+                                           Margin="0,5,0,1"
+                                           Text="{Binding ManualWaterProofStatus}"
+                                           FontSize="11.5"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource BrandBlue}"
+                                           TextWrapping="Wrap"/>
+
+                                <ItemsControl Grid.Row="7"
+                                              Grid.ColumnSpan="3"
+                                              Margin="0,4,0,0"
+                                              ItemsSource="{Binding ManualWaterProofResults}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Columns="3"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border x:Name="ManualLeakResultCard"
+                                                    Margin="2"
+                                                    Padding="5"
+                                                    MinHeight="88"
+                                                    Background="{Binding LiveCellBackground}"
+                                                    BorderBrush="#9CADCF"
+                                                    BorderThickness="1"
+                                                    CornerRadius="3">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding ChannelText}"
+                                                               HorizontalAlignment="Center"
+                                                               FontWeight="Bold"
+                                                               Foreground="{Binding LiveCellForeground}"
+                                                               TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding LiveMachineValueText}"
+                                                               HorizontalAlignment="Center"
+                                                               FontSize="18"
+                                                               FontWeight="Bold"
+                                                               Foreground="{Binding LiveCellForeground}"/>
+                                                    <TextBlock Text="{Binding LeakText, StringFormat=Độ rò: {0}}"
+                                                               HorizontalAlignment="Center"
+                                                               FontSize="10.5"
+                                                               Foreground="{Binding LiveCellForeground}"/>
+                                                    <TextBlock x:Name="ManualLeakResultText"
+                                                               Text="{Binding ResultText}"
+                                                               HorizontalAlignment="Center"
+                                                               FontWeight="Bold"
+                                                               Foreground="{Binding LiveCellForeground}"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding Enabled}" Value="False">
+                                                    <Setter TargetName="ManualLeakResultCard" Property="Background" Value="#ECEFF1"/>
+                                                    <Setter TargetName="ManualLeakResultText" Property="Text" Value="TẮT"/>
+                                                    <Setter TargetName="ManualLeakResultText" Property="Foreground" Value="{StaticResource TextMuted}"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </Grid>
                         </StackPanel>
                     </Border>
@@ -594,9 +674,9 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="30"/>
-                            <RowDefinition Height="30"/>
-                            <RowDefinition Height="30"/>
+                            <RowDefinition Height="32"/>
+                            <RowDefinition Height="32"/>
+                            <RowDefinition Height="32"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Cổng in" Style="{StaticResource FieldLabelStyle}"/>
@@ -636,19 +716,20 @@
                                   Content="Sử dụng in Lable"
                                   IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
 
-                        <StackPanel x:Name="LabelPrintActionsPanel"
-                                    Grid.Row="2"
-                                    Grid.Column="0"
-                                    Grid.ColumnSpan="6"
-                                    Orientation="Horizontal"
-                                    HorizontalAlignment="Right">
-                            <Button Content="CH&#7880;NH TEM" Width="82" Height="28" Margin="2,2" Padding="3,0"
+                        <UniformGrid x:Name="LabelPrintActionsPanel"
+                                     Grid.Row="2"
+                                     Grid.Column="0"
+                                     Grid.ColumnSpan="6"
+                                     Columns="3"
+                                     Width="252"
+                                     HorizontalAlignment="Right">
+                            <Button Content="CH&#7880;NH TEM" Height="28" Margin="2,2" Padding="3,0"
                                     Style="{StaticResource SettingsInfoButtonStyle}" Click="EditLabelTemplate_Click"/>
-                            <Button Content="XEM TR&#431;&#7898;C" Width="82" Height="28" Margin="2,2" Padding="3,0"
+                            <Button Content="XEM TR&#431;&#7898;C" Height="28" Margin="2,2" Padding="3,0"
                                     Style="{StaticResource SettingsInfoButtonStyle}" Click="PreviewLabel_Click"/>
-                            <Button Content="IN TH&#7916;" Width="72" Height="28" Margin="2,2" Padding="3,0"
+                            <Button Content="IN TH&#7916;" Height="28" Margin="2,2" Padding="3,0"
                                     Style="{StaticResource SettingsWarningButtonStyle}" Click="TestPrintLabel_Click"/>
-                        </StackPanel>
+                        </UniformGrid>
                     </Grid>
 
                     <Grid Grid.Row="2" Margin="0,3,0,1">

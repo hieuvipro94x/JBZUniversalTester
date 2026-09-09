@@ -1098,11 +1098,21 @@ internal static class Program
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
         Assert(settingsSource.Contains("if (available >= 1160)", StringComparison.Ordinal) &&
+               settingsXaml.Contains("ScrollChanged=\"SettingsScrollViewer_ScrollChanged\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("e.ViewportWidth", StringComparison.Ordinal) &&
+               settingsSource.Contains("double.IsFinite(e.ViewportWidth)", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (!double.IsFinite(viewportWidth) || viewportWidth <= 0)", StringComparison.Ordinal) &&
+               settingsSource.Contains("SettingsPanelsHost.Margin.Left", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<UniformGrid x:Name=\"LabelPrintActionsPanel\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Columns=\"3\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"WaterProofChannelRows\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<RowDefinition Height=\"96\"/>", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<RowDefinition Height=\"32\"/>", StringComparison.Ordinal) &&
                settingsXaml.Contains("<Setter Property=\"Height\" Value=\"30\"/>", StringComparison.Ordinal) &&
                settingsXaml.Contains("<RowDefinition Height=\"46\"/>", StringComparison.Ordinal) &&
                settingsXaml.Contains("<RowDefinition Height=\"44\"/>", StringComparison.Ordinal) &&
                settingsXaml.Contains("<RowDefinition Height=\"130\"/>", StringComparison.Ordinal),
-            "Production settings uses a compact responsive density at 1280x1024");
+            "Production settings uses the real viewport, preserves the right border, and evenly sizes label buttons");
         Assert(!settingsXaml.Contains("Settings.ItemHeight", StringComparison.Ordinal) &&
                !settingsXaml.Contains("Settings.PageDelay", StringComparison.Ordinal) &&
                !settingsXaml.Contains("Settings.ShowTitle", StringComparison.Ordinal) &&
@@ -1120,7 +1130,7 @@ internal static class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 13 &&
+        Assert(settingsButtons.Length == 14 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
@@ -1787,6 +1797,33 @@ internal static class Program
         Assert(WaterProofSerialService.BuildTestCommand(loaded) == ":TEST,1,0,1,0,1200,600\r\n",
             "Connector metadata must not change the proven Leak UART command format");
 
+        var fixedBaudSettings = new ProductionSettings
+        {
+            WaterProofMachine = new WaterProofMachineSettings
+            {
+                PortName = " COM7 ",
+                BaudRate = 9600
+            }
+        };
+        string fixedBaudPath = Path.Combine(
+            Path.GetTempPath(),
+            $"jbz-leak-fixed-baud-{Guid.NewGuid():N}.cfg");
+        try
+        {
+            ProductionConfigService.SaveLegacyCfg(fixedBaudSettings, fixedBaudPath);
+            string fixedBaudConfig = File.ReadAllText(fixedBaudPath);
+            Assert(fixedBaudSettings.WaterProofMachine.PortName == "COM7" &&
+                   fixedBaudSettings.WaterProofMachine.BaudRate == WaterProofMachineSettings.DefaultBaudRate &&
+                   fixedBaudConfig.Contains("[WaterProofPortName]COM7", StringComparison.Ordinal) &&
+                   fixedBaudConfig.Contains("[WaterProofBaudRate]115200", StringComparison.Ordinal),
+                "Leak COM selection is trimmed and the removed baud setting remains fixed at 115200");
+        }
+        finally
+        {
+            if (File.Exists(fixedBaudPath))
+                File.Delete(fixedBaudPath);
+        }
+
         var passRow = new WaterProofChannelResult
         {
             Channel = 1,
@@ -1822,6 +1859,53 @@ internal static class Program
         Assert(passRow.PressureText == "2.1" && passRow.LeakText == "2.1",
             "Leak summary card displays machine-reported pressure drop instead of fill/hold pressure");
 
+        var settingsLeakVm = new ProductionSettingsViewModel();
+        MethodInfo resetSettingsLeak = typeof(ProductionSettingsViewModel).GetMethod(
+            "ResetManualWaterProofResults",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings Leak result reset method not found");
+        MethodInfo updateSettingsLeak = typeof(ProductionSettingsViewModel).GetMethod(
+            "UpdateManualWaterProofProgress",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings Leak realtime update method not found");
+        MethodInfo finishSettingsLeak = typeof(ProductionSettingsViewModel).GetMethod(
+            "ApplyManualWaterProofResult",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings Leak final result method not found");
+        resetSettingsLeak.Invoke(settingsLeakVm, [profile]);
+        updateSettingsLeak.Invoke(settingsLeakVm,
+        [
+            "COM7",
+            new WaterProofProgress(WaterProofStage.Pressurizing, [84.0, 0.0, 83.5], ":PRESS,84,0,83.5")
+        ]);
+        updateSettingsLeak.Invoke(settingsLeakVm,
+        [
+            "COM7",
+            new WaterProofProgress(WaterProofStage.Waiting, [83.4, 0.0, 82.7], ":WAIT,83.4,0,82.7")
+        ]);
+        Assert(settingsLeakVm.ManualWaterProofResults.Count == 3 &&
+               Math.Abs(settingsLeakVm.ManualWaterProofResults[0].Leak.GetValueOrDefault() - 0.6) < 0.0001 &&
+               !settingsLeakVm.ManualWaterProofResults[0].IsMeasured &&
+               !settingsLeakVm.ManualWaterProofResults[1].Enabled &&
+               Math.Abs(settingsLeakVm.ManualWaterProofResults[2].LiveMachineValue.GetValueOrDefault() - 82.7) < 0.0001,
+            "Settings Leak CH1/CH2/CH3 cards update PRESS/WAIT values in realtime without an early result");
+        finishSettingsLeak.Invoke(settingsLeakVm,
+        [
+            new WaterProofRunResult(
+            [
+                new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
+                new WaterProofChannelMeasurement(2, false, 0.0, 0.0, 0.0, false),
+                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, false)
+            ],
+            false,
+            ":RESULT,84,83.4,0.6,1,0,0,0,0,83.5,82.7,0.8,0")
+        ]);
+        Assert(settingsLeakVm.ManualWaterProofResults[0].ResultText == "PASS" &&
+               settingsLeakVm.ManualWaterProofResults[1].ResultText == "---" &&
+               settingsLeakVm.ManualWaterProofResults[1].LiveMachineValue is null &&
+               settingsLeakVm.ManualWaterProofResults[2].ResultText == "FAIL",
+            "Settings Leak cards publish PASS/FAIL only from the final machine result");
+
         string xaml = File.ReadAllText(
     Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
 
@@ -1832,10 +1916,9 @@ internal static class Program
             xaml.Contains("Text=\"{Binding LiveMachineValueText}\"", StringComparison.Ordinal) &&
             xaml.Contains("Background=\"{Binding LiveCellBackground}\"", StringComparison.Ordinal) &&
             xaml.Contains("Foreground=\"{Binding LiveCellForeground}\"", StringComparison.Ordinal) &&
-            xaml.Contains("x:Key=\"WaterProofGridHeaderStyle\"", StringComparison.Ordinal) &&
-            xaml.Contains("x:Key=\"WaterProofLeakTextStyle\"", StringComparison.Ordinal) &&
-            xaml.Contains("x:Key=\"WaterProofResultCellStyle\"", StringComparison.Ordinal),
-            "Leak summary and detail table use the professional realtime/result presentation");
+            !xaml.Contains("x:Name=\"WaterProofGrid\"", StringComparison.Ordinal) &&
+            !xaml.Contains("WaterProofOperationGridStyle", StringComparison.Ordinal),
+            "Leak uses only the compact TEST LEAK card; the lower area remains dedicated to continuity/final results");
 
         // Regression: :PRESS lưu áp cuối làm baseline, từng :WAIT phải cập nhật
         // Leak ngay trên UI nhưng tuyệt đối chưa được chốt PASS/FAIL trước :RESULT.
@@ -1946,14 +2029,14 @@ internal static class Program
             ?? throw new InvalidOperationException("Leak operation panel method not found");
         realtimeLeakVm.SelectedOperationTabIndex = 0;
         showLeakPanel.Invoke(realtimeLeakVm, null);
-        Assert(realtimeLeakVm.SelectedOperationTabIndex == 3,
-            "Leak run switches to its detailed realtime table before RESULT");
+        Assert(realtimeLeakVm.SelectedOperationTabIndex == 0,
+            "Leak run keeps the lower continuity table visible and reports realtime values only in the TEST LEAK card");
         int resultStyleUses = xaml.Split(
             "CellStyle=\"{StaticResource PassFailResultCellStyle}\"",
             StringSplitOptions.None).Length - 1;
         Assert(resultStyleUses == 1 &&
-               xaml.Contains("CellStyle=\"{StaticResource WaterProofResultCellStyle}\"", StringComparison.Ordinal),
-            "Resistance and professional Leak result columns preserve green PASS/red FAIL presentation");
+               !xaml.Contains("WaterProofResultCellStyle", StringComparison.Ordinal),
+            "Only the resistance/final result table remains; the removed Leak detail grid has no result column");
         Assert(xaml.Contains("<Viewbox Margin=\"10\"", StringComparison.Ordinal) &&
                xaml.Contains("StretchDirection=\"DownOnly\"", StringComparison.Ordinal),
             "Large result text scales down to keep PASS/KHÔNG ĐẠT/LẮP SẢN PHẨM inside its box");
@@ -1961,15 +2044,33 @@ internal static class Program
         ProductModel connectorModel = HtdrvTwoEndpointModel();
         using TestEngine connectorEngine = CreateEngine(out _);
         connectorEngine.SetModel(connectorModel);
-        Assert(!connectorEngine.IsConnectorConnected("1") &&
+        Assert(!connectorEngine.HasConnectorActivity("1") &&
+               !connectorEngine.IsConnectorConnected("1") &&
                connectorEngine.IsConnectorDisconnected("1"),
             "Leak connector gate remains closed and confirms full disconnection before fitting");
         connectorEngine.ProcessFrame(FrameSeq(1, (1, new[] { 2 })));
-        Assert(connectorEngine.IsConnectorConnected("1") &&
+        Assert(connectorEngine.HasConnectorActivity("1") &&
+               !connectorEngine.HasConnectedRetWire("1") &&
+               connectorEngine.IsConnectorConnected("1") &&
                !connectorEngine.IsConnectorDisconnected("1") &&
                !connectorEngine.IsConnectorConnected("2") &&
                !connectorEngine.IsConnectorConnected(string.Empty),
             "Leak connector gate opens only for the exact connected THT connector");
+
+        ProductModel retTriggerModel = TopologyModel(
+            new Terminal(40, "1", "1", "2", "RET1"),
+            new Terminal(41, "2", "1", "2", "RET1"),
+            new Terminal(42, "1", "2", "2", "NORMAL"),
+            new Terminal(43, "2", "2", "2", "NORMAL"));
+        using TestEngine retTriggerEngine = CreateEngine(out _);
+        retTriggerEngine.SetModel(retTriggerModel);
+        retTriggerEngine.ProcessFrame(FrameSeq(2, (42, new[] { 43 })));
+        Assert(!retTriggerEngine.HasConnectedRetWire("1"),
+            "A correctly connected non-RET wire cannot start Leak");
+        retTriggerEngine.ProcessFrame(FrameSeq(3, (40, new[] { 41 })));
+        Assert(retTriggerEngine.HasConnectedRetWire("1") &&
+               !retTriggerEngine.HasConnectedRetWire("UNKNOWN"),
+            "RET1 connected to its matching RET1 topology through the selected connector starts Leak");
 
         ProductModel multiNetConnectorModel = TopologyModel(
             new Terminal(1, "LEAK", "1", "2", "A"),
@@ -1983,8 +2084,9 @@ internal static class Program
             "All Leak connector relations fitted report connected");
         multiNetConnectorEngine.ProcessFrame(FrameSeq(3, (1, new[] { 2 })));
         Assert(!multiNetConnectorEngine.IsConnectorConnected("LEAK") &&
+               multiNetConnectorEngine.HasConnectorActivity("LEAK") &&
                !multiNetConnectorEngine.IsConnectorDisconnected("LEAK"),
-            "One missing Leak contact is neither connected nor fully removed and cannot trigger retest");
+            "Any Leak connector pin activity can start Leak even before every connector relation is fitted");
         multiNetConnectorEngine.ProcessFrame(FrameSeq(4));
         Assert(multiNetConnectorEngine.IsConnectorDisconnected("LEAK"),
             "Leak connector removal requires every mapped continuity relation to disappear");
@@ -2001,7 +2103,7 @@ internal static class Program
             (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(removalVm) ?? throw new InvalidOperationException("Leak removal TestEngine not found"));
         removalEngine.SetFrameProcessingEnabled(true);
-        removalVm.SelectedOperationTabIndex = 3;
+        removalVm.SelectedOperationTabIndex = 0;
 
         MethodInfo armRemoval = typeof(TestViewModel).GetMethod(
             "ArmWaterProofFaultRemovalWait",
@@ -2013,14 +2115,14 @@ internal static class Program
             "_waitForFaultProductRemoval",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Leak removal wait flag not found");
-        Assert(removalVm.SelectedOperationTabIndex == 3 &&
+        Assert(removalVm.SelectedOperationTabIndex == 0 &&
                (bool)(waitForFaultRemoval.GetValue(removalVm) ?? false),
-            "Leak FAIL keeps the result page visible and arms ProductRemoved confirmation");
+            "Leak FAIL keeps the continuity/final result area visible and arms ProductRemoved confirmation");
 
         removalBoard.Publish(FrameSeq(1, (1, new[] { 18 })));
         Assert((bool)(waitForFaultRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.SelectedOperationTabIndex == 3,
-            "Leak FAIL must keep its result table while any product IO remains connected");
+               removalVm.SelectedOperationTabIndex == 0,
+            "Leak FAIL must keep the continuity/final area while any product IO remains connected");
         removalBoard.Publish(FrameSeq(2));
         Assert(!(bool)(waitForFaultRemoval.GetValue(removalVm) ?? true) &&
                removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
@@ -2070,7 +2172,7 @@ internal static class Program
                (int)(waterProofRunningAfterLeakFail.GetValue(removalVm) ?? -1) == 0,
             "Leak FAIL removal fully re-arms cycle 2 and releases both automatic-test locks");
 
-        removalVm.SelectedOperationTabIndex = 3;
+        removalVm.SelectedOperationTabIndex = 0;
         MethodInfo armPassRemoval = typeof(TestViewModel).GetMethod(
             "ArmPassProductRemovalWait",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -2082,10 +2184,10 @@ internal static class Program
             ?? throw new InvalidOperationException("PASS removal wait flag not found");
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
                removalVm.IsProductRemovalPending &&
-               removalVm.SelectedOperationTabIndex == 3 &&
+               removalVm.SelectedOperationTabIndex == 0 &&
                removalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
                removalVm.StateBackground == "#2AA84A",
-            "Committed Leak PASS keeps the result table, stays green, and explicitly requests ProductRemoved before scan restart");
+            "Committed final PASS keeps the continuity/final area, stays green, and requests ProductRemoved before scan restart");
         removalVm.StopViewAsync().GetAwaiter().GetResult();
         Assert(removalVm.IsProductRemovalPending &&
                removalVm.State.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.Ordinal),
@@ -2093,9 +2195,9 @@ internal static class Program
         removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
                removalVm.IsProductRemovalPending &&
-               removalVm.SelectedOperationTabIndex == 3 &&
+               removalVm.SelectedOperationTabIndex == 0 &&
                removalVm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM",
-            "Leak PASS result table remains visible while any product IO is still connected");
+            "Final PASS remains visible over the continuity area while any product IO is still connected");
         removalBoard.Publish(FrameSeq(4));
         FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
             "_cycleActive",
@@ -2161,8 +2263,8 @@ internal static class Program
             {
                 new(1, true, 84.0, 83.8, 0.2, true)
             });
-        typeof(TestViewModel).GetField("_waitForProductRelease", BindingFlags.Instance | BindingFlags.NonPublic)
-            ?.SetValue(retestArmVm, true);
+        typeof(TestViewModel).GetField("_productionPhase", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, 3);
         MethodInfo armLeakRetest = typeof(TestViewModel).GetMethod(
             "ArmWaterProofRetestConnectorCycle",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -2173,7 +2275,22 @@ internal static class Program
             ?? throw new InvalidOperationException("Leak retest connector state not found");
         armLeakRetest.Invoke(retestArmVm, null);
         Assert((int)(leakRetestState.GetValue(retestArmVm) ?? 0) == 1,
-            "Completed Leak on an enabled THT arms connector remove/reinsert retest");
+            "A pre-continuity Leak FAIL arms connector remove/reinsert retest");
+
+        retestArmVm.Faults.Add(new FaultRow
+        {
+            Kind = FaultKind.MissingConnection,
+            Io = 40,
+            WireName = "RET1",
+            Status = "CHƯA KẾT NỐI"
+        });
+        MethodInfo refreshLeakFaults = typeof(TestViewModel).GetMethod(
+            "RefreshFaults",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-grid refresh method not found");
+        refreshLeakFaults.Invoke(retestArmVm, null);
+        Assert(retestArmVm.Faults.Count == 0,
+            "The lower continuity table stays empty while Leak is running or awaiting RET reconnection");
         typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(retestArmVm, new WaterProofModelSettings { Enabled = false });
         armLeakRetest.Invoke(retestArmVm, null);
@@ -2183,6 +2300,17 @@ internal static class Program
             Environment.CurrentDirectory,
             "ViewModels",
             "TestViewModel.cs"));
+        int leakGateStart = testViewModelSource.IndexOf(
+            "private bool TryValidateWaterProofConnectorGate",
+            StringComparison.Ordinal);
+        int leakGateEnd = testViewModelSource.IndexOf(
+            "private string[] ConfiguredWaterProofConnectorIds",
+            leakGateStart,
+            StringComparison.Ordinal);
+        string leakGateSource = testViewModelSource[leakGateStart..leakGateEnd];
+        Assert(leakGateSource.Contains("HasConnectedRetWire", StringComparison.Ordinal) &&
+               !leakGateSource.Contains("HasConnectorActivity", StringComparison.Ordinal),
+            "Production Leak gate requires a correctly connected RET-number wire, not arbitrary connector activity");
         int retestMethodStart = testViewModelSource.IndexOf(
             "private async Task RunWaterProofRetestOnlyAsync",
             StringComparison.Ordinal);
@@ -2191,11 +2319,67 @@ internal static class Program
             retestMethodStart,
             StringComparison.Ordinal);
         string retestMethodSource = testViewModelSource[retestMethodStart..retestMethodEnd];
-        Assert(retestMethodSource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
+        Assert(!retestMethodSource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
+               retestMethodSource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("EjectFaultProductAsync", StringComparison.Ordinal),
-            "Leak-only retest saves its own history but cannot enter production count or relay paths");
+            "Transient Leak retest does not write separate production history; only the centralized full-continuity FAIL gate may finalize it");
+
+        int processStart = testViewModelSource.IndexOf(
+            "private void ProcessEngineChangedOnUi",
+            StringComparison.Ordinal);
+        int processEnd = testViewModelSource.IndexOf(
+            "private void CaptureProductTestStartedAt",
+            processStart,
+            StringComparison.Ordinal);
+        string processSource = testViewModelSource[processStart..processEnd];
+        int leakFirstGate = processSource.IndexOf(
+            "phase == ProductionPhase.Continuity",
+            StringComparison.Ordinal);
+        int wiringFaultGate = processSource.IndexOf(
+            "_engine.LastFrameValid &&",
+            StringComparison.Ordinal);
+        int postContinuityStart = testViewModelSource.IndexOf(
+            "private async Task RunAutomaticPostContinuityAsync",
+            StringComparison.Ordinal);
+        int postContinuityEnd = testViewModelSource.IndexOf(
+            "private async Task HandleFinalPassRejectedAsync",
+            postContinuityStart,
+            StringComparison.Ordinal);
+        string postContinuitySource = testViewModelSource[postContinuityStart..postContinuityEnd];
+        int finalizeLeakStart = testViewModelSource.IndexOf(
+            "private async Task FinalizeWaterProofProductFailureAsync",
+            StringComparison.Ordinal);
+        int finalizeLeakEnd = testViewModelSource.IndexOf(
+            "private async Task<bool> RunAutomaticWaterProofAsync",
+            finalizeLeakStart,
+            StringComparison.Ordinal);
+        string finalizeLeakSource = testViewModelSource[finalizeLeakStart..finalizeLeakEnd];
+        Assert(leakFirstGate >= 0 && leakFirstGate < wiringFaultGate &&
+               processSource.Contains("RunPreContinuityWaterProofAsync", StringComparison.Ordinal) &&
+               !postContinuitySource.Contains("RunAutomaticWaterProofAsync", StringComparison.Ordinal) &&
+               finalizeLeakSource.Contains("_engine.ContinuityPassed", StringComparison.Ordinal) &&
+               finalizeLeakSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
+               finalizeLeakSource.Contains("failureDetails: faults", StringComparison.Ordinal) &&
+               finalizeLeakSource.Contains("ShowFaultConfirmationDialog", StringComparison.Ordinal),
+            "Leak starts before continuity evaluation; Leak FAIL is recorded and confirmed only after full continuity PASS");
+
+        var leakDisplayRow = new ResistanceResult
+        {
+            Name = "TEST LEAK",
+            ChannelTextOverride = "CH1",
+            MinDisplayTextOverride = "—",
+            DisplayOverride = "CH1 Δ0.2",
+            MaxDisplayTextOverride = "≤ 2",
+            ResultTextOverride = "PASS"
+        };
+        Assert(xaml.Contains("ItemsSource=\"{Binding ResistanceDisplayRows}\"", StringComparison.Ordinal) &&
+               leakDisplayRow.Name == "TEST LEAK" &&
+               leakDisplayRow.ChannelText == "CH1" &&
+               leakDisplayRow.Display == "CH1 Δ0.2" &&
+               leakDisplayRow.ResultText == "PASS",
+            "Resistance result table can show two resistance measurements plus a separate TEST LEAK PASS row");
 
         var idleLeakService = new WaterProofSerialService();
         Stopwatch disposeWatch = Stopwatch.StartNew();
@@ -2207,6 +2391,17 @@ internal static class Program
             Environment.CurrentDirectory,
             "Services",
             "WaterProofSerialService.cs"));
+        string productionSettingsXaml = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory,
+            "Views",
+            "ProductionSettingsPage.xaml"));
+        string productionSettingsVmSource = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory,
+            "ViewModels",
+            "ProductionSettingsViewModel.cs"));
+        string manualLeakMethodSource = testViewModelSource[
+            testViewModelSource.IndexOf("public async Task<WaterProofRunResult> TestManualWaterProofAsync", StringComparison.Ordinal)..
+            testViewModelSource.IndexOf("private string ReadyStateForCurrentModel", StringComparison.Ordinal)];
         Assert(
             leakServiceSource.Contains(
                 "ReleaseRunPort(runNumber, port)",
@@ -2218,6 +2413,21 @@ internal static class Program
                 "next run will reconnect cleanly",
                 StringComparison.Ordinal),
             "A completed Leak result releases only its owned COM session and waits bounded cleanup before cycle 2");
+        Assert(productionSettingsXaml.Contains("Content=\"CHẠY TEST\"", StringComparison.Ordinal) &&
+               productionSettingsXaml.Contains("ManualWaterProofTestCommand", StringComparison.Ordinal) &&
+               productionSettingsXaml.Contains("ManualWaterProofResults", StringComparison.Ordinal) &&
+               productionSettingsXaml.Contains("LiveMachineValueText", StringComparison.Ordinal) &&
+               !productionSettingsXaml.Contains("Settings.WaterProofMachine.BaudRate", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("ManualWaterProofStatus", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("UpdateManualWaterProofProgress", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("ApplyManualWaterProofResult", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("Máy Leak phải dùng một cổng COM riêng", StringComparison.Ordinal) &&
+               manualLeakMethodSource.Contains("_waterProof.RunTestAsync", StringComparison.Ordinal) &&
+               manualLeakMethodSource.Contains("AllRelaysOffAsync", StringComparison.Ordinal) &&
+               !manualLeakMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
+               !manualLeakMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
+               !manualLeakMethodSource.Contains("EjectFaultProductAsync", StringComparison.Ordinal),
+            "Settings manual Leak test uses the owned COM path without production count or relay output");
     }
 
     private static void TestProductionScanTokenSurvivesCycleCancel()

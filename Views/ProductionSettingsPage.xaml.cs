@@ -83,15 +83,46 @@ public partial class ProductionSettingsPage : UserControl
 
     private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        double viewportWidth = SettingsScrollViewer?.ViewportWidth ?? 0;
+        if (!double.IsFinite(viewportWidth) || viewportWidth <= 0)
+        {
+            viewportWidth = Math.Max(
+                320,
+                e.NewSize.Width - SystemParameters.VerticalScrollBarWidth);
+        }
+
+        UpdatePanelWidths(viewportWidth);
+    }
+
+    private void SettingsScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (Math.Abs(e.ViewportWidthChange) > 0.1 &&
+            double.IsFinite(e.ViewportWidth) &&
+            e.ViewportWidth > 0)
+        {
+            UpdatePanelWidths(e.ViewportWidth);
+        }
+    }
+
+    private void UpdatePanelWidths(double viewportWidth)
+    {
+        // WPF có thể báo PositiveInfinity trong lượt đo ScrollViewer đầu tiên.
+        // Width của FrameworkElement chỉ nhận số hữu hạn không âm.
+        if (!double.IsFinite(viewportWidth) || viewportWidth <= 0)
+            return;
+
         if (IoSettingsPanel is null || RelaySettingsPanel is null || LabelSettingsPanel is null)
         {
             return;
         }
 
         // Ưu tiên ba nhóm chức năng trên cùng một hàng từ màn hình 1280 trở lên
-        // (kể cả khi Windows dành một phần chiều rộng cho chrome/sidebar).
+        // theo chiều rộng thực của viewport. Không dùng Width của UserControl
+        // vì phần thanh cuộn dọc sẽ làm mất viền phải của panel cuối.
         // Tỷ lệ 28/28/44 vẫn dành nhiều chỗ nhất cho TEM / ĐIỆN TRỞ.
-        double available = Math.Max(320, e.NewSize.Width - 20);
+        double available = Math.Max(
+            320,
+            viewportWidth - SettingsPanelsHost.Margin.Left - SettingsPanelsHost.Margin.Right);
         if (available >= 1160)
         {
             double content = available - 18;
@@ -654,9 +685,13 @@ public partial class ProductionSettingsPage : UserControl
                 return false;
             }
 
-            if (_vm.Settings.WaterProofMachine.BaudRate <= 0)
+            if (!string.IsNullOrWhiteSpace(_vm.Settings.Label.PrinterCom) &&
+                string.Equals(
+                    _vm.Settings.WaterProofMachine.PortName.Trim(),
+                    _vm.Settings.Label.PrinterCom.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
             {
-                error = "Baudrate máy kín nước phải lớn hơn 0.";
+                error = "Máy Leak và máy in tem không được dùng chung một cổng COM.";
                 return false;
             }
 
