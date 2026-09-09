@@ -829,6 +829,26 @@ public sealed class TestEngine : IDisposable
     }
 
     /// <summary>
+    /// Presentation-only evidence that the in-progress scan already contains an
+    /// expected product edge. It never participates in PASS/FAIL or removal.
+    /// </summary>
+    public bool HasContinuityPreviewProductActivity
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_model is null)
+                    return false;
+
+                return _continuityPreviewConnections.Any(pair =>
+                    pair.Value.Any(target =>
+                        IsProductActivityEdge(_model, pair.Key, target)));
+            }
+        }
+    }
+
+    /// <summary>
     /// Clears the presentation overlay when an authoritative complete frame is about
     /// to be processed. Returns true only when the visible preview could have changed.
     /// </summary>

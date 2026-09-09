@@ -607,7 +607,7 @@ internal static class Program
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
         Assert(testViewModelSource.Contains(
-                   "ProcessScheduledEngineChangedOnUi(request.Generation)",
+                   "ProcessScheduledEngineChangedOnUi(request.Generation, rows)",
                    StringComparison.Ordinal) &&
                !testViewModelSource.Contains(
                    "ProcessScheduledEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration))",

@@ -138,10 +138,10 @@ public sealed class TestViewModel : ObservableObject
     private int _runtimeMode = (int)RuntimeMode.Background;
     private int _productionPhase = (int)ProductionPhase.WaitingProduct;
     private long _runtimeGeneration;
-    private int _engineUiUpdateQueued;
+    private int _enginePresentationWorkerRunning;
     private long _engineUiUpdateRevision;
+    private long _engineUiLastCompletedRevision;
     private EngineUiUpdateRequest? _latestEngineUiUpdateRequest;
-    private long _engineUiQueuedAtTimestamp;
     // Separate presentation queue for pre-C0 continuity preview. It never runs
     // ProcessEngineChangedOnUi, so no PASS/FAIL/relay state machine can be entered.
     private int _continuityPreviewUiQueued;
@@ -2261,58 +2261,95 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        QueueEngineUiDispatcher(dispatcher);
+        QueueEnginePresentationWorker(dispatcher);
     }
 
-    private void QueueEngineUiDispatcher(System.Windows.Threading.Dispatcher dispatcher)
+    private void QueueEnginePresentationWorker(System.Windows.Threading.Dispatcher dispatcher)
     {
-        if (Interlocked.Exchange(ref _engineUiUpdateQueued, 1) != 0)
+        if (Interlocked.Exchange(ref _enginePresentationWorkerRunning, 1) != 0)
             return;
 
-        Volatile.Write(ref _engineUiQueuedAtTimestamp, Stopwatch.GetTimestamp());
-        Interlocked.Increment(ref _engineUiUpdatesScheduled);
-        dispatcher.BeginInvoke(new Action(() =>
+        _ = Task.Run(async () =>
         {
-            EngineUiUpdateRequest? request =
-                Volatile.Read(ref _latestEngineUiUpdateRequest);
-            long queuedAt = Volatile.Read(ref _engineUiQueuedAtTimestamp);
             try
             {
-                if (request is not null)
+                while (!_lifetimeCts.IsCancellationRequested)
                 {
-                    Interlocked.Increment(ref _engineUiUpdatesRendered);
-                    // Generation phải đi cùng event đã tạo request. Không lấy
-                    // generation hiện tại ở lúc Dispatcher chạy, vì operator có
-                    // thể đã rời/vào Test và tạo một cycle mới trong thời gian chờ.
-                    ProcessScheduledEngineChangedOnUi(request.Generation);
+                    EngineUiUpdateRequest? request = Volatile.Read(ref _latestEngineUiUpdateRequest);
+                    if (request is null)
+                        return;
+
+                    EngineFaultRowsSnapshot? rows = BuildEngineFaultRowsSnapshot();
+                    if (Volatile.Read(ref _latestEngineUiUpdateRequest)?.Revision != request.Revision)
+                        continue;
+
+                    long queuedAt = Stopwatch.GetTimestamp();
+                    Interlocked.Increment(ref _engineUiUpdatesScheduled);
+                    await dispatcher.InvokeAsync(() =>
+                    {
+                        if (Volatile.Read(ref _latestEngineUiUpdateRequest)?.Revision != request.Revision)
+                            return;
+
+                        Interlocked.Increment(ref _engineUiUpdatesRendered);
+                        ProcessScheduledEngineChangedOnUi(request.Generation, rows);
+                        Volatile.Write(ref _engineUiLastCompletedRevision, request.Revision);
+                        double dispatcherMs = Stopwatch.GetElapsedTime(queuedAt).TotalMilliseconds;
+                        if (dispatcherMs > 16)
+                        {
+                            AsyncFileLogService.Current.Performance(
+                                $"UI_PERF_WARNING phase=ENGINE_DISPATCHER duration_ms={dispatcherMs:0.###}");
+                        }
+                    });
+
+                    if (Volatile.Read(ref _latestEngineUiUpdateRequest)?.Revision == request.Revision)
+                        return;
                 }
-                double dispatcherMs = Stopwatch.GetElapsedTime(queuedAt).TotalMilliseconds;
-                if (dispatcherMs > 16)
-                {
-                    AsyncFileLogService.Current.Performance(
-                        $"UI_PERF_WARNING phase=ENGINE_DISPATCHER duration_ms={dispatcherMs:0.###}");
-                }
+            }
+            catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+            {
             }
             catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
             {
-                EnterDeviceFault(ex, "ProcessEngineChangedOnUi.Dispatcher");
+                EnterDeviceFault(ex, "EnginePresentationWorker");
             }
             finally
             {
-                Interlocked.Exchange(ref _engineUiUpdateQueued, 0);
-
-                // Nếu frame mới tới trong lúc callback đang chạy, chỉ xếp thêm
-                // một callback để render snapshot mới nhất. Không phát lại mọi
-                // trạng thái trung gian và cũng không làm mất trạng thái cuối.
-                if (Volatile.Read(ref _latestEngineUiUpdateRequest)?.Revision != request?.Revision)
-                    QueueEngineUiDispatcher(dispatcher);
+                Interlocked.Exchange(ref _enginePresentationWorkerRunning, 0);
+                EngineUiUpdateRequest? latest = Volatile.Read(ref _latestEngineUiUpdateRequest);
+                if (!_lifetimeCts.IsCancellationRequested &&
+                    latest is not null &&
+                    latest.Revision > Volatile.Read(ref _engineUiLastCompletedRevision))
+                {
+                    QueueEnginePresentationWorker(dispatcher);
+                }
             }
-        }));
+        });
+    }
+
+    private EngineFaultRowsSnapshot? BuildEngineFaultRowsSnapshot()
+    {
+        if (!MasterApproved)
+            return null;
+
+        bool removal = _waitForProductRelease || _waitForFaultProductRemoval;
+        // Frame rỗng đã là nguồn authoritative cho ProductRemoved. Không dựng
+        // lại bảng removal hàng trăm dòng trước khi Dispatcher được quyền reset
+        // cycle và hiện CHỜ LẮP SẢN PHẨM.
+        if (removal && _engine.IsProductReleased)
+            return new EngineFaultRowsSnapshot(Removal: true, Array.Empty<FaultRow>());
+
+        IReadOnlyList<FaultRow> rows = removal
+            ? _engine.BuildRemovalRows()
+            : _engine.BuildRows();
+        return new EngineFaultRowsSnapshot(removal, rows);
     }
 
     private sealed record EngineUiUpdateRequest(long Revision, long Generation);
+    private sealed record EngineFaultRowsSnapshot(bool Removal, IReadOnlyList<FaultRow> Rows);
 
-    private void ProcessScheduledEngineChangedOnUi(long generation)
+    private void ProcessScheduledEngineChangedOnUi(
+        long generation,
+        EngineFaultRowsSnapshot? rowsSnapshot = null)
     {
         if (!MasterApproved)
         {
@@ -2332,7 +2369,7 @@ public sealed class TestViewModel : ObservableObject
             ProcessMasterEngineChangedOnUi(generation);
         }
         else
-            ProcessEngineChangedOnUi(generation);
+            ProcessEngineChangedOnUi(generation, rowsSnapshot);
     }
 
     private void ProcessMasterRemovalAfterReturningToMain(long generation)
@@ -2357,21 +2394,15 @@ public sealed class TestViewModel : ObservableObject
         AddLog("Đã xác nhận frame rỗng sau khi rời kiểm tra Master; xóa khóa tháo sản phẩm.");
     }
 
-    private void ProcessEngineChangedOnUi(long generation)
+    private void ProcessEngineChangedOnUi(
+        long generation,
+        EngineFaultRowsSnapshot? rowsSnapshot = null)
     {
         if (IsDeviceFault)
             return;
 
         if (!IsProductionFaultContext(generation))
             return;
-
-        RefreshFaults();
-        LogFaultGate(generation);
-        if (Volatile.Read(ref _firstLogicalStateLogged) != 0 &&
-            Interlocked.CompareExchange(ref _firstUiUpdateRenderedLogged, 1, 0) == 0)
-        {
-            AsyncFileLogService.Current.Performance("FIRST_UI_UPDATE_RENDERED");
-        }
 
         // Sau lỗi: chỉ chờ tháo sản phẩm, không phát lại lỗi.
         if (_waitForFaultProductRemoval)
@@ -2385,7 +2416,10 @@ public sealed class TestViewModel : ObservableObject
 
             TryCompleteFaultProductRemoval();
             if (_waitForFaultProductRemoval)
+            {
+                RefreshFaultsFromSnapshot(rowsSnapshot);
                 ObserveWaterProofRetestConnectorCycle(generation);
+            }
 
             return;
         }
@@ -2424,10 +2458,19 @@ public sealed class TestViewModel : ObservableObject
             }
             else
             {
+                RefreshFaultsFromSnapshot(rowsSnapshot);
                 ObserveWaterProofRetestConnectorCycle(generation);
             }
 
             return;
+        }
+
+        RefreshFaultsFromSnapshot(rowsSnapshot);
+        LogFaultGate(generation);
+        if (Volatile.Read(ref _firstLogicalStateLogged) != 0 &&
+            Interlocked.CompareExchange(ref _firstUiUpdateRenderedLogged, 1, 0) == 0)
+        {
+            AsyncFileLogService.Current.Performance("FIRST_UI_UPDATE_RENDERED");
         }
 
         // Chỉ product fault đã qua monotonic confirmation gate mới được
@@ -2812,7 +2855,6 @@ public sealed class TestViewModel : ObservableObject
             Volatile.Read(ref _probeSessionActive) != 0 ||
             !MasterApproved ||
             IsIoMappingMode ||
-            !_presentationCycleStarted ||
             CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval))
         {
             return true;
@@ -2836,6 +2878,28 @@ public sealed class TestViewModel : ObservableObject
             return true;
 
         long generation = Volatile.Read(ref _runtimeGeneration);
+        if (!_presentationCycleStarted &&
+            CurrentProductionPhase == ProductionPhase.Continuity &&
+            _engine.HasContinuityPreviewProductActivity)
+        {
+            // Lần lắp đầu tiên không được chờ C0 của toàn bộ dải 4/10 card.
+            // Preview đã được TestEngine lọc về đúng expected product edge và
+            // chỉ được phép đổi presentation, không PASS/FAIL/counter/relay.
+            InvokeUi(() =>
+            {
+                if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                    _presentationCycleStarted ||
+                    CurrentProductionPhase != ProductionPhase.Continuity ||
+                    IsProductRemovalPending)
+                {
+                    return;
+                }
+
+                _presentationCycleStarted = true;
+                RaiseCenterPresentation();
+                State = "ĐANG TEST";
+            });
+        }
         QueueContinuityPreviewUi(generation);
         return true;
     }
@@ -2847,7 +2911,11 @@ public sealed class TestViewModel : ObservableObject
         if (Interlocked.CompareExchange(ref _continuityPreviewUiQueued, 1, 0) != 0)
             return;
 
-        InvokeUi(ProcessContinuityPreviewUi);
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+            ProcessContinuityPreviewUi();
+        else
+            dispatcher.BeginInvoke(ProcessContinuityPreviewUi, System.Windows.Threading.DispatcherPriority.Background);
     }
 
     private void ProcessContinuityPreviewUi()
@@ -2873,7 +2941,11 @@ public sealed class TestViewModel : ObservableObject
             if (Volatile.Read(ref _continuityPreviewUiRevision) != revision &&
                 Interlocked.CompareExchange(ref _continuityPreviewUiQueued, 1, 0) == 0)
             {
-                InvokeUi(ProcessContinuityPreviewUi);
+                var dispatcher = Application.Current?.Dispatcher;
+                if (dispatcher is null || dispatcher.CheckAccess())
+                    ProcessContinuityPreviewUi();
+                else
+                    dispatcher.BeginInvoke(ProcessContinuityPreviewUi, System.Windows.Threading.DispatcherPriority.Background);
             }
         }
     }
@@ -8963,7 +9035,9 @@ public sealed class TestViewModel : ObservableObject
             MessageBoxButton.OK,
             MessageBoxImage.Warning));
 
-    private void RefreshFaults()
+    private void RefreshFaults() => RefreshFaultsFromSnapshot(rowsSnapshot: null);
+
+    private void RefreshFaultsFromSnapshot(EngineFaultRowsSnapshot? rowsSnapshot)
     {
         long refreshStarted = Stopwatch.GetTimestamp();
         if (IsRuntimeMode(RuntimeMode.Probe) ||
@@ -9010,12 +9084,16 @@ public sealed class TestViewModel : ObservableObject
                 // HTDRV_REMOVAL_DISPLAY_2026-09-05: sau PASS/FAIL, đảo ý
                 // nghĩa bảng sang "connection còn trên jig". Engine chỉ đọc
                 // snapshot quan hệ hiện tại, không sửa detection/PASS latch.
-                desiredRows = _engine.BuildRemovalRows();
+                desiredRows = rowsSnapshot is { Removal: true }
+                    ? rowsSnapshot.Rows
+                    : _engine.BuildRemovalRows();
             }
             else
             {
                 desiredRows = _presentationCycleStarted
-                    ? _engine.BuildRows()
+                    ? rowsSnapshot is { Removal: false }
+                        ? rowsSnapshot.Rows
+                        : _engine.BuildRows()
                     : Array.Empty<FaultRow>();
             }
         }
@@ -9224,6 +9302,15 @@ public sealed class TestViewModel : ObservableObject
         if (desiredIndex != desiredRows.Count)
             return false;
 
+        // Một thay đổi lớn mà phát từng Remove sẽ bắt DataGrid layout lại nhiều
+        // lần trên cùng một frame. Một Reset duy nhất rẻ hơn và vẫn giữ snapshot
+        // cuối cùng chính xác; delta nhỏ tiếp tục dùng RemoveAt để giữ scroll.
+        if (Faults.Count - desiredRows.Count > 8)
+        {
+            Faults.ReplaceAll(desiredRows);
+            return true;
+        }
+
         desiredIndex = desiredRows.Count - 1;
         for (int currentIndex = Faults.Count - 1; currentIndex >= 0; currentIndex--)
         {
@@ -9262,6 +9349,14 @@ public sealed class TestViewModel : ObservableObject
         // replace hoặc reorder tiếp tục dùng bộ đồng bộ key-based tổng quát.
         if (currentIndex != Faults.Count)
             return false;
+
+        // Tương tự đường xóa: tránh hàng chục/hàng trăm CollectionChanged/Add
+        // khiến WPF đo và layout DataGrid lặp lại trong một lần cập nhật.
+        if (addedCount > 8)
+        {
+            Faults.ReplaceAll(desiredRows);
+            return true;
+        }
 
         currentIndex = 0;
         for (int desiredIndex = 0; desiredIndex < desiredRows.Count; desiredIndex++)
