@@ -12,7 +12,13 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public static class ProbeContactClassifier
 {
-    public sealed record Detection(int Io, int Score, string Signature);
+    public sealed record Detection(
+        int Io,
+        int Score,
+        string Signature,
+        int Hits = 0,
+        int FanIn = 0,
+        bool IsMapped = false);
 
     private sealed record Candidate(
         int Io,
@@ -53,7 +59,6 @@ public static class ProbeContactClassifier
         // Partial/target-only data rất dễ bị nhiễu điện dung (ví dụ tay người chạm IO)
         // và không đủ bằng chứng để kết luận đầu dò thật.
         if (maxContacts <= 0 ||
-            model is null ||
             frame.Mode != BoardScanMode.Production ||
             !frame.Complete ||
             frame.UnknownBytes != 0 ||
@@ -63,10 +68,6 @@ public static class ProbeContactClassifier
         }
 
         int sourceCount = frame.Connections.Count;
-        int capacityIo = boardCapacity?.TotalIoCapacity ?? Math.Max(
-            BoardIoDecoder.IoPerExpansionCard,
-            frame.CardNumber * BoardIoDecoder.IoPerScanCard);
-
         var fanInByTarget = new Dictionary<int, int>();
         int edgeCount = 0;
 
@@ -80,12 +81,6 @@ public static class ProbeContactClassifier
         }
 
         if (fanInByTarget.Count == 0 && frame.TargetHits.Count == 0)
-            return Array.Empty<Detection>();
-
-        // Probe thật của JBZ chỉ được xét trong một sweep Production đủ rộng.
-        // Không dùng frame ngắn/khuyết để tránh biến nhiễu cục bộ thành Probe.
-        int minimumSweepSources = Math.Max(16, (capacityIo * 3) / 5);
-        if (sourceCount < minimumSweepSources)
             return Array.Empty<Detection>();
 
         int repeatedThreshold = GetRepeatedTargetThreshold(sourceCount);
@@ -108,15 +103,12 @@ public static class ProbeContactClassifier
                     (mapped ? 16 : 0) +
                     (sourceWordMissing ? 8 : 0);
 
-                // Không còn các nhánh permissive targetOnly/diagnostic/dominant.
-                // Chúng có thể nhận nhiễu cơ thể người chỉ vì một TARGET lặp lại.
-                // Probe hợp lệ phải là IO có trong model và có fan-in mạnh qua nhiều
-                // SOURCE độc lập. Trường hợp firmware thay SOURCE word bằng TARGET
-                // vẫn được chấp nhận khi chính source word của IO đó bị thiếu.
+                // Trace Htdrv cho thấy TP thường là một IO rỗng, không nằm trong
+                // topology THT. Vì vậy mapping chỉ dùng xếp hạng, không phải gate.
+                // Một TARGET lẻ vẫn bị loại: phải có fan-in/hit lặp qua nhiều SOURCE.
                 bool repeatedTarget =
-                    mapped &&
-                    (fanIn >= repeatedThreshold ||
-                     (sourceWordMissing && hits >= repeatedThreshold));
+                    fanIn >= repeatedThreshold ||
+                    (sourceWordMissing && hits >= repeatedThreshold);
 
                 return new Candidate(
                     io,
@@ -161,7 +153,13 @@ public static class ProbeContactClassifier
                 $"TARGET IO{candidate.Io}: hits={candidate.Hits}, fan-in={candidate.FanIn}, " +
                 $"sources={sourceCount}, edges={edgeCount}";
 
-            result.Add(new Detection(candidate.Io, candidate.Score, signature));
+            result.Add(new Detection(
+                candidate.Io,
+                candidate.Score,
+                signature,
+                candidate.Hits,
+                candidate.FanIn,
+                candidate.Mapped));
         }
 
         return result;

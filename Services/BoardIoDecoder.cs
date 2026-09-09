@@ -57,7 +57,7 @@ public sealed class BoardIoDecoder
     // Presentation-only continuity preview: remember the last finalized TARGET set
     // for each SOURCE across complete scan cycles. We only emit a preview when a
     // SOURCE relation actually changes, so unchanged 256/640-I/O scans stay silent.
-    readonly Dictionary<int, HashSet<int>> _lastProductionSourceTargets = [];
+    readonly Dictionary<int, IReadOnlySet<int>> _lastProductionSourceTargets = [];
 
     int? _currentSource;
     long _sequence;
@@ -155,7 +155,7 @@ public sealed class BoardIoDecoder
     IReadOnlyList<ScanFrame> FeedProduction(ReadOnlySpan<byte> data)
     {
         AppendInput(data);
-        var frames = new List<ScanFrame>();
+        List<ScanFrame>? frames = null;
 
         while (_buffer.Count - _bufferOffset >= 2)
         {
@@ -168,7 +168,7 @@ public sealed class BoardIoDecoder
                 // every TARGET belonging to it has already been received. Publish
                 // only a changed relation, never one event per protocol word.
                 if (_currentSource is int completedSource)
-                    QueueProductionContinuityPreviewIfChanged(frames, completedSource, emit: true);
+                    QueueProductionContinuityPreviewIfChanged(ref frames, completedSource, emit: true);
 
                 AppendRaw(first, second);
                 _bufferOffset += 2;
@@ -231,7 +231,7 @@ public sealed class BoardIoDecoder
                 // its comparison cache here, but do not emit a redundant preview
                 // immediately before the authoritative C0 frame.
                 if (_currentSource is int finalSource && terminator.IsKnown && _unknownBytes == 0)
-                    QueueProductionContinuityPreviewIfChanged(frames, finalSource, emit: false);
+                    QueueProductionContinuityPreviewIfChanged(ref frames, finalSource, emit: false);
 
                 _sequence++;
 
@@ -241,7 +241,7 @@ public sealed class BoardIoDecoder
                 // không chỉ riêng số SOURCE. Vẫn từ chối frame thiếu bất kỳ I/O nào.
                 bool complete = terminator.IsKnown && HasCompleteProductionCoverage();
 
-                frames.Add(new ScanFrame(
+                (frames ??= []).Add(new ScanFrame(
                     DateTime.Now,
                     CardCount,
                     _activeTargets.Count == 0 ? EmptyTargets : _activeTargets.ToHashSet(),
@@ -270,7 +270,7 @@ public sealed class BoardIoDecoder
         }
 
         CompactBuffer();
-        return frames;
+        return frames is null ? Array.Empty<ScanFrame>() : frames;
     }
 
     /// <summary>
@@ -314,7 +314,7 @@ public sealed class BoardIoDecoder
     }
 
     private void QueueProductionContinuityPreviewIfChanged(
-        List<ScanFrame> frames,
+        ref List<ScanFrame>? frames,
         int sourceIo,
         bool emit)
     {
@@ -327,13 +327,15 @@ public sealed class BoardIoDecoder
 
         bool hadPrevious = _lastProductionSourceTargets.TryGetValue(
             sourceIo,
-            out HashSet<int>? previousTargets);
+            out IReadOnlySet<int>? previousTargets);
         bool changed = hadPrevious
             ? !previousTargets!.SetEquals(currentTargets)
             : currentTargets.Count > 0;
 
         // Keep the comparison cache synchronized even for empty/unchanged sources.
-        _lastProductionSourceTargets[sourceIo] = currentTargets.ToHashSet();
+        _lastProductionSourceTargets[sourceIo] = currentTargets.Count == 0
+            ? EmptyTargets
+            : currentTargets.ToHashSet();
 
         if (!emit || !changed)
             return;
@@ -349,7 +351,7 @@ public sealed class BoardIoDecoder
         // Sentinel for TestViewModel/D2xx transport:
         // Production + Complete=false + SourceCount=1 + no C0 marker.
         // This is presentation data only; it must never enter TestEngine.ProcessFrame.
-        frames.Add(new ScanFrame(
+        (frames ??= []).Add(new ScanFrame(
             DateTime.Now,
             CardCount,
             targetSnapshot,
@@ -405,7 +407,7 @@ public sealed class BoardIoDecoder
     IReadOnlyList<ScanFrame> FeedProbe(ReadOnlySpan<byte> data)
     {
         AppendInput(data);
-        var frames = new List<ScanFrame>();
+        List<ScanFrame>? frames = null;
 
         while (_buffer.Count - _bufferOffset >= 2)
         {
@@ -429,7 +431,7 @@ public sealed class BoardIoDecoder
                     _probeActive.Remove(io);
 
                 HashSet<int> instantIo = _probeActive.ToHashSet();
-                frames.Add(new ScanFrame(
+                (frames ??= []).Add(new ScanFrame(
                     DateTime.Now,
                     CardCount,
                     instantIo,
@@ -456,7 +458,7 @@ public sealed class BoardIoDecoder
                 // Nhờ vậy release từng IO được xử lý độc lập và không reset UI
                 // Production/configuration.
                 HashSet<int> snapshot = _probeActive.ToHashSet();
-                frames.Add(new ScanFrame(
+                (frames ??= []).Add(new ScanFrame(
                     DateTime.Now,
                     CardCount,
                     snapshot,
@@ -482,7 +484,7 @@ public sealed class BoardIoDecoder
         }
 
         CompactBuffer();
-        return frames;
+        return frames is null ? Array.Empty<ScanFrame>() : frames;
     }
 
     public IReadOnlyList<ScanFrame> Decode(byte[] raw)

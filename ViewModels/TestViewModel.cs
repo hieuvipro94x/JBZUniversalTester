@@ -230,7 +230,8 @@ public sealed class TestViewModel : ObservableObject
     private readonly object _inlineProbeGate = new();
     private int[] _inlineProbeContactIos = Array.Empty<int>();
     private long _inlineProbeLastSeenUtcTicks;
-    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 1, releaseFrames: 1, maxContacts: 2);
+    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 2, maxContacts: 2);
+    private readonly ManualProbeSession _manualProbeSession = new(confirmFrames: 2, releaseFrames: 2);
     // V12.9.2: Probe UI tuyệt đối không dùng TTL/quarantine dài.
     // Timestamp chỉ còn phục vụ interlock relay chống rung cực ngắn sau RELEASE,
     // không được phép giữ ProbeContacts trên giao diện.
@@ -1111,6 +1112,7 @@ public sealed class TestViewModel : ObservableObject
 
         Interlocked.Exchange(ref _manualModeActive, 1);
         CancelCycleOperations();
+        ResetManualProbeSession("enter-manual-mode");
         SwitchRuntimeMode(RuntimeMode.Background);
         Interlocked.Exchange(ref _probeSessionActive, 0);
         Interlocked.Exchange(ref _postContinuityStarted, 0);
@@ -1478,6 +1480,7 @@ public sealed class TestViewModel : ObservableObject
         _deviceFaultMessage = "Mất kết nối với máy test. Vui lòng khởi động lại.";
         BoardConnectionMessage = _deviceFaultMessage;
         HardwareStatus = "Máy test: MẤT KẾT NỐI";
+        ResetManualProbeSession("device-fault");
         _cycleActive = false;
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
@@ -2722,6 +2725,7 @@ public sealed class TestViewModel : ObservableObject
 
     private void ResetFullCycleAfterProductRemoved()
     {
+        ResetManualProbeSession("product-removed");
         _engine.ResetProductCycle();
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _postContinuityStarted, 0);
@@ -3051,13 +3055,17 @@ public sealed class TestViewModel : ObservableObject
                     return;
                 }
 
-                // Probe là lớp quan sát SONG SONG. Không suppress toàn bộ frame
-                // chỉ vì classifier nghi ngờ Probe; SHORT/WRONG thật vẫn phải đi
-                // qua TestEngine. UI chỉ đổi khi ProbeStateTracker đổi state.
+                // Probe là lớp quan sát SONG SONG. Snapshot có chữ ký fan-in
+                // mạnh được cô lập khỏi TestEngine; fault Production đã có
+                // vẫn giữ nguyên. UI chỉ đổi khi tracker đổi state.
                 bool probeChanged;
                 bool preserveProductionFaultsForProbe = false;
                 int[] displayedProbeIos;
-                if (TryDetectInlineProbeContacts(frame, out int[] touchedIos))
+                if (_manualProbeSession.IsActive)
+                {
+                    preserveProductionFaultsForProbe = ProcessManualProbeFrame(frame, generation);
+                }
+                else if (TryDetectInlineProbeContacts(frame, out int[] touchedIos))
                 {
                     Interlocked.Increment(ref _productionFramesRoutedToProbe);
                     preserveProductionFaultsForProbe = true;
@@ -3120,17 +3128,24 @@ public sealed class TestViewModel : ObservableObject
                 // Drop only the presentation overlay immediately before the
                 // authoritative C0 snapshot is evaluated. PASS/FAIL state itself
                 // has never been changed by the preview path.
-                bool continuityPreviewCleared = _engine.ClearContinuityPreview();
+                bool continuityPreviewCleared = false;
+                bool engineChanged = false;
                 // Htdrv changes the operator state from the physical snapshot,
                 // not from the slower fault/topology result. One active jig IO
                 // is enough for ĐANG TEST; an empty complete frame immediately
                 // returns to SẴN SÀNG. Removal/PASS latches remain authoritative.
-                UpdateImmediateProductPresenceState(frame);
-                bool engineChanged = _engine.ProcessFrame(frame, preserveProductionFaultsForProbe);
+                // Chữ ký Probe mạnh chỉ là lớp quan sát. Không được
+                // đổi LẮP SẢN PHẨM -> ĐANG TEST chỉ vì target đầu dò.
+                if (!preserveProductionFaultsForProbe)
+                {
+                    continuityPreviewCleared = _engine.ClearContinuityPreview();
+                    UpdateImmediateProductPresenceState(frame);
+                    engineChanged = _engine.ProcessFrame(frame, false);
+                }
                 Interlocked.Increment(ref _productionFramesProcessed);
                 if (continuityPreviewCleared && !engineChanged)
                     QueueContinuityPreviewUi(generation);
-                if (restoreBoardPresentation && !engineChanged)
+                if (!preserveProductionFaultsForProbe && restoreBoardPresentation && !engineChanged)
                 {
                     // UI đã xóa snapshot lúc đổi lifecycle. Frame đầu tiên của phiên mới
                     // phải dựng lại presentation kể cả topology vật lý không đổi.
@@ -3168,41 +3183,26 @@ public sealed class TestViewModel : ObservableObject
         if (IsDeviceFault ||
             !_board.IsScanning ||
             !IsRuntimeMode(RuntimeMode.Production) ||
-            Volatile.Read(ref _probeSessionActive) != 0 ||
-            !HasInstalledProductEvidenceForProbe())
+            Volatile.Read(ref _probeSessionActive) != 0)
         {
             return;
         }
 
         int[] probeIos = preview.ActiveIo
             .Where(_board.Capacity.ContainsGlobalIo)
-            .Where(IsMappedProbeIo)
             .Distinct()
             .Take(2)
             .OrderBy(value => value)
             .ToArray();
-        if (probeIos.Length == 0 || !UpdateInlineProbeContacts(probeIos))
+        if (probeIos.Length == 0)
             return;
 
-        long generation = Volatile.Read(ref _runtimeGeneration);
-        DateTime requestedAt = DateTime.Now;
-        InvokeUi(() =>
-        {
-            if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-                Volatile.Read(ref _probeSessionActive) != 0)
-            {
-                return;
-            }
-
-            ShowInlineProbeContacts(probeIos);
-            DateTime renderedAt = DateTime.Now;
-            AsyncFileLogService.Current.Performance(
-                $"PROBE_EARLY_LATENCY TOUCH {string.Join(", ", probeIos.Select(io => $"IO{io}"))}; " +
-                $"RX->VM={Math.Max(0, (requestedAt - preview.Timestamp).TotalMilliseconds):0.0} ms; " +
-                $"VM->UI={Math.Max(0, (renderedAt - requestedAt).TotalMilliseconds):0.0} ms; " +
-                $"seq={preview.Sequence} hits={preview.PeakHitCount}/{preview.RequiredHitCount}",
-                AppLogLevel.Normal);
-        });
+        // Preview trước C0 chỉ là candidate. Không dùng nó để tăng
+        // stable-frame hoặc đổi UI; snapshot C0 hoàn chỉnh mới có quyền xác nhận.
+        AsyncFileLogService.Current.Performance(
+            $"PROBE_PREVIEW candidate={string.Join(",", probeIos.Select(io => $"IO{io}"))} " +
+            $"seq={preview.Sequence} hits={preview.PeakHitCount}/{preview.RequiredHitCount}",
+            AppLogLevel.Diagnostic);
     }
 
     private void ArmFaultProductRemoval(ProductModel model)
@@ -3896,8 +3896,7 @@ public sealed class TestViewModel : ObservableObject
     private bool TryDetectInlineProbeContacts(ScanFrame frame, out int[] ios)
     {
         ios = Array.Empty<int>();
-        if (frame.Mode != BoardScanMode.Production ||
-            !HasInstalledProductEvidenceForProbe())
+        if (frame.Mode != BoardScanMode.Production)
         {
             return false;
         }
@@ -3931,6 +3930,89 @@ public sealed class TestViewModel : ObservableObject
         // Production có thể giữ stable-frame riêng trong TestEngine, nhưng Probe UI
         // không được chờ RequiredStableFrames hoặc timer 500-2000 ms.
         return false;
+    }
+
+    private bool ProcessManualProbeFrame(ScanFrame frame, long generation)
+    {
+        IReadOnlyList<ProbeContactClassifier.Detection> detections =
+            ProbeContactClassifier.DetectMany(
+                frame,
+                _model,
+                maxContacts: 4,
+                boardCapacity: _board.Capacity);
+
+        ManualProbeUpdate update = _manualProbeSession.Update(
+            frame.Sequence,
+            detections,
+            _model,
+            _board.Capacity);
+
+        if (update.Transition == ManualProbeTransition.None)
+            return detections.Count > 0;
+
+        AsyncFileLogService.Current.Performance(
+            $"MANUAL_PROBE transition={update.Transition} phase={update.Phase} " +
+            $"tp=IO{update.ProbeIo} contact=IO{update.ContactIo} " +
+            $"candidate=IO{update.CandidateIo} stable={update.StableFrames} seq={frame.Sequence}");
+
+        if (update.Transition == ManualProbeTransition.PointerConfirmed)
+        {
+            AddLog($"TEST POINTER: đã khóa IO{update.ProbeIo}; bắt đầu CONNECTOR CHECK.");
+            return true;
+        }
+
+        if (update.Transition is not (ManualProbeTransition.ConnectorChanged or
+            ManualProbeTransition.ConnectorReleased))
+        {
+            return detections.Count > 0;
+        }
+
+        int contactIo = update.ContactIo;
+        lock (_inlineProbeGate)
+        {
+            _inlineProbeContactIos = contactIo > 0 ? [contactIo] : Array.Empty<int>();
+        }
+        Volatile.Write(ref _inlineProbeContactIo, contactIo);
+        _sound.SetTestPointContactSound(contactIo > 0);
+        if (contactIo > 0)
+            Interlocked.Exchange(ref _inlineProbeLastSeenUtcTicks, DateTime.UtcNow.Ticks);
+
+        InvokeUi(() =>
+        {
+            if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                !_manualProbeSession.IsActive)
+            {
+                return;
+            }
+
+            if (contactIo > 0)
+                ShowInlineProbeContacts([contactIo]);
+            else
+                ClearInlineProbeDisplay();
+        });
+
+        return detections.Count > 0;
+    }
+
+    private void StartManualProbeSession(string reason)
+    {
+        ClearInlineProbeContactsState(clearLastSeen: true);
+        InvokeUi(ClearInlineProbeDisplay);
+        ManualProbeUpdate update = _manualProbeSession.Start();
+        AsyncFileLogService.Current.Performance(
+            $"MANUAL_PROBE transition={update.Transition} phase={update.Phase} reason={reason}");
+    }
+
+    private void ResetManualProbeSession(string reason)
+    {
+        ManualProbeUpdate update = _manualProbeSession.Reset();
+        ClearInlineProbeContactsState(clearLastSeen: true);
+        InvokeUi(ClearInlineProbeDisplay);
+        if (update.Transition != ManualProbeTransition.None)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"MANUAL_PROBE transition={update.Transition} phase={update.Phase} reason={reason}");
+        }
     }
 
     private int[] SnapshotInlineProbeContacts()
@@ -4364,6 +4446,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Increment(ref _statisticsLoadGeneration);
         _lifetimeCts.Cancel();
         CancelCycleOperations();
+        ResetManualProbeSession("shutdown");
 
         if (_hardwareMonitorTask is not null)
         {
@@ -4509,6 +4592,7 @@ public sealed class TestViewModel : ObservableObject
                 InvokeUi(UpdateCardScanningState);
             }
 
+            StartManualProbeSession("manual-start");
             AddLog("TESTPIN/Probe observer ON - dùng stream Production, không reset chu kỳ/engine/relay.");
         }
         catch (Exception ex)
@@ -4525,7 +4609,10 @@ public sealed class TestViewModel : ObservableObject
         await EnsureContinuousProductionScanAsync();
         if (IsDeviceFault)
             return;
-        AddLog("TESTPIN/Probe observer luôn ON - yêu cầu OFF legacy được bỏ qua.");
+        ResetManualProbeSession("manual-stop");
+        ClearInlineProbeContactsState(clearLastSeen: true);
+        InvokeUi(ClearInlineProbeDisplay);
+        AddLog("TESTPIN/Probe session OFF; stream Production vẫn tiếp tục.");
     }
 
     /// <summary>
@@ -4658,6 +4745,7 @@ public sealed class TestViewModel : ObservableObject
         // ARM engine để callback Probe/Background cũ không thể lọt sang test.
         Interlocked.Exchange(ref _probeSessionActive, 0);
         SwitchRuntimeMode(RuntimeMode.Production);
+        ResetManualProbeSession("new-test");
         AsyncFileLogService.Current.Performance("TEST_ARM_BEGIN");
 
         // Chu kỳ mới có CancellationToken riêng. Khi đóng TestView/thoát app,
@@ -4780,6 +4868,7 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task StopTestAsync()
     {
+        ResetManualProbeSession("leave-test-view");
         if (Volatile.Read(ref _discardStandaloneLocked) != 0)
         {
             CancelCycleOperations();
@@ -6562,6 +6651,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         _cycleActive = true;
         SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+        StartManualProbeSession("post-pass");
         // Không ẩn bảng kết quả ngay khi PASS. Người vận hành phải còn nhìn
         // thấy kết quả cho tới khi D2XX xác nhận toàn bộ continuity đã mất.
         // ResetFullCycleAfterProductRemoved() sẽ chuyển tab về 0.
@@ -7811,6 +7901,7 @@ public sealed class TestViewModel : ObservableObject
         // không một task PASS/FAIL cũ hoàn thành muộn có thể cộng sản lượng
         // nhầm sang mã hàng vừa chọn.
         CancelCycleOperations();
+        ResetManualProbeSession("model-change");
         _cycleActive = false;
         SetProductionPhase(ProductionPhase.WaitingProduct);
         _waitForProductRelease = false;

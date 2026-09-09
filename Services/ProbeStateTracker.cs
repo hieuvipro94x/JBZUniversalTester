@@ -14,7 +14,7 @@ public sealed class ProbeStateTracker
     private readonly int _releaseFrames;
     private int[] _activeIos = [];
 
-    public ProbeStateTracker(int confirmFrames = 1, int releaseFrames = 1, int maxContacts = 2)
+    public ProbeStateTracker(int confirmFrames = 2, int releaseFrames = 2, int maxContacts = 2)
     {
         _confirmFrames = Math.Clamp(confirmFrames, 1, 10);
         _releaseFrames = Math.Clamp(releaseFrames, 1, 10);

@@ -43,6 +43,7 @@ internal static class Program
             ("Topology learning uses one direct-contact signal", TestTopologyLearningDirectContact),
             ("THT discard contact interlock and frame isolation", TestDiscardContactInterlock),
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
+            ("Manual Probe TP latch and connector transitions", TestManualProbeSession),
             ("Inline probe does not clear wiring faults", TestInlineProbeDoesNotClearWiringFaults),
             ("Htdrv endpoint/probe display cases", TestHtdrvEndpointProbeDisplayCases),
             ("500-cycle scan/probe/fault stress", TestFiveHundredCycleScanProbeFaultStress),
@@ -2588,8 +2589,66 @@ internal static class Program
         IReadOnlyList<ProbeContactClassifier.Detection> detections =
             ProbeContactClassifier.DetectMany(frame, model, maxContacts: 2, boardCapacity: BoardCapacity.Create(10));
 
-        Assert(detections.Count == 1 && detections[0].Io == 113,
-            "Target-only production probe touch appears on TestWindow instead of being ignored");
+        Assert(detections.Count == 0,
+            "One target-only hit is only noise/candidate and must not confirm Probe");
+
+        ScanFrame strongFrame = FrameSeq(
+            8,
+            Enumerable.Range(20, 20)
+                .Select(source => (source, new[] { 113 }))
+                .ToArray());
+        detections = ProbeContactClassifier.DetectMany(
+            strongFrame,
+            model,
+            maxContacts: 2,
+            boardCapacity: BoardCapacity.Create(10));
+        Assert(detections.Count == 1 && detections[0].Io == 113 && detections[0].FanIn == 20,
+            "A complete frame with strong repeated fan-in identifies one Probe IO");
+    }
+
+    private static void TestManualProbeSession()
+    {
+        ProductModel model = Model(("PAIR", new[] { 1, 2 }));
+        BoardCapacity capacity = BoardCapacity.Create(1);
+        var session = new ManualProbeSession(confirmFrames: 2, releaseFrames: 2);
+        session.Start();
+
+        ProbeContactClassifier.Detection tp = new(7, 120, "TP", FanIn: 20);
+        ManualProbeUpdate firstTp = session.Update(1, [tp], model, capacity);
+        Assert(firstTp.Transition == ManualProbeTransition.PointerCandidateChanged && session.ProbeIo == 0,
+            "First strong TP frame remains a candidate");
+        session.Update(1, [tp], model, capacity);
+        Assert(session.ProbeIo == 0, "Duplicate callback from the same frame cannot confirm TP");
+        ManualProbeUpdate confirmedTp = session.Update(2, [tp], model, capacity);
+        Assert(confirmedTp.Transition == ManualProbeTransition.PointerConfirmed &&
+               session.ProbeIo == 7 &&
+               session.Phase == ManualProbePhase.ConnectorCheck,
+            "Second distinct stable frame latches the free TP IO and enters connector check");
+
+        ProbeContactClassifier.Detection io1 = new(1, 100, "IO1", FanIn: 20, IsMapped: true);
+        ProbeContactClassifier.Detection io2 = new(2, 110, "IO2", FanIn: 20, IsMapped: true);
+        session.Update(3, [io1], model, capacity);
+        session.Update(4, [io1], model, capacity);
+        Assert(session.ContactIo == 1 && session.ProbeIo == 7,
+            "Stable connector contact is shown without replacing the latched TP");
+
+        session.Update(5, [io2, io1], model, capacity);
+        Assert(session.ContactIo == 1,
+            "A multi-target transition keeps the previous stable connector");
+        session.Update(6, [io2], model, capacity);
+        Assert(session.ContactIo == 1, "First frame on a new connector is only a candidate");
+        session.Update(7, [io2], model, capacity);
+        Assert(session.ContactIo == 2 && session.ProbeIo == 7,
+            "New connector replaces the old one only after stable confirmation");
+
+        session.Update(8, [], model, capacity);
+        Assert(session.ContactIo == 2, "First empty frame is release debounce");
+        session.Update(9, [], model, capacity);
+        Assert(session.ContactIo == 0 && session.ProbeIo == 7,
+            "Release clears connector contact but keeps TP latched");
+        session.Reset();
+        Assert(session.Phase == ManualProbePhase.Inactive && session.ProbeIo == 0,
+            "Session reset clears the TP latch");
     }
 
     private static void TestLegacyDatabaseWithoutSchemaInfo()
@@ -3445,7 +3504,7 @@ internal static class Program
         decoder.ConfigureCapacity(BoardCapacity.Create(1));
         decoder.ConfigureMode(BoardScanMode.Production);
         byte[] smallRaw = BuildProductionScanFrame(1, 0x00, (1, 18));
-        ScanFrame production = decoder.Feed(smallRaw).Single();
+        ScanFrame production = decoder.Feed(smallRaw).Single(frame => frame.Complete);
         Assert(production.Complete && production.Mode == BoardScanMode.Production, "Production complete");
         Assert(production.Connections.TryGetValue(1, out IReadOnlySet<int>? targets) && targets.SetEquals([18]), "IO1->IO18");
         Assert(production.SourceCount == 64 && production.ExpectedIoCount == 64 &&
@@ -3455,7 +3514,7 @@ internal static class Program
         decoder.Reset();
         var replacementRaw = BuildProductionScanFrame(1, 0x00, (1, 2)).ToList();
         replacementRaw.RemoveRange(4, 2); // Bo thật có thể phát A0 01 thay cho source 80 01.
-        ScanFrame targetReplacement = decoder.Feed(replacementRaw.ToArray()).Single();
+        ScanFrame targetReplacement = decoder.Feed(replacementRaw.ToArray()).Single(frame => frame.Complete);
         Assert(targetReplacement.Complete &&
                targetReplacement.SourceCount == 63 &&
                targetReplacement.ActiveIo.SetEquals([2]) &&
@@ -3471,16 +3530,18 @@ internal static class Program
         }
 
         decoder.Reset();
-        Assert(decoder.Feed(smallRaw.AsSpan(0, smallRaw.Length - 1)).Count == 0,
+        Assert(decoder.Feed(smallRaw.AsSpan(0, smallRaw.Length - 1)).All(frame => !frame.Complete),
             "Partial terminator is buffered");
-        ScanFrame splitFrame = decoder.Feed(smallRaw.AsSpan(smallRaw.Length - 1)).Single();
+        ScanFrame splitFrame = decoder.Feed(smallRaw.AsSpan(smallRaw.Length - 1)).Single(frame => frame.Complete);
         Assert(splitFrame.Connections.TryGetValue(1, out IReadOnlySet<int>? splitTargets) &&
                splitTargets.SetEquals([18]) && splitFrame.Complete,
             "Frame split across reads is reconstructed");
 
         decoder.Reset();
         byte[] secondRaw = BuildProductionScanFrame(1, 0x00, (2, 8));
-        IReadOnlyList<ScanFrame> multiple = decoder.Feed(smallRaw.Concat(secondRaw).ToArray());
+        IReadOnlyList<ScanFrame> multiple = decoder.Feed(smallRaw.Concat(secondRaw).ToArray())
+            .Where(frame => frame.Complete)
+            .ToArray();
         Assert(multiple.Count == 2 &&
                multiple[0].Connections[1].SetEquals([18]) &&
                multiple[1].Connections[2].SetEquals([8]),
@@ -3556,7 +3617,7 @@ internal static class Program
         decoder.ConfigureCapacity(BoardCapacity.Create(4, 3));
         decoder.ConfigureMode(BoardScanMode.Production);
         ScanFrame offsetFrame = decoder.Feed(
-            BuildProductionScanFrame(6, 0x01, (129, 130))).Single();
+            BuildProductionScanFrame(6, 0x01, (129, 130))).Single(frame => frame.Complete);
         Assert(offsetFrame.Complete && offsetFrame.SourceCount == 256 &&
                offsetFrame.ExpectedIoCount == 256 &&
                offsetFrame.Connections.TryGetValue(1, out IReadOnlySet<int>? offsetTargets) &&
@@ -3701,7 +3762,7 @@ internal static class Program
 
         IReadOnlyList<ScanFrame> frames = decoder.Feed(raw.ToArray());
         IReadOnlyList<ProductionProbePreview> previews = decoder.DrainProductionProbePreviews();
-        Assert(frames.Count == 0 &&
+        Assert(frames.All(frame => !frame.Complete) &&
                previews.Count == 1 &&
                previews[0].ActiveIo.SequenceEqual([198]) &&
                previews[0].RequiredHitCount == 24 &&
@@ -3720,7 +3781,7 @@ internal static class Program
         }
         completeRaw.Add(BoardIoDecoder.WordEnd1);
         completeRaw.Add(0x00);
-        Assert(singleReadDecoder.Feed(completeRaw.ToArray()).Single().Complete &&
+        Assert(singleReadDecoder.Feed(completeRaw.ToArray()).Single(frame => frame.Complete).Complete &&
                singleReadDecoder.DrainProductionProbePreviews().Count == 1,
             "Early Probe preview survives when TARGET threshold and C0 arrive in the same FT_Read batch");
 
@@ -3744,11 +3805,11 @@ internal static class Program
         long processedBefore = vm.ProductionFramesProcessed;
         int commandsBefore = board.Commands.Count;
         board.PublishProbePreview(previews[0] with { ScanGeneration = 1 });
-        Assert(vm.HasInlineProbeContacts &&
-               vm.Faults.Any(row => row.Kind == FaultKind.Probe && row.Io == 198) &&
+        Assert(!vm.HasInlineProbeContacts &&
+               vm.Faults.All(row => row.Kind != FaultKind.Probe) &&
                vm.ProductionFramesProcessed == processedBefore &&
                board.Commands.Count == commandsBefore,
-            "Early Probe preview updates only presentation/interlock, never TestEngine, counters, or relay; " +
+            "Early Probe preview remains candidate-only and never changes UI, TestEngine, counters, or relay; " +
             $"active={vm.HasInlineProbeContacts}, rows={string.Join("|", vm.Faults.Select(row => $"{row.Kind}:IO{row.Io}"))}, " +
             $"processed={processedBefore}->{vm.ProductionFramesProcessed}, " +
             $"commands={commandsBefore}->{board.Commands.Count}");
@@ -5069,6 +5130,11 @@ internal static class Program
             Enumerable.Range(10, 20)
                 .Select(source => (source, new[] { 1 }))
                 .ToArray()));
+        board.Publish(FrameSeq(
+            23,
+            Enumerable.Range(10, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
 
         Assert(vm.HasInlineProbeContacts, "Inline Probe frame appears as transient UI state");
         Assert(vm.ProductionFramesProcessed > processedBeforeProbe,
@@ -5081,7 +5147,12 @@ internal static class Program
         cleanProbeVm.SetModel(model);
         cleanProbeVm.StartProductionTestAsync().GetAwaiter().GetResult();
         cleanProbeBoard.Publish(FrameSeq(
-            23,
+            24,
+            Enumerable.Range(10, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
+        cleanProbeBoard.Publish(FrameSeq(
+            25,
             Enumerable.Range(10, 20)
                 .Select(source => (source, new[] { 1 }))
                 .ToArray()));
@@ -5100,20 +5171,20 @@ internal static class Program
         TestViewModel pointerDisabledVm = CreateTestViewModel(pointerDisabled, out FakeBoard disabledBoard);
         pointerDisabledVm.SetModel(model);
         pointerDisabledVm.StartProductionTestAsync().GetAwaiter().GetResult();
-        disabledBoard.Publish(new ScanFrame(
-            DateTime.Now,
-            1,
-            new HashSet<int> { 113 },
-            [],
-            false,
-            0,
+        disabledBoard.Publish(FrameSeq(
             30,
-            new Dictionary<int, IReadOnlySet<int>>(),
-            new Dictionary<int, int> { [113] = 1 },
-            BoardScanMode.Production));
+            Enumerable.Range(10, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
+        disabledBoard.Publish(FrameSeq(
+            31,
+            Enumerable.Range(10, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
         Assert(pointerDisabledVm.HasInlineProbeContacts,
             "Legacy UseTestPointer=false is normalized to always-on Probe observation");
-        disabledBoard.Publish(FrameSeq(2));
+        disabledBoard.Publish(FrameSeq(32));
+        disabledBoard.Publish(FrameSeq(33));
 
         MethodInfo waitMethod = typeof(TestViewModel).GetMethod(
             "WaitForProbeRelayInterlockAsync",
@@ -5155,37 +5226,48 @@ internal static class Program
         int passBeforeProbe = vm.Pass;
         int failBeforeProbe = vm.Fail;
         int commandsBeforeProbe = board.Commands.Count;
+        string centerBeforeProbe = vm.CenterResultText;
         board.Publish(FrameSeq(
             11,
             Enumerable.Range(20, 20)
                 .Select(source => (source, new[] { 1 }))
                 .ToArray()));
+        board.Publish(FrameSeq(
+            12,
+            Enumerable.Range(20, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
 
         Assert(vm.HasInlineProbeContacts &&
-               vm.Faults.Count == 1 &&
-               vm.Faults[0].Kind == FaultKind.Probe &&
-               vm.Faults[0].FaultType == "TP" &&
-               vm.Faults[0].Io == 1 &&
-               vm.Faults[0].IoText == "1" &&
-               vm.Faults[0].Connector == "1" &&
-               vm.Faults[0].Pin == "1" &&
-               vm.Faults[0].WireName == "1" &&
-               vm.Faults[0].Section == "0.5" &&
-               vm.Faults[0].Color == "R" &&
-               vm.Faults[0].Status.Length == 0 &&
-               vm.Faults[0].IoCnPnText == "1-1-1" &&
-               vm.IsCenterResultVisible &&
-               vm.CenterResultText == "LẮP SẢN PHẨM" &&
+               vm.Faults.Any(row =>
+                   row.Kind == FaultKind.Probe &&
+                   row.FaultType == "TP" &&
+                   row.Io == 1 &&
+                   row.IoText == "1" &&
+                   row.Connector == "1" &&
+                   row.Pin == "1" &&
+                   row.WireName == "1" &&
+                   row.Section == "0.5" &&
+                   row.Color == "R" &&
+                   row.Status.Length == 0 &&
+                   row.IoCnPnText == "1-1-1") &&
+               vm.CenterResultText == centerBeforeProbe &&
                vm.Total == totalBeforeProbe &&
                vm.Pass == passBeforeProbe &&
                vm.Fail == failBeforeProbe &&
                board.Commands.Count == commandsBeforeProbe,
-            "CASE B: mapped Probe shows the complete touched THT row without production or relay side effects");
+            "CASE B: mapped Probe shows the complete touched THT row without production or relay side effects; " +
+            $"active={vm.HasInlineProbeContacts}, center={vm.CenterResultText}/{centerBeforeProbe}, " +
+            $"count={vm.Total}/{totalBeforeProbe},{vm.Pass}/{passBeforeProbe},{vm.Fail}/{failBeforeProbe}, " +
+            $"commands={board.Commands.Count}/{commandsBeforeProbe}, rows=" +
+            string.Join("|", vm.Faults.Select(row =>
+                $"{row.Kind}/IO{row.Io}/{row.IoText}/{row.IoCnPnText}/{row.WireName}/{row.Section}/{row.Color}/{row.Status}")));
 
-        board.Publish(FrameSeq(12));
+        board.Publish(FrameSeq(13));
+        board.Publish(FrameSeq(14));
         Assert(!vm.HasInlineProbeContacts &&
-               vm.Faults.Count == 0 &&
-               vm.CenterResultText == "LẮP SẢN PHẨM",
+               vm.Faults.All(row => row.Kind != FaultKind.Probe) &&
+               vm.CenterResultText == centerBeforeProbe,
             "CASE C: Probe release leaves the not-installed product presentation unchanged");
 
         var duplicateModel = new ProductModel
@@ -5286,6 +5368,11 @@ internal static class Program
             Enumerable.Range(30, 20)
                 .Select(source => (source, new[] { 86 }))
                 .ToArray()));
+        shortBoard.Publish(FrameSeq(
+            24,
+            Enumerable.Range(30, 20)
+                .Select(source => (source, new[] { 86 }))
+                .ToArray()));
         refreshFaults.Invoke(shortVm, []);
         Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe &&
                                         row.Io == 86 &&
@@ -5300,6 +5387,11 @@ internal static class Program
         long processedBeforeUnusedProbe = unusedVm.ProductionFramesProcessed;
         unusedBoard.Publish(FrameSeq(
             30,
+            Enumerable.Range(40, 20)
+                .Select(source => (source, new[] { 7 }))
+                .ToArray()));
+        unusedBoard.Publish(FrameSeq(
+            31,
             Enumerable.Range(40, 20)
                 .Select(source => (source, new[] { 7 }))
                 .ToArray()));
@@ -5325,6 +5417,21 @@ internal static class Program
         long processedBeforeTestPin = testPinVm.ProductionFramesProcessed;
         testPinBoard.Publish(FrameSeq(
             40,
+            Enumerable.Range(60, 20)
+                .Select(source => (source, new[] { 7 }))
+                .ToArray()));
+        testPinBoard.Publish(FrameSeq(
+            41,
+            Enumerable.Range(60, 20)
+                .Select(source => (source, new[] { 7 }))
+                .ToArray()));
+        testPinBoard.Publish(FrameSeq(
+            42,
+            Enumerable.Range(60, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
+        testPinBoard.Publish(FrameSeq(
+            43,
             Enumerable.Range(60, 20)
                 .Select(source => (source, new[] { 1 }))
                 .ToArray()));

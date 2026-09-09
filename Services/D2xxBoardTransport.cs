@@ -84,9 +84,16 @@ public sealed class D2xxBoardTransport : IBoardTransport
     long _lastPerfAggregateTick;
     long _pollCount;
     long _queueCallCount;
+    long _zeroQueueCount;
     long _readCallCount;
     long _bytesReceived;
     long _framesPublished;
+    long _completeFramesPublished;
+    long _partialFramesReceived;
+    long _parserErrorBytes;
+    long _invalidFramesReceived;
+    long _framesDropped;
+    long _d2xxErrorCount;
     long _probePreviewsPublished;
     long _framesReceivedTotal;
     long _completeFramesReceivedTotal;
@@ -97,6 +104,13 @@ public sealed class D2xxBoardTransport : IBoardTransport
     int _lastFrameEndMarkerCode = -1;
     int _lastFrameUnknownBytes;
     long _decodeTicks;
+    const int FrameIntervalSampleCapacity = 256;
+    readonly long[] _frameIntervalTicks = new long[FrameIntervalSampleCapacity];
+    int _frameIntervalSampleCount;
+    int _frameIntervalSampleWriteIndex;
+    long _lastCompleteFrameStopwatchTimestamp;
+    long _lastFrameIntervalGeneration = -1;
+    long _lastProcessCpuTicks;
     long _openCount;
     long _closeCount;
     long _readerStartCount;
@@ -948,11 +962,25 @@ public sealed class D2xxBoardTransport : IBoardTransport
     {
         var buffer = new byte[65536];
         WaitHandle[] receiveWaitHandles = [_rxEvent, ct.WaitHandle];
+        bool waitForRxNotification = true;
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
+                if (waitForRxNotification)
+                {
+                    PublishPerfAggregateIfDue(_scanMode);
+
+                    // Event-first receive: do not spend one empty queue call after
+                    // every successful read. A timeout is only a watchdog fallback;
+                    // it still checks the queue once in case a driver notification
+                    // was missed, without creating a millisecond polling loop.
+                    int waitResult = WaitHandle.WaitAny(receiveWaitHandles, 1000);
+                    if (waitResult == 1 || ct.IsCancellationRequested)
+                        break;
+                }
+
                 Interlocked.Increment(ref _pollCount);
                 // Chụp generation trước khi kiểm tra control waiter. Nếu một
                 // STOP/START bắt đầu ngay sau đây, buffer đang đọc vẫn mang
@@ -961,9 +989,18 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
                 if (Volatile.Read(ref _controlWaiters) > 0)
                 {
-                    ct.WaitHandle.WaitOne(ProductionTimingPolicy.D2xxControlWaitSleepMs);
-                    continue;
+                    do
+                    {
+                        ct.WaitHandle.WaitOne(ProductionTimingPolicy.D2xxControlWaitSleepMs);
+                    }
+                    while (Volatile.Read(ref _controlWaiters) > 0 && !ct.IsCancellationRequested);
+
+                    // No bytes were read before yielding to the command. Purge and
+                    // START may now have established a new generation, so attribute
+                    // the next fresh chunk to that generation instead of dropping it.
+                    readGeneration = Volatile.Read(ref _scanGeneration);
                 }
+                ct.ThrowIfCancellationRequested();
 
                 IntPtr handle = _handle;
                 if (handle == IntPtr.Zero)
@@ -986,6 +1023,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                         if (ct.IsCancellationRequested || _handle == IntPtr.Zero)
                             break;
 
+                        Interlocked.Increment(ref _d2xxErrorCount);
                         throw new InvalidOperationException(
                             $"FT_GetQueueStatus lỗi FTDI: {queueStatus} ({GetStatusName(queueStatus)})");
                     }
@@ -1005,6 +1043,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                             if (ct.IsCancellationRequested || _handle == IntPtr.Zero)
                                 break;
 
+                            Interlocked.Increment(ref _d2xxErrorCount);
                             throw new InvalidOperationException(
                                 $"FT_Read lỗi FTDI: {readStatus} ({GetStatusName(readStatus)})");
                         }
@@ -1017,14 +1056,18 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
                 if (queued == 0 || read == 0)
                 {
-                    PublishPerfAggregateIfDue(_scanMode);
+                    if (queued == 0)
+                        Interlocked.Increment(ref _zeroQueueCount);
 
-                    // Htdrv gốc đăng ký FT_EVENT_RXCHAR và chỉ thức khi driver
-                    // báo có dữ liệu. Timeout giữ watchdog/perf metrics hoạt động
-                    // ngay cả khi bo im lặng; cancellation luôn đánh thức worker.
-                    WaitHandle.WaitAny(receiveWaitHandles, 1000);
+                    PublishPerfAggregateIfDue(_scanMode);
+                    waitForRxNotification = true;
                     continue;
                 }
+
+                // Usually queued == read because the reusable buffer is 64 KiB.
+                // If the driver returned less, drain the known remainder directly
+                // instead of waiting for another notification.
+                waitForRxNotification = read >= queued;
 
                 Interlocked.Add(ref _bytesReceived, (long)read);
                 PublishProtocolTrace("RX", buffer.AsSpan(0, checked((int)read)));
@@ -1066,6 +1109,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
                         decoded.Mode != _scanMode ||
                         readGeneration != Volatile.Read(ref _scanGeneration))
                     {
+                        Interlocked.Increment(ref _framesDropped);
                         continue;
                     }
 
@@ -1135,25 +1179,47 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
         long polls = Interlocked.Exchange(ref _pollCount, 0);
         long queueCalls = Interlocked.Exchange(ref _queueCallCount, 0);
+        long zeroQueueCalls = Interlocked.Exchange(ref _zeroQueueCount, 0);
         long reads = Interlocked.Exchange(ref _readCallCount, 0);
         long bytes = Interlocked.Exchange(ref _bytesReceived, 0);
         long frames = Interlocked.Exchange(ref _framesPublished, 0);
+        long completeFrames = Interlocked.Exchange(ref _completeFramesPublished, 0);
+        long partialFrames = Interlocked.Exchange(ref _partialFramesReceived, 0);
+        long parserErrorBytes = Interlocked.Exchange(ref _parserErrorBytes, 0);
+        long invalidFrames = Interlocked.Exchange(ref _invalidFramesReceived, 0);
+        long droppedFrames = Interlocked.Exchange(ref _framesDropped, 0);
         long probePreviews = Interlocked.Exchange(ref _probePreviewsPublished, 0);
         long decodeTicks = Interlocked.Exchange(ref _decodeTicks, 0);
         double intervalSeconds = previous == 0 ? 5.0 : Math.Max(0.001, (now - previous) / 1000.0);
         double decodeMs = decodeTicks <= 0
             ? 0
             : decodeTicks * 1000.0 / Stopwatch.Frequency;
+        (double intervalAvgMs, double intervalMedianMs, double intervalP95Ms, double intervalP99Ms) =
+            TakeFrameIntervalStatistics();
 
         using Process process = Process.GetCurrentProcess();
+        long processCpuTicks = process.TotalProcessorTime.Ticks;
+        long previousCpuTicks = Interlocked.Exchange(ref _lastProcessCpuTicks, processCpuTicks);
+        double processCpuPercent = previousCpuTicks <= 0
+            ? 0
+            : Math.Max(0, processCpuTicks - previousCpuTicks) /
+              (intervalSeconds * TimeSpan.TicksPerSecond * Environment.ProcessorCount) * 100.0;
         AsyncFileLogService.Current.Performance(
             "BOARD_METRICS " +
             $"mode={mode} polls_per_sec={polls / intervalSeconds:0.###} " +
             $"queue_calls_per_sec={queueCalls / intervalSeconds:0.###} " +
-            $"reads_per_sec={reads / intervalSeconds:0.###} " +
-            $"frames_per_sec={frames / intervalSeconds:0.###} probe_previews={probePreviews} bytes={bytes} " +
+            $"zero_queue={zeroQueueCalls} reads_per_sec={reads / intervalSeconds:0.###} " +
+            $"avg_bytes_per_read={(reads > 0 ? bytes / (double)reads : 0):0.###} " +
+            $"frames_per_sec={frames / intervalSeconds:0.###} complete_frames={completeFrames} " +
+            $"frame_interval_avg_ms={intervalAvgMs:0.###} frame_interval_median_ms={intervalMedianMs:0.###} " +
+            $"frame_interval_p95_ms={intervalP95Ms:0.###} frame_interval_p99_ms={intervalP99Ms:0.###} " +
+            $"partial_frames={partialFrames} parser_error_bytes={parserErrorBytes} " +
+            $"invalid_frames={invalidFrames} dropped_frames={droppedFrames} " +
+            $"probe_previews={probePreviews} bytes={bytes} " +
             $"decode_avg_ms={(frames > 0 ? decodeMs / frames : 0):0.###} " +
             $"opens={Interlocked.Read(ref _openCount)} closes={Interlocked.Read(ref _closeCount)} " +
+            $"reconnects={Math.Max(0, Interlocked.Read(ref _openCount) - 1)} " +
+            $"d2xx_errors={Interlocked.Read(ref _d2xxErrorCount)} process_cpu_pct={processCpuPercent:0.###} " +
             $"reader_starts={Interlocked.Read(ref _readerStartCount)} reader_active={(_readerTask is { IsCompleted: false } ? 1 : 0)} " +
             $"threads={process.Threads.Count} handles={process.HandleCount} " +
             $"private_mb={process.PrivateMemorySize64 / 1048576d:0.###} " +
@@ -1165,13 +1231,24 @@ public sealed class D2xxBoardTransport : IBoardTransport
         Interlocked.Increment(ref _framesPublished);
         Interlocked.Increment(ref _framesReceivedTotal);
         Interlocked.Exchange(ref _lastFrameSequence, decoded.Sequence);
-        if (decoded.Mode == BoardScanMode.Production &&
-            decoded.Complete &&
-            decoded.UnknownBytes == 0 &&
-            decoded.TerminatorKnown)
+        bool validCompleteProductionFrame = decoded.Mode == BoardScanMode.Production &&
+                                            decoded.Complete &&
+                                            decoded.UnknownBytes == 0 &&
+                                            decoded.TerminatorKnown;
+        if (validCompleteProductionFrame)
         {
+            Interlocked.Increment(ref _completeFramesPublished);
             Interlocked.Exchange(ref _lastCompleteFrameSequence, decoded.Sequence);
             Interlocked.Increment(ref _completeFramesReceivedTotal);
+            RecordCompleteFrameInterval(decoded.ScanGeneration);
+        }
+        else if (decoded.Mode == BoardScanMode.Production)
+        {
+            Interlocked.Increment(ref _partialFramesReceived);
+            if (decoded.UnknownBytes > 0)
+                Interlocked.Add(ref _parserErrorBytes, decoded.UnknownBytes);
+            if (decoded.UnknownBytes > 0 || !decoded.TerminatorKnown)
+                Interlocked.Increment(ref _invalidFramesReceived);
         }
         Interlocked.Exchange(ref _lastFrameTimestampUtcTicks, DateTime.UtcNow.Ticks);
         Volatile.Write(ref _lastFrameSourceCount, decoded.SourceCount);
@@ -1231,6 +1308,77 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
         FrameReceived?.Invoke(this, decoded);
     }
+
+    private void RecordCompleteFrameInterval(long generation)
+    {
+        long now = Stopwatch.GetTimestamp();
+        if (_lastFrameIntervalGeneration != generation)
+        {
+            _lastFrameIntervalGeneration = generation;
+            _lastCompleteFrameStopwatchTimestamp = now;
+            _frameIntervalSampleCount = 0;
+            _frameIntervalSampleWriteIndex = 0;
+            return;
+        }
+
+        long previous = _lastCompleteFrameStopwatchTimestamp;
+        _lastCompleteFrameStopwatchTimestamp = now;
+        if (previous <= 0 || now <= previous)
+            return;
+
+        _frameIntervalTicks[_frameIntervalSampleWriteIndex] = now - previous;
+        _frameIntervalSampleWriteIndex =
+            (_frameIntervalSampleWriteIndex + 1) % FrameIntervalSampleCapacity;
+        if (_frameIntervalSampleCount < FrameIntervalSampleCapacity)
+            _frameIntervalSampleCount++;
+    }
+
+    private (double AverageMs, double MedianMs, double P95Ms, double P99Ms)
+        TakeFrameIntervalStatistics()
+    {
+        int count = _frameIntervalSampleCount;
+        if (count == 0)
+            return (0, 0, 0, 0);
+
+        var samples = new long[count];
+        if (count < FrameIntervalSampleCapacity)
+        {
+            Array.Copy(_frameIntervalTicks, samples, count);
+        }
+        else
+        {
+            int tail = FrameIntervalSampleCapacity - _frameIntervalSampleWriteIndex;
+            Array.Copy(_frameIntervalTicks, _frameIntervalSampleWriteIndex, samples, 0, tail);
+            Array.Copy(_frameIntervalTicks, 0, samples, tail, _frameIntervalSampleWriteIndex);
+        }
+
+        _frameIntervalSampleCount = 0;
+        _frameIntervalSampleWriteIndex = 0;
+        Array.Sort(samples);
+
+        double averageTicks = 0;
+        foreach (long sample in samples)
+            averageTicks += sample;
+        averageTicks /= count;
+
+        return (
+            TicksToMilliseconds(averageTicks),
+            TicksToMilliseconds(Percentile(samples, 0.50)),
+            TicksToMilliseconds(Percentile(samples, 0.95)),
+            TicksToMilliseconds(Percentile(samples, 0.99)));
+    }
+
+    private static long Percentile(long[] sortedSamples, double percentile)
+    {
+        int index = Math.Clamp(
+            (int)Math.Ceiling(sortedSamples.Length * percentile) - 1,
+            0,
+            sortedSamples.Length - 1);
+        return sortedSamples[index];
+    }
+
+    private static double TicksToMilliseconds(double ticks) =>
+        ticks * 1000.0 / Stopwatch.Frequency;
 
     private static bool IsContinuityPreviewFrame(ScanFrame frame) =>
         frame.Mode == BoardScanMode.Production &&
