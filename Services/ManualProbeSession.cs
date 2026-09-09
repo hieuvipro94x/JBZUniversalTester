@@ -58,6 +58,10 @@ public sealed class ManualProbeSession
     public int ProbeIo { get { lock (_gate) return _probeIo; } }
     public int ContactIo { get { lock (_gate) return _contactIo; } }
     public bool IsActive { get { lock (_gate) return _phase != ManualProbePhase.Inactive; } }
+    public bool HasTransientContactEvidence
+    {
+        get { lock (_gate) return _candidateIo != 0 || _contactIo != 0; }
+    }
 
     public ManualProbeUpdate Start()
     {

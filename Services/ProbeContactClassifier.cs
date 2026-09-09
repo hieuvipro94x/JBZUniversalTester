@@ -69,6 +69,8 @@ public static class ProbeContactClassifier
 
         int sourceCount = frame.Connections.Count;
         var fanInByTarget = new Dictionary<int, int>();
+        var unexpectedFanInByTarget = new Dictionary<int, int>();
+        HashSet<long>? expectedEdges = null;
         int edgeCount = 0;
 
         foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
@@ -76,6 +78,12 @@ public static class ProbeContactClassifier
             foreach (int target in pair.Value)
             {
                 fanInByTarget[target] = fanInByTarget.GetValueOrDefault(target) + 1;
+                expectedEdges ??= BuildExpectedEdges(model);
+                if (!expectedEdges.Contains(EdgeKey(pair.Key, target)))
+                {
+                    unexpectedFanInByTarget[target] =
+                        unexpectedFanInByTarget.GetValueOrDefault(target) + 1;
+                }
                 edgeCount++;
             }
         }
@@ -94,12 +102,13 @@ public static class ProbeContactClassifier
             {
                 int hits = frame.TargetHits.GetValueOrDefault(io);
                 int fanIn = fanInByTarget.GetValueOrDefault(io);
+                int unexpectedFanIn = unexpectedFanInByTarget.GetValueOrDefault(io);
                 bool mapped = IsMapped(model, io);
                 bool sourceWordMissing = !frame.Connections.ContainsKey(io);
 
                 int score =
                     hits * 5 +
-                    fanIn * 6 +
+                    unexpectedFanIn * 6 +
                     (mapped ? 16 : 0) +
                     (sourceWordMissing ? 8 : 0);
 
@@ -107,13 +116,13 @@ public static class ProbeContactClassifier
                 // topology THT. Vì vậy mapping chỉ dùng xếp hạng, không phải gate.
                 // Một TARGET lẻ vẫn bị loại: phải có fan-in/hit lặp qua nhiều SOURCE.
                 bool repeatedTarget =
-                    fanIn >= repeatedThreshold ||
-                    (sourceWordMissing && hits >= repeatedThreshold);
+                    unexpectedFanIn >= repeatedThreshold ||
+                    (fanIn == 0 && sourceWordMissing && hits >= repeatedThreshold);
 
                 return new Candidate(
                     io,
                     hits,
-                    fanIn,
+                    unexpectedFanIn,
                     mapped,
                     sourceWordMissing,
                     score,
@@ -166,7 +175,44 @@ public static class ProbeContactClassifier
     }
 
     public static int GetRepeatedTargetThreshold(int sourceCount) =>
-        Math.Clamp(sourceCount / 8, 6, 24);
+        // Trace bo thật có các contact hợp lệ khoảng 12 fan-in trên sweep 256 IO.
+        // Giữ sàn 6 để một/vài cạnh thường không thành Probe và trần 12 để không
+        // bỏ lọt phần đầu/phần đuôi của thao tác chạm đang chuyển tiếp.
+        Math.Clamp((sourceCount + 15) / 16, 6, 12);
+
+    private static HashSet<long> BuildExpectedEdges(ProductModel? model)
+    {
+        var result = new HashSet<long>();
+        if (model is null)
+            return result;
+
+        foreach (WireNet net in model.Nets)
+        {
+            int[] ios = net.IoNumbers.Where(io => io > 0).Distinct().ToArray();
+            for (int left = 0; left < ios.Length; left++)
+            {
+                for (int right = left + 1; right < ios.Length; right++)
+                {
+                    result.Add(EdgeKey(ios[left], ios[right]));
+                    result.Add(EdgeKey(ios[right], ios[left]));
+                }
+            }
+        }
+
+        if (model.Clip is not null)
+        {
+            foreach (ClipBranch branch in model.Clip.Branches)
+            {
+                result.Add(EdgeKey(model.Clip.CommonIo, branch.TargetIo));
+                result.Add(EdgeKey(branch.TargetIo, model.Clip.CommonIo));
+            }
+        }
+
+        return result;
+    }
+
+    private static long EdgeKey(int source, int target) =>
+        ((long)source << 32) | (uint)target;
 
     private static bool IsMapped(ProductModel? model, int io)
     {

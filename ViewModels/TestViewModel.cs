@@ -230,7 +230,7 @@ public sealed class TestViewModel : ObservableObject
     private readonly object _inlineProbeGate = new();
     private int[] _inlineProbeContactIos = Array.Empty<int>();
     private long _inlineProbeLastSeenUtcTicks;
-    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 2, maxContacts: 2);
+    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 2, maxContacts: 1);
     private readonly ManualProbeSession _manualProbeSession = new(confirmFrames: 2, releaseFrames: 2);
     // V12.9.2: Probe UI tuyệt đối không dùng TTL/quarantine dài.
     // Timestamp chỉ còn phục vụ interlock relay chống rung cực ngắn sau RELEASE,
@@ -3100,12 +3100,20 @@ public sealed class TestViewModel : ObservableObject
                 }
                 else
                 {
+                    // Một frame chuyển tiếp có thể tụt dưới ngưỡng fan-in trước
+                    // khi contact biến mất hoàn toàn. Giữ cách ly cho tới khi
+                    // tracker nhận đủ RELEASE frame, nếu không frame đuôi này sẽ
+                    // lọt sang ProductDetect/WRONG_CANDIDATE.
+                    bool probeTransitionPending = _probeStateTracker.HasTrackedContacts;
                     bool discardContactClosed =
                         Volatile.Read(ref _discardContactClosed) != 0 &&
                         _model is { HasDiscardInterlock: true };
                     probeChanged = discardContactClosed
                         ? false
                         : UpdateInlineProbeContacts(Array.Empty<int>());
+                    preserveProductionFaultsForProbe = probeTransitionPending;
+                    if (preserveProductionFaultsForProbe)
+                        Interlocked.Increment(ref _productionFramesRoutedToProbe);
 
                     if (probeChanged)
                     {
@@ -3905,7 +3913,7 @@ public sealed class TestViewModel : ObservableObject
             ProbeContactClassifier.DetectMany(
                 frame,
                 _model,
-                maxContacts: 2,
+                maxContacts: 1,
                 boardCapacity: _board.Capacity);
 
         if (detections.Count > 0)
@@ -3934,6 +3942,7 @@ public sealed class TestViewModel : ObservableObject
 
     private bool ProcessManualProbeFrame(ScanFrame frame, long generation)
     {
+        bool hadTransientEvidence = _manualProbeSession.HasTransientContactEvidence;
         IReadOnlyList<ProbeContactClassifier.Detection> detections =
             ProbeContactClassifier.DetectMany(
                 frame,
@@ -3948,7 +3957,11 @@ public sealed class TestViewModel : ObservableObject
             _board.Capacity);
 
         if (update.Transition == ManualProbeTransition.None)
-            return detections.Count > 0;
+        {
+            return detections.Count > 0 ||
+                   hadTransientEvidence ||
+                   _manualProbeSession.HasTransientContactEvidence;
+        }
 
         AsyncFileLogService.Current.Performance(
             $"MANUAL_PROBE transition={update.Transition} phase={update.Phase} " +

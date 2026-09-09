@@ -2604,6 +2604,18 @@ internal static class Program
             boardCapacity: BoardCapacity.Create(10));
         Assert(detections.Count == 1 && detections[0].Io == 113 && detections[0].FanIn == 20,
             "A complete frame with strong repeated fan-in identifies one Probe IO");
+
+        int[] spliceIos = Enumerable.Range(1, 13).ToArray();
+        ProductModel largeSplice = Model(("SPLICE", spliceIos));
+        ScanFrame expectedFanIn = FrameSeq(
+            9,
+            spliceIos.Skip(1).Select(source => (source, new[] { 1 })).ToArray());
+        Assert(ProbeContactClassifier.DetectMany(
+                   expectedFanIn,
+                   largeSplice,
+                   maxContacts: 1,
+                   boardCapacity: BoardCapacity.Create(1)).Count == 0,
+            "A large fan-in that belongs to the expected THT splice is not misclassified as Probe");
     }
 
     private static void TestManualProbeSession()
@@ -3765,8 +3777,8 @@ internal static class Program
         Assert(frames.All(frame => !frame.Complete) &&
                previews.Count == 1 &&
                previews[0].ActiveIo.SequenceEqual([198]) &&
-               previews[0].RequiredHitCount == 24 &&
-               previews[0].PeakHitCount == 24,
+               previews[0].RequiredHitCount == 12 &&
+               previews[0].PeakHitCount == 12,
             "Strong Production probe contact is previewed before C0 without creating a partial ScanFrame");
 
         var singleReadDecoder = new BoardIoDecoder();
@@ -5194,6 +5206,30 @@ internal static class Program
         ((Task)waitMethod.Invoke(pointerDisabledVm, [CancellationToken.None])!).GetAwaiter().GetResult();
         sw.Stop();
         Assert(sw.ElapsedMilliseconds < 100, "Released always-on Probe adds no production PASS delay");
+
+        TestViewModel transitionVm = CreateTestViewModel(production, out FakeBoard transitionBoard);
+        transitionVm.SetModel(model);
+        transitionVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        transitionBoard.Publish(FrameSeq(40));
+        TestEngine transitionEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(transitionVm) ?? throw new InvalidOperationException("Transition engine not found"));
+        long engineFramesBeforeProbe = transitionEngine.FramesProcessed;
+        transitionBoard.Publish(FrameSeq(
+            41,
+            Enumerable.Range(20, 12)
+                .Select(source => (source, new[] { 14 }))
+                .ToArray()));
+        transitionBoard.Publish(FrameSeq(
+            42,
+            Enumerable.Range(20, 5)
+                .Select(source => (source, new[] { 14 }))
+                .ToArray()));
+        Assert(transitionEngine.FramesProcessed == engineFramesBeforeProbe &&
+               !transitionEngine.HasProductActivity &&
+               transitionEngine.GetPassGateDiagnostics().WrongCandidateCount == 0,
+            "A weak trailing Probe transition frame remains quarantined from ProductDetect/WRONG_CANDIDATE");
     }
 
     private static void TestHtdrvEndpointProbeDisplayCases()

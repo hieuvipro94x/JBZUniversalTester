@@ -27,6 +27,12 @@ public sealed class ProbeStateTracker
 
     public bool IsActive => _activeIos.Length > 0;
 
+    /// <summary>
+    /// Có candidate đang debounce hoặc contact đã xác nhận. Caller dùng tín hiệu
+    /// này để cách ly các frame chuyển tiếp khỏi TestEngine cho tới khi RELEASE đủ frame.
+    /// </summary>
+    public bool HasTrackedContacts => _contacts.Count > 0;
+
     public bool Update(IReadOnlyCollection<int> observedIos)
     {
         HashSet<int> observed = observedIos
