@@ -159,17 +159,9 @@ public partial class TopologyLearningWindow : Window
 
     private void UpdateActiveIoDiagnostics(ScanFrame frame, LearnedTopologySnapshot snapshot)
     {
-        HashSet<int> activeIos = frame.ActiveIo
-            .Where(_test.BoardCapacity.ContainsGlobalIo)
-            .ToHashSet();
-
-        foreach ((int source, IReadOnlySet<int> targets) in frame.Connections)
-        {
-            if (_test.BoardCapacity.ContainsGlobalIo(source) && targets.Count > 0)
-                activeIos.Add(source);
-            foreach (int target in targets.Where(_test.BoardCapacity.ContainsGlobalIo))
-                activeIos.Add(target);
-        }
+        IReadOnlyList<int> activeIos = TopologyLearningService.FindProbeContactIo(
+            frame,
+            _test.BoardCapacity);
 
         Dictionary<int, string> relatedByIo = snapshot.Networks
             .SelectMany(network => network.Ios.Select(io => new
@@ -180,7 +172,7 @@ public partial class TopologyLearningWindow : Window
             .ToDictionary(item => item.Io, item => item.Related);
 
         int[] displayedIos = ActiveIoRows.Select(row => row.Io).ToArray();
-        int[] desiredIos = activeIos.OrderBy(io => io).ToArray();
+        int[] desiredIos = activeIos.ToArray();
         if (!displayedIos.SequenceEqual(desiredIos))
         {
             ActiveIoRows.Clear();

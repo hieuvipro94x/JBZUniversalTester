@@ -39,6 +39,7 @@ internal static class Program
             ("Production/probe decoder separation", TestDecoderModes),
             ("10-card complete-frame stress", TestTenCardCompleteFrameStress),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),
+            ("Topology learning uses one direct-contact signal", TestTopologyLearningDirectContact),
             ("THT discard contact interlock and frame isolation", TestDiscardContactInterlock),
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
             ("Inline probe does not clear wiring faults", TestInlineProbeDoesNotClearWiringFaults),
@@ -1458,6 +1459,108 @@ internal static class Program
         Assert(!vm.IsProductRemovalPending &&
                vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "LẮP SẢN PHẨM",
             "A complete clean frame clears the startup interlock and arms Production");
+    }
+
+    private static void TestTopologyLearningDirectContact()
+    {
+        var connections = new Dictionary<int, IReadOnlySet<int>>();
+        for (int source = 1; source <= 256; source++)
+        {
+            if (source != 20)
+                connections[source] = new HashSet<int> { 20 };
+        }
+
+        var frame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 20 },
+            [],
+            true,
+            0,
+            171,
+            connections,
+            new Dictionary<int, int> { [20] = 255 },
+            BoardScanMode.Production);
+
+        IReadOnlyList<int> directActiveIo = TopologyLearningService.FindProbeContactIo(
+            frame,
+            BoardCapacity.Create(4));
+
+        Assert(directActiveIo.SequenceEqual(new[] { 20 }),
+            "Topology learning reports only the directly active GND-contact IO, not every connection source");
+        LearnedTopologySnapshot probeSnapshot = TopologyLearningService.BuildSnapshot(
+            frame,
+            BoardCapacity.Create(4));
+        Assert(probeSnapshot.Rows.Count == 0,
+            "A detected Probe signature is not learned a second time as a continuity network");
+
+        var noisyPairConnections = new Dictionary<int, IReadOnlySet<int>>();
+        int[] everyIo = Enumerable.Range(1, 256).ToArray();
+        foreach (int source in everyIo)
+        {
+            noisyPairConnections[source] = everyIo
+                .Where(target => target != source)
+                .ToHashSet();
+        }
+
+        var noisyPairFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 21, 23 },
+            [],
+            true,
+            0,
+            172,
+            noisyPairConnections,
+            new Dictionary<int, int> { [21] = 255, [23] = 255 },
+            BoardScanMode.Production);
+        LearnedTopologySnapshot noisyPairSnapshot = TopologyLearningService.BuildSnapshot(
+            noisyPairFrame,
+            BoardCapacity.Create(4));
+        Assert(TopologyLearningService.FindProbeContactIo(
+                   noisyPairFrame,
+                   BoardCapacity.Create(4)).Count == 0 &&
+               noisyPairSnapshot.Networks.Count == 1 &&
+               noisyPairSnapshot.Networks[0].Ios.SequenceEqual(new[] { 21, 23 }),
+            "Two active IOs produce only their IO21-to-IO23 network even when raw scan sources contain card-wide noise");
+
+        var singleContactFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 12 },
+            [],
+            true,
+            0,
+            173,
+            new Dictionary<int, IReadOnlySet<int>>
+            {
+                [12] = new HashSet<int> { 12 }
+            },
+            new Dictionary<int, int> { [12] = 1 },
+            BoardScanMode.Production);
+        Assert(TopologyLearningService.FindProbeContactIo(
+                   singleContactFrame,
+                   BoardCapacity.Create(4)).Count == 0 &&
+               TopologyLearningService.BuildSnapshot(
+                   singleContactFrame,
+                   BoardCapacity.Create(4)).Rows.Count == 0,
+            "A single GND/IO self-contact has no Probe or topology effect");
+
+        ScanFrame ordinaryPair = FrameSeq(174, (7, new[] { 18 }));
+        Assert(TopologyLearningService.FindProbeContactIo(
+                   ordinaryPair,
+                   BoardCapacity.Create(4)).Count == 0 &&
+               TopologyLearningService.BuildSnapshot(
+                   ordinaryPair,
+                   BoardCapacity.Create(4)).Rows.Count == 1,
+            "An ordinary IO-to-IO pair remains learnable topology and is not treated as Probe");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.Contains(
+                   "Volatile.Read(ref _topologyLearningActive) == 0",
+                   StringComparison.Ordinal),
+            "Background product interlock is bypassed while topology learning owns the frame presentation");
     }
 
     private static void TestDuplicateClipFaultRows()
@@ -4030,11 +4133,20 @@ internal static class Program
         Assert(tenCardEvents == 2 && tenCardVm.Faults.Count == 638,
             "Large active table removes only the changed endpoint rows without rebuilding all 638 rows");
 
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [tenCardRows]);
+        Assert(tenCardEvents == 2 &&
+               tenCardVm.Faults.Count == 640 &&
+               ReferenceEquals(tenCardVm.Faults[0], tenCardRows[0]) &&
+               ReferenceEquals(tenCardVm.Faults[1], tenCardRows[1]),
+            "Reopened network inserts only its two cached rows without resetting the 640-row DataGrid");
+
         string testViewModelCode = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
         Assert(testViewModelCode.Contains("TryRemoveMissingFaultRowsInOrder(desiredRows)", StringComparison.Ordinal) &&
+               testViewModelCode.Contains("TryInsertMissingFaultRowsInOrder(desiredRows)", StringComparison.Ordinal) &&
                testViewModelCode.Contains("ReferenceEquals(Faults[currentIndex], desiredRows[desiredIndex])", StringComparison.Ordinal),
-            "Large PASS-only deltas use the reference subsequence fast path without rebuilding row keys");
+            "Large row remove/reinsert deltas use reference subsequence fast paths without rebuilding row keys");
 
         tenCardEvents = 0;
         synchronize.Invoke(tenCardVm, [Array.Empty<FaultRow>()]);

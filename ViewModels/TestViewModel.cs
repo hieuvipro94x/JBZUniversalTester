@@ -134,6 +134,7 @@ public sealed class TestViewModel : ObservableObject
     private bool _presentationCycleStarted;
     private int _productStartSoundPlayed;
     private int _probeSessionActive;
+    private int _topologyLearningActive;
     private int _runtimeMode = (int)RuntimeMode.Background;
     private int _productionPhase = (int)ProductionPhase.WaitingProduct;
     private long _runtimeGeneration;
@@ -2849,7 +2850,10 @@ public sealed class TestViewModel : ObservableObject
             // nhưng tuyệt đối không đưa frame nền vào fault engine hay relay flow.
             if (mode == RuntimeMode.Background && frame.Mode == BoardScanMode.Production)
             {
-                HandleBackgroundProductRemovalInterlock(frame, generation);
+                // Cửa sổ QUÉT/HỌC MÃ là observer riêng của cùng stream. Không
+                // diễn giải frame chạm GND ở đây lần thứ hai thành các cặp sản phẩm.
+                if (Volatile.Read(ref _topologyLearningActive) == 0)
+                    HandleBackgroundProductRemovalInterlock(frame, generation);
                 return;
             }
 
@@ -4365,6 +4369,7 @@ public sealed class TestViewModel : ObservableObject
 
         try
         {
+            Volatile.Write(ref _topologyLearningActive, 1);
             bool started = await _scanSupervisor.EnsureProductionScanAsync(0, _lifetimeCts.Token);
             if (started)
                 InvokeUi(UpdateCardScanningState);
@@ -4372,6 +4377,7 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            Volatile.Write(ref _topologyLearningActive, 0);
             EnterDeviceFault(ex, "TopologyLearning");
         }
     }
@@ -4379,10 +4385,20 @@ public sealed class TestViewModel : ObservableObject
     public async Task StopTopologyLearningAsync()
     {
         if (IsDeviceFault || !_board.IsConnected || CurrentRuntimeMode != RuntimeMode.Background)
+        {
+            Volatile.Write(ref _topologyLearningActive, 0);
             return;
+        }
 
-        await EnsureContinuousProductionScanAsync();
-        AddLog("TOPOLOGY LEARNING OFF - khôi phục dải scan nền của mã hiện tại.");
+        try
+        {
+            await EnsureContinuousProductionScanAsync();
+            AddLog("TOPOLOGY LEARNING OFF - khôi phục dải scan nền của mã hiện tại.");
+        }
+        finally
+        {
+            Volatile.Write(ref _topologyLearningActive, 0);
+        }
     }
 
     /// <summary>
@@ -8801,6 +8817,12 @@ public sealed class TestViewModel : ObservableObject
             if (TryRemoveMissingFaultRowsInOrder(desiredRows))
                 return;
 
+            // Khi một dây vừa mất tiếp xúc, các row cache của dây đó xuất hiện
+            // lại đúng vị trí cũ. Đây là phép chèn thuần theo thứ tự, xử lý O(n)
+            // và không reset toàn DataGrid 300-640 dòng.
+            if (TryInsertMissingFaultRowsInOrder(desiredRows))
+                return;
+
             // Xóa key thừa TRƯỚC khi căn vị trí. Nếu BG01 ở đầu bảng PASS,
             // cách cũ Move toàn bộ BG02..BG200 lên rồi mới xóa đuôi. Cách này
             // chỉ phát đúng các Remove của BG01, các row sau tự dịch chỉ số.
@@ -8939,6 +8961,47 @@ public sealed class TestViewModel : ObservableObject
             }
 
             Faults.RemoveAt(currentIndex);
+        }
+
+        return true;
+    }
+
+    private bool TryInsertMissingFaultRowsInOrder(IReadOnlyList<FaultRow> desiredRows)
+    {
+        int addedCount = desiredRows.Count - Faults.Count;
+        if (addedCount <= 0 ||
+            addedCount > Math.Max(32, desiredRows.Count / 4))
+        {
+            return false;
+        }
+
+        int currentIndex = 0;
+        for (int desiredIndex = 0;
+             desiredIndex < desiredRows.Count && currentIndex < Faults.Count;
+             desiredIndex++)
+        {
+            if (ReferenceEquals(desiredRows[desiredIndex], Faults[currentIndex]))
+                currentIndex++;
+        }
+
+        // Không phải phép chèn thuần của các row cache theo thứ tự. Fault động,
+        // replace hoặc reorder tiếp tục dùng bộ đồng bộ key-based tổng quát.
+        if (currentIndex != Faults.Count)
+            return false;
+
+        currentIndex = 0;
+        for (int desiredIndex = 0; desiredIndex < desiredRows.Count; desiredIndex++)
+        {
+            FaultRow desired = desiredRows[desiredIndex];
+            if (currentIndex < Faults.Count &&
+                ReferenceEquals(Faults[currentIndex], desired))
+            {
+                currentIndex++;
+                continue;
+            }
+
+            Faults.Insert(currentIndex, desired);
+            currentIndex++;
         }
 
         return true;

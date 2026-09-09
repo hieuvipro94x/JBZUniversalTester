@@ -11,6 +11,35 @@ public static class TopologyLearningService
         WriteIndented = true
     };
 
+    public static IReadOnlyList<int> FindProbeContactIo(
+        ScanFrame frame,
+        BoardCapacity capacity)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(capacity);
+
+        if (frame.Mode != BoardScanMode.Production || !frame.Complete || frame.UnknownBytes != 0)
+            return [];
+
+        int[] activeIo = frame.ActiveIo
+            .Where(capacity.ContainsGlobalIo)
+            .Distinct()
+            .ToArray();
+
+        // Một đầu dò chỉ xác định một IO. Từ hai IO active trở lên là một
+        // quan hệ continuity cần đưa sang bảng kết nối, không phải hai đầu dò.
+        if (activeIo.Length != 1)
+            return [];
+
+        return ProbeContactClassifier
+            .DetectMany(frame, model: null, maxContacts: 1, boardCapacity: capacity)
+            .Select(detection => detection.Io)
+            .Where(io => io == activeIo[0])
+            .Distinct()
+            .OrderBy(io => io)
+            .ToArray();
+    }
+
     public static LearnedTopologySnapshot BuildSnapshot(ScanFrame frame, BoardCapacity capacity)
     {
         ArgumentNullException.ThrowIfNull(frame);
@@ -20,6 +49,12 @@ public static class TopologyLearningService
             return new LearnedTopologySnapshot(string.Empty, [], []);
 
         var parent = new Dictionary<int, int>();
+        HashSet<int> activeIo = frame.ActiveIo
+            .Where(capacity.ContainsGlobalIo)
+            .Distinct()
+            .ToHashSet();
+        HashSet<int> probeContactIo = FindProbeContactIo(frame, capacity).ToHashSet();
+        activeIo.ExceptWith(probeContactIo);
 
         int Find(int value)
         {
@@ -53,14 +88,26 @@ public static class TopologyLearningService
 
         foreach ((int source, IReadOnlySet<int> targets) in frame.Connections)
         {
-            if (!capacity.ContainsGlobalIo(source))
+            // Chỉ các IO thực tế active mới được phép tạo topology. Những
+            // source quét trung gian không được kéo cả dải card vào một mạng.
+            if (!activeIo.Contains(source))
                 continue;
 
             foreach (int target in targets)
             {
-                if (source != target && capacity.ContainsGlobalIo(target))
+                if (source != target &&
+                    activeIo.Contains(target))
                     Union(source, target);
             }
+        }
+
+        // Trace thực tế có frame hai đầu mút active nhưng firmware không luôn
+        // phát cạnh trực tiếp giữa chúng. Với đúng hai IO, chính hai đầu mút là
+        // cặp continuity duy nhất có thể kết luận mà không suy diễn thêm.
+        if (parent.Count == 0 && activeIo.Count == 2)
+        {
+            int[] pair = activeIo.OrderBy(io => io).ToArray();
+            Union(pair[0], pair[1]);
         }
 
         int[][] components = parent.Keys
