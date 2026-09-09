@@ -52,6 +52,8 @@ public sealed class BoardIoDecoder
     readonly Dictionary<int, int> _targetHitCounts = [];
     readonly HashSet<int> _probeActive = [];
     readonly List<byte> _frameRaw = [];
+    readonly List<ProductionProbePreview> _productionProbePreviews = [];
+    int[] _lastProductionProbePreviewIo = [];
 
     int? _currentSource;
     long _sequence;
@@ -120,6 +122,7 @@ public sealed class BoardIoDecoder
     {
         _buffer.Clear();
         _bufferOffset = 0;
+        _productionProbePreviews.Clear();
         ResetFrameState(resetSequence: true);
     }
 
@@ -131,6 +134,7 @@ public sealed class BoardIoDecoder
         _targetHitCounts.Clear();
         _probeActive.Clear();
         _frameRaw.Clear();
+        _lastProductionProbePreviewIo = [];
         _currentSource = null;
         _unknownBytes = 0;
 
@@ -178,8 +182,8 @@ public sealed class BoardIoDecoder
                     _currentSource is int source)
                 {
                     _activeTargets.Add(targetIo);
-                    _targetHitCounts[targetIo] =
-                        _targetHitCounts.GetValueOrDefault(targetIo) + 1;
+                    int targetHits = _targetHitCounts.GetValueOrDefault(targetIo) + 1;
+                    _targetHitCounts[targetIo] = targetHits;
 
                     if (!_connections.TryGetValue(source, out HashSet<int>? targets))
                     {
@@ -188,6 +192,7 @@ public sealed class BoardIoDecoder
                     }
 
                     targets.Add(targetIo);
+                    QueueProductionProbePreviewIfReady(targetIo, targetHits);
                 }
 
                 AppendRaw(first, second);
@@ -249,6 +254,46 @@ public sealed class BoardIoDecoder
 
         CompactBuffer();
         return frames;
+    }
+
+    /// <summary>
+    /// Lấy các candidate đầu dò đã đạt ngưỡng ngay trong frame Production đang
+    /// thu. Caller phải gọi cùng critical section với Feed để giữ đúng thứ tự.
+    /// </summary>
+    public IReadOnlyList<ProductionProbePreview> DrainProductionProbePreviews()
+    {
+        if (_productionProbePreviews.Count == 0)
+            return Array.Empty<ProductionProbePreview>();
+
+        ProductionProbePreview[] result = _productionProbePreviews.ToArray();
+        _productionProbePreviews.Clear();
+        return result;
+    }
+
+    private void QueueProductionProbePreviewIfReady(int targetIo, int targetHits)
+    {
+        // Htdrv phản hồi ngay trong vòng quét, nhưng một TARGET đơn lẻ cũng có
+        // thể là continuity/GND nhiễu. Chỉ preview khi fan-in đã đạt đúng ngưỡng
+        // repeated-target mà classifier frame hoàn chỉnh đang sử dụng.
+        int requiredHits = ProbeContactClassifier.GetRepeatedTargetThreshold(ExpectedIoCount);
+        // Hot path: chỉ làm việc khi một target vừa CHẠM ngưỡng, không LINQ/sort
+        // lại toàn bộ dictionary cho hàng trăm target word trong mỗi frame.
+        if (targetHits != requiredHits ||
+            _lastProductionProbePreviewIo.Length >= 2 ||
+            _lastProductionProbePreviewIo.Contains(targetIo))
+            return;
+
+        int[] candidates = _lastProductionProbePreviewIo
+            .Append(targetIo)
+            .OrderBy(io => io)
+            .ToArray();
+        _lastProductionProbePreviewIo = candidates;
+        _productionProbePreviews.Add(new ProductionProbePreview(
+            DateTime.Now,
+            candidates,
+            requiredHits,
+            targetHits,
+            _sequence + 1));
     }
 
     private bool HasCompleteProductionCoverage()

@@ -289,6 +289,19 @@ public sealed record ScanFrame(
         TargetHitCounts ?? new Dictionary<int, int>();
 }
 
+/// <summary>
+/// Tín hiệu đầu dò đã đủ mạnh ngay trong lúc decoder đang thu một frame
+/// Production. Đây chỉ là dữ liệu trình bày/interlock; ScanFrame hoàn chỉnh
+/// vẫn là nguồn duy nhất cho TestEngine và quyết định PASS/FAIL.
+/// </summary>
+public sealed record ProductionProbePreview(
+    DateTime Timestamp,
+    IReadOnlyList<int> ActiveIo,
+    int RequiredHitCount,
+    int PeakHitCount,
+    long Sequence = 0,
+    long ScanGeneration = 0);
+
 public sealed record WiringFaultPair(
     int SourceIo,
     int TargetIo,

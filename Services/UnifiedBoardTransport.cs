@@ -18,6 +18,8 @@ public sealed class UnifiedBoardTransport : IBoardTransport
         _production = production;
         _d2xx = new D2xxBoardTransport(ftdiSerial, production);
         _d2xx.FrameReceived += (_, e) => FrameReceived?.Invoke(this, e);
+        _d2xx.ProductionProbePreviewReceived += (_, e) =>
+            ProductionProbePreviewReceived?.Invoke(this, e);
         _d2xx.Log += (_, text) => Log?.Invoke(this, text);
     }
 
@@ -40,6 +42,7 @@ public sealed class UnifiedBoardTransport : IBoardTransport
     public BoardMode ActiveMode { get; private set; } = BoardMode.Auto;
 
     public event EventHandler<ScanFrame>? FrameReceived;
+    public event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceived;
     public event EventHandler<string>? Log;
 
     public async Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default)

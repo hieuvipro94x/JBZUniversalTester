@@ -37,6 +37,7 @@ internal static class Program
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
+            ("Production probe preview arrives before frame terminator", TestProductionProbePreview),
             ("10-card complete-frame stress", TestTenCardCompleteFrameStress),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),
             ("Topology learning uses one direct-contact signal", TestTopologyLearningDirectContact),
@@ -3679,6 +3680,78 @@ internal static class Program
         Console.WriteLine(
             $"10-CARD STRESS: frames={frameCount} elapsedMs={stopwatch.ElapsedMilliseconds} " +
             $"allocated={allocated:N0} changed={changed} START={startCount} STOP={stopCount}");
+    }
+
+    private static void TestProductionProbePreview()
+    {
+        var decoder = new BoardIoDecoder();
+        decoder.ConfigureCapacity(BoardCapacity.Create(4));
+        decoder.ConfigureMode(BoardScanMode.Production);
+
+        var raw = new List<byte>();
+        for (int source = 1; source <= 24; source++)
+        {
+            int sourceZeroBased = source - 1;
+            raw.Add(checked((byte)(BoardIoDecoder.SourceBase + sourceZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            raw.Add(checked((byte)(sourceZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+            int targetZeroBased = 198 - 1;
+            raw.Add(checked((byte)(BoardIoDecoder.TargetBase + targetZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            raw.Add(checked((byte)(targetZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+        }
+
+        IReadOnlyList<ScanFrame> frames = decoder.Feed(raw.ToArray());
+        IReadOnlyList<ProductionProbePreview> previews = decoder.DrainProductionProbePreviews();
+        Assert(frames.Count == 0 &&
+               previews.Count == 1 &&
+               previews[0].ActiveIo.SequenceEqual([198]) &&
+               previews[0].RequiredHitCount == 24 &&
+               previews[0].PeakHitCount == 24,
+            "Strong Production probe contact is previewed before C0 without creating a partial ScanFrame");
+
+        var singleReadDecoder = new BoardIoDecoder();
+        singleReadDecoder.ConfigureCapacity(BoardCapacity.Create(4));
+        singleReadDecoder.ConfigureMode(BoardScanMode.Production);
+        var completeRaw = new List<byte>(raw);
+        for (int source = 25; source <= 256; source++)
+        {
+            int sourceZeroBased = source - 1;
+            completeRaw.Add(checked((byte)(BoardIoDecoder.SourceBase + sourceZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            completeRaw.Add(checked((byte)(sourceZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+        }
+        completeRaw.Add(BoardIoDecoder.WordEnd1);
+        completeRaw.Add(0x00);
+        Assert(singleReadDecoder.Feed(completeRaw.ToArray()).Single().Complete &&
+               singleReadDecoder.DrainProductionProbePreviews().Count == 1,
+            "Early Probe preview survives when TARGET threshold and C0 arrive in the same FT_Read batch");
+
+        var singleTargetDecoder = new BoardIoDecoder();
+        singleTargetDecoder.ConfigureCapacity(BoardCapacity.Create(4));
+        singleTargetDecoder.ConfigureMode(BoardScanMode.Production);
+        _ = singleTargetDecoder.Feed([BoardIoDecoder.SourceBase, 0, BoardIoDecoder.TargetBase, 11]);
+        Assert(singleTargetDecoder.DrainProductionProbePreviews().Count == 0,
+            "One ordinary TARGET word cannot become an early Probe/GND false positive");
+
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            ProductSettleTimeMs = 10_000,
+            WrongConnectionConfirmMs = 0,
+            ShortCircuitConfirmMs = 0
+        };
+        TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
+        vm.SetModel(Model(("PAIR", new[] { 1, 86 })));
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        long processedBefore = vm.ProductionFramesProcessed;
+        int commandsBefore = board.Commands.Count;
+        board.PublishProbePreview(previews[0] with { ScanGeneration = 1 });
+        Assert(vm.HasInlineProbeContacts &&
+               vm.Faults.Any(row => row.Kind == FaultKind.Probe && row.Io == 198) &&
+               vm.ProductionFramesProcessed == processedBefore &&
+               board.Commands.Count == commandsBefore,
+            "Early Probe preview updates only presentation/interlock, never TestEngine, counters, or relay; " +
+            $"active={vm.HasInlineProbeContacts}, rows={string.Join("|", vm.Faults.Select(row => $"{row.Kind}:IO{row.Io}"))}, " +
+            $"processed={processedBefore}->{vm.ProductionFramesProcessed}, " +
+            $"commands={commandsBefore}->{board.Commands.Count}");
     }
 
     private static byte[] BuildProductionScanFrame(
@@ -7374,7 +7447,11 @@ internal static class Program
         public Action<FakeBoard>? StartScanCallback { get; set; }
         private event EventHandler<ScanFrame>? FrameReceivedCore;
         public event EventHandler<ScanFrame>? FrameReceived { add { FrameReceivedCore += value; } remove { FrameReceivedCore -= value; } }
+        private event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceivedCore;
+        public event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceived { add { ProductionProbePreviewReceivedCore += value; } remove { ProductionProbePreviewReceivedCore -= value; } }
         public event EventHandler<string>? Log { add { } remove { } }
+        public void PublishProbePreview(ProductionProbePreview preview) =>
+            ProductionProbePreviewReceivedCore?.Invoke(this, preview);
         public void Publish(ScanFrame frame)
         {
             LastFrameTimestampUtc = DateTime.UtcNow;

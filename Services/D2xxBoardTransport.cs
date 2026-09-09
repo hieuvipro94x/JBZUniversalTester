@@ -74,7 +74,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
     BoardScanCapacity _scanCapacity;
     int _expectedIoCount;
     string _lastCapacityLogSignature = string.Empty;
-    byte _appliedLatencyMs;
     int _activeRelay = -1;
     BoardScanMode _scanMode = BoardScanMode.Production;
     long _scanGeneration;
@@ -88,6 +87,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
     long _readCallCount;
     long _bytesReceived;
     long _framesPublished;
+    long _probePreviewsPublished;
     long _framesReceivedTotal;
     long _completeFramesReceivedTotal;
     long _lastFrameSequence;
@@ -149,6 +149,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
     public int LastFrameUnknownBytes => Volatile.Read(ref _lastFrameUnknownBytes);
 
     public event EventHandler<ScanFrame>? FrameReceived;
+    public event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceived;
     public event EventHandler<string>? Log;
     public event EventHandler<D2xxProtocolTrace>? ProtocolTrace;
 
@@ -198,9 +199,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall)]
     static extern uint FT_SetTimeouts(IntPtr handle, uint readTimeout, uint writeTimeout);
-
-    [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall)]
-    static extern uint FT_SetLatencyTimer(IntPtr handle, byte latency);
 
     [DllImport("ftd2xx.dll", CallingConvention = CallingConvention.StdCall)]
     static extern uint FT_SetUSBParameters(IntPtr handle, uint inTransferSize, uint outTransferSize);
@@ -388,9 +386,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     Ensure(FT_SetTimeouts(_handle, 50, 150), "FT_SetTimeouts");
                     Ensure(FT_SetUSBParameters(_handle, 65536, 65536), "FT_SetUSBParameters");
 
-                    byte latencyMs = checked((byte)Math.Clamp(_production.UsbDelay, 1, 16));
-                    Ensure(FT_SetLatencyTimer(_handle, latencyMs), "FT_SetLatencyTimer");
-                    _appliedLatencyMs = latencyMs;
                     Ensure(FT_Purge(_handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
                     _rxEvent.Reset();
                     Ensure(
@@ -663,8 +658,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
             // Chỉ restart khi mode/capacity thật sự đổi hoặc stream không chạy.
             await StopScanCoreAsync(ct);
-            await ApplyPendingNativeConfigurationAsync(ct);
-
             // Trace Htdrv với 4 card khởi tạo BO trước khi gửi 8C 00 04 00.
             // Khi operator đổi product từ dải 1 card sang 4/10 card, INIT của
             // dải cũ không còn hợp lệ: reset sạch và chuẩn bị lại trước scan.
@@ -913,27 +906,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
         ? "none"
         : $"{capacity.StartScanParameter}/{capacity.TotalIoCapacity}";
 
-    private async Task ApplyPendingNativeConfigurationAsync(CancellationToken ct)
-    {
-        byte requestedLatency = checked((byte)Math.Clamp(_production.UsbDelay, 1, 16));
-        if (_appliedLatencyMs == requestedLatency)
-            return;
-
-        await _ioLock.WaitAsync(ct);
-        try
-        {
-            IntPtr handle = _handle;
-            if (handle == IntPtr.Zero)
-                throw new InvalidOperationException("Bo JBZ đã đóng kết nối.");
-            Ensure(FT_SetLatencyTimer(handle, requestedLatency), "FT_SetLatencyTimer");
-            _appliedLatencyMs = requestedLatency;
-        }
-        finally
-        {
-            _ioLock.Release();
-        }
-    }
-
     private void StartPermanentReader()
     {
         if (_readerTask is { IsCompleted: false })
@@ -1058,12 +1030,32 @@ public sealed class D2xxBoardTransport : IBoardTransport
                 PublishProtocolTrace("RX", buffer.AsSpan(0, checked((int)read)));
                 long decodeStarted = Stopwatch.GetTimestamp();
                 IReadOnlyList<ScanFrame> decodedFrames;
+                IReadOnlyList<ProductionProbePreview> probePreviews;
                 lock (_decoderGate)
                 {
                     decodedFrames = _decoder.Feed(
                         buffer.AsSpan(0, checked((int)read)));
+                    probePreviews = _decoder.DrainProductionProbePreviews();
                 }
                 Interlocked.Add(ref _decodeTicks, Stopwatch.GetTimestamp() - decodeStarted);
+
+                foreach (ProductionProbePreview preview in probePreviews)
+                {
+                    if (ct.IsCancellationRequested)
+                        break;
+
+                    if (!IsScanning ||
+                        _scanMode != BoardScanMode.Production ||
+                        readGeneration != Volatile.Read(ref _scanGeneration))
+                    {
+                        continue;
+                    }
+
+                    Interlocked.Increment(ref _probePreviewsPublished);
+                    ProductionProbePreviewReceived?.Invoke(
+                        this,
+                        preview with { ScanGeneration = readGeneration });
+                }
 
                 foreach (ScanFrame decoded in decodedFrames)
                 {
@@ -1138,6 +1130,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         long reads = Interlocked.Exchange(ref _readCallCount, 0);
         long bytes = Interlocked.Exchange(ref _bytesReceived, 0);
         long frames = Interlocked.Exchange(ref _framesPublished, 0);
+        long probePreviews = Interlocked.Exchange(ref _probePreviewsPublished, 0);
         long decodeTicks = Interlocked.Exchange(ref _decodeTicks, 0);
         double intervalSeconds = previous == 0 ? 5.0 : Math.Max(0.001, (now - previous) / 1000.0);
         double decodeMs = decodeTicks <= 0
@@ -1150,7 +1143,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             $"mode={mode} polls_per_sec={polls / intervalSeconds:0.###} " +
             $"queue_calls_per_sec={queueCalls / intervalSeconds:0.###} " +
             $"reads_per_sec={reads / intervalSeconds:0.###} " +
-            $"frames_per_sec={frames / intervalSeconds:0.###} bytes={bytes} " +
+            $"frames_per_sec={frames / intervalSeconds:0.###} probe_previews={probePreviews} bytes={bytes} " +
             $"decode_avg_ms={(frames > 0 ? decodeMs / frames : 0):0.###} " +
             $"opens={Interlocked.Read(ref _openCount)} closes={Interlocked.Read(ref _closeCount)} " +
             $"reader_starts={Interlocked.Read(ref _readerStartCount)} reader_active={(_readerTask is { IsCompleted: false } ? 1 : 0)} " +

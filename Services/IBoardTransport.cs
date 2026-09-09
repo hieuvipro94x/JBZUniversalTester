@@ -36,6 +36,7 @@ public interface IBoardTransport : IAsyncDisposable
     byte? LastFrameEndMarkerCode { get; }
     int LastFrameUnknownBytes { get; }
     event EventHandler<ScanFrame>? FrameReceived;
+    event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceived;
     event EventHandler<string>? Log;
     Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default);
     Task DisconnectAsync();

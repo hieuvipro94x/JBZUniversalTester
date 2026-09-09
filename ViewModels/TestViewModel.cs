@@ -1027,6 +1027,7 @@ public sealed class TestViewModel : ObservableObject
         _engine.Changed += OnEngineChanged;
         _board.Log += OnBoardLog;
         _board.FrameReceived += OnBoardFrameReceived;
+        _board.ProductionProbePreviewReceived += OnProductionProbePreviewReceived;
         _waterProof.Log += OnWaterProofLog;
 
         // FileSystemWatcher được tạo sau first-render trong InitializeCoreAsync,
@@ -3059,6 +3060,48 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
+    private void OnProductionProbePreviewReceived(
+        object? sender,
+        ProductionProbePreview preview)
+    {
+        if (IsDeviceFault ||
+            !_board.IsScanning ||
+            !IsRuntimeMode(RuntimeMode.Production) ||
+            Volatile.Read(ref _probeSessionActive) != 0)
+        {
+            return;
+        }
+
+        int[] probeIos = preview.ActiveIo
+            .Where(_board.Capacity.ContainsGlobalIo)
+            .Distinct()
+            .Take(2)
+            .OrderBy(value => value)
+            .ToArray();
+        if (probeIos.Length == 0 || !UpdateInlineProbeContacts(probeIos))
+            return;
+
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        DateTime requestedAt = DateTime.Now;
+        InvokeUi(() =>
+        {
+            if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                Volatile.Read(ref _probeSessionActive) != 0)
+            {
+                return;
+            }
+
+            ShowInlineProbeContacts(probeIos);
+            DateTime renderedAt = DateTime.Now;
+            AsyncFileLogService.Current.Performance(
+                $"PROBE_EARLY_LATENCY TOUCH {string.Join(", ", probeIos.Select(io => $"IO{io}"))}; " +
+                $"RX->VM={Math.Max(0, (requestedAt - preview.Timestamp).TotalMilliseconds):0.0} ms; " +
+                $"VM->UI={Math.Max(0, (renderedAt - requestedAt).TotalMilliseconds):0.0} ms; " +
+                $"seq={preview.Sequence} hits={preview.PeakHitCount}/{preview.RequiredHitCount}",
+                AppLogLevel.Normal);
+        });
+    }
+
     private void ArmFaultProductRemoval(ProductModel model)
     {
         _waitForFaultProductRemoval = true;
@@ -4263,6 +4306,7 @@ public sealed class TestViewModel : ObservableObject
         _engine.Changed -= OnEngineChanged;
         _board.Log -= OnBoardLog;
         _board.FrameReceived -= OnBoardFrameReceived;
+        _board.ProductionProbePreviewReceived -= OnProductionProbePreviewReceived;
         _waterProof.Log -= OnWaterProofLog;
         _lifetimeCts.Dispose();
     }

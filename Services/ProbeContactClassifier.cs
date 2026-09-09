@@ -75,7 +75,7 @@ public static class ProbeContactClassifier
         if (fanInByTarget.Count == 0 && frame.TargetHits.Count == 0)
             return Array.Empty<Detection>();
 
-        int repeatedThreshold = Math.Clamp(sourceCount / 8, 6, 24);
+        int repeatedThreshold = GetRepeatedTargetThreshold(sourceCount);
 
         Candidate[] candidates = fanInByTarget.Keys
             .Concat(frame.TargetHits.Keys)
@@ -163,6 +163,9 @@ public static class ProbeContactClassifier
 
         return result;
     }
+
+    public static int GetRepeatedTargetThreshold(int sourceCount) =>
+        Math.Clamp(sourceCount / 8, 6, 24);
 
     private static bool IsMapped(ProductModel? model, int io)
     {
