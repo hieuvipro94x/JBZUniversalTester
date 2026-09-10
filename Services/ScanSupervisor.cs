@@ -204,7 +204,9 @@ public sealed class ScanSupervisor
         {
             long now = _timeProvider.GetTimestamp();
             disconnected = SnapshotUnsafe(now);
-            if (_healthState is ScanHealthState.Recovering or ScanHealthState.Faulted)
+            if (_healthState is ScanHealthState.Suspended or
+                ScanHealthState.Recovering or
+                ScanHealthState.Faulted)
                 return false;
 
             _healthState = ScanHealthState.Recovering;

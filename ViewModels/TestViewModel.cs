@@ -153,6 +153,8 @@ public sealed class TestViewModel : ObservableObject
     private long _engineUiUpdateRevision;
     private long _engineUiLastCompletedRevision;
     private long _productionUiCycleEpoch;
+    private long _inlineProbeUiRevision;
+    private long _ioMappingUiRevision;
     private int _productionRuntimeState = (int)ProductionRuntimeState.WaitingForProduct;
     private EngineUiUpdateRequest? _latestEngineUiUpdateRequest;
     // Separate presentation queue for pre-C0 continuity preview. It never runs
@@ -243,8 +245,8 @@ public sealed class TestViewModel : ObservableObject
     private readonly object _inlineProbeGate = new();
     private int[] _inlineProbeContactIos = Array.Empty<int>();
     private long _inlineProbeLastSeenUtcTicks;
-    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 2, maxContacts: 64);
-    private readonly ManualProbeSession _manualProbeSession = new(confirmFrames: 2, releaseFrames: 2);
+    private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 1, maxContacts: 64);
+    private readonly ManualProbeSession _manualProbeSession = new(confirmFrames: 2, releaseFrames: 1);
     // V12.9.2: Probe UI tuyệt đối không dùng TTL/quarantine dài.
     // Timestamp chỉ còn phục vụ interlock relay chống rung cực ngắn sau RELEASE,
     // không được phép giữ ProbeContacts trên giao diện.
@@ -1324,6 +1326,7 @@ public sealed class TestViewModel : ObservableObject
                 "[MANUAL-R] Bắt đầu đo " +
                 string.Join(", ", steps.Select(step => $"{step.Name}/CH{step.Channel}")));
             await EnsureKeysightConnectedAsync();
+            _scanSupervisor.Suspend("Resistance");
             List<ResistanceResult> results =
                 await _engine.MeasureResistanceStepsAsync(steps, onChannelUpdated, ct);
             AddLog(
@@ -2295,12 +2298,14 @@ public sealed class TestViewModel : ObservableObject
     {
         long revision = Interlocked.Increment(ref _engineUiUpdateRevision);
         long cycleEpoch = Volatile.Read(ref _productionUiCycleEpoch);
+        long probeRevision = Volatile.Read(ref _inlineProbeUiRevision);
         Volatile.Write(
             ref _latestEngineUiUpdateRequest,
             new EngineUiUpdateRequest(
                 revision,
                 generation,
                 cycleEpoch,
+                probeRevision,
                 Stopwatch.GetTimestamp()));
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null || dispatcher.CheckAccess())
@@ -2416,6 +2421,7 @@ public sealed class TestViewModel : ObservableObject
         long Revision,
         long Generation,
         long CycleEpoch,
+        long ProbeRevision,
         long RequestedAt);
 
     private bool TryAcceptProductionUiSnapshot(
@@ -2423,7 +2429,8 @@ public sealed class TestViewModel : ObservableObject
         TestEnginePresentationSnapshot snapshot)
     {
         if (!IsRuntimeContext(RuntimeMode.Production, request.Generation) ||
-            request.CycleEpoch != Volatile.Read(ref _productionUiCycleEpoch))
+            request.CycleEpoch != Volatile.Read(ref _productionUiCycleEpoch) ||
+            request.ProbeRevision != Volatile.Read(ref _inlineProbeUiRevision))
         {
             return false;
         }
@@ -3204,9 +3211,13 @@ public sealed class TestViewModel : ObservableObject
                         .OrderBy(value => value)
                         .ToArray();
 
+                    bool hadTrackedContacts = _probeStateTracker.HasTrackedContacts;
                     bool changed = probeIos.Length > 0
                         ? UpdateInlineProbeContacts(probeIos)
                         : ClearInlineProbeContactsState();
+                    long probeRevision = (!hadTrackedContacts || changed)
+                        ? Interlocked.Increment(ref _inlineProbeUiRevision)
+                        : Volatile.Read(ref _inlineProbeUiRevision);
 
                     if (changed)
                     {
@@ -3214,7 +3225,8 @@ public sealed class TestViewModel : ObservableObject
                         InvokeUi(() =>
                         {
                             if (!IsRuntimeContext(RuntimeMode.Probe, generation) ||
-                                Volatile.Read(ref _probeSessionActive) == 0)
+                                Volatile.Read(ref _probeSessionActive) == 0 ||
+                                probeRevision != Volatile.Read(ref _inlineProbeUiRevision))
                             {
                                 return;
                             }
@@ -3302,31 +3314,42 @@ public sealed class TestViewModel : ObservableObject
                 {
                     Interlocked.Increment(ref _productionFramesRoutedToProbe);
                     preserveProductionFaultsForProbe = true;
+                    bool hadTrackedContacts = _probeStateTracker.HasTrackedContacts;
                     probeChanged = UpdateInlineProbeContacts(touchedIos);
                     displayedProbeIos = SnapshotInlineProbeContacts();
+                    long probeRevision = (!hadTrackedContacts || probeChanged)
+                        ? Interlocked.Increment(ref _inlineProbeUiRevision)
+                        : Volatile.Read(ref _inlineProbeUiRevision);
 
                     // Nếu một frame đầu của cùng thao tác chạm đã kịp tạo candidate
                     // WRONG/SHORT trước khi đủ chữ ký classifier, xóa đúng các fault
                     // liên quan Pin đầu dò. Fault thật ở I/O khác vẫn được giữ nguyên.
-                    if (_engine.SuppressProbeRelatedWiringFaults(displayedProbeIos) &&
-                        !_engine.HasWiringFault)
+                    _engine.SuppressProbeRelatedWiringFaults(touchedIos);
+                    if (!_engine.HasWiringFault)
                     {
                         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
                         _sound.SetWiringFaultAlarm(false);
                     }
 
-                    if (probeChanged)
+                    TestEnginePresentationSnapshot probeSnapshot =
+                        _engine.CapturePresentationSnapshot(removal: false);
+                    if (!hadTrackedContacts || probeChanged)
                     {
                         DateTime requestedAt = DateTime.Now;
                         InvokeUi(() =>
                         {
                             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-                                Volatile.Read(ref _probeSessionActive) != 0)
+                                Volatile.Read(ref _probeSessionActive) != 0 ||
+                                probeRevision != Volatile.Read(ref _inlineProbeUiRevision))
                             {
                                 return;
                             }
 
-                            ShowInlineProbeContacts(displayedProbeIos);
+                            RestoreProductionPresentationAfterProbe(
+                                probeSnapshot,
+                                restorePendingRows: false);
+                            if (displayedProbeIos.Length > 0)
+                                ShowInlineProbeContacts(displayedProbeIos);
                             LogProbeLatency(frame, requestedAt, displayedProbeIos);
                         });
                     }
@@ -3350,16 +3373,23 @@ public sealed class TestViewModel : ObservableObject
 
                     if (probeChanged)
                     {
+                        long probeRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
+                        TestEnginePresentationSnapshot probeSnapshot =
+                            _engine.CapturePresentationSnapshot(removal: false);
                         DateTime requestedAt = DateTime.Now;
                         InvokeUi(() =>
                         {
                             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-                                Volatile.Read(ref _probeSessionActive) != 0)
+                                Volatile.Read(ref _probeSessionActive) != 0 ||
+                                probeRevision != Volatile.Read(ref _inlineProbeUiRevision))
                             {
                                 return;
                             }
 
                             ClearInlineProbeDisplay();
+                            RestoreProductionPresentationAfterProbe(
+                                probeSnapshot,
+                                restorePendingRows: true);
                             LogProbeLatency(frame, requestedAt, Array.Empty<int>());
                         });
                     }
@@ -3378,6 +3408,7 @@ public sealed class TestViewModel : ObservableObject
                 // đổi LẮP SẢN PHẨM -> ĐANG TEST chỉ vì target đầu dò.
                 if (!preserveProductionFaultsForProbe)
                 {
+                    _engine.ClearProbeEvidenceExclusions();
                     continuityPreviewCleared = _engine.ClearContinuityPreview();
                     engineChanged = _engine.ProcessFrame(frame, false);
                 }
@@ -3683,20 +3714,22 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         _lastIoMappingSignature = signature;
+        long mappingRevision = Interlocked.Increment(ref _ioMappingUiRevision);
         // Giống Htdrv: TESTPOINT.wav lặp liên tục từ lúc nhận diện TOUCH cho
         // tới đúng frame RELEASE. Các cặp thông mạch của sản phẩm không phát âm.
         _sound.SetTestPointContactSound(rows.Any(row => row.Kind == FaultKind.Probe));
         InvokeUi(() =>
         {
             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-                !IsIoMappingMode)
+                !IsIoMappingMode ||
+                mappingRevision != Volatile.Read(ref _ioMappingUiRevision))
             {
                 return;
             }
 
             SynchronizeFaultRows(rows);
             State = rows.Count == 0
-                ? "LẬP BẢN ĐỒ IO • CHƯA CÓ KẾT NỐI"
+                ? "LẮP SẢN PHẨM"
                 : $"LẬP BẢN ĐỒ IO • {rows.Count} TÍN HIỆU";
             RaiseTestStatistics();
         });
@@ -3716,7 +3749,10 @@ public sealed class TestViewModel : ObservableObject
             return false;
         }
 
-        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(frame);
+        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(
+            frame,
+            _model,
+            _board.Capacity);
         if (pairs.Count > 0)
         {
             SetProductRemovalPending(true);
@@ -3834,7 +3870,10 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(frame);
+        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(
+            frame,
+            _model,
+            _board.Capacity);
         if (pairs.Count > 0)
         {
             Interlocked.Exchange(ref _startupIoInterlockState, 0);
@@ -4246,6 +4285,7 @@ public sealed class TestViewModel : ObservableObject
         }
 
         int contactIo = update.ContactIo;
+        long probeRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
         lock (_inlineProbeGate)
         {
             _inlineProbeContactIos = contactIo > 0 ? [contactIo] : Array.Empty<int>();
@@ -4258,7 +4298,8 @@ public sealed class TestViewModel : ObservableObject
         InvokeUi(() =>
         {
             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-                !_manualProbeSession.IsActive)
+                !_manualProbeSession.IsActive ||
+                probeRevision != Volatile.Read(ref _inlineProbeUiRevision))
             {
                 return;
             }
@@ -4328,6 +4369,8 @@ public sealed class TestViewModel : ObservableObject
     private bool ClearInlineProbeContactsState(bool clearLastSeen = false)
     {
         bool changed = _probeStateTracker.Clear();
+        if (clearLastSeen)
+            Interlocked.Increment(ref _inlineProbeUiRevision);
         _sound.SetTestPointContactSound(false);
         lock (_inlineProbeGate)
         {
@@ -4342,6 +4385,38 @@ public sealed class TestViewModel : ObservableObject
             Interlocked.Exchange(ref _inlineProbeLastSeenUtcTicks, 0);
 
         return changed;
+    }
+
+    private void RestoreProductionPresentationAfterProbe(
+        TestEnginePresentationSnapshot snapshot,
+        bool restorePendingRows)
+    {
+        ApplyAuthoritativeProductionState(snapshot.Electrical);
+        if (snapshot.Electrical.ProductEvidence)
+        {
+            RefreshFaultsFromSnapshot(snapshot);
+            return;
+        }
+
+        // A confirmed Probe contact is not a production cycle. If a weaker
+        // leading frame had queued a Product/WRONG presentation, restore the
+        // waiting state and the model's pending rows in this same UI update.
+        if (CurrentProductionPhase == ProductionPhase.Continuity &&
+            !_waitForProductRelease &&
+            !_waitForFaultProductRemoval &&
+            !IsProductRemovalPending)
+        {
+            _productDetectedThisCycle = false;
+            Interlocked.Exchange(ref _productStartSoundPlayed, 0);
+            ResetProductPresentationCycle();
+            SetProductionRuntimeState(ProductionRuntimeState.WaitingForProduct);
+            State = "LẮP SẢN PHẨM";
+        }
+
+        SynchronizeFaultRows(restorePendingRows
+            ? snapshot.Rows
+            : Array.Empty<FaultRow>());
+        RaiseTestStatistics();
     }
 
 
@@ -4448,6 +4523,7 @@ public sealed class TestViewModel : ObservableObject
                 Splice = pin.SpliceName,
                 Section = pin.Section,
                 Color = pin.Color,
+                Status = $"TP - IO({pin.IoNumber})",
                 DisplayOrder = pin.OriginalOrder > 0
                     ? pin.OriginalOrder
                     : pin.IoNumber
@@ -4460,12 +4536,14 @@ public sealed class TestViewModel : ObservableObject
         new FaultRow
         {
             Kind = FaultKind.Probe,
+            FaultType = "TP",
             // Không có PinRecord trong THT: vẫn giữ IO vật lý do đầu dò phát
             // hiện để cột IO chỉ đúng vị trí đang chạm. Các cột metadata THT
             // tiếp tục để trống; không suy diễn Connector/Pin.
             Io = io,
             IoTextOverride = $"IO ({io})",
             RelatedIos = [io],
+            Status = $"TP - IO({io})",
             DisplayOrder = io
         }
     ];
@@ -5059,6 +5137,7 @@ public sealed class TestViewModel : ObservableObject
         _lastPassRemainingSignature = string.Empty;
         _lastProductEvidenceSignature = string.Empty;
         _lastIoMappingSignature = string.Empty;
+        Interlocked.Increment(ref _ioMappingUiRevision);
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
         _sound.SetWiringFaultAlarm(false);
@@ -6061,6 +6140,7 @@ public sealed class TestViewModel : ObservableObject
             if (IsResistanceEnabledForModel(_model))
             {
                 await EnsureKeysightConnectedAsync();
+                _scanSupervisor.Suspend("Resistance");
                 List<ResistanceResult> results = await _engine.MeasureResistanceAsync(ct);
                 foreach (ResistanceResult result in results)
                 {
@@ -7613,6 +7693,10 @@ public sealed class TestViewModel : ObservableObject
                 AddLog("[AUTO-R] Switching TestWindow to resistance view");
 
                 await EnsureKeysightConnectedAsync();
+                // TestEngine owns STOP_SCAN and the resistance route sequence.
+                // Suspend first so the watchdog treats IsScanning=false as the
+                // intentional AUTO-R phase until a later production START.
+                _scanSupervisor.Suspend("Resistance");
 
                 List<ResistanceResult> results =
                     await _engine.MeasureResistanceAsync(
@@ -8158,6 +8242,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _startupIoInterlockState, 0);
         _startupIoWarningSignature = string.Empty;
         _lastIoMappingSignature = string.Empty;
+        Interlocked.Increment(ref _ioMappingUiRevision);
         _sound.SetTestPointContactSound(false);
         _discardInterlock.Reset();
         Interlocked.Exchange(ref _discardContactClosed, 0);

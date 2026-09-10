@@ -437,6 +437,10 @@ internal static class Program
         Assert(supervisor.HealthSnapshot.State == ScanHealthState.Suspended &&
                !supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
             "An intentional resistance STOP remains healthy beyond watchdog timeout");
+        board.SetConnectionStateForTest(false);
+        Assert(!supervisor.TryBeginDisconnectedRecovery(out _),
+            "Suspended resistance phase cannot trigger watchdog reopen recovery");
+        board.SetConnectionStateForTest(true);
 
         supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
             .GetAwaiter().GetResult();
@@ -452,18 +456,32 @@ internal static class Program
         Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
             "A complete frame from the new generation resumes Monitoring");
 
+        for (int cycle = 0; cycle < 40; cycle++)
+        {
+            supervisor.Suspend("Resistance");
+            board.StopScanAsync().GetAwaiter().GetResult();
+            clock.Advance(TimeSpan.FromSeconds(10));
+            Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+                $"AUTO-R cycle {cycle + 1}: watchdog stays suspended for the complete resistance window");
+            supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            board.Publish(HealthFrame(20 + cycle, 3 + cycle));
+            Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+                $"AUTO-R cycle {cycle + 1}: monitoring resumes only after the requested START and complete frame");
+        }
+
         supervisor.Suspend("ProductionReconfigure");
         board.StopScanAsync().GetAwaiter().GetResult();
         supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
             .GetAwaiter().GetResult();
-        board.Publish(HealthFrame(5, 2));
+        board.Publish(HealthFrame(60, 42));
         Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
             "A complete frame from the stale generation is ignored");
-        board.Publish(HealthFrame(6, 3));
+        board.Publish(HealthFrame(61, 43));
         Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
             "A complete frame from the new generation is accepted");
 
-        board.Publish(HealthFrame(7, 3, complete: false));
+        board.Publish(HealthFrame(62, 43, complete: false));
         clock.Advance(TimeSpan.FromMilliseconds(1_001));
         Assert(supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out ScanHealthSnapshot stalled) &&
                stalled.State == ScanHealthState.Recovering,
@@ -471,7 +489,7 @@ internal static class Program
         Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
             "A second watchdog tick cannot start duplicate recovery");
 
-        board.StartScanCallback = current => current.Publish(HealthFrame(8, 4));
+        board.StartScanCallback = current => current.Publish(HealthFrame(63, 44));
         Assert(supervisor.RecoverSoftAsync(
                     BoardCapacity.MaxGlobalIo,
                     BoardScanMode.Production,
@@ -516,6 +534,8 @@ internal static class Program
                !recoveryMethod.Contains("SetRelay", StringComparison.Ordinal) &&
                !recoveryMethod.Contains("Print", StringComparison.Ordinal),
             "Recovery is scoped to transport lifetime and cannot repeat production side effects");
+        Assert(source.Split("_scanSupervisor.Suspend(\"Resistance\")", StringSplitOptions.None).Length - 1 >= 3,
+            "Manual, Master and automatic resistance paths suspend ScanSupervisor before TestEngine stops scan");
 
         static ScanFrame HealthFrame(long sequence, long generation, bool complete = true) => new(
             DateTime.Now,
@@ -1717,6 +1737,47 @@ internal static class Program
         Assert(normalized.Count == 1 && normalized[0] == new StartupIoContactPair(1, 18),
             "Startup IO detector normalizes and de-duplicates bidirectional edges");
 
+        ScanFrame substitutedSource = FrameSeq(99, (12, new[] { 13 })) with
+        {
+            ActiveIo = new HashSet<int> { 13 },
+            ExpectedIoCount = 64,
+            SourceCount = 63,
+            ScanUnitCount = 1
+        };
+        Assert(StartupIoInterlock.FindConnectedPairs(
+                   substitutedSource,
+                   Model(("OTHER", new[] { 1, 18 })),
+                   BoardCapacity.Create(1)).Count == 0,
+            "A lone TARGET replacing its SOURCE word is raw IO activity, not IO12<->IO13 product evidence");
+
+        ScanFrame expectedSubstitutedSource = substitutedSource with
+        {
+            ConnectionsBySource = new Dictionary<int, IReadOnlySet<int>>
+            {
+                [12] = new HashSet<int> { 13 }
+            }
+        };
+        Assert(StartupIoInterlock.FindConnectedPairs(
+                   expectedSubstitutedSource,
+                   Model(("EXPECTED", new[] { 12, 13 })),
+                   BoardCapacity.Create(1)).Single() == new StartupIoContactPair(12, 13),
+            "A real expected product pair remains authoritative even when its target replaces a SOURCE word");
+
+        Assert(StartupIoInterlock.FindConnectedPairs(
+                   ProbeFrameSeq(98, 13),
+                   model: null,
+                   capacity: BoardCapacity.Create(10)).Count == 0,
+            "Probe/TP fan-in is never product-removal evidence");
+
+        TestViewModel rawIoVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard rawIoBoard);
+        rawIoVm.SetModel(Model(("RAW-IO-CONTROL", new[] { 1, 18 })));
+        rawIoBoard.Publish(substitutedSource with { Sequence = 99 });
+        Assert(!rawIoVm.IsProductRemovalPending &&
+               !rawIoVm.State.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase),
+            "A complete frame containing only raw IO13 cannot lock START or request product removal");
+
         var resumeProduction = new ProductionSettings
         {
             MasterFaultRequiredCount = 0,
@@ -2122,8 +2183,7 @@ internal static class Program
         var fastApp = new AppSettings();
         fastApp.Test.ResistanceMinimumSettleMs = 0;
         fastApp.Test.ResistanceSampleIntervalMs = 0;
-        // Giá trị legacy 3 không được phép làm engine đọc lặp lại.
-        fastApp.Test.ResistanceStableSampleCount = 3;
+        fastApp.Test.ResistanceStableSampleCount = 2;
         fastApp.Test.ResistanceStabilityTimeoutMs = 100;
         using (var measurementEngine = new TestEngine(fakeBoard, fakeVisa, fastApp, configured))
         {
@@ -2144,8 +2204,9 @@ internal static class Program
                     .Select(frame => frame[7])
                     .SequenceEqual(new byte[] { 0x08, 0x02, 0x0A, 0x04, 0x07, 0x07 }),
                 "Engine emits direct CH8/CH2/CH10/CH4/CH7/CH7 selectors, never bitmasks");
-            Assert(measured.Count == 6 && fakeVisa.MeasureCallCount == 6,
-                "Disabled R5 and Channel=0 R6 create neither route nor Keysight call/result");
+            Assert(measured.Count == 6 && fakeVisa.MeasureCallCount == 12 &&
+                   measured.All(result => result.IsStable && result.SampleCount == 2),
+                "Each enabled slot requires two stable samples; disabled/Channel=0 slots create no route or result");
             Assert(fakeBoard.ReleaseResistanceRouteCount == 1 &&
                    fakeBoard.ReleaseResistanceFrames.SequenceEqual(
                        new byte[] { 0x91, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x30 }),
@@ -2164,12 +2225,63 @@ internal static class Program
                 .GetResult();
             Assert(manualResults is [{ Name: "R3", Channel: 10 }] &&
                    manualBoard.ResistanceSteps.Select(step => step.Channel).SequenceEqual(new[] { 10 }) &&
-                   manualVisa.MeasureCallCount == 1 &&
+                   manualVisa.MeasureCallCount == 2 &&
                    manualUpdates.Count == 2 &&
                    manualUpdates[0].ResultText == "ĐANG ĐO" &&
                    manualUpdates[1].ResultText == "PASS" &&
                    manualUpdates[1].Display != "—",
-                "Manual single CH immediately reports measuring, then measured value and PASS");
+                "Manual single CH reports measuring, then only the stable final value and PASS");
+        }
+
+        var stableGateSettings = new ProductionSettings
+        {
+            ResistanceChannels =
+            [
+                new() { Enabled = true, Name = "R1", Channel = 1, MinOhm = 8_000, MaxOhm = 11_000 }
+            ]
+        };
+        var transientOpenVisa = new FakeKeysightVisaService(connected: true, measurement: 8_818);
+        transientOpenVisa.Measurements.Enqueue(9.9e37);
+        transientOpenVisa.Measurements.Enqueue(8_820);
+        transientOpenVisa.Measurements.Enqueue(8_818);
+        using (var transientOpenEngine = new TestEngine(
+                   new FakeBoard(), transientOpenVisa, fastApp, stableGateSettings))
+        {
+            transientOpenEngine.SetModel(new ProductModel { ModelName = "R-STABLE" });
+            var updates = new List<ResistanceResult>();
+            ResistanceResult result = transientOpenEngine
+                .MeasureResistanceAsync(updates.Add)
+                .GetAwaiter().GetResult().Single();
+            Assert(result.Passed && result.IsStable && !result.IsOpen &&
+                   result.SampleCount == 3 &&
+                   Math.Abs((result.ValueOhm ?? 0) - 8_819) < 0.001 &&
+                   updates.Count == 2 && updates[0].ResultText == "ĐANG ĐO" &&
+                   updates[1].Passed,
+                "Transient OPEN is hidden; two following numeric samples stabilize at their average and PASS");
+        }
+
+        var persistentOpenVisa = new FakeKeysightVisaService(connected: true, measurement: 9.9e37);
+        using (var persistentOpenEngine = new TestEngine(
+                   new FakeBoard(), persistentOpenVisa, fastApp, stableGateSettings))
+        {
+            persistentOpenEngine.SetModel(new ProductModel { ModelName = "R-OPEN" });
+            ResistanceResult result = persistentOpenEngine.MeasureResistanceAsync()
+                .GetAwaiter().GetResult().Single();
+            Assert(!result.Passed && result.IsStable && result.IsOpen && result.SampleCount == 2,
+                "Consecutive OPEN samples confirm a real stable OPEN failure");
+        }
+
+        var outOfRangeVisa = new FakeKeysightVisaService(connected: true, measurement: 12_010);
+        outOfRangeVisa.Measurements.Enqueue(12_000);
+        using (var outOfRangeEngine = new TestEngine(
+                   new FakeBoard(), outOfRangeVisa, fastApp, stableGateSettings))
+        {
+            outOfRangeEngine.SetModel(new ProductModel { ModelName = "R-OUT" });
+            ResistanceResult result = outOfRangeEngine.MeasureResistanceAsync()
+                .GetAwaiter().GetResult().Single();
+            Assert(!result.Passed && result.IsStable && !result.IsOpen &&
+                   result.SampleCount == 2 && result.ValueOhm > 11_000,
+                "Stable numeric value outside MinOhm/MaxOhm remains a real failure");
         }
 
         var failureBoard = new FakeBoard();
@@ -5497,15 +5609,38 @@ internal static class Program
         cleanProbeVm.StartProductionTestAsync().GetAwaiter().GetResult();
         cleanProbeBoard.Publish(ProbeFrameSeq(24, 1));
         cleanProbeBoard.Publish(ProbeFrameSeq(25, 1));
+        TestEngine cleanProbeEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(cleanProbeVm) ?? throw new InvalidOperationException("Clean Probe engine not found"));
         int cleanProbeProductSoundFlag = (int)(typeof(TestViewModel).GetField(
             "_productStartSoundPlayed",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?.GetValue(cleanProbeVm) ?? -1);
         Assert(cleanProbeVm.HasInlineProbeContacts &&
                cleanProbeVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               !cleanProbeEngine.GetProductEvidenceSnapshot().ValidProductEvidence &&
                cleanProbeProductSoundFlag == 0 &&
                !cleanProbeVm.Faults.Any(row => row.Kind is FaultKind.WrongWiring or FaultKind.Short),
             "Inline Probe contact stays display-only and cannot create ProductPresence, sound, WRONG or SHORT");
+
+        TestViewModel leadingFrameVm = CreateTestViewModel(production, out FakeBoard leadingFrameBoard);
+        leadingFrameVm.SetModel(model);
+        leadingFrameVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        leadingFrameBoard.Publish(FrameSeq(26, (230, new[] { 1 }), (231, new[] { 1 })));
+        TestEngine leadingFrameEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(leadingFrameVm) ?? throw new InvalidOperationException("Leading-frame engine not found"));
+        Assert(leadingFrameEngine.GetPassGateDiagnostics().WrongCandidateCount > 0 &&
+               leadingFrameEngine.HasProductActivity,
+            "Setup: a weak leading frame can temporarily look like model-related wrong wiring");
+        leadingFrameBoard.Publish(ProbeFrameSeq(27, 1));
+        ProductEvidenceSnapshot isolatedEvidence = leadingFrameEngine.GetProductEvidenceSnapshot();
+        Assert(isolatedEvidence.WrongCandidateCount == 0 &&
+               !isolatedEvidence.ValidProductEvidence &&
+               leadingFrameVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
+            "First confirmed Probe-classifier frame removes same-IO candidates and Product evidence before TP UI confirmation");
 
         var pointerDisabled = new ProductionSettings
         {
@@ -5596,7 +5731,7 @@ internal static class Program
                    row.WireName == "1" &&
                    row.Section == "0.5" &&
                    row.Color == "R" &&
-                   row.Status.Length == 0 &&
+                   row.Status == "TP - IO(1)" &&
                    row.IoCnPnText == "1-1-1") &&
                vm.CenterResultText == centerBeforeProbe &&
                vm.Total == totalBeforeProbe &&
@@ -5610,12 +5745,23 @@ internal static class Program
             string.Join("|", vm.Faults.Select(row =>
                 $"{row.Kind}/IO{row.Io}/{row.IoText}/{row.IoCnPnText}/{row.WireName}/{row.Section}/{row.Color}/{row.Status}")));
 
+        long touchRevision = (long)(typeof(TestViewModel).GetField(
+            "_inlineProbeUiRevision",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? -1L);
         board.Publish(FrameSeq(13));
-        board.Publish(FrameSeq(14));
+        long releaseRevision = (long)(typeof(TestViewModel).GetField(
+            "_inlineProbeUiRevision",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? -1L);
         Assert(!vm.HasInlineProbeContacts &&
                vm.Faults.All(row => row.Kind != FaultKind.Probe) &&
+               vm.Faults.Count(row => row.Status == "CHƯA KẾT NỐI") == 2 &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               vm.State == "LẮP SẢN PHẨM" &&
+               releaseRevision > touchRevision &&
                vm.CenterResultText == centerBeforeProbe,
-            "CASE C: Probe release leaves the not-installed product presentation unchanged");
+            "CASE C: one RELEASE frame clears TP, restores pending model rows, and invalidates stale TOUCH callbacks");
 
         var duplicateModel = new ProductModel
         {
@@ -5732,6 +5878,8 @@ internal static class Program
                unusedVm.Faults[0].Connector.Length == 0 &&
                unusedVm.Faults[0].Pin.Length == 0 &&
                unusedVm.Faults[0].WireName.Length == 0 &&
+               unusedVm.Faults[0].FaultType == "TP" &&
+               unusedVm.Faults[0].Status == "TP - IO(7)" &&
                unusedVm.CenterResultText == "LẮP SẢN PHẨM" &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
             "CASE E: always-on Probe shows an unmapped physical IO in the IO column without starting the product cycle");
@@ -7643,6 +7791,8 @@ internal static class Program
                    probeRows[0].Kind == FaultKind.Probe &&
                    probeRows[0].Io == 7 &&
                    probeRows[0].IoText == "IO (7)" &&
+                   probeRows[0].FaultType == "TP" &&
+                   probeRows[0].Status == "TP - IO(7)" &&
                    probeRows[0].Connector.Length == 0 &&
                    probeRows[0].Pin.Length == 0 &&
                    probeRows[0].WireName.Length == 0,
@@ -7669,14 +7819,30 @@ internal static class Program
             board.Publish(FrameSeq(
                 4,
                 Enumerable.Range(10, 20)
-                    .Select(source => (source, new[] { 7 }))
+                    .Select(source => (source, new[] { 63 }))
                     .ToArray()));
-            Assert(AppSoundService.Current.IsTestPointContactSoundActive,
-                "Blank THT Probe TOUCH starts continuous TESTPOINT sound");
+            TestEngine emptyModelEngine = (TestEngine)(typeof(TestViewModel).GetField(
+                "_engine",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(vm) ?? throw new InvalidOperationException("Empty-model engine not found"));
+            Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 1 &&
+                   vm.Faults[0].Kind == FaultKind.Probe &&
+                   vm.Faults[0].Io == 63 &&
+                   vm.Faults[0].Status == "TP - IO(63)" &&
+                   vm.Faults[0].Connector.Length == 0 &&
+                   vm.Faults[0].Pin.Length == 0 &&
+                   emptyModelEngine.ExpectedNetCount == 0 &&
+                   !emptyModelEngine.HasProductActivity &&
+                   vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Blank THT Probe works on any installed IO without mapping or production evidence");
 
             board.Publish(FrameSeq(5));
-            Assert(!AppSoundService.Current.IsTestPointContactSoundActive,
-                "Blank THT Probe RELEASE stops TESTPOINT sound immediately");
+            Assert(!AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 0 &&
+                   vm.State == "LẮP SẢN PHẨM" &&
+                   vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Blank THT Probe RELEASE clears rows and returns to waiting immediately");
         }
         finally
         {
@@ -7989,13 +8155,14 @@ internal static class Program
         public override bool IsConnected => connected;
         public int MeasureCallCount { get; private set; }
         public bool ThrowOnMeasure { get; set; }
+        public Queue<double> Measurements { get; } = new();
 
         public override double MeasureResistance(string command = ":MEASURE:RES?")
         {
             MeasureCallCount++;
             if (ThrowOnMeasure)
                 throw new InvalidOperationException("Simulated Keysight failure");
-            return measurement;
+            return Measurements.Count > 0 ? Measurements.Dequeue() : measurement;
         }
     }
 

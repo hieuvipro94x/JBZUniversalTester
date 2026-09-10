@@ -129,6 +129,11 @@ public sealed class TestEngine : IDisposable
     readonly HashSet<int> _unexpectedIo = [];
     readonly HashSet<WiringFaultPair> _wiringFaults = [];
     readonly HashSet<WiringFaultPair> _candidateWiringFaults = [];
+    // Probe frames are kept outside ProcessFrame. If a weaker leading frame was
+    // evaluated before the classifier confirmed the probe signature, exclude
+    // only edges touching the confirmed probe IO from product evidence until
+    // the next authoritative non-probe frame replaces the snapshot.
+    readonly HashSet<int> _probeEvidenceExcludedIo = [];
     readonly HashSet<string> _confirmedOpenKeys = new(StringComparer.Ordinal);
     readonly HashSet<string> _latchedClipKeys = new(StringComparer.OrdinalIgnoreCase);
     readonly HashSet<(int SourceIo, int TargetIo)> _unexpectedPairScratch = [];
@@ -352,6 +357,8 @@ public sealed class TestEngine : IDisposable
             foreach (int target in pair.Value)
             {
                 if (target == pair.Key ||
+                    _probeEvidenceExcludedIo.Contains(pair.Key) ||
+                    _probeEvidenceExcludedIo.Contains(target) ||
                     !_componentByIo.TryGetValue(target, out int targetComponent) ||
                     sourceComponent != targetComponent)
                 {
@@ -932,6 +939,7 @@ public sealed class TestEngine : IDisposable
         _unexpectedIo.Clear();
         _wiringFaults.Clear();
         _candidateWiringFaults.Clear();
+        _probeEvidenceExcludedIo.Clear();
         _confirmedOpenKeys.Clear();
         _faultConfirmation.Reset();
         _contactUnstable = false;
@@ -1623,6 +1631,8 @@ public sealed class TestEngine : IDisposable
         int target)
     {
         if (source <= 0 || target <= 0 || source == target ||
+            _probeEvidenceExcludedIo.Contains(source) ||
+            _probeEvidenceExcludedIo.Contains(target) ||
             model.IgnoredIo.Contains(source) || model.IgnoredIo.Contains(target))
         {
             return false;
@@ -2266,7 +2276,12 @@ public sealed class TestEngine : IDisposable
         bool changed;
         lock (_gate)
         {
-            changed = _candidateWiringFaults.RemoveWhere(fault =>
+            changed = !_probeEvidenceExcludedIo.SetEquals(suppressed);
+            _probeEvidenceExcludedIo.Clear();
+            foreach (int io in suppressed)
+                _probeEvidenceExcludedIo.Add(io);
+
+            changed |= _candidateWiringFaults.RemoveWhere(fault =>
                           suppressed.Contains(fault.SourceIo) || suppressed.Contains(fault.TargetIo)) > 0;
 
             // Không xóa _wiringFaults đã confirmed: đó có thể là lỗi SHORT/WRONG
@@ -2276,6 +2291,16 @@ public sealed class TestEngine : IDisposable
         if (changed)
             Changed?.Invoke(this, EventArgs.Empty);
         return changed;
+    }
+
+    /// <summary>
+    /// Called immediately before the next complete frame that is not classified
+    /// as Probe. That frame becomes the new authoritative product snapshot.
+    /// </summary>
+    public void ClearProbeEvidenceExclusions()
+    {
+        lock (_gate)
+            _probeEvidenceExcludedIo.Clear();
     }
 
     /// <summary>
@@ -2783,7 +2808,7 @@ public sealed class TestEngine : IDisposable
                 };
                 onChannelUpdated?.Invoke(measuring);
 
-                ResistanceResult result = await MeasureChannelOnceAsync(step, ct);
+                ResistanceResult result = await MeasureChannelStableAsync(step, ct);
                 results.Add(result);
                 onChannelUpdated?.Invoke(result);
             }
@@ -2796,7 +2821,7 @@ public sealed class TestEngine : IDisposable
         return results;
     }
 
-    private async Task<ResistanceResult> MeasureChannelOnceAsync(
+    private async Task<ResistanceResult> MeasureChannelStableAsync(
         ResistanceStep step,
         CancellationToken ct)
     {
@@ -2812,30 +2837,109 @@ public sealed class TestEngine : IDisposable
         AsyncFileLogService.Current.Test($"[AUTO-R] CH{step.Channel} minimum settle complete");
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        double sample = await Task.Run(
-            () => _visa.MeasureResistance(_settings.Keysight.Command),
-            ct);
-        bool open = !double.IsFinite(sample) ||
-                    Math.Abs(sample) >= _settings.Test.ResistanceOpenThreshold;
-        bool passed = !open && sample >= step.MinOhm && sample <= step.MaxOhm;
+        int requiredSamples = Math.Max(2, _settings.Test.ResistanceStableSampleCount);
+        int timeoutMs = Math.Clamp(
+            _settings.Test.ResistanceStabilityTimeoutMs,
+            100,
+            120_000);
+        int intervalMs = Math.Max(0, _settings.Test.ResistanceSampleIntervalMs);
+        var numericWindow = new Queue<double>(requiredSamples);
+        int consecutiveOpen = 0;
+        int sampleCount = 0;
+        double? stableValue = null;
+        bool confirmedOpen = false;
+        bool stable = false;
 
-        AsyncFileLogService.Current.Test(open
-            ? $"[AUTO-R] CH{step.Channel} sample#1=OPEN"
-            : $"[AUTO-R] CH{step.Channel} sample#1={sample:0.###}");
+        while (!stable && stopwatch.ElapsedMilliseconds < timeoutMs)
+        {
+            ct.ThrowIfCancellationRequested();
+            double sample = await Task.Run(
+                () => _visa.MeasureResistance(_settings.Keysight.Command),
+                ct);
+            sampleCount++;
+            bool open = !double.IsFinite(sample) ||
+                        Math.Abs(sample) >= _settings.Test.ResistanceOpenThreshold;
+            AsyncFileLogService.Current.Test(open
+                ? $"[AUTO-R] CH{step.Channel} sample#{sampleCount}=OPEN"
+                : $"[AUTO-R] CH{step.Channel} sample#{sampleCount}={sample:0.###}");
+
+            if (open)
+            {
+                numericWindow.Clear();
+                consecutiveOpen++;
+                if (consecutiveOpen >= requiredSamples)
+                {
+                    confirmedOpen = true;
+                    stable = true;
+                }
+            }
+            else
+            {
+                consecutiveOpen = 0;
+                numericWindow.Enqueue(sample);
+                while (numericWindow.Count > requiredSamples)
+                    numericWindow.Dequeue();
+
+                if (numericWindow.Count == requiredSamples &&
+                    AreResistanceSamplesStable(numericWindow))
+                {
+                    stableValue = numericWindow.Average();
+                    stable = true;
+                }
+            }
+
+            if (!stable && stopwatch.ElapsedMilliseconds < timeoutMs && intervalMs > 0)
+                await Task.Delay(intervalMs, ct);
+        }
+
+        if (!stable && consecutiveOpen > 0)
+        {
+            // Bounded timeout is authoritative: an OPEN that never recovered
+            // during the whole channel window is a real final OPEN failure.
+            confirmedOpen = true;
+            stable = true;
+        }
+
+        bool passed = stable &&
+                      !confirmedOpen &&
+                      stableValue is double stableOhm &&
+                      stableOhm >= step.MinOhm &&
+                      stableOhm <= step.MaxOhm;
+        string status = stable ? passed ? "PASS" : "FAIL" : "UNSTABLE";
+        string stableText = confirmedOpen
+            ? "OPEN"
+            : stableValue is double displayOhm
+                ? displayOhm.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)
+                : "NONE";
         AsyncFileLogService.Current.Test(
-            $"[AUTO-R] CH{step.Channel} single measurement time={stopwatch.ElapsedMilliseconds}ms " +
-            $"result={(passed ? "PASS" : "FAIL")}");
+            $"[AUTO-R] CH{step.Channel} stable={stable.ToString().ToLowerInvariant()} " +
+            $"samples={sampleCount} value={stableText}");
+        AsyncFileLogService.Current.Test(
+            $"[AUTO-R] CH{step.Channel} FINAL {status} time={stopwatch.ElapsedMilliseconds}ms");
 
         ResistanceResult result = BuildResistanceResult(
             step,
-            valueOhm: open ? null : sample,
-            open,
-            stable: true,
-            status: passed ? "PASS" : "FAIL",
-            sampleCount: 1,
+            stableValue,
+            confirmedOpen,
+            stable,
+            status,
+            sampleCount,
             stopwatch.ElapsedMilliseconds);
         LogResistanceDiagnostic(result);
         return result;
+    }
+
+    private bool AreResistanceSamplesStable(IEnumerable<double> samples)
+    {
+        double[] values = samples.ToArray();
+        if (values.Length < 2)
+            return false;
+
+        double averageMagnitude = Math.Abs(values.Average());
+        double allowedDelta = Math.Max(
+            _settings.Test.ResistanceStableAbsoluteToleranceOhm,
+            averageMagnitude * _settings.Test.ResistanceStableRelativeTolerancePercent / 100d);
+        return values.Max() - values.Min() <= allowedDelta;
     }
 
     private void LogResistanceDiagnostic(ResistanceResult result)

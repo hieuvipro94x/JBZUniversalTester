@@ -54,12 +54,12 @@ public static class IoMappingFramePresenter
         rows.AddRange(probeIos.Select(io => new FaultRow
         {
             Kind = FaultKind.Probe,
-            FaultType = "ĐẦU DÒ",
+            FaultType = "TP",
             Io = io,
             IoTextOverride = $"IO ({io})",
             RelatedIos = [io],
             DisplayOrder = io,
-            Status = $"PHÁT HIỆN IO({io})"
+            Status = $"TP - IO({io})"
         }));
 
         rows.AddRange(pairs

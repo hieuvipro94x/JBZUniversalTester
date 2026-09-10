@@ -28,8 +28,7 @@ public sealed class AppSettings
         Test.ResistanceChannels ??= [];
         Test.ResistanceMinimumSettleMs = Math.Clamp(Test.ResistanceMinimumSettleMs, 0, 60_000);
         Test.ResistanceSampleIntervalMs = Math.Clamp(Test.ResistanceSampleIntervalMs, 0, 10_000);
-        // Mỗi kênh chỉ đọc Keysight đúng một lần; ghi đè cấu hình cũ từng lưu 3 mẫu.
-        Test.ResistanceStableSampleCount = 1;
+        Test.ResistanceStableSampleCount = Math.Clamp(Test.ResistanceStableSampleCount, 2, 10);
         Test.ResistanceStableAbsoluteToleranceOhm = Math.Max(0, Test.ResistanceStableAbsoluteToleranceOhm);
         Test.ResistanceStableRelativeTolerancePercent = Math.Max(0, Test.ResistanceStableRelativeTolerancePercent);
         Test.ResistanceStabilityTimeoutMs = Math.Clamp(Test.ResistanceStabilityTimeoutMs, 100, 120_000);
@@ -66,10 +65,10 @@ public sealed class TestSettings
     public double ResistanceOpenThreshold { get; set; } = 1e30;
     public int ResistanceMinimumSettleMs { get; set; } = 300;
     public int ResistanceSampleIntervalMs { get; set; } = 50;
-    public int ResistanceStableSampleCount { get; set; } = 1;
+    public int ResistanceStableSampleCount { get; set; } = 2;
     public double ResistanceStableAbsoluteToleranceOhm { get; set; } = 5;
     public double ResistanceStableRelativeTolerancePercent { get; set; } = 0.2;
-    public int ResistanceStabilityTimeoutMs { get; set; } = 3000;
+    public int ResistanceStabilityTimeoutMs { get; set; } = 2000;
 
     public List<ResistanceChannelSettings> ResistanceChannels
     {
