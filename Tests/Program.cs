@@ -71,6 +71,7 @@ internal static class Program
             ("Fault display localization and detail", TestFaultDisplayFormatter),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
             ("Authoritative production state and stale UI snapshot gate", TestAuthoritativeProductionState),
+            ("Model-aware product evidence rejects raw single IO", TestModelAwareProductEvidence),
             ("Duplicate CLIP fault rows do not lock hardware", TestDuplicateClipFaultRows),
             ("D2XX resistance selectors and ten-slot configuration", TestD2xxResistanceRouting),
             ("Leak connector mapping and PASS/FAIL presentation", TestWaterProofConfigurationAndPresentation),
@@ -909,6 +910,149 @@ internal static class Program
         Assert(gate.TryAccept(10, 21, 0, 0, 7) &&
                !gate.TryAccept(10, 20, 30, 200, 8),
             "ProductRemoved cycle epoch invalidates every queued callback from the removed product");
+    }
+
+    private static void TestModelAwareProductEvidence()
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.Zero));
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            IoConfirm1 = 1,
+            IoConfirmN = 1
+        };
+        var board = new FakeBoard();
+        using var engine = new TestEngine(
+            board,
+            new KeysightVisaService(),
+            new AppSettings(),
+            production,
+            clock);
+        engine.SetModel(Model(
+            ("PAIR-A", new[] { 1, 2 }),
+            ("PAIR-B", new[] { 3, 4 })));
+
+        AssertWaiting("No activity", FrameSeq(1));
+        for (int sequence = 2; sequence <= 101; sequence++)
+            AssertWaiting("Sustained raw IO18", FrameSeq(sequence, (18, new[] { 18 })));
+        AssertWaiting("Raw IO26 touch", FrameSeq(102, (26, new[] { 26 })));
+        AssertWaiting("Raw IO26 release", FrameSeq(103));
+        AssertWaiting("Sequential raw IO10", FrameSeq(104, (10, new[] { 10 })));
+        AssertWaiting("Sequential raw IO18", FrameSeq(105, (18, new[] { 18 })));
+        AssertWaiting("Sequential raw IO26", FrameSeq(106, (26, new[] { 26 })));
+        AssertWaiting(
+            "Two raw IOs without a logical edge",
+            FrameSeq(107, (10, new[] { 10 }), (18, new[] { 18 })));
+        AssertWaiting(
+            "Unmapped raw edge",
+            FrameSeq(108, (10, new[] { 18 })));
+
+        engine.ProcessFrame(FrameSeq(109, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        ProductEvidenceSnapshot expected = engine.GetProductEvidenceSnapshot();
+        Assert(expected.ValidProductEvidence &&
+               expected.State == ProductPresenceState.Present &&
+               expected.ExpectedConnectedCount == 1 &&
+               expected.Reason == "EXPECTED_CONNECTIVITY" &&
+               engine.GetProductionElectricalSnapshot().ProductEvidence,
+            "A valid expected pair immediately creates authoritative product presence");
+        Assert(engine.BuildRows().All(row => row.WireName != "PAIR-A") &&
+               engine.BuildRows().Count(row => row.WireName == "PAIR-B") == 2,
+            "Realtime row delta removes a connected pair and restores it after disconnect");
+
+        engine.ProcessFrame(FrameSeq(110));
+        Assert(!engine.HasProductActivity &&
+               engine.BuildRows().Count(row => row.WireName == "PAIR-A") == 2,
+            "Disconnecting the valid pair restores Waiting and its rows");
+
+        engine.ProcessFrame(FrameSeq(111, (1, new[] { 4 })));
+        ProductEvidenceSnapshot wrongCandidate = engine.GetProductEvidenceSnapshot();
+        Assert(wrongCandidate.ValidProductEvidence &&
+               wrongCandidate.WrongCandidateCount == 1 &&
+               !engine.ReadyToEvaluateProductFaults,
+            "A first wrong model-aware edge creates product presence before full source coverage");
+        clock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 1));
+        engine.ProcessFrame(FrameSeq(112, (1, new[] { 4 })));
+        Assert(engine.HasWiringFault &&
+               engine.GetProductEvidenceSnapshot().WrongConfirmedCount == 1,
+            "Wrong wiring confirmation remains realtime after semantic presence detection");
+
+        engine.SetModel(Model(
+            ("PAIR-A", new[] { 1, 2 }),
+            ("PAIR-B", new[] { 3, 4 })));
+        engine.ProcessFrame(FrameSeq(113, (2, new[] { 3 })));
+        ProductEvidenceSnapshot shortCandidate = engine.GetProductEvidenceSnapshot();
+        Assert(shortCandidate.ValidProductEvidence &&
+               shortCandidate.ShortCandidateCount == 1,
+            "A first model-aware cross-network short also creates product presence");
+        clock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 1));
+        engine.ProcessFrame(FrameSeq(114, (2, new[] { 3 })));
+        Assert(engine.HasWiringFault &&
+               engine.GetProductEvidenceSnapshot().ShortConfirmedCount == 1,
+            "Short confirmation remains realtime without waiting for an expected pair");
+
+        engine.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
+        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 2 }, sequence: 115) &&
+               engine.HasContinuityPreviewProductActivity &&
+               !engine.HasProductActivity &&
+               !engine.GetProductEvidenceSnapshot().ProbeEvidence,
+            "Presentation/Probe evidence is independent from authoritative ProductPresence");
+
+        TestViewModel vm = CreateTestViewModel(production, out FakeBoard vmBoard);
+        vm.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        ((Task)(typeof(TestViewModel).GetField(
+            "_statisticsLoadTask",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? Task.CompletedTask)).GetAwaiter().GetResult();
+        int totalBefore = vm.Total;
+        int passBefore = vm.Pass;
+        int failBefore = vm.Fail;
+        string lotBefore = vm.Lot;
+        for (int sequence = 200; sequence < 300; sequence++)
+            vmBoard.Publish(FrameSeq(sequence, (10, new[] { 10 })));
+
+        int productSoundFlag = (int)(typeof(TestViewModel).GetField(
+            "_productStartSoundPlayed",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? -1);
+        bool productDetectedThisCycle = (bool)(typeof(TestViewModel).GetField(
+            "_productDetectedThisCycle",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? true);
+        Assert(vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               vm.Total == totalBefore && vm.Pass == passBefore && vm.Fail == failBefore &&
+               vm.Lot == lotBefore && productSoundFlag == 0 && !productDetectedThisCycle &&
+               !vmBoard.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+            $"100 raw single-IO frames cannot start product lifecycle side effects " +
+            $"(state={vm.CurrentProductionRuntimeState}, totals={vm.Total}/{vm.Pass}/{vm.Fail}, " +
+            $"lot={vm.Lot}/{lotBefore}, sound={productSoundFlag}, detected={productDetectedThisCycle}, " +
+            $"commands={string.Join(',', vmBoard.Commands)})");
+
+        string d2xxSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "D2xxBoardTransport.cs"));
+        string supervisorSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "ScanSupervisor.cs"));
+        Assert(d2xxSource.Contains(
+                   "readGeneration != Volatile.Read(ref _scanGeneration)",
+                   StringComparison.Ordinal) &&
+               supervisorSource.Contains("frame.ScanGeneration != _previousScanGeneration", StringComparison.Ordinal),
+            "Stale scan generations remain rejected by transport and ScanSupervisor gates");
+
+        void AssertWaiting(string scenario, ScanFrame frame)
+        {
+            engine.ProcessFrame(frame);
+            ProductEvidenceSnapshot evidence = engine.GetProductEvidenceSnapshot();
+            Assert(!evidence.ValidProductEvidence &&
+                   evidence.State == ProductPresenceState.WaitingForProduct &&
+                   !engine.HasProductActivity &&
+                   !engine.ReadyToEvaluateProductFaults &&
+                   !engine.HasWiringFault &&
+                   !engine.ContinuityPassed,
+                $"{scenario} remains raw-only WaitingForProduct");
+        }
     }
 
     private static void TestFinalTestStatusGuards()
@@ -4142,8 +4286,10 @@ internal static class Program
         engine.ProcessFrame(oneEndTouch);
         Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
         engine.ProcessFrame(oneEndTouch);
-        Assert(!engine.HasWiringFault,
-            "One-end source self-edge never becomes a wrong-wire FAIL");
+        Assert(!engine.HasWiringFault &&
+               !engine.HasProductActivity &&
+               !engine.ReadyToEvaluateProductFaults,
+            "One-end source self-edge never becomes ProductPresence or a wrong-wire FAIL");
 
         ScanFrame fullCoverageOpen = Frame((1, new[] { 18 }), (2, Array.Empty<int>()));
         engine.ProcessFrame(fullCoverageOpen);
@@ -5351,9 +5497,15 @@ internal static class Program
         cleanProbeVm.StartProductionTestAsync().GetAwaiter().GetResult();
         cleanProbeBoard.Publish(ProbeFrameSeq(24, 1));
         cleanProbeBoard.Publish(ProbeFrameSeq(25, 1));
+        int cleanProbeProductSoundFlag = (int)(typeof(TestViewModel).GetField(
+            "_productStartSoundPlayed",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(cleanProbeVm) ?? -1);
         Assert(cleanProbeVm.HasInlineProbeContacts &&
+               cleanProbeVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               cleanProbeProductSoundFlag == 0 &&
                !cleanProbeVm.Faults.Any(row => row.Kind is FaultKind.WrongWiring or FaultKind.Short),
-            "Inline Probe contact is display-only and cannot create a new WRONG/SHORT fault");
+            "Inline Probe contact stays display-only and cannot create ProductPresence, sound, WRONG or SHORT");
 
         var pointerDisabled = new ProductionSettings
         {
@@ -5519,13 +5671,11 @@ internal static class Program
         Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 20);
         unmappedPairEngine.ProcessFrame(unmappedPairFrame with { Sequence = 15 });
         PassGateDiagnostics unmappedDiagnostics = unmappedPairEngine.GetPassGateDiagnostics();
-        Assert(unmappedDiagnostics.WrongConfirmedCount == 1 &&
-               unmappedPairEngine.HasWiringFault &&
-               unmappedPairEngine.WiringFaults.Any(fault =>
-                   fault.SourceIo == 23 &&
-                   fault.TargetIo == 25 &&
-                   fault.FaultType == ProductFaultType.WrongWiring),
-            "CASE C2: two IO absent from THT become confirmed WRONG and must enter the FAIL confirmation flow");
+        Assert(unmappedDiagnostics.WrongCandidateCount == 0 &&
+               unmappedDiagnostics.ShortCandidateCount == 0 &&
+               !unmappedDiagnostics.HasProductActivity &&
+               !unmappedPairEngine.HasWiringFault,
+            "CASE C2: an edge fully outside the THT is raw activity and cannot create ProductPresence or FAIL");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings

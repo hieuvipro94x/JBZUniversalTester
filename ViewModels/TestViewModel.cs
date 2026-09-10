@@ -196,7 +196,7 @@ public sealed class TestViewModel : ObservableObject
     private string _lastFaultGateSignature = string.Empty;
     private string _lastFaultGateSuppressedSignature = string.Empty;
     private string _lastPassRemainingSignature = string.Empty;
-    private string _lastProductDetectSignature = string.Empty;
+    private string _lastProductEvidenceSignature = string.Empty;
     private string _lastIoMappingSignature = string.Empty;
     // V12.10.3: TestEngine.Reset() phát Changed đồng bộ. Trong Master state machine,
     // reset nội bộ không được phép tái nhập OnEngineChanged trước khi state hoàn tất.
@@ -2630,7 +2630,8 @@ public sealed class TestViewModel : ObservableObject
         if (_cycleActive &&
             phase == ProductionPhase.Continuity &&
             IsWaterProofEnabledForCurrentModel() &&
-            Volatile.Read(ref _preContinuityWaterProofPassed) == 0)
+            Volatile.Read(ref _preContinuityWaterProofPassed) == 0 &&
+            (rowsSnapshot?.Electrical.ProductEvidence ?? _engine.HasProductActivity))
         {
             if (!TryValidateWaterProofConnectorGate(_model!, out string connectorGateError))
             {
@@ -2941,7 +2942,7 @@ public sealed class TestViewModel : ObservableObject
         _lastFaultGateSignature = string.Empty;
         _lastFaultGateSuppressedSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;
-        _lastProductDetectSignature = string.Empty;
+        _lastProductEvidenceSignature = string.Empty;
         _activeCycleId = Guid.NewGuid().ToString("N");
         _cycleStartedAt = DateTime.Now;
         _cycleTestStartedAt = null;
@@ -3370,10 +3371,9 @@ public sealed class TestViewModel : ObservableObject
                 // has never been changed by the preview path.
                 bool continuityPreviewCleared = false;
                 bool engineChanged = false;
-                // Htdrv changes the operator state from the physical snapshot,
-                // not from the slower fault/topology result. One active jig IO
-                // is enough for ĐANG TEST; an empty complete frame immediately
-                // returns to SẴN SÀNG. Removal/PASS latches remain authoritative.
+                // Product presence comes only from model-aware connectivity in
+                // the complete engine snapshot. Raw/self-edge activity cannot
+                // move the operator UI into the Testing state.
                 // Chữ ký Probe mạnh chỉ là lớp quan sát. Không được
                 // đổi LẮP SẢN PHẨM -> ĐANG TEST chỉ vì target đầu dò.
                 if (!preserveProductionFaultsForProbe)
@@ -3391,6 +3391,8 @@ public sealed class TestViewModel : ObservableObject
                     OnEngineChanged(_engine, EventArgs.Empty);
                 }
                 PlayProductStartSoundOnce(generation, preserveProductionFaultsForProbe);
+                if (preserveProductionFaultsForProbe)
+                    LogProbeProductEvidence(frame);
                 double processMs = Stopwatch.GetElapsedTime(processStarted).TotalMilliseconds;
                 // Diagnostic topology có thể lớn hàng trăm network. Chỉ dựng khi
                 // trạng thái logic đổi; frame giống hệt vẫn đi qua debounce engine.
@@ -3919,7 +3921,7 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
-        LogProductDetect(frame, gate);
+        LogProductEvidence(frame);
         LogPassLatencyMarkers(frame, gate, processMs);
 
         if (gate.ContinuityPassed &&
@@ -4043,19 +4045,56 @@ public sealed class TestViewModel : ObservableObject
         return "HANDLER_ALREADY_RUNNING_OR_GUARD";
     }
 
-    private void LogProductDetect(ScanFrame frame, PassGateDiagnostics gate)
+    private void LogProductEvidence(ScanFrame frame)
     {
-        int expected = gate.ExpectedNetCount;
-        int present = gate.PassedNetCount;
-        int threshold = expected <= 2 ? 1 : Math.Max(1, Math.Min(expected, _settings.Board.RequiredStableFrames));
-        bool detected = gate.HasProductActivity;
-        string signature = $"{expected}|{present}|{threshold}|{detected}";
-        if (string.Equals(signature, _lastProductDetectSignature, StringComparison.Ordinal))
+        ProductEvidenceSnapshot evidence = _engine.GetProductEvidenceSnapshot();
+        WriteProductEvidenceLog(frame, evidence);
+    }
+
+    private void LogProbeProductEvidence(ScanFrame frame)
+    {
+        if (!AsyncFileLogService.Current.FileLoggingEnabled)
             return;
 
-        _lastProductDetectSignature = signature;
+        ProductEvidenceSnapshot current = _engine.GetProductEvidenceSnapshot();
+        ProductEvidenceSnapshot probe = current with
+        {
+            FrameSequence = frame.Sequence,
+            ScanGeneration = frame.ScanGeneration,
+            RawActiveIoCount = frame.ActiveIo.Count,
+            ProbeEvidence = true,
+            Reason = current.ValidProductEvidence
+                ? "PROBE_WITH_EXISTING_PRODUCT"
+                : "PROBE_ONLY"
+        };
+        WriteProductEvidenceLog(frame, probe);
+    }
+
+    private void WriteProductEvidenceLog(
+        ScanFrame frame,
+        ProductEvidenceSnapshot evidence)
+    {
+        string signature =
+            $"{evidence.RawActiveIoCount}|{evidence.ExpectedConnectedCount}|" +
+            $"{evidence.WrongCandidateCount}|{evidence.WrongConfirmedCount}|" +
+            $"{evidence.ShortCandidateCount}|{evidence.ShortConfirmedCount}|" +
+            $"{evidence.ProbeEvidence}|{evidence.ValidProductEvidence}|" +
+            $"{evidence.State}|{evidence.Reason}";
+        if (string.Equals(signature, _lastProductEvidenceSignature, StringComparison.Ordinal))
+            return;
+
+        _lastProductEvidenceSignature = signature;
         AsyncFileLogService.Current.Performance(
-            $"PRODUCT_DETECT seq={frame.Sequence} expected={expected} present={present} threshold={threshold} detected={detected}");
+            $"PRODUCT_EVIDENCE seq={frame.Sequence} generation={frame.ScanGeneration} " +
+            $"raw_active_count={evidence.RawActiveIoCount} " +
+            $"expected_connected={evidence.ExpectedConnectedCount} " +
+            $"wrong_candidates={evidence.WrongCandidateCount} " +
+            $"wrong_confirmed={evidence.WrongConfirmedCount} " +
+            $"short_candidates={evidence.ShortCandidateCount} " +
+            $"short_confirmed={evidence.ShortConfirmedCount} " +
+            $"probe_evidence={evidence.ProbeEvidence} " +
+            $"valid_product_evidence={evidence.ValidProductEvidence} " +
+            $"state={evidence.State} reason={evidence.Reason}");
     }
 
     private void LogPassLatencyMarkers(ScanFrame frame, PassGateDiagnostics gate, double processMs)
@@ -5018,7 +5057,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _lastContinuousScanMetricsTick, 0);
         _lastPassGateSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;
-        _lastProductDetectSignature = string.Empty;
+        _lastProductEvidenceSignature = string.Empty;
         _lastIoMappingSignature = string.Empty;
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);

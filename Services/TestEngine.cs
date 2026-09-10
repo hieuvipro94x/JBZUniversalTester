@@ -54,6 +54,30 @@ public readonly record struct ProductionElectricalSnapshot(
     bool HasConfirmedWiringFault,
     double EngineComputeMilliseconds);
 
+public enum ProductPresenceState
+{
+    WaitingForProduct = 0,
+    Present = 1
+}
+
+/// <summary>
+/// Model-aware product evidence from one complete Production frame. Raw active
+/// I/O and Probe evidence are diagnostic inputs only and cannot create presence.
+/// </summary>
+public readonly record struct ProductEvidenceSnapshot(
+    long FrameSequence,
+    long ScanGeneration,
+    int RawActiveIoCount,
+    int ExpectedConnectedCount,
+    int WrongCandidateCount,
+    int WrongConfirmedCount,
+    int ShortCandidateCount,
+    int ShortConfirmedCount,
+    bool ProbeEvidence,
+    bool ValidProductEvidence,
+    ProductPresenceState State,
+    string Reason);
+
 public sealed record TestEnginePresentationSnapshot(
     ProductionElectricalSnapshot Electrical,
     bool Removal,
@@ -72,6 +96,7 @@ public sealed class TestEngine : IDisposable
     {
         internal ProductModel Model { get; init; } = null!;
         internal Dictionary<int, int> ComponentByIo { get; init; } = null!;
+        internal HashSet<int> ModelIo { get; init; } = null!;
         internal Dictionary<PinRecord, WireNet[]> NetsByPin { get; init; } = null!;
         internal Dictionary<PinRecord, int> DisplayOrderByPin { get; init; } = null!;
         internal Dictionary<WireNet, int> DisplayOrderByNet { get; init; } = null!;
@@ -108,6 +133,7 @@ public sealed class TestEngine : IDisposable
     readonly HashSet<string> _latchedClipKeys = new(StringComparer.OrdinalIgnoreCase);
     readonly HashSet<(int SourceIo, int TargetIo)> _unexpectedPairScratch = [];
     Dictionary<int, int> _componentByIo = [];
+    HashSet<int> _modelIo = [];
     Dictionary<int, int> _actualComponentByIo = [];
     Dictionary<PinRecord, WireNet[]> _netsByPin = new(ReferenceEqualityComparer.Instance);
     Dictionary<WireNet, string> _confirmationKeyByNet = new(ReferenceEqualityComparer.Instance);
@@ -231,6 +257,12 @@ public sealed class TestEngine : IDisposable
             return BuildProductionElectricalSnapshotUnsafe();
     }
 
+    public ProductEvidenceSnapshot GetProductEvidenceSnapshot()
+    {
+        lock (_gate)
+            return BuildProductEvidenceSnapshotUnsafe();
+    }
+
     public TestEnginePresentationSnapshot CapturePresentationSnapshot(bool removal)
     {
         long started = Stopwatch.GetTimestamp();
@@ -250,7 +282,8 @@ public sealed class TestEngine : IDisposable
 
     private ProductionElectricalSnapshot BuildProductionElectricalSnapshotUnsafe()
     {
-        bool productEvidence = _model is not null && HasProductActivityUnsafe(_model);
+        ProductEvidenceSnapshot evidence = BuildProductEvidenceSnapshotUnsafe();
+        bool productEvidence = evidence.ValidProductEvidence;
         int expected = _model is null ? 0 : ProductionExpectedNetCount(_model);
         int passed = _model is null ? 0 : CountPassedExpectedUnsafe(_model);
         bool continuityComplete = _model is not null &&
@@ -269,11 +302,73 @@ public sealed class TestEngine : IDisposable
             _lastEngineComputeMilliseconds);
     }
 
+    private ProductEvidenceSnapshot BuildProductEvidenceSnapshotUnsafe()
+    {
+        int expectedConnected = CountExpectedConnectivityEdgesUnsafe();
+        int wrongCandidates = _candidateWiringFaults.Count(item =>
+            item.FaultType == ProductFaultType.WrongWiring);
+        int wrongConfirmed = _wiringFaults.Count(item =>
+            item.FaultType == ProductFaultType.WrongWiring);
+        int shortCandidates = _candidateWiringFaults.Count(item =>
+            item.FaultType == ProductFaultType.ShortCircuit);
+        int shortConfirmed = _wiringFaults.Count(item =>
+            item.FaultType == ProductFaultType.ShortCircuit);
+        bool valid = _model is not null && HasProductActivityUnsafe(_model);
+        string reason = !valid
+            ? _currentActive.Count > 0 ? "RAW_ACTIVITY_ONLY" : "NO_ACTIVITY"
+            : wrongConfirmed > 0
+                ? "WRONG_CONFIRMED"
+                : shortConfirmed > 0
+                    ? "SHORT_CONFIRMED"
+                    : wrongCandidates > 0
+                        ? "WRONG_CANDIDATE"
+                        : shortCandidates > 0
+                            ? "SHORT_CANDIDATE"
+                            : "EXPECTED_CONNECTIVITY";
+
+        return new ProductEvidenceSnapshot(
+            _lastFrameSequence,
+            _lastFrameScanGeneration,
+            _currentActive.Count,
+            expectedConnected,
+            wrongCandidates,
+            wrongConfirmed,
+            shortCandidates,
+            shortConfirmed,
+            ProbeEvidence: false,
+            valid,
+            valid ? ProductPresenceState.Present : ProductPresenceState.WaitingForProduct,
+            reason);
+    }
+
+    private int CountExpectedConnectivityEdgesUnsafe()
+    {
+        var expectedEdges = new HashSet<(int Low, int High)>();
+        foreach (KeyValuePair<int, HashSet<int>> pair in _currentConnections)
+        {
+            if (!_componentByIo.TryGetValue(pair.Key, out int sourceComponent))
+                continue;
+
+            foreach (int target in pair.Value)
+            {
+                if (target == pair.Key ||
+                    !_componentByIo.TryGetValue(target, out int targetComponent) ||
+                    sourceComponent != targetComponent)
+                {
+                    continue;
+                }
+
+                expectedEdges.Add((Math.Min(pair.Key, target), Math.Max(pair.Key, target)));
+            }
+        }
+
+        return expectedEdges.Count;
+    }
+
     /// <summary>
-    /// Có hoạt động điện của sản phẩm trên các I/O production hiện tại.
-    /// Với CLIP, A0/AO common -> I/O cấu hình trên row aN cũng được tính
-    /// là hoạt động của sản phẩm.
-    /// Dùng để chuyển UI từ CHỜ LẮP SẢN PHẨM sang ĐANG KIỂM TRA.
+    /// Có ít nhất một cạnh connectivity model-aware: cạnh đúng trong một
+    /// component kỳ vọng, hoặc cạnh Wrong/Short có tối thiểu một endpoint của
+    /// model. Raw/self-edge và Probe không phải bằng chứng sản phẩm.
     /// </summary>
     public bool HasProductActivity
     {
@@ -286,7 +381,7 @@ public sealed class TestEngine : IDisposable
 
                 return _currentConnections.Any(pair =>
                     pair.Value.Any(target =>
-                        IsProductActivityEdge(_model, pair.Key, target)));
+                        IsProductConnectivityEdgeUnsafe(_model, pair.Key, target)));
             }
         }
     }
@@ -304,7 +399,7 @@ public sealed class TestEngine : IDisposable
                 // nên chỉ released khi các quan hệ đó cũng đã mất.
                 return !_currentConnections.Any(pair =>
                     pair.Value.Any(target =>
-                        IsProductActivityEdge(_model, pair.Key, target)));
+                        IsProductConnectivityEdgeUnsafe(_model, pair.Key, target)));
             }
         }
     }
@@ -454,6 +549,20 @@ public sealed class TestEngine : IDisposable
         // Build immutable topology outside the frame lock. Only the short
         // reference swap/reset is serialized with ProcessFrame.
         Dictionary<int, int> componentByIo = BuildExpectedComponents(model);
+        HashSet<int> modelIo = model.Pins
+            .Select(pin => pin.IoNumber)
+            .Where(io => io > 0 && !model.IgnoredIo.Contains(io))
+            .ToHashSet();
+        if (model.Clip is not null)
+        {
+            if (model.Clip.CommonIo > 0)
+                modelIo.Add(model.Clip.CommonIo);
+            foreach (ClipBranch branch in model.Clip.Branches)
+            {
+                if (branch.TargetIo > 0)
+                    modelIo.Add(branch.TargetIo);
+            }
+        }
         Dictionary<PinRecord, WireNet[]> netsByPin = BuildNetsByPin(model);
         Dictionary<PinRecord, int> displayOrderByPin = BuildDisplayOrderByPin(model);
         Dictionary<WireNet, int> displayOrderByNet = BuildNetworkDisplayOrder(model);
@@ -469,6 +578,7 @@ public sealed class TestEngine : IDisposable
         {
             Model = model,
             ComponentByIo = componentByIo,
+            ModelIo = modelIo,
             NetsByPin = netsByPin,
             DisplayOrderByPin = displayOrderByPin,
             DisplayOrderByNet = displayOrderByNet,
@@ -484,6 +594,7 @@ public sealed class TestEngine : IDisposable
         {
             _model = prepared.Model;
             _componentByIo = prepared.ComponentByIo;
+            _modelIo = prepared.ModelIo;
             _netsByPin = prepared.NetsByPin;
             _displayOrderByPin = prepared.DisplayOrderByPin;
             _displayOrderByNet = prepared.DisplayOrderByNet;
@@ -926,7 +1037,7 @@ public sealed class TestEngine : IDisposable
 
                 return _continuityPreviewConnections.Any(pair =>
                     pair.Value.Any(target =>
-                        IsProductActivityEdge(_model, pair.Key, target)));
+                        IsProductConnectivityEdgeUnsafe(_model, pair.Key, target)));
             }
         }
     }
@@ -1210,7 +1321,8 @@ public sealed class TestEngine : IDisposable
             if (model.IgnoredIo.Contains(source))
                 continue;
 
-            bool sourceMapped = componentByIo.TryGetValue(source, out int sourceComponent);
+            bool sourceMapped = _modelIo.Contains(source);
+            bool sourceComponentKnown = componentByIo.TryGetValue(source, out int sourceComponent);
 
             foreach (int target in pair.Value)
             {
@@ -1224,9 +1336,17 @@ public sealed class TestEngine : IDisposable
                 if (source == target)
                     continue;
 
-                bool targetMapped = componentByIo.TryGetValue(target, out int targetComponent);
+                bool targetMapped = _modelIo.Contains(target);
+                bool targetComponentKnown = componentByIo.TryGetValue(target, out int targetComponent);
 
-                if (!sourceMapped || !targetMapped || sourceComponent != targetComponent)
+                // An edge completely outside the loaded model is raw/noise
+                // activity, not a product Wrong/Short candidate.
+                if (!sourceMapped && !targetMapped)
+                    continue;
+
+                if (!sourceMapped || !targetMapped ||
+                    !sourceComponentKnown || !targetComponentKnown ||
+                    sourceComponent != targetComponent)
                     unexpectedNow.Add((source, target));
             }
         }
@@ -1395,7 +1515,7 @@ public sealed class TestEngine : IDisposable
         {
             foreach (int target in pair.Value)
             {
-                if (IsProductActivityEdge(model, pair.Key, target))
+                if (IsProductConnectivityEdgeUnsafe(model, pair.Key, target))
                     return true;
             }
         }
@@ -1497,15 +1617,21 @@ public sealed class TestEngine : IDisposable
     }
 
 
-    private static bool IsProductActivityEdge(
+    private bool IsProductConnectivityEdgeUnsafe(
         ProductModel model,
         int source,
         int target)
     {
-        // CLIP A0 -> I/O cấu hình là continuity thật của sản phẩm. Chỉ loại
-        // các special row malformed đã được parser đánh dấu ignored.
-        return !model.IgnoredIo.Contains(source) &&
-               !model.IgnoredIo.Contains(target);
+        if (source <= 0 || target <= 0 || source == target ||
+            model.IgnoredIo.Contains(source) || model.IgnoredIo.Contains(target))
+        {
+            return false;
+        }
+
+        // A correct expected edge has both endpoints in one expected component.
+        // A Wrong/Short edge may have only one mapped endpoint; it is still
+        // model-relevant evidence and must be evaluated before ProductPresent.
+        return _modelIo.Contains(source) || _modelIo.Contains(target);
     }
 
     private static bool IsClipBranchConnected(
@@ -2181,7 +2307,7 @@ public sealed class TestEngine : IDisposable
 
             return _currentConnections.Any(pair =>
                 pair.Value.Any(target =>
-                    IsProductActivityEdge(_model, pair.Key, target) &&
+                    IsProductConnectivityEdgeUnsafe(_model, pair.Key, target) &&
                     (connectorIo.Contains(pair.Key) || connectorIo.Contains(target))));
         }
     }
