@@ -5073,25 +5073,21 @@ internal static class Program
             1,
             (1, new[] { 18 }),
             (201, new[] { 202, 203 })));
-        Assert(vm.PassedNetworkCount == 3 && vm.State != "LẮP SẢN PHẨM",
-            "Normal wire and connected AO-aN branches are latched in the incomplete cycle");
+        Assert(vm.PassedNetworkCount == 3 && vm.State == "ĐANG KIỂM TRA...",
+            "The first complete frame with real product connectivity shows testing immediately");
 
         // Tháo dây thường nhưng AO-a1 vẫn còn: tuyệt đối chưa reset.
         board.Publish(FrameSeq(2, (201, new[] { 202 })));
-        Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
-        board.Publish(FrameSeq(3, (201, new[] { 202 })));
         Assert(vm.PassedNetworkCount > 0 && vm.State != "LẮP SẢN PHẨM",
             "One remaining AO-a1 connection prevents cycle reset");
 
-        // Chỉ khi không còn bất kỳ cặp dây thường/CLIP nào và trạng thái rỗng
-        // ổn định hết cửa sổ chống chập chờn thì mới xóa toàn bộ latch.
-        board.Publish(FrameSeq(4));
-        Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
-        board.Publish(FrameSeq(5));
+        // Complete frame đầu tiên không còn bất kỳ cặp dây thường/CLIP nào
+        // phải xóa toàn bộ latch và trả UI về LẮP SẢN PHẨM ngay.
+        board.Publish(FrameSeq(3));
         Assert(vm.PassedNetworkCount == 0 &&
                vm.State == "LẮP SẢN PHẨM" &&
                vm.ResultStatusText == "LẮP SẢN PHẨM",
-            "Full stable release clears normal/CLIP latches and returns the cycle to ready");
+            "First authoritative full-release frame resets normal/CLIP latches and returns UI immediately");
     }
 
     private static void TestPartCounterStore()

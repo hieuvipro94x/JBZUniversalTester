@@ -2703,16 +2703,17 @@ public sealed class TestViewModel : ObservableObject
             if (hasProductEvidence)
                 State = "TIẾP XÚC JIG/PROBE KHÔNG ỔN ĐỊNH — KIỂM TRA PROBE PIN/JIG";
 
-            if (_engine.ContactLossTimedOut && _productDetectedThisCycle)
+            if (!_engine.HasProductActivity && _productDetectedThisCycle)
             {
-                // Sản phẩm đang lắp dở nhưng đã mất TOÀN BỘ cạnh điện đủ lâu:
-                // đây là thao tác tháo để lắp lại từ đầu, không phải OPEN/FAIL.
+                // Complete frame hiện tại đã xác nhận mất TOÀN BỘ connectivity
+                // model-aware. Reset ngay trong cùng UI update; không chờ cửa
+                // sổ contact-loss vì operator cần lắp/tháo phản hồi tức thời.
                 // ResetProductCycle phải xóa cả latch WireNet và CLIP AO/A0-aN.
                 // Nếu còn dù chỉ một cạnh dây thường hoặc CLIP thì
                 // HasProductActivity vẫn true và tuyệt đối không vào nhánh này.
                 ResetFullCycleAfterProductRemoved();
                 State = "LẮP SẢN PHẨM";
-                AddLog("Đã tháo hoàn toàn sản phẩm đang lắp dở; reset dây thường và toàn bộ nhánh CLIP để lắp lại từ đầu.");
+                AddLog("Complete frame đã xác nhận tháo hoàn toàn; reset ngay dây thường và toàn bộ nhánh CLIP để lắp lại từ đầu.");
             }
             else if (_engine.HasProductActivity && !_productDetectedThisCycle)
             {
