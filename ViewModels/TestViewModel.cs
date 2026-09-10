@@ -193,6 +193,9 @@ public sealed class TestViewModel : ObservableObject
     private long _productionFramesRoutedToProbe;
     private long _engineUiUpdatesScheduled;
     private long _engineUiUpdatesRendered;
+    private long _uiRequestCount;
+    private long _uiDispatcherEnqueueCount;
+    private long _uiRenderedCount;
     private long _lastContinuousScanMetricsTick;
     private string _lastPassGateSignature = string.Empty;
     private string _lastFaultGateSignature = string.Empty;
@@ -349,6 +352,10 @@ public sealed class TestViewModel : ObservableObject
     public long ProductionFramesRoutedToProbe => Interlocked.Read(ref _productionFramesRoutedToProbe);
     public long EngineUiUpdatesScheduled => Interlocked.Read(ref _engineUiUpdatesScheduled);
     public long EngineUiUpdatesRendered => Interlocked.Read(ref _engineUiUpdatesRendered);
+    public long EngineUiRequestCount => Interlocked.Read(ref _uiRequestCount);
+    public long EngineUiDispatcherEnqueueCount =>
+        Interlocked.Read(ref _uiDispatcherEnqueueCount);
+    public long EngineUiRenderedCount => Interlocked.Read(ref _uiRenderedCount);
     public ProductionRuntimeState CurrentProductionRuntimeState =>
         (ProductionRuntimeState)Volatile.Read(ref _productionRuntimeState);
 
@@ -2296,6 +2303,7 @@ public sealed class TestViewModel : ObservableObject
 
     private void ScheduleEngineUiUpdate(long generation)
     {
+        Interlocked.Increment(ref _uiRequestCount);
         long revision = Interlocked.Increment(ref _engineUiUpdateRevision);
         long cycleEpoch = Volatile.Read(ref _productionUiCycleEpoch);
         long probeRevision = Volatile.Read(ref _inlineProbeUiRevision);
@@ -2320,6 +2328,7 @@ public sealed class TestViewModel : ObservableObject
 
                 Interlocked.Increment(ref _engineUiUpdatesScheduled);
                 Interlocked.Increment(ref _engineUiUpdatesRendered);
+                Interlocked.Increment(ref _uiRenderedCount);
                 ProcessScheduledEngineChangedOnUi(request, snapshot);
                 Volatile.Write(ref _engineUiLastCompletedRevision, request.Revision);
             }
@@ -2354,6 +2363,7 @@ public sealed class TestViewModel : ObservableObject
 
                     long queuedAt = Stopwatch.GetTimestamp();
                     Interlocked.Increment(ref _engineUiUpdatesScheduled);
+                    Interlocked.Increment(ref _uiDispatcherEnqueueCount);
                     await dispatcher.InvokeAsync(() =>
                     {
                         if (Volatile.Read(ref _latestEngineUiUpdateRequest)?.Revision != request.Revision)
@@ -2363,6 +2373,7 @@ public sealed class TestViewModel : ObservableObject
                             return;
 
                         Interlocked.Increment(ref _engineUiUpdatesRendered);
+                        Interlocked.Increment(ref _uiRenderedCount);
                         ProcessScheduledEngineChangedOnUi(request, rows);
                         Volatile.Write(ref _engineUiLastCompletedRevision, request.Revision);
                         double queueDelayMs = Stopwatch.GetElapsedTime(queuedAt).TotalMilliseconds;
@@ -3941,6 +3952,10 @@ public sealed class TestViewModel : ObservableObject
         long engineProcessed = _engine.FramesProcessed;
         long uiScheduled = Interlocked.Read(ref _engineUiUpdatesScheduled);
         long uiRendered = Interlocked.Read(ref _engineUiUpdatesRendered);
+        long uiRequests = Interlocked.Read(ref _uiRequestCount);
+        long dispatcherEnqueued = Interlocked.Read(ref _uiDispatcherEnqueueCount);
+        long pipelineRendered = Interlocked.Read(ref _uiRenderedCount);
+        long coalesced = Math.Max(0, uiRequests - pipelineRendered);
 
         AsyncFileLogService.Current.Performance(
             "CONTINUOUS_SCAN_METRICS " +
@@ -3948,6 +3963,10 @@ public sealed class TestViewModel : ObservableObject
             $"engine_processed_total={engineProcessed} dropped={dropped} probe_routed={probeRouted} " +
             $"ui_scheduled={uiScheduled} ui_rendered={uiRendered} " +
             $"scan_running={_board.IsScanning} mode={CurrentRuntimeMode}");
+        AsyncFileLogService.Current.Performance(
+            $"UI_PIPELINE requests={uiRequests} " +
+            $"dispatcher_enqueued={dispatcherEnqueued} " +
+            $"rendered={pipelineRendered} coalesced={coalesced}");
     }
 
     private void LogPassGateAfterProductionFrame(ScanFrame frame, double processMs)
@@ -5133,6 +5152,9 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _productionFramesRoutedToProbe, 0);
         Interlocked.Exchange(ref _engineUiUpdatesScheduled, 0);
         Interlocked.Exchange(ref _engineUiUpdatesRendered, 0);
+        Interlocked.Exchange(ref _uiRequestCount, 0);
+        Interlocked.Exchange(ref _uiDispatcherEnqueueCount, 0);
+        Interlocked.Exchange(ref _uiRenderedCount, 0);
         Interlocked.Exchange(ref _lastContinuousScanMetricsTick, 0);
         _lastPassGateSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;

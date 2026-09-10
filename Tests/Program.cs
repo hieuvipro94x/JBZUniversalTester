@@ -702,9 +702,9 @@ internal static class Program
         var stripe2 = WireColorToBrushConverter.ToBrush("W/B");
         Assert(ReferenceEquals(red1, red2) && red1.IsFrozen, "Single wire color brush is cached and frozen");
         Assert(ReferenceEquals(stripe1, stripe2) && stripe1.IsFrozen, "Composite wire color brush is cached and frozen");
-        AssertBalancedTwoColorBrush("R/W", "#ED0000", "#FFFFFF");
-        AssertBalancedTwoColorBrush("W/R", "#FFFFFF", "#ED0000");
-        AssertBalancedTwoColorBrush("R/W/G", "#ED0000", "#FFFFFF");
+        AssertBalancedTwoColorBrush("R/W", "#FF0000", "#FFFFFF");
+        AssertBalancedTwoColorBrush("W/R", "#FFFFFF", "#FF0000");
+        AssertBalancedTwoColorBrush("R/W/G", "#FF0000", "#FFFFFF");
 
         var wrongRow = new FaultRow { Kind = FaultKind.WrongWiring, Color = "B/Br" };
         Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#FFFFFF" &&
@@ -734,10 +734,17 @@ internal static class Program
                normalCheckRow.Status == "KIỂM TRA",
             "Normal KIỂM TRA row uses the original dark text on absolute white");
         Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
-               BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
+               BrushHex(openBlueRow.WireColorBrush) == "#0000FF" &&
+               BrushHex(new FaultRow { Color = "R" }.WireColorBrush) == "#FF0000" &&
+               BrushHex(new FaultRow { Color = "P" }.WireColorBrush) == "#EAADEA" &&
+               BrushHex(new FaultRow { Color = "B" }.WireColorBrush) == "#000000" &&
+               BrushHex(new FaultRow { Color = "W" }.WireColorBrush) == "#FFFFFF" &&
+               BrushHex(new FaultRow { Color = "Gr" }.WireColorBrush) == "#606060" &&
+               BrushHex(new FaultRow { Color = "Br" }.WireColorBrush) == "#A62A2A" &&
+               BrushHex(new FaultRow { Color = "Or" }.WireColorBrush) == "#007FFF" &&
                new FaultRow { Color = "Y/B" }.WireColorBrush is LinearGradientBrush &&
                new FaultRow { Color = "W" }.WireColorBrush is SolidColorBrush,
-            "Single and striped wire-color backgrounds preserve their real colors");
+            "Single and striped wire-color backgrounds preserve the original tester palette");
         var cachedRow = new FaultRow { Io = 42, Connector = " CN1 ", Pin = " 7 ", Color = "L" };
         string cachedIoCnPn = cachedRow.IoCnPnText;
         Assert(cachedIoCnPn == "42-CN1-7" && ReferenceEquals(cachedIoCnPn, cachedRow.IoCnPnText),
@@ -930,6 +937,31 @@ internal static class Program
         Assert(gate.TryAccept(10, 21, 0, 0, 7) &&
                !gate.TryAccept(10, 20, 30, 200, 8),
             "ProductRemoved cycle epoch invalidates every queued callback from the removed product");
+
+        TestViewModel pipelineVm = CreateTestViewModel(production, out FakeBoard pipelineBoard);
+        pipelineVm.SetModel(model);
+        pipelineVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        long requestsBefore = pipelineVm.EngineUiRequestCount;
+        long renderedBefore = pipelineVm.EngineUiRenderedCount;
+        pipelineBoard.Publish(FrameSeq(104, (1, new[] { 3 })));
+        Assert(pipelineVm.EngineUiRequestCount > requestsBefore &&
+               pipelineVm.EngineUiRenderedCount > renderedBefore &&
+               pipelineVm.EngineUiDispatcherEnqueueCount == 0,
+            "Headless UI pipeline counts request and accepted inline render without claiming a Dispatcher enqueue");
+
+        string pipelineSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(pipelineSource.Contains(
+                   "Interlocked.Increment(ref _uiDispatcherEnqueueCount);\r\n                    await dispatcher.InvokeAsync",
+                   StringComparison.Ordinal) ||
+               pipelineSource.Contains(
+                   "Interlocked.Increment(ref _uiDispatcherEnqueueCount);\n                    await dispatcher.InvokeAsync",
+                   StringComparison.Ordinal),
+            "Dispatcher enqueue counter increments only at the actual InvokeAsync call site");
+        Assert(pipelineSource.Contains("UI_PIPELINE requests=", StringComparison.Ordinal) &&
+               pipelineSource.Contains("dispatcher_enqueued=", StringComparison.Ordinal) &&
+               pipelineSource.Contains("rendered={pipelineRendered} coalesced={coalesced}", StringComparison.Ordinal),
+            "Periodic diagnostics expose separate request, Dispatcher enqueue, rendered and coalesced totals");
     }
 
     private static void TestModelAwareProductEvidence()
@@ -1291,12 +1323,16 @@ internal static class Program
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
                !xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
                xaml.Contains("views:OutlinedTextBlock Text=\"{Binding WireColorText}\"", StringComparison.Ordinal) &&
-               xaml.Contains("Foreground=\"{StaticResource PiBlueTextBrush}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Foreground=\"White\"", StringComparison.Ordinal) &&
                xaml.Contains("Stroke=\"#111111\"", StringComparison.Ordinal) &&
                xaml.Contains("StrokeThickness=\"1\"", StringComparison.Ordinal) &&
+               xaml.Contains("FontFamily=\"Malgun Gothic\"", StringComparison.Ordinal) &&
+               xaml.Contains("FontSize=\"22\"", StringComparison.Ordinal) &&
+               !xaml.Contains("BorderBrush=\"#606060\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridCenterTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("ElementStyle=\"{StaticResource HtdrvGridStrongCenterTextStyle}\"", StringComparison.Ordinal) &&
+               !xaml.Contains("x:Key=\"OperatorWireNameTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireName}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource OperatorWireTextStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&

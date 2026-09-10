@@ -20,47 +20,47 @@ namespace JBZUniversalTester.Converters
         private static readonly Dictionary<string, Color> ColorMap =
             new Dictionary<string, Color>(StringComparer.OrdinalIgnoreCase)
             {
-                { "B", Color.FromRgb(0x10, 0x10, 0x10) },
-                { "BK", Color.FromRgb(0x10, 0x10, 0x10) },
-                { "BLACK", Color.FromRgb(0x10, 0x10, 0x10) },
+                { "B", Colors.Black },
+                { "BK", Colors.Black },
+                { "BLACK", Colors.Black },
 
                 { "W", Colors.White },
                 { "WH", Colors.White },
                 { "WHITE", Colors.White },
 
-                { "R", Color.FromRgb(0xED, 0x00, 0x00) },
-                { "RED", Color.FromRgb(0xED, 0x00, 0x00) },
+                { "R", Colors.Red },
+                { "RED", Colors.Red },
 
                 { "G", Color.FromRgb(0x00, 0xD0, 0x00) },
                 { "GN", Color.FromRgb(0x00, 0xD0, 0x00) },
                 { "GREEN", Color.FromRgb(0x00, 0xD0, 0x00) },
 
                 // Quy ước THT: L = Blue.
-                { "L", Color.FromRgb(0x00, 0x77, 0xFF) },
-                { "BL", Color.FromRgb(0x00, 0x77, 0xFF) },
-                { "BLU", Color.FromRgb(0x00, 0x77, 0xFF) },
-                { "BLUE", Color.FromRgb(0x00, 0x77, 0xFF) },
+                { "L", Colors.Blue },
+                { "BL", Colors.Blue },
+                { "BLU", Colors.Blue },
+                { "BLUE", Colors.Blue },
 
                 { "Y", Color.FromRgb(0xFF, 0xFF, 0x00) },
                 { "YL", Color.FromRgb(0xFF, 0xFF, 0x00) },
                 { "YELLOW", Color.FromRgb(0xFF, 0xFF, 0x00) },
 
-                { "BR", Color.FromRgb(0x8A, 0x43, 0x00) },
-                { "BN", Color.FromRgb(0x8A, 0x43, 0x00) },
-                { "BROWN", Color.FromRgb(0x8A, 0x43, 0x00) },
+                { "BR", Color.FromRgb(0xA6, 0x2A, 0x2A) },
+                { "BN", Color.FromRgb(0xA6, 0x2A, 0x2A) },
+                { "BROWN", Color.FromRgb(0xA6, 0x2A, 0x2A) },
 
-                { "OR", Color.FromRgb(0xFF, 0x99, 0x00) },
-                { "O", Color.FromRgb(0xFF, 0x99, 0x00) },
-                { "ORANGE", Color.FromRgb(0xFF, 0x99, 0x00) },
+                { "OR", Color.FromRgb(0x00, 0x7F, 0xFF) },
+                { "O", Color.FromRgb(0x00, 0x7F, 0xFF) },
+                { "ORANGE", Color.FromRgb(0x00, 0x7F, 0xFF) },
 
-                { "P", Color.FromRgb(0xFF, 0x2C, 0xA5) },
-                { "PK", Color.FromRgb(0xFF, 0x2C, 0xA5) },
-                { "PINK", Color.FromRgb(0xFF, 0x2C, 0xA5) },
+                { "P", Color.FromRgb(0xEA, 0xAD, 0xEA) },
+                { "PK", Color.FromRgb(0xEA, 0xAD, 0xEA) },
+                { "PINK", Color.FromRgb(0xEA, 0xAD, 0xEA) },
 
-                { "GR", Color.FromRgb(0x80, 0x80, 0x80) },
-                { "GY", Color.FromRgb(0x80, 0x80, 0x80) },
-                { "GRAY", Color.FromRgb(0x80, 0x80, 0x80) },
-                { "GREY", Color.FromRgb(0x80, 0x80, 0x80) },
+                { "GR", Color.FromRgb(0x60, 0x60, 0x60) },
+                { "GY", Color.FromRgb(0x60, 0x60, 0x60) },
+                { "GRAY", Color.FromRgb(0x60, 0x60, 0x60) },
+                { "GREY", Color.FromRgb(0x60, 0x60, 0x60) },
 
                 { "V", Color.FromRgb(0x7F, 0x00, 0xBB) },
                 { "VI", Color.FromRgb(0x7F, 0x00, 0xBB) },
