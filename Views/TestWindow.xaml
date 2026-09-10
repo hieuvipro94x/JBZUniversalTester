@@ -258,7 +258,7 @@
                BasedOn="{StaticResource HtdrvGridCenterTextStyle}">
             <Setter Property="FontSize" Value="22"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Foreground" Value="#67CFF5"/>
+            <Setter Property="Foreground" Value="{StaticResource PiBlueTextBrush}"/>
         </Style>
 
         <Style x:Key="OperatorConnectorTextStyle"
