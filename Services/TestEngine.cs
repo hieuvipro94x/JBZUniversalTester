@@ -1,5 +1,6 @@
 ﻿using JBZUniversalTester.Models;
 
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -37,6 +38,27 @@ public sealed record PassGateDiagnostics(
     bool LastFrameValid,
     long LastFrameSequence,
     int LastFrameUnknownBytes);
+
+/// <summary>
+/// Authoritative electrical state produced from one complete Production frame.
+/// Product evidence, realtime fault eligibility and full continuity are separate
+/// facts; consumers must not infer one from another.
+/// </summary>
+public readonly record struct ProductionElectricalSnapshot(
+    long FrameSequence,
+    long ScanGeneration,
+    bool ProductEvidence,
+    bool StableProductPresence,
+    bool RealtimeEvaluationEnabled,
+    bool ContinuityComplete,
+    bool HasConfirmedWiringFault,
+    double EngineComputeMilliseconds);
+
+public sealed record TestEnginePresentationSnapshot(
+    ProductionElectricalSnapshot Electrical,
+    bool Removal,
+    IReadOnlyList<FaultRow> Rows,
+    double RowBuildMilliseconds);
 
 /// <summary>
 /// V10.3 continuity engine reconstructed from the 2026-08-07 production and
@@ -107,8 +129,10 @@ public sealed class TestEngine : IDisposable
     bool _hasExpectedSourceCoverage;
     bool _lastFrameValid;
     long _lastFrameSequence;
+    long _lastFrameScanGeneration;
     long _framesProcessed;
     int _lastFrameUnknownBytes;
+    double _lastEngineComputeMilliseconds;
     bool _disposed;
 
     public event EventHandler? Changed;
@@ -166,6 +190,19 @@ public sealed class TestEngine : IDisposable
         get { lock (_gate) return _readyToEvaluateProductFaults; }
     }
 
+    /// <summary>
+    /// Wrong-wire/short evaluation starts with the first real product edge. It
+    /// intentionally does not wait for source coverage or full continuity.
+    /// </summary>
+    public bool RealtimeEvaluationEnabled
+    {
+        get
+        {
+            lock (_gate)
+                return _model is not null && HasProductActivityUnsafe(_model);
+        }
+    }
+
     public bool HasExpectedSourceCoverage
     {
         get { lock (_gate) return _hasExpectedSourceCoverage; }
@@ -186,6 +223,50 @@ public sealed class TestEngine : IDisposable
     public int LastFrameUnknownBytes
     {
         get { lock (_gate) return _lastFrameUnknownBytes; }
+    }
+
+    public ProductionElectricalSnapshot GetProductionElectricalSnapshot()
+    {
+        lock (_gate)
+            return BuildProductionElectricalSnapshotUnsafe();
+    }
+
+    public TestEnginePresentationSnapshot CapturePresentationSnapshot(bool removal)
+    {
+        long started = Stopwatch.GetTimestamp();
+        lock (_gate)
+        {
+            IReadOnlyList<FaultRow> rows = removal
+                ? BuildRemovalRows()
+                : BuildRows();
+            double rowBuildMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            return new TestEnginePresentationSnapshot(
+                BuildProductionElectricalSnapshotUnsafe(),
+                removal,
+                rows,
+                rowBuildMs);
+        }
+    }
+
+    private ProductionElectricalSnapshot BuildProductionElectricalSnapshotUnsafe()
+    {
+        bool productEvidence = _model is not null && HasProductActivityUnsafe(_model);
+        int expected = _model is null ? 0 : ProductionExpectedNetCount(_model);
+        int passed = _model is null ? 0 : CountPassedExpectedUnsafe(_model);
+        bool continuityComplete = _model is not null &&
+                                  expected > 0 &&
+                                  passed == expected &&
+                                  _candidateWiringFaults.Count == 0 &&
+                                  _wiringFaults.Count == 0;
+        return new ProductionElectricalSnapshot(
+            _lastFrameSequence,
+            _lastFrameScanGeneration,
+            productEvidence,
+            _productStable,
+            productEvidence,
+            continuityComplete,
+            _wiringFaults.Count > 0,
+            _lastEngineComputeMilliseconds);
     }
 
     /// <summary>
@@ -749,7 +830,9 @@ public sealed class TestEngine : IDisposable
         _hasExpectedSourceCoverage = false;
         _lastFrameValid = false;
         _lastFrameSequence = 0;
+        _lastFrameScanGeneration = 0;
         _lastFrameUnknownBytes = 0;
+        _lastEngineComputeMilliseconds = 0;
         _forceNextFrameChanged = true;
     }
 
@@ -848,6 +931,15 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    public long ContinuityPreviewSequence
+    {
+        get
+        {
+            lock (_gate)
+                return _continuityPreviewSequence;
+        }
+    }
+
     /// <summary>
     /// Clears the presentation overlay when an authoritative complete frame is about
     /// to be processed. Returns true only when the visible preview could have changed.
@@ -897,6 +989,7 @@ public sealed class TestEngine : IDisposable
             frame.UnknownBytes > 0)
             return false;
 
+        long computeStarted = Stopwatch.GetTimestamp();
         Interlocked.Increment(ref _framesProcessed);
         bool changed;
 
@@ -1037,6 +1130,7 @@ public sealed class TestEngine : IDisposable
                 (hasExpectedSourceCoverage || allExpectedConnectionsPresent);
             _lastFrameValid = true;
             _lastFrameSequence = frame.Sequence;
+            _lastFrameScanGeneration = frame.ScanGeneration;
             _lastFrameUnknownBytes = frame.UnknownBytes;
 
             // Snapshot đã được classifier xác định là đầu dò chỉ dùng để hiển
@@ -1046,11 +1140,12 @@ public sealed class TestEngine : IDisposable
             // Nếu operator chạm đủ hai đầu của một dây sai, BO đã trả về cạnh
             // vật lý đó và phải báo sau debounce riêng, không đợi 99 dây của
             // WH322244 được lắp xong.
+            bool realtimeEvaluationEnabled = hasProductActivity;
             bool wiringChanged = !preserveConfirmedWiringFaults && UpdateWiringFaults(
                 model,
                 _expectedConnectionScratch,
                 hasProductActivity,
-                hasProductActivity);
+                realtimeEvaluationEnabled);
 
             if (preserveConfirmedWiringFaults &&
                 previousConfirmedWiringFaults.Length > 0 &&
@@ -1081,6 +1176,8 @@ public sealed class TestEngine : IDisposable
                 previousReadyToEvaluate != _readyToEvaluateProductFaults;
 
             _forceNextFrameChanged = false;
+            _lastEngineComputeMilliseconds =
+                Stopwatch.GetElapsedTime(computeStarted).TotalMilliseconds;
         }
 
         // Không block worker D2XX. TestViewModel sẽ marshal async sang UI.

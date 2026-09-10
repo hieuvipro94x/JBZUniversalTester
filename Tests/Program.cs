@@ -35,6 +35,7 @@ internal static class Program
         [
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
+            ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
             ("Production probe preview arrives before frame terminator", TestProductionProbePreview),
@@ -69,6 +70,7 @@ internal static class Program
             ("Standard product picker filter", TestProductPickerFilter),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
+            ("Authoritative production state and stale UI snapshot gate", TestAuthoritativeProductionState),
             ("Duplicate CLIP fault rows do not lock hardware", TestDuplicateClipFaultRows),
             ("D2XX resistance selectors and ten-slot configuration", TestD2xxResistanceRouting),
             ("Leak connector mapping and PASS/FAIL presentation", TestWaterProofConfigurationAndPresentation),
@@ -405,6 +407,130 @@ internal static class Program
             BoardScanMode.Production);
     }
 
+    private static void TestScanWatchdogRecovery()
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.Zero));
+        var board = new FakeBoard();
+        var supervisor = new ScanSupervisor(board, _ => { }, clock);
+
+        supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "A reused production stream must pass through the first-frame gate");
+
+        board.Publish(HealthFrame(1, 1, complete: false));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "An incomplete frame cannot arm Monitoring");
+        board.Publish(HealthFrame(2, 1));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "The first complete frame enters Monitoring");
+
+        clock.Advance(TimeSpan.FromMilliseconds(999));
+        Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "A healthy stream below its stall timeout does not recover");
+
+        supervisor.Suspend("Resistance");
+        board.StopScanAsync().GetAwaiter().GetResult();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Suspended &&
+               !supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "An intentional resistance STOP remains healthy beyond watchdog timeout");
+
+        supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "START after an intentional pause resets the baseline and enters Starting");
+        clock.Advance(TimeSpan.FromMilliseconds(20));
+        Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "Starting cannot fault a few milliseconds later from the pre-STOP frame age");
+        board.Publish(HealthFrame(3, 2, complete: false));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "Raw receive activity without a complete frame keeps the first-frame gate armed");
+        board.Publish(HealthFrame(4, 2));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "A complete frame from the new generation resumes Monitoring");
+
+        supervisor.Suspend("ProductionReconfigure");
+        board.StopScanAsync().GetAwaiter().GetResult();
+        supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        board.Publish(HealthFrame(5, 2));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "A complete frame from the stale generation is ignored");
+        board.Publish(HealthFrame(6, 3));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "A complete frame from the new generation is accepted");
+
+        board.Publish(HealthFrame(7, 3, complete: false));
+        clock.Advance(TimeSpan.FromMilliseconds(1_001));
+        Assert(supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out ScanHealthSnapshot stalled) &&
+               stalled.State == ScanHealthState.Recovering,
+            "Raw bytes with frames=0 eventually trigger a Monitoring stall recovery");
+        Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "A second watchdog tick cannot start duplicate recovery");
+
+        board.StartScanCallback = current => current.Publish(HealthFrame(8, 4));
+        Assert(supervisor.RecoverSoftAsync(
+                    BoardCapacity.MaxGlobalIo,
+                    BoardScanMode.Production,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult() &&
+               supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "Soft STOP/START recovery succeeds after its first complete frame");
+
+        supervisor.BeginRecovery("force-soft-failure");
+        board.StartFailuresRemaining = 1;
+        Assert(!supervisor.RecoverSoftAsync(
+                    BoardCapacity.MaxGlobalIo,
+                    BoardScanMode.Production,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult(),
+            "A failed soft restart is reported for reopen escalation");
+        board.StartScanCallback = current => current.Publish(HealthFrame(9, 5));
+        Assert(supervisor.RecoverReopenAsync(
+                    BoardCapacity.MaxGlobalIo,
+                    BoardScanMode.Production,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult() &&
+               board.ConnectAttempts == 1 &&
+               board.IsConnected && board.IsScanning &&
+               board.CurrentScanMode == BoardScanMode.Production &&
+               supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "Reopen recovery restores the same scan mode and reaches Monitoring");
+
+        string source = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        int recoveryStart = source.IndexOf(
+            "private async Task<bool> RecoverProductionScanAsync",
+            StringComparison.Ordinal);
+        int recoveryEnd = source.IndexOf(
+            "private async Task HardwareMonitorLoopAsync",
+            recoveryStart,
+            StringComparison.Ordinal);
+        string recoveryMethod = source[recoveryStart..recoveryEnd];
+        Assert(recoveryMethod.Contains("_lifetimeCts.Token", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("CurrentCycleToken", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("Record", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("SetRelay", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("Print", StringComparison.Ordinal),
+            "Recovery is scoped to transport lifetime and cannot repeat production side effects");
+
+        static ScanFrame HealthFrame(long sequence, long generation, bool complete = true) => new(
+            DateTime.Now,
+            BoardCapacity.MaxExpansionCardCount,
+            new HashSet<int>(),
+            [],
+            complete,
+            0,
+            sequence,
+            new Dictionary<int, IReadOnlySet<int>>(),
+            new Dictionary<int, int>(),
+            BoardScanMode.Production,
+            TerminatorKnown: complete,
+            ScanGeneration: generation);
+    }
+
     private static void TestProductionDataUpgrade()
     {
         string root = Path.Combine(Path.GetTempPath(), "JBZUpgradeTest_" + Guid.NewGuid().ToString("N"));
@@ -607,12 +733,18 @@ internal static class Program
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
         Assert(testViewModelSource.Contains(
-                   "ProcessScheduledEngineChangedOnUi(request.Generation, rows)",
+                   "ProcessScheduledEngineChangedOnUi(request, rows)",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "TryAcceptProductionUiSnapshot(request, rows)",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "AdvanceProductionUiCycleEpoch();",
                    StringComparison.Ordinal) &&
                !testViewModelSource.Contains(
                    "ProcessScheduledEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration))",
                    StringComparison.Ordinal),
-            "Coalesced engine UI callbacks preserve the event generation and reject stale cycles");
+            "Coalesced engine UI callbacks preserve version identity and reject stale product cycles");
 
         var disabled = new ResistanceChannelEditor(
             new ResistanceChannelSetting { Enabled = true, Name = "R3", Channel = 3, MinOhm = 1, MaxOhm = 2 },
@@ -712,6 +844,71 @@ internal static class Program
         Console.WriteLine(
             $"PERF: 2,000 identical 500-IO/250-network frames: {largeStopwatch.ElapsedMilliseconds} ms, " +
             $"{largeAllocated:N0} bytes allocated");
+    }
+
+    private static void TestAuthoritativeProductionState()
+    {
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            IoConfirm1 = 1,
+            IoConfirmN = 1
+        };
+        ProductModel model = Model(
+            ("PAIR-A", new[] { 1, 3 }),
+            ("PAIR-B", new[] { 2, 4 }));
+        using TestEngine engine = CreateEngine(out _, production);
+        engine.SetModel(model);
+
+        ProductionElectricalSnapshot waiting = engine.GetProductionElectricalSnapshot();
+        Assert(!waiting.ProductEvidence &&
+               !waiting.RealtimeEvaluationEnabled &&
+               !waiting.ContinuityComplete,
+            "No product evidence is authoritative WaitingForProduct input");
+
+        engine.ProcessFrame(FrameSeq(100, (1, new[] { 3 })));
+        TestEnginePresentationSnapshot installing = engine.CapturePresentationSnapshot(removal: false);
+        Assert(installing.Electrical.ProductEvidence &&
+               installing.Electrical.RealtimeEvaluationEnabled &&
+               !installing.Electrical.ContinuityComplete &&
+               installing.Rows.Count(row => row.WireName == "PAIR-A") == 0 &&
+               installing.Rows.Count(row => row.WireName == "PAIR-B") == 2,
+            "One correct pair immediately enables realtime evaluation and removes only its rows");
+
+        engine.ProcessFrame(FrameSeq(101));
+        TestEnginePresentationSnapshot released = engine.CapturePresentationSnapshot(removal: false);
+        Assert(!released.Electrical.ProductEvidence &&
+               !released.Electrical.RealtimeEvaluationEnabled &&
+               released.Rows.Count(row => row.WireName == "PAIR-A") == 2 &&
+               released.Rows.Count(row => row.WireName == "PAIR-B") == 2,
+            "Disconnecting the pair immediately restores its rows without waiting for full product state");
+
+        engine.ProcessFrame(FrameSeq(102, (1, new[] { 4 })));
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(FrameSeq(103, (1, new[] { 4 })));
+        ProductionElectricalSnapshot wrong = engine.GetProductionElectricalSnapshot();
+        Assert(wrong.ProductEvidence &&
+               wrong.RealtimeEvaluationEnabled &&
+               !wrong.ContinuityComplete &&
+               wrong.HasConfirmedWiringFault,
+            "Wrong wiring remains confirmed during partial installation");
+
+        var gate = new ProductionUiVersionGate();
+        Assert(gate.TryAccept(10, 20, 30, 100, 1),
+            "First production UI snapshot is accepted");
+        Assert(!gate.TryAccept(9, 20, 30, 101, 2),
+            "Older runtime generation cannot update UI");
+        Assert(!gate.TryAccept(10, 19, 30, 101, 3),
+            "Older product cycle cannot update UI");
+        Assert(!gate.TryAccept(10, 20, 29, 999, 4),
+            "Older D2XX scan generation cannot update UI");
+        Assert(!gate.TryAccept(10, 20, 30, 99, 5),
+            "Older complete-frame sequence cannot overwrite the latest UI");
+        Assert(gate.TryAccept(10, 20, 30, 100, 6),
+            "A newer confirmation revision of the same frame remains applicable");
+        Assert(gate.TryAccept(10, 21, 0, 0, 7) &&
+               !gate.TryAccept(10, 20, 30, 200, 8),
+            "ProductRemoved cycle epoch invalidates every queued callback from the removed product");
     }
 
     private static void TestFinalTestStatusGuards()
@@ -930,13 +1127,13 @@ internal static class Program
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
                !xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
                xaml.Contains("views:OutlinedTextBlock Text=\"{Binding WireColorText}\"", StringComparison.Ordinal) &&
-               xaml.Contains("Foreground=\"#FFFFFF\"", StringComparison.Ordinal) &&
+               xaml.Contains("Foreground=\"{StaticResource PiBlueTextBrush}\"", StringComparison.Ordinal) &&
                xaml.Contains("Stroke=\"#111111\"", StringComparison.Ordinal) &&
                xaml.Contains("StrokeThickness=\"1\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridCenterTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("ElementStyle=\"{StaticResource HtdrvGridStrongCenterTextStyle}\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireName}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource HtdrvGridCenterTextStyle}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireName}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource OperatorWireTextStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\" Width=\"0.85*\" MinWidth=\"90\"", StringComparison.Ordinal) &&
@@ -1016,7 +1213,7 @@ internal static class Program
         Assert(xaml.Contains("x:Name=\"OperationTablesHost\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Lo&#7841;i\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"CONNECTOR\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Connector\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Chân Pin\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Mã Dây\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"Tiết Diện\"", StringComparison.Ordinal) &&
@@ -1029,7 +1226,7 @@ internal static class Program
             "TestWindow has no offline preview path; MainWindow must reject entry without a healthy board");
         int typeColumnIndex = xaml.IndexOf("Header=\"Lo&#7841;i\"", StringComparison.Ordinal);
         int ioColumnIndex = xaml.IndexOf("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal);
-        int connectorColumnIndex = xaml.IndexOf("Header=\"CONNECTOR\"", StringComparison.Ordinal);
+        int connectorColumnIndex = xaml.IndexOf("Header=\"Connector\"", StringComparison.Ordinal);
         Assert(typeColumnIndex >= 0 &&
                ioColumnIndex > typeColumnIndex &&
                connectorColumnIndex > ioColumnIndex,
@@ -4452,14 +4649,16 @@ internal static class Program
             Path.Combine(Environment.CurrentDirectory, "Services", "ScanSupervisor.cs"));
         string d2xxTransportSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Services", "D2xxBoardTransport.cs"));
-        Assert(!testViewModelSource.Contains("ConnectBoardWithRetryAsync", StringComparison.Ordinal) &&
-               !testViewModelSource.Contains("ReconnectBoardForSettingsAsync", StringComparison.Ordinal) &&
-               !testViewModelSource.Contains("PRODUCTION_RECONFIGURE_RECONNECT", StringComparison.Ordinal) &&
-               !testViewModelSource.Contains("RecoverProductionScanStallAsync", StringComparison.Ordinal) &&
-               !scanSupervisorSource.Contains("RecoverProductionScanStallAsync", StringComparison.Ordinal) &&
-               !scanSupervisorSource.Contains("_board.DisconnectAsync()", StringComparison.Ordinal) &&
+        Assert(testViewModelSource.Contains("StopScanIntentionallyAsync", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("RecoverProductionScanAsync", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("ScanHealthState.Suspended", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("ScanHealthState.Starting", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("ScanHealthState.Monitoring", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("RecoverSoftAsync", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("RecoverReopenAsync", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("_board.DisconnectAsync()", StringComparison.Ordinal) &&
                !d2xxTransportSource.Contains("attempt <= 6", StringComparison.Ordinal),
-            "D2XX startup and watchdog have no retry, STOP/START recovery, or in-session reconnect path");
+            "D2XX watchdog uses explicit pause, first-frame state, soft recovery, then one clean reopen");
         Assert(mainWindowXaml.Contains("Color=\"#273F91\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Color=\"#B45309\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Color=\"#0F766E\"", StringComparison.Ordinal) &&
@@ -5414,7 +5613,13 @@ internal static class Program
             ShortCircuitConfirmMs = 0,
             UseTestPointer = true
         };
-        ProductModel model = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
+        // Keep one network intentionally pending so this stress test exercises
+        // the continuous scan/probe/fault path without legitimately entering
+        // the separate final-PASS flow that stops scanning for relay handling.
+        ProductModel model = Model(
+            ("PAIR-A", new[] { 1, 86 }),
+            ("PAIR-B", new[] { 2, 87 }),
+            ("PAIR-C", new[] { 3, 88 }));
         TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
         vm.SetModel(model);
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
@@ -7518,6 +7723,7 @@ internal static class Program
         public int ReleaseResistanceRouteCount { get; private set; }
         public bool ThrowOnSetRelay { get; set; }
         public bool ThrowOnConnect { get; set; }
+        public int StartFailuresRemaining { get; set; }
         public int ConnectAttempts { get; private set; }
         public bool IsConnected { get; private set; } = true;
         public bool IsScanning { get; private set; } = true;
@@ -7579,7 +7785,22 @@ internal static class Program
         public Task HandshakeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ResetClearAsync(CancellationToken ct = default) { Commands.Add("RESET"); return Task.CompletedTask; }
         public void ConfigureActiveScanRange(int maxIo) { }
-        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default) { IsScanning = true; CurrentScanMode = mode; AppliedScanCapacity = Capacity; LastStartScanToken = ct; Commands.Add("START"); StartScanCallback?.Invoke(this); return Task.CompletedTask; }
+        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default)
+        {
+            if (StartFailuresRemaining > 0)
+            {
+                StartFailuresRemaining--;
+                throw new InvalidOperationException("Simulated scan start failure");
+            }
+
+            IsScanning = true;
+            CurrentScanMode = mode;
+            AppliedScanCapacity = Capacity;
+            LastStartScanToken = ct;
+            Commands.Add("START");
+            StartScanCallback?.Invoke(this);
+            return Task.CompletedTask;
+        }
         public Task StopScanAsync(CancellationToken ct = default) { IsScanning = false; Commands.Add("STOP"); return Task.CompletedTask; }
         public Task EnterIdleAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task SelectResistanceRouteAsync(ResistanceStep step, CancellationToken ct = default)

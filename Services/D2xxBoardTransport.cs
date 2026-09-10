@@ -1209,6 +1209,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
             $"mode={mode} polls_per_sec={polls / intervalSeconds:0.###} " +
             $"queue_calls_per_sec={queueCalls / intervalSeconds:0.###} " +
             $"zero_queue={zeroQueueCalls} reads_per_sec={reads / intervalSeconds:0.###} " +
+            $"queue_calls_per_frame={(frames > 0 ? queueCalls / (double)frames : 0):0.###} " +
+            $"reads_per_frame={(frames > 0 ? reads / (double)frames : 0):0.###} " +
             $"avg_bytes_per_read={(reads > 0 ? bytes / (double)reads : 0):0.###} " +
             $"frames_per_sec={frames / intervalSeconds:0.###} complete_frames={completeFrames} " +
             $"frame_interval_avg_ms={intervalAvgMs:0.###} frame_interval_median_ms={intervalMedianMs:0.###} " +
