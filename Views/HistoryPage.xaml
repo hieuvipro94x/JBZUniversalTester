@@ -11,9 +11,6 @@
         <SolidColorBrush x:Key="HistoryNeutralBackground" Color="#ECEFF1"/>
         <SolidColorBrush x:Key="HistoryNeutralForeground" Color="#455A64"/>
         <SolidColorBrush x:Key="HistoryNeutralBorder" Color="#B0BEC5"/>
-        <SolidColorBrush x:Key="HistoryImportBackground" Color="#FFF4E5"/>
-        <SolidColorBrush x:Key="HistoryImportForeground" Color="#8A4B08"/>
-        <SolidColorBrush x:Key="HistoryImportBorder" Color="#D9A441"/>
         <SolidColorBrush x:Key="HistoryExportLightBackground" Color="#E5F5F3"/>
         <SolidColorBrush x:Key="HistoryExportAction" Color="#0F766E"/>
         <SolidColorBrush x:Key="HistoryExitBackground" Color="#FFF0F0"/>
@@ -80,14 +77,6 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
-        </Style>
-
-        <Style x:Key="HistoryImportButtonStyle"
-               TargetType="Button"
-               BasedOn="{StaticResource CompactButton}">
-            <Setter Property="Background" Value="{StaticResource HistoryImportBackground}"/>
-            <Setter Property="Foreground" Value="{StaticResource HistoryImportForeground}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource HistoryImportBorder}"/>
         </Style>
 
         <Style x:Key="HistoryCsvButtonStyle"
@@ -253,11 +242,6 @@
                             VerticalAlignment="Center"
                             HorizontalAlignment="Right"
                             Margin="0">
-                    <Button x:Name="ImportLegacyButton"
-                            Content="NHẬP LỊCH SỬ CŨ"
-                            Width="122"
-                            Style="{StaticResource HistoryImportButtonStyle}"
-                            Click="ImportLegacy_Click"/>
                     <Button Content="CSV"
                             Width="78"
                             Style="{StaticResource HistoryCsvButtonStyle}"

@@ -13,25 +13,17 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 public partial class HistoryPage : UserControl
 {
-    private const int UiRowLimit = 200;
-    private readonly ProductionSettings _settings;
-    private readonly Func<Task> _importLegacyHistoryAsync;
     private readonly string _historyPath;
     private readonly object _storeGate = new();
     private TestHistoryStore? _store;
-    private IReadOnlyList<TestHistoryRecord> _records = [];
     private int _reloadGeneration;
 
     public event EventHandler? RequestClose;
 
-    public HistoryPage(ProductionSettings settings, Func<Task> importLegacyHistoryAsync)
+    public HistoryPage()
     {
         InitializeComponent();
         DataContext = this;
-        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _importLegacyHistoryAsync = importLegacyHistoryAsync ??
-            throw new ArgumentNullException(nameof(importLegacyHistoryAsync));
-
         _historyPath = RuntimePaths.DatabaseFile;
 
         SetDefaultFilters();
@@ -49,7 +41,6 @@ public partial class HistoryPage : UserControl
         Loaded -= HistoryPage_Loaded;
         Interlocked.Increment(ref _reloadGeneration);
         HistoryGrid.ItemsSource = null;
-        _records = [];
         DataContext = null;
     }
 
@@ -65,28 +56,6 @@ public partial class HistoryPage : UserControl
     }
 
     private void Search_Click(object sender, RoutedEventArgs e) => Reload();
-
-    private async void ImportLegacy_Click(object sender, RoutedEventArgs e)
-    {
-        ImportLegacyButton.IsEnabled = false;
-        CloseButton.IsEnabled = false;
-        SummaryText.Text = "Đang nhập lịch sử cũ — vui lòng chờ và chưa bắt đầu Production...";
-        try
-        {
-            await _importLegacyHistoryAsync();
-            Reload();
-        }
-        catch (Exception ex)
-        {
-            AsyncFileLogService.Current.Error($"Legacy history import failed: {ex}");
-            ShowMessage("Chưa nhập được lịch sử cũ. Vui lòng thử lại.", "CHƯA NHẬP ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
-        }
-        finally
-        {
-            ImportLegacyButton.IsEnabled = true;
-            CloseButton.IsEnabled = true;
-        }
-    }
 
     private void ClearFilter_Click(object sender, RoutedEventArgs e)
     {
@@ -114,13 +83,12 @@ public partial class HistoryPage : UserControl
         int generation = Interlocked.Increment(ref _reloadGeneration);
         try
         {
-            HistorySearchCriteria criteria = CreateSearchCriteria(UiRowLimit);
+            HistorySearchCriteria criteria = CreateSearchCriteria();
             IReadOnlyList<TestHistoryRecord> rows = await Task.Run(() =>
-                GetStore().SearchSummary(criteria));
+                GetStore().SearchAllSummary(criteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
 
-            _records = rows;
             HistoryGrid.ItemsSource = rows;
 
             int productCount = rows.Count(row => row.IsProductionRecord);
@@ -135,7 +103,7 @@ public partial class HistoryPage : UserControl
             FailCountText.Text = fail.ToString("N0");
 
             SummaryText.Text =
-                $"{rows.Count:N0} bản ghi hiển thị (tối đa {UiRowLimit:N0}) | SẢN PHẨM {productCount:N0} " +
+                $"{rows.Count:N0} bản ghi | SẢN PHẨM {productCount:N0} " +
                 $"(PASS {pass:N0} / FAIL {fail:N0}) | LEAK RETEST {leakRetest:N0} | MASTER {master:N0}";
         }
         catch (Exception ex)
@@ -149,10 +117,10 @@ public partial class HistoryPage : UserControl
         }
     }
 
-    private HistorySearchCriteria CreateSearchCriteria(int maxRows)
+    private HistorySearchCriteria CreateSearchCriteria()
     {
         DateTime? from = FromDatePicker.SelectedDate?.Date;
-        DateTime? to = ToDatePicker.SelectedDate?.Date.AddDays(1).AddTicks(-1);
+        DateTime? to = ToDatePicker.SelectedDate?.Date.AddDays(1);
         long? lot = long.TryParse(LotTextBox.Text?.Trim(), out long n) ? n : null;
         string result = (ResultComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "ALL";
         return new HistorySearchCriteria(
@@ -160,18 +128,11 @@ public partial class HistoryPage : UserControl
             to,
             lot,
             PartTextBox.Text?.Trim() ?? string.Empty,
-            result,
-            maxRows);
+            result);
     }
 
     private async void ExportCsv_Click(object sender, RoutedEventArgs e)
     {
-        if (_records.Count == 0)
-        {
-            ShowMessage("Không có dữ liệu để xuất.", "Lịch sử", MessageBoxImage.Information);
-            return;
-        }
-
         var dialog = new SaveFileDialog
         {
             Title = "Xuất lịch sử CSV",
@@ -183,7 +144,7 @@ public partial class HistoryPage : UserControl
         if (result != true)
             return;
 
-        HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
+        HistorySearchCriteria criteria = CreateSearchCriteria();
         try
         {
             int exportedCount = await Task.Run(() =>
@@ -205,12 +166,6 @@ public partial class HistoryPage : UserControl
 
     private async void ExportXlsx_Click(object sender, RoutedEventArgs e)
     {
-        if (_records.Count == 0)
-        {
-            ShowMessage("Không có dữ liệu để xuất.", "Lịch sử", MessageBoxImage.Information);
-            return;
-        }
-
         var dialog = new SaveFileDialog
         {
             Title = "Xuất lịch sử Excel theo mẫu chuẩn",
@@ -222,7 +177,7 @@ public partial class HistoryPage : UserControl
         if (result != true)
             return;
 
-        HistorySearchCriteria criteria = CreateSearchCriteria(20_000);
+        HistorySearchCriteria criteria = CreateSearchCriteria();
         try
         {
             int exportedCount = await Task.Run(() =>

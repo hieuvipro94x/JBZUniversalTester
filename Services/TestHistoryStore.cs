@@ -1858,7 +1858,10 @@ public sealed class TestHistoryStore
         SearchCore(criteria, exportAll: false, includeLabelPayload: true);
 
     public IReadOnlyList<TestHistoryRecord> SearchSummary(HistorySearchCriteria criteria) =>
-        SearchCore(criteria, exportAll: false, includeLabelPayload: false);
+        SearchCore(criteria, exportAll: false, includeLabelPayload: false, applyLimit: true);
+
+    public IReadOnlyList<TestHistoryRecord> SearchAllSummary(HistorySearchCriteria criteria) =>
+        SearchCore(criteria, exportAll: false, includeLabelPayload: false, applyLimit: false);
 
     public IReadOnlyList<TestHistoryRecord> SearchForExport(HistorySearchCriteria criteria) =>
         SearchCore(criteria, exportAll: true, includeLabelPayload: false);
@@ -1872,13 +1875,15 @@ public sealed class TestHistoryStore
     private IReadOnlyList<TestHistoryRecord> SearchCore(
         HistorySearchCriteria criteria,
         bool exportAll,
-        bool includeLabelPayload) =>
-        EnumerateCore(criteria, exportAll, includeLabelPayload).ToArray();
+        bool includeLabelPayload,
+        bool applyLimit = true) =>
+        EnumerateCore(criteria, exportAll, includeLabelPayload, applyLimit).ToArray();
 
     private IEnumerable<TestHistoryRecord> EnumerateCore(
         HistorySearchCriteria criteria,
         bool exportAll,
-        bool includeLabelPayload)
+        bool includeLabelPayload,
+        bool applyLimit = true)
     {
         ArgumentNullException.ThrowIfNull(criteria);
         long started = Stopwatch.GetTimestamp();
@@ -1887,12 +1892,12 @@ public sealed class TestHistoryStore
         var clauses = new List<string>();
         if (criteria.From is DateTime from)
         {
-            clauses.Add("COALESCE(t.TestStartedAt,t.StartedAt) >= $From");
+            clauses.Add("t.ResultAt >= $From");
             command.Parameters.AddWithValue("$From", from.ToString("O", CultureInfo.InvariantCulture));
         }
         if (criteria.To is DateTime to)
         {
-            clauses.Add("COALESCE(t.TestStartedAt,t.StartedAt) <= $To");
+            clauses.Add("t.ResultAt < $To");
             command.Parameters.AddWithValue("$To", to.ToString("O", CultureInfo.InvariantCulture));
         }
         if (criteria.LotNo is long lot)
@@ -1908,8 +1913,40 @@ public sealed class TestHistoryStore
         if (!string.IsNullOrWhiteSpace(criteria.Result) &&
             !criteria.Result.Equals("ALL", StringComparison.OrdinalIgnoreCase))
         {
-            clauses.Add("(t.Result LIKE $Result OR t.FaultType LIKE $Result OR t.ResultCode LIKE $Result)");
-            command.Parameters.AddWithValue("$Result", $"%{criteria.Result.Trim()}%");
+            string resultFilter = criteria.Result.Trim().ToUpperInvariant();
+            if (resultFilter == "PASS")
+            {
+                clauses.Add("t.Passed=1");
+            }
+            else if (resultFilter == "FAIL")
+            {
+                clauses.Add("t.Passed=0");
+            }
+            else if (TryMapHistoryFaultFilter(resultFilter, out string faultCode))
+            {
+                clauses.Add("(REPLACE(UPPER(t.ResultCode),' ','_')=$FaultCode OR " +
+                            "UPPER(t.FaultType) LIKE $FaultTypeEnglish OR " +
+                            "UPPER(t.FaultType) LIKE $FaultTypeVietnamese OR " +
+                            "EXISTS(SELECT 1 FROM TestFaults rf WHERE rf.TestId=t.Id AND " +
+                            "(REPLACE(UPPER(rf.FaultCode),' ','_')=$FaultCode OR " +
+                            "REPLACE(UPPER(rf.FaultType),' ','_')=$FaultCode)))");
+                command.Parameters.AddWithValue("$FaultCode", faultCode);
+                (string english, string vietnamese) = faultCode switch
+                {
+                    "OPEN_CIRCUIT" => ("%OPEN CIRCUIT%", "%HỞ MẠCH%"),
+                    "WRONG_WIRING" => ("%INCORRECT CONNECTION%", "%SAI DÂY%"),
+                    "SHORT_CIRCUIT" => ("%SHORT CIRCUIT%", "%CHẬP MẠCH%"),
+                    "RESISTANCE_OUT_OF_RANGE" => ("%RESISTANCE OUT OF SPECIFICATION%", "%ĐIỆN TRỞ%"),
+                    _ => (faultCode, faultCode)
+                };
+                command.Parameters.AddWithValue("$FaultTypeEnglish", english);
+                command.Parameters.AddWithValue("$FaultTypeVietnamese", vietnamese);
+            }
+            else
+            {
+                clauses.Add("(t.Result LIKE $Result OR t.FaultType LIKE $Result OR t.ResultCode LIKE $Result)");
+                command.Parameters.AddWithValue("$Result", $"%{criteria.Result.Trim()}%");
+            }
         }
         if (!string.IsNullOrWhiteSpace(criteria.InspectionType))
         {
@@ -1955,8 +1992,11 @@ public sealed class TestHistoryStore
         int offset = Math.Max(0, criteria.Offset);
         string order = exportAll
             ? "ORDER BY p.PartNumber COLLATE NOCASE,t.StartedAt,t.Id"
-            : $"ORDER BY t.ResultAt DESC,t.Id DESC LIMIT {limit}" +
-              (criteria.BeforeResultAt is null ? $" OFFSET {offset}" : string.Empty);
+            : "ORDER BY t.ResultAt DESC,t.Id DESC" +
+              (applyLimit
+                  ? $" LIMIT {limit}" +
+                    (criteria.BeforeResultAt is null ? $" OFFSET {offset}" : string.Empty)
+                  : string.Empty);
         string labelPayloadColumn = includeLabelPayload ? "t.LabelPayload" : "''";
         command.CommandText = $"""
             SELECT
@@ -1992,6 +2032,19 @@ public sealed class TestHistoryStore
         }
         AsyncFileLogService.Current.Performance(
             $"HISTORY_QUERY rows={rows} duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
+    }
+
+    private static bool TryMapHistoryFaultFilter(string value, out string faultCode)
+    {
+        faultCode = value switch
+        {
+            "DÂY CHƯA KẾT NỐI" or "HỞ MẠCH" => "OPEN_CIRCUIT",
+            "ĐẤU SAI" or "SAI KẾT NỐI" => "WRONG_WIRING",
+            "CHẬP MẠCH" => "SHORT_CIRCUIT",
+            "ĐIỆN TRỞ KHÔNG ĐẠT" => "RESISTANCE_OUT_OF_RANGE",
+            _ => string.Empty
+        };
+        return faultCode.Length > 0;
     }
 
     public bool UpdateRemovalTiming(string cycleId, DateTime removalStartedAt, DateTime? removedAt)

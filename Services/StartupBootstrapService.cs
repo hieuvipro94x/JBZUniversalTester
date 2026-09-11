@@ -5,10 +5,6 @@ namespace JBZUniversalTester.Services;
 
 public static class StartupBootstrapService
 {
-    private static readonly object LegacyImportGate = new();
-    private static Task _legacyImportTask = Task.CompletedTask;
-    private static bool _legacyImportStarted;
-
     public static void EnsureFastConfiguration()
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
@@ -74,38 +70,6 @@ public static class StartupBootstrapService
         return Task.CompletedTask;
     }
 
-    public static Task ImportLegacyHistoryForMaintenanceAsync(
-        ProductionPersistenceService persistence,
-        AsyncFileLogService? logger = null)
-    {
-        ArgumentNullException.ThrowIfNull(persistence);
-        AsyncFileLogService log = logger ?? AsyncFileLogService.Current;
-
-        lock (LegacyImportGate)
-        {
-            if (_legacyImportStarted)
-                return _legacyImportTask;
-
-            _legacyImportStarted = true;
-            _legacyImportTask = Task.Run(async () =>
-            {
-                try
-                {
-                    await ImportLegacyHistoryOnceAsync(persistence, log)
-                        .ConfigureAwait(false);
-                    log.Application("Deferred legacy history import completed.");
-                }
-                catch (Exception ex)
-                {
-                    // Dữ liệu production SQLite hiện tại đã sẵn sàng. Lỗi import
-                    // lịch sử cũ chỉ được ghi log, không hạ kết nối bo đang chạy.
-                    log.Error($"Deferred legacy history import error: {ex}");
-                }
-            });
-            return _legacyImportTask;
-        }
-    }
-
     private static void MigrateLocalLegacyDatabase(AsyncFileLogService log)
     {
         if (File.Exists(RuntimePaths.DatabaseFile) || !File.Exists(RuntimePaths.LegacyDatabaseFile))
@@ -127,29 +91,4 @@ public static class StartupBootstrapService
         }
     }
 
-    private static async Task ImportLegacyHistoryOnceAsync(
-        ProductionPersistenceService persistence,
-        AsyncFileLogService log)
-    {
-        const string migrationKey = "LEGACY_PHT_UNDERSCORE_IMPORT_V1";
-        await persistence.Initialization.ConfigureAwait(false);
-        if (await persistence.IsRuntimeMigrationCompletedAsync(migrationKey).ConfigureAwait(false))
-            return;
-
-        var reader = new LegacyPhtHistoryReader(
-            RuntimePaths.LegacyPassRoot,
-            RuntimePaths.LegacyErrorRoot);
-        int imported = 0;
-        int existing = 0;
-        var importer = new LegacyPhtImportService(persistence, reader);
-        IReadOnlyList<LegacyImportResult> results =
-            await importer.ImportChangedFilesAsync().ConfigureAwait(false);
-        imported = results.Sum(result => result.ImportedRecords);
-        existing = results.Sum(result => result.ExistingRecords);
-
-        await persistence.CompleteRuntimeMigrationAsync(
-            migrationKey,
-            $"imported={imported}; existing={existing}").ConfigureAwait(false);
-        log.Application($"LEGACY_HISTORY_IMPORT imported={imported} existing={existing}");
-    }
 }

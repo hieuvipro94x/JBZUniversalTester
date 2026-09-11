@@ -387,9 +387,7 @@ public partial class MainWindow : Window
         {
             await CloseInternalPageAsync();
 
-            _historyPage = new HistoryPage(
-                _viewModel.ProductionSettings,
-                _viewModel.Test.ImportLegacyHistoryForMaintenanceAsync);
+            _historyPage = new HistoryPage();
             _historyPage.RequestClose += InternalPage_RequestClose;
 
             InternalPageHost.Content = _historyPage;

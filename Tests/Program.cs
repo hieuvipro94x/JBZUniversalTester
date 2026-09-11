@@ -1310,10 +1310,11 @@ internal static class Program
         publishRecoveryFrame.GetAwaiter().GetResult();
         Assert(recoveryVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                recoveryVm.Faults.Count == 0 &&
-               recoveryVm.CenterResultText == "LẮP SẢN PHẨM" &&
+               recoveryVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               !recoveryVm.IsProductRemovalPending &&
                !recoveryBoard.Commands.Contains("START") &&
                !recoveryBoard.Commands.Contains("SET:2"),
-            "Rejected FAIL commit reuses healthy removal scan, returns to the empty wait-product presentation, and cannot remain latched at KHÔNG ĐẠT");
+            "Rejected FAIL commit reuses healthy removal scan, returns to authoritative WaitingForProduct with no removal latch, and cannot remain latched at KHÔNG ĐẠT");
 
         string xaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
         Assert(!xaml.Contains("ProbeToggleText", StringComparison.Ordinal) &&
@@ -3338,6 +3339,10 @@ internal static class Program
                 new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 1));
             Assert(firstPage.Count == 1 && firstPage[0].LabelPayload.Length == 0,
                 "History summary omits large label payloads");
+            IReadOnlyList<TestHistoryRecord> allRows = initial.SearchAllSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 1));
+            Assert(allRows.Count == 2 && allRows.All(row => row.LabelPayload.Length == 0),
+                "History full summary returns every matching row without the UI page limit");
             IReadOnlyList<TestHistoryRecord> secondPage = initial.SearchSummary(
                 new HistorySearchCriteria(
                     null,
@@ -4320,11 +4325,11 @@ internal static class Program
         long processedBefore = vm.ProductionFramesProcessed;
         int commandsBefore = board.Commands.Count;
         board.PublishProbePreview(previews[0] with { ScanGeneration = 1 });
-        Assert(!vm.HasInlineProbeContacts &&
-               vm.Faults.All(row => row.Kind != FaultKind.Probe) &&
+        Assert(vm.HasInlineProbeContacts &&
+               vm.Faults.Count(row => row.Kind == FaultKind.Probe && row.Io == 198) == 1 &&
                vm.ProductionFramesProcessed == processedBefore &&
                board.Commands.Count == commandsBefore,
-            "Early Probe preview remains candidate-only and never changes UI, TestEngine, counters, or relay; " +
+            "Early Probe preview renders candidate UI immediately without changing TestEngine, counters, or relay; " +
             $"active={vm.HasInlineProbeContacts}, rows={string.Join("|", vm.Faults.Select(row => $"{row.Kind}:IO{row.Io}"))}, " +
             $"processed={processedBefore}->{vm.ProductionFramesProcessed}, " +
             $"commands={commandsBefore}->{board.Commands.Count}");
@@ -5021,13 +5026,9 @@ internal static class Program
         string bootstrapSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Services", "StartupBootstrapService.cs"));
         Assert(bootstrapSource.Contains("Critical filesystem bootstrap completed.", StringComparison.Ordinal) &&
-               !bootstrapSource.Contains("StartLegacyHistoryImportInBackground(", StringComparison.Ordinal) &&
-               bootstrapSource.Contains("ImportLegacyHistoryForMaintenanceAsync(", StringComparison.Ordinal) &&
-               !bootstrapSource.Contains("new ProductionPersistenceService(", StringComparison.Ordinal) &&
-               bootstrapSource.Contains("IsRuntimeMigrationCompletedAsync", StringComparison.Ordinal) &&
-               bootstrapSource.Contains("Task.Run(async () =>", StringComparison.Ordinal) &&
-               bootstrapSource.Contains("Deferred legacy history import completed.", StringComparison.Ordinal),
-            "Legacy import stays off startup and shares the production SQLite writer instead of creating a competing writer");
+               !bootstrapSource.Contains("ImportLegacyHistoryForMaintenanceAsync(", StringComparison.Ordinal) &&
+               !bootstrapSource.Contains("LEGACY_PHT_UNDERSCORE_IMPORT", StringComparison.Ordinal),
+            "Legacy underscore history remains external and has no runtime path into SQLite");
 
         string persistenceSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Services", "ProductionPersistenceService.cs"));
@@ -5049,20 +5050,19 @@ internal static class Program
             Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
         string historyPageSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml.cs"));
-        Assert(historyPageXaml.Contains("Content=\"NHẬP LỊCH SỬ CŨ\"", StringComparison.Ordinal) &&
+        Assert(!historyPageXaml.Contains("NHẬP LỊCH SỬ CŨ", StringComparison.Ordinal) &&
                historyPageXaml.Contains("x:Name=\"CloseButton\"", StringComparison.Ordinal) &&
-               historyPageSource.Contains("await _importLegacyHistoryAsync();", StringComparison.Ordinal) &&
-               historyPageSource.Contains("CloseButton.IsEnabled = false", StringComparison.Ordinal),
-            "Legacy history migration is explicit, uses the shared writer, and cannot return to Production while import is active");
+               historyPageSource.Contains("SearchAllSummary(criteria)", StringComparison.Ordinal) &&
+               !historyPageSource.Contains("UiRowLimit", StringComparison.Ordinal),
+            "History displays every filtered SQLite row and exposes no legacy import action");
         System.Xml.Linq.XElement[] historyButtons =
             System.Xml.Linq.XDocument.Parse(historyPageXaml)
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(historyButtons.Length == 6 &&
+        Assert(historyButtons.Length == 5 &&
                historyButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
-               historyPageXaml.Contains("HistoryImportButtonStyle", StringComparison.Ordinal) &&
                historyPageXaml.Contains("HistoryCsvButtonStyle", StringComparison.Ordinal) &&
                historyPageXaml.Contains("HistoryExcelButtonStyle", StringComparison.Ordinal) &&
                historyPageXaml.Contains("HistorySearchButtonStyle", StringComparison.Ordinal) &&
@@ -5809,7 +5809,8 @@ internal static class Program
                    row.Color == "R" &&
                    row.Status == "TP - IO(1)" &&
                    row.IoCnPnText == "1-1-1") &&
-               vm.CenterResultText == centerBeforeProbe &&
+               vm.CenterResultText.Length == 0 &&
+               vm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
                vm.Total == totalBeforeProbe &&
                vm.Pass == passBeforeProbe &&
                vm.Fail == failBeforeProbe &&
@@ -5832,12 +5833,14 @@ internal static class Program
             ?.GetValue(vm) ?? -1L);
         Assert(!vm.HasInlineProbeContacts &&
                vm.Faults.All(row => row.Kind != FaultKind.Probe) &&
-               vm.Faults.Count(row => row.Status == "CHƯA KẾT NỐI") == 2 &&
+               vm.Faults.Count == 0 &&
                vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               vm.CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
+               vm.CurrentProbePresentationState == ProbePresentationState.Released &&
                vm.State == "LẮP SẢN PHẨM" &&
                releaseRevision > touchRevision &&
-               vm.CenterResultText == centerBeforeProbe,
-            "CASE C: one RELEASE frame clears TP, restores pending model rows, and invalidates stale TOUCH callbacks");
+               vm.CenterResultText == "LẮP SẢN PHẨM",
+            "CASE C: one RELEASE frame clears TP, keeps pending model rows hidden while waiting, restores waiting presentation, and invalidates stale TOUCH callbacks");
 
         var duplicateModel = new ProductModel
         {

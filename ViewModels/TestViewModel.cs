@@ -92,7 +92,6 @@ public sealed class TestViewModel : ObservableObject
     private Task _probePersistenceTask = Task.CompletedTask;
     private Task _removalPersistenceTask = Task.CompletedTask;
     private Task _masterPersistenceTask = Task.CompletedTask;
-    private Task _legacyHistoryImportTask = Task.CompletedTask;
     private Task _deviceFaultHardwareLockTask = Task.CompletedTask;
     private long _statisticsLoadGeneration;
     private Task _statisticsLoadTask = Task.CompletedTask;
@@ -1681,18 +1680,6 @@ public sealed class TestViewModel : ObservableObject
                     _productionSettings,
                     ProgramIdentityService.VersionText);
             }
-        }
-    }
-
-    public Task ImportLegacyHistoryForMaintenanceAsync()
-    {
-        lock (_historyStoreGate)
-        {
-            _legacyHistoryImportTask =
-                StartupBootstrapService.ImportLegacyHistoryForMaintenanceAsync(
-                    ProductionPersistence,
-                    AsyncFileLogService.Current);
-            return _legacyHistoryImportTask;
         }
     }
 
@@ -5201,7 +5188,6 @@ public sealed class TestViewModel : ObservableObject
         try { await _removalPersistenceTask; } catch { }
         try { await _masterPersistenceTask; } catch { }
         try { await _statisticsLoadTask; } catch { }
-        try { await _legacyHistoryImportTask; } catch { }
 
         _cycleActive = false;
         _waitForProductRelease = false;
