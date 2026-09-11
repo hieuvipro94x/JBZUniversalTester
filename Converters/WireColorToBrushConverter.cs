@@ -49,9 +49,13 @@ namespace JBZUniversalTester.Converters
                 { "BN", Color.FromRgb(0xA6, 0x2A, 0x2A) },
                 { "BROWN", Color.FromRgb(0xA6, 0x2A, 0x2A) },
 
-                { "OR", Color.FromRgb(0x00, 0x7F, 0xFF) },
-                { "O", Color.FromRgb(0x00, 0x7F, 0xFF) },
-                { "ORANGE", Color.FromRgb(0x00, 0x7F, 0xFF) },
+                // Quy ước THT: O / Or / Orange = Orange.
+                // Dùng cùng một RGB cho cả màu đơn và phần màu trong dây kép
+                // (ví dụ B/Or => Đen/Cam), tránh alias Or bị rơi về xanh dương.
+                { "OR", Color.FromRgb(0xFF, 0x8C, 0x00) },
+                { "O", Color.FromRgb(0xFF, 0x8C, 0x00) },
+                { "OG", Color.FromRgb(0xFF, 0x8C, 0x00) },
+                { "ORANGE", Color.FromRgb(0xFF, 0x8C, 0x00) },
 
                 { "P", Color.FromRgb(0xEA, 0xAD, 0xEA) },
                 { "PK", Color.FromRgb(0xEA, 0xAD, 0xEA) },
@@ -87,7 +91,7 @@ namespace JBZUniversalTester.Converters
                 { "L", "Xanh dương" }, { "BL", "Xanh dương" }, { "BLU", "Xanh dương" }, { "BLUE", "Xanh dương" },
                 { "Y", "Vàng" }, { "YL", "Vàng" }, { "YELLOW", "Vàng" },
                 { "BR", "Nâu" }, { "BN", "Nâu" }, { "BROWN", "Nâu" },
-                { "OR", "Cam" }, { "O", "Cam" }, { "ORANGE", "Cam" },
+                { "OR", "Cam" }, { "O", "Cam" }, { "OG", "Cam" }, { "ORANGE", "Cam" },
                 { "P", "Hồng" }, { "PK", "Hồng" }, { "PINK", "Hồng" },
                 { "GR", "Xám" }, { "GY", "Xám" }, { "GRAY", "Xám" }, { "GREY", "Xám" },
                 { "V", "Tím" }, { "VI", "Tím" }, { "VIOLET", "Tím" },

@@ -705,6 +705,8 @@ internal static class Program
         AssertBalancedTwoColorBrush("R/W", "#FF0000", "#FFFFFF");
         AssertBalancedTwoColorBrush("W/R", "#FFFFFF", "#FF0000");
         AssertBalancedTwoColorBrush("R/W/G", "#FF0000", "#FFFFFF");
+        AssertBalancedTwoColorBrush("B/Or", "#000000", "#FF8C00");
+        AssertBalancedTwoColorBrush("Or/B", "#FF8C00", "#000000");
 
         var wrongRow = new FaultRow { Kind = FaultKind.WrongWiring, Color = "B/Br" };
         Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#FFFFFF" &&
@@ -741,7 +743,9 @@ internal static class Program
                BrushHex(new FaultRow { Color = "W" }.WireColorBrush) == "#FFFFFF" &&
                BrushHex(new FaultRow { Color = "Gr" }.WireColorBrush) == "#606060" &&
                BrushHex(new FaultRow { Color = "Br" }.WireColorBrush) == "#A62A2A" &&
-               BrushHex(new FaultRow { Color = "Or" }.WireColorBrush) == "#007FFF" &&
+               BrushHex(new FaultRow { Color = "Or" }.WireColorBrush) == "#FF8C00" &&
+               BrushHex(new FaultRow { Color = "O" }.WireColorBrush) == "#FF8C00" &&
+               BrushHex(new FaultRow { Color = "OG" }.WireColorBrush) == "#FF8C00" &&
                new FaultRow { Color = "Y/B" }.WireColorBrush is LinearGradientBrush &&
                new FaultRow { Color = "W" }.WireColorBrush is SolidColorBrush,
             "Single and striped wire-color backgrounds preserve the original tester palette");
