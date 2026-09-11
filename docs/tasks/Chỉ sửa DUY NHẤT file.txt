@@ -1,0 +1,167 @@
+Chỉ sửa DUY NHẤT file:
+
+ViewModels/TestViewModel.cs
+
+KHÔNG sửa bất kỳ file nào khác.
+KHÔNG sửa TestEngine.cs.
+KHÔNG sửa D2XX/decoder/parser.
+KHÔNG sửa XAML.
+KHÔNG sửa Tests.
+KHÔNG sửa Version.props.
+KHÔNG refactor ngoài phạm vi lỗi này.
+
+Lỗi cần xử lý triệt để:
+
+Sau khi dùng đầu dò trong Production, khi nhấc đầu dò khỏi IO thì log đã đúng:
+
+- ProductState = WaitingForProduct
+- ProbeState = Released
+- PresentationMode = Waiting
+- rendered_rows = 0
+
+nhưng chữ lớn giữa màn hình "LẮP SẢN PHẨM" không hiện lại.
+
+Ngoài ra trong lúc Probe Candidate, có lúc bảng Production 184 dòng tự xuất hiện lại mặc dù:
+- ProductState vẫn WaitingForProduct
+- PresentationMode vẫn Waiting
+- chưa có sản phẩm thật.
+
+Root cause cần sửa trong TestViewModel.cs:
+
+1. `_presentationCycleStarted` có thể bị bật/stale trong lúc Probe Candidate/Touch hoặc sau Probe release.
+
+2. `RefreshFaultsFromSnapshot(TestEnginePresentationSnapshot? rowsSnapshot)` đang quyết định bật `_presentationCycleStarted` bằng state LIVE:
+
+    _engine.HasProductActivity
+
+trong khi đang render một `rowsSnapshot` cụ thể.
+
+Không được trộn snapshot N với live engine state N+1.
+
+Khi có rowsSnapshot, phải dùng authoritative:
+
+    rowsSnapshot.Electrical.ProductEvidence
+
+để quyết định presentation của chính snapshot đó.
+
+Chỉ fallback `_engine.HasProductActivity` khi rowsSnapshot == null và thực sự cần.
+
+3. Tuyệt đối KHÔNG được bật `_presentationCycleStarted` khi Probe đang sở hữu presentation:
+
+    CurrentProbePresentationState == Candidate
+    hoặc Touch
+    hoặc _probeStateTracker.HasTrackedContacts
+    hoặc đang có pending Production Probe Preview
+    hoặc inline Probe contact đang active.
+
+Probe Candidate/Touch không phải Product.
+
+4. Continuity Preview hiện có đoạn có thể:
+
+    _presentationCycleStarted = true;
+    State = "ĐANG TEST";
+
+Phải chặn đoạn này nếu đang có Probe Candidate/Touch/tracked/pending-preview.
+
+Preview của đầu dò không được khởi động Product presentation.
+
+5. Khi Probe RELEASE và authoritative snapshot xác nhận:
+
+    ProductEvidence == false
+    ProductState == WaitingForProduct
+    PresentationMode == Waiting
+
+thì phải đảm bảo:
+
+    _presentationCycleStarted = false
+
+và gọi đúng RaiseCenterPresentation() để chữ lớn:
+
+    "LẮP SẢN PHẨM"
+
+hiện lại ngay.
+
+Đồng thời:
+- Fault grid phải = 0 row.
+- Không chờ thêm product frame.
+- Không cần timeout.
+- Không tăng debounce.
+- Không restart scan.
+
+6. Nhưng phải giữ đúng trường hợp có SẢN PHẨM THẬT:
+
+Nếu trước/đồng thời Probe có authoritative ProductEvidence thật thì khi nhả Probe:
+- restore Product presentation
+- KHÔNG reset `_presentationCycleStarted`
+- KHÔNG xóa bảng sản phẩm thật.
+
+Phải phân biệt bằng authoritative electrical snapshot, không đoán bằng raw IO.
+
+7. Sửa `IsWaitingProductPresentation` để một latch stale không thể tạo trạng thái mâu thuẫn:
+
+    ProductRuntimeState = WaitingForProduct
+    PresentationMode = Waiting
+    ProbeState = Released
+    nhưng CenterResultText lại rỗng.
+
+Khi authoritative state thực sự là WaitingForProduct + Waiting + Probe Released/Inactive + không removal/device fault thì center phải hiển thị "LẮP SẢN PHẨM".
+
+Không được làm Probe Candidate/Touch hiện "LẮP SẢN PHẨM".
+
+8. Giữ nguyên toàn bộ behavior:
+- Probe không được tính là Product.
+- Probe không tạo WRONG/SHORT.
+- Sai dây/chập realtime của sản phẩm thật vẫn hoạt động.
+- PASS/FAIL/removal lifecycle giữ nguyên.
+- Master giữ nguyên.
+- Leak/Resistance giữ nguyên.
+- LiveTopology giữ nguyên.
+- Không thay đổi tốc độ scan/D2XX.
+
+Case bắt buộc sau sửa:
+
+A.
+WaitingForProduct
+→ Probe Candidate
+→ Probe Touch
+→ Probe Released
+→ ProductEvidence=false
+
+Kết quả:
+- ProductState=WaitingForProduct
+- PresentationMode=Waiting
+- ProbeState=Released
+- _presentationCycleStarted=false
+- Fault grid=0
+- CenterResultText="LẮP SẢN PHẨM"
+
+B.
+WaitingForProduct
+→ Probe Candidate liên tục qua nhiều IO
+
+Kết quả:
+- không được xuất hiện lại 184 Production rows
+- không được bật Product presentation
+- không phát product-start sound.
+
+C.
+Product thật đang TestingRealtime
+→ dùng Probe
+→ nhả Probe
+
+Kết quả:
+- restore đúng Product presentation và rows trước đó
+- không reset nhầm về Waiting.
+
+D.
+Probe leading frame tới trước complete classifier:
+- Candidate/pending preview phải có quyền ưu tiên presentation.
+- Không để một frame Probe tạm bật `_presentationCycleStarted`.
+
+Sau khi sửa:
+- chạy `dotnet build -c Release`
+- nếu build lỗi thì chỉ sửa lỗi compile trong CHÍNH TestViewModel.cs.
+- cuối cùng chỉ báo ngắn:
+  `DONE - TestViewModel.cs`
+  và kết quả build.
+- KHÔNG giải thích dài.

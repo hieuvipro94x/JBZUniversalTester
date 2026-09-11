@@ -431,9 +431,10 @@ public sealed class TestViewModel : ObservableObject
 
     private bool IsWaitingProductPresentation =>
         !IsDeviceFault &&
+        CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
         CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
         CurrentProbePresentationState is ProbePresentationState.Inactive or ProbePresentationState.Released &&
-        !_presentationCycleStarted &&
+        !IsProbeOwningProductionPresentation() &&
         !IsProductRemovalPending &&
         CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity;
 
@@ -448,6 +449,20 @@ public sealed class TestViewModel : ObservableObject
     {
         _presentationCycleStarted = false;
         RaiseCenterPresentation();
+    }
+
+    private bool IsProbeOwningProductionPresentation()
+    {
+        ProbePresentationState probeState = CurrentProbePresentationState;
+        if (probeState is ProbePresentationState.Candidate or ProbePresentationState.Touch ||
+            _probeStateTracker.HasTrackedContacts ||
+            Volatile.Read(ref _inlineProbeContactIo) != 0)
+        {
+            return true;
+        }
+
+        lock (_probePreviewGate)
+            return _pendingProductionProbePreview is not null;
     }
 
     public string ResultStatusText
@@ -3155,6 +3170,7 @@ public sealed class TestViewModel : ObservableObject
         long generation = Volatile.Read(ref _runtimeGeneration);
         if (!_presentationCycleStarted &&
             CurrentProductionPhase == ProductionPhase.Continuity &&
+            !IsProbeOwningProductionPresentation() &&
             _engine.HasContinuityPreviewProductActivity)
         {
             // Lần lắp đầu tiên không được chờ C0 của toàn bộ dải 4/10 card.
@@ -3167,6 +3183,7 @@ public sealed class TestViewModel : ObservableObject
                     cycleEpoch != Volatile.Read(ref _productionUiCycleEpoch) ||
                     _presentationCycleStarted ||
                     CurrentProductionPhase != ProductionPhase.Continuity ||
+                    IsProbeOwningProductionPresentation() ||
                     IsProductRemovalPending)
                 {
                     return;
@@ -4724,6 +4741,12 @@ public sealed class TestViewModel : ObservableObject
 
             bool waitingForProduct =
                 CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct;
+            bool presentationCycleStarted = productSnapshot.Electrical.ProductEvidence;
+            if (_presentationCycleStarted != presentationCycleStarted)
+            {
+                _presentationCycleStarted = presentationCycleStarted;
+                RaiseCenterPresentation();
+            }
             desiredRows = waitingForProduct
                 ? Array.Empty<FaultRow>()
                 : productSnapshot.Rows;
@@ -9661,12 +9684,26 @@ public sealed class TestViewModel : ObservableObject
         else
         {
             bool masterCycleActive = !MasterApproved && IsMasterSequenceActive;
+            bool hasProductEvidence = rowsSnapshot?.Electrical.ProductEvidence ??
+                                      _engine.HasProductActivity;
+            bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
             if (!_presentationCycleStarted &&
                 (_cycleActive || masterCycleActive) &&
-                Volatile.Read(ref _inlineProbeContactIo) == 0 &&
-                _engine.HasProductActivity)
+                !probeOwnsPresentation &&
+                hasProductEvidence)
             {
                 _presentationCycleStarted = true;
+                RaiseCenterPresentation();
+            }
+            else if (rowsSnapshot is not null &&
+                     !hasProductEvidence &&
+                     !probeOwnsPresentation &&
+                     CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+                     CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
+                     CurrentProbePresentationState is ProbePresentationState.Inactive or ProbePresentationState.Released &&
+                     _presentationCycleStarted)
+            {
+                _presentationCycleStarted = false;
                 RaiseCenterPresentation();
             }
 
