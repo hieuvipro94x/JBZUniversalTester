@@ -61,8 +61,9 @@ public enum ProductPresenceState
 }
 
 /// <summary>
-/// Model-aware product evidence from one complete Production frame. Raw active
-/// I/O and Probe evidence are diagnostic inputs only and cannot create presence.
+/// Authoritative product evidence from one complete Production frame. A real
+/// non-self electrical edge can be expected, wrong or short; raw self-activity
+/// and Probe evidence remain diagnostic-only and cannot create presence.
 /// </summary>
 public readonly record struct ProductEvidenceSnapshot(
     long FrameSequence,
@@ -373,9 +374,9 @@ public sealed class TestEngine : IDisposable
     }
 
     /// <summary>
-    /// Có ít nhất một cạnh connectivity model-aware: cạnh đúng trong một
-    /// component kỳ vọng, hoặc cạnh Wrong/Short có tối thiểu một endpoint của
-    /// model. Raw/self-edge và Probe không phải bằng chứng sản phẩm.
+    /// Có ít nhất một cạnh continuity vật lý hợp lệ trong snapshot Production.
+    /// Cạnh đúng, sai dây/chập vào I/O ngoài THT đều là bằng chứng sản phẩm;
+    /// chỉ self-edge, I/O ignored và I/O đang bị Probe exclusion mới bị loại.
     /// </summary>
     public bool HasProductActivity
     {
@@ -1326,16 +1327,22 @@ public sealed class TestEngine : IDisposable
         {
             int source = pair.Key;
 
-            if (model.IgnoredIo.Contains(source))
+            if (model.IgnoredIo.Contains(source) ||
+                _probeEvidenceExcludedIo.Contains(source))
+            {
                 continue;
+            }
 
             bool sourceMapped = _modelIo.Contains(source);
             bool sourceComponentKnown = componentByIo.TryGetValue(source, out int sourceComponent);
 
             foreach (int target in pair.Value)
             {
-                if (model.IgnoredIo.Contains(target))
+                if (model.IgnoredIo.Contains(target) ||
+                    _probeEvidenceExcludedIo.Contains(target))
+                {
                     continue;
+                }
 
                 // Một word target thay source có thể được decoder biểu diễn
                 // tạm thời là IOx -> IOx. Đây là một đầu đang chạm, không hề
@@ -1347,11 +1354,12 @@ public sealed class TestEngine : IDisposable
                 bool targetMapped = _modelIo.Contains(target);
                 bool targetComponentKnown = componentByIo.TryGetValue(target, out int targetComponent);
 
-                // An edge completely outside the loaded model is raw/noise
-                // activity, not a product Wrong/Short candidate.
-                if (!sourceMapped && !targetMapped)
-                    continue;
-
+                // Every real non-self electrical edge in the active board range must be
+                // evaluated. A harness can be miswired onto I/O that is not present in the
+                // loaded THT; treating that edge as RAW_ACTIVITY_ONLY hides exactly the
+                // wrong-wire/short conditions production must catch. Probe frames are
+                // quarantined before ProcessFrame and confirmed probe I/O is excluded
+                // separately, so model membership is not a safe noise filter here.
                 if (!sourceMapped || !targetMapped ||
                     !sourceComponentKnown || !targetComponentKnown ||
                     sourceComponent != targetComponent)
@@ -1638,10 +1646,11 @@ public sealed class TestEngine : IDisposable
             return false;
         }
 
-        // A correct expected edge has both endpoints in one expected component.
-        // A Wrong/Short edge may have only one mapped endpoint; it is still
-        // model-relevant evidence and must be evaluated before ProductPresent.
-        return _modelIo.Contains(source) || _modelIo.Contains(target);
+        // Do not require either endpoint to belong to the THT. A wrong harness
+        // can physically connect two otherwise-unused fixture I/O; that edge is
+        // still authoritative product evidence and must reach the wiring evaluator.
+        // Probe is filtered by the router/classifier and by _probeEvidenceExcludedIo.
+        return true;
     }
 
     private static bool IsClipBranchConnected(
@@ -2050,12 +2059,22 @@ public sealed class TestEngine : IDisposable
                 continue;
             }
 
+            string fallbackStatus = fault.FaultType == ProductFaultType.ShortCircuit
+                ? "CHẬP MẠCH"
+                : "SAI DÂY";
+            FaultKind fallbackKind = fault.FaultType == ProductFaultType.ShortCircuit
+                ? FaultKind.Short
+                : FaultKind.WrongWiring;
+            ProductFaultType fallbackType = fault.FaultType == ProductFaultType.ShortCircuit
+                ? ProductFaultType.ShortCircuit
+                : ProductFaultType.WrongWiring;
+
             AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
-                fault.SourceIo, "CHẬP MẠCH", FaultKind.Short,
-                ProductFaultType.ShortCircuit, relation);
+                fault.SourceIo, fallbackStatus, fallbackKind,
+                fallbackType, relation);
             AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
-                fault.TargetIo, "CHẬP MẠCH", FaultKind.Short,
-                ProductFaultType.ShortCircuit, relation);
+                fault.TargetIo, fallbackStatus, fallbackKind,
+                fallbackType, relation);
         }
 
         return rows;

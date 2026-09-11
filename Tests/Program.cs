@@ -996,9 +996,13 @@ internal static class Program
         AssertWaiting(
             "Two raw IOs without a logical edge",
             FrameSeq(107, (10, new[] { 10 }), (18, new[] { 18 })));
-        AssertWaiting(
-            "Unmapped raw edge",
-            FrameSeq(108, (10, new[] { 18 })));
+        engine.ProcessFrame(FrameSeq(108, (10, new[] { 18 })));
+        ProductEvidenceSnapshot unmappedWrong = engine.GetProductEvidenceSnapshot();
+        Assert(unmappedWrong.ValidProductEvidence &&
+               unmappedWrong.WrongCandidateCount == 1 &&
+               unmappedWrong.Reason == "WRONG_CANDIDATE" &&
+               !engine.HasWiringFault,
+            "A real non-self edge outside the THT is product evidence and becomes a realtime wrong-wire candidate");
 
         engine.ProcessFrame(FrameSeq(109, (1, new[] { 2 })) with { ScanGeneration = 2 });
         ProductEvidenceSnapshot expected = engine.GetProductEvidenceSnapshot();
@@ -5885,11 +5889,16 @@ internal static class Program
         Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 20);
         unmappedPairEngine.ProcessFrame(unmappedPairFrame with { Sequence = 15 });
         PassGateDiagnostics unmappedDiagnostics = unmappedPairEngine.GetPassGateDiagnostics();
-        Assert(unmappedDiagnostics.WrongCandidateCount == 0 &&
+        Assert(unmappedDiagnostics.WrongCandidateCount == 1 &&
                unmappedDiagnostics.ShortCandidateCount == 0 &&
-               !unmappedDiagnostics.HasProductActivity &&
-               !unmappedPairEngine.HasWiringFault,
-            "CASE C2: an edge fully outside the THT is raw activity and cannot create ProductPresence or FAIL");
+               unmappedDiagnostics.HasProductActivity &&
+               unmappedDiagnostics.WrongConfirmedCount == 1 &&
+               unmappedPairEngine.HasWiringFault &&
+               unmappedPairEngine.BuildRows().Count(row =>
+                   row.Kind == FaultKind.WrongWiring &&
+                   row.Status == "SAI DÂY" &&
+                   (row.Io == 23 || row.Io == 25)) == 2,
+            "CASE C2: an ordinary physical edge outside the THT is not Probe/noise; it remains realtime product evidence and confirms SAI DÂY");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings
