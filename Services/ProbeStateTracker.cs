@@ -63,6 +63,21 @@ public sealed class ProbeStateTracker
 
         if (_candidateIos.SequenceEqual(observed))
             _candidateFrames++;
+        else if (_activeIos.Length == 0 &&
+                 _candidateIos.Length > 0 &&
+                 _candidateIos.Intersect(observed).Any())
+        {
+            // A real touch can expose its contacts progressively across two
+            // complete scans (IO10, then IO10+IO12). Preserve the shared
+            // candidate and confirm the union without using a time delay.
+            _candidateIos = _candidateIos
+                .Concat(observed)
+                .Distinct()
+                .OrderBy(io => io)
+                .Take(MaxContacts)
+                .ToArray();
+            _candidateFrames++;
+        }
         else
         {
             _candidateIos = observed;

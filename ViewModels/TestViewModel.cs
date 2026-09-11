@@ -22,6 +22,22 @@ public enum ProductionRuntimeState
     Failed = 4
 }
 
+public enum ProbePresentationState
+{
+    Inactive = 0,
+    Candidate = 1,
+    Touch = 2,
+    Released = 3
+}
+
+public enum ProductionPresentationMode
+{
+    Waiting = 0,
+    Product = 1,
+    Probe = 2,
+    LiveTopology = 3
+}
+
 public sealed class TestViewModel : ObservableObject
 {
     private sealed record LabelPrintContext(
@@ -155,6 +171,11 @@ public sealed class TestViewModel : ObservableObject
     private long _productionUiCycleEpoch;
     private long _inlineProbeUiRevision;
     private long _ioMappingUiRevision;
+    private readonly object _probePreviewGate = new();
+    private ProductionProbePreview? _pendingProductionProbePreview;
+    private LiveTopologySnapshot _lastLiveTopologySnapshot = LiveTopologySnapshot.Empty();
+    private int _probePresentationState = (int)ProbePresentationState.Inactive;
+    private int _productionPresentationMode = (int)ProductionPresentationMode.Waiting;
     private int _productionRuntimeState = (int)ProductionRuntimeState.WaitingForProduct;
     private EngineUiUpdateRequest? _latestEngineUiUpdateRequest;
     // Separate presentation queue for pre-C0 continuity preview. It never runs
@@ -953,7 +974,11 @@ public sealed class TestViewModel : ObservableObject
     }
 
     public bool ProductionEnabled => MasterApproved;
-    public bool IsIoMappingMode => _model?.IsIoMappingTemplate == true;
+    public bool IsIoMappingMode => _model is not null && _engine.ExpectedNetCount == 0;
+    public ProbePresentationState CurrentProbePresentationState =>
+        (ProbePresentationState)Volatile.Read(ref _probePresentationState);
+    public ProductionPresentationMode CurrentProductionPresentationMode =>
+        (ProductionPresentationMode)Volatile.Read(ref _productionPresentationMode);
     public bool IsMasterSequenceActive => _model is not null && !MasterApproved;
     public bool IsMasterBadPhase => MasterState is
         MasterSequenceState.WaitingBadMaster or
@@ -1426,7 +1451,7 @@ public sealed class TestViewModel : ObservableObject
         if (_model is null)
             return "CHỜ CHỌN MÃ HÀNG";
         if (IsIoMappingMode)
-            return "ĐANG LẬP BẢN ĐỒ IO";
+            return "LẮP SẢN PHẨM";
         if (_requireStartupIoClear && Volatile.Read(ref _startupIoInterlockState) != 2)
             return "CHỜ ĐỒNG BỘ DỮ LIỆU BO";
         return MasterApproved
@@ -2218,11 +2243,49 @@ public sealed class TestViewModel : ObservableObject
     private long AdvanceProductionUiCycleEpoch() =>
         Interlocked.Increment(ref _productionUiCycleEpoch);
 
-    private void SetProductionRuntimeState(ProductionRuntimeState state)
+    private void SetProductionRuntimeState(
+        ProductionRuntimeState state,
+        long frameSequence = 0,
+        string reason = "LIFECYCLE")
     {
         int previous = Interlocked.Exchange(ref _productionRuntimeState, (int)state);
         if (previous != (int)state)
+        {
             Raise(nameof(CurrentProductionRuntimeState));
+            AsyncFileLogService.Current.Performance(
+                $"PRODUCT_STATE old={(ProductionRuntimeState)previous} new={state} " +
+                $"seq={frameSequence} reason={reason}");
+        }
+    }
+
+    private void SetProbePresentationState(
+        ProbePresentationState state,
+        IReadOnlyList<int> ios,
+        long frameSequence)
+    {
+        int previous = Interlocked.Exchange(ref _probePresentationState, (int)state);
+        if (previous == (int)state)
+            return;
+
+        Raise(nameof(CurrentProbePresentationState));
+        AsyncFileLogService.Current.Performance(
+            $"PROBE_STATE old={(ProbePresentationState)previous} new={state} " +
+            $"ios={string.Join(',', ios.OrderBy(io => io).Select(io => $"IO{io}"))} seq={frameSequence}");
+    }
+
+    private void SetProductionPresentationMode(
+        ProductionPresentationMode mode,
+        long frameSequence,
+        string reason)
+    {
+        int previous = Interlocked.Exchange(ref _productionPresentationMode, (int)mode);
+        if (previous == (int)mode)
+            return;
+
+        Raise(nameof(CurrentProductionPresentationMode));
+        AsyncFileLogService.Current.Performance(
+            $"PRESENTATION_STATE old={(ProductionPresentationMode)previous} new={mode} " +
+            $"seq={frameSequence} reason={reason}");
     }
 
     /// <summary>
@@ -2459,7 +2522,9 @@ public sealed class TestViewModel : ObservableObject
         TestEnginePresentationSnapshot rowsSnapshot)
     {
         long applyStarted = Stopwatch.GetTimestamp();
-        int rowsBefore = Faults.Count;
+        (string Key, string Status)[] rowsBefore = Faults
+            .Select(row => (RowKey(row), row.Status))
+            .ToArray();
         long generation = request.Generation;
         if (!MasterApproved)
         {
@@ -2483,21 +2548,43 @@ public sealed class TestViewModel : ObservableObject
 
         double applyMs = Stopwatch.GetElapsedTime(applyStarted).TotalMilliseconds;
         double queueDelayMs = Stopwatch.GetElapsedTime(request.RequestedAt).TotalMilliseconds - applyMs;
-        int rowsAfter = Faults.Count;
-        int removed = Math.Max(0, rowsBefore - rowsAfter);
-        int added = Math.Max(0, rowsAfter - rowsBefore);
-        int changedRows = removed + added;
-        if (applyMs > 16 || queueDelayMs > 16 || rowsSnapshot.RowBuildMilliseconds > 16)
-        {
-            AsyncFileLogService.Current.Performance(
-                $"UI_FRAME seq={rowsSnapshot.Electrical.FrameSequence} " +
-                $"generation={request.Generation}/{rowsSnapshot.Electrical.ScanGeneration} " +
-                $"state={CurrentProductionRuntimeState} changed_rows={changedRows} " +
-                $"removed={removed} added={added} " +
-                $"engine_compute_ms={rowsSnapshot.Electrical.EngineComputeMilliseconds:0.###} " +
-                $"row_diff_ms={rowsSnapshot.RowBuildMilliseconds:0.###} " +
-                $"queue_delay_ms={Math.Max(0, queueDelayMs):0.###} apply_ms={applyMs:0.###}");
-        }
+        (int removed, int added, int changed) = CalculateRenderedRowDelta(rowsBefore, Faults);
+        LogUiSnapshot(
+            rowsSnapshot.Electrical.FrameSequence,
+            rowsSnapshot.Electrical.ScanGeneration,
+            rowsSnapshot.Rows.Count,
+            "engine",
+            removed,
+            added,
+            changed);
+        AsyncFileLogService.Current.Performance(
+            $"UI_FRAME seq={rowsSnapshot.Electrical.FrameSequence} " +
+            $"generation={request.Generation}/{rowsSnapshot.Electrical.ScanGeneration} " +
+            $"product_state={CurrentProductionRuntimeState} " +
+            $"probe_state={CurrentProbePresentationState} " +
+            $"presentation={CurrentProductionPresentationMode} " +
+            $"rendered_rows={Faults.Count} added={added} removed={removed} changed={changed} " +
+            $"engine_compute_ms={rowsSnapshot.Electrical.EngineComputeMilliseconds:0.###} " +
+            $"row_diff_ms={rowsSnapshot.RowBuildMilliseconds:0.###} " +
+            $"queue_delay_ms={Math.Max(0, queueDelayMs):0.###} apply_ms={applyMs:0.###}");
+    }
+
+    private void LogUiSnapshot(
+        long frameSequence,
+        long scanGeneration,
+        int sourceRows,
+        string source,
+        int removed = 0,
+        int added = 0,
+        int changed = 0)
+    {
+        AsyncFileLogService.Current.Performance(
+            $"UI_SNAPSHOT seq={frameSequence} generation={scanGeneration} " +
+            $"product_state={CurrentProductionRuntimeState} " +
+            $"probe_state={CurrentProbePresentationState} " +
+            $"presentation_mode={CurrentProductionPresentationMode} " +
+            $"source_rows={sourceRows} rendered_rows={Faults.Count} " +
+            $"removed={removed} added={added} changed={changed} source={source}");
     }
 
     private void ProcessMasterRemovalAfterReturningToMain(long generation)
@@ -2790,7 +2877,16 @@ public sealed class TestViewModel : ObservableObject
             _ => ProductionRuntimeState.WaitingForProduct
         };
 
-        SetProductionRuntimeState(runtimeState);
+        SetProductionRuntimeState(
+            runtimeState,
+            electrical.FrameSequence,
+            electrical.ProductEvidence ? "PRODUCT_EVIDENCE" : "NO_PRODUCT_EVIDENCE");
+        SetProductionPresentationMode(
+            runtimeState == ProductionRuntimeState.WaitingForProduct
+                ? ProductionPresentationMode.Waiting
+                : ProductionPresentationMode.Product,
+            electrical.FrameSequence,
+            "ENGINE_SNAPSHOT");
         if (!_cycleActive || CurrentProductionPhase != ProductionPhase.Continuity ||
             _waitForProductRelease || _waitForFaultProductRemoval || IsProductRemovalPending)
         {
@@ -3295,18 +3391,30 @@ public sealed class TestViewModel : ObservableObject
                         $"generation={frame.ScanGeneration}/{cycleStartGeneration}");
                 }
 
-                // THT trống là chế độ lập bản đồ I/O tương thích Htdrv. Chỉ dựng
-                // bảng quan sát từ frame hiện tại; tuyệt đối không đưa frame vào
-                // fault engine, Master, PASS/FAIL, counter hay relay production.
+                // Probe classification phải hoàn tất trước mọi ProductEvidence,
+                // startup product interlock và wiring evaluator. Preview candidate
+                // cùng sequence/generation cũng được quarantine tại đây.
+                bool frameClassifiedAsProbe =
+                    TryDetectInlineProbeContacts(frame, out int[] touchedIos);
+                bool probeTransitionPendingAtFrameStart =
+                    _probeStateTracker.HasTrackedContacts;
+
+                // Không có eligible expected network là LiveTopology mode, không
+                // phụ thuộc tên file/kích thước hay cờ parser của một biến thể THT.
                 if (IsIoMappingMode)
                 {
-                    ProcessIoMappingFrame(frame, generation);
+                    ProcessIoMappingFrame(
+                        frame,
+                        generation,
+                        frameClassifiedAsProbe ? touchedIos : Array.Empty<int>());
                     Interlocked.Increment(ref _productionFramesProcessed);
                     LogContinuousScanMetricsIfDue();
                     return;
                 }
 
-                if (!HandleStartupIoInterlock(frame, generation))
+                if (!frameClassifiedAsProbe &&
+                    !probeTransitionPendingAtFrameStart &&
+                    !HandleStartupIoInterlock(frame, generation))
                 {
                     LogContinuousScanMetricsIfDue();
                     return;
@@ -3322,14 +3430,20 @@ public sealed class TestViewModel : ObservableObject
                 {
                     preserveProductionFaultsForProbe = ProcessManualProbeFrame(frame, generation);
                 }
-                else if (TryDetectInlineProbeContacts(frame, out int[] touchedIos))
+                else if (frameClassifiedAsProbe)
                 {
                     Interlocked.Increment(ref _productionFramesRoutedToProbe);
                     preserveProductionFaultsForProbe = true;
                     bool hadTrackedContacts = _probeStateTracker.HasTrackedContacts;
                     probeChanged = UpdateInlineProbeContacts(touchedIos);
                     displayedProbeIos = SnapshotInlineProbeContacts();
-                    long probeRevision = (!hadTrackedContacts || probeChanged)
+                    bool probeTrackingStarted =
+                        !hadTrackedContacts && _probeStateTracker.HasTrackedContacts;
+                    if (probeTrackingStarted && !probeChanged)
+                        SetProbePresentationState(ProbePresentationState.Candidate, touchedIos, frame.Sequence);
+                    if (probeChanged && displayedProbeIos.Length > 0)
+                        SetProbePresentationState(ProbePresentationState.Touch, displayedProbeIos, frame.Sequence);
+                    long probeRevision = (probeTrackingStarted || probeChanged)
                         ? Interlocked.Increment(ref _inlineProbeUiRevision)
                         : Volatile.Read(ref _inlineProbeUiRevision);
 
@@ -3345,7 +3459,7 @@ public sealed class TestViewModel : ObservableObject
 
                     TestEnginePresentationSnapshot probeSnapshot =
                         _engine.CapturePresentationSnapshot(removal: false);
-                    if (!hadTrackedContacts || probeChanged)
+                    if (probeChanged)
                     {
                         DateTime requestedAt = DateTime.Now;
                         InvokeUi(() =>
@@ -3357,11 +3471,11 @@ public sealed class TestViewModel : ObservableObject
                                 return;
                             }
 
-                            RestoreProductionPresentationAfterProbe(
+                            ApplyProbePresentationSnapshot(
                                 probeSnapshot,
-                                restorePendingRows: false);
-                            if (displayedProbeIos.Length > 0)
-                                ShowInlineProbeContacts(displayedProbeIos);
+                                displayedProbeIos,
+                                released: false,
+                                frame.Sequence);
                             LogProbeLatency(frame, requestedAt, displayedProbeIos);
                         });
                     }
@@ -3385,6 +3499,10 @@ public sealed class TestViewModel : ObservableObject
 
                     if (probeChanged)
                     {
+                        SetProbePresentationState(
+                            ProbePresentationState.Released,
+                            Array.Empty<int>(),
+                            frame.Sequence);
                         long probeRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
                         TestEnginePresentationSnapshot probeSnapshot =
                             _engine.CapturePresentationSnapshot(removal: false);
@@ -3398,10 +3516,11 @@ public sealed class TestViewModel : ObservableObject
                                 return;
                             }
 
-                            ClearInlineProbeDisplay();
-                            RestoreProductionPresentationAfterProbe(
+                            ApplyProbePresentationSnapshot(
                                 probeSnapshot,
-                                restorePendingRows: true);
+                                Array.Empty<int>(),
+                                released: true,
+                                frame.Sequence);
                             LogProbeLatency(frame, requestedAt, Array.Empty<int>());
                         });
                     }
@@ -3481,8 +3600,17 @@ public sealed class TestViewModel : ObservableObject
         if (probeIos.Length == 0)
             return;
 
-        // Preview trước C0 chỉ là candidate. Không dùng nó để tăng
-        // stable-frame hoặc đổi UI; snapshot C0 hoàn chỉnh mới có quyền xác nhận.
+        // Preview trước C0 không được đổi UI, nhưng phải đánh dấu đúng complete
+        // frame sắp tới là Probe candidate. Nếu chỉ log rồi bỏ qua, frame đầu
+        // của thao tác chạm có thể lọt vào ProductEvidence/WRONG_CANDIDATE.
+        lock (_probePreviewGate)
+            _pendingProductionProbePreview = preview with { ActiveIo = probeIos };
+        if (CurrentProbePresentationState != ProbePresentationState.Candidate)
+            Interlocked.Increment(ref _inlineProbeUiRevision);
+        SetProbePresentationState(
+            ProbePresentationState.Candidate,
+            probeIos,
+            preview.Sequence);
         AsyncFileLogService.Current.Performance(
             $"PROBE_PREVIEW candidate={string.Join(",", probeIos.Select(io => $"IO{io}"))} " +
             $"seq={preview.Sequence} hits={preview.PeakHitCount}/{preview.RequiredHitCount}",
@@ -3713,23 +3841,113 @@ public sealed class TestViewModel : ObservableObject
         _sound.PlayProductStart();
     }
 
-    private void ProcessIoMappingFrame(ScanFrame frame, long generation)
+    private void ProcessIoMappingFrame(
+        ScanFrame frame,
+        long generation,
+        IReadOnlyList<int> detectedProbeIos)
     {
-        if (!frame.Complete || frame.UnknownBytes != 0)
+        if (!frame.Complete || frame.UnknownBytes != 0 || !frame.TerminatorKnown)
             return;
 
-        IReadOnlyList<FaultRow> rows = IoMappingFramePresenter.BuildRows(
-            frame,
-            _board.Capacity);
-        string signature = string.Join('|', rows.Select(RowKey));
-        if (string.Equals(signature, _lastIoMappingSignature, StringComparison.Ordinal))
+        bool hadTrackedProbe = SnapshotInlineProbeContacts().Length > 0;
+        if (detectedProbeIos.Count > 0)
+        {
+            int[] activeProbeIos = detectedProbeIos
+                .Where(_board.Capacity.ContainsGlobalIo)
+                .Distinct()
+                .OrderBy(io => io)
+                .ToArray();
+            if (activeProbeIos.Length == 0)
+                return;
+
+            bool changed = !SnapshotInlineProbeContacts().SequenceEqual(activeProbeIos);
+            lock (_inlineProbeGate)
+                _inlineProbeContactIos = activeProbeIos;
+            Volatile.Write(ref _inlineProbeContactIo, activeProbeIos[0]);
+            Interlocked.Exchange(ref _inlineProbeLastSeenUtcTicks, DateTime.UtcNow.Ticks);
+            _sound.SetTestPointContactSound(true);
+            SetProbePresentationState(ProbePresentationState.Touch, activeProbeIos, frame.Sequence);
+            if (!changed)
+                return;
+            long probeRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
+            FaultRow[] probeRows = BuildProbeDisplayRows(activeProbeIos).ToArray();
+            InvokeUi(() =>
+            {
+                if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                    !IsIoMappingMode ||
+                    probeRevision != Volatile.Read(ref _inlineProbeUiRevision))
+                {
+                    return;
+                }
+
+                ProbeContacts.Clear();
+                foreach (FaultRow row in probeRows)
+                    ProbeContacts.Add(row);
+                SetProductionPresentationMode(
+                    ProductionPresentationMode.Probe,
+                    frame.Sequence,
+                    "LIVE_TOPOLOGY_PROBE_TOUCH");
+                SynchronizeFaultRows(probeRows);
+                UpdateProbeCardActivity(activeProbeIos);
+                Raise(nameof(HasInlineProbeContacts));
+                RaiseTestStatistics();
+                LogUiSnapshot(frame.Sequence, frame.ScanGeneration, probeRows.Length, "live-probe");
+            });
+            return;
+        }
+
+        if (hadTrackedProbe)
+        {
+            ClearInlineProbeContactsState();
+            SetProbePresentationState(ProbePresentationState.Released, [], frame.Sequence);
+            long releaseRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
+            LiveTopologySnapshot restore = _lastLiveTopologySnapshot;
+            InvokeUi(() =>
+            {
+                if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                    !IsIoMappingMode ||
+                    releaseRevision != Volatile.Read(ref _inlineProbeUiRevision))
+                {
+                    return;
+                }
+
+                ProbeContacts.Clear();
+                SetLiveTopologyProductState(restore, "PROBE_RELEASE_RESTORE");
+                SynchronizeFaultRows(restore.Rows);
+                UpdateProbeCardActivity(Array.Empty<int>());
+                Raise(nameof(HasInlineProbeContacts));
+                RaiseTestStatistics();
+                LogUiSnapshot(frame.Sequence, frame.ScanGeneration, restore.Rows.Count, "live-restore");
+            });
+            return;
+        }
+
+        SetProbePresentationState(ProbePresentationState.Inactive, [], frame.Sequence);
+        LiveTopologySnapshot topology = LiveTopologyPresenter.Build(frame, _board.Capacity);
+        LiveTopologySnapshot previousTopology = _lastLiveTopologySnapshot;
+        bool sameGeneration = previousTopology.ScanGeneration == 0 ||
+                              topology.ScanGeneration == 0 ||
+                              previousTopology.ScanGeneration == topology.ScanGeneration;
+        if (sameGeneration &&
+            previousTopology.FrameSequence > 0 &&
+            topology.FrameSequence > 0 &&
+            topology.FrameSequence <= previousTopology.FrameSequence)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"UI_SNAPSHOT_REJECT mode=LiveTopology seq={topology.FrameSequence} " +
+                $"rendered_seq={previousTopology.FrameSequence} generation={topology.ScanGeneration}");
+            return;
+        }
+        if (string.Equals(topology.Signature, _lastIoMappingSignature, StringComparison.Ordinal))
             return;
 
-        _lastIoMappingSignature = signature;
+        HashSet<LiveTopologyPair> previousPairs = previousTopology.Pairs.ToHashSet();
+        HashSet<LiveTopologyPair> currentPairs = topology.Pairs.ToHashSet();
+        int addedPairs = currentPairs.Count(pair => !previousPairs.Contains(pair));
+        int removedPairs = previousPairs.Count(pair => !currentPairs.Contains(pair));
+        _lastLiveTopologySnapshot = topology;
+        _lastIoMappingSignature = topology.Signature;
         long mappingRevision = Interlocked.Increment(ref _ioMappingUiRevision);
-        // Giống Htdrv: TESTPOINT.wav lặp liên tục từ lúc nhận diện TOUCH cho
-        // tới đúng frame RELEASE. Các cặp thông mạch của sản phẩm không phát âm.
-        _sound.SetTestPointContactSound(rows.Any(row => row.Kind == FaultKind.Probe));
         InvokeUi(() =>
         {
             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
@@ -3739,15 +3957,38 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            SynchronizeFaultRows(rows);
-            State = rows.Count == 0
-                ? "LẮP SẢN PHẨM"
-                : $"LẬP BẢN ĐỒ IO • {rows.Count} TÍN HIỆU";
+            ProbeContacts.Clear();
+            SetLiveTopologyProductState(topology, "LIVE_CONNECTIVITY");
+            SynchronizeFaultRows(topology.Rows);
             RaiseTestStatistics();
+            LogUiSnapshot(
+                topology.FrameSequence,
+                topology.ScanGeneration,
+                topology.Rows.Count,
+                "live-topology");
         });
 
-        AsyncFileLogService.Current.Test(
-            $"IO_MAPPING frame={frame.Sequence} rows={rows.Count} signature=\"{signature}\"");
+        string components = string.Join(';', topology.Components.Select(component =>
+            $"[{string.Join(',', component.Select(io => $"IO{io}"))}]"));
+        AsyncFileLogService.Current.Performance(
+            $"LIVE_TOPOLOGY seq={frame.Sequence} pairs={topology.Pairs.Count} " +
+            $"components={components} stable=1 added={addedPairs} removed={removedPairs}");
+    }
+
+    private void SetLiveTopologyProductState(LiveTopologySnapshot topology, string reason)
+    {
+        bool present = topology.Pairs.Count > 0;
+        SetProductionRuntimeState(
+            present
+                ? ProductionRuntimeState.TestingRealtime
+                : ProductionRuntimeState.WaitingForProduct,
+            topology.FrameSequence,
+            reason);
+        SetProductionPresentationMode(
+            present ? ProductionPresentationMode.LiveTopology : ProductionPresentationMode.Waiting,
+            topology.FrameSequence,
+            reason);
+        State = present ? "ĐANG KIỂM TRA..." : "LẮP SẢN PHẨM";
     }
 
     private bool HandleStartupIoInterlock(ScanFrame frame, long generation)
@@ -3802,14 +4043,12 @@ public sealed class TestViewModel : ObservableObject
         _cycleActive = false;
         SetProductionPhase(ProductionPhase.WaitingProduct);
         SelectedOperationTabIndex = 0;
-        Faults.Clear();
-        UpdateCachedFaultCounts(Array.Empty<FaultRow>());
-
+        var rows = new List<FaultRow>(pairs.Count);
         foreach (StartupIoContactPair pair in pairs)
         {
             PinRecord? first = FindPinByIo(pair.FirstIo);
 
-            Faults.Add(new FaultRow
+            rows.Add(new FaultRow
             {
                 Kind = FaultKind.Info,
                 ProductFaultType = ProductFaultType.None,
@@ -3826,6 +4065,8 @@ public sealed class TestViewModel : ObservableObject
                 Status = "SẢN PHẨM VẪN ĐANG LẮP — VUI LÒNG THÁO SẢN PHẨM"
             });
         }
+
+        SynchronizeFaultRows(rows);
 
         State = "VUI LÒNG THÁO SẢN PHẨM";
     }
@@ -4238,11 +4479,23 @@ public sealed class TestViewModel : ObservableObject
             return false;
         }
 
-        IReadOnlyList<int> observedIos = TopologyLearningService.FindProbeObservationIo(
-            frame,
-            _board.Capacity);
+        int[] previewIos = TakeProbePreviewForFrame(frame);
+        IReadOnlyList<int> classifiedIos = ProbeContactClassifier
+            .DetectMany(
+                frame,
+                _model,
+                maxContacts: _probeStateTracker.MaxContacts,
+                boardCapacity: _board.Capacity)
+            .Select(detection => detection.Io)
+            .ToArray();
+        int[] observedIos = previewIos
+            .Concat(classifiedIos)
+            .Where(_board.Capacity.ContainsGlobalIo)
+            .Distinct()
+            .OrderBy(value => value)
+            .ToArray();
 
-        if (observedIos.Count > 0)
+        if (observedIos.Length > 0)
         {
             ios = observedIos
                 .Where(value => value > 0)
@@ -4262,6 +4515,29 @@ public sealed class TestViewModel : ObservableObject
         // Production có thể giữ stable-frame riêng trong TestEngine, nhưng Probe UI
         // không được chờ RequiredStableFrames hoặc timer 500-2000 ms.
         return false;
+    }
+
+    private int[] TakeProbePreviewForFrame(ScanFrame frame)
+    {
+        lock (_probePreviewGate)
+        {
+            ProductionProbePreview? preview = _pendingProductionProbePreview;
+            if (preview is null)
+                return [];
+
+            bool sameGeneration = preview.ScanGeneration == 0 ||
+                                  frame.ScanGeneration == 0 ||
+                                  preview.ScanGeneration == frame.ScanGeneration;
+            if (sameGeneration && preview.Sequence == frame.Sequence)
+            {
+                _pendingProductionProbePreview = null;
+                return preview.ActiveIo.ToArray();
+            }
+
+            if (!sameGeneration || frame.Sequence >= preview.Sequence)
+                _pendingProductionProbePreview = null;
+            return [];
+        }
     }
 
     private bool ProcessManualProbeFrame(ScanFrame frame, long generation)
@@ -4383,6 +4659,10 @@ public sealed class TestViewModel : ObservableObject
             if (changed)
                 _sound.SetTestPointContactSound(true);
         }
+        else if (changed)
+        {
+            _sound.SetTestPointContactSound(false);
+        }
         return changed;
     }
 
@@ -4407,36 +4687,58 @@ public sealed class TestViewModel : ObservableObject
         return changed;
     }
 
-    private void RestoreProductionPresentationAfterProbe(
-        TestEnginePresentationSnapshot snapshot,
-        bool restorePendingRows)
+    private void ApplyProbePresentationSnapshot(
+        TestEnginePresentationSnapshot productSnapshot,
+        IReadOnlyList<int> probeIos,
+        bool released,
+        long frameSequence)
     {
-        ApplyAuthoritativeProductionState(snapshot.Electrical);
-        if (snapshot.Electrical.ProductEvidence)
+        IReadOnlyList<FaultRow> desiredRows;
+        if (!released && probeIos.Count > 0)
         {
-            RefreshFaultsFromSnapshot(snapshot);
-            return;
+            desiredRows = BuildProbeDisplayRows(probeIos);
+            ProbeContacts.Clear();
+            foreach (FaultRow row in desiredRows)
+                ProbeContacts.Add(row);
+            SetProductionPresentationMode(
+                ProductionPresentationMode.Probe,
+                frameSequence,
+                "PROBE_TOUCH");
+        }
+        else
+        {
+            _sound.SetTestPointContactSound(false);
+            ProbeContacts.Clear();
+            ApplyAuthoritativeProductionState(productSnapshot.Electrical);
+            desiredRows = productSnapshot.Rows;
+            if (!productSnapshot.Electrical.ProductEvidence &&
+                CurrentProductionPhase == ProductionPhase.Continuity)
+            {
+                State = "LẮP SẢN PHẨM";
+            }
+            SetProductionPresentationMode(
+                productSnapshot.Electrical.ProductEvidence
+                    ? ProductionPresentationMode.Product
+                    : ProductionPresentationMode.Waiting,
+                frameSequence,
+                "PROBE_RELEASE_RESTORE");
         }
 
-        // A confirmed Probe contact is not a production cycle. If a weaker
-        // leading frame had queued a Product/WRONG presentation, restore the
-        // waiting state and the model's pending rows in this same UI update.
-        if (CurrentProductionPhase == ProductionPhase.Continuity &&
-            !_waitForProductRelease &&
-            !_waitForFaultProductRemoval &&
-            !IsProductRemovalPending)
-        {
-            _productDetectedThisCycle = false;
-            Interlocked.Exchange(ref _productStartSoundPlayed, 0);
-            ResetProductPresentationCycle();
-            SetProductionRuntimeState(ProductionRuntimeState.WaitingForProduct);
-            State = "LẮP SẢN PHẨM";
-        }
-
-        SynchronizeFaultRows(restorePendingRows
-            ? snapshot.Rows
-            : Array.Empty<FaultRow>());
+        // Faults is the collection bound by FaultGrid. Apply exactly one
+        // reducer result so Probe and Product callbacks cannot overwrite each
+        // other through separate Clear/Insert/restore operations.
+        SynchronizeFaultRows(desiredRows);
+        UpdateProbeCardActivity(probeIos);
+        Raise(nameof(HasInlineProbeContacts));
+        Raise(nameof(ProbeModeText));
+        Raise(nameof(ProbeBarText));
+        Raise(nameof(ProbeBarBackground));
         RaiseTestStatistics();
+        LogUiSnapshot(
+            productSnapshot.Electrical.FrameSequence,
+            productSnapshot.Electrical.ScanGeneration,
+            desiredRows.Count,
+            "probe-reducer");
     }
 
 
@@ -4587,7 +4889,7 @@ public sealed class TestViewModel : ObservableObject
         ProbeContacts.Clear();
         foreach (FaultRow row in rows)
             ProbeContacts.Add(row);
-        SynchronizeInlineProbeFaultRows(rows);
+        SynchronizeFaultRows(rows);
         UpdateProbeCardActivity(ios);
         Raise(nameof(HasInlineProbeContacts));
         Raise(nameof(ProbeModeText));
@@ -4621,7 +4923,7 @@ public sealed class TestViewModel : ObservableObject
         _sound.SetTestPointContactSound(false);
         if (ProbeContacts.Count > 0)
             ProbeContacts.Clear();
-        RemoveInlineProbeFaultRows();
+        SynchronizeFaultRows(Faults.Where(row => row.Kind != FaultKind.Probe).ToArray());
 
         UpdateProbeCardActivity(Array.Empty<int>());
         Raise(nameof(HasInlineProbeContacts));
@@ -4632,21 +4934,13 @@ public sealed class TestViewModel : ObservableObject
 
     private void SynchronizeInlineProbeFaultRows(IReadOnlyList<FaultRow> rows)
     {
-        RemoveInlineProbeFaultRows();
-
-        for (int index = rows.Count - 1; index >= 0; index--)
-            Faults.Insert(0, rows[index]);
-
+        SynchronizeFaultRows(rows);
         RaiseTestStatistics();
     }
 
     private void RemoveInlineProbeFaultRows()
     {
-        for (int index = Faults.Count - 1; index >= 0; index--)
-        {
-            if (Faults[index].Kind == FaultKind.Probe)
-                Faults.RemoveAt(index);
-        }
+        SynchronizeFaultRows(Faults.Where(row => row.Kind != FaultKind.Probe).ToArray());
     }
 
     private void RebuildActiveCards()
@@ -5160,6 +5454,11 @@ public sealed class TestViewModel : ObservableObject
         _lastPassRemainingSignature = string.Empty;
         _lastProductEvidenceSignature = string.Empty;
         _lastIoMappingSignature = string.Empty;
+        _lastLiveTopologySnapshot = LiveTopologySnapshot.Empty();
+        lock (_probePreviewGate)
+            _pendingProductionProbePreview = null;
+        Interlocked.Exchange(ref _probePresentationState, (int)ProbePresentationState.Inactive);
+        Interlocked.Exchange(ref _productionPresentationMode, (int)ProductionPresentationMode.Waiting);
         Interlocked.Increment(ref _ioMappingUiRevision);
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
@@ -5211,7 +5510,7 @@ public sealed class TestViewModel : ObservableObject
 
         if (ioMappingMode)
         {
-            State = "LẬP BẢN ĐỒ IO • CHƯA CÓ KẾT NỐI";
+            State = "LẮP SẢN PHẨM";
             AddLog(
                 "THT trống: đã bật chế độ lập bản đồ IO. Đầu dò và các cặp IO thông nhau " +
                 "chỉ hiển thị trên bảng; không PASS/FAIL, không cộng sản lượng và không kích relay.");
@@ -8265,6 +8564,11 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _startupIoInterlockState, 0);
         _startupIoWarningSignature = string.Empty;
         _lastIoMappingSignature = string.Empty;
+        _lastLiveTopologySnapshot = LiveTopologySnapshot.Empty();
+        lock (_probePreviewGate)
+            _pendingProductionProbePreview = null;
+        Interlocked.Exchange(ref _probePresentationState, (int)ProbePresentationState.Inactive);
+        Interlocked.Exchange(ref _productionPresentationMode, (int)ProductionPresentationMode.Waiting);
         Interlocked.Increment(ref _ioMappingUiRevision);
         _sound.SetTestPointContactSound(false);
         _discardInterlock.Reset();
@@ -8348,12 +8652,16 @@ public sealed class TestViewModel : ObservableObject
                 $"IO({model.DiscardContactIo[1]}), khóa ở lần tác động 1 và mở ở lần 2.");
         }
 
-        if (model.IsIoMappingTemplate)
+        if (IsIoMappingMode)
         {
             AddLog(
-                "Model THT trống hợp lệ: dùng để dò chân/lập bản đồ IO; " +
+                "Model không có mạng Production hợp lệ: dùng LiveTopology realtime; " +
                 "mọi kết nối chỉ hiển thị, không tham gia Production PASS/FAIL.");
+            AsyncFileLogService.Current.Performance("MODEL_MODE mode=LiveTopology expected=0");
         }
+        else
+            AsyncFileLogService.Current.Performance(
+                $"MODEL_MODE mode=ExpectedTopology expected={_engine.ExpectedNetCount}");
 
         if (model.Clip is not null)
         {
@@ -9651,6 +9959,43 @@ public sealed class TestViewModel : ObservableObject
 
     private static string RowKey(FaultRow row) => row.PresentationKey;
 
+    private static (int Removed, int Added, int Changed) CalculateRenderedRowDelta(
+        IReadOnlyList<(string Key, string Status)> before,
+        IReadOnlyList<FaultRow> after)
+    {
+        Dictionary<string, List<string>> beforeByKey = before
+            .GroupBy(item => item.Key, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => item.Status).OrderBy(value => value, StringComparer.Ordinal).ToList(),
+                StringComparer.Ordinal);
+        Dictionary<string, List<string>> afterByKey = after
+            .GroupBy(RowKey, StringComparer.Ordinal)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => item.Status).OrderBy(value => value, StringComparer.Ordinal).ToList(),
+                StringComparer.Ordinal);
+
+        int removed = 0;
+        int added = 0;
+        int contentChanged = 0;
+        foreach (string key in beforeByKey.Keys.Union(afterByKey.Keys, StringComparer.Ordinal))
+        {
+            List<string> oldValues = beforeByKey.GetValueOrDefault(key) ?? [];
+            List<string> newValues = afterByKey.GetValueOrDefault(key) ?? [];
+            int shared = Math.Min(oldValues.Count, newValues.Count);
+            removed += oldValues.Count - shared;
+            added += newValues.Count - shared;
+            for (int index = 0; index < shared; index++)
+            {
+                if (!string.Equals(oldValues[index], newValues[index], StringComparison.Ordinal))
+                    contentChanged++;
+            }
+        }
+
+        return (removed, added, removed + added + contentChanged);
+    }
+
     private void UpdateCachedFaultCounts(IReadOnlyList<FaultRow> rows)
     {
         int open = 0;
@@ -9737,8 +10082,7 @@ public sealed class TestViewModel : ObservableObject
             // Giữ bảng continuity/header hiện hữu nhưng không để row cũ khiến
             // người vận hành hiểu nhầm là trạng thái phần cứng hiện tại.
             SelectedOperationTabIndex = 0;
-            Faults.Clear();
-            UpdateCachedFaultCounts(Array.Empty<FaultRow>());
+            SynchronizeFaultRows(Array.Empty<FaultRow>());
             ResetProductPresentationCycle();
         });
     }

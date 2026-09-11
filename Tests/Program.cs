@@ -1116,12 +1116,18 @@ internal static class Program
             "Master minimum 0 must be preserved and disable Master");
 
         ProductionConfigService.SetMasterFaultRequiredCountForPath(settings, "PN-1.tht", 1);
-        ProductModel model1 = new() { ModelName = "PN-1", PartNumber = "PN-1", SourcePath = "PN-1.tht" };
+        ProductModel model1 = Model(("PN-1-WIRE", new[] { 1, 2 }));
+        model1.ModelName = "PN-1";
+        model1.PartNumber = "PN-1";
+        model1.SourcePath = "PN-1.tht";
         Assert(ProductionConfigService.GetMasterFaultRequiredCount(settings, model1) == 1,
             "Master minimum 1 must be preserved");
 
         ProductionConfigService.SetMasterFaultRequiredCountForPath(settings, "PN-2.tht", 2);
-        ProductModel model2 = new() { ModelName = "PN-2", PartNumber = "PN-2", SourcePath = "PN-2.tht" };
+        ProductModel model2 = Model(("PN-2-WIRE", new[] { 1, 2 }));
+        model2.ModelName = "PN-2";
+        model2.PartNumber = "PN-2";
+        model2.SourcePath = "PN-2.tht";
         Assert(ProductionConfigService.GetMasterFaultRequiredCount(settings, model2) == 2,
             "Master minimum 2 must be preserved");
 
@@ -4314,6 +4320,36 @@ internal static class Program
             $"active={vm.HasInlineProbeContacts}, rows={string.Join("|", vm.Faults.Select(row => $"{row.Kind}:IO{row.Io}"))}, " +
             $"processed={processedBefore}->{vm.ProductionFramesProcessed}, " +
             $"commands={commandsBefore}->{board.Commands.Count}");
+
+        TestEngine previewEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? throw new InvalidOperationException("Preview engine not found"));
+        long engineFramesBeforeCandidate = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 50, ScanGeneration: 1));
+        board.Publish(FrameSeq(50, (230, new[] { 1 })) with { ScanGeneration = 1 });
+        Assert(previewEngine.FramesProcessed == engineFramesBeforeCandidate &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               previewEngine.GetPassGateDiagnostics().WrongCandidateCount == 0 &&
+               (int)(typeof(TestViewModel).GetField(
+                   "_productStartSoundPlayed",
+                   BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(vm) ?? -1) == 0,
+            "Probe preview quarantines the matching leading complete frame before ProductEvidence, WRONG and sound");
+
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 51, ScanGeneration: 1));
+        board.Publish(ProbeFrameSeq(51, 1) with { ScanGeneration = 1 });
+        Assert(vm.HasInlineProbeContacts &&
+               vm.CurrentProbePresentationState == ProbePresentationState.Touch &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               vm.Faults.All(row => row.Kind == FaultKind.Probe),
+            "Confirmed Probe touch owns presentation but never changes ProductState");
+        board.Publish(FrameSeq(52) with { ScanGeneration = 1 });
+        Assert(!vm.HasInlineProbeContacts &&
+               vm.CurrentProbePresentationState == ProbePresentationState.Released &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
+            "Probe release restores the prior waiting ProductState on the next complete frame");
     }
 
     private static byte[] BuildProductionScanFrame(
@@ -7804,6 +7840,37 @@ internal static class Program
             }
 
             BoardCapacity capacity = BoardCapacity.Create(1);
+            LiveTopologySnapshot twoPairTopology = LiveTopologyPresenter.Build(
+                FrameSeq(
+                    20,
+                    (3, new[] { 1 }),
+                    (1, new[] { 3 }),
+                    (2, new[] { 4 }),
+                    (4, new[] { 2 })),
+                capacity);
+            Assert(twoPairTopology.Rows.Count == 2 &&
+                   twoPairTopology.Pairs.SequenceEqual([
+                       new LiveTopologyPair(1, 3),
+                       new LiveTopologyPair(2, 4)]) &&
+                   twoPairTopology.Components.Count == 2,
+                "LiveTopology uses exact board edges and canonicalizes reverse directions once");
+
+            LiveTopologySnapshot onePairRemoved = LiveTopologyPresenter.Build(
+                FrameSeq(21, (4, new[] { 2 })),
+                capacity);
+            Assert(onePairRemoved.Rows.Count == 1 &&
+                   onePairRemoved.Pairs.Single() == new LiveTopologyPair(2, 4),
+                "LiveTopology removal drops only the missing pair and retains the other pair");
+
+            LiveTopologySnapshot component = LiveTopologyPresenter.Build(
+                FrameSeq(22, (1, new[] { 3 }), (3, new[] { 1, 5 }), (5, new[] { 3 })),
+                capacity);
+            Assert(component.Pairs.SequenceEqual([
+                       new LiveTopologyPair(1, 3),
+                       new LiveTopologyPair(3, 5)]) &&
+                   component.Components.Single().SequenceEqual([1, 3, 5]),
+                "A component larger than two keeps only observed physical edges and a deterministic component diagnostic");
+
             IReadOnlyList<FaultRow> connectionRows = IoMappingFramePresenter.BuildRows(
                 FrameSeq(1, (2, new[] { 1, 3 }), (1, new[] { 2 })),
                 capacity);
@@ -7844,6 +7911,8 @@ internal static class Program
                    vm.Faults.Count == 1 &&
                    vm.Faults[0].ActualSourceIo == 4 &&
                    vm.Faults[0].ActualTargetIo == 9 &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
+                   vm.CurrentProductionPresentationMode == ProductionPresentationMode.LiveTopology &&
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 &&
                    !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
                 "Blank THT observation never commits production or activates a relay");
@@ -7866,15 +7935,82 @@ internal static class Program
                    vm.Faults[0].Pin.Length == 0 &&
                    emptyModelEngine.ExpectedNetCount == 0 &&
                    !emptyModelEngine.HasProductActivity &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
+                   vm.CurrentProbePresentationState == ProbePresentationState.Touch &&
+                   vm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
-                "Blank THT Probe works on any installed IO without mapping or production evidence");
+                "Blank THT Probe presentation overrides rows without changing LiveTopology product presence");
 
             board.Publish(FrameSeq(5));
             Assert(!AppSoundService.Current.IsTestPointContactSoundActive &&
-                   vm.Faults.Count == 0 &&
-                   vm.State == "LẮP SẢN PHẨM" &&
+                   vm.Faults.Count == 1 &&
+                   vm.Faults[0].ActualSourceIo == 4 &&
+                   vm.Faults[0].ActualTargetIo == 9 &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
+                   vm.CurrentProbePresentationState == ProbePresentationState.Released &&
+                   vm.CurrentProductionPresentationMode == ProductionPresentationMode.LiveTopology &&
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
-                "Blank THT Probe RELEASE clears rows and returns to waiting immediately");
+                "Blank THT Probe RELEASE restores the exact prior LiveTopology snapshot");
+
+            board.Publish(FrameSeq(6, (1, new[] { 3 }), (3, new[] { 1 }), (2, new[] { 4 }), (4, new[] { 2 })));
+            Assert(vm.Faults.Count == 2 &&
+                   vm.Faults.Select(row => (row.ActualSourceIo, row.ActualTargetIo)).SequenceEqual([
+                       ((int?)1, (int?)3),
+                       ((int?)2, (int?)4)]) &&
+                   vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Empty THT renders exactly two canonical live pairs without PASS/FAIL");
+
+            board.Publish(FrameSeq(7, (4, new[] { 2 })));
+            Assert(vm.Faults.Count == 1 &&
+                   vm.Faults[0].ActualSourceIo == 2 &&
+                   vm.Faults[0].ActualTargetIo == 4,
+                "Empty THT removal removes IO1<->IO3 immediately and retains IO2<->IO4");
+
+            board.Publish(FrameSeq(8, (1, new[] { 3 }), (2, new[] { 4 })));
+            board.Publish(FrameSeq(
+                9,
+                Enumerable.Range(10, 20).Select(source => (source, new[] { 63 })).ToArray()));
+            Assert(vm.Faults.Count == 1 &&
+                   vm.Faults[0].Kind == FaultKind.Probe &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime,
+                "Empty THT Probe temporarily owns the table while ProductState remains Present");
+            board.Publish(FrameSeq(10));
+            Assert(vm.Faults.Count == 2 &&
+                   vm.Faults.Any(row => row.ActualSourceIo == 1 && row.ActualTargetIo == 3) &&
+                   vm.Faults.Any(row => row.ActualSourceIo == 2 && row.ActualTargetIo == 4) &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime,
+                "Empty THT Probe release restores the exact two-pair topology snapshot");
+
+            board.Publish(FrameSeq(100, (1, new[] { 3 })));
+            board.Publish(FrameSeq(99, (2, new[] { 4 })));
+            Assert(vm.Faults.Count == 1 &&
+                   vm.Faults[0].ActualSourceIo == 1 &&
+                   vm.Faults[0].ActualTargetIo == 3,
+                "An older LiveTopology snapshot cannot overwrite the latest rendered frame");
+
+            ProductModel noEligibleNetModel = new()
+            {
+                ModelName = "NO-ELIGIBLE-NET",
+                PartNumber = "NO-ELIGIBLE-NET"
+            };
+            PinRecord singlePin = new("CN1", "SINGLE", 8, "1");
+            noEligibleNetModel.Pins.Add(singlePin);
+            noEligibleNetModel.Nets.Add(new WireNet("SINGLE", [8], [singlePin]));
+            TestViewModel noEligibleVm = CreateTestViewModel(production);
+            noEligibleVm.SetModel(noEligibleNetModel);
+            Assert(!noEligibleNetModel.IsIoMappingTemplate &&
+                   noEligibleVm.ExpectedNetworkCount == 0 &&
+                   noEligibleVm.IsIoMappingMode,
+                "LiveTopology mode is derived from eligible ExpectedNetCount, not parser filename/empty-table flags");
+
+            var evolvingProbe = new ProbeStateTracker(confirmFrames: 2, releaseFrames: 1, maxContacts: 2);
+            Assert(!evolvingProbe.Update([10]) &&
+                   evolvingProbe.HasTrackedContacts &&
+                   evolvingProbe.Update([10, 12]) &&
+                   evolvingProbe.ActiveIos.SequenceEqual([10, 12]) &&
+                   evolvingProbe.Update([]) &&
+                   !evolvingProbe.IsActive,
+                "Probe candidate IO10 -> IO10+IO12 confirms by frame continuity and releases without a timer");
         }
         finally
         {
