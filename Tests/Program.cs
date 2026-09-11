@@ -5952,6 +5952,7 @@ internal static class Program
         unusedVm.SetModel(model);
         unusedVm.StartProductionTestAsync().GetAwaiter().GetResult();
         long processedBeforeUnusedProbe = unusedVm.ProductionFramesProcessed;
+        string stateBeforeUnusedProbe = unusedVm.State;
         unusedBoard.Publish(ProbeFrameSeq(30, 7));
         unusedBoard.Publish(ProbeFrameSeq(31, 7));
         Assert(unusedVm.HasInlineProbeContacts &&
@@ -5964,9 +5965,18 @@ internal static class Program
                unusedVm.Faults[0].WireName.Length == 0 &&
                unusedVm.Faults[0].FaultType == "TP" &&
                unusedVm.Faults[0].Status == "TP - IO(7)" &&
-               unusedVm.CenterResultText == "LẮP SẢN PHẨM" &&
+               unusedVm.CenterResultText.Length == 0 &&
+               unusedVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               unusedVm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
+               unusedVm.CurrentProbePresentationState == ProbePresentationState.Touch &&
+               unusedVm.State == stateBeforeUnusedProbe &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
-            "CASE E: always-on Probe shows an unmapped physical IO in the IO column without starting the product cycle");
+            "CASE E: always-on Probe shows an unmapped physical IO while Probe owns presentation, without starting the product cycle; " +
+            $"state={unusedVm.State}/{stateBeforeUnusedProbe}, runtime={unusedVm.CurrentProductionRuntimeState}, " +
+            $"presentation={unusedVm.CurrentProductionPresentationMode}, probe={unusedVm.CurrentProbePresentationState}, " +
+            $"center='{unusedVm.CenterResultText}', processed={unusedVm.ProductionFramesProcessed}/{processedBeforeUnusedProbe}, rows=" +
+            string.Join("|", unusedVm.Faults.Select(row =>
+                $"{row.Kind}/IO{row.Io}/{row.IoText}/{row.Connector}/{row.Pin}/{row.WireName}/{row.FaultType}/{row.Status}")));
 
         TestViewModel testPinVm = CreateTestViewModel(production, out FakeBoard testPinBoard);
         testPinVm.SetModel(model);
