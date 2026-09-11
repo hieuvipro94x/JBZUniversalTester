@@ -435,9 +435,39 @@
         </Style>
 
         <DataTemplate x:Key="WireColorCellTemplate">
-            <Border Background="{Binding WireColorBrush}"
-                    HorizontalAlignment="Stretch"
+            <Border HorizontalAlignment="Stretch"
                     VerticalAlignment="Stretch">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <!-- Mặc định vẫn dùng màu do ViewModel cung cấp. -->
+                        <Setter Property="Background" Value="{Binding WireColorBrush}"/>
+                        <Style.Triggers>
+                            <!-- Mã màu dây Orange: O / Or / OR phải luôn hiển thị màu cam,
+                                 không được rơi về màu xanh dương do mapping/fallback cũ. -->
+                            <DataTrigger Binding="{Binding WireColorText}" Value="O">
+                                <Setter Property="Background" Value="#FF8C00"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding WireColorText}" Value="o">
+                                <Setter Property="Background" Value="#FF8C00"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding WireColorText}" Value="Or">
+                                <Setter Property="Background" Value="#FF8C00"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding WireColorText}" Value="OR">
+                                <Setter Property="Background" Value="#FF8C00"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding WireColorText}" Value="or">
+                                <Setter Property="Background" Value="#FF8C00"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding WireColorText}" Value="Orange">
+                                <Setter Property="Background" Value="#FF8C00"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding WireColorText}" Value="ORANGE">
+                                <Setter Property="Background" Value="#FF8C00"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <views:OutlinedTextBlock Text="{Binding WireColorText}"
                                          Foreground="White"
                                          Stroke="#111111"
