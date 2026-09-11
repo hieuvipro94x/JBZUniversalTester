@@ -431,6 +431,8 @@ public sealed class TestViewModel : ObservableObject
 
     private bool IsWaitingProductPresentation =>
         !IsDeviceFault &&
+        CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
+        CurrentProbePresentationState is ProbePresentationState.Inactive or ProbePresentationState.Released &&
         !_presentationCycleStarted &&
         !IsProductRemovalPending &&
         CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity;
@@ -2268,6 +2270,9 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         Raise(nameof(CurrentProbePresentationState));
+        // Center overlay depends on Probe state: hide "LẮP SẢN PHẨM" while
+        // Candidate/Touch owns the presentation, restore it only after Release.
+        RaiseCenterPresentation();
         AsyncFileLogService.Current.Performance(
             $"PROBE_STATE old={(ProbePresentationState)previous} new={state} " +
             $"ios={string.Join(',', ios.OrderBy(io => io).Select(io => $"IO{io}"))} seq={frameSequence}");
@@ -2283,6 +2288,9 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         Raise(nameof(CurrentProductionPresentationMode));
+        // Center waiting overlay is presentation-owned. When Probe/Product takes
+        // visual priority it must be hidden immediately, without changing ProductState.
+        RaiseCenterPresentation();
         AsyncFileLogService.Current.Performance(
             $"PRESENTATION_STATE old={(ProductionPresentationMode)previous} new={mode} " +
             $"seq={frameSequence} reason={reason}");
@@ -4709,17 +4717,27 @@ public sealed class TestViewModel : ObservableObject
         {
             _sound.SetTestPointContactSound(false);
             ProbeContacts.Clear();
+
+            // Restore Product truth first. Probe is presentation-only and must not
+            // manufacture ProductEvidence or repopulate model rows while waiting.
             ApplyAuthoritativeProductionState(productSnapshot.Electrical);
-            desiredRows = productSnapshot.Rows;
-            if (!productSnapshot.Electrical.ProductEvidence &&
+
+            bool waitingForProduct =
+                CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct;
+            desiredRows = waitingForProduct
+                ? Array.Empty<FaultRow>()
+                : productSnapshot.Rows;
+
+            if (waitingForProduct &&
                 CurrentProductionPhase == ProductionPhase.Continuity)
             {
                 State = "LẮP SẢN PHẨM";
             }
+
             SetProductionPresentationMode(
-                productSnapshot.Electrical.ProductEvidence
-                    ? ProductionPresentationMode.Product
-                    : ProductionPresentationMode.Waiting,
+                waitingForProduct
+                    ? ProductionPresentationMode.Waiting
+                    : ProductionPresentationMode.Product,
                 frameSequence,
                 "PROBE_RELEASE_RESTORE");
         }
