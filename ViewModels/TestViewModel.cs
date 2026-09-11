@@ -3625,17 +3625,27 @@ public sealed class TestViewModel : ObservableObject
         if (probeIos.Length == 0)
             return;
 
-        // Preview trước C0 không được đổi UI, nhưng phải đánh dấu đúng complete
-        // frame sắp tới là Probe candidate. Nếu chỉ log rồi bỏ qua, frame đầu
-        // của thao tác chạm có thể lọt vào ProductEvidence/WRONG_CANDIDATE.
+        // Preview trước C0 vừa quarantine complete frame sắp tới, vừa sở hữu
+        // presentation ngay. Đây chỉ là UI; Product state/engine/sound giữ nguyên.
         lock (_probePreviewGate)
             _pendingProductionProbePreview = preview with { ActiveIo = probeIos };
-        if (CurrentProbePresentationState != ProbePresentationState.Candidate)
-            Interlocked.Increment(ref _inlineProbeUiRevision);
+        long probeRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
         SetProbePresentationState(
             ProbePresentationState.Candidate,
             probeIos,
             preview.Sequence);
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        InvokeUi(() =>
+        {
+            if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                Volatile.Read(ref _probeSessionActive) != 0 ||
+                probeRevision != Volatile.Read(ref _inlineProbeUiRevision))
+            {
+                return;
+            }
+
+            ShowProductionProbePreview(probeIos, preview.Sequence);
+        });
         AsyncFileLogService.Current.Performance(
             $"PROBE_PREVIEW candidate={string.Join(",", probeIos.Select(io => $"IO{io}"))} " +
             $"seq={preview.Sequence} hits={preview.PeakHitCount}/{preview.RequiredHitCount}",
@@ -4957,6 +4967,26 @@ public sealed class TestViewModel : ObservableObject
 
         string display = string.Join(", ", ios.Select(io => $"IO({io})"));
         AddLog($"Đầu dò phát hiện {display}; hiển thị song song và bỏ qua logic chập của frame probe.");
+    }
+
+    private void ShowProductionProbePreview(IReadOnlyList<int> ios, long frameSequence)
+    {
+        IReadOnlyList<FaultRow> rows = BuildProbeDisplayRows(ios);
+        ProbeContacts.Clear();
+        foreach (FaultRow row in rows)
+            ProbeContacts.Add(row);
+
+        SetProductionPresentationMode(
+            ProductionPresentationMode.Probe,
+            frameSequence,
+            "PROBE_PREVIEW");
+        SynchronizeFaultRows(rows);
+        UpdateProbeCardActivity(ios);
+        Raise(nameof(HasInlineProbeContacts));
+        Raise(nameof(ProbeModeText));
+        Raise(nameof(ProbeBarText));
+        Raise(nameof(ProbeBarBackground));
+        RaiseTestStatistics();
     }
 
     private void ClearInlineProbeDisplay()
