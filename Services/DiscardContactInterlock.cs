@@ -10,10 +10,10 @@ public enum DiscardContactTransition
 }
 
 /// <summary>
-/// Theo dõi hai lần tác động cảm biến thùng hàng lỗi. Lần THÔNG thứ nhất khóa
-/// Production; cảm biến phải NGẮT rồi THÔNG lần thứ hai mới hoàn tất/mở khóa.
+/// Theo dõi một lần đưa hàng qua cảm biến thùng hàng lỗi. Một lần hợp lệ gồm
+/// cảm biến THÔNG khi hàng đi qua và sau đó phải NGẮT khi hàng đã qua khỏi cảm biến.
 /// Nếu lúc ARM đang THÔNG, bắt buộc chờ NGẮT làm baseline để tiếp điểm kẹt
-/// không thể tự tạo lần xác nhận thứ nhất.
+/// không thể tự tạo một lần xác nhận giả.
 /// </summary>
 public sealed class DiscardContactInterlock
 {
@@ -23,7 +23,6 @@ public sealed class DiscardContactInterlock
         AwaitingOpenBaseline,
         AwaitingFirstPass,
         AwaitingReleaseAfterFirstPass,
-        AwaitingSecondPass,
         Completed
     }
 
@@ -65,9 +64,6 @@ public sealed class DiscardContactInterlock
                     _state = State.AwaitingReleaseAfterFirstPass;
                     return DiscardContactTransition.FirstPassDetected;
                 case State.AwaitingReleaseAfterFirstPass when !contactClosed:
-                    _state = State.AwaitingSecondPass;
-                    break;
-                case State.AwaitingSecondPass when contactClosed:
                     _state = State.Completed;
                     return DiscardContactTransition.Completed;
             }
