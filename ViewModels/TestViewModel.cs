@@ -507,12 +507,12 @@ public sealed class TestViewModel : ObservableObject
 
             if (IsMasterSequenceActive)
             {
-                if (!_presentationCycleStarted &&
-                    !IsProductRemovalPending &&
-                    !_engine.HasProductActivity)
-                    return "LẮP SẢN PHẨM";
-
-                return NormalizeSingleLine(value);
+                // Ô trạng thái lớn phải luôn cho người vận hành biết chính xác
+                // loại mẫu Master cần kiểm tra. Trạng thái THÁO SẢN PHẨM ở trên
+                // vẫn có ưu tiên cao hơn để không che mất hướng dẫn an toàn.
+                return IsMasterBadPhase
+                    ? "KIỂM TRA MASTER LỖI"
+                    : "KIỂM TRA MASTER ĐẠT";
             }
 
             if (value.Contains("ĐANG TEST LEAK", StringComparison.OrdinalIgnoreCase))

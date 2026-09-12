@@ -252,6 +252,12 @@
             <Setter Property="FontWeight" Value="Bold"/>
         </Style>
 
+        <!-- Cột IO phải luôn hiện đầy đủ, ví dụ IO (12) / IO (256), không rút gọn thành IO... -->
+        <Style x:Key="HtdrvIoTextStyle" TargetType="TextBlock" BasedOn="{StaticResource HtdrvGridStrongCenterTextStyle}">
+            <Setter Property="TextTrimming" Value="None"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+        </Style>
+
         <!-- Nhấn mạnh ba thông tin công nhân cần nhận dạng nhanh trên bảng test. -->
         <Style x:Key="OperatorWireTextStyle"
                TargetType="TextBlock"
@@ -751,7 +757,7 @@
 
             <Grid Grid.Column="3">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="188"/>
+                    <ColumnDefinition Width="220"/>
                     <ColumnDefinition Width="24"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
@@ -762,18 +768,17 @@
                         Background="{Binding StateBackground}"
                         BorderBrush="{StaticResource PiBorderBrush}"
                         BorderThickness="1">
-                    <Viewbox Margin="10"
-                             Stretch="Uniform"
-                             StretchDirection="DownOnly"
-                             HorizontalAlignment="Stretch"
-                             VerticalAlignment="Center">
-                        <TextBlock Text="{Binding ResultStatusText}"
-                                   Foreground="{Binding StateForeground}"
-                                   FontSize="34"
-                                   FontWeight="SemiBold"
-                                   TextAlignment="Center"
-                                   TextWrapping="NoWrap"/>
-                    </Viewbox>
+                    <TextBlock Text="{Binding ResultStatusText}"
+                               Margin="8,6"
+                               Foreground="{Binding StateForeground}"
+                               FontSize="32"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Stretch"
+                               VerticalAlignment="Center"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"
+                               LineStackingStrategy="BlockLineHeight"
+                               LineHeight="38"/>
                 </Border>
 
                 <Grid Grid.Column="2" VerticalAlignment="Top">
@@ -893,7 +898,7 @@
                       Style="{StaticResource FaultOperationGridStyle}">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Lo&#7841;i" Binding="{Binding FaultType}" Width="1.20*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongTextStyle}"/>
-                    <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="0.55*" MinWidth="60" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongCenterTextStyle}"/>
+                    <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="0.80*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvIoTextStyle}"/>
                     <DataGridTextColumn x:Name="ConnectorColumn" Header="Connector" Binding="{Binding Connector}" Width="0.95*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource OperatorConnectorTextStyle}"/>
                     <DataGridTextColumn Header="Chân Pin" Binding="{Binding Pin}" Width="0.90*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="Mã Dây" Binding="{Binding WireName}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource OperatorWireTextStyle}"/>
