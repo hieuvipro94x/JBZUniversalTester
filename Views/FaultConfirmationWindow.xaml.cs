@@ -66,67 +66,83 @@ public partial class FaultConfirmationWindow : Window
         if (fault.Type == ProductFaultType.SystemDeviceError)
             return "LỖI GIAO TIẾP THIẾT BỊ\n\nVUI LÒNG KHỞI ĐỘNG LẠI";
 
-        if (fault.Type != ProductFaultType.WrongWiring)
+        if (fault.Type is not (ProductFaultType.WrongWiring or ProductFaultType.ShortCircuit))
             return FaultDisplayFormatter.FormatOperator(fault).Title;
 
         PinRecord? actualFrom = ResolveActualPin(fault.ActualSourceIo);
         PinRecord? actualTo = ResolveActualPin(fault.ActualTargetIo);
 
-        // Cả hai IO thực tế đều có trong THT:
-        // dùng trực tiếp WireName + Connector của đúng PinRecord.
-        if (actualFrom is not null && actualTo is not null)
-        {
-            string from = FormatMappedEndpoint(actualFrom, fault.ActualSourceIo);
-            string to = FormatMappedEndpoint(actualTo, fault.ActualTargetIo);
+        // Popup vận hành phải ưu tiên tên dây thật trong THT.
+        // Chỉ khi IO không có WireName/cấu hình trong THT mới hiện IO(n).
+        string from = FormatCompactEndpoint(
+            actualFrom,
+            fault.ActualSourceIo,
+            fallbackWireName: fault.WireName);
 
-            return $"LỖI SAI DÂY\n\n{from} NỐI NHẦM VỚI {to}";
+        string to = FormatCompactEndpoint(
+            actualTo,
+            fault.ActualTargetIo,
+            fallbackWireName: null);
+
+        bool fromMappedByName = HasWireName(actualFrom);
+        bool toMappedByName = HasWireName(actualTo);
+
+        if (fault.Type == ProductFaultType.ShortCircuit)
+        {
+            // Hai network đã cấu hình bị nối/chập với nhau:
+            //   LỖI CHẬP MẠCH
+            //   BG1 CHẬP VỚI BF2
+            //
+            // Nếu một đầu không có tên dây trong THT:
+            //   BG1 CHẬP VỚI IO(12)
+            return $"LỖI CHẬP MẠCH\n\n{from} CHẬP VỚI {to}";
         }
 
-        // Một đầu IO không tồn tại trong THT => cắm nhầm lỗ.
-        if (actualFrom is not null &&
-            fault.ActualTargetIo is int badTargetIo &&
-            badTargetIo > 0)
+        // WRONG WIRING:
+        // - Cả hai đầu có tên dây THT:
+        //     BG1 NỐI NHẦM BF2
+        // - Chỉ một đầu có tên dây THT:
+        //     BG1 NỐI IO(12)
+        //   Luôn đưa đầu có tên dây lên trước để người vận hành dễ hiểu.
+        if (fromMappedByName && toMappedByName)
+            return $"LỖI SAI DÂY\n\n{from} NỐI NHẦM {to}";
+
+        if (fromMappedByName)
+            return $"LỖI SAI DÂY\n\n{from} NỐI {to}";
+
+        if (toMappedByName)
+            return $"LỖI SAI DÂY\n\n{to} NỐI {from}";
+
+        // Resolver/model có thể không được truyền vào popup. Khi đó vẫn tận dụng
+        // WireName đã capture trong FaultDetail cho đầu nguồn nếu có.
+        if (!string.IsNullOrWhiteSpace(fault.WireName))
         {
-            string known = FormatMappedEndpoint(actualFrom, fault.ActualSourceIo);
-            return $"LỖI CẮM NHẦM LỖ\n\n{known} CẮM NHẦM VÀO IO {badTargetIo}";
+            string known = fault.WireName.Trim();
+            int? otherIo = fault.ActualTargetIo ?? fault.ActualSourceIo;
+            if (otherIo is int io && io > 0)
+                return $"LỖI SAI DÂY\n\n{known} NỐI IO({io})";
         }
 
-        if (actualTo is not null &&
-            fault.ActualSourceIo is int badSourceIo &&
-            badSourceIo > 0)
-        {
-            string known = FormatMappedEndpoint(actualTo, fault.ActualTargetIo);
-            return $"LỖI CẮM NHẦM LỖ\n\n{known} CẮM NHẦM VÀO IO {badSourceIo}";
-        }
+        return $"LỖI SAI DÂY\n\n{from} NỐI {to}";
+    }
 
-        // Fallback nếu không có resolver/model: không tự bịa WireName/Housing.
-        if (fault.ActualSourceIo is int sourceIo &&
-            sourceIo > 0 &&
-            string.IsNullOrWhiteSpace(fault.ActualConnectorFrom))
-        {
-            string known = ResolveFallbackKnownName(fault);
-            return $"LỖI CẮM NHẦM LỖ\n\n{known} CẮM NHẦM VÀO IO {sourceIo}";
-        }
+    private static bool HasWireName(PinRecord? pin) =>
+        pin is not null && !string.IsNullOrWhiteSpace(pin.WireName);
 
-        if (fault.ActualTargetIo is int targetIo &&
-            targetIo > 0 &&
-            string.IsNullOrWhiteSpace(fault.ActualConnectorTo))
-        {
-            string known = ResolveFallbackKnownName(fault);
-            return $"LỖI CẮM NHẦM LỖ\n\n{known} CẮM NHẦM VÀO IO {targetIo}";
-        }
+    private static string FormatCompactEndpoint(
+        PinRecord? pin,
+        int? io,
+        string? fallbackWireName)
+    {
+        if (pin is not null && !string.IsNullOrWhiteSpace(pin.WireName))
+            return pin.WireName.Trim();
 
-        string fallbackFrom = FormatFallbackEndpoint(
-            fault.WireName,
-            fault.ActualConnectorFrom,
-            fault.ActualSourceIo);
+        if (!string.IsNullOrWhiteSpace(fallbackWireName))
+            return fallbackWireName.Trim();
 
-        string fallbackTo = FormatFallbackEndpoint(
-            null,
-            fault.ActualConnectorTo,
-            fault.ActualTargetIo);
-
-        return $"LỖI SAI DÂY\n\n{fallbackFrom} NỐI NHẦM VỚI {fallbackTo}";
+        return io is int value && value > 0
+            ? $"IO({value})"
+            : "IO(?)";
     }
 
     private PinRecord? ResolveActualPin(int? io)

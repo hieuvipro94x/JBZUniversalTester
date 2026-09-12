@@ -64,18 +64,36 @@ public static class LiveTopologyPresenter
             .ThenBy(pair => pair.SecondIo)
             .ToArray();
         IReadOnlyList<IReadOnlyList<int>> components = BuildComponents(orderedPairs);
-        FaultRow[] rows = orderedPairs.Select(pair => new FaultRow
-        {
-            Kind = FaultKind.Info,
-            FaultType = "THÔNG MẠCH",
-            Io = pair.FirstIo,
-            ActualSourceIo = pair.FirstIo,
-            ActualTargetIo = pair.SecondIo,
-            RelatedIos = [pair.FirstIo, pair.SecondIo],
-            WireName = $"IO({pair.FirstIo}) ↔ IO({pair.SecondIo})",
-            DisplayOrder = pair.FirstIo * 10_000 + pair.SecondIo,
-            Status = $"ĐANG KẾT NỐI: IO({pair.FirstIo}) ↔ IO({pair.SecondIo})"
-        }).ToArray();
+
+        // Htdrv gốc hiển thị mỗi quan hệ điện thành MỘT CẶP 2 dòng:
+        // dòng đầu là IO thứ nhất, dòng sau là IO thứ hai. Mỗi cặp mới có
+        // IsNetworkStart=true ở dòng đầu để DataGrid vẽ đường phân cách cyan.
+        // Đây chỉ là presentation: FaultKind.Info + ProductFaultType.None đảm bảo
+        // LiveTopology không bị tính là OPEN/SAI DÂY/CHẬP MẠCH hay PASS/FAIL.
+        FaultRow[] rows = orderedPairs
+            .SelectMany((pair, pairIndex) =>
+            {
+                int[] related = [pair.FirstIo, pair.SecondIo];
+                int baseOrder = pairIndex * 2;
+
+                return new[]
+                {
+                    BuildPairRow(
+                        io: pair.FirstIo,
+                        peerIo: pair.SecondIo,
+                        related: related,
+                        displayOrder: baseOrder,
+                        isPairStart: true),
+                    BuildPairRow(
+                        io: pair.SecondIo,
+                        peerIo: pair.FirstIo,
+                        related: related,
+                        displayOrder: baseOrder + 1,
+                        isPairStart: false)
+                };
+            })
+            .ToArray();
+
         string signature = string.Join('|', orderedPairs.Select(pair => $"{pair.FirstIo}-{pair.SecondIo}"));
 
         return new LiveTopologySnapshot(
@@ -85,6 +103,34 @@ public static class LiveTopologyPresenter
             components,
             rows,
             signature);
+    }
+
+    private static FaultRow BuildPairRow(
+        int io,
+        int peerIo,
+        int[] related,
+        int displayOrder,
+        bool isPairStart)
+    {
+        int zeroBased = io - 1;
+        int connector = (zeroBased / BoardCapacity.IoPerPort) + 1;
+        int pin = (zeroBased % BoardCapacity.IoPerPort) + 1;
+
+        return new FaultRow
+        {
+            Kind = FaultKind.Info,
+            ProductFaultType = ProductFaultType.None,
+            FaultType = "CHẬP MẠCH",
+            Io = io,
+            IoTextOverride = $"IO ({io})",
+            ActualSourceIo = related[0],
+            ActualTargetIo = related[1],
+            RelatedIos = related,
+            DisplayOrder = displayOrder,
+            IsNetworkStart = isPairStart,
+            IoCnPnOverride = $"{io}-{connector}-{pin}",
+            Status = $"NỐI VỚI IO({peerIo})"
+        };
     }
 
     private static IReadOnlyList<IReadOnlyList<int>> BuildComponents(

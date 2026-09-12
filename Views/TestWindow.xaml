@@ -376,6 +376,12 @@
                                 <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
                                 <Setter Property="Foreground" Value="{Binding RowForegroundBrush}"/>
                             </Trigger>
+                            <!-- LiveTopology (mã hàng không cấu hình IO): chỉ đổi màu hiển thị,
+                                 tuyệt đối không đổi FaultKind/ProductFaultType nên không cộng lỗi. -->
+                            <DataTrigger Binding="{Binding FaultType}" Value="CHẬP MẠCH">
+                                <Setter Property="Foreground" Value="#FF0000"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </DataTrigger>
                         </Style.Triggers>
                     </Style>
                 </Setter.Value>
@@ -418,6 +424,12 @@
                     <Setter Property="Foreground" Value="{Binding RowForegroundBrush}"/>
                     <Setter Property="BorderBrush" Value="{StaticResource PiGridBrush}"/>
                 </Trigger>
+                <!-- LiveTopology: DataGridCell đang đặt Foreground riêng nên phải
+                     đổi màu ngay tại Cell; đổi ở DataGridRow thôi sẽ bị ghi đè. -->
+                <DataTrigger Binding="{Binding FaultType}" Value="CHẬP MẠCH">
+                    <Setter Property="Foreground" Value="#FF0000"/>
+                    <Setter Property="FontWeight" Value="Bold"/>
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 
