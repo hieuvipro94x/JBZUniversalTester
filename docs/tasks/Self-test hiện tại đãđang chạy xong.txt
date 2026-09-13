@@ -1,0 +1,157 @@
+Đọc AGENTS.md trước.
+
+Self-test hiện tại đã/đang chạy xong. Hãy chuẩn bị repository để lưu toàn bộ công việc hiện tại lên Git/GitHub cho tôi về nhà tiếp tục làm.
+
+Không giải thích dài. Tự kiểm tra và thực hiện trực tiếp.
+
+YÊU CẦU:
+
+1. Kiểm tra kết quả self-test vừa chạy.
+   - Nếu ALL PASS: có thể commit/push bình thường.
+   - Nếu còn FAIL: KHÔNG được sửa vội chỉ để push và KHÔNG làm mất thay đổi hiện tại.
+     Vẫn lưu toàn bộ source để tôi về nhà làm tiếp, nhưng commit phải ghi rõ WIP/self-test còn FAIL.
+   - Không chạy lại toàn bộ self-test nếu vừa có kết quả đầy đủ, trừ khi cần xác minh trạng thái sau một thay đổi mới.
+
+2. Chạy:
+   git status
+   git diff --stat
+   git diff
+
+   Audit tất cả file thay đổi trước khi commit.
+
+3. TUYỆT ĐỐI KHÔNG commit các dữ liệu/runtime của máy sản xuất như:
+   - *.db
+   - *.db-wal
+   - *.db-shm
+   - *.backup
+   - *.log
+   - *.RPT
+   - bin/
+   - obj/
+   - publish/
+   - TestResults/
+   - .vs/
+   - file cấu hình máy chứa dữ liệu runtime nếu không phải source mẫu
+   - database/history thật
+   - file tạm
+   - crash dump
+   - build output.
+
+   Không xóa các file đó khỏi máy.
+   Chỉ bảo đảm chúng không bị đưa vào commit.
+
+4. Nếu .gitignore chưa chặn các file runtime trên thì cập nhật .gitignore an toàn.
+   Không ignore nhầm source cần thiết:
+   *.cs
+   *.xaml
+   *.csproj
+   *.props
+   *.md
+   scripts/source config mẫu hợp lệ.
+
+5. Kiểm tra không có:
+   - password
+   - token
+   - private key
+   - credential
+   - DB production
+   - log production
+   trong staged files.
+
+6. Bảo đảm tất cả source sửa hôm nay cần để tiếp tục công việc đều được stage, bao gồm:
+   - History/SQLite schema v7 compatibility
+   - History preservation/sorting
+   - persistence safety
+   - Probe vs Short fixes
+   - D2XX / 10-card optimization nếu đã sửa
+   - regression tests
+   - AGENTS.md
+   - Version.props nếu version đã được bump hợp lệ
+   - các source liên quan khác thực sự đã thay đổi.
+
+7. Không tự reset/revert/discard bất kỳ thay đổi source nào của tôi.
+
+8. Kiểm tra Git:
+   git branch --show-current
+   git remote -v
+
+   Không tạo lại repository.
+   Không đổi remote nếu remote hiện tại hợp lệ.
+   Không force push.
+   Không rebase/reset lịch sử chỉ để push.
+
+9. Nếu self-test ALL PASS:
+   commit message dùng dạng:
+
+   fix: harden history persistence probe short and scan reliability
+
+   Nếu self-test còn FAIL:
+   commit message dùng dạng:
+
+   wip: preserve current JBZ fixes for continued testing
+
+10. Trước commit xem lại staged files:
+
+    git diff --cached --stat
+    git diff --cached
+
+    Nếu có DB/log/RPT/bin/obj/runtime data thì bỏ chúng khỏi staging trước khi commit.
+
+11. Commit toàn bộ source hợp lệ.
+
+12. Push lên remote hiện tại.
+
+    Ưu tiên push đúng current branch:
+
+    git push -u origin <current-branch>
+
+    Nếu current branch là main và self-test ALL PASS:
+    có thể push main bình thường nếu working tree/remote không có conflict.
+
+    Nếu current branch là main nhưng self-test vẫn FAIL:
+    KHÔNG đẩy WIP lỗi trực tiếp lên main.
+    Tạo branch an toàn từ trạng thái hiện tại, ví dụ:
+
+    wip/jbz-2026-09-13
+
+    commit và push branch đó để tôi về nhà checkout/pull tiếp.
+
+13. Nếu push bị reject vì remote có commit mới:
+    KHÔNG force push.
+    Fetch và kiểm tra nguyên nhân.
+    Không tự merge/rebase nếu có nguy cơ conflict mất code.
+    Báo ngắn cho tôi nếu cần xử lý thủ công.
+
+14. Sau push xác minh:
+
+    git status
+    git log -1 --oneline
+    git branch --show-current
+    git remote -v
+
+    Working tree source phải sạch hoặc chỉ còn các runtime/local files cố tình không commit.
+
+CUỐI CÙNG CHỈ BÁO:
+
+GIT RESULT
+Self-tests:
+Branch:
+Commit:
+Remote:
+Push:
+Excluded runtime files:
+Working tree:
+Command để về nhà lấy code:
+
+Nếu branch main:
+git pull origin main
+
+Nếu branch WIP:
+git fetch origin
+git switch <branch>
+git pull
+
+Không giải thích quá trình.
+Không in diff dài.
+Không kể từng command.
+Chỉ báo kết quả cuối và SHA commit.

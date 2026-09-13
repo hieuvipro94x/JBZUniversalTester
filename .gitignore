@@ -30,6 +30,9 @@ coverage.*
 [Bb]ackup/
 [Bb]ackups/
 *.log
+*.[Rr][Pp][Tt]
+*.dmp
+*.mdmp
 *.tmp
 *.temp
 *.bak
