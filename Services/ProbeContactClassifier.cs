@@ -256,6 +256,52 @@ public static class ProbeContactClassifier
         return false;
     }
 
+    /// <summary>
+    /// Distinguishes a matching probe edge from independent or reciprocal physical
+    /// wiring that must still reach the production fault engine.
+    /// </summary>
+    public static bool HasAuthoritativeDirectConnectionBeyondProbe(
+        ScanFrame frame,
+        ProductModel? model,
+        IReadOnlyCollection<int> probeIos)
+    {
+        if (probeIos.Count == 0)
+            return HasUnexpectedDirectConnectionEvidence(frame, model);
+
+        HashSet<int> probeSet = probeIos.Where(io => io > 0).ToHashSet();
+        HashSet<long> expectedEdges = BuildExpectedEdges(model);
+        var fanInByTarget = new Dictionary<int, int>();
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target > 0 && target != pair.Key)
+                    fanInByTarget[target] = fanInByTarget.GetValueOrDefault(target) + 1;
+            }
+        }
+
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target <= 0 || target == pair.Key ||
+                    expectedEdges.Contains(EdgeKey(pair.Key, target)) ||
+                    fanInByTarget.GetValueOrDefault(target) is not (> 0 and <= 2))
+                {
+                    continue;
+                }
+
+                bool outsideProbe = !probeSet.Contains(pair.Key) && !probeSet.Contains(target);
+                bool reciprocal = frame.Connections.TryGetValue(target, out IReadOnlySet<int>? reverseTargets) &&
+                                  reverseTargets.Contains(pair.Key);
+                if (outsideProbe || reciprocal)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
     private static HashSet<long> BuildExpectedEdges(ProductModel? model)
     {
         var result = new HashSet<long>();

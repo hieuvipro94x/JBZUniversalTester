@@ -4518,6 +4518,27 @@ internal static class Program
                vm.CurrentProbePresentationState == ProbePresentationState.Released &&
                vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
             "Probe release restores the prior waiting ProductState on the next complete frame");
+
+        long beforeStaleGeneration = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 53, ScanGeneration: 1));
+        board.Publish(FrameSeq(53) with { ScanGeneration = 2 });
+        Assert(previewEngine.FramesProcessed == beforeStaleGeneration + 1,
+            "Probe preview from an older scan generation cannot quarantine a new-generation frame");
+
+        long beforeStaleSequence = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 54, ScanGeneration: 2));
+        board.Publish(FrameSeq(55) with { ScanGeneration = 2 });
+        Assert(previewEngine.FramesProcessed == beforeStaleSequence + 1,
+            "Probe preview can quarantine only its exact complete-frame sequence");
+
+        long beforePhysicalPair = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [9], 12, 12, Sequence: 56, ScanGeneration: 2));
+        board.Publish(FrameSeq(56, (9, new[] { 10 }), (10, new[] { 9 })) with { ScanGeneration = 2 });
+        Assert(previewEngine.FramesProcessed == beforePhysicalPair + 1,
+            "Reciprocal IO9-IO10 physical evidence is never swallowed by a matching Probe preview");
     }
 
     private static byte[] BuildProductionScanFrame(

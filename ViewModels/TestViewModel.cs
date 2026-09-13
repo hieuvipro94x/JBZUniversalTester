@@ -1751,6 +1751,7 @@ public sealed class TestViewModel : ObservableObject
 
         string diagnostic =
             $"PERSISTENCE FAULT [{source}]{Environment.NewLine}" +
+            $"Domain=Data.Persistence.{source}{Environment.NewLine}" +
             $"Timestamp={DateTime.Now:O}{Environment.NewLine}" +
             $"Exception={exception.GetType().FullName}{Environment.NewLine}" +
             $"Message={exception.Message}{Environment.NewLine}" +
@@ -1759,9 +1760,6 @@ public sealed class TestViewModel : ObservableObject
             $"Database={ResolveHistoryDatabasePath(_productionSettings)}";
         AsyncFileLogService.Current.Error(diagnostic);
         AddLog($"LỖI LƯU DỮ LIỆU [{source}]: {exception.Message}");
-
-        if (Application.Current is not null)
-            CrashReportService.Write(exception, $"Data.Persistence.{source}", diagnostic);
 
         _cycleActive = false;
         Interlocked.Exchange(ref _postContinuityStarted, 0);
@@ -4643,13 +4641,17 @@ public sealed class TestViewModel : ObservableObject
         // Nó phải thắng preview Probe để IO9<->IO10 (hoặc bất kỳ cặp ngoài model)
         // vẫn đi vào TestEngine/LiveTopology và báo CHẬP MẠCH. Consume preview cùng
         // frame để candidate cũ không rò sang snapshot kế tiếp.
-        if (ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(frame, _model))
+        int[] previewIos = TakeProbePreviewForFrame(frame);
+        if (ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(frame, _model) &&
+            (previewIos.Length == 0 ||
+             ProbeContactClassifier.HasAuthoritativeDirectConnectionBeyondProbe(
+                 frame,
+                 _model,
+                 previewIos)))
         {
-            _ = TakeProbePreviewForFrame(frame);
             return false;
         }
 
-        int[] previewIos = TakeProbePreviewForFrame(frame);
         IReadOnlyList<int> classifiedIos = ProbeContactClassifier
             .DetectMany(
                 frame,
@@ -8386,8 +8388,6 @@ public sealed class TestViewModel : ObservableObject
                 AddLog("PASS - continuity/điện trở/kín nước theo cấu hình đã đạt; chuẩn bị chuỗi relay MARKING/JIG.");
             }
 
-            await PauseProductionScanForFinalPassAsync(ct);
-
             // Relay chạy sau theo cấu hình Production Settings. Tuyệt đối không
             // cho relay PASS chạy trong lúc/ngay sau khi que dò còn tạo tín hiệu.
             // Quan trọng hơn: kết quả PASS phải commit SQLite DURABLE trước khi
@@ -8437,6 +8437,7 @@ public sealed class TestViewModel : ObservableObject
 
             // Từ đây PASS đã durable. UI/âm thanh và relay chỉ được chạy sau commit.
             TriggerPassUi();
+            await PauseProductionScanForFinalPassAsync(ct);
             bool ok = await _engine.CompletePassAsync(
                 Resistance,
                 onPassStarted: () => AddLog(PassRelaySequenceText() + " bắt đầu."),
