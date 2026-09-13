@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -3014,6 +3014,54 @@ internal static class Program
                finalizeLeakSource.Contains("failureDetails: faults", StringComparison.Ordinal) &&
                finalizeLeakSource.Contains("ShowFaultConfirmationDialog", StringComparison.Ordinal),
             "Leak starts before continuity evaluation; Leak FAIL is recorded and confirmed only after full continuity PASS");
+        int durablePassCommit = postContinuitySource.IndexOf(
+            "bool passCommitted = await RecordCompletedProductAsync",
+            StringComparison.Ordinal);
+        int passRelayExecution = postContinuitySource.IndexOf(
+            "bool ok = await _engine.CompletePassAsync",
+            StringComparison.Ordinal);
+        Assert(durablePassCommit >= 0 &&
+               passRelayExecution > durablePassCommit &&
+               testViewModelSource.Contains("EnsureProductionPersistenceReadyAsync(\"StartProduction.Preflight\")", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("HandlePersistenceFaultAsync", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("Data.Persistence.", StringComparison.Ordinal),
+            "Production requires SQLite preflight and durable PASS commit before MARKING/JIG; DB faults are not Hardware.DeviceFault");
+
+        int masterGoodStart = testViewModelSource.IndexOf(
+            "private async Task CompleteGoodMasterAsync",
+            StringComparison.Ordinal);
+        int masterGoodEnd = testViewModelSource.IndexOf(
+            "private void TransitionToBadMaster",
+            masterGoodStart,
+            StringComparison.Ordinal);
+        string masterGoodSource = testViewModelSource[masterGoodStart..masterGoodEnd];
+        int masterGoodCommit = masterGoodSource.IndexOf(
+            "RecordMasterHistory(",
+            masterGoodSource.IndexOf("masterPassAt = DateTime.Now", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        int masterGoodAwait = masterGoodSource.IndexOf(
+            "await _masterPersistenceTask",
+            masterGoodCommit,
+            StringComparison.Ordinal);
+        int masterGoodRelay = masterGoodSource.IndexOf(
+            "bool ok = await _engine.CompletePassAsync",
+            StringComparison.Ordinal);
+        int masterBadStart = testViewModelSource.IndexOf(
+            "private async Task EjectValidatedBadMasterAsync",
+            StringComparison.Ordinal);
+        int masterBadEnd = testViewModelSource.IndexOf(
+            "private void BeginMasterHistoryCycle",
+            masterBadStart,
+            StringComparison.Ordinal);
+        string masterBadSource = testViewModelSource[masterBadStart..masterBadEnd];
+        Assert(masterGoodCommit >= 0 &&
+               masterGoodAwait > masterGoodCommit &&
+               masterGoodRelay > masterGoodAwait &&
+               masterBadSource.IndexOf("await _masterPersistenceTask", StringComparison.Ordinal) >= 0 &&
+               masterBadSource.IndexOf("await _engine.EjectMasterSampleAsync", StringComparison.Ordinal) >
+               masterBadSource.IndexOf("await _masterPersistenceTask", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("Master.{inspectionType}.OpenStore", StringComparison.Ordinal),
+            "Master GOOD/BAD history must commit before JIG eject; SQLite open failures stay in persistence-fault routing");
 
         var leakDisplayRow = new ResistanceResult
         {
@@ -3149,8 +3197,11 @@ internal static class Program
                    model,
                    maxContacts: 2,
                    boardCapacity: BoardCapacity.Create(10)).Count == 0 &&
-               ProbeContactClassifier.HasDirectConnectionEvidence(directWireFrame),
-            "Htdrv hit=1 edges 5-8 and 6-7 remain direct wire evidence, not Probe");
+               ProbeContactClassifier.HasDirectConnectionEvidence(directWireFrame) &&
+               ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(directWireFrame, model),
+            "Htdrv hit=1 edges 5-8 and 6-7 remain authoritative unexpected wire evidence, not Probe");
+        Assert(!ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(strongFrame, model),
+            "Strong high-fan-in TP signature is not mistaken for a two-pin short");
 
         int[] spliceIos = Enumerable.Range(1, 13).ToArray();
         ProductModel largeSplice = Model(("SPLICE", spliceIos));
@@ -3322,6 +3373,9 @@ internal static class Program
 
     private static void TestDatabaseSchemaV5()
     {
+        Assert(TestHistoryStore.CurrentSchemaVersion >= 7,
+            "Production History schema support must never regress below v7");
+
         string root = Path.Combine(
             Path.GetTempPath(),
             "JBZDatabaseSchemaV5Tests",
@@ -3433,8 +3487,8 @@ internal static class Program
                     string.Empty,
                     "ALL",
                     MaxRows: 1,
-                    AfterHistoryAt: firstPage[0].EffectiveTestStartedAt,
-                    AfterId: firstPage[0].Id));
+                    BeforeHistoryAt: firstPage[0].EffectiveTestStartedAt,
+                    BeforeId: firstPage[0].Id));
             Assert(secondPage.Count == 1 && secondPage[0].Id != firstPage[0].Id,
                 "History keyset cursor returns the next stable page without OFFSET");
             Assert(firstPage.Count + secondPage.Count == allSummary.Total,
@@ -5162,8 +5216,10 @@ internal static class Program
                scanSupervisorSource.Contains("RecoverSoftAsync", StringComparison.Ordinal) &&
                scanSupervisorSource.Contains("RecoverReopenAsync", StringComparison.Ordinal) &&
                scanSupervisorSource.Contains("_board.DisconnectAsync()", StringComparison.Ordinal) &&
+               d2xxTransportSource.Contains("Drain-to-empty", StringComparison.Ordinal) &&
+               !d2xxTransportSource.Contains("waitForRxNotification", StringComparison.Ordinal) &&
                !d2xxTransportSource.Contains("attempt <= 6", StringComparison.Ordinal),
-            "D2XX watchdog uses explicit pause, first-frame state, soft recovery, then one clean reopen");
+            "D2XX watchdog keeps recovery safety while the reader drains queued bytes before waiting for RX events");
         Assert(mainWindowXaml.Contains("Color=\"#273F91\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Color=\"#B45309\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Color=\"#0F766E\"", StringComparison.Ordinal) &&
@@ -5216,9 +5272,13 @@ internal static class Program
                historyPageXaml.Contains("x:Name=\"CloseButton\"", StringComparison.Ordinal) &&
                historyPageSource.Contains("GetHistorySummary(criteria)", StringComparison.Ordinal) &&
                historyPageSource.Contains("MaxRows = PageSize", StringComparison.Ordinal) &&
-               historyPageSource.Contains("AfterHistoryAt = cursor.EffectiveTestStartedAt", StringComparison.Ordinal) &&
+               historyPageSource.Contains("BeforeHistoryAt = cursor.EffectiveTestStartedAt", StringComparison.Ordinal) &&
                !historyPageSource.Contains("UiRowLimit", StringComparison.Ordinal),
             "History uses full SQL summary plus incremental keyset pages and exposes no legacy import action");
+        Assert(testViewModelSource.Contains(
+                   "ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(frame, _model)",
+                   StringComparison.Ordinal),
+            "Unexpected two-pin electrical edges take precedence over Probe preview routing");
         System.Xml.Linq.XElement[] historyButtons =
             System.Xml.Linq.XDocument.Parse(historyPageXaml)
                 .Descendants()
@@ -7025,12 +7085,12 @@ internal static class Program
             IReadOnlyList<TestHistoryRecord> allExportRows = exportStore.SearchForExport(monthlyCriteria);
             Assert(limitedRows.Count == 1 && allExportRows.Count == 3,
                 "History export is independent from the DataGrid row limit");
-            Assert(allExportRows[0].CycleId == "export-part-z-a" &&
+            Assert(allExportRows[0].CycleId == "export-part-a" &&
                    allExportRows[1].CycleId == "export-part-z-b" &&
-                   allExportRows[2].CycleId == "export-part-a",
-                "History export sorts oldest-to-newest by displayed test-start time and stable Id");
-            Assert(allExportRows[0].ExportModelFileName == "A.tht" &&
-                   allExportRows[1].ExportModelFileName == "B.tht",
+                   allExportRows[2].CycleId == "export-part-z-a",
+                "History export sorts newest-to-oldest by displayed test-start time and stable Id");
+            Assert(allExportRows[1].ExportModelFileName == "B.tht" &&
+                   allExportRows[2].ExportModelFileName == "A.tht",
                 "Changing A.tht to B.tht snapshots B.tht only for the new cycle");
 
             // Regression: row cũ bắt đầu trước nhưng test lâu hơn nên ResultAt muộn hơn.
@@ -7071,11 +7131,11 @@ internal static class Program
                     "ALL",
                     MaxRows: 10));
             Assert(orderedRows.Count == 2 &&
-                   orderedRows[0].CycleId == "older-start-later-result" &&
-                   orderedRows[0].TimeText == "08:00:00" &&
-                   orderedRows[1].CycleId == "newer-start-earlier-result" &&
-                   orderedRows[1].TimeText == "08:01:00",
-                "History grid is strictly oldest-to-newest by displayed TEST START time even when ResultAt order differs");
+                   orderedRows[0].CycleId == "newer-start-earlier-result" &&
+                   orderedRows[0].TimeText == "08:01:00" &&
+                   orderedRows[1].CycleId == "older-start-later-result" &&
+                   orderedRows[1].TimeText == "08:00:00",
+                "History grid is strictly newest-to-oldest by displayed TEST START time even when ResultAt order differs");
 
             IReadOnlyList<TestHistoryRecord> orderPage1 = orderingStore.SearchSummary(
                 new HistorySearchCriteria(
@@ -7093,13 +7153,13 @@ internal static class Program
                     "ORDER-TEST",
                     "ALL",
                     MaxRows: 1,
-                    AfterHistoryAt: orderPage1[0].EffectiveTestStartedAt,
-                    AfterId: orderPage1[0].Id));
+                    BeforeHistoryAt: orderPage1[0].EffectiveTestStartedAt,
+                    BeforeId: orderPage1[0].Id));
             Assert(orderPage1.Count == 1 &&
                    orderPage2.Count == 1 &&
-                   orderPage1[0].CycleId == "older-start-later-result" &&
-                   orderPage2[0].CycleId == "newer-start-earlier-result",
-                "History keyset pagination preserves oldest-to-newest TEST START order across pages");
+                   orderPage1[0].CycleId == "newer-start-earlier-result" &&
+                   orderPage2[0].CycleId == "older-start-later-result",
+                "History keyset pagination preserves newest-to-oldest TEST START order across pages");
         }
         finally
         {

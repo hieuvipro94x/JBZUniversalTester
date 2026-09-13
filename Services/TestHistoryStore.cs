@@ -2029,106 +2029,6 @@ public sealed class TestHistoryStore
         using SqliteConnection connection = Open();
         using SqliteCommand command = connection.CreateCommand();
         List<string> clauses = ConfigureHistoryFilter(command, criteria, includeCursor: !exportAll);
-        /*
-        if (criteria.From is DateTime from)
-        {
-            clauses.Add("t.ResultAt >= $From");
-            command.Parameters.AddWithValue("$From", from.ToString("O", CultureInfo.InvariantCulture));
-        }
-        if (criteria.To is DateTime to)
-        {
-            clauses.Add("t.ResultAt < $To");
-            command.Parameters.AddWithValue("$To", to.ToString("O", CultureInfo.InvariantCulture));
-        }
-        if (criteria.LotNo is long lot)
-        {
-            clauses.Add("t.Lot=$Lot");
-            command.Parameters.AddWithValue("$Lot", lot);
-        }
-        if (!string.IsNullOrWhiteSpace(criteria.PartKeyword))
-        {
-            clauses.Add("(p.PartNumber LIKE $Part OR p.PartName LIKE $Part OR m.ModelName LIKE $Part OR t.FaultSummary LIKE $Part)");
-            command.Parameters.AddWithValue("$Part", $"%{criteria.PartKeyword.Trim()}%");
-        }
-        if (!string.IsNullOrWhiteSpace(criteria.Result) &&
-            !criteria.Result.Equals("ALL", StringComparison.OrdinalIgnoreCase))
-        {
-            string resultFilter = criteria.Result.Trim().ToUpperInvariant();
-            if (resultFilter == "PASS")
-            {
-                clauses.Add("t.Passed=1");
-            }
-            else if (resultFilter == "FAIL")
-            {
-                clauses.Add("t.Passed=0");
-            }
-            else if (TryMapHistoryFaultFilter(resultFilter, out string faultCode))
-            {
-                clauses.Add("(REPLACE(UPPER(t.ResultCode),' ','_')=$FaultCode OR " +
-                            "UPPER(t.FaultType) LIKE $FaultTypeEnglish OR " +
-                            "UPPER(t.FaultType) LIKE $FaultTypeVietnamese OR " +
-                            "EXISTS(SELECT 1 FROM TestFaults rf WHERE rf.TestId=t.Id AND " +
-                            "(REPLACE(UPPER(rf.FaultCode),' ','_')=$FaultCode OR " +
-                            "REPLACE(UPPER(rf.FaultType),' ','_')=$FaultCode)))");
-                command.Parameters.AddWithValue("$FaultCode", faultCode);
-                (string english, string vietnamese) = faultCode switch
-                {
-                    "OPEN_CIRCUIT" => ("%OPEN CIRCUIT%", "%HỞ MẠCH%"),
-                    "WRONG_WIRING" => ("%INCORRECT CONNECTION%", "%SAI DÂY%"),
-                    "SHORT_CIRCUIT" => ("%SHORT CIRCUIT%", "%CHẬP MẠCH%"),
-                    "RESISTANCE_OUT_OF_RANGE" => ("%RESISTANCE OUT OF SPECIFICATION%", "%ĐIỆN TRỞ%"),
-                    _ => (faultCode, faultCode)
-                };
-                command.Parameters.AddWithValue("$FaultTypeEnglish", english);
-                command.Parameters.AddWithValue("$FaultTypeVietnamese", vietnamese);
-            }
-            else
-            {
-                clauses.Add("(t.Result LIKE $Result OR t.FaultType LIKE $Result OR t.ResultCode LIKE $Result)");
-                command.Parameters.AddWithValue("$Result", $"%{criteria.Result.Trim()}%");
-            }
-        }
-        if (!string.IsNullOrWhiteSpace(criteria.InspectionType))
-        {
-            clauses.Add("t.InspectionType=$Inspection");
-            command.Parameters.AddWithValue("$Inspection", criteria.InspectionType.Trim());
-        }
-        if (!string.IsNullOrWhiteSpace(criteria.FaultType))
-        {
-            clauses.Add("EXISTS(SELECT 1 FROM TestFaults f WHERE f.TestId=t.Id AND (f.FaultType LIKE $Fault OR f.FaultCode LIKE $Fault))");
-            command.Parameters.AddWithValue("$Fault", $"%{criteria.FaultType.Trim()}%");
-        }
-        if (criteria.Io is int io)
-        {
-            clauses.Add("EXISTS(SELECT 1 FROM TestFaults f WHERE f.TestId=t.Id AND $Io IN (f.ExpectedSourceIo,f.ExpectedTargetIo,f.ActualSourceIo,f.ActualTargetIo))");
-            command.Parameters.AddWithValue("$Io", io);
-        }
-        if (!string.IsNullOrWhiteSpace(criteria.WireName))
-        {
-            clauses.Add("EXISTS(SELECT 1 FROM TestFaults f WHERE f.TestId=t.Id AND f.WireName LIKE $Wire)");
-            command.Parameters.AddWithValue("$Wire", $"%{criteria.WireName.Trim()}%");
-        }
-        if (!string.IsNullOrWhiteSpace(criteria.CycleId))
-        {
-            clauses.Add("t.CycleId=$Cycle");
-            command.Parameters.AddWithValue("$Cycle", criteria.CycleId.Trim());
-        }
-        if (!string.IsNullOrWhiteSpace(criteria.AppVersion))
-        {
-            clauses.Add("t.AppVersion LIKE $AppVersion");
-            command.Parameters.AddWithValue("$AppVersion", $"%{criteria.AppVersion.Trim()}%");
-        }
-        if (!exportAll && criteria.BeforeResultAt is DateTime beforeResultAt &&
-            criteria.BeforeId is long beforeId)
-        {
-            clauses.Add("(t.ResultAt < $BeforeResultAt OR (t.ResultAt=$BeforeResultAt AND t.Id < $BeforeId))");
-            command.Parameters.AddWithValue(
-                "$BeforeResultAt",
-                beforeResultAt.ToString("O", CultureInfo.InvariantCulture));
-            command.Parameters.AddWithValue("$BeforeId", beforeId);
-        }
-
-        */
         int limit = Math.Clamp(criteria.MaxRows, 1, 5_000);
         int offset = Math.Max(0, criteria.Offset);
 
@@ -2137,10 +2037,10 @@ public sealed class TestHistoryStore
         // nếu không test dài/ngắn khác nhau có thể làm giờ đang hiển thị bị đảo.
         const string historyAtSql = "COALESCE(t.TestStartedAt,t.StartedAt)";
         string order =
-            $"ORDER BY {historyAtSql},t.Id" +
+            $"ORDER BY {historyAtSql} DESC,t.Id DESC" +
             (!exportAll && applyLimit
                 ? $" LIMIT {limit}" +
-                  (criteria.AfterHistoryAt is null ? $" OFFSET {offset}" : string.Empty)
+                  (criteria.BeforeHistoryAt is null ? $" OFFSET {offset}" : string.Empty)
                 : string.Empty);
         string labelPayloadColumn = includeLabelPayload ? "t.LabelPayload" : "''";
         command.CommandText = $"""
@@ -2215,11 +2115,11 @@ public sealed class TestHistoryStore
         if (!string.IsNullOrWhiteSpace(criteria.WireName)) { clauses.Add("EXISTS(SELECT 1 FROM TestFaults f WHERE f.TestId=t.Id AND f.WireName LIKE $Wire)"); command.Parameters.AddWithValue("$Wire", $"%{criteria.WireName.Trim()}%"); }
         if (!string.IsNullOrWhiteSpace(criteria.CycleId)) { clauses.Add("t.CycleId=$Cycle"); command.Parameters.AddWithValue("$Cycle", criteria.CycleId.Trim()); }
         if (!string.IsNullOrWhiteSpace(criteria.AppVersion)) { clauses.Add("t.AppVersion LIKE $AppVersion"); command.Parameters.AddWithValue("$AppVersion", $"%{criteria.AppVersion.Trim()}%"); }
-        if (includeCursor && criteria.AfterHistoryAt is DateTime cursor && criteria.AfterId is long id)
+        if (includeCursor && criteria.BeforeHistoryAt is DateTime cursor && criteria.BeforeId is long id)
         {
-            clauses.Add($"({historyAtSql} > $AfterHistoryAt OR ({historyAtSql}=$AfterHistoryAt AND t.Id > $AfterId))");
-            command.Parameters.AddWithValue("$AfterHistoryAt", cursor.ToString("O", CultureInfo.InvariantCulture));
-            command.Parameters.AddWithValue("$AfterId", id);
+            clauses.Add($"({historyAtSql} < $BeforeHistoryAt OR ({historyAtSql}=$BeforeHistoryAt AND t.Id < $BeforeId))");
+            command.Parameters.AddWithValue("$BeforeHistoryAt", cursor.ToString("O", CultureInfo.InvariantCulture));
+            command.Parameters.AddWithValue("$BeforeId", id);
         }
         return clauses;
     }

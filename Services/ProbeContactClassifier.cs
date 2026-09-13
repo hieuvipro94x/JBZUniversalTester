@@ -1,4 +1,4 @@
-﻿using JBZUniversalTester.Models;
+using JBZUniversalTester.Models;
 
 namespace JBZUniversalTester.Services;
 
@@ -203,6 +203,57 @@ public static class ProbeContactClassifier
         }
 
         return fanInByTarget.Any(pair => pair.Value is > 0 and <= 2);
+    }
+
+    /// <summary>
+    /// Trả về true khi snapshot có ít nhất một cạnh điện low-fan-in không thuộc
+    /// topology mong đợi. Cạnh vật lý này phải được TestEngine/LiveTopology xử lý
+    /// trước preview Probe; nếu không một nối tắt hai chân ngoài model có thể bị
+    /// quarantine thành PROBE_ONLY và mất cảnh báo CHẬP MẠCH.
+    /// </summary>
+    public static bool HasUnexpectedDirectConnectionEvidence(
+        ScanFrame frame,
+        ProductModel? model)
+    {
+        if (frame.Mode != BoardScanMode.Production ||
+            !frame.Complete ||
+            frame.UnknownBytes != 0 ||
+            !frame.TerminatorKnown)
+        {
+            return false;
+        }
+
+        var fanInByTarget = new Dictionary<int, int>();
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target > 0 && target != pair.Key)
+                    fanInByTarget[target] = fanInByTarget.GetValueOrDefault(target) + 1;
+            }
+        }
+
+        if (fanInByTarget.Count == 0)
+            return false;
+
+        HashSet<long> expectedEdges = BuildExpectedEdges(model);
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target <= 0 || target == pair.Key)
+                    continue;
+
+                int fanIn = fanInByTarget.GetValueOrDefault(target);
+                if (fanIn is > 0 and <= 2 &&
+                    !expectedEdges.Contains(EdgeKey(pair.Key, target)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static HashSet<long> BuildExpectedEdges(ProductModel? model)

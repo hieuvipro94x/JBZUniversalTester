@@ -1,4 +1,4 @@
-﻿using JBZUniversalTester.Models;
+using JBZUniversalTester.Models;
 
 using System.Diagnostics;
 using System.Globalization;
@@ -3012,15 +3012,11 @@ public sealed class TestEngine : IDisposable
         };
     }
 
-    public async Task<bool> CompletePassAsync(
+    public bool CanCompletePass(
         IReadOnlyList<ResistanceResult> resistance,
-        Action? onPassStarted = null,
-        bool markingEnabled = true,
-        bool continuityAlreadyValidated = false,
-        CancellationToken ct = default)
+        bool continuityAlreadyValidated = false)
     {
-        ProductModel? model = _model;
-        if (model is null)
+        if (_model is null)
             return false;
 
         int expectedResistanceCount = ResistanceMeasurementPlan.BuildEnabledSteps(_production).Count;
@@ -3028,8 +3024,20 @@ public sealed class TestEngine : IDisposable
                             (resistance.Count == expectedResistanceCount &&
                              resistance.All(x => x.Passed));
 
-        if ((!ContinuityPassed && !continuityAlreadyValidated) || !resistanceOk)
+        return (ContinuityPassed || continuityAlreadyValidated) && resistanceOk;
+    }
+
+    public async Task<bool> CompletePassAsync(
+        IReadOnlyList<ResistanceResult> resistance,
+        Action? onPassStarted = null,
+        bool markingEnabled = true,
+        bool continuityAlreadyValidated = false,
+        CancellationToken ct = default)
+    {
+        if (!CanCompletePass(resistance, continuityAlreadyValidated))
             return false;
+
+        int expectedResistanceCount = ResistanceMeasurementPlan.BuildEnabledSteps(_production).Count;
 
         if (expectedResistanceCount == 0)
         {

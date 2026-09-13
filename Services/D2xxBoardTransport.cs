@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -984,25 +984,15 @@ public sealed class D2xxBoardTransport : IBoardTransport
     {
         var buffer = new byte[65536];
         WaitHandle[] receiveWaitHandles = [_rxEvent, ct.WaitHandle];
-        bool waitForRxNotification = true;
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                if (waitForRxNotification)
-                {
-                    PublishPerfAggregateIfDue(_scanMode);
-
-                    // Event-first receive: do not spend one empty queue call after
-                    // every successful read. A timeout is only a watchdog fallback;
-                    // it still checks the queue once in case a driver notification
-                    // was missed, without creating a millisecond polling loop.
-                    int waitResult = WaitHandle.WaitAny(receiveWaitHandles, 1000);
-                    if (waitResult == 1 || ct.IsCancellationRequested)
-                        break;
-                }
-
+                // Drain-to-empty: khi stream đang có dữ liệu, đọc/poll liên tục cho
+                // tới khi FTDI queue rỗng. Chỉ chờ RX event khi queue thực sự rỗng.
+                // Cách này tránh bị giới hạn bởi nhịp event ~16 ms (~62 read/s),
+                // đặc biệt quan trọng với 10 card / 640 source mỗi frame.
                 Interlocked.Increment(ref _pollCount);
                 // Chụp generation trước khi kiểm tra control waiter. Nếu một
                 // STOP/START bắt đầu ngay sau đây, buffer đang đọc vẫn mang
@@ -1078,14 +1068,14 @@ public sealed class D2xxBoardTransport : IBoardTransport
                         Interlocked.Increment(ref _zeroQueueCount);
 
                     PublishPerfAggregateIfDue(_scanMode);
-                    waitForRxNotification = true;
+                    int waitResult = WaitHandle.WaitAny(receiveWaitHandles, 1000);
+                    if (waitResult == 1 || ct.IsCancellationRequested)
+                        break;
                     continue;
                 }
 
-                // Usually queued == read because the reusable buffer is 64 KiB.
-                // If the driver returned less, drain the known remainder directly
-                // instead of waiting for another notification.
-                waitForRxNotification = read >= queued;
+                // Successful read: loop immediately and drain any bytes that arrived
+                // while this chunk was decoded. Do not wait for another RX event.
 
                 Interlocked.Add(ref _bytesReceived, (long)read);
                 PublishProtocolTrace("RX", buffer.AsSpan(0, checked((int)read)));
@@ -1121,7 +1111,6 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     }
 
                     PublishPerfAggregateIfDue(_scanMode);
-                    waitForRxNotification = true;
                     continue;
                 }
                 finally

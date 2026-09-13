@@ -1,4 +1,4 @@
-﻿namespace JBZUniversalTester.Models;
+namespace JBZUniversalTester.Models;
 
 public sealed class TestHistoryRecord
 {
@@ -252,8 +252,8 @@ public sealed record HistorySearchCriteria(
     string WireName = "",
     string CycleId = "",
     string AppVersion = "",
-    DateTime? AfterHistoryAt = null,
-    long? AfterId = null);
+    DateTime? BeforeHistoryAt = null,
+    long? BeforeId = null);
 
 public sealed record HistorySummary(
     long Total,

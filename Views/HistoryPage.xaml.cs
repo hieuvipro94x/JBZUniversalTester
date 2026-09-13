@@ -163,8 +163,8 @@ public partial class HistoryPage : UserControl
             {
                 MaxRows = PageSize,
                 Offset = 0,
-                AfterHistoryAt = cursor.EffectiveTestStartedAt,
-                AfterId = cursor.Id
+                BeforeHistoryAt = cursor.EffectiveTestStartedAt,
+                BeforeId = cursor.Id
             };
             IReadOnlyList<TestHistoryRecord> page = await Task.Run(() => GetStore().SearchSummary(pageCriteria));
             if (generation != Volatile.Read(ref _reloadGeneration))

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
@@ -185,6 +185,7 @@ public sealed class TestViewModel : ObservableObject
     private long _continuityPreviewUiCycleEpoch;
     private long _continuityPreviewUiSequence;
     private int _deviceFault;
+    private int _persistenceFault;
     private int _boardUnavailablePresentationApplied;
     private int _manualModeActive;
     private int _hardwareReconfigurationActive;
@@ -361,6 +362,7 @@ public sealed class TestViewModel : ObservableObject
     };
 
     public bool IsDeviceFault => Volatile.Read(ref _deviceFault) != 0;
+    public bool IsPersistenceFault => Volatile.Read(ref _persistenceFault) != 0;
     public bool IsManualModeActive => Volatile.Read(ref _manualModeActive) != 0;
     public bool CanEnterManualMode => !IsDeviceFault && !IsManualForbiddenWorkActive;
     public string DeviceFaultMessage => _deviceFaultMessage;
@@ -1703,6 +1705,104 @@ public sealed class TestViewModel : ObservableObject
                     ProgramIdentityService.VersionText);
             }
         }
+    }
+
+    private async Task<bool> EnsureProductionPersistenceReadyAsync(string source)
+    {
+        try
+        {
+            ProductionPersistenceService persistence = ProductionPersistence;
+            await persistence.Initialization;
+            if (persistence.SchemaVersion != TestHistoryStore.CurrentSchemaVersion)
+            {
+                throw new InvalidDataException(
+                    $"SQLite schema v{persistence.SchemaVersion} không khớp runtime " +
+                    $"v{TestHistoryStore.CurrentSchemaVersion}.");
+            }
+
+            Interlocked.Exchange(ref _persistenceFault, 0);
+            Raise(nameof(IsPersistenceFault));
+            return true;
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            await HandlePersistenceFaultAsync(
+                ex,
+                source,
+                productMayBePresent: false,
+                stopScan: false);
+            return false;
+        }
+    }
+
+    private async Task HandlePersistenceFaultAsync(
+        Exception exception,
+        string source,
+        bool productMayBePresent,
+        bool stopScan)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        Interlocked.Exchange(ref _persistenceFault, 1);
+        Raise(nameof(IsPersistenceFault));
+
+        string diagnostic =
+            $"PERSISTENCE FAULT [{source}]{Environment.NewLine}" +
+            $"Timestamp={DateTime.Now:O}{Environment.NewLine}" +
+            $"Exception={exception.GetType().FullName}{Environment.NewLine}" +
+            $"Message={exception.Message}{Environment.NewLine}" +
+            $"CycleId={_activeCycleId}{Environment.NewLine}" +
+            $"Model={_model?.ModelName ?? "(none)"} / {_model?.PartNumber ?? "(none)"}{Environment.NewLine}" +
+            $"Database={ResolveHistoryDatabasePath(_productionSettings)}";
+        AsyncFileLogService.Current.Error(diagnostic);
+        AddLog($"LỖI LƯU DỮ LIỆU [{source}]: {exception.Message}");
+
+        if (Application.Current is not null)
+            CrashReportService.Write(exception, $"Data.Persistence.{source}", diagnostic);
+
+        _cycleActive = false;
+        Interlocked.Exchange(ref _postContinuityStarted, 0);
+        Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+        _sound.SetWiringFaultAlarm(false);
+        SetProductionPhase(ProductionPhase.EquipmentError);
+
+        if (productMayBePresent)
+        {
+            _waitForProductRelease = true;
+            // Commit có thể chưa tạo Tests row, vì vậy không gọi
+            // SetProductRemovalPending() (hàm đó sẽ ghi RemovalStarted khi latch
+            // result đã bật). Chỉ khóa runtime để không ARM cycle khác.
+            if (Interlocked.Exchange(ref _productRemovalPending, 1) != 1)
+                Raise(nameof(IsProductRemovalPending));
+        }
+
+        if (stopScan && _board.IsConnected)
+        {
+            try
+            {
+                _scanSupervisor.Suspend("PersistenceFault");
+                if (_board.IsScanning)
+                    await _board.StopScanAsync(CancellationToken.None);
+                await _board.AllRelaysOffAsync(CancellationToken.None);
+            }
+            catch (Exception hardwareException)
+            {
+                // Chỉ lỗi thật từ board/relay mới được phân loại DeviceFault.
+                EnterDeviceFault(hardwareException, "PersistenceFault.SafeHardware");
+                return;
+            }
+        }
+
+        await InvokeUiAsync(() =>
+        {
+            State = productMayBePresent
+                ? "LỖI LƯU DỮ LIỆU - KHÔNG MARKING/JIG"
+                : "LỖI LƯU DỮ LIỆU - KHÔNG BẮT ĐẦU TEST";
+            RaiseTestStatistics();
+        });
     }
 
     private CancellationToken BeginCycleOperations()
@@ -3952,25 +4052,34 @@ public sealed class TestViewModel : ObservableObject
             ClearInlineProbeContactsState();
             SetProbePresentationState(ProbePresentationState.Released, [], frame.Sequence);
             long releaseRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
-            LiveTopologySnapshot restore = _lastLiveTopologySnapshot;
-            InvokeUi(() =>
+            bool physicalTopologyNow =
+                ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(frame, _model);
+            if (!physicalTopologyNow)
             {
-                if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-                    !IsIoMappingMode ||
-                    releaseRevision != Volatile.Read(ref _inlineProbeUiRevision))
+                LiveTopologySnapshot restore = _lastLiveTopologySnapshot;
+                InvokeUi(() =>
                 {
-                    return;
-                }
+                    if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                        !IsIoMappingMode ||
+                        releaseRevision != Volatile.Read(ref _inlineProbeUiRevision))
+                    {
+                        return;
+                    }
 
-                ProbeContacts.Clear();
-                SetLiveTopologyProductState(restore, "PROBE_RELEASE_RESTORE");
-                SynchronizeFaultRows(restore.Rows);
-                UpdateProbeCardActivity(Array.Empty<int>());
-                Raise(nameof(HasInlineProbeContacts));
-                RaiseTestStatistics();
-                LogUiSnapshot(frame.Sequence, frame.ScanGeneration, restore.Rows.Count, "live-restore");
-            });
-            return;
+                    ProbeContacts.Clear();
+                    SetLiveTopologyProductState(restore, "PROBE_RELEASE_RESTORE");
+                    SynchronizeFaultRows(restore.Rows);
+                    UpdateProbeCardActivity(Array.Empty<int>());
+                    Raise(nameof(HasInlineProbeContacts));
+                    RaiseTestStatistics();
+                    LogUiSnapshot(frame.Sequence, frame.ScanGeneration, restore.Rows.Count, "live-restore");
+                });
+                return;
+            }
+
+            // Nếu frame release đồng thời đã có cạnh điện thật, không restore
+            // snapshot cũ rồi bỏ frame. Fall through để LiveTopology hiển thị
+            // cặp CHẬP MẠCH ngay trong chính snapshot hiện tại.
         }
 
         SetProbePresentationState(ProbePresentationState.Inactive, [], frame.Sequence);
@@ -4527,6 +4636,16 @@ public sealed class TestViewModel : ObservableObject
         ios = Array.Empty<int>();
         if (frame.Mode != BoardScanMode.Production)
         {
+            return false;
+        }
+
+        // Cạnh điện low-fan-in ngoài topology là bằng chứng vật lý authoritative.
+        // Nó phải thắng preview Probe để IO9<->IO10 (hoặc bất kỳ cặp ngoài model)
+        // vẫn đi vào TestEngine/LiveTopology và báo CHẬP MẠCH. Consume preview cùng
+        // frame để candidate cũ không rò sang snapshot kế tiếp.
+        if (ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(frame, _model))
+        {
+            _ = TakeProbePreviewForFrame(frame);
             return false;
         }
 
@@ -5483,6 +5602,11 @@ public sealed class TestViewModel : ObservableObject
 
         bool ioMappingMode = IsIoMappingMode;
 
+        // Production result phải có SQLite writable trước khi ARM. IO Mapping
+        // không ghi kết quả production nên vẫn được phép dùng để chẩn đoán bo.
+        if (!ioMappingMode && !await EnsureProductionPersistenceReadyAsync("StartProduction.Preflight"))
+            return;
+
         if (!_board.IsConnected)
         {
             ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
@@ -5567,7 +5691,8 @@ public sealed class TestViewModel : ObservableObject
         _activeCycleId = Guid.NewGuid().ToString("N");
         _lastFaultRejectSignature = string.Empty;
         _cycleStartedAt = DateTime.Now;
-        _ = PersistActiveCycleStageAsync("ARMED");
+        if (!ioMappingMode)
+            _ = PersistActiveCycleStageAsync("ARMED");
         _cycleTestStartedAt = null;
         _cycleRemovalStartedAt = null;
         ResetCycleInspectionTrace();
@@ -5852,12 +5977,15 @@ public sealed class TestViewModel : ObservableObject
         bool committed = await RecordCompletedProductAsync(false, primaryName, cycleModel, generation, cycleToken);
         if (!committed)
         {
-            AbortProductionFaultForProbe();
-            await RecoverAfterUncommittedFailAsync(
-                cycleModel,
-                generation,
-                cycleToken,
-                "WIRING_FAIL");
+            if (!IsPersistenceFault)
+            {
+                AbortProductionFaultForProbe();
+                await RecoverAfterUncommittedFailAsync(
+                    cycleModel,
+                    generation,
+                    cycleToken,
+                    "WIRING_FAIL");
+            }
             return;
         }
 
@@ -6588,11 +6716,39 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
+            // MASTER GOOD cũng phải tuân cùng invariants với Product PASS:
+            // kết quả phải commit SQLite bền vững TRƯỚC khi pulse JIG. Nếu DB lỗi,
+            // mẫu vẫn nằm trên jig và production bị khóa thay vì eject không trace.
+            if (!_engine.CanCompletePass(Resistance))
+            {
+                State = "MASTER PASS - FAIL";
+                MasterStatus = "MASTER PASS KHÔNG CÒN ĐỦ ĐIỀU KIỆN - KIỂM TRA LẠI";
+                AddLog("MASTER GOOD FAIL - điều kiện PASS đổi trước khi commit History.");
+                RecordMasterHistory(
+                    HistoryInspectionType.MasterGood,
+                    passed: false,
+                    CaptureFaultDetails());
+                MarkMasterRemovalStarted();
+                return;
+            }
+
+            masterPassAt = DateTime.Now;
+            RecordMasterHistory(
+                HistoryInspectionType.MasterGood,
+                passed: true,
+                [],
+                masterPassAt);
+            await _masterPersistenceTask;
+            if (IsPersistenceFault)
+            {
+                AddLog("MASTER GOOD: SQLite chưa commit; KHÔNG pulse JIG.");
+                return;
+            }
+
             bool ok = await _engine.CompletePassAsync(
                 Resistance,
                 onPassStarted: () =>
                 {
-                    masterPassAt ??= DateTime.Now;
                     State = "HOÀN THÀNH MẪU MASTER ĐẠT";
                     MasterStatus = State;
                     _sound.PlayTestOk();
@@ -6602,14 +6758,10 @@ public sealed class TestViewModel : ObservableObject
 
             if (!ok)
             {
-                State = "MASTER PASS - FAIL";
-                MasterStatus = "MASTER PASS KHÔNG HOÀN THÀNH PASS - KIỂM TRA LẠI";
-                AddLog("MASTER GOOD FAIL - CompletePassAsync trả false.");
-                RecordMasterHistory(
-                    HistoryInspectionType.MasterGood,
-                    passed: false,
-                    CaptureFaultDetails());
-                MarkMasterRemovalStarted();
+                State = "LỖI THỰC THI RELAY MASTER";
+                MasterStatus = "MASTER ĐÃ LƯU PASS NHƯNG KHÔNG THỂ MỞ JIG";
+                AddLog("MASTER GOOD: kết quả đã commit nhưng CompletePassAsync trả false; không ghi đè History.");
+                await _board.AllRelaysOffAsync(CancellationToken.None);
                 return;
             }
 
@@ -6617,11 +6769,6 @@ public sealed class TestViewModel : ObservableObject
             await _board.AllRelaysOffAsync(CancellationToken.None);
 
             _masterGoodVerified = true;
-            RecordMasterHistory(
-                HistoryInspectionType.MasterGood,
-                passed: true,
-                [],
-                masterPassAt);
             MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: true);
             MasterState = MasterSequenceState.EjectingGoodMaster;
@@ -6693,6 +6840,15 @@ public sealed class TestViewModel : ObservableObject
         CancellationToken ct = CurrentCycleToken();
         try
         {
+            // MASTER BAD N/N phải được commit trước khi mở JIG. Nếu SQLite lỗi,
+            // giữ mẫu tại jig để không mất traceability.
+            await _masterPersistenceTask;
+            if (IsPersistenceFault)
+            {
+                AddLog("MASTER BAD: SQLite chưa commit; KHÔNG pulse JIG.");
+                return;
+            }
+
             _masterFaultCollectionLocked = true;
             MasterState = MasterSequenceState.EjectingBadMaster;
             State = "HOÀN THÀNH MẪU MASTER LỖI";
@@ -6855,7 +7011,22 @@ public sealed class TestViewModel : ObservableObject
             PrintStatus = LabelPrintStatus.NotRequested.ToString()
         };
 
-        TestHistoryStore store = HistoryStore;
+        TestHistoryStore store;
+        try
+        {
+            store = HistoryStore;
+        }
+        catch (Exception ex)
+        {
+            // Schema/SQLite là lỗi persistence, không phải mất kết nối bo.
+            _masterPersistenceTask = HandlePersistenceFaultAsync(
+                ex,
+                $"Master.{inspectionType}.OpenStore",
+                productMayBePresent: true,
+                stopScan: true);
+            return;
+        }
+
         _masterRecordedHistoryStore = store;
         _masterHistoryCycleId = cycleId;
         ProductionResultCommitRequest request = ProductionResultCommitRequest.Capture(
@@ -6884,7 +7055,11 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             AddLog($"LỖI LƯU DỮ LIỆU MASTER {inspectionType}: {ex.Message}");
-            throw;
+            await HandlePersistenceFaultAsync(
+                ex,
+                $"Master.{inspectionType}",
+                productMayBePresent: true,
+                stopScan: true);
         }
     }
 
@@ -8133,12 +8308,15 @@ public sealed class TestViewModel : ObservableObject
                     if (!committed)
                     {
                         Interlocked.Exchange(ref _postContinuityStarted, 0);
-                        AddLog("Resistance FAIL đã được chu kỳ hiện tại xử lý trước đó; bỏ qua popup/eject lặp.");
-                        await RecoverAfterUncommittedFailAsync(
-                            cycleModel,
-                            generation,
-                            ct,
-                            "RESISTANCE_FAIL");
+                        AddLog("Resistance FAIL chưa commit; bỏ qua popup/eject để không tạo sản phẩm mất traceability.");
+                        if (!IsPersistenceFault)
+                        {
+                            await RecoverAfterUncommittedFailAsync(
+                                cycleModel,
+                                generation,
+                                ct,
+                                "RESISTANCE_FAIL");
+                        }
                         return;
                     }
 
@@ -8200,7 +8378,6 @@ public sealed class TestViewModel : ObservableObject
 
                 passUiTriggered = true;
                 passUiTimestamp = Stopwatch.GetTimestamp();
-                passResultAt = DateTime.Now;
                 State = "PASS";
                 AsyncFileLogService.Current.Performance(
                     $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
@@ -8209,14 +8386,13 @@ public sealed class TestViewModel : ObservableObject
                 AddLog("PASS - continuity/điện trở/kín nước theo cấu hình đã đạt; chuẩn bị chuỗi relay MARKING/JIG.");
             }
 
-            TriggerPassUi();
             await PauseProductionScanForFinalPassAsync(ct);
 
-            // PASS UI/sound phải bật ngay khi điều kiện logic đã đạt.
-            // Relay chạy sau theo cấu hình Production Settings.
-            // Tuyệt đối không cho relay PASS chạy trong lúc/Ngay sau khi que
-            // dò GND còn tạo tín hiệu. Sau lockout phải xác nhận continuity
-            // vẫn PASS và không có wiring fault mới được MARKING/JIG.
+            // Relay chạy sau theo cấu hình Production Settings. Tuyệt đối không
+            // cho relay PASS chạy trong lúc/ngay sau khi que dò còn tạo tín hiệu.
+            // Quan trọng hơn: kết quả PASS phải commit SQLite DURABLE trước khi
+            // MARKING/JIG được phép tác động, để không có sản phẩm đã eject nhưng
+            // lịch sử lại mất khi DB/schema/ổ đĩa lỗi.
             await WaitForProbeRelayInterlockAsync(ct);
             // Continuity đã được chốt trước khi vào bước điện trở cuối cùng.
             // Các thao tác đo có thể dừng scan nên dùng snapshot đã xác nhận.
@@ -8231,27 +8407,13 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            bool ok = await _engine.CompletePassAsync(
-                Resistance,
-                onPassStarted: () =>
-                {
-                    if (!passUiTriggered)
-                    {
-                        TriggerPassUi();
-                        return;
-                    }
-
-                    AddLog(PassRelaySequenceText() + " bắt đầu.");
-                },
-                continuityAlreadyValidated: continuityLatchedForFinalPass,
-                ct: ct);
-
-            if (!ok)
+            if (!_engine.CanCompletePass(Resistance, continuityLatchedForFinalPass))
             {
                 await HandleFinalPassRejectedAsync(cycleModel, generation, ct);
                 return;
             }
 
+            passResultAt = DateTime.Now;
             bool passCommitted = await RecordCompletedProductAsync(
                 true,
                 "PASS",
@@ -8262,11 +8424,35 @@ public sealed class TestViewModel : ObservableObject
             if (!passCommitted)
             {
                 Interlocked.Exchange(ref _postContinuityStarted, 0);
-                await RecoverAfterUncommittedFailAsync(
-                    cycleModel,
-                    generation,
-                    ct,
-                    "PASS_COMMIT_REJECTED");
+                if (!IsPersistenceFault)
+                {
+                    await RecoverAfterUncommittedFailAsync(
+                        cycleModel,
+                        generation,
+                        ct,
+                        "PASS_COMMIT_REJECTED");
+                }
+                return;
+            }
+
+            // Từ đây PASS đã durable. UI/âm thanh và relay chỉ được chạy sau commit.
+            TriggerPassUi();
+            bool ok = await _engine.CompletePassAsync(
+                Resistance,
+                onPassStarted: () => AddLog(PassRelaySequenceText() + " bắt đầu."),
+                continuityAlreadyValidated: continuityLatchedForFinalPass,
+                ct: ct);
+
+            if (!ok)
+            {
+                // Không được đổi PASS đã commit thành FAIL. Giữ outputs safe và
+                // khóa vòng đời để người vận hành xử lý sản phẩm đang trong JIG.
+                _cycleActive = false;
+                SetProductionPhase(ProductionPhase.EquipmentError);
+                SetProductRemovalPending(true);
+                await _board.AllRelaysOffAsync(CancellationToken.None);
+                State = "PASS ĐÃ LƯU - RELAY BỊ CHẶN";
+                AddLog("PASS đã commit SQLite nhưng chuỗi relay bị từ chối; không ghi FAIL/không cộng lại kết quả.");
                 return;
             }
 
@@ -8356,12 +8542,15 @@ public sealed class TestViewModel : ObservableObject
         if (!committed)
         {
             Interlocked.Exchange(ref _postContinuityStarted, 0);
-            AddLog("Final PASS rejection không commit được; không mở popup/eject lặp vì lifecycle kết quả đã đổi chủ.");
-            await RecoverAfterUncommittedFailAsync(
-                cycleModel,
-                generation,
-                ct,
-                "FINAL_PASS_REJECT");
+            AddLog("Final PASS rejection không commit được; không mở popup/eject để không tạo sản phẩm mất traceability.");
+            if (!IsPersistenceFault)
+            {
+                await RecoverAfterUncommittedFailAsync(
+                    cycleModel,
+                    generation,
+                    ct,
+                    "FINAL_PASS_REJECT");
+            }
             return;
         }
 
@@ -8910,14 +9099,11 @@ public sealed class TestViewModel : ObservableObject
                     return;
                 }
 
-                Total = 0;
-                Pass = 0;
-                Fail = 0;
-                DailyTestCount = 0;
-                MonthlyTestCount = 0;
-                LifetimeTestCount = 0;
-                ProbeCycleCount = 0;
-                UpdateDailyLotDisplay();
+                // Không biến lỗi DB thành số liệu 0 giả. Giữ snapshot đang có và
+                // khóa Production ở preflight cho tới khi SQLite mở lại được.
+                Interlocked.Exchange(ref _persistenceFault, 1);
+                Raise(nameof(IsPersistenceFault));
+                State = "LỖI LƯU DỮ LIỆU - KHÔNG BẮT ĐẦU TEST";
                 RaiseTestStatistics();
                 AddLog($"Không thể nạp lịch sử sản lượng: {ex.Message}");
             });
@@ -9139,11 +9325,14 @@ public sealed class TestViewModel : ObservableObject
             }
         }
 
-        TestHistoryStore historyStore = HistoryStore;
+        TestHistoryStore? historyStore = null;
         bool historySaved = false;
         ProductionCommitResult? databaseResult = null;
         try
         {
+            // Constructor/migration của store cũng là persistence boundary và phải
+            // nằm trong catch này; schema mismatch không được lọt ra DeviceFault.
+            historyStore = HistoryStore;
             ProductionResultCommitRequest commitRequest = ProductionResultCommitRequest.Capture(
                 history,
                 model,
@@ -9190,7 +9379,11 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             AddLog($"LỖI LƯU DỮ LIỆU: kết quả cycle {cycleId} chưa được xác nhận trong SQLite: {ex.Message}");
-            await InvokeUiAsync(() => State = "LỖI LƯU DỮ LIỆU - KIỂM TRA Ổ ĐĨA");
+            await HandlePersistenceFaultAsync(
+                ex,
+                $"Commit.{resultStatus}",
+                productMayBePresent: true,
+                stopScan: true);
             return false;
         }
 
@@ -9240,7 +9433,7 @@ public sealed class TestViewModel : ObservableObject
             }
             else
             {
-                _ = PrintPassLabelSafeAsync(printRequest, historyStore, history.Id);
+                _ = PrintPassLabelSafeAsync(printRequest, historyStore!, history.Id);
             }
         }
 
