@@ -1,4 +1,5 @@
 using System.IO;
+using System.Globalization;
 using System.Text;
 using JBZUniversalTester.Versioning;
 
@@ -47,7 +48,7 @@ public static class CrashReportService
     private static string BuildOperatorConnectionReport() =>
         new StringBuilder()
             .AppendLine("============================================================")
-            .Append("Thời gian: ").AppendLine(DateTime.Now.ToString("O"))
+            .Append("Thời gian: ").AppendLine(FormatPcLocalTime(DateTime.Now))
             .Append("Phiên bản: ").AppendLine(AppVersion.DisplayVersion)
             .AppendLine("Loại lỗi: LỖI KẾT NỐI THIẾT BỊ")
             .AppendLine("Hướng dẫn: Kiểm tra nguồn và cáp kết nối, sau đó khởi động lại chương trình.")
@@ -60,7 +61,7 @@ public static class CrashReportService
         string? runtimeContext) =>
         new StringBuilder()
             .AppendLine("============================================================")
-            .Append("Crash Time: ").AppendLine(DateTime.Now.ToString("O"))
+            .Append("Crash Time: ").AppendLine(FormatPcLocalTime(DateTime.Now))
             .Append("AppVersion: ").AppendLine(AppVersion.DisplayVersion)
             .Append("Source: ").AppendLine(source ?? string.Empty)
             .Append("ExceptionType: ").AppendLine(exception.GetType().FullName ?? exception.GetType().Name)
@@ -73,4 +74,7 @@ public static class CrashReportService
             .Append("RuntimeContext: ").AppendLine(runtimeContext ?? string.Empty)
             .AppendLine()
             .ToString();
+
+    private static string FormatPcLocalTime(DateTime localTime) =>
+        localTime.ToString("G", CultureInfo.CurrentCulture);
 }

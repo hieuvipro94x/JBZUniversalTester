@@ -1619,6 +1619,8 @@ internal static class Program
             Path.Combine(Environment.CurrentDirectory, "Services", "CrashReportService.cs"));
         Assert(crashReportSource.Contains("IsDeviceConnectionFault(source) &&", StringComparison.Ordinal) &&
                crashReportSource.Contains("!AsyncFileLogService.Current.FileLoggingEnabled", StringComparison.Ordinal) &&
+               crashReportSource.Contains("ToString(\"G\", CultureInfo.CurrentCulture)", StringComparison.Ordinal) &&
+               !crashReportSource.Contains("DateTime.Now.ToString(\"O\")", StringComparison.Ordinal) &&
                crashReportSource.Contains("Loại lỗi: LỖI KẾT NỐI THIẾT BỊ", StringComparison.Ordinal) &&
                crashReportSource.Contains("BuildOperatorConnectionReport()", StringComparison.Ordinal) &&
                !crashReportSource[crashReportSource.IndexOf("BuildOperatorConnectionReport() =>", StringComparison.Ordinal)..
