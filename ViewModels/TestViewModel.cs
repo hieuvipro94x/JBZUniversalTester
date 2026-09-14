@@ -9088,6 +9088,12 @@ public sealed class TestViewModel : ObservableObject
                 part,
                 _productionSettings.ProbeReplacementThreshold,
                 _lifetimeCts.Token);
+            Task<TestHistoryRecord?> retryLabelTask = ProductionPersistence.GetLatestLabelForPartAsync(
+                part, [LabelPrintStatus.NotRequested, LabelPrintStatus.Failed], _lifetimeCts.Token);
+            Task<TestHistoryRecord?> pendingLabelTask = ProductionPersistence.GetLatestLabelForPartAsync(
+                part, [LabelPrintStatus.Pending], _lifetimeCts.Token);
+            Task<TestHistoryRecord?> sentLabelTask = ProductionPersistence.GetLatestLabelForPartAsync(
+                part, [LabelPrintStatus.Printed], _lifetimeCts.Token);
             await Task.Run(() =>
             {
                 // Diagnostic topology có thể có hàng trăm network; dựng chuỗi/log ở
@@ -9097,7 +9103,10 @@ public sealed class TestViewModel : ObservableObject
             }, _lifetimeCts.Token);
             var snapshot = (
                 Stats: await statisticsTask,
-                PartCounter: await probeTask);
+                PartCounter: await probeTask,
+                RetryLabel: await retryLabelTask,
+                PendingLabel: await pendingLabelTask,
+                SentLabel: await sentLabelTask);
 
             if (generation != Volatile.Read(ref _statisticsLoadGeneration) ||
                 _lifetimeCts.IsCancellationRequested ||
@@ -9123,6 +9132,19 @@ public sealed class TestViewModel : ObservableObject
                     "giữ SQLite PASS history làm nguồn sự thật sau lỗi in/cấu hình cũ.");
             }
 
+            if (snapshot.PendingLabel is TestHistoryRecord pending)
+            {
+                const string pendingMessage =
+                    "Phiên trước kết thúc khi đang gửi tem; trạng thái tem vật lý không xác định. Không tự động gửi lại.";
+                await ProductionPersistence.UpdateLabelPrintOutcomeAsync(
+                    pending.Id, pending.CycleId, LabelPrintStatus.Unknown, null, pendingMessage,
+                    cancellationToken: _lifetimeCts.Token);
+                AddLog($"LABEL UNKNOWN RECOVERED: cycle {pending.CycleId}; LOT {pending.LotNo}; {pendingMessage}");
+            }
+
+            LabelPrintContext? retryContext = RestoreLabelContext(snapshot.RetryLabel, model);
+            LabelPrintContext? sentContext = RestoreLabelContext(snapshot.SentLabel, model);
+
             await InvokeUiAsync(() =>
             {
                 if (!IsActiveStatisticsContext(model, part, generation))
@@ -9133,6 +9155,11 @@ public sealed class TestViewModel : ObservableObject
                 ApplyProductionStatistics(snapshot.Stats);
                 ApplyPartCounter(snapshot.PartCounter);
                 RaiseTestStatistics();
+
+                if (sentContext is not null)
+                    SetSuccessfulLabelContext(sentContext);
+                if (retryContext is not null)
+                    SetFailedLabelContext(retryContext, snapshot.RetryLabel!.PrintMessage);
 
                 AddLog(
                     $"Đã nạp sản lượng từ SQLite: Tổng {Total}, PASS {Pass}, FAIL {Fail}, " +
@@ -9166,6 +9193,21 @@ public sealed class TestViewModel : ObservableObject
         finally
         {
             _statisticsLoadGate.Release();
+        }
+    }
+
+    private LabelPrintContext? RestoreLabelContext(TestHistoryRecord? history, ProductModel model)
+    {
+        if (history is null) return null;
+        try
+        {
+            LabelPrintRequest request = LabelPrintRequest.Restore(history, model, _productionSettings.Label);
+            return new LabelPrintContext(request, HistoryStore, history.Id);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể khôi phục snapshot tem cycle {history.CycleId}: {ex.Message}");
+            return null;
         }
     }
 
@@ -9805,7 +9847,7 @@ public sealed class TestViewModel : ObservableObject
                 printedAt,
                 result.Message,
                 status == LabelPrintStatus.Printed ? request.Data.Barcode : null);
-            AddLog($"LABEL {status.ToString().ToUpperInvariant()}: cycle {request.CycleId}; {result.Message}");
+            AddLog($"LABEL {(result.Printed ? "SENT" : "FAILED")}: cycle {request.CycleId}; {result.Message}");
 
             if (result.Printed)
             {
@@ -9880,8 +9922,8 @@ public sealed class TestViewModel : ObservableObject
                 DateTime.Now,
                 result.Message,
                 _lifetimeCts.Token);
-            InvokeUi(() => LabelStatusText = $"TEM: ĐÃ IN LẠI LOT {context.Request.Data.LotNo}");
-            AddLog($"LABEL REPRINTED: cycle {context.Request.CycleId}; LOT {context.Request.Data.LotNo}; không tăng LOT.");
+            InvokeUi(() => LabelStatusText = $"TEM: ĐÃ GỬI LẠI LOT {context.Request.Data.LotNo}");
+            AddLog($"LABEL REPRINT SENT: cycle {context.Request.CycleId}; LOT {context.Request.Data.LotNo}; không tăng LOT.");
         }
         catch (Exception ex)
         {
@@ -9921,7 +9963,7 @@ public sealed class TestViewModel : ObservableObject
 
         InvokeUi(() =>
         {
-            LabelStatusText = $"TEM: ĐÃ IN LOT {context.Request.Data.LotNo}";
+            LabelStatusText = $"TEM: ĐÃ GỬI LOT {context.Request.Data.LotNo}";
             Raise(nameof(CanRetryLabel));
             Raise(nameof(CanReprintLabel));
             RetryLabelCommand.RaiseCanExecuteChanged();

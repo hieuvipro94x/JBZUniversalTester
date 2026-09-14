@@ -2170,6 +2170,51 @@ public sealed class TestHistoryStore
         return command.ExecuteNonQuery() == 1;
     }
 
+    public TestHistoryRecord? GetLatestLabelForPart(
+        PartIdentitySnapshot part,
+        params LabelPrintStatus[] statuses)
+    {
+        ArgumentNullException.ThrowIfNull(part);
+        if (statuses.Length == 0) return null;
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        var statusParameters = new List<string>(statuses.Length);
+        for (int i = 0; i < statuses.Length; i++)
+        {
+            string name = "$Status" + i.ToString(CultureInfo.InvariantCulture);
+            statusParameters.Add(name);
+            command.Parameters.AddWithValue(name, statuses[i].ToString());
+        }
+        command.CommandText = $"""
+            SELECT t.Id,t.FinishedAt,p.PartName,p.PartNumber,p.VehicleType,p.Eco,p.Nco,p.Alc,
+                   t.Lot,t.CycleId,m.ModelName,m.FilePath,t.LabelProfile,t.LabelTemplateType,
+                   t.LabelPayload,t.PrintStatus,t.Printer,t.LabelCopies,t.PrintMessage
+            FROM Tests t
+            JOIN Parts p ON p.Id=t.PartId
+            JOIN Models m ON m.Id=t.ModelId
+            WHERE p.PartKey=$PartKey AND t.InspectionType=$Inspection AND t.Passed=1
+              AND t.LabelPayload<>'' AND t.PrintStatus IN ({string.Join(',', statusParameters)})
+            ORDER BY COALESCE(t.ResultAt,t.FinishedAt) DESC,t.Id DESC
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$PartKey", part.PartKey);
+        command.Parameters.AddWithValue("$Inspection", HistoryInspectionType.Product);
+        using SqliteDataReader reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        return new TestHistoryRecord
+        {
+            Id = reader.GetInt64(0), Finished = ParseDate(reader.GetString(1)),
+            PartName = reader.GetString(2), PartNumber = reader.GetString(3),
+            VehicleType = reader.GetString(4), Eco = reader.GetString(5),
+            Nco = reader.GetString(6), Alc = reader.GetString(7), LotNo = reader.GetInt64(8),
+            CycleId = reader.GetString(9), ModelName = reader.GetString(10), ModelFile = reader.GetString(11),
+            LabelProfile = reader.GetString(12), LabelTemplateType = reader.GetString(13),
+            LabelPayload = reader.GetString(14), PrintStatus = reader.GetString(15),
+            Printer = reader.GetString(16), LabelCopies = reader.GetInt32(17), PrintMessage = reader.GetString(18),
+            Passed = true, InspectionType = HistoryInspectionType.Product
+        };
+    }
+
     public void IncrementLabelReprint(long historyId, string cycleId, DateTime printedAt, string message)
     {
         using SqliteConnection connection = Open();

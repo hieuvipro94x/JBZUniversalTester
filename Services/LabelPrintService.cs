@@ -111,7 +111,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             await WriteToConnectedComAsync(payload, request.Copies, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via {request.PrinterCom}.");
+                $"Sent {request.Copies} label job(s) via {request.PrinterCom}; no printer ACK is available.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.PrinterName))
@@ -126,7 +126,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             }, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via Windows printer '{request.PrinterName}'.");
+                $"Sent {request.Copies} label job(s) via Windows printer '{request.PrinterName}'; no physical print ACK is available.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.RawDestination))
@@ -134,7 +134,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             await PrintToRawDestinationAsync(request.RawDestination, payload, request.Copies, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via raw destination '{request.RawDestination}'.");
+                $"Sent {request.Copies} label job(s) via raw destination '{request.RawDestination}'; no physical print ACK is available.");
         }
 
         return new LabelPrintTransportResult(
@@ -295,7 +295,7 @@ public sealed class LabelPrintService : IAsyncDisposable
                 return new LabelPrintTransportResult(false, $"External label helper exited with code {process.ExitCode}.");
         }
 
-        return new LabelPrintTransportResult(true, $"External helper completed. Print file: {printFile}");
+        return new LabelPrintTransportResult(true, $"External helper accepted the label job; no physical print ACK is available. Print file: {printFile}");
     }
 
     private static string ResolveTransportName(LabelPrintRequest request) =>

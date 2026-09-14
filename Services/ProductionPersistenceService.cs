@@ -118,6 +118,12 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
         CancellationToken cancellationToken = default) =>
         EnqueueAsync(() => _repository.TryBeginFirstPrint(historyId, cycleId), cancellationToken);
 
+    public Task<TestHistoryRecord?> GetLatestLabelForPartAsync(
+        PartIdentitySnapshot part,
+        LabelPrintStatus[] statuses,
+        CancellationToken cancellationToken = default) =>
+        EnqueueAsync(() => _repository.GetLatestLabelForPart(part, statuses), cancellationToken);
+
     public Task UpdateLabelPrintOutcomeAsync(
         long historyId,
         string cycleId,

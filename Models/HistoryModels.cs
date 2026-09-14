@@ -435,6 +435,9 @@ public sealed record LabelPrintRequest(
         // payload của TEM_BE, TEM_TO hoặc template tùy chỉnh khác.
         if (isSmallQrLabel)
             payload = JBZUniversalTester.Services.LabelTemplateRenderer.NormalizeEplJob(payload);
+        else if (templateType == LabelSettings.LargeTemplate &&
+                 JBZUniversalTester.Services.BuiltInLabelTemplateStore.IsReference(profile.TemplatePath))
+            payload = payload.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
         if (isSmallLabel)
         {
@@ -471,6 +474,48 @@ public sealed record LabelPrintRequest(
             profile.ExternalHelperPath,
             profile.ExternalHelperArgument,
             profile.ExternalPrintFile);
+    }
+
+    public static LabelPrintRequest Restore(
+        TestHistoryRecord history,
+        ProductModel model,
+        LabelSettings currentSettings)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        if (string.IsNullOrWhiteSpace(history.LabelPayload))
+            throw new InvalidOperationException("Persisted label payload is empty.");
+
+        LabelSettings identitySettings = new()
+        {
+            TemplateType = history.LabelTemplateType,
+            PrinterName = currentSettings.PrinterName,
+            PrinterCom = currentSettings.PrinterCom,
+            RawDestination = currentSettings.RawDestination,
+            BaudRate = currentSettings.BaudRate,
+            WriteTimeoutMs = currentSettings.WriteTimeoutMs,
+            EncodingName = currentSettings.EncodingName,
+            ExternalHelperPath = currentSettings.ExternalHelperPath,
+            ExternalHelperArgument = currentSettings.ExternalHelperArgument,
+            ExternalPrintFile = currentSettings.ExternalPrintFile
+        };
+        LabelPrintRequest captured = Capture(history, model, identitySettings);
+        return captured with
+        {
+            Payload = history.LabelPayload,
+            Copies = Math.Max(1, history.LabelCopies),
+            Data = captured.Data with
+            {
+                PartName = history.PartName,
+                PartNumber = history.PartNumber,
+                VehicleType = history.VehicleType,
+                Eco = history.Eco,
+                Nco = history.Nco,
+                Alc = history.Alc,
+                LotNo = history.LotNo,
+                TestedAt = history.Finished,
+                CycleId = history.CycleId
+            }
+        };
     }
 }
 

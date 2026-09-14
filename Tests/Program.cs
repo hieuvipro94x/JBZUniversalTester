@@ -8124,6 +8124,10 @@ internal static class Program
                firstPrintSource.Contains("TryBeginFirstPrintAsync", StringComparison.Ordinal) &&
                !retrySource.Contains("TryRestoreReservation", StringComparison.Ordinal),
             "Printer failure/retry cannot freeze later LOTs; duplicate-print protection remains in SQLite");
+        Assert(labelFlowSource.Contains("GetLatestLabelForPartAsync", StringComparison.Ordinal) &&
+               labelFlowSource.Contains("LabelPrintStatus.Unknown", StringComparison.Ordinal) &&
+               labelFlowSource.Contains("result.Printed ? \"SENT\" : \"FAILED\"", StringComparison.Ordinal),
+            "Restart restores retryable snapshots, quarantines ambiguous Pending sends, and reports transport acceptance honestly");
 
         DateTime finished = new(2026, 8, 10, 9, 8, 7, DateTimeKind.Local);
         var history = new TestHistoryRecord
@@ -8171,6 +8175,8 @@ internal static class Program
             "Auto-print disabled/not requested hides any prepared barcode from history export");
         history.BarcodeValue = string.Empty;
         history.LabelProfile = request.FormatName;
+        history.LabelTemplateType = settings.TemplateType;
+        history.LabelPayload = request.Payload;
         history.Printer = request.Printer;
         history.LabelCopies = request.Copies;
         Assert(history.ExportBarcodeText.Length == 0,
@@ -8266,12 +8272,42 @@ internal static class Program
                 LabelPrintStatus.Failed,
                 null,
                 "printer offline");
+            PartIdentitySnapshot persistedPart = PartIdentitySnapshot.Capture(labelModel);
+            TestHistoryRecord recoverable = store.GetLatestLabelForPart(
+                persistedPart, LabelPrintStatus.NotRequested, LabelPrintStatus.Failed)
+                ?? throw new InvalidOperationException("Retryable label snapshot was not recovered.");
+            LabelPrintRequest restored = LabelPrintRequest.Restore(
+                recoverable, labelModel, new LabelSettings { PrinterName = "RECOVERED-PRINTER" });
+            Assert(restored.CycleId == request.CycleId &&
+                   restored.Data.LotNo == request.Data.LotNo &&
+                   restored.Payload == request.Payload &&
+                   restored.PrinterName == "RECOVERED-PRINTER",
+                "Crash after PASS commit restores the exact cycle/LOT/payload while allowing repaired printer routing");
             TestHistoryRecord failedPrint = store.Search(new HistorySearchCriteria(
                 null, null, 31415, "PART-A", "PASS", 10)).Single();
             Assert(failedPrint.BarcodeValue.Length == 0 && failedPrint.ExportBarcodeText.Length == 0,
                 "Failed or disabled printing never writes barcode into history");
             Assert(store.TryBeginFirstPrint(id, request.CycleId), "Explicit retry reuses the failed cycle/LOT transaction");
             Assert(!store.TryBeginFirstPrint(id, request.CycleId), "Concurrent retry callback is blocked while Pending");
+            TestHistoryRecord ambiguous = store.GetLatestLabelForPart(
+                persistedPart, LabelPrintStatus.Pending)
+                ?? throw new InvalidOperationException("Pending label transaction was not recovered.");
+            store.UpdateLabelPrintOutcome(
+                ambiguous.Id,
+                ambiguous.CycleId,
+                LabelPrintStatus.Unknown,
+                null,
+                "restart ambiguity; no automatic retry");
+            Assert(!store.TryBeginFirstPrint(id, request.CycleId),
+                "Crash during transport send becomes Unknown and cannot auto-retry a possibly printed label");
+            store.UpdateLabelPrintOutcome(
+                id,
+                request.CycleId,
+                LabelPrintStatus.Failed,
+                null,
+                "operator confirmed no physical label");
+            Assert(store.TryBeginFirstPrint(id, request.CycleId),
+                "Operator-confirmed failed send can retry the same immutable LOT after restart");
             store.UpdateLabelPrintOutcome(
                 id,
                 request.CycleId,
