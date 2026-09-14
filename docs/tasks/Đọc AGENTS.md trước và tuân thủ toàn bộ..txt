@@ -1,0 +1,787 @@
+Đọc AGENTS.md trước và tuân thủ toàn bộ.
+
+MỤC TIÊU LẦN NÀY:
+Tôi muốn CHỐT một bản production ổn định nhất có thể.
+KHÔNG muốn refactor lớn.
+KHÔNG muốn thay đổi kiến trúc nếu không bắt buộc.
+KHÔNG muốn tối ưu mạo hiểm.
+KHÔNG muốn sửa lan man làm phát sinh regression mới.
+
+Hãy audit toàn bộ project hiện tại ở trạng thái đang có, với nguyên tắc:
+
+STABILITY > CORRECTNESS > DATA SAFETY > HARDWARE SAFETY > UI RESPONSIVENESS > PERFORMANCE > CLEAN CODE
+
+Chỉ sửa khi:
+1. tìm được bug thực sự;
+2. có bằng chứng từ source/test/log;
+3. có regression test hoặc cách xác minh rõ;
+4. thay đổi nhỏ, local, ít rủi ro.
+
+Nếu một phần đang đúng và self-test đã bảo vệ:
+KHÔNG được “cải tiến cho đẹp”.
+
+============================================================
+1. BASELINE HIỆN TẠI
+============================================================
+
+Baseline gần nhất:
+
+Version:
+16.0.336
+
+Build:
+PASS
+0 warning
+0 error
+
+Self-tests:
+51/51 PASS
+
+SQLite:
+schema v7
+history compatibility đã được sửa
+integrity regression PASS
+
+Các phần vừa sửa và KHÔNG được làm regression:
+
+- Probe preview quarantine đúng sequence/generation.
+- Direct physical pair không bị Probe nuốt.
+- IO9↔IO10 regression đã PASS.
+- SQLite/persistence error không route thành DeviceFault.
+- PASS sequence:
+  DB commit
+  → PASS UI
+  → stop scan
+  → relay.
+- History:
+  TestStartedAt ?? StartedAt
+  newest → oldest.
+- DB v7 không downgrade về v5.
+- History cũ không bị xóa.
+- 51/51 self-tests PASS.
+
+Trước khi sửa bất cứ gì:
+chạy baseline build + self-test lại một lần.
+
+Nếu baseline hiện tại KHÔNG còn 51/51 PASS:
+ưu tiên tìm nguyên nhân sai khác trước.
+Không audit mở rộng cho tới khi baseline ổn định.
+
+============================================================
+2. CHẾ ĐỘ AUDIT LẦN NÀY: PRODUCTION FREEZE
+============================================================
+
+Không refactor lớn.
+
+Không:
+- đổi naming hàng loạt
+- tách class chỉ vì class dài
+- rewrite state machine nếu state hiện tại đúng
+- đổi async model nếu không có bug
+- thay collections chỉ vì allocation
+- thay transport protocol
+- thay relay timing
+- thay firmware command bytes
+- đổi DB schema nếu không thật sự cần
+- bump schema version nếu không cần
+- đổi UI layout ngoài bug rõ ràng
+- tối ưu bằng pooling phức tạp
+- đổi public API chỉ để code đẹp.
+
+Ưu tiên:
+- guard condition
+- fix local logic
+- remove duplicate dangerous path
+- fix race rõ ràng
+- fix stale state
+- fix wrong exception routing
+- add regression test
+- add safe logging/diagnostic nếu cần.
+
+============================================================
+3. AUDIT THEO CÁC VÙNG CRITICAL
+============================================================
+
+Audit đầy đủ nhưng chỉ sửa bug thật.
+
+A. DATABASE / HISTORY / PERSISTENCE
+
+Kiểm tra:
+
+TestHistoryStore
+History models
+History page
+migrations
+SchemaInfo
+ActiveTestCycles
+TestFaults
+ResistanceMeasurements
+WaterProofMeasurements
+PartModels
+statistics
+export
+pagination
+exactly-once CycleId
+
+Bắt buộc giữ:
+
+- schema v7 production mở được
+- không downgrade
+- không mất history cũ
+- không destructive migration
+- legacy row vẫn query được
+- History Date/Time = TestStartedAt ?? StartedAt
+- newest → oldest
+- filter/pagination/export cùng timestamp
+- summary toàn filtered dataset
+- CSV/XLSX không chỉ export current page
+- exactly-once
+- completed result atomic
+- no orphan rows
+- SQLite error không thành DeviceFault.
+
+Tìm các path nguy hiểm:
+
+catch(Exception)
+DELETE
+DROP TABLE
+File.Delete(database)
+new empty DB
+SchemaVersion
+CurrentSchemaVersion
+ResultAt DESC
+Started vs StartedAt
+MAX rows hard-limit
+duplicate persistence path.
+
+Nếu không có bug:
+KHÔNG đổi schema.
+
+============================================================
+B. PASS / FAIL / MASTER PERSISTENCE SAFETY
+============================================================
+
+Audit end-to-end:
+
+ARM
+product detected
+TestingRealtime
+continuity complete
+optional resistance
+optional waterproof
+PASS
+FAIL
+popup
+relay
+marking
+JIG
+removal
+discard
+history.
+
+PASS invariant:
+
+success electrical result
+→ completed DB commit
+→ PASS UI
+→ stop scan
+→ MARKING/JIG.
+
+Nếu DB fail:
+không relay PASS,
+không PASS counter/LOT,
+không label PASS.
+
+FAIL invariant:
+không duplicate result,
+không duplicate relay,
+removal/discard update cùng cycle.
+
+MASTER:
+Good/Bad history đúng,
+không production stats,
+không production LOT.
+
+Không rewrite flow nếu invariants đã đúng.
+
+============================================================
+C. D2XX / SCAN TRANSPORT
+============================================================
+
+Audit:
+
+D2xxBoardTransport
+IBoardTransport
+ScanSupervisor
+BoardIoDecoder
+frame assembly
+generation
+reconfigure
+watchdog
+queue/read loop.
+
+Tập trung tìm bug thật:
+
+- lost bytes
+- duplicate frames
+- stale generation
+- partial frame accepted as authoritative
+- bad reconfigure state
+- reader restart race
+- stop/start race
+- reconnect while critical cycle active
+- watchdog false positive
+- excessive QueueStatus/read pattern.
+
+KHÔNG tối ưu reader loop nếu:
+- current behavior ổn
+- không có measurable gain
+- thay đổi có nguy cơ frame corruption.
+
+10-card hiện có stress test:
+frames=500
+elapsed≈74 ms
+allocated≈20 MB
+START=0
+STOP=0
+
+20 MB allocation là điểm cần ghi nhận nhưng:
+KHÔNG được rewrite hot path chỉ để giảm allocation nếu không có proof về production stall/GC issue.
+
+Chỉ sửa allocation nếu:
+- xác định object churn cụ thể
+- thay đổi đơn giản
+- regression tests vẫn pass
+- benchmark tốt hơn rõ ràng.
+
+============================================================
+D. 2 ↔ 10 CARD RECONFIGURE
+============================================================
+
+Audit kỹ:
+
+2 card
+→ 10 card
+→ 2 card.
+
+Kiểm tra:
+
+- capacity
+- ScanThrough
+- START_SCAN parameter
+- expected source count
+- decoder reset
+- frame accumulator reset
+- scan generation
+- stale frame
+- watchdog
+- first valid frame
+- throughput recovery.
+
+Không được:
+- dùng stale 640-source expectation sau khi về 2 card
+- chấp nhận old-generation frame
+- unnecessary FTDI reopen.
+
+Nếu logic hiện tại đã có regression test và đúng:
+không sửa.
+
+============================================================
+E. PROBE / SHORT / WRONG WIRING
+============================================================
+
+Audit:
+
+ProductionProbePreview
+ProbeContactClassifier
+TryDetectInlineProbeContacts
+TestEngine unexpected pair
+LiveTopology
+IoMapping
+presentation ownership.
+
+Giữ nguyên invariants vừa sửa:
+
+1. Matching preview sequence/generation probe-like frame:
+   quarantine trước ProductEvidence.
+
+2. Direct physical edge:
+   không bị Probe nuốt.
+
+3. Probe thật:
+   không thành Short/Wrong.
+
+4. IO ngoài model nhưng trong physical capacity:
+   vẫn quan sát được.
+
+5. Blank THT:
+   topology only,
+   không production PASS/FAIL/counter/relay.
+
+Không đổi precedence nếu tests hiện tại đã đúng.
+
+============================================================
+F. PRODUCT STATE MACHINE
+============================================================
+
+Audit:
+
+WaitingForProduct
+TestingRealtime
+PassSequence
+Failed
+WaitingForRemoval
+discard
+cycle reset.
+
+Tìm:
+- state split giữa UI và TestEngine
+- stale callbacks
+- reset chậm
+- product removed nhưng state không reset
+- new product dùng dữ liệu cycle cũ
+- fault state giữ sai sang cycle mới.
+
+Không rewrite state machine nếu không có failing scenario.
+
+============================================================
+G. RELAY SAFETY
+============================================================
+
+Audit mọi relay call.
+
+Invariant:
+
+- relay action chỉ khi permitted state
+- safe OFF trước/sau pulse
+- exactly once
+- không relay vì Probe/LiveTopology
+- không PASS relay trước DB commit
+- cancellation không bỏ relay ON
+- exceptions vẫn safe OFF.
+
+Không giảm pulse/settle timing.
+
+============================================================
+H. RESISTANCE / WATERPROOF / LEAK
+============================================================
+
+Audit integration, không redesign.
+
+Kiểm tra:
+
+- scan stop/resume đúng lúc
+- channel selector reset
+- timeout
+- cancellation
+- result attached đúng TestId
+- no duplicate child rows
+- device exception domain đúng
+- Leak COM không thành main DeviceFault.
+
+Không thay timing nếu không có bug.
+
+============================================================
+I. UI RESPONSIVENESS
+============================================================
+
+Audit:
+
+UI_SNAPSHOT
+UI_FRAME
+Dispatcher
+row diff
+Probe UI
+status
+fault popup.
+
+Tìm:
+- blocking file/DB work trên UI thread
+- synchronous waits
+- repeated full collection rebuild
+- duplicate Dispatcher jobs
+- deadlock risk
+- stale async render.
+
+Không refactor MVVM lớn.
+
+Nếu current UI latency nhỏ:
+giữ nguyên.
+
+============================================================
+J. LOGGING / RPT / EXCEPTION DOMAIN
+============================================================
+
+Audit tất cả catch blocks.
+
+Phân loại rõ:
+
+Hardware/FTDI
+→ DeviceFault
+
+Database/persistence
+→ Data/Persistence
+
+Leak/Printer
+→ riêng từng thiết bị
+
+Application/UI
+→ software/application domain.
+
+Không catch-all rồi EnterDeviceFault.
+
+Không ghi RPT main DeviceFault cho lỗi không phải main tester hardware.
+
+Không log quá nhiều trong hot path nếu Diagnostic off.
+
+============================================================
+K. STARTUP / SHUTDOWN
+============================================================
+
+Audit:
+
+startup
+model load
+DB open
+board open
+background scan
+shutdown.
+
+Tìm:
+- DB schema error nhưng production vẫn arm
+- board chưa ready nhưng START enabled
+- duplicate startup initialization
+- duplicate model load
+- shutdown race
+- relay not OFF.
+
+Không tối ưu startup nếu hiện < vài giây và ổn định.
+
+============================================================
+4. SOURCE-WIDE STATIC AUDIT
+============================================================
+
+Dùng rg tìm tối thiểu:
+
+TODO
+FIXME
+HACK
+catch (Exception
+async void
+.GetAwaiter().GetResult
+.Wait(
+.Result
+Thread.Sleep
+Task.Run
+Dispatcher.Invoke
+File.Delete
+DROP TABLE
+DELETE FROM Tests
+CurrentSchemaVersion
+EnterDeviceFault
+CrashReportService.Write
+START_SCAN
+StopScan
+RecoverProductionScan
+ResultAt DESC
+COALESCE
+StartedAt
+TestStartedAt
+CycleId
+RecordCompletedProductAsync
+TriggerPassUi
+PauseProductionScanForFinalPassAsync
+ProbeContactClassifier
+PROBE_ONLY
+ShortCircuit
+WrongWiring.
+
+Không mặc định mọi occurrence là bug.
+Chỉ sửa khi chứng minh có rủi ro thật.
+
+============================================================
+5. TEST GAP ANALYSIS
+============================================================
+
+Đọc toàn bộ Tests/Program.cs.
+
+Tìm các production-critical path chưa có regression test.
+
+Chỉ bổ sung test nếu thiếu thật.
+
+Ưu tiên test:
+
+- DB v7 opens
+- no downgrade
+- history preserved
+- persistence failure blocks PASS relay
+- Probe quarantine
+- direct physical short
+- stale generation
+- partial frame not authoritative
+- 2→10→2 reset
+- exactly once
+- removal/discard
+- Master isolation
+- SQLite exception routing.
+
+Không viết hàng chục test trùng lặp.
+
+============================================================
+6. PERFORMANCE AUDIT NHƯNG KHÔNG MẠO HIỂM
+============================================================
+
+Chạy benchmark hiện có.
+
+So sánh:
+
+D2XX/frame processing
+History query
+10-card stress
+UI logical update nếu có test.
+
+Không sửa performance nếu:
+- không có bottleneck thực tế
+- gain nhỏ
+- làm code phức tạp hơn rõ rệt.
+
+Production freeze:
+ưu tiên code dễ hiểu và đoán được behavior.
+
+Nếu allocation 20 MB / 500 frames chưa gây GC stall:
+ghi Remaining Risk,
+không rewrite.
+
+============================================================
+7. DATABASE COPY VALIDATION
+============================================================
+
+Nếu repo/máy có production DB:
+
+KHÔNG test destructive trên DB thật.
+
+Copy DB sang temp.
+
+Trên COPY:
+
+PRAGMA integrity_check;
+
+đếm:
+
+Tests
+TestFaults
+ResistanceMeasurements
+WaterProofMeasurements
+
+mở bằng code hiện tại.
+
+Query History.
+
+Verify schema.
+
+Không được sửa/xóa DB production.
+
+============================================================
+8. BUILD MATRIX
+============================================================
+
+Chạy:
+
+dotnet clean
+dotnet build -c Release
+
+Yêu cầu:
+0 warning
+0 error.
+
+Chạy:
+
+dotnet run --project Tests -c Release
+
+Phải:
+ALL PASS.
+
+Nếu project x86 production:
+kiểm tra Release x86 build/publish compile được.
+
+Không cần publish/deploy tự động nếu không được yêu cầu.
+
+============================================================
+9. SOAK / REPEAT TEST
+============================================================
+
+Để tránh kiểu 1 lần PASS nhưng race vẫn còn:
+
+chạy full self-test ít nhất 3 lần liên tiếp nếu thời gian hợp lý.
+
+Mỗi lần phải ALL PASS.
+
+Nếu test nondeterministic/flaky:
+đó là bug cần audit.
+
+Không sửa bằng retry test.
+
+Nếu có 10-card stress:
+chạy lặp vài lần và ghi:
+- elapsed
+- allocated
+- changed
+- START
+- STOP.
+
+============================================================
+10. CHANGE BUDGET
+============================================================
+
+Đây là rule quan trọng nhất.
+
+Sau audit, phân loại issue:
+
+P0 = data loss / hardware safety / false PASS / false FAIL / crash
+P1 = production logic / race / persistence / serious performance
+P2 = cosmetic / maintainability / theoretical optimization.
+
+CHỈ tự sửa:
+P0
+P1 có bằng chứng rõ.
+
+KHÔNG sửa P2 trong release freeze.
+
+Nếu gặp P1 nhưng fix lớn/rủi ro:
+không sửa ngay.
+Báo Remaining Risk.
+
+Mục tiêu là GIẢM số dòng thay đổi.
+
+Nếu audit không tìm bug production thật:
+KHÔNG được tạo thay đổi giả để có commit mới.
+
+============================================================
+11. VERSION RULE
+============================================================
+
+KHÔNG bump version nếu audit không sửa production code.
+
+Nếu có fix thật và toàn test PASS:
+bump đúng 1 lần theo AGENTS.md.
+
+Không bump mỗi lần thử.
+
+============================================================
+12. RELEASE ACCEPTANCE
+============================================================
+
+Chỉ đề xuất PRODUCTION CANDIDATE nếu:
+
+- Release build 0 warning / 0 error
+- self-test ALL PASS
+- self-test repeat không flaky
+- DB schema v7 compatible
+- DB history preservation verified
+- no destructive migration
+- persistence failure không thể false PASS
+- relay safety verified by tests/source
+- DeviceFault routing đúng
+- Probe/Short regressions pass
+- stale generation protection pass
+- 2↔10 card logic pass
+- no known P0
+- no unresolved high-confidence P1.
+
+Hardware thật chưa test:
+không được ghi “production fully validated”.
+
+Chỉ được ghi:
+
+SOFTWARE RELEASE CANDIDATE
+
+và liệt kê hardware validation còn cần:
+- FTDI thật
+- relay/JIG
+- Leak COM nếu dùng
+- printer nếu dùng
+- 2-card / 10-card physical scan
+- short physical pair
+- Probe TP
+- DB production copy.
+
+============================================================
+13. KHÔNG COMMIT/PUSH TỰ ĐỘNG
+============================================================
+
+Lần audit này:
+KHÔNG commit.
+KHÔNG push.
+
+Tôi muốn xem RESULT trước.
+
+============================================================
+14. BÁO CÁO CUỐI — NGẮN NHƯNG ĐỦ QUYẾT ĐỊNH
+============================================================
+
+Chỉ báo:
+
+PRODUCTION AUDIT RESULT
+
+Baseline:
+Version:
+Build:
+Self-tests:
+Repeated runs:
+
+Issues found:
+P0:
+P1:
+P2:
+
+Fixes actually made:
+-
+
+Files changed:
+-
+
+Lines changed approximately:
+-
+
+DB/schema:
+-
+
+History/data preservation:
+-
+
+PASS/FAIL/Master safety:
+-
+
+Probe/Short:
+-
+
+D2XX / 2↔10 cards:
+-
+
+UI responsiveness:
+-
+
+Performance:
+-
+
+Flaky tests:
+-
+
+Known remaining software risks:
+-
+
+Hardware validation still required:
+-
+
+Release decision:
+SOFTWARE RELEASE CANDIDATE
+hoặc
+NOT READY FOR PRODUCTION
+
+Reason:
+-
+
+Không kể quá trình suy nghĩ.
+Không in diff dài.
+Không sửa cosmetic.
+Không refactor ngoài scope.
