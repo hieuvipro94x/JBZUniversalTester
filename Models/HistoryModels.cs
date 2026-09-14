@@ -59,6 +59,7 @@ public sealed class TestHistoryRecord
     public int LabelCopies { get; set; }
     public int ReprintCount { get; set; }
     public string PrintMessage { get; set; } = string.Empty;
+    public long HistoryOrdinal { get; set; }
 
     public TestHistoryRecord ClonePersistenceSnapshot() => (TestHistoryRecord)MemberwiseClone();
 
@@ -271,6 +272,16 @@ public sealed record HistorySummary(
 public sealed record HistoryPartOption(string Keyword, string Display)
 {
     public override string ToString() => Display;
+}
+
+public static class HistoryPresentation
+{
+    public static void AssignOrdinals(IEnumerable<TestHistoryRecord> records, long loadedBefore)
+    {
+        long ordinal = loadedBefore;
+        foreach (TestHistoryRecord record in records)
+            record.HistoryOrdinal = ++ordinal;
+    }
 }
 
 public sealed record LabelPrintData(

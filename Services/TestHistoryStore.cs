@@ -2037,7 +2037,7 @@ public sealed class TestHistoryStore
         // nếu không test dài/ngắn khác nhau có thể làm giờ đang hiển thị bị đảo.
         const string historyAtSql = "COALESCE(t.TestStartedAt,t.StartedAt)";
         string order =
-            $"ORDER BY {historyAtSql} DESC,t.Id DESC" +
+            $"ORDER BY {historyAtSql} ASC,t.Id ASC" +
             (!exportAll && applyLimit
                 ? $" LIMIT {limit}" +
                   (criteria.BeforeHistoryAt is null ? $" OFFSET {offset}" : string.Empty)
@@ -2117,7 +2117,7 @@ public sealed class TestHistoryStore
         if (!string.IsNullOrWhiteSpace(criteria.AppVersion)) { clauses.Add("t.AppVersion LIKE $AppVersion"); command.Parameters.AddWithValue("$AppVersion", $"%{criteria.AppVersion.Trim()}%"); }
         if (includeCursor && criteria.BeforeHistoryAt is DateTime cursor && criteria.BeforeId is long id)
         {
-            clauses.Add($"({historyAtSql} < $BeforeHistoryAt OR ({historyAtSql}=$BeforeHistoryAt AND t.Id < $BeforeId))");
+            clauses.Add($"({historyAtSql} > $BeforeHistoryAt OR ({historyAtSql}=$BeforeHistoryAt AND t.Id > $BeforeId))");
             command.Parameters.AddWithValue("$BeforeHistoryAt", cursor.ToString("O", CultureInfo.InvariantCulture));
             command.Parameters.AddWithValue("$BeforeId", id);
         }

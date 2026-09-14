@@ -1,0 +1,647 @@
+Đọc AGENTS.md trước.
+
+TASK:
+Audit và nếu cần thì sửa CHỈ phần hiển thị/sắp xếp LỊCH SỬ KIỂM TRA.
+
+KHÔNG sửa:
+- SQLite schema
+- migration
+- production persistence
+- CycleId
+- PASS/FAIL logic
+- Master logic
+- relay
+- D2XX
+- LOT
+- statistics
+- Resistance
+- Leak
+- Printer.
+
+Không xóa hoặc sửa dữ liệu History cũ.
+
+============================================================
+1. YÊU CẦU MỚI CHÍNH XÁC
+============================================================
+
+Tôi muốn bảng LỊCH SỬ KIỂM TRA hiển thị:
+
+CŨ NHẤT
+↓
+MỚI HƠN
+↓
+MỚI NHẤT
+
+Tức là sort ASCENDING.
+
+Ví dụ:
+
+2026/09/10 08:00:00   STT 1
+2026/09/10 08:01:00   STT 2
+2026/09/10 09:15:00   STT 3
+2026/09/11 07:30:00   STT 4
+...
+2026/09/14 15:20:00   STT N
+
+KHÔNG được hiện:
+
+2026/09/14
+2026/09/13
+2026/09/12
+...
+
+như kiểu newest-first.
+
+============================================================
+2. NGÀY/GIỜ DÙNG ĐỂ SORT
+============================================================
+
+History time source vẫn phải giữ đúng:
+
+HistoryAt =
+    TestStartedAt ?? StartedAt
+
+Tương đương SQL:
+
+COALESCE(t.TestStartedAt, t.StartedAt)
+
+KHÔNG dùng:
+- ResultAt
+- FinishedAt
+- ProductRemovedAt
+- thời điểm PASS/FAIL.
+
+Ngày và giờ hiển thị cũng phải lấy từ cùng HistoryAt.
+
+Expected:
+
+DateText:
+yyyy/MM/dd
+
+TimeText:
+HH:mm:ss
+
+============================================================
+3. ORDER BY PHẢI ĐỔI SANG ASC
+============================================================
+
+Audit tất cả History query.
+
+Main History table phải dùng logic tương đương:
+
+ORDER BY
+    COALESCE(t.TestStartedAt, t.StartedAt) ASC,
+    t.Id ASC
+
+Tức:
+
+- ngày cũ nhất trước
+- trong cùng ngày: giờ nhỏ nhất trước
+- cùng timestamp: Id nhỏ trước
+
+Ví dụ cùng ngày:
+
+08:00
+08:01
+08:03
+09:20
+15:30
+
+KHÔNG:
+
+15:30
+09:20
+08:03
+...
+
+============================================================
+4. PAGINATION PHẢI ĐỔI THEO ASC
+============================================================
+
+Đây là chỗ dễ lỗi nhất.
+
+Nếu hiện tại keyset pagination đang dùng DESC kiểu:
+
+HistoryAt < CursorHistoryAt
+OR
+(HistoryAt = CursorHistoryAt AND Id < CursorId)
+
+thì phải đổi đồng bộ thành ASC:
+
+HistoryAt > CursorHistoryAt
+OR
+(
+    HistoryAt = CursorHistoryAt
+    AND Id > CursorId
+)
+
+Trong đó:
+
+HistoryAt =
+COALESCE(t.TestStartedAt,t.StartedAt)
+
+Không được chỉ đổi ORDER BY ASC mà quên đổi cursor,
+vì sẽ gây:
+
+- duplicate row
+- mất row
+- Load More nhảy sai
+- page 2 quay lại dữ liệu cũ.
+
+============================================================
+5. STT PHẢI LÀ 1 → N
+============================================================
+
+Cột "Số thứ tự" KHÔNG được dùng trực tiếp:
+
+- Tests.Id
+- LOT
+- database primary key
+- serial lưu cũ
+
+nếu chúng không phải ordinal của History view.
+
+Tôi muốn:
+
+STT = vị trí thực tế của row trong kết quả History đã filter + sort.
+
+Ví dụ:
+
+row đầu tiên  = 1
+row thứ hai   = 2
+row thứ ba    = 3
+...
+row cuối cùng = N
+
+STT phải tăng:
+
+1
+2
+3
+4
+5
+...
+N
+
+KHÔNG:
+
+1205
+601
+600
+599
+...
+
+như hình hiện tại.
+
+============================================================
+6. STT PHẢI ĐÚNG QUA LOAD MORE
+============================================================
+
+Nếu page size = 200:
+
+Page đầu:
+
+1 ... 200
+
+Load More:
+
+201 ... 400
+
+Load More:
+
+401 ... 600
+
+Không được page tiếp theo quay lại:
+
+1 ... 200
+
+Không được dựa trên Id DB.
+
+Có thể triển khai STT ở ViewModel/presentation layer nếu đơn giản và an toàn:
+
+displayIndex = loadedRowsBeforeCurrentPage + indexWithinCurrentPage + 1
+
+NHƯNG chỉ nếu sorting/pagination đảm bảo append đúng thứ tự ASC.
+
+Nếu query architecture phù hợp hơn với SQL:
+có thể dùng ROW_NUMBER() OVER (...) trên filtered ordered set.
+
+Chọn cách ÍT THAY ĐỔI và ít rủi ro nhất.
+
+Không thay schema chỉ để thêm STT.
+
+============================================================
+7. STT SAU KHI FILTER
+============================================================
+
+Khi user filter:
+
+- từ ngày
+- đến ngày
+- LOT
+- File THT
+- Kết quả
+- Loại kiểm tra
+- model/part nếu có
+
+STT phải đánh lại từ:
+
+1 ... N
+
+trên chính filtered result.
+
+Ví dụ toàn DB có 2,567 record.
+
+Filter chỉ còn 95 record:
+
+STT phải là:
+
+1 ... 95
+
+KHÔNG giữ ordinal từ toàn database như:
+
+443 ... 537.
+
+============================================================
+8. SEARCH / RESET FILTER
+============================================================
+
+Khi nhấn TÌM KIẾM:
+
+- clear current rows
+- query lại từ oldest result của filter mới
+- STT reset = 1
+
+Khi nhấn XÓA LỌC:
+
+- query full dataset
+- oldest first
+- STT reset = 1.
+
+Không append filter mới vào dataset cũ.
+
+============================================================
+9. SUMMARY KHÔNG BỊ ẢNH HƯỞNG
+============================================================
+
+Các ô:
+
+TỔNG
+PASS
+FAIL
+
+vẫn phải tính toàn bộ filtered dataset.
+
+Việc đổi sort ASC và STT không được làm thay đổi:
+
+Total
+Pass
+Fail
+PassRate.
+
+Sort chỉ thay thứ tự hiển thị.
+
+============================================================
+10. EXPORT CSV/XLSX
+============================================================
+
+Audit export.
+
+Nếu export cần giống History UI thì export theo:
+
+HistoryAt ASC,
+Id ASC
+
+tức oldest → newest.
+
+Nếu có cột STT trong CSV/XLSX:
+phải là:
+
+1 ... N
+
+theo filtered export result.
+
+Không dùng DB Id làm STT.
+
+Export phải vẫn xuất TOÀN BỘ filtered dataset,
+không chỉ page hiện đang load.
+
+============================================================
+11. CĂN GIỮ BẢNG HISTORY
+============================================================
+
+Đồng thời audit HistoryPage.xaml.
+
+Các cột sau căn GIỮA cả header và cell:
+
+Ngày
+Thời gian
+File
+Loại kiểm tra
+Tên sản phẩm
+Mã hàng
+Loại xe
+LOT
+Kết quả
+Số thứ tự
+
+Yêu cầu:
+
+HorizontalContentAlignment = Center
+VerticalContentAlignment = Center
+
+Với DataGridTextColumn phải kiểm tra cả ElementStyle/TextBlock,
+không chỉ DataGridCell.
+
+Ví dụ style phù hợp:
+
+<Style x:Key="HistoryCenterTextStyle"
+       TargetType="TextBlock">
+    <Setter Property="TextAlignment" Value="Center"/>
+    <Setter Property="VerticalAlignment" Value="Center"/>
+    <Setter Property="HorizontalAlignment" Value="Stretch"/>
+</Style>
+
+Header cũng phải Center.
+
+Riêng cột:
+
+Lịch sử kiểm tra
+
+giữ:
+- Header căn giữa
+- nội dung căn trái
+- VerticalAlignment Center
+
+vì text dài.
+
+============================================================
+12. ROW HEIGHT / VISUAL CONSISTENCY
+============================================================
+
+Audit row/header hiện tại.
+
+Giữ giao diện hiện có nhưng bảo đảm:
+
+- row height đồng đều
+- vertical center
+- padding đồng nhất
+- không mỗi cột lệch một kiểu
+- không thay màu/theme/layout lớn.
+
+Không redesign History page.
+
+Chỉ sửa alignment cần thiết.
+
+============================================================
+13. KHÔNG ĐƯỢC ĐỔI DATABASE
+============================================================
+
+TUYỆT ĐỐI KHÔNG:
+
+DROP
+DELETE
+UPDATE historical rows
+recreate DB
+change schema
+change CurrentSchemaVersion
+migration mới.
+
+Đây là thay đổi:
+
+QUERY ORDER
++
+PAGINATION
++
+DISPLAY STT
++
+UI ALIGNMENT
+
+Không phải database migration.
+
+============================================================
+14. AUDIT CODE TRƯỚC KHI SỬA
+============================================================
+
+Tìm tối thiểu:
+
+rg -n "ResultAt DESC|TestStartedAt|StartedAt|ORDER BY|BeforeResultAt|HistoryAt|EffectiveTestStartedAt|EffectiveResultAt|LoadMore|PageSize|Sequence|Ordinal|RowNumber|Số thứ tự|HistoryPage" .
+
+Xác định chính xác:
+
+- query main history
+- pagination cursor
+- UI collection
+- STT binding
+- export query
+- filter reset.
+
+Không sửa bằng workaround XAML nếu STT/sort sai từ query.
+
+============================================================
+15. REGRESSION TEST BẮT BUỘC
+============================================================
+
+Thêm/sửa test để chứng minh requirement MỚI.
+
+Test dataset ví dụ:
+
+ID 20 | 2026-09-13 15:00
+ID 5  | 2026-09-11 09:00
+ID 8  | 2026-09-12 10:00
+ID 3  | 2026-09-11 08:00
+
+Expected UI:
+
+STT 1 | ID3  | 2026-09-11 08:00
+STT 2 | ID5  | 2026-09-11 09:00
+STT 3 | ID8  | 2026-09-12 10:00
+STT 4 | ID20 | 2026-09-13 15:00
+
+Test thêm:
+
+A. SAME TIMESTAMP
+
+ID10 10:00
+ID11 10:00
+ID12 10:00
+
+Expected:
+
+ID10
+ID11
+ID12
+
+theo Id ASC.
+
+B. LEGACY:
+
+TestStartedAt=NULL
+StartedAt=2026-09-01
+
+phải sort đúng bằng StartedAt.
+
+C. PAGINATION:
+
+page size nhỏ, ví dụ 3.
+
+page1 STT:
+1,2,3
+
+page2:
+4,5,6
+
+không duplicate/missing.
+
+D. FILTER:
+
+full set 10 rows.
+
+filter còn 4 rows.
+
+Expected STT:
+1,2,3,4.
+
+E. EXPORT:
+
+export filtered rows theo ASC và STT 1..N.
+
+============================================================
+16. KIỂM TRA ẢNH HIỆN TẠI
+============================================================
+
+Hiện ảnh History cho thấy cột "Số thứ tự" có các giá trị kiểu:
+
+1205
+601
+600
+599
+598
+...
+
+Đó KHÔNG phải presentation tôi muốn.
+
+Sau sửa, với cùng filtered dataset phải nhìn như:
+
+1
+2
+3
+4
+5
+6
+...
+
+từ trên xuống dưới.
+
+Và cột ngày phải:
+
+ngày cũ → ngày mới.
+
+============================================================
+17. BUILD / TEST
+============================================================
+
+Sau sửa:
+
+dotnet build -c Release
+
+Yêu cầu:
+
+0 warning
+0 error.
+
+Sau đó:
+
+dotnet run --project Tests -c Release
+
+ALL PASS.
+
+Không được sửa/bỏ test cũ chỉ để pass.
+
+Nếu test cũ đang assert newest→oldest,
+thì đó là requirement cũ đã được tôi thay đổi rõ trong task này.
+
+Cập nhật test đó theo requirement mới:
+OLDEST → NEWEST.
+
+Không thay các History safety tests khác.
+
+============================================================
+18. VERSION
+============================================================
+
+Nếu source thay đổi:
+bump Version.props đúng 1 lần theo AGENTS.md.
+
+Không bump schema version.
+
+============================================================
+19. KHÔNG COMMIT/PUSH
+============================================================
+
+Không commit.
+Không push.
+
+Tôi sẽ kiểm tra RESULT trước.
+
+============================================================
+20. BÁO CÁO CUỐI
+============================================================
+
+Chỉ trả:
+
+HISTORY ORDER / STT RESULT
+
+Before order:
+-
+
+After order:
+-
+
+History timestamp:
+-
+
+SQL/order:
+-
+
+Pagination direction:
+-
+
+STT source before:
+-
+
+STT source after:
+-
+
+STT across Load More:
+-
+
+STT after filter:
+-
+
+CSV/XLSX order:
+-
+
+Column alignment:
+-
+
+Files changed:
+-
+
+DB/schema changed:
+NO
+
+Version:
+-
+
+Build:
+-
+
+Self-tests:
+-
+
+Remaining risk:
+-
+
+Không kể chain-of-thought.
+Không in diff dài.

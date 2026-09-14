@@ -162,8 +162,9 @@
         </Style>
 
         <Style x:Key="CenterCellText" TargetType="TextBlock">
-            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="HistoryCellStyle" TargetType="DataGridCell">
@@ -176,6 +177,13 @@
                     <Setter Property="Foreground" Value="#172B3A"/>
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <Style x:Key="HistoryCenterCellStyle"
+               TargetType="DataGridCell"
+               BasedOn="{StaticResource HistoryCellStyle}">
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
     </UserControl.Resources>
 
@@ -408,23 +416,26 @@
                 <DataGrid.Columns>
                     <!-- Ngày/Thời gian = thời điểm BẮT ĐẦU TEST (EffectiveTestStartedAt).
                          TestHistoryStore sắp xếp từ cũ đến mới theo timestamp này. -->
-                    <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="100"/>
-                    <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="90"/>
-                    <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180"/>
-                    <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="120"/>
-                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150"/>
-                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150"/>
-                    <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115"/>
-                    <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110"/>
-                    <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding ExportSequenceNo}" Width="100" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="90" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="120" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding HistoryOrdinal}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportTestLogText}"
                                            ToolTip="{Binding ExportTestLogText}"
                                            TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap"/>
+                                           TextWrapping="NoWrap"
+                                           HorizontalAlignment="Stretch"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Left"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>

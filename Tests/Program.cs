@@ -6882,14 +6882,14 @@ internal static class Program
                     StringComparison.Ordinal),
                 "History CSV preserves the exact original 14-column Korean header");
             Assert(csvText.Contains(
-                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,VOLVO Radio,합격,2001",
+                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,VOLVO Radio,합격,1",
                     StringComparison.Ordinal) &&
                    csvText.Contains("장착 14:07:03~14:07:05(2.000초) 14:07:05 검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
                    csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
                    csvText.Contains(",NI375C10002608092001,,,JBZUniversalTester V15.2.0", StringComparison.Ordinal) &&
                    !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV keeps three test phases, sequence and barcode without raw EPL payload");
+                "Sample history CSV keeps three test phases, view ordinal and barcode without raw EPL payload");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -6899,8 +6899,8 @@ internal static class Program
             Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal) &&
                    sheet.Contains("<c r=\"B2\" s=\"4\"><v>", StringComparison.Ordinal),
                 "XLSX date and time use separate native numeric cells");
-            Assert(sheet.Contains("<c r=\"I2\"><v>2001</v></c>", StringComparison.Ordinal),
-                "XLSX sequence uses the PASS LOT number");
+            Assert(sheet.Contains("<c r=\"I2\"><v>1</v></c>", StringComparison.Ordinal),
+                "XLSX sequence uses the filtered view ordinal");
             Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
                    sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
                    !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
@@ -6957,11 +6957,11 @@ internal static class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(failed.ExportSequenceNo is null &&
-                   customerText.Contains(",불량,,", StringComparison.Ordinal) &&
+            Assert(failed.HistoryOrdinal == 1 &&
+                   customerText.Contains(",불량,1,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
-                "History CSV/UI FAIL uses concise Korean fault detail and blank sequence");
+                "History CSV/UI FAIL uses concise Korean fault detail and filtered view ordinal");
 
             var masterBad = new TestHistoryRecord
             {
@@ -7157,13 +7157,17 @@ internal static class Program
             IReadOnlyList<TestHistoryRecord> allExportRows = exportStore.SearchForExport(monthlyCriteria);
             Assert(limitedRows.Count == 1 && allExportRows.Count == 3,
                 "History export is independent from the DataGrid row limit");
-            Assert(allExportRows[0].CycleId == "export-part-a" &&
+            Assert(allExportRows[0].CycleId == "export-part-z-a" &&
                    allExportRows[1].CycleId == "export-part-z-b" &&
-                   allExportRows[2].CycleId == "export-part-z-a",
-                "History export sorts newest-to-oldest by displayed test-start time and stable Id");
+                   allExportRows[2].CycleId == "export-part-a",
+                "History export sorts oldest-to-newest by displayed test-start time and stable Id");
             Assert(allExportRows[1].ExportModelFileName == "B.tht" &&
-                   allExportRows[2].ExportModelFileName == "A.tht",
+                   allExportRows[0].ExportModelFileName == "A.tht",
                 "Changing A.tht to B.tht snapshots B.tht only for the new cycle");
+            string ordinalCsv = Path.Combine(root, "history-export-ordinal.csv");
+            HistoryExportService.ExportCsv(ordinalCsv, allExportRows);
+            Assert(allExportRows.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 1, 2, 3 }),
+                "Full filtered CSV export assigns sequential view ordinals instead of database or LOT values");
 
             // Regression: row cũ bắt đầu trước nhưng test lâu hơn nên ResultAt muộn hơn.
             // History phải vẫn sắp theo giờ BẮT ĐẦU TEST đang hiển thị, không theo ResultAt.
@@ -7203,11 +7207,11 @@ internal static class Program
                     "ALL",
                     MaxRows: 10));
             Assert(orderedRows.Count == 2 &&
-                   orderedRows[0].CycleId == "newer-start-earlier-result" &&
-                   orderedRows[0].TimeText == "08:01:00" &&
-                   orderedRows[1].CycleId == "older-start-later-result" &&
-                   orderedRows[1].TimeText == "08:00:00",
-                "History grid is strictly newest-to-oldest by displayed TEST START time even when ResultAt order differs");
+                   orderedRows[0].CycleId == "older-start-later-result" &&
+                   orderedRows[0].TimeText == "08:00:00" &&
+                   orderedRows[1].CycleId == "newer-start-earlier-result" &&
+                   orderedRows[1].TimeText == "08:01:00",
+                "History grid is strictly oldest-to-newest by displayed TEST START time even when ResultAt order differs");
 
             IReadOnlyList<TestHistoryRecord> orderPage1 = orderingStore.SearchSummary(
                 new HistorySearchCriteria(
@@ -7229,9 +7233,65 @@ internal static class Program
                     BeforeId: orderPage1[0].Id));
             Assert(orderPage1.Count == 1 &&
                    orderPage2.Count == 1 &&
-                   orderPage1[0].CycleId == "newer-start-earlier-result" &&
-                   orderPage2[0].CycleId == "older-start-later-result",
-                "History keyset pagination preserves newest-to-oldest TEST START order across pages");
+                   orderPage1[0].CycleId == "older-start-later-result" &&
+                   orderPage2[0].CycleId == "newer-start-earlier-result",
+                "History keyset pagination preserves oldest-to-newest TEST START order across pages");
+
+            DateTime sameTime = orderBase.AddMinutes(10);
+            foreach (string cycleId in new[] { "same-10", "same-11", "same-12" })
+            {
+                orderingStore.Add(new TestHistoryRecord
+                {
+                    Started = sameTime,
+                    TestStartedAt = sameTime,
+                    Finished = sameTime.AddSeconds(1),
+                    PartNumber = "SAME-TIME",
+                    ModelFile = @"D:\Models\ORDER.tht",
+                    Result = "PASS",
+                    Passed = true,
+                    CycleId = cycleId
+                });
+            }
+            IReadOnlyList<TestHistoryRecord> sameRows = orderingStore.SearchSummary(
+                new HistorySearchCriteria(null, null, null, "SAME-TIME", "ALL", MaxRows: 10));
+            Assert(sameRows.Select(row => row.CycleId).SequenceEqual(new[] { "same-10", "same-11", "same-12" }) &&
+                   sameRows[0].Id < sameRows[1].Id && sameRows[1].Id < sameRows[2].Id,
+                "Equal HistoryAt values use Id ASC as the stable tie-breaker");
+
+            orderingStore.Add(new TestHistoryRecord
+            {
+                Started = orderBase.AddDays(-1),
+                TestStartedAt = null,
+                Finished = orderBase.AddDays(-1).AddSeconds(1),
+                PartNumber = "LEGACY-ORDER",
+                ModelFile = @"D:\Models\ORDER.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "legacy-started-at"
+            });
+            IReadOnlyList<TestHistoryRecord> legacyRows = orderingStore.SearchSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 10));
+            Assert(legacyRows[0].CycleId == "legacy-started-at" &&
+                   legacyRows[0].EffectiveTestStartedAt == orderBase.AddDays(-1),
+                "Legacy NULL TestStartedAt falls back to StartedAt in oldest-first ordering");
+
+            IReadOnlyList<TestHistoryRecord> ordinalPage1 = orderingStore.SearchSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 3));
+            TestHistoryRecord ordinalCursor = ordinalPage1[^1];
+            IReadOnlyList<TestHistoryRecord> ordinalPage2 = orderingStore.SearchSummary(
+                new HistorySearchCriteria(
+                    null, null, null, string.Empty, "ALL", MaxRows: 3,
+                    BeforeHistoryAt: ordinalCursor.EffectiveTestStartedAt,
+                    BeforeId: ordinalCursor.Id));
+            HistoryPresentation.AssignOrdinals(ordinalPage1, 0);
+            HistoryPresentation.AssignOrdinals(ordinalPage2, ordinalPage1.Count);
+            Assert(ordinalPage1.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 1, 2, 3 }) &&
+                   ordinalPage2.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 4, 5, 6 }) &&
+                   ordinalPage1.Concat(ordinalPage2).Select(row => row.Id).SequenceEqual(legacyRows.Select(row => row.Id)),
+                "ASC keyset Load More has no duplicate/missing rows and presentation ordinals continue across pages");
+            HistoryPresentation.AssignOrdinals(sameRows, 0);
+            Assert(sameRows.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 1, 2, 3 }),
+                "A filtered History result resets presentation ordinals to one");
         }
         finally
         {

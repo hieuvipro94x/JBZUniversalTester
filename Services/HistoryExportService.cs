@@ -36,7 +36,7 @@ public static class HistoryExportService
         new("차 종", 18, HistoryCellType.Text, r => r.VehicleType),
         new("Lot", 16, HistoryCellType.Text, r => r.ExportLotText),
         new("결 과", 10, HistoryCellType.Text, r => r.ExportResultText),
-        new("순 번", 11, HistoryCellType.Number, r => r.ExportSequenceNo),
+        new("순 번", 11, HistoryCellType.Number, r => r.HistoryOrdinal),
         new("검 사 기 록", 80, HistoryCellType.Text, r => r.ExportTestLogText, true),
         new("바코드", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
         new("200 %", 10, HistoryCellType.Text, r => r.ExportPercentText),
@@ -57,6 +57,7 @@ public static class HistoryExportService
         int count = 0;
         foreach (TestHistoryRecord record in records)
         {
+            record.HistoryOrdinal = count + 1L;
             writer.WriteLine(string.Join(',', Columns.Select(column =>
                 EscapeCsv(ToCsvValue(column, record)))));
             count++;
@@ -141,6 +142,7 @@ public static class HistoryExportService
         int count = 0;
         foreach (TestHistoryRecord record in records)
         {
+            record.HistoryOrdinal = count + 1L;
             AppendDataRow(sb, count + 2, record);
             writer.Write(sb);
             sb.Clear();
