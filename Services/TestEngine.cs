@@ -1445,6 +1445,26 @@ public sealed class TestEngine : IDisposable
         int actualSource,
         int actualTarget)
     {
+        bool sourceMapped = model.Nets.Any(net => net.IoNumbers.Contains(actualSource)) ||
+                            (model.Clip?.CommonIo == actualSource) ||
+                            (model.Clip?.Branches.Any(branch => branch.TargetIo == actualSource) == true);
+        bool targetMapped = model.Nets.Any(net => net.IoNumbers.Contains(actualTarget)) ||
+                            (model.Clip?.CommonIo == actualTarget) ||
+                            (model.Clip?.Branches.Any(branch => branch.TargetIo == actualTarget) == true);
+
+        if (!sourceMapped && !targetMapped)
+        {
+            int first = Math.Min(actualSource, actualTarget);
+            int second = Math.Max(actualSource, actualTarget);
+            return new WiringFaultPair(
+                first,
+                second,
+                $"Phát hiện chập IO{first} <-> IO{second} ngoài topology THT",
+                ProductFaultType.ShortCircuit,
+                null,
+                null);
+        }
+
         // Nếu SOURCE chính là source được khai báo của một network nhưng trả về
         // một target ngoài network đó, đây là lỗi ĐẤU SAI: ta biết chính xác
         // "đáng lẽ source này phải đi tới đâu" và "thực tế đang đi tới đâu".
@@ -1472,13 +1492,6 @@ public sealed class TestEngine : IDisposable
         // Một cạnh điện nối hai component THT khác nhau nhưng SOURCE không phải
         // source định nghĩa của network nào thường biểu hiện một cầu nối/chập
         // giữa hai network. Tách riêng để UI/History không còn ghi chung chung.
-        bool sourceMapped = model.Nets.Any(net => net.IoNumbers.Contains(actualSource)) ||
-                            (model.Clip?.CommonIo == actualSource) ||
-                            (model.Clip?.Branches.Any(branch => branch.TargetIo == actualSource) == true);
-        bool targetMapped = model.Nets.Any(net => net.IoNumbers.Contains(actualTarget)) ||
-                            (model.Clip?.CommonIo == actualTarget) ||
-                            (model.Clip?.Branches.Any(branch => branch.TargetIo == actualTarget) == true);
-
         ProductFaultType type = sourceMapped && targetMapped
             ? ProductFaultType.ShortCircuit
             : ProductFaultType.WrongWiring;

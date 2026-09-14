@@ -3500,6 +3500,18 @@ public sealed class TestViewModel : ObservableObject
                     bool sameScanSession = cycleStartGeneration == 0 ||
                                            frame.ScanGeneration == 0 ||
                                            frame.ScanGeneration == cycleStartGeneration;
+                    bool authoritativeFrame = frame.Complete &&
+                                              frame.UnknownBytes == 0 &&
+                                              frame.TerminatorKnown &&
+                                              ((frame.ExpectedIoCount == 0 && frame.ScanUnitCount == 0) ||
+                                               (frame.ExpectedIoCount == _board.Capacity.TotalIoCapacity &&
+                                                frame.ScanUnitCount == _board.Capacity.ScanCardCount));
+                    if (!authoritativeFrame)
+                    {
+                        Interlocked.Increment(ref _productionFramesDropped);
+                        LogContinuousScanMetricsIfDue();
+                        return;
+                    }
                     if (cycleStartSequence > 0 &&
                         sameScanSession &&
                         frame.Sequence > 0 &&

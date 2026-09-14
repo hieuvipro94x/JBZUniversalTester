@@ -362,14 +362,19 @@ internal static class Program
     private static void TestProductionScanFirstFrameAfterSequenceReset()
     {
         var board = new FakeBoard();
-        board.Publish(CreateProductionFrame(sequence: 1));
-        board.SetAppliedScanCapacityForTest(1);
+        board.Publish(CreateProductionFrame(sequence: 1, scanUnits: 2, generation: 1));
+        board.SetRequestedScanCapacityForTest(10);
+        board.SetAppliedScanCapacityForTest(2);
+        long callbackGeneration = 1;
         board.StartScanCallback = current =>
         {
             _ = Task.Run(async () =>
             {
                 await Task.Delay(50);
-                current.Publish(CreateProductionFrame(sequence: 1));
+                current.Publish(CreateProductionFrame(
+                    sequence: 1,
+                    scanUnits: current.Capacity.ScanCardCount,
+                    generation: Interlocked.Increment(ref callbackGeneration)));
             });
         };
 
@@ -381,15 +386,20 @@ internal static class Program
             .GetAwaiter()
             .GetResult();
 
-        Assert(
-            board.Commands.Count(command => command == "START") == 1,
-            "Changing active capacity restarts firmware scan exactly once");
+        board.SetRequestedScanCapacityForTest(2);
+        supervisor.StartProductionScanAndVerifyFrameAsync(128, CancellationToken.None, "SELF_TEST_10_TO_2")
+            .GetAwaiter().GetResult();
+        board.SetRequestedScanCapacityForTest(10);
+        supervisor.StartProductionScanAndVerifyFrameAsync(640, CancellationToken.None, "SELF_TEST_2_TO_10_AGAIN")
+            .GetAwaiter().GetResult();
+        Assert(board.Commands.Count(command => command == "START") == 3 && board.ConnectAttempts == 3,
+            "2 -> 10 -> 2 -> 10 uses one controlled reopen and one START per physical capacity transition");
 
         var sameCapacityBoard = new FakeBoard();
         _ = Task.Run(async () =>
         {
             await Task.Delay(50);
-            sameCapacityBoard.Publish(CreateProductionFrame(sequence: 2));
+            sameCapacityBoard.Publish(CreateProductionFrame(sequence: 2, scanUnits: 10, generation: 1));
         });
         new ScanSupervisor(sameCapacityBoard, _ => { })
             .StartProductionScanAndVerifyFrameAsync(
@@ -425,9 +435,9 @@ internal static class Program
             ScanSupervisor.ResolveProductionStallTimeoutMs(BoardCapacity.Create(10)) == 17_500,
             "Ten-module background stall watchdog must not interrupt a valid frame");
 
-        static ScanFrame CreateProductionFrame(long sequence) => new(
+        static ScanFrame CreateProductionFrame(long sequence, int scanUnits, long generation) => new(
             DateTime.Now,
-            BoardCapacity.MaxExpansionCardCount,
+            scanUnits,
             new HashSet<int>(),
             [],
             true,
@@ -435,7 +445,13 @@ internal static class Program
             sequence,
             new Dictionary<int, IReadOnlySet<int>>(),
             new Dictionary<int, int>(),
-            BoardScanMode.Production);
+            BoardScanMode.Production,
+            scanUnits * BoardCapacity.IoPerExpansionCard,
+            scanUnits * BoardCapacity.IoPerExpansionCard,
+            0,
+            scanUnits,
+            true,
+            generation);
     }
 
     private static void TestScanWatchdogRecovery()
@@ -578,6 +594,9 @@ internal static class Program
             new Dictionary<int, IReadOnlySet<int>>(),
             new Dictionary<int, int>(),
             BoardScanMode.Production,
+            ExpectedIoCount: BoardCapacity.MaxGlobalIo,
+            SourceCount: complete ? BoardCapacity.MaxGlobalIo : 128,
+            ScanUnitCount: BoardCapacity.MaxExpansionCardCount,
             TerminatorKnown: complete,
             ScanGeneration: generation);
     }
@@ -1033,12 +1052,35 @@ internal static class Program
         engine.ProcessFrame(FrameSeq(108, (10, new[] { 18 })));
         ProductEvidenceSnapshot unmappedWrong = engine.GetProductEvidenceSnapshot();
         Assert(unmappedWrong.ValidProductEvidence &&
-               unmappedWrong.WrongCandidateCount == 1 &&
-               unmappedWrong.Reason == "WRONG_CANDIDATE" &&
+               unmappedWrong.ShortCandidateCount == 1 &&
+               unmappedWrong.Reason == "SHORT_CANDIDATE" &&
                !engine.HasWiringFault,
-            "A real non-self edge outside the THT is product evidence and becomes a realtime wrong-wire candidate");
+            "A direct pair with both endpoints outside the THT becomes a realtime short candidate");
 
-        engine.ProcessFrame(FrameSeq(109, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        ScanFrame tenCardPair = FrameSeq(109, (200, [201]), (201, [200])) with
+        {
+            ExpectedIoCount = 640,
+            SourceCount = 640,
+            ScanUnitCount = 10
+        };
+        engine.ProcessFrame(tenCardPair);
+        Assert(engine.GetPassGateDiagnostics().ShortCandidateCount == 1 &&
+               LiveTopologyPresenter.Build(tenCardPair, BoardCapacity.Create(10)).Pairs
+                   .Contains(new LiveTopologyPair(200, 201)),
+            "10-card physical coverage retains IO200-IO201 as one SHORT outside the model");
+        ScanFrame upperBoundaryPair = FrameSeq(110, (639, [640]), (640, [639])) with
+        {
+            ExpectedIoCount = 640,
+            SourceCount = 640,
+            ScanUnitCount = 10
+        };
+        engine.ProcessFrame(upperBoundaryPair);
+        Assert(engine.GetPassGateDiagnostics().ShortCandidateCount == 1 &&
+               LiveTopologyPresenter.Build(upperBoundaryPair, BoardCapacity.Create(10)).Pairs
+                   .Contains(new LiveTopologyPair(639, 640)),
+            "10-card upper boundary IO639-IO640 remains observable and classified SHORT");
+
+        engine.ProcessFrame(FrameSeq(111, (1, new[] { 2 })) with { ScanGeneration = 2 });
         ProductEvidenceSnapshot expected = engine.GetProductEvidenceSnapshot();
         Assert(expected.ValidProductEvidence &&
                expected.State == ProductPresenceState.Present &&
@@ -4537,8 +4579,10 @@ internal static class Program
         board.PublishProbePreview(new ProductionProbePreview(
             DateTime.Now, [9], 12, 12, Sequence: 56, ScanGeneration: 2));
         board.Publish(FrameSeq(56, (9, new[] { 10 }), (10, new[] { 9 })) with { ScanGeneration = 2 });
-        Assert(previewEngine.FramesProcessed == beforePhysicalPair + 1,
-            "Reciprocal IO9-IO10 physical evidence is never swallowed by a matching Probe preview");
+        PassGateDiagnostics directPair = previewEngine.GetPassGateDiagnostics();
+        Assert(previewEngine.FramesProcessed == beforePhysicalPair + 1 &&
+               directPair.ShortCandidateCount == 1 && directPair.WrongCandidateCount == 0,
+            "Reciprocal IO9-IO10 physical evidence bypasses Probe and is one canonical SHORT");
     }
 
     private static byte[] BuildProductionScanFrame(
@@ -5943,6 +5987,14 @@ internal static class Program
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         board.Publish(FrameSeq(10, (1, new[] { 86 }), (2, new[] { 87 })));
         Assert(vm.PassedNetworkCount == 0, "Reused background scan rejects stale pre-cycle complete frame");
+        board.Publish((FrameSeq(11, (1, new[] { 86 }), (2, new[] { 87 }))) with
+        {
+            ExpectedIoCount = 128,
+            SourceCount = 128,
+            ScanUnitCount = 2
+        });
+        Assert(vm.PassedNetworkCount == 0,
+            "Fresh-frame gate rejects a frame whose coverage belongs to another capacity");
         board.Publish(FrameSeq(11, (1, new[] { 86 }), (2, new[] { 87 })));
         Assert(vm.PassedNetworkCount == 2, "Fresh post-ARM frame can satisfy two-wire PASS gate");
 
@@ -6218,16 +6270,15 @@ internal static class Program
         Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 20);
         unmappedPairEngine.ProcessFrame(unmappedPairFrame with { Sequence = 15 });
         PassGateDiagnostics unmappedDiagnostics = unmappedPairEngine.GetPassGateDiagnostics();
-        Assert(unmappedDiagnostics.WrongCandidateCount == 1 &&
-               unmappedDiagnostics.ShortCandidateCount == 0 &&
+        Assert(unmappedDiagnostics.WrongCandidateCount == 0 &&
+               unmappedDiagnostics.ShortCandidateCount == 1 &&
                unmappedDiagnostics.HasProductActivity &&
-               unmappedDiagnostics.WrongConfirmedCount == 1 &&
+               unmappedDiagnostics.ShortConfirmedCount == 1 &&
                unmappedPairEngine.HasWiringFault &&
                unmappedPairEngine.BuildRows().Count(row =>
-                   row.Kind == FaultKind.WrongWiring &&
-                   row.Status == "SAI DÂY" &&
-                   (row.Io == 23 || row.Io == 25)) == 2,
-            "CASE C2: an ordinary physical edge outside the THT is not Probe/noise; it remains realtime product evidence and confirms SAI DÂY");
+                    row.Kind == FaultKind.Short &&
+                    (row.Io == 23 || row.Io == 25)) == 2,
+            "CASE C2: a direct physical pair outside the THT is not Probe/noise and confirms CHẬP MẠCH");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings

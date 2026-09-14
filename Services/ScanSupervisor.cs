@@ -46,6 +46,7 @@ public sealed class ScanSupervisor
     private long _previousScanGeneration;
     private long _baselineCompleteFrames;
     private bool _requireNewGeneration;
+    private BoardCapacity _expectedCapacity = BoardCapacity.Create(1);
     private TaskCompletionSource<ScanFrame>? _firstFrameWaiter;
 
     public ScanSupervisor(
@@ -94,6 +95,12 @@ public sealed class ScanSupervisor
         bool capacityChanged = _board.AppliedScanCapacity is not BoardCapacity appliedCapacity ||
                                !HasSameActiveRange(appliedCapacity, requestedCapacity);
 
+        if (capacityChanged && _board.AppliedScanCapacity is not null)
+        {
+            await ReopenForCapacityTransitionAsync(maxIo, ct);
+            requestedCapacity = _board.Capacity;
+        }
+
         if (!capacityChanged &&
             _board.IsScanning &&
             _board.CurrentScanMode == BoardScanMode.Production)
@@ -105,6 +112,7 @@ public sealed class ScanSupervisor
                     requireNewGeneration: false,
                     recovering: false,
                     _board.CompleteFramesReceived,
+                    requestedCapacity,
                     "reuse-running-stream");
                 MarkStartCommandCompleted();
             }
@@ -116,6 +124,7 @@ public sealed class ScanSupervisor
             requireNewGeneration: true,
             recovering: false,
             _board.CompleteFramesReceived,
+            requestedCapacity,
             "ensure-production");
         try
         {
@@ -145,12 +154,19 @@ public sealed class ScanSupervisor
                      _board.IsScanning &&
                      _board.CurrentScanMode == BoardScanMode.Production;
 
+        if (capacityChanged && _board.AppliedScanCapacity is not null)
+        {
+            await ReopenForCapacityTransitionAsync(maxIo, ct);
+            configuredCapacity = _board.Capacity;
+        }
+
         long baselineFrameCount = _board.CompleteFramesReceived;
         TaskCompletionSource<ScanFrame> firstFrame = BeginFirstFrameWait(
             BoardScanMode.Production,
             requireNewGeneration: !reuse,
             recovering: false,
             baselineFrameCount,
+            configuredCapacity,
             reason);
         if (!reuse)
             await _board.StartScanAsync(BoardScanMode.Production, ct);
@@ -252,6 +268,7 @@ public sealed class ScanSupervisor
                 requireNewGeneration: true,
                 recovering: true,
                 baseline,
+                _board.Capacity,
                 "soft-recovery");
             await _board.StartScanAsync(mode, recoveryToken);
             MarkStartCommandCompleted();
@@ -293,6 +310,7 @@ public sealed class ScanSupervisor
                 requireNewGeneration: false,
                 recovering: true,
                 baseline,
+                _board.Capacity,
                 "reopen-recovery");
             await _board.StartScanAsync(mode, recoveryToken);
             MarkStartCommandCompleted();
@@ -346,6 +364,7 @@ public sealed class ScanSupervisor
         bool requireNewGeneration,
         bool recovering,
         long baselineCompleteFrames,
+        BoardCapacity expectedCapacity,
         string reason)
     {
         TaskCompletionSource<ScanFrame> waiter = new(
@@ -357,6 +376,7 @@ public sealed class ScanSupervisor
             _expectedMode = mode;
             _previousScanGeneration = _lastObservedScanGeneration;
             _baselineCompleteFrames = baselineCompleteFrames;
+            _expectedCapacity = expectedCapacity;
             _requireNewGeneration = requireNewGeneration;
             _healthState = recovering ? ScanHealthState.Recovering : ScanHealthState.Starting;
             _healthReason = reason;
@@ -402,7 +422,8 @@ public sealed class ScanSupervisor
         if (frame.Mode != _expectedMode ||
             !frame.Complete ||
             frame.UnknownBytes != 0 ||
-            !frame.TerminatorKnown)
+            !frame.TerminatorKnown ||
+            !HasExpectedCoverage(frame, _expectedCapacity))
         {
             return;
         }
@@ -476,6 +497,25 @@ public sealed class ScanSupervisor
     private static bool HasSameActiveRange(BoardCapacity left, BoardCapacity right) =>
         left.StartScanParameter == right.StartScanParameter &&
         left.TotalIoCapacity == right.TotalIoCapacity;
+
+    private static bool HasExpectedCoverage(ScanFrame frame, BoardCapacity expected) =>
+        // Zero metadata exists only on legacy/in-memory transport frames. Every
+        // D2XX decoder frame carries both values and must match exactly.
+        (frame.ExpectedIoCount == 0 && frame.ScanUnitCount == 0) ||
+        (frame.ExpectedIoCount == expected.TotalIoCapacity &&
+         frame.ScanUnitCount == expected.ScanCardCount);
+
+    private async Task ReopenForCapacityTransitionAsync(int maxIo, CancellationToken ct)
+    {
+        BoardCapacity previous = _board.AppliedScanCapacity!;
+        BoardCapacity requested = _board.Capacity;
+        _log($"SCAN_CAPACITY_CONTROLLED_REOPEN old={previous.ScanCardCount}/{previous.TotalIoCapacity} " +
+             $"new={requested.ScanCardCount}/{requested.TotalIoCapacity}");
+        await _board.DisconnectAsync();
+        ct.ThrowIfCancellationRequested();
+        await _board.ConnectAsync(ct);
+        _board.ConfigureActiveScanRange(maxIo);
+    }
 
     private string BuildFrameTimeoutDiagnostic(string reason, long baselineFrameCount)
     {

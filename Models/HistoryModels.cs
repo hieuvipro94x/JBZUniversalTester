@@ -406,9 +406,6 @@ public sealed record LabelPrintRequest(
         // payload của TEM_BE, TEM_TO hoặc template tùy chỉnh khác.
         if (isSmallQrLabel)
             payload = JBZUniversalTester.Services.LabelTemplateRenderer.NormalizeEplJob(payload);
-        else if (templateType == LabelSettings.LargeTemplate &&
-                 JBZUniversalTester.Services.BuiltInLabelTemplateStore.IsReference(profile.TemplatePath))
-            payload = payload.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
         if (isSmallLabel)
         {
