@@ -5623,6 +5623,28 @@ public sealed class TestViewModel : ObservableObject
         if (!ioMappingMode && !await EnsureProductionPersistenceReadyAsync("StartProduction.Preflight"))
             return;
 
+        if (!ioMappingMode)
+        {
+            // LOTNO phải được đối chiếu với SQLite của đúng mã hàng trước khi
+            // cycle mới có thể reserve LOT. Điều này phục hồi an toàn các máy
+            // từng chạy bản cũ đã commit PASS nhưng chưa cập nhật LOT config.
+            try
+            {
+                await _statisticsLoadTask;
+            }
+            catch
+            {
+                // LoadStatisticsForModelAsync tự route lỗi sang persistence fault.
+            }
+
+            if (IsPersistenceFault)
+            {
+                State = "LỖI LƯU DỮ LIỆU - KHÔNG BẮT ĐẦU TEST";
+                AddLog("Không thể ARM Production vì LOT/Statistics chưa đồng bộ an toàn với SQLite.");
+                return;
+            }
+        }
+
         if (!_board.IsConnected)
         {
             ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
@@ -9078,9 +9100,27 @@ public sealed class TestViewModel : ObservableObject
                 PartCounter: await probeTask);
 
             if (generation != Volatile.Read(ref _statisticsLoadGeneration) ||
-                _lifetimeCts.IsCancellationRequested)
+                _lifetimeCts.IsCancellationRequested ||
+                !IsActiveStatisticsContext(model, part, generation))
             {
                 return;
+            }
+
+            if (snapshot.Stats.DailyTotal > 0 &&
+                snapshot.Stats.LastLotNo > _lotSequence.NextLot)
+            {
+                long previousLot = _lotSequence.NextLot;
+                if (!_lotSequence.TryReconcileCommittedLot(
+                        snapshot.Stats.LastLotNo,
+                        out string reconcileError))
+                {
+                    throw new InvalidOperationException(
+                        $"Không thể đồng bộ LOTNO từ SQLite: {reconcileError}");
+                }
+
+                AddLog(
+                    $"LOTNO RECOVERED FROM SQLITE: {previousLot} -> {snapshot.Stats.LastLotNo}; " +
+                    "giữ SQLite PASS history làm nguồn sự thật sau lỗi in/cấu hình cũ.");
             }
 
             await InvokeUiAsync(() =>
@@ -9361,15 +9401,26 @@ public sealed class TestViewModel : ObservableObject
                 cycleToken);
             history.Id = databaseResult.TestId;
             historySaved = true;
-            if (passed && !shouldAutoPrint && databaseResult.AlreadyCommitted)
+            if (passed)
             {
-                _lotSequence.ReleaseReservation(cycleId);
-            }
-            else if (passed && !shouldAutoPrint &&
-                     !_lotSequence.TryCommitSuccessfulPass(cycleId, completedLot, out string lotCommitError))
-            {
-                throw new InvalidOperationException(
-                    $"PASS đã lưu nhưng chưa thể tăng LOT {completedLot}: {lotCommitError}");
+                if (databaseResult.AlreadyCommitted)
+                {
+                    _lotSequence.ReleaseReservation(cycleId);
+                    if (databaseResult.Statistics.DailyTotal > 0 &&
+                        !_lotSequence.TryReconcileCommittedLot(
+                            databaseResult.Statistics.LastLotNo,
+                            out string reconcileError))
+                    {
+                        throw new InvalidOperationException(
+                            $"PASS đã tồn tại nhưng chưa thể đồng bộ LOTNO: {reconcileError}");
+                    }
+                }
+                else if (!_lotSequence.TryCommitSuccessfulPass(
+                             cycleId, completedLot, out string lotCommitError))
+                {
+                    throw new InvalidOperationException(
+                        $"PASS đã lưu nhưng chưa thể tăng LOT {completedLot}: {lotCommitError}");
+                }
             }
             _recordedHistoryCycleId = cycleId;
             _recordedHistoryStore = historyStore;
@@ -9467,7 +9518,7 @@ public sealed class TestViewModel : ObservableObject
             $"Đã lưu kết quả mã hàng: LOT {completedLot}, {resultStatus}" +
             (passed ? ", " : $" - {failureName}, ") +
             $"Tổng {Total}, PASS {Pass}, FAIL {Fail}, tỷ lệ {Rate:0.00}%. " +
-            $"LOTNO kế tiếp: {_productionSettings.LotNo}.");
+            $"LOTNO đã commit: {_lotSequence.NextLot}.");
 
         if (!passed)
         {
@@ -9736,32 +9787,13 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
-            if (!_lotSequence.IsCommitCandidate(request.CycleId, request.Data.LotNo))
-            {
-                string blocked = $"LOT {request.Data.LotNo} đang chờ LOT trước đó được in/commit; chưa gửi dữ liệu tới máy in.";
-                await UpdateLabelPrintOutcomeSafeAsync(
-                    historyStore, historyId, request.CycleId, LabelPrintStatus.Failed, null, blocked);
-                SetFailedLabelContext(new LabelPrintContext(request, historyStore, historyId), blocked);
-                AddLog($"LABEL BLOCKED: cycle {request.CycleId}; {blocked}");
-                return;
-            }
-
+            // LOT đã được commit ngay sau SQLite PASS. In tem là tác vụ
+            // downstream độc lập: một tem lỗi không được giữ reservation cũ
+            // rồi khóa toàn bộ LOT/tem của các sản phẩm PASS tiếp theo.
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
                 request, _lifetimeCts.Token);
 
-            bool commitUnknown = false;
-            if (result.Printed &&
-                !_lotSequence.TryCommitSuccessfulPrint(request.CycleId, request.Data.LotNo, out string commitError))
-            {
-                commitUnknown = true;
-                result = new LabelPrintTransportResult(
-                    false,
-                    $"Printer accepted LOT {request.Data.LotNo}, but LOT commit failed: {commitError}");
-            }
-
-            LabelPrintStatus status = commitUnknown
-                ? LabelPrintStatus.Unknown
-                : result.Printed
+            LabelPrintStatus status = result.Printed
                 ? LabelPrintStatus.Printed
                 : LabelPrintStatus.Failed;
             DateTime? printedAt = result.Printed ? DateTime.Now : null;
@@ -9781,13 +9813,7 @@ public sealed class TestViewModel : ObservableObject
                 SetSuccessfulLabelContext(new LabelPrintContext(request, historyStore, historyId));
             }
 
-            if (commitUnknown)
-            {
-                SetUnknownLabelStatus(request, result.Message);
-                ShowLabelWarning(
-                    $"Tem LOT {request.Data.LotNo} có thể đã được in. Không tự in lại để tránh trùng tem.");
-            }
-            else if (!result.Printed)
+            if (!result.Printed)
             {
                 SetFailedLabelContext(new LabelPrintContext(request, historyStore, historyId), result.Message);
                 ShowLabelWarning(
@@ -9822,12 +9848,6 @@ public sealed class TestViewModel : ObservableObject
 
         if (context is null)
             return;
-
-        if (!_lotSequence.TryRestoreReservation(context.Request.CycleId, context.Request.Data.LotNo))
-        {
-            ShowLabelWarning($"Chưa thể thử in lại tem LOT {context.Request.Data.LotNo}.");
-            return;
-        }
 
         await PrintPassLabelSafeAsync(context.Request, context.HistoryStore, context.HistoryId);
     }
@@ -9889,7 +9909,13 @@ public sealed class TestViewModel : ObservableObject
     {
         lock (_labelStateGate)
         {
-            _failedLabelPrint = null;
+            if (string.Equals(
+                    _failedLabelPrint?.Request.CycleId,
+                    context.Request.CycleId,
+                    StringComparison.Ordinal))
+            {
+                _failedLabelPrint = null;
+            }
             _lastSuccessfulLabelPrint = context;
         }
 

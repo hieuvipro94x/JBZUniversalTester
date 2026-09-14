@@ -7566,19 +7566,43 @@ internal static class Program
         Assert(cycleA == 2045 && lots.ReserveForCycle("cycle-a") == 2045,
             "Duplicate PASS callback keeps the same reserved LOT");
         Assert(lots.NextLot == 2044 && persistCount == 0,
-            "Reservation/printer failure does not advance persisted LOT");
-        Assert(lots.TryCommitSuccessfulPrint("cycle-a", 2045, out string errorA) && errorA.Length == 0,
-            "Successful print commits reserved LOT");
+            "Reservation alone does not advance persisted LOT before durable PASS");
+        Assert(lots.TryCommitSuccessfulPass("cycle-a", 2045, out string errorA) && errorA.Length == 0,
+            "Durable PASS commits reserved LOT before label printing");
         Assert(lots.NextLot == 2045 && persistCount == 1,
-            "Successful print advances and persists completed LOT exactly once");
+            "Durable PASS advances and persists completed LOT exactly once");
 
         long cycleB = lots.ReserveForCycle("cycle-b");
         Assert(cycleB == 2046 && lots.NextLot == 2045,
             "Next PASS receives the next LOT without early commit");
-        Assert(!lots.TryCommitSuccessfulPrint("cycle-b", 2047, out _),
-            "Mismatched LOT cannot commit");
+        Assert(!lots.TryCommitSuccessfulPass("cycle-b", 2047, out _),
+            "Mismatched PASS LOT cannot commit");
         Assert(lots.NextLot == 2045,
-            "Failed/mismatched print leaves next LOT unchanged for retry");
+            "Failed/mismatched PASS LOT leaves committed LOT unchanged");
+
+        var staleSettings = new ProductionSettings { LotNo = 2036, LotNoDate = "2026-08-29" };
+        int stalePersistCount = 0;
+        var staleLots = new LotSequenceService(staleSettings, _ => stalePersistCount++, () => lotClock);
+        long failedLabelLot = staleLots.ReserveForCycle("old-label-failed");
+        long nextDurableLot = staleLots.ReserveForCycle("next-pass");
+        Assert(failedLabelLot == 2037 && nextDurableLot == 2038,
+            "A legacy failed-label reservation can leave the next durable PASS at a higher LOT");
+        Assert(staleLots.TryCommitSuccessfulPass("next-pass", nextDurableLot, out string staleCommitError) &&
+               staleCommitError.Length == 0 && staleLots.NextLot == 2038 && stalePersistCount == 1,
+            "SQLite-durable higher PASS clears stale lower label reservation instead of freezing LOTNO");
+        Assert(staleLots.ReserveForCycle("after-recovery") == 2039,
+            "LOT continues sequentially after stale failed-label recovery");
+
+        var recoveredSettings = new ProductionSettings { LotNo = 2036, LotNoDate = "2026-08-29" };
+        int recoveryPersistCount = 0;
+        var recoveredLots = new LotSequenceService(recoveredSettings, _ => recoveryPersistCount++, () => lotClock);
+        Assert(recoveredLots.TryReconcileCommittedLot(2040, out string recoveryError) &&
+               recoveryError.Length == 0 && recoveredLots.NextLot == 2040 && recoveryPersistCount == 1,
+            "SQLite history reconciles a stale persisted LOTNO left by older label-gated builds");
+        Assert(recoveredLots.ReserveForCycle("post-history-recovery") == 2041,
+            "Recovered machine reserves the next unused LOT instead of reusing historical LOTs");
+        Assert(recoveredLots.TryReconcileCommittedLot(2035, out _) && recoveredLots.NextLot == 2040,
+            "History reconciliation never moves LOTNO backwards");
 
         var restartedSettings = new ProductionSettings
         {
@@ -7629,11 +7653,11 @@ internal static class Program
         var perProductLots = new LotSequenceService(perProductSettings, _ => { }, () => lotClock);
         perProductLots.SelectProduct("PART-2000", migrateCurrentLotIfMissing: false);
         Assert(perProductLots.NextLot == 2000, "PART-2000 loads its own starting LOT");
-        Assert(perProductLots.TryCommitSuccessfulPrint(
+        Assert(perProductLots.TryCommitSuccessfulPass(
                 "part-2000-cycle",
                 perProductLots.ReserveForCycle("part-2000-cycle"),
                 out _),
-            "PART-2000 commits its own LOT");
+            "PART-2000 commits its own LOT on durable PASS");
         perProductLots.SelectProduct("PART-7000", migrateCurrentLotIfMissing: false);
         Assert(perProductLots.NextLot == 7000, "PART-7000 loads its own starting LOT");
         perProductLots.SelectProduct("PART-5000", migrateCurrentLotIfMissing: false);
@@ -8035,8 +8059,8 @@ internal static class Program
                     continue;
                 string cycleId = $"stress-{cycle}";
                 long lot = stressLots.ReserveForCycle(cycleId);
-                Assert(stressLots.TryCommitSuccessfulPrint(cycleId, lot, out _),
-                    $"100-cycle label stress commits cycle {cycle}");
+                Assert(stressLots.TryCommitSuccessfulPass(cycleId, lot, out _),
+                    $"100-cycle PASS/FAIL stress commits cycle {cycle}");
             }
             Assert(stressLots.NextLot == 3050,
                 "100-cycle PASS/FAIL stress has no skipped or duplicate committed LOT");
@@ -8067,6 +8091,39 @@ internal static class Program
                (bool)(hasLabelTransport.Invoke(null, [new LabelSettings { PrinterCom = "COM3" }]) ?? false) &&
                (bool)(hasLabelTransport.Invoke(null, [new LabelSettings { PrinterName = "ZDesigner" }]) ?? false),
             "Auto-print is skipped on stations without a configured printer transport");
+
+        string labelFlowSource = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        int recordStart = labelFlowSource.IndexOf(
+            "private async Task<bool> RecordCompletedProductAsync",
+            StringComparison.Ordinal);
+        int captureStart = labelFlowSource.IndexOf(
+            "private static bool TryCapturePassLabel",
+            recordStart,
+            StringComparison.Ordinal);
+        string recordSource = labelFlowSource[recordStart..captureStart];
+        int printStart = labelFlowSource.IndexOf(
+            "private async Task PrintPassLabelSafeAsync",
+            StringComparison.Ordinal);
+        int retryStart = labelFlowSource.IndexOf(
+            "private async Task RetryLastFailedLabelAsync",
+            printStart,
+            StringComparison.Ordinal);
+        string firstPrintSource = labelFlowSource[printStart..retryStart];
+        int reprintStart = labelFlowSource.IndexOf(
+            "private async Task ReprintLastSuccessfulLabelAsync",
+            retryStart,
+            StringComparison.Ordinal);
+        string retrySource = labelFlowSource[retryStart..reprintStart];
+        Assert(recordSource.IndexOf("TryCommitSuccessfulPass", StringComparison.Ordinal) >= 0 &&
+               recordSource.IndexOf("TryCommitSuccessfulPass", StringComparison.Ordinal) <
+               recordSource.IndexOf("PrintPassLabelSafeAsync", StringComparison.Ordinal),
+            "LOT commits after durable PASS before asynchronous first-label printing");
+        Assert(!firstPrintSource.Contains("IsCommitCandidate", StringComparison.Ordinal) &&
+               !firstPrintSource.Contains("TryCommitSuccessfulPrint", StringComparison.Ordinal) &&
+               firstPrintSource.Contains("TryBeginFirstPrintAsync", StringComparison.Ordinal) &&
+               !retrySource.Contains("TryRestoreReservation", StringComparison.Ordinal),
+            "Printer failure/retry cannot freeze later LOTs; duplicate-print protection remains in SQLite");
 
         DateTime finished = new(2026, 8, 10, 9, 8, 7, DateTimeKind.Local);
         var history = new TestHistoryRecord

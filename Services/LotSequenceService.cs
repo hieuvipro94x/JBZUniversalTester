@@ -111,19 +111,28 @@ public sealed class LotSequenceService
             ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
                 _settings, reservation.ProductKey, migrateCurrentLot: false);
             long current = Math.Max(0, lot.LotNo);
-            if (completedLot != checked(current + 1L))
+            if (completedLot <= current)
             {
-                error = $"Cannot commit LOT {completedLot}; expected next LOT is {current + 1L}.";
-                return false;
+                // SQLite/CycleId may already contain this durable PASS. Treat the
+                // in-memory reservation as stale and never move LOT backwards.
+                RemoveCommittedReservationsLocked(reservation.ProductKey, current);
+                error = string.Empty;
+                return true;
             }
 
             try
             {
+                // The completed PASS is already durable in SQLite before this method
+                // is called. Advance to that exact LOT even if an older failed-label
+                // reservation was left in memory by a previous cycle. A printer
+                // failure must never freeze every later PASS at the old LOTNO.
                 lot.LotNo = completedLot;
                 if (IsActiveProduct(reservation.ProductKey))
                     SyncCompatibilityFieldsLocked(lot);
                 _persist(_settings);
-                _reservations.Remove(cycleId);
+
+                RemoveCommittedReservationsLocked(reservation.ProductKey, completedLot);
+
                 EnsureCurrentProductionDateLocked(reservation.ProductKey, persist: false);
                 error = string.Empty;
                 return true;
@@ -133,7 +142,42 @@ public sealed class LotSequenceService
                 lot.LotNo = current;
                 if (IsActiveProduct(reservation.ProductKey))
                     SyncCompatibilityFieldsLocked(lot);
-                error = $"Cannot persist next LOT: {ex.Message}";
+                error = $"Cannot persist completed LOT: {ex.Message}";
+                return false;
+            }
+        }
+    }
+
+    public bool TryReconcileCommittedLot(long committedLot, out string error)
+    {
+        lock (_gate)
+        {
+            EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
+            ProductLotSettings lot = ActiveLotLocked();
+            long current = Math.Max(0, lot.LotNo);
+            long authoritative = Math.Max(0, committedLot);
+            if (authoritative <= current)
+            {
+                error = string.Empty;
+                return true;
+            }
+
+            try
+            {
+                lot.LotNo = authoritative;
+                SyncCompatibilityFieldsLocked(lot);
+                _persist(_settings);
+
+                RemoveCommittedReservationsLocked(_activeProductKey, authoritative);
+
+                error = string.Empty;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                lot.LotNo = current;
+                SyncCompatibilityFieldsLocked(lot);
+                error = $"Cannot reconcile committed LOT {authoritative}: {ex.Message}";
                 return false;
             }
         }
@@ -271,6 +315,22 @@ public sealed class LotSequenceService
 
     private bool IsActiveProduct(string productKey) =>
         string.Equals(productKey, _activeProductKey, StringComparison.OrdinalIgnoreCase);
+
+    private void RemoveCommittedReservationsLocked(string productKey, long throughLot)
+    {
+        foreach (string staleCycle in _reservations
+                     .Where(pair =>
+                         string.Equals(
+                             pair.Value.ProductKey,
+                             productKey,
+                             StringComparison.OrdinalIgnoreCase) &&
+                         pair.Value.LotNo <= throughLot)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            _reservations.Remove(staleCycle);
+        }
+    }
 
     private static string NormalizeProductKey(string? productKey) =>
         string.IsNullOrWhiteSpace(productKey) ? "DEFAULT" : productKey.Trim();
