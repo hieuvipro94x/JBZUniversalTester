@@ -9213,7 +9213,7 @@ public sealed class TestViewModel : ObservableObject
                 "LABEL SKIPPED: AutoPrintLabelOnPass đang bật nhưng chưa cấu hình " +
                 "PrinterName/PrinterCom/RawDestination/ExternalHelperPath; kết quả PASS vẫn được lưu bình thường.");
         }
-        long completedLot = shouldAutoPrint
+        long completedLot = passed
             ? _lotSequence.ReserveForCycle(cycleId)
             : _lotSequence.NextLot;
 
@@ -9359,6 +9359,16 @@ public sealed class TestViewModel : ObservableObject
                 cycleToken);
             history.Id = databaseResult.TestId;
             historySaved = true;
+            if (passed && !shouldAutoPrint && databaseResult.AlreadyCommitted)
+            {
+                _lotSequence.ReleaseReservation(cycleId);
+            }
+            else if (passed && !shouldAutoPrint &&
+                     !_lotSequence.TryCommitSuccessfulPass(cycleId, completedLot, out string lotCommitError))
+            {
+                throw new InvalidOperationException(
+                    $"PASS đã lưu nhưng chưa thể tăng LOT {completedLot}: {lotCommitError}");
+            }
             _recordedHistoryCycleId = cycleId;
             _recordedHistoryStore = historyStore;
             await InvokeUiAsync(() =>

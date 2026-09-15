@@ -91,18 +91,18 @@ public sealed class LotSequenceService
                 .Select(item => item.LotNo)
                 .Distinct()
                 .Count();
-            long reserved = checked(lot.LotNo + pendingForProduct);
+            long reserved = checked(lot.LotNo + pendingForProduct + 1L);
             _reservations[cycleId] = new LotReservation(_activeProductKey, reserved);
             return reserved;
         }
     }
 
-    public bool TryCommitSuccessfulPrint(string cycleId, long printedLot, out string error)
+    public bool TryCommitSuccessfulPass(string cycleId, long completedLot, out string error)
     {
         lock (_gate)
         {
             if (!_reservations.TryGetValue(cycleId, out LotReservation reservation) ||
-                reservation.LotNo != printedLot)
+                reservation.LotNo != completedLot)
             {
                 error = $"LOT reservation mismatch for cycle {cycleId}.";
                 return false;
@@ -111,15 +111,15 @@ public sealed class LotSequenceService
             ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
                 _settings, reservation.ProductKey, migrateCurrentLot: false);
             long current = Math.Max(0, lot.LotNo);
-            if (printedLot != current)
+            if (completedLot != checked(current + 1L))
             {
-                error = $"Cannot commit LOT {printedLot}; next persisted LOT is {current}.";
+                error = $"Cannot commit LOT {completedLot}; expected next LOT is {current + 1L}.";
                 return false;
             }
 
             try
             {
-                lot.LotNo = checked(printedLot + 1);
+                lot.LotNo = completedLot;
                 if (IsActiveProduct(reservation.ProductKey))
                     SyncCompatibilityFieldsLocked(lot);
                 _persist(_settings);
@@ -139,6 +139,9 @@ public sealed class LotSequenceService
         }
     }
 
+    public bool TryCommitSuccessfulPrint(string cycleId, long printedLot, out string error) =>
+        TryCommitSuccessfulPass(cycleId, printedLot, out error);
+
     public bool IsCommitCandidate(string cycleId, long lotNo)
     {
         lock (_gate)
@@ -150,7 +153,7 @@ public sealed class LotSequenceService
             }
             ProductLotSettings current = ProductionConfigService.GetOrCreateProductLot(
                 _settings, reservation.ProductKey, migrateCurrentLot: false);
-            return current.LotNo == lotNo;
+            return lotNo == checked(current.LotNo + 1L);
         }
     }
 
@@ -165,7 +168,7 @@ public sealed class LotSequenceService
                 return existing.LotNo == lotNo && IsActiveProduct(existing.ProductKey);
 
             ProductLotSettings current = ActiveLotLocked();
-            if (lotNo < current.LotNo || _reservations.Values.Any(item =>
+            if (lotNo <= current.LotNo || _reservations.Values.Any(item =>
                     IsActiveProduct(item.ProductKey) && item.LotNo == lotNo))
             {
                 return false;
@@ -185,6 +188,14 @@ public sealed class LotSequenceService
             EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
             return ActiveLotLocked().LotNo;
         }
+    }
+
+    public void ReleaseReservation(string cycleId)
+    {
+        if (string.IsNullOrWhiteSpace(cycleId))
+            return;
+        lock (_gate)
+            _reservations.Remove(cycleId);
     }
 
     private bool EnsureCurrentProductionDateLocked(string productKey, bool persist)

@@ -7509,19 +7509,19 @@ internal static class Program
         int persistCount = 0;
         var lots = new LotSequenceService(settings, _ => persistCount++, () => lotClock);
         long cycleA = lots.ReserveForCycle("cycle-a");
-        Assert(cycleA == 2044 && lots.ReserveForCycle("cycle-a") == 2044,
+        Assert(cycleA == 2045 && lots.ReserveForCycle("cycle-a") == 2045,
             "Duplicate PASS callback keeps the same reserved LOT");
         Assert(lots.NextLot == 2044 && persistCount == 0,
             "Reservation/printer failure does not advance persisted LOT");
-        Assert(lots.TryCommitSuccessfulPrint("cycle-a", 2044, out string errorA) && errorA.Length == 0,
+        Assert(lots.TryCommitSuccessfulPrint("cycle-a", 2045, out string errorA) && errorA.Length == 0,
             "Successful print commits reserved LOT");
         Assert(lots.NextLot == 2045 && persistCount == 1,
-            "Successful print advances and persists next LOT exactly once");
+            "Successful print advances and persists completed LOT exactly once");
 
         long cycleB = lots.ReserveForCycle("cycle-b");
-        Assert(cycleB == 2045 && lots.NextLot == 2045,
+        Assert(cycleB == 2046 && lots.NextLot == 2045,
             "Next PASS receives the next LOT without early commit");
-        Assert(!lots.TryCommitSuccessfulPrint("cycle-b", 2046, out _),
+        Assert(!lots.TryCommitSuccessfulPrint("cycle-b", 2047, out _),
             "Mismatched LOT cannot commit");
         Assert(lots.NextLot == 2045,
             "Failed/mismatched print leaves next LOT unchanged for retry");
@@ -7590,6 +7590,28 @@ internal static class Program
         lotClock = lotClock.AddDays(1);
         Assert(perProductLots.NextLot == 2000,
             "PART-2000 returns to its own starting LOT when the production date changes");
+
+        var zeroBasedSettings = new ProductionSettings { LotNo = 0, LotNoDate = "2026-08-30" };
+        int zeroBasedPersistCount = 0;
+        var zeroBasedLots = new LotSequenceService(
+            zeroBasedSettings,
+            _ => zeroBasedPersistCount++,
+            () => lotClock);
+        Assert(zeroBasedLots.NextLot == 0,
+            "A non-print product keeps configured base LOT zero before production PASS");
+        long firstNoPrintLot = zeroBasedLots.ReserveForCycle("no-print-pass-1");
+        Assert(firstNoPrintLot == 1 &&
+               zeroBasedLots.TryCommitSuccessfulPass("no-print-pass-1", firstNoPrintLot, out _) &&
+               zeroBasedLots.NextLot == 1 && zeroBasedPersistCount == 1,
+            "First non-print PASS advances configured base LOT 0 to completed LOT 1");
+        long lotBeforeFail = zeroBasedLots.NextLot;
+        Assert(lotBeforeFail == 1 && zeroBasedLots.NextLot == lotBeforeFail,
+            "FAIL does not reserve, consume or increment the product LOT");
+        long secondNoPrintLot = zeroBasedLots.ReserveForCycle("no-print-pass-2");
+        Assert(secondNoPrintLot == 2 &&
+               zeroBasedLots.TryCommitSuccessfulPass("no-print-pass-2", secondNoPrintLot, out _) &&
+               zeroBasedLots.NextLot == 2,
+            "Next non-print PASS continues LOT 2 after an intervening FAIL");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelProfileTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
