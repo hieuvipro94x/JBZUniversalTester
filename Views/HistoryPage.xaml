@@ -149,6 +149,7 @@
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FontSize" Value="11.5"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="BorderBrush" Value="#C8D0D9"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
             <Setter Property="Padding" Value="6,4"/>
@@ -165,6 +166,7 @@
             <Setter Property="HorizontalAlignment" Value="Stretch"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0"/>
         </Style>
 
         <Style x:Key="HistoryCellStyle" TargetType="DataGridCell">
@@ -182,7 +184,7 @@
         <Style x:Key="HistoryCenterCellStyle"
                TargetType="DataGridCell"
                BasedOn="{StaticResource HistoryCellStyle}">
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
     </UserControl.Resources>
@@ -426,7 +428,7 @@
                     <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Số thứ tự" Binding="{Binding HistoryOrdinal}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200">
+                    <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportTestLogText}"
@@ -435,23 +437,28 @@
                                            TextWrapping="NoWrap"
                                            HorizontalAlignment="Stretch"
                                            VerticalAlignment="Center"
-                                           TextAlignment="Left"/>
+                                           TextAlignment="Center"
+                                           Margin="0"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="Mã vạch" Width="260">
+                    <DataGridTemplateColumn Header="Mã vạch" Width="260" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportBarcodeText}"
                                            ToolTip="{Binding ExportBarcodeText}"
                                            TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap"/>
+                                           TextWrapping="NoWrap"
+                                           HorizontalAlignment="Stretch"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center"
+                                           Margin="0"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="200 %" Binding="{Binding ExportPercentText}" Width="80"/>
-                    <DataGridTextColumn Header="Kiểm tra đầu vào" Binding="{Binding ExportIncomingInspectionText}" Width="130"/>
-                    <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="220"/>
+                    <DataGridTextColumn Header="200 %" Binding="{Binding ExportPercentText}" Width="80" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Kiểm tra đầu vào" Binding="{Binding ExportIncomingInspectionText}" Width="130" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="220" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>

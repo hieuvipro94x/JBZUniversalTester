@@ -7292,6 +7292,92 @@ internal static class Program
             HistoryPresentation.AssignOrdinals(sameRows, 0);
             Assert(sameRows.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 1, 2, 3 }),
                 "A filtered History result resets presentation ordinals to one");
+
+            var scaleStore = new TestHistoryStore(Path.Combine(root, "history-450.db"));
+            DateTime scaleStart = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Local);
+            for (int index = 0; index < 450; index++)
+            {
+                bool passed = index % 3 != 0;
+                scaleStore.Add(new TestHistoryRecord
+                {
+                    Started = scaleStart.AddMinutes(index),
+                    TestStartedAt = scaleStart.AddMinutes(index),
+                    Finished = scaleStart.AddMinutes(index).AddSeconds(1),
+                    PartNumber = index % 2 == 0 ? "K32000-A" : "K32000-B",
+                    ModelFile = index % 2 == 0 ? @"D:\Models\K32000-A.tht" : @"D:\Models\K32000-B.tht",
+                    Result = passed ? "PASS" : "FAIL",
+                    Passed = passed,
+                    InspectionType = HistoryInspectionType.Product,
+                    CycleId = $"scale-{index:D3}"
+                });
+            }
+
+            HistorySearchCriteria scaleCriteria = new(
+                scaleStart.Date, scaleStart.Date.AddDays(1), null, string.Empty, "ALL", MaxRows: 200);
+            HistorySummary scaleSummary = scaleStore.GetHistorySummary(scaleCriteria);
+            var loadedScaleRows = new List<TestHistoryRecord>(450);
+            DateTime? scaleCursorAt = null;
+            long? scaleCursorId = null;
+            while (loadedScaleRows.Count < scaleSummary.Total)
+            {
+                IReadOnlyList<TestHistoryRecord> batch = scaleStore.SearchSummary(
+                    scaleCriteria with { BeforeHistoryAt = scaleCursorAt, BeforeId = scaleCursorId });
+                Assert(batch.Count > 0, "A 450-row History result always has a continuation batch");
+                HistoryPresentation.AssignOrdinals(batch, loadedScaleRows.Count);
+                loadedScaleRows.AddRange(batch);
+                TestHistoryRecord last = batch[^1];
+                scaleCursorAt = last.EffectiveTestStartedAt;
+                scaleCursorId = last.Id;
+            }
+            Assert(scaleSummary.Total == 450 && scaleSummary.ProductPass == 300 && scaleSummary.ProductFail == 150 &&
+                   loadedScaleRows.Count == 450 && loadedScaleRows.Select(row => row.Id).Distinct().Count() == 450 &&
+                   loadedScaleRows.Select(row => row.HistoryOrdinal).SequenceEqual(Enumerable.Range(1, 450).Select(value => (long)value)),
+                "History PageSize 200 is batch-only: 450 filtered rows load as 200/200/50 with global summary and STT 1-450");
+            IReadOnlyList<TestHistoryRecord> scaleExport = scaleStore.SearchForExport(scaleCriteria);
+            string scaleCsv = Path.Combine(root, "history-450.csv");
+            string scaleXlsx = Path.Combine(root, "history-450.xlsx");
+            Assert(scaleExport.Count == 450 && HistoryExportService.ExportCsv(scaleCsv, scaleExport) == 450 &&
+                   HistoryExportService.ExportXlsx(scaleXlsx, scaleExport) == 450 &&
+                   scaleExport.Select(row => row.HistoryOrdinal).SequenceEqual(Enumerable.Range(1, 450).Select(value => (long)value)),
+                "CSV/XLSX export all 450 filtered rows oldest-first with STT 1-450");
+
+            var filterStore = new TestHistoryStore(Path.Combine(root, "history-filter-boundaries.db"));
+            void AddFilterRow(DateTime at, string part, bool passed, string inspectionType, string cycleId) =>
+                filterStore.Add(new TestHistoryRecord
+                {
+                    Started = at,
+                    TestStartedAt = at,
+                    Finished = at.AddSeconds(1),
+                    PartNumber = part,
+                    ModelFile = $@"D:\Models\{part}.tht",
+                    Result = passed ? "PASS" : "FAIL",
+                    Passed = passed,
+                    InspectionType = inspectionType,
+                    CycleId = cycleId
+                });
+            AddFilterRow(new DateTime(2026, 8, 31, 23, 59, 59), "K32000-A", true, HistoryInspectionType.Product, "before-range");
+            AddFilterRow(new DateTime(2026, 9, 1, 0, 0, 0), "K32000-A", true, HistoryInspectionType.Product, "range-a-pass");
+            AddFilterRow(new DateTime(2026, 9, 5, 12, 0, 0), "K32000-B", false, HistoryInspectionType.Product, "range-b-fail");
+            AddFilterRow(new DateTime(2026, 9, 10, 12, 0, 0), "K32000-A", false, HistoryInspectionType.Product, "range-a-fail");
+            AddFilterRow(new DateTime(2026, 9, 11, 12, 0, 0), "K32000-A", false, HistoryInspectionType.LeakRetest, "range-a-leak-fail");
+            AddFilterRow(new DateTime(2026, 9, 14, 23, 59, 59), "K32000-B", true, HistoryInspectionType.Product, "range-end-pass");
+            AddFilterRow(new DateTime(2026, 9, 15, 0, 0, 0), "K32000-A", true, HistoryInspectionType.Product, "after-range");
+
+            HistorySearchCriteria rangeCriteria = new(
+                new DateTime(2026, 9, 1), new DateTime(2026, 9, 15), null, string.Empty, "ALL", MaxRows: 200);
+            IReadOnlyList<TestHistoryRecord> rangeRows = filterStore.SearchAllSummary(rangeCriteria);
+            IReadOnlyList<TestHistoryRecord> onlyA = filterStore.SearchAllSummary(rangeCriteria with { PartKeyword = "K32000-A" });
+            IReadOnlyList<TestHistoryRecord> passRows = filterStore.SearchAllSummary(rangeCriteria with { Result = "PASS" });
+            IReadOnlyList<TestHistoryRecord> failRows = filterStore.SearchAllSummary(rangeCriteria with { Result = "FAIL" });
+            IReadOnlyList<TestHistoryRecord> combinedRows = filterStore.SearchAllSummary(
+                rangeCriteria with { PartKeyword = "K32000-A", Result = "FAIL", InspectionType = HistoryInspectionType.Product });
+            Assert(rangeRows.Count == 5 && rangeRows.First().CycleId == "range-a-pass" && rangeRows.Last().CycleId == "range-end-pass" &&
+                   rangeRows.Select(row => row.PartNumber).Distinct().Order().SequenceEqual(new[] { "K32000-A", "K32000-B" }) &&
+                   onlyA.Count == 3 && onlyA.All(row => row.PartNumber == "K32000-A") &&
+                   passRows.Count == 2 && passRows.All(row => row.Passed) &&
+                   failRows.Count == 3 && failRows.All(row => !row.Passed) &&
+                   combinedRows.Count == 1 && combinedRows[0].CycleId == "range-a-fail",
+                "Date end-day, ALL/single product, PASS/FAIL/ALL and combined SQL filters apply before paging");
         }
         finally
         {
