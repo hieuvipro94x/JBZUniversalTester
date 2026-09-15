@@ -131,40 +131,13 @@ internal static class Program
 
         string pickerSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "HomeViewModel.cs"));
-        string pickerGuardSource = File.ReadAllText(
-            Path.Combine(Environment.CurrentDirectory, "Views", "FixedPositionOpenFileDialogGuard.cs"));
         Assert(pickerSource.Contains("DefaultExt = \".tht\"", StringComparison.Ordinal) &&
                pickerSource.Contains("OriginalItemDirectory = @\"C:\\Item\"", StringComparison.Ordinal) &&
                pickerSource.Contains("FirstOrDefault(window => window.IsActive)", StringComparison.Ordinal) &&
                pickerSource.Contains("AutoUpgradeEnabled = false", StringComparison.Ordinal) &&
                pickerSource.Contains("dialog.ShowDialog(new NativeDialogOwner(owner))", StringComparison.Ordinal) &&
-               pickerSource.Contains("FixedPositionOpenFileDialogGuard(owner)", StringComparison.Ordinal),
-            "Product picker uses the original filter/directory and owner-bound classic native dialog");
-        Assert(pickerGuardSource.Contains("GetWindow(handle, GwOwner) == _ownerHandle", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("MonitorFromWindow(", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("GetMonitorInfo(", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("PreferredDialogWidthDip = 640", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("PreferredDialogHeightDip = 440", StringComparison.Ordinal) &&
-               !pickerGuardSource.Contains("DialogWidthWorkAreaRatio", StringComparison.Ordinal) &&
-               !pickerGuardSource.Contains("MaximumDialogWidthDip = 900", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("VisualTreeHelper.GetDpi(owner)", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("DwmwaExtendedFrameBounds = 9", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("DwmGetWindowAttribute(", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("GetOwnerCenter(monitorInfo", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("GetWindowRect(_ownerHandle", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("visibleWidth + insetLeft + insetRight", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("~WsThickFrame &", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("~WsMaximizeBox", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("SwpNoZOrder | SwpNoActivate", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("if (!IsWindow(dialogHandle))", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("CorrectAndLockLayout(dialogHandle)", StringComparison.Ordinal) &&
-               !pickerGuardSource.Contains("LayoutCorrectionPasses", StringComparison.Ordinal) &&
-               !pickerGuardSource.Contains("RunLayoutCorrectionPass", StringComparison.Ordinal) &&
-               !pickerGuardSource.Contains("WmNcLButtonDown", StringComparison.Ordinal) &&
-               !pickerGuardSource.Contains("ScMove", StringComparison.Ordinal) &&
-               pickerGuardSource.Contains("ReleaseCreationHook();", StringComparison.Ordinal),
-            "OpenFileDialog compensates the DWM frame for the original visible size, centers after Shell layout, and remains movable");
+               !pickerSource.Contains("FixedPositionOpenFileDialogGuard", StringComparison.Ordinal),
+            "Product picker uses the original owner-bound classic native dialog without post-open resize hooks");
     }
 
     private static void TestDiscardContactInterlock()

@@ -146,6 +146,11 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         if (!IsWindow(dialogHandle))
             return;
 
+        // The Shell can restore its remembered dialog size after HCBT_ACTIVATE.
+        // Reapply the compact target at idle, when that native initialization is
+        // complete, otherwise a previously maximized width becomes permanent.
+        ApplyPreferredSizeWithinWorkArea(dialogHandle);
+
         // SetWindowPos processes WM_SIZE synchronously, so one measurement and
         // correction is sufficient before the fixed-size style is applied.
         ExpandIfNativeControlsDoNotFit(dialogHandle);
