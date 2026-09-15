@@ -59,6 +59,7 @@ public sealed class TestHistoryRecord
     public int LabelCopies { get; set; }
     public int ReprintCount { get; set; }
     public string PrintMessage { get; set; } = string.Empty;
+    public long HistoryOrdinal { get; set; }
 
     public TestHistoryRecord ClonePersistenceSnapshot() => (TestHistoryRecord)MemberwiseClone();
 
@@ -74,14 +75,16 @@ public sealed class TestHistoryRecord
     // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
     public string BarcodeOutputText => BarcodeValue ?? string.Empty;
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
-    public string ExportLotText => LotText ?? string.Empty;
+    public string ExportLotText => Math.Max(0, LotNo).ToString(System.Globalization.CultureInfo.InvariantCulture);
     public bool IsProductionRecord => HistoryInspectionType.IsProduct(InspectionType);
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
     public string InspectionTypeText => HistoryInspectionType.KoreanName(InspectionType);
     public string ExportProgressText => Passed ? "1/1" : "0/1";
     public string ExportResultText => Passed ? "합격" : "불량";
     public long? ExportAcceptedLotNo => IsProductionRecord && Passed && LotNo > 0 ? LotNo : null;
-    public long? ExportSequenceNo => IsProductionRecord ? Math.Max(0, LotNo) : null;
+    public long? ExportSequenceNo => IsProductionRecord && Passed
+        ? ExportAcceptedLotNo ?? (ProductionCounter > 0 ? ProductionCounter : null)
+        : null;
     public string ExportBarcodeInputText => string.Empty;
     public string ExportBarcodeText =>
         IsProductionRecord &&
@@ -269,6 +272,16 @@ public sealed record HistorySummary(
 public sealed record HistoryPartOption(string Keyword, string Display)
 {
     public override string ToString() => Display;
+}
+
+public static class HistoryPresentation
+{
+    public static void AssignOrdinals(IEnumerable<TestHistoryRecord> records, long loadedBefore)
+    {
+        long ordinal = loadedBefore;
+        foreach (TestHistoryRecord record in records)
+            record.HistoryOrdinal = ++ordinal;
+    }
 }
 
 public sealed record LabelPrintData(

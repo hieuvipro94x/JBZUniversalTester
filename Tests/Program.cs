@@ -6882,14 +6882,14 @@ internal static class Program
                     StringComparison.Ordinal),
                 "History CSV preserves the exact original 14-column Korean header");
             Assert(csvText.Contains(
-                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,VOLVO Radio,합격,2001",
+                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,2001,합격,1",
                     StringComparison.Ordinal) &&
                    csvText.Contains("장착 14:07:03~14:07:05(2.000초) 14:07:05 검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
                    csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
                    csvText.Contains(",NI375C10002608092001,,,JBZUniversalTester V15.2.0", StringComparison.Ordinal) &&
                    !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV keeps three test phases, saved product LOT and barcode without raw EPL payload");
+                "Sample history CSV keeps three test phases, saved product LOT, display ordinal and barcode without raw EPL payload");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -6899,8 +6899,9 @@ internal static class Program
             Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal) &&
                    sheet.Contains("<c r=\"B2\" s=\"4\"><v>", StringComparison.Ordinal),
                 "XLSX date and time use separate native numeric cells");
-            Assert(sheet.Contains("<c r=\"I2\"><v>2001</v></c>", StringComparison.Ordinal),
-                "XLSX sequence uses the saved product LOT");
+            Assert(sheet.Contains("<c r=\"G2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">2001</t>", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"I2\"><v>1</v></c>", StringComparison.Ordinal),
+                "XLSX LOT uses saved product LOT while sequence uses the display ordinal");
             Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
                    sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
                    !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
@@ -6966,11 +6967,11 @@ internal static class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(failed.ExportSequenceNo == 0 &&
-                   customerText.Contains(",불량,0,", StringComparison.Ordinal) &&
+            Assert(failed.HistoryOrdinal == 1 &&
+                   customerText.Contains(",0,불량,1,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
-                "History CSV/UI FAIL uses concise Korean fault detail and the configured zero-based LOT");
+                "History CSV/UI FAIL uses concise Korean fault detail, zero-based LOT and display ordinal");
 
             var masterBad = new TestHistoryRecord
             {
@@ -7178,8 +7179,9 @@ internal static class Program
                 "Changing A.tht to B.tht snapshots B.tht only for the new cycle");
             string lotCsv = Path.Combine(root, "history-export-lot.csv");
             HistoryExportService.ExportCsv(lotCsv, allExportRows);
-            Assert(allExportRows.Select(row => row.ExportSequenceNo).SequenceEqual(new long?[] { 7000, 7001, 2000 }),
-                "Full filtered CSV preserves the saved LOT sequence for each product");
+            Assert(allExportRows.Select(row => row.ExportLotText).SequenceEqual(new[] { "7000", "7001", "2000" }) &&
+                   allExportRows.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 1, 2, 3 }),
+                "Full filtered CSV keeps per-product LOT in LOT and ordinal in sequence");
 
             // Regression: row cũ bắt đầu trước nhưng test lâu hơn nên ResultAt muộn hơn.
             // History phải vẫn sắp theo giờ BẮT ĐẦU TEST đang hiển thị, không theo ResultAt.
@@ -7295,8 +7297,12 @@ internal static class Program
                     null, null, null, string.Empty, "ALL", MaxRows: 3,
                     BeforeHistoryAt: ordinalCursor.EffectiveTestStartedAt,
                     BeforeId: ordinalCursor.Id));
-            Assert(ordinalPage1.Concat(ordinalPage2).Select(row => row.Id).SequenceEqual(legacyRows.Select(row => row.Id)),
-                "ASC keyset Load More has no duplicate or missing rows");
+            HistoryPresentation.AssignOrdinals(ordinalPage1, 0);
+            HistoryPresentation.AssignOrdinals(ordinalPage2, ordinalPage1.Count);
+            Assert(ordinalPage1.Concat(ordinalPage2).Select(row => row.Id).SequenceEqual(legacyRows.Select(row => row.Id)) &&
+                   ordinalPage1.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 1, 2, 3 }) &&
+                   ordinalPage2.Select(row => row.HistoryOrdinal).SequenceEqual(new long[] { 4, 5, 6 }),
+                "ASC keyset Load More has no duplicate/missing rows and keeps ordinal across pages");
 
             var scaleStore = new TestHistoryStore(Path.Combine(root, "history-450.db"));
             DateTime scaleStart = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Local);
@@ -7329,6 +7335,7 @@ internal static class Program
                 IReadOnlyList<TestHistoryRecord> batch = scaleStore.SearchSummary(
                     scaleCriteria with { BeforeHistoryAt = scaleCursorAt, BeforeId = scaleCursorId });
                 Assert(batch.Count > 0, "A 450-row History result always has a continuation batch");
+                HistoryPresentation.AssignOrdinals(batch, loadedScaleRows.Count);
                 loadedScaleRows.AddRange(batch);
                 TestHistoryRecord last = batch[^1];
                 scaleCursorAt = last.EffectiveTestStartedAt;
@@ -7336,15 +7343,17 @@ internal static class Program
             }
             Assert(scaleSummary.Total == 450 && scaleSummary.ProductPass == 300 && scaleSummary.ProductFail == 150 &&
                    loadedScaleRows.Count == 450 && loadedScaleRows.Select(row => row.Id).Distinct().Count() == 450 &&
-                   loadedScaleRows[0].ExportSequenceNo == 2000 && loadedScaleRows[1].ExportSequenceNo == 0,
-                "History PageSize 200 is batch-only and preserves per-product LOT values across 200/200/50 batches");
+                   loadedScaleRows[0].ExportLotText == "2000" && loadedScaleRows[1].ExportLotText == "0" &&
+                   loadedScaleRows[^1].HistoryOrdinal == 450,
+                "History batches preserve per-product LOT and continuous display ordinal across 200/200/50 rows");
             IReadOnlyList<TestHistoryRecord> scaleExport = scaleStore.SearchForExport(scaleCriteria);
             string scaleCsv = Path.Combine(root, "history-450.csv");
             string scaleXlsx = Path.Combine(root, "history-450.xlsx");
             Assert(scaleExport.Count == 450 && HistoryExportService.ExportCsv(scaleCsv, scaleExport) == 450 &&
                    HistoryExportService.ExportXlsx(scaleXlsx, scaleExport) == 450 &&
-                   scaleExport[0].ExportSequenceNo == 2000 && scaleExport[1].ExportSequenceNo == 0,
-                "CSV/XLSX export all 450 filtered rows oldest-first with saved per-product LOT values");
+                   scaleExport[0].ExportLotText == "2000" && scaleExport[1].ExportLotText == "0" &&
+                   scaleExport[^1].HistoryOrdinal == 450,
+                "CSV/XLSX export all rows with saved LOT and sequence ordinal in separate columns");
 
             var filterStore = new TestHistoryStore(Path.Combine(root, "history-filter-boundaries.db"));
             void AddFilterRow(DateTime at, string part, bool passed, string inspectionType, string cycleId) =>
