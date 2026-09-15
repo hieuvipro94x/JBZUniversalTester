@@ -39,10 +39,11 @@ public sealed class ProbeStateTracker
 
         if (observed.Length == 0)
         {
+            bool candidateCleared = _candidateIos.Length > 0;
             _candidateIos = [];
             _candidateFrames = 0;
             if (_activeIos.Length == 0)
-                return false;
+                return candidateCleared;
 
             _missingFrames++;
             if (_missingFrames < _releaseFrames)

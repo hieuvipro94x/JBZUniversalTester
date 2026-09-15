@@ -1725,21 +1725,8 @@ public sealed class ThtModelParser
         // remain unassigned (CS0177).
         branchNumber = 0;
 
-        string normalized = NormalizeSpecialPinName(pinType);
-
-        // Một số THT gốc ghi chữ O thay cho số 0 trong hậu tố nhánh
-        // (a1O/a2O). AO đứng riêng vẫn là common; chỉ chuẩn hóa O khi phía
-        // trước đã có ít nhất một chữ số để không làm sai topology A0/AO.
-        if (normalized.Length > 2 &&
-            normalized[0] is 'a' or 'A' &&
-            normalized.Skip(1).Any(char.IsDigit))
-        {
-            normalized = normalized[0] + normalized[1..]
-                .Replace('O', '0')
-                .Replace('o', '0');
-        }
-
-        Match match = BranchPinRegex.Match(normalized);
+        Match match = BranchPinRegex.Match(
+            NormalizeSpecialPinName(pinType));
 
         if (!match.Success)
         {

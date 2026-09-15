@@ -323,10 +323,19 @@ public static class ProbeContactClassifier
 
         if (model.Clip is not null)
         {
-            foreach (ClipBranch branch in model.Clip.Branches)
+            int[] clipIos = model.Clip.Branches
+                .Select(branch => branch.TargetIo)
+                .Append(model.Clip.CommonIo)
+                .Where(io => io > 0)
+                .Distinct()
+                .ToArray();
+            for (int left = 0; left < clipIos.Length; left++)
             {
-                result.Add(EdgeKey(model.Clip.CommonIo, branch.TargetIo));
-                result.Add(EdgeKey(branch.TargetIo, model.Clip.CommonIo));
+                for (int right = left + 1; right < clipIos.Length; right++)
+                {
+                    result.Add(EdgeKey(clipIos[left], clipIos[right]));
+                    result.Add(EdgeKey(clipIos[right], clipIos[left]));
+                }
             }
         }
 
