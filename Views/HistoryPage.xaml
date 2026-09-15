@@ -104,6 +104,18 @@
             <Setter Property="FontWeight" Value="Bold"/>
         </Style>
 
+        <Style x:Key="HistoryLoadMoreButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="MinWidth" Value="116"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Background" Value="{StaticResource HistoryNeutralBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryNeutralForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HistoryNeutralBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+
         <Style x:Key="HistoryCloseButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource CompactButton}">
@@ -481,10 +493,8 @@
             <Button x:Name="LoadMoreButton"
                     Grid.Column="1"
                     Content="TẢI THÊM"
-                    Height="32"
-                    MinWidth="116"
                     VerticalAlignment="Center"
-                    Style="{StaticResource CompactButton}"
+                    Style="{StaticResource HistoryLoadMoreButtonStyle}"
                     Click="LoadMore_Click"/>
 
             <TextBlock Grid.Column="2"
