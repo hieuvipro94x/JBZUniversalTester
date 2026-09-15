@@ -711,6 +711,8 @@ public sealed class TestViewModel : ObservableObject
 
     public int WiringFaultCount => WrongCount + ShortCount;
 
+    public int CurrentFaultCount => OpenCount + WrongCount + ShortCount;
+
     public int PassedNetworkCount =>
         _engine.PassedNets.Count;
 
@@ -1236,7 +1238,10 @@ public sealed class TestViewModel : ObservableObject
 
         int next = pending ? 1 : 0;
         if (Interlocked.Exchange(ref _productRemovalPending, next) != next)
+        {
             Raise(nameof(IsProductRemovalPending));
+            RaiseCenterPresentation();
+        }
     }
 
     public async Task ExitManualModeAsync(bool outputsAlreadyOff = false)
@@ -3176,6 +3181,10 @@ public sealed class TestViewModel : ObservableObject
         _waterProofEquipmentErrorAwaitingRemoval = false;
         _productDetectedThisCycle = false;
         SetProductionRuntimeState(ProductionRuntimeState.WaitingForProduct);
+        SetProductionPresentationMode(
+            ProductionPresentationMode.Waiting,
+            frameSequence: 0,
+            reason: "PRODUCT_REMOVED");
         ResetProductPresentationCycle();
         Interlocked.Exchange(ref _productStartSoundPlayed, 0);
         _lastFaultRejectSignature = string.Empty;
@@ -10524,6 +10533,8 @@ public sealed class TestViewModel : ObservableObject
             Raise(nameof(ShortCount));
         if (previousWiring != wrong + shortCount)
             Raise(nameof(WiringFaultCount));
+        if (openChanged || wrongChanged || shortChanged)
+            Raise(nameof(CurrentFaultCount));
     }
 
     private void RaiseTestStatistics()

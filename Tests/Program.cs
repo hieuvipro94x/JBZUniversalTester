@@ -2942,8 +2942,10 @@ internal static class Program
                !removalVm.IsProductRemovalPending &&
                !(bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? true) &&
                removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+               removalVm.IsCenterResultVisible &&
+               removalVm.CenterResultText == "LẮP SẢN PHẨM" &&
                removalVm.SelectedOperationTabIndex == 0,
-            "After committed Leak PASS, a fresh empty frame clears the MainWindow lock without auto-arming a new test");
+            "After committed Leak PASS, removal restores both center and small ready states without auto-arming");
 
         TestViewModel pauseVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -5078,6 +5080,16 @@ internal static class Program
         synchronize.Invoke(deltaVm, [largeRows]);
         Assert(collectionEvents == 1 && deltaVm.Faults.Count == 200,
             "First large 10-card presentation reaches DataGrid with one collection reset");
+
+        FaultRow[] sampleFaultRows = [
+            new FaultRow { Kind = FaultKind.WrongWiring, Io = 1, Status = "SAI DÂY" },
+            new FaultRow { Kind = FaultKind.Short, Io = 2, Status = "CHẬP MẠCH" },
+            new FaultRow { Kind = FaultKind.MissingConnection, Io = 3, Status = "HỞ MẠCH" }
+        ];
+        synchronize.Invoke(deltaVm, [sampleFaultRows]);
+        Assert(deltaVm.WrongCountText == "1" && deltaVm.CurrentFaultCount == 3,
+            "Wrong-wiring counter is separate from the total current child-fault counter");
+        synchronize.Invoke(deltaVm, [largeRows]);
 
         collectionEvents = 0;
         synchronize.Invoke(deltaVm, [largeRows.Skip(2).ToArray()]);
