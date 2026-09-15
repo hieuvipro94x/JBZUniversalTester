@@ -6933,9 +6933,11 @@ internal static class Program
                    historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"1200\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("x:Name=\"LoadMoreButton\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("x:Key=\"HistoryLoadMoreButtonStyle\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("BasedOn=\"{StaticResource HistoryExcelButtonStyle}\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Style=\"{StaticResource HistoryLoadMoreButtonStyle}\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("BorderThickness\" Value=\"1\"", StringComparison.Ordinal) &&
-                   historyXaml.Contains("Property=\"MinWidth\" Value=\"116\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"Width\" Value=\"108\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"HorizontalAlignment\" Value=\"Center\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Property=\"Height\" Value=\"32\"", StringComparison.Ordinal),
                 "History UI locks column layout and keeps the inspection record widest with horizontal scrolling");
 

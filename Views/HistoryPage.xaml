@@ -106,13 +106,14 @@
 
         <Style x:Key="HistoryLoadMoreButtonStyle"
                TargetType="Button"
-               BasedOn="{StaticResource CompactButton}">
+               BasedOn="{StaticResource HistoryExcelButtonStyle}">
             <Setter Property="Height" Value="32"/>
-            <Setter Property="MinWidth" Value="116"/>
-            <Setter Property="Margin" Value="3,0"/>
-            <Setter Property="Background" Value="{StaticResource HistoryNeutralBackground}"/>
-            <Setter Property="Foreground" Value="{StaticResource HistoryNeutralForeground}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource HistoryNeutralBorder}"/>
+            <Setter Property="Width" Value="108"/>
+            <Setter Property="MinWidth" Value="108"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="BorderThickness" Value="1"/>
         </Style>
 
@@ -493,7 +494,6 @@
             <Button x:Name="LoadMoreButton"
                     Grid.Column="1"
                     Content="TẢI THÊM"
-                    VerticalAlignment="Center"
                     Style="{StaticResource HistoryLoadMoreButtonStyle}"
                     Click="LoadMore_Click"/>
 
