@@ -2312,6 +2312,9 @@ internal static class Program
         fastApp.Test.ResistanceStabilityTimeoutMs = 100;
         using (var measurementEngine = new TestEngine(fakeBoard, fakeVisa, fastApp, configured))
         {
+            var resistanceSoundChannels = new List<int>();
+            measurementEngine.ResistanceChannelMeasurementStarted +=
+                step => resistanceSoundChannels.Add(step.Channel);
             measurementEngine.SetModel(new ProductModel { ModelName = "R-PLAN" });
             List<ResistanceResult> measured = measurementEngine.MeasureResistanceAsync()
                 .GetAwaiter().GetResult();
@@ -2336,6 +2339,8 @@ internal static class Program
                    fakeBoard.ReleaseResistanceFrames.SequenceEqual(
                        new byte[] { 0x91, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x30 }),
                 "Measurement route is released in finally after the sequence");
+            Assert(resistanceSoundChannels.SequenceEqual(new[] { 8, 2, 10, 4, 7, 7 }),
+                "CLICK sound trigger fires exactly once when each enabled resistance channel begins measurement");
         }
 
         var manualBoard = new FakeBoard();

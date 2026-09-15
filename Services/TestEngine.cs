@@ -168,6 +168,7 @@ public sealed class TestEngine : IDisposable
     bool _disposed;
 
     public event EventHandler? Changed;
+    public event Action<ResistanceStep>? ResistanceChannelMeasurementStarted;
 
     public IReadOnlyCollection<string> PassedNets => _passedNets;
     public IReadOnlyCollection<int> UnexpectedIo => _unexpectedIo;
@@ -2829,6 +2830,7 @@ public sealed class TestEngine : IDisposable
                     $"[AUTO-R] {step.Name} enabled=true channel={step.Channel} " +
                     $"selector=0x{D2xxResistanceRouting.ToResistanceSelector(step.Channel):X2}");
                 await _board.SelectResistanceRouteAsync(step, ct);
+                ResistanceChannelMeasurementStarted?.Invoke(step);
 
                 var measuring = new ResistanceResult
                 {

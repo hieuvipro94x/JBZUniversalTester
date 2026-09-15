@@ -1120,6 +1120,7 @@ public sealed class TestViewModel : ObservableObject
             settings.Keysight.Resource ?? string.Empty;
 
         _engine.Changed += OnEngineChanged;
+        _engine.ResistanceChannelMeasurementStarted += OnResistanceChannelMeasurementStarted;
         _board.Log += OnBoardLog;
         _board.FrameReceived += OnBoardFrameReceived;
         _board.ProductionProbePreviewReceived += OnProductionProbePreviewReceived;
@@ -5408,6 +5409,7 @@ public sealed class TestViewModel : ObservableObject
         }
 
         _engine.Changed -= OnEngineChanged;
+        _engine.ResistanceChannelMeasurementStarted -= OnResistanceChannelMeasurementStarted;
         _board.Log -= OnBoardLog;
         _board.FrameReceived -= OnBoardFrameReceived;
         _board.ProductionProbePreviewReceived -= OnProductionProbePreviewReceived;
@@ -10415,6 +10417,13 @@ public sealed class TestViewModel : ObservableObject
     }
 
     public void AddExternalLog(string message) => AddLog(message);
+
+    private void OnResistanceChannelMeasurementStarted(ResistanceStep step)
+    {
+        _sound.PlayClick();
+        AsyncFileLogService.Current.Test(
+            $"[RESISTANCE-SOUND] CLICK channel={step.Channel} name={step.Name}");
+    }
 
     private void AddLog(string text)
     {
