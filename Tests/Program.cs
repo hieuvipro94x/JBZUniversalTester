@@ -2067,6 +2067,27 @@ internal static class Program
                    BoardCapacity.Create(4)).Rows.Count == 1,
             "An ordinary IO-to-IO pair remains learnable topology and is not treated as Probe");
 
+        var targetOnlyPairFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 2 },
+            [],
+            true,
+            0,
+            175,
+            new Dictionary<int, IReadOnlySet<int>>
+            {
+                [1] = new HashSet<int> { 2 }
+            },
+            new Dictionary<int, int> { [2] = 1 },
+            BoardScanMode.Production);
+        LearnedTopologySnapshot targetOnlyPair = TopologyLearningService.BuildSnapshot(
+            targetOnlyPairFrame,
+            BoardCapacity.Create(4));
+        Assert(targetOnlyPair.Rows.Count == 1 &&
+               targetOnlyPair.Rows[0].Connection == "IO(1) ↔ IO(2)",
+            "Learning shows IO(1) connected to IO(2) when firmware reports only the target as active");
+
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
         Assert(testViewModelSource.Contains(

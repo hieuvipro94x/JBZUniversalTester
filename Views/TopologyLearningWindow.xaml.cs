@@ -43,7 +43,7 @@ public partial class TopologyLearningWindow : Window
             _test.BoardFrameActivity += Test_BoardFrameActivity;
             _test.PropertyChanged += Test_PropertyChanged;
             UpdateBoardStatus();
-            LearningStatusText.Text = "Đang giám sát trực tiếp toàn bộ IO đã cấu hình.";
+            LearningStatusText.Text = "Đang giám sát trực tiếp toàn bộ chân IO trên các card.";
         }
         catch (Exception ex)
         {

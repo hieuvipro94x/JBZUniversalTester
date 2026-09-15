@@ -89,6 +89,26 @@ public static class TopologyLearningService
         HashSet<int> probeContactIo = FindProbeContactIo(frame, capacity).ToHashSet();
         activeIo.ExceptWith(probeContactIo);
 
+        // Production decoder lưu các chân đọc được ở ActiveIo (TARGET). Với
+        // một nối tắt ngắn, firmware có thể chỉ phát IO nguồn ở Connections,
+        // vì vậy không được yêu cầu cả SOURCE lẫn TARGET cùng có trong ActiveIo.
+        // Chỉ mở rộng nguồn khi có đúng một TARGET và nó không mang chữ ký Probe;
+        // từ hai TARGET trở lên vẫn khóa trong tập active để không kéo nhiễu
+        // quét toàn card thành một mạng continuity giả.
+        if (activeIo.Count == 1)
+        {
+            int activeTarget = activeIo.Single();
+            foreach ((int source, IReadOnlySet<int> targets) in frame.Connections)
+            {
+                if (source != activeTarget &&
+                    capacity.ContainsGlobalIo(source) &&
+                    targets.Contains(activeTarget))
+                {
+                    activeIo.Add(source);
+                }
+            }
+        }
+
         int Find(int value)
         {
             if (!parent.TryGetValue(value, out int root))
@@ -121,8 +141,8 @@ public static class TopologyLearningService
 
         foreach ((int source, IReadOnlySet<int> targets) in frame.Connections)
         {
-            // Chỉ các IO thực tế active mới được phép tạo topology. Những
-            // source quét trung gian không được kéo cả dải card vào một mạng.
+            // Chỉ endpoint vật lý đã được xác nhận mới được tạo topology.
+            // Những source quét trung gian không được kéo cả dải card vào mạng.
             if (!activeIo.Contains(source))
                 continue;
 
