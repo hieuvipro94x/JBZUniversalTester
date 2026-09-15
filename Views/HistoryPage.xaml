@@ -194,7 +194,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="28"/>
+            <RowDefinition Height="40"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
@@ -467,7 +467,7 @@
         <Grid Grid.Row="3" Margin="2,4,2,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="110"/>
+                <ColumnDefinition Width="124"/>
                 <ColumnDefinition Width="310"/>
             </Grid.ColumnDefinitions>
 
@@ -481,7 +481,9 @@
             <Button x:Name="LoadMoreButton"
                     Grid.Column="1"
                     Content="TẢI THÊM"
-                    Height="24"
+                    Height="32"
+                    MinWidth="116"
+                    VerticalAlignment="Center"
                     Style="{StaticResource CompactButton}"
                     Click="LoadMore_Click"/>
 

@@ -6930,7 +6930,10 @@ internal static class Program
                    historyXaml.Contains("CanUserReorderColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("CanUserSortColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Visible\"", StringComparison.Ordinal) &&
-                   historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"1200\"", StringComparison.Ordinal),
+                   historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"1200\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("x:Name=\"LoadMoreButton\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("MinWidth=\"116\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Height=\"32\"", StringComparison.Ordinal),
                 "History UI locks column layout and keeps the inspection record widest with horizontal scrolling");
 
             var failed = new TestHistoryRecord
