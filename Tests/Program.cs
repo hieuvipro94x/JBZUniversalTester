@@ -2088,6 +2088,29 @@ internal static class Program
                targetOnlyPair.Rows[0].Connection == "IO(1) ↔ IO(2)",
             "Learning shows IO(1) connected to IO(2) when firmware reports only the target as active");
 
+        var twoTargetOnlyPairsFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 2, 4 },
+            [],
+            true,
+            0,
+            176,
+            new Dictionary<int, IReadOnlySet<int>>
+            {
+                [1] = new HashSet<int> { 2 },
+                [3] = new HashSet<int> { 4 }
+            },
+            new Dictionary<int, int> { [2] = 1, [4] = 1 },
+            BoardScanMode.Production);
+        LearnedTopologySnapshot twoTargetOnlyPairs = TopologyLearningService.BuildSnapshot(
+            twoTargetOnlyPairsFrame,
+            BoardCapacity.Create(4));
+        Assert(twoTargetOnlyPairs.Rows.Count == 2 &&
+               twoTargetOnlyPairs.Rows[0].Connection == "IO(1) ↔ IO(2)" &&
+               twoTargetOnlyPairs.Rows[1].Connection == "IO(3) ↔ IO(4)",
+            "Learning displays every simultaneous physical pair instead of merging only the first pair");
+
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
         Assert(testViewModelSource.Contains(

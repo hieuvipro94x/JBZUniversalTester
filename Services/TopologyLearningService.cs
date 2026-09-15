@@ -92,21 +92,22 @@ public static class TopologyLearningService
         // Production decoder lưu các chân đọc được ở ActiveIo (TARGET). Với
         // một nối tắt ngắn, firmware có thể chỉ phát IO nguồn ở Connections,
         // vì vậy không được yêu cầu cả SOURCE lẫn TARGET cùng có trong ActiveIo.
-        // Chỉ mở rộng nguồn khi có đúng một TARGET và nó không mang chữ ký Probe;
-        // từ hai TARGET trở lên vẫn khóa trong tập active để không kéo nhiễu
-        // quét toàn card thành một mạng continuity giả.
-        if (activeIo.Count == 1)
+        // Với từng TARGET, chỉ nhận SOURCE khi frame chứng minh duy nhất một
+        // nguồn vật lý đang trỏ tới nó. Nhờ vậy nhiều cặp độc lập được giữ đủ,
+        // còn fan-in quét toàn card/Probe không thể kéo hàng trăm IO vào mạng giả.
+        int[] reportedTargets = activeIo.ToArray();
+        foreach (int activeTarget in reportedTargets)
         {
-            int activeTarget = activeIo.Single();
-            foreach ((int source, IReadOnlySet<int> targets) in frame.Connections)
-            {
-                if (source != activeTarget &&
-                    capacity.ContainsGlobalIo(source) &&
-                    targets.Contains(activeTarget))
-                {
-                    activeIo.Add(source);
-                }
-            }
+            int[] sources = frame.Connections
+                .Where(pair => pair.Key != activeTarget &&
+                               capacity.ContainsGlobalIo(pair.Key) &&
+                               pair.Value.Contains(activeTarget))
+                .Select(pair => pair.Key)
+                .Distinct()
+                .Take(2)
+                .ToArray();
+            if (sources.Length == 1)
+                activeIo.Add(sources[0]);
         }
 
         int Find(int value)
