@@ -20,6 +20,7 @@ public partial class HistoryPage : UserControl
     private int _reloadGeneration;
     private const int PageSize = 200;
     private readonly ObservableCollection<TestHistoryRecord> _records = [];
+    private readonly Dictionary<string, long> _passOrdinalsByProduct = new(StringComparer.Ordinal);
     private HistorySearchCriteria? _activeCriteria;
     private HistorySummary _summary = new(0, 0, 0, 0, 0, 0);
     private bool _loadingPage;
@@ -106,6 +107,7 @@ public partial class HistoryPage : UserControl
             HistorySearchCriteria criteria = CreateSearchCriteria();
             _activeCriteria = criteria;
             _records.Clear();
+            _passOrdinalsByProduct.Clear();
             Task<HistorySummary> summaryTask = Task.Run(() => GetStore().GetHistorySummary(criteria));
             Task<IReadOnlyList<TestHistoryRecord>> pageTask = Task.Run(() =>
                 GetStore().SearchSummary(criteria with { MaxRows = PageSize, Offset = 0 }));
@@ -115,7 +117,7 @@ public partial class HistoryPage : UserControl
 
             _summary = summaryTask.Result;
             IReadOnlyList<TestHistoryRecord> rows = pageTask.Result;
-            HistoryPresentation.AssignOrdinals(rows, _records.Count);
+            HistoryPresentation.AssignProductPassOrdinals(rows, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in rows)
                 _records.Add(row);
 
@@ -170,7 +172,7 @@ public partial class HistoryPage : UserControl
             IReadOnlyList<TestHistoryRecord> page = await Task.Run(() => GetStore().SearchSummary(pageCriteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
-            HistoryPresentation.AssignOrdinals(page, _records.Count);
+            HistoryPresentation.AssignProductPassOrdinals(page, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in page)
                 _records.Add(row);
             SummaryText.Text = $"Đang hiển thị {_records.Count:N0} / {_summary.Total:N0} bản ghi";

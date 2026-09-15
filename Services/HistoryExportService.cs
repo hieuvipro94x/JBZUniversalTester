@@ -55,9 +55,10 @@ public static class HistoryExportService
         writer.WriteLine(string.Join(',', Columns.Select(column => EscapeCsv(column.Header))));
 
         int count = 0;
+        var passOrdinalsByProduct = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (TestHistoryRecord record in records)
         {
-            record.HistoryOrdinal = count + 1L;
+            HistoryPresentation.AssignProductPassOrdinals([record], passOrdinalsByProduct);
             writer.WriteLine(string.Join(',', Columns.Select(column =>
                 EscapeCsv(ToCsvValue(column, record)))));
             count++;
@@ -140,9 +141,10 @@ public static class HistoryExportService
         sb.Clear();
 
         int count = 0;
+        var passOrdinalsByProduct = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (TestHistoryRecord record in records)
         {
-            record.HistoryOrdinal = count + 1L;
+            HistoryPresentation.AssignProductPassOrdinals([record], passOrdinalsByProduct);
             AppendDataRow(sb, count + 2, record);
             writer.Write(sb);
             sb.Clear();
