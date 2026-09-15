@@ -6589,6 +6589,38 @@ internal static class Program
         Assert(vm.ExpectedNetworkCount == 1 && vm.ProductionEnabled,
             "Production/Master UI uses the same corrected WireName topology source of truth");
 
+        MethodInfo parseClipBranch = typeof(ThtModelParser).GetMethod(
+            "TryGetBranchNumber",
+            BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("TryGetBranchNumber method not found.");
+        object?[] a10Args = ["a1O", 0];
+        object?[] a20Args = ["a2O", 0];
+        Assert((bool)(parseClipBranch.Invoke(null, a10Args) ?? false) && (int)a10Args[1]! == 10 &&
+               (bool)(parseClipBranch.Invoke(null, a20Args) ?? false) && (int)a20Args[1]! == 20,
+            "Legacy CLIP names a1O/a2O normalize letter O to numeric branches a10/a20");
+
+        var clipCommon = new PinRecord("CLIP", "AO", 401, "AO", PinType: "AO");
+        var clipA10 = new PinRecord("CLIP", "a10", 411, "a10", PinType: "a1O");
+        var clipA20 = new PinRecord("CLIP", "a20", 421, "a20", PinType: "a2O");
+        var clipModel = new ProductModel
+        {
+            ModelName = "CLIP-TENS",
+            PartNumber = "CLIP-TENS",
+            Pins = [clipCommon, clipA10, clipA20],
+            Clip = new ClipTopology(clipCommon,
+            [
+                new ClipBranch("a10", 10, 411, clipA10, null),
+                new ClipBranch("a20", 20, 421, clipA20, null)
+            ])
+        };
+        using TestEngine clipTensEngine = CreateEngine(out _, production);
+        clipTensEngine.SetModel(clipModel);
+        clipTensEngine.ProcessFrame(FrameSeq(30, (401, new[] { 421 })));
+        Assert(clipTensEngine.ExpectedNetCount == 2 &&
+               clipTensEngine.GetPassGateDiagnostics().ShortCandidateCount == 0 &&
+               !clipTensEngine.HasWiringFault,
+            "Configured CLIP AO IO401 to a20 IO421 is expected continuity, never an unconfigured short");
+
         ProductModel wh322244Extract = TopologyModel(
             new Terminal(1, "1", "1", "43", "BG01"),
             new Terminal(2, "1", "2", "43", "BG02"),
