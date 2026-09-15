@@ -131,13 +131,19 @@ internal static class Program
 
         string pickerSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "HomeViewModel.cs"));
+        string resizeLockSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "FixedPositionOpenFileDialogGuard.cs"));
         Assert(pickerSource.Contains("DefaultExt = \".tht\"", StringComparison.Ordinal) &&
                pickerSource.Contains("OriginalItemDirectory = @\"C:\\Item\"", StringComparison.Ordinal) &&
                pickerSource.Contains("FirstOrDefault(window => window.IsActive)", StringComparison.Ordinal) &&
                pickerSource.Contains("AutoUpgradeEnabled = false", StringComparison.Ordinal) &&
                pickerSource.Contains("dialog.ShowDialog(new NativeDialogOwner(owner))", StringComparison.Ordinal) &&
-               !pickerSource.Contains("FixedPositionOpenFileDialogGuard", StringComparison.Ordinal),
-            "Product picker uses the original owner-bound classic native dialog without post-open resize hooks");
+               pickerSource.Contains("FixedPositionOpenFileDialogGuard(owner, resizeLockOnly: true)", StringComparison.Ordinal),
+            "Product picker uses the original owner-bound classic native dialog with resize lock only");
+        Assert(resizeLockSource.Contains("if (_resizeLockOnly)", StringComparison.Ordinal) &&
+               resizeLockSource.Contains("LockDialogSize(dialogHandle);", StringComparison.Ordinal) &&
+               resizeLockSource.Contains("return CallNextHookEx", StringComparison.Ordinal),
+            "Product picker resize lock changes only native resize/maximize styles");
     }
 
     private static void TestDiscardContactInterlock()
@@ -6391,6 +6397,19 @@ internal static class Program
         TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
         vm.SetModel(model);
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
+
+        // Warm every presentation/fault branch before measuring native handles.
+        // WPF creates a fixed set of process-wide resources on first use; the
+        // steady-state loop below is the part that must remain bounded.
+        board.Publish(FrameSeq(900, (1, new[] { 86 }), (2, new[] { 87 })));
+        board.Publish(FrameSeq(901, (1, Array.Empty<int>())));
+        board.Publish(FrameSeq(902, (1, new[] { 86, 87 }), (2, new[] { 87 })));
+        board.Publish(FrameSeq(
+            903,
+            Enumerable.Range(10, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
+        board.Publish(FrameSeq(904));
 
         int threadCountBefore = Process.GetCurrentProcess().Threads.Count;
         int handleCountBefore = Process.GetCurrentProcess().HandleCount;

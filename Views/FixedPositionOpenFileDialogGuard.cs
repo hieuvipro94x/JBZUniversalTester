@@ -69,6 +69,7 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     private readonly double _ownerDpiScaleX;
     private readonly double _ownerDpiScaleY;
     private readonly HookProc _hookCallback;
+    private readonly bool _resizeLockOnly;
 
     // Keep delegate alive while EnumChildWindows is executing.
     private readonly EnumWindowsProc _enumChildCallback;
@@ -82,11 +83,12 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
     private int _furthestChildRight;
     private int _furthestChildBottom;
 
-    public FixedPositionOpenFileDialogGuard(Window owner)
+    public FixedPositionOpenFileDialogGuard(Window owner, bool resizeLockOnly = false)
     {
         ArgumentNullException.ThrowIfNull(owner);
 
         _ownerHandle = new WindowInteropHelper(owner).Handle;
+        _resizeLockOnly = resizeLockOnly;
         _dispatcher = owner.Dispatcher;
 
         DpiScale dpi = VisualTreeHelper.GetDpi(owner);
@@ -114,6 +116,12 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             IntPtr dialogHandle = wParam;
 
             ReleaseCreationHook();
+
+            if (_resizeLockOnly)
+            {
+                LockDialogSize(dialogHandle);
+                return CallNextHookEx(IntPtr.Zero, code, wParam, lParam);
+            }
 
             // 1) Apply the normal compact target while resize style still exists.
             //    This lets the Shell process WM_SIZE and perform native re-layout.

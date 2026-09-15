@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Interop;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Services;
+using JBZUniversalTester.Views;
 using WinForms = System.Windows.Forms;
 
 namespace JBZUniversalTester.ViewModels;
@@ -79,6 +80,7 @@ public sealed class HomeViewModel : ObservableObject
         WinForms.DialogResult accepted;
         if (owner is not null)
         {
+            using var resizeLock = new FixedPositionOpenFileDialogGuard(owner, resizeLockOnly: true);
             accepted = dialog.ShowDialog(new NativeDialogOwner(owner));
         }
         else
