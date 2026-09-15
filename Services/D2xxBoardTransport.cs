@@ -632,14 +632,12 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
     public void ConfigureActiveScanRange(int maxIo)
     {
-        // Test pointer là chế độ quan sát I/O vật lý. Khi bật, BO phải quét
-        // toàn bộ card đã cấu hình, không được co theo MaxIo của THT; nhờ đó
-        // có thể dò IO128 trên máy 2 card dù THT chỉ khai báo ví dụ IO1..64.
-        // TestEngine vẫn chỉ đánh giá topology trong model nên I/O ngoài THT không thể PASS/FAIL.
+        // Trace Htdrv3 dùng dải scan theo model trong production. Số card cấu
+        // hình vẫn là giới hạn phần cứng đã lắp, không phải số card phải quét.
         _scanCapacity = BoardScanCapacity.Create(
             _production,
             maxIo,
-            scanAllInstalledIo: true);
+            scanAllInstalledIo: false);
         _installedCapacity = _scanCapacity.Installed;
         _capacity = _scanCapacity.Active;
         _production.ExpansionCardCount = _installedCapacity.ExpansionCardCount;

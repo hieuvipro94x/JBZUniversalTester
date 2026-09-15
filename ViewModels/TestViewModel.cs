@@ -9542,15 +9542,9 @@ public sealed class TestViewModel : ObservableObject
 
     private void UpdateDailyLotDisplay()
     {
-        // LOT hiển thị = LOTNO bắt đầu riêng của mã hàng + Tổng đạt trong ngày.
-        // Ví dụ base 2000 và PASS 10 => 2010. Giá trị in tem thực tế vẫn được
-        // commit riêng sau khi máy in xác nhận để tránh trùng LOT vật lý.
-        long passedToday = Math.Max(0, Pass);
-        long startLot = _lotSequence.StartLot;
-        long displayLot = startLot > long.MaxValue - passedToday
-            ? long.MaxValue
-            : startLot + passedToday;
-        Lot = displayLot.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // LOT hiển thị là LOT PASS cuối cùng đã commit của đúng mã hàng.
+        // Daily PASS chỉ là thống kê và tuyệt đối không được cộng thêm lần nữa.
+        Lot = _lotSequence.NextLot.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void ApplyPartCounter(PartCounterEntry entry)

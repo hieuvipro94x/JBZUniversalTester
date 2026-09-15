@@ -4095,10 +4095,10 @@ internal static class Program
         Assert(configured10Model37.IsModelWithinInstalledCapacity &&
                configured10Model37.InstalledScanUnits == 10 &&
                configured10Model37.RequiredScanUnits == 1 &&
-               configured10Model37.ActiveScanUnits == 1 &&
-               configured10Model37.StartScanParameter == 1 &&
-               configured10Model37.ActiveIoCapacity == 64,
-            "The logged MaxIO 37 case scans 64 sources instead of all 640 installed sources");
+               configured10Model37.ActiveScanUnits == 2 &&
+               configured10Model37.StartScanParameter == 2 &&
+               configured10Model37.ActiveIoCapacity == 128,
+            "Htdrv3 trace parity: installed 10 / MaxIO 37 sends START_SCAN=2 instead of scanning all 640 IO");
 
         BoardScanCapacity configured10WithoutModel = BoardScanCapacity.Create(
             new ProductionSettings { ExpansionCardCount = 10 },
@@ -4155,9 +4155,9 @@ internal static class Program
                offsetModel.Active.ExpansionCardCount == 4 &&
                offsetModel.StartScanParameter == 6 &&
                offsetSmallModel.IsModelWithinInstalledCapacity &&
-               offsetSmallModel.Active.ExpansionCardCount == 1 &&
-               offsetSmallModel.StartScanParameter == 3 &&
-               offsetSmallModel.ActiveIoCapacity == 64 &&
+               offsetSmallModel.Active.ExpansionCardCount == 2 &&
+               offsetSmallModel.StartScanParameter == 4 &&
+               offsetSmallModel.ActiveIoCapacity == 128 &&
                !offsetTooLarge.IsModelWithinInstalledCapacity,
             "Start Card does not let a model exceed the configured logical card count");
 
@@ -5757,9 +5757,9 @@ internal static class Program
                     DailyFailCount = 0
                 }
             ]);
-            Assert(lotDisplayVm.Lot == "2010" && lotDisplayVm.Total == 10 &&
+            Assert(lotDisplayVm.Lot == "2000" && lotDisplayVm.Total == 10 &&
                    lotDisplayVm.Pass == 10 && lotDisplayVm.Fail == 0,
-                "LOT display is starting LOT 2000 plus daily PASS 10");
+                "LOT display uses the committed product LOT without adding daily PASS twice");
             applyDailyStatistics.Invoke(lotDisplayVm, [new ModelProductionStatistics()]);
             Assert(lotDisplayVm.Lot == "2000" && lotDisplayVm.Total == 0,
                 "New daily period resets production to zero and LOT display to its starting value");
@@ -5793,7 +5793,7 @@ internal static class Program
             applyProductionStatistics.Invoke(switchVm,
                 [new ProductionStatisticsSnapshot(12, 10, 2, 12, 12, 10, 2, 2009, "FAIL")]);
             Assert(switchVm.Total == 12 && switchVm.Pass == 10 && switchVm.Fail == 2 && switchVm.Lot == "2010",
-                "CASE A: Part A shows only A daily totals and StartLot 2000 + PASS 10");
+                "CASE A: Part A shows only A daily totals and its committed LOT");
 
             switchVm.SetModel(partB);
             long generationB = (long)(typeof(TestViewModel).GetField(
@@ -5809,11 +5809,34 @@ internal static class Program
             Assert(!staleAAllowed && currentBAllowed,
                 "CASE D: stale Part A statistics cannot apply after Part B becomes active");
 
+            var cardSaveLot = new ProductionSettings
+            {
+                LotNo = 142,
+                LotNoDate = DateTime.Today.ToString("yyyy-MM-dd"),
+                LotSettingsByProduct = new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["PART-CARD"] = new()
+                    {
+                        StartLotNo = 0,
+                        LotNo = 142,
+                        LotNoDate = DateTime.Today.ToString("yyyy-MM-dd")
+                    }
+                }
+            };
+            ProductionConfigService.SetProductLot(
+                cardSaveLot,
+                "PART-CARD",
+                142,
+                DateTime.Today.ToString("yyyy-MM-dd"));
+            Assert(cardSaveLot.LotNo == 142 &&
+                   cardSaveLot.LotSettingsByProduct["PART-CARD"].LotNo == 142,
+                "Saving card settings cannot add the existing LOT progress a second time");
+
             switchVm.SetModel(partA);
             applyProductionStatistics.Invoke(switchVm,
                 [new ProductionStatisticsSnapshot(13, 11, 2, 13, 13, 11, 2, 2010, "PASS")]);
-            Assert(switchVm.Total == 13 && switchVm.Pass == 11 && switchVm.Fail == 2 && switchVm.Lot == "2011",
-                "CASE A/E: switching back restores A and one PASS advances only A Total/PASS/LOT");
+            Assert(switchVm.Total == 13 && switchVm.Pass == 11 && switchVm.Fail == 2 && switchVm.Lot == "2010",
+                "CASE A/E: statistics refresh cannot advance A LOT without a committed PASS");
             switchVm.SetModel(partB);
             applyProductionStatistics.Invoke(switchVm,
                 [new ProductionStatisticsSnapshot(4, 3, 1, 4, 4, 3, 1, 7002, "FAIL")]);

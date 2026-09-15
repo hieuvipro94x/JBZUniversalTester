@@ -305,23 +305,13 @@ public static class ProductionConfigService
     {
         ProductLotSettings lot = GetOrCreateProductLot(settings, productKey, migrateCurrentLot: false);
         long normalizedStart = Math.Max(0, startLotNo);
-        long previousStart = Math.Max(0, lot.StartLotNo);
         string normalizedDate = (lotNoDate ?? string.Empty).Trim();
-        if (normalizedStart != previousStart)
+        if (normalizedStart != lot.StartLotNo)
         {
-            // Đổi base trong cùng ngày giữ số PASS/LOT đã chạy; nếu cấu hình
-            // được mở sang ngày mới thì bắt đầu lại đúng base mới.
-            bool sameProductionDate = string.Equals(
-                lot.LotNoDate,
-                normalizedDate,
-                StringComparison.Ordinal);
-            long progress = sameProductionDate
-                ? Math.Max(0, lot.LotNo - previousStart)
-                : 0;
+            // Giá trị nhập là LOT đã hoàn thành gần nhất. Không cộng lại tiến độ
+            // cũ khi lưu các cài đặt độc lập như số card mở rộng.
             lot.StartLotNo = normalizedStart;
-            lot.LotNo = normalizedStart > long.MaxValue - progress
-                ? long.MaxValue
-                : normalizedStart + progress;
+            lot.LotNo = normalizedStart;
             lot.LotNoDate = normalizedDate;
         }
         settings.LotNo = lot.LotNo;

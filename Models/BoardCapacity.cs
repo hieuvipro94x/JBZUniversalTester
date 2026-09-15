@@ -177,8 +177,14 @@ public sealed record BoardScanCapacity
         // Required là số card logic cần cho model. Không có model (hoặc THT trống)
         // thì quét toàn bộ dải đã lắp. Có model hợp lệ thì chỉ dùng số card logic
         // cần thiết, nhưng START_SCAN vẫn phải cộng offset vật lý Start Card.
+        // Trace Htdrv3 gốc: model MaxIO=41 vẫn dùng START_SCAN=2 và giữ nhịp
+        // khoảng 150 ms/frame. Hai card là dải production tối thiểu; model lớn
+        // hơn chỉ mở rộng đúng tới card chứa MaxIO, không quét thừa toàn bộ máy.
+        int productionScanUnits = Math.Min(
+            installed.ExpansionCardCount,
+            Math.Max(2, required));
         int activeExpansionCards = !scanAllInstalledIo && maxGlobalIo > 0 && fits
-            ? required
+            ? productionScanUnits
             : installed.ExpansionCardCount;
         BoardCapacity active = BoardCapacity.Create(activeExpansionCards, installed.StartCardNumber);
 
