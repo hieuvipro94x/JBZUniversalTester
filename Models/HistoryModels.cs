@@ -75,7 +75,9 @@ public sealed class TestHistoryRecord
     // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
     public string BarcodeOutputText => BarcodeValue ?? string.Empty;
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
-    public string ExportLotText => Math.Max(0, LotNo).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    public string ExportLotText => IsProductionRecord && Passed
+        ? Math.Max(0, LotNo).ToString(System.Globalization.CultureInfo.InvariantCulture)
+        : string.Empty;
     public bool IsProductionRecord => HistoryInspectionType.IsProduct(InspectionType);
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
     public string InspectionTypeText => HistoryInspectionType.KoreanName(InspectionType);

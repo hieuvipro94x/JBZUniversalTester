@@ -6967,11 +6967,11 @@ internal static class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(failed.HistoryOrdinal == 1 &&
-                   customerText.Contains(",0,불량,1,", StringComparison.Ordinal) &&
+            Assert(failed.HistoryOrdinal == 1 && failed.ExportLotText.Length == 0 &&
+                   customerText.Contains(",,불량,1,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
-                "History CSV/UI FAIL uses concise Korean fault detail, zero-based LOT and display ordinal");
+                "History CSV/UI FAIL uses concise Korean fault detail, blank LOT and display ordinal");
 
             var masterBad = new TestHistoryRecord
             {
@@ -7306,9 +7306,12 @@ internal static class Program
 
             var scaleStore = new TestHistoryStore(Path.Combine(root, "history-450.db"));
             DateTime scaleStart = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Local);
+            long nextPrintedLot = 2000;
             for (int index = 0; index < 450; index++)
             {
                 bool passed = index % 3 != 0;
+                bool printedProduct = index % 2 == 0;
+                long savedLot = printedProduct ? nextPrintedLot : 0;
                 scaleStore.Add(new TestHistoryRecord
                 {
                     Started = scaleStart.AddMinutes(index),
@@ -7319,9 +7322,11 @@ internal static class Program
                     Result = passed ? "PASS" : "FAIL",
                     Passed = passed,
                     InspectionType = HistoryInspectionType.Product,
-                    LotNo = index % 2 == 0 ? 2000 + (index / 2) : 0,
+                    LotNo = savedLot,
                     CycleId = $"scale-{index:D3}"
                 });
+                if (printedProduct && passed)
+                    nextPrintedLot++;
             }
 
             HistorySearchCriteria scaleCriteria = new(
@@ -7343,17 +7348,21 @@ internal static class Program
             }
             Assert(scaleSummary.Total == 450 && scaleSummary.ProductPass == 300 && scaleSummary.ProductFail == 150 &&
                    loadedScaleRows.Count == 450 && loadedScaleRows.Select(row => row.Id).Distinct().Count() == 450 &&
-                   loadedScaleRows[0].ExportLotText == "2000" && loadedScaleRows[1].ExportLotText == "0" &&
+                   loadedScaleRows[0].ExportLotText.Length == 0 && loadedScaleRows[1].ExportLotText == "0" &&
+                   loadedScaleRows[2].ExportLotText == "2000" && loadedScaleRows[6].ExportLotText.Length == 0 &&
+                   loadedScaleRows[8].ExportLotText == "2002" &&
                    loadedScaleRows[^1].HistoryOrdinal == 450,
-                "History batches preserve per-product LOT and continuous display ordinal across 200/200/50 rows");
+                "History batches leave FAIL LOT blank and the next PASS reuses the unconsumed LOT");
             IReadOnlyList<TestHistoryRecord> scaleExport = scaleStore.SearchForExport(scaleCriteria);
             string scaleCsv = Path.Combine(root, "history-450.csv");
             string scaleXlsx = Path.Combine(root, "history-450.xlsx");
             Assert(scaleExport.Count == 450 && HistoryExportService.ExportCsv(scaleCsv, scaleExport) == 450 &&
                    HistoryExportService.ExportXlsx(scaleXlsx, scaleExport) == 450 &&
-                   scaleExport[0].ExportLotText == "2000" && scaleExport[1].ExportLotText == "0" &&
+                   scaleExport[0].ExportLotText.Length == 0 && scaleExport[1].ExportLotText == "0" &&
+                   scaleExport[2].ExportLotText == "2000" && scaleExport[6].ExportLotText.Length == 0 &&
+                   scaleExport[8].ExportLotText == "2002" &&
                    scaleExport[^1].HistoryOrdinal == 450,
-                "CSV/XLSX export all rows with saved LOT and sequence ordinal in separate columns");
+                "CSV/XLSX leave FAIL LOT blank and keep PASS LOT plus sequence ordinal in separate columns");
 
             var filterStore = new TestHistoryStore(Path.Combine(root, "history-filter-boundaries.db"));
             void AddFilterRow(DateTime at, string part, bool passed, string inspectionType, string cycleId) =>
