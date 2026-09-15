@@ -2920,8 +2920,19 @@ internal static class Program
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
                removalVm.IsProductRemovalPending &&
                removalVm.SelectedOperationTabIndex == 0 &&
-               removalVm.ResultStatusText == "THÁO SẢN PHẨM",
-            "Final PASS remains visible over the continuity area while any product IO is still connected");
+               removalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
+               removalVm.Faults.Any(row =>
+                   row.Status == "CHỜ THÁO" &&
+                   row.RelatedIos.Contains(1) &&
+                   row.RelatedIos.Contains(18)),
+            "Final PASS shows the remaining wire/IO relation while MainWindow continues removal monitoring");
+        removalVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(removalVm.IsProductRemovalPending &&
+               removalVm.Faults.Any(row =>
+                   row.Status == "CHỜ THÁO" &&
+                   row.RelatedIos.Contains(1) &&
+                   row.RelatedIos.Contains(18)),
+            "Re-entering TestWindow while removal is pending preserves the remaining wire/IO rows");
         removalBoard.Publish(FrameSeq(4));
         FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
             "_cycleActive",

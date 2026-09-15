@@ -4294,9 +4294,19 @@ public sealed class TestViewModel : ObservableObject
             (_waitForProductRelease || _waitForFaultProductRemoval))
         {
             _engine.SetFrameProcessingEnabled(true);
-            _engine.ProcessFrame(frame, false);
+            bool removalChanged = _engine.ProcessFrame(frame, false);
             if (!_engine.IsProductReleased)
+            {
+                if (removalChanged)
+                {
+                    TestEnginePresentationSnapshot removalSnapshot =
+                        _engine.CapturePresentationSnapshot(removal: true);
+                    InvokeUi(() => UpdateBackgroundRemovalPresentation(
+                        generation,
+                        removalSnapshot));
+                }
                 return;
+            }
 
             InvokeUi(() => CompleteBackgroundProductRemoval(generation));
             return;
@@ -4367,6 +4377,23 @@ public sealed class TestViewModel : ObservableObject
         _engine.SetFrameProcessingEnabled(false);
         State = ReadyStateForCurrentModel();
         AddLog("Đã tháo sản phẩm tại màn hình chính; xóa khóa ProductRemoved và trở về LẮP SẢN PHẨM.");
+    }
+
+    private void UpdateBackgroundRemovalPresentation(
+        long generation,
+        TestEnginePresentationSnapshot removalSnapshot)
+    {
+        if (!IsRuntimeContext(RuntimeMode.Background, generation) ||
+            Volatile.Read(ref _removalMonitoringFromMain) == 0 ||
+            (!_waitForProductRelease && !_waitForFaultProductRemoval) ||
+            removalSnapshot.Removal is false)
+        {
+            return;
+        }
+
+        SelectedOperationTabIndex = 0;
+        RefreshFaultsFromSnapshot(removalSnapshot);
+        State = "THÁO SẢN PHẨM";
     }
 
     private static void LogProbeLatency(ScanFrame frame, DateTime uiRequestedAt, IReadOnlyList<int> ios)
@@ -5611,6 +5638,8 @@ public sealed class TestViewModel : ObservableObject
         // hoặc gate thuộc runtime Production vẫn giữ nguyên để tránh test trùng.
         bool resumeCurrentStartupModel =
             IsProductRemovalPending &&
+            !_waitForProductRelease &&
+            !_waitForFaultProductRemoval &&
             Volatile.Read(ref _discardStandaloneLocked) == 0 &&
             !_requireStartupIoClear &&
             CurrentRuntimeMode == RuntimeMode.Background &&
@@ -5619,6 +5648,8 @@ public sealed class TestViewModel : ObservableObject
         if (IsProductRemovalPending && !resumeCurrentStartupModel)
         {
             bool discardLocked = Volatile.Read(ref _discardStandaloneLocked) != 0;
+            SelectedOperationTabIndex = 0;
+            RefreshFaults();
             State = discardLocked
                 ? "THÙNG LỖI ĐÃ KHÓA - CHỜ NHẢ CẢM BIẾN"
                 : "THÁO SẢN PHẨM";
