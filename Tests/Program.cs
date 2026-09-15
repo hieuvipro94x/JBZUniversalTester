@@ -150,6 +150,8 @@ internal static class Program
                pickerGuardSource.Contains("VisualTreeHelper.GetDpi(owner)", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DwmwaExtendedFrameBounds = 9", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("DwmGetWindowAttribute(", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("GetOwnerCenter(monitorInfo", StringComparison.Ordinal) &&
+               pickerGuardSource.Contains("GetWindowRect(_ownerHandle", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("visibleWidth + insetLeft + insetRight", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("~WsThickFrame &", StringComparison.Ordinal) &&
                pickerGuardSource.Contains("~WsMaximizeBox", StringComparison.Ordinal) &&
@@ -6956,6 +6958,8 @@ internal static class Program
                 previousHeader = headerIndex;
             }
             Assert(historyXaml.Contains("CanUserResizeColumns=\"False\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("<Setter Property=\"HorizontalContentAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
+                   historyXaml.Contains("<Setter Property=\"HorizontalAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
                    historyXaml.Contains("CanUserReorderColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("CanUserSortColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Visible\"", StringComparison.Ordinal) &&

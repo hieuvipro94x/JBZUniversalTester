@@ -176,7 +176,7 @@
         </Style>
 
         <Style x:Key="CenterCellText" TargetType="TextBlock">
-            <Setter Property="HorizontalAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="TextAlignment" Value="Center"/>
             <Setter Property="Margin" Value="0"/>
@@ -197,7 +197,7 @@
         <Style x:Key="HistoryCenterCellStyle"
                TargetType="DataGridCell"
                BasedOn="{StaticResource HistoryCellStyle}">
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
     </UserControl.Resources>

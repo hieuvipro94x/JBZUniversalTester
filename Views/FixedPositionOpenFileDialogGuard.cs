@@ -613,7 +613,7 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         return GetDlgItem(dialogHandle, classicId);
     }
 
-    private static void SetCenteredWindowSize(
+    private void SetCenteredWindowSize(
         IntPtr dialogHandle,
         MonitorInfo monitorInfo,
         int outerWidth,
@@ -623,13 +623,15 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
         int invisibleInsetLeft,
         int invisibleInsetTop)
     {
-        int visibleX =
-            monitorInfo.WorkArea.Left +
-            ((monitorInfo.WorkArea.Width - visibleWidth) / 2);
-
-        int visibleY =
-            monitorInfo.WorkArea.Top +
-            ((monitorInfo.WorkArea.Height - visibleHeight) / 2);
+        GetOwnerCenter(monitorInfo, out int centerX, out int centerY);
+        int visibleX = Math.Clamp(
+            centerX - (visibleWidth / 2),
+            monitorInfo.WorkArea.Left,
+            Math.Max(monitorInfo.WorkArea.Left, monitorInfo.WorkArea.Right - visibleWidth));
+        int visibleY = Math.Clamp(
+            centerY - (visibleHeight / 2),
+            monitorInfo.WorkArea.Top,
+            Math.Max(monitorInfo.WorkArea.Top, monitorInfo.WorkArea.Bottom - visibleHeight));
 
         int x = visibleX - invisibleInsetLeft;
         int y = visibleY - invisibleInsetTop;
@@ -666,15 +668,17 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             1,
             visibleFrame.Height);
 
-        int x =
-            monitorInfo.WorkArea.Left +
-            ((monitorInfo.WorkArea.Width - visibleWidth) / 2) -
-            (visibleFrame.Left - windowRect.Left);
-
-        int y =
-            monitorInfo.WorkArea.Top +
-            ((monitorInfo.WorkArea.Height - visibleHeight) / 2) -
-            (visibleFrame.Top - windowRect.Top);
+        GetOwnerCenter(monitorInfo, out int centerX, out int centerY);
+        int visibleX = Math.Clamp(
+            centerX - (visibleWidth / 2),
+            monitorInfo.WorkArea.Left,
+            Math.Max(monitorInfo.WorkArea.Left, monitorInfo.WorkArea.Right - visibleWidth));
+        int visibleY = Math.Clamp(
+            centerY - (visibleHeight / 2),
+            monitorInfo.WorkArea.Top,
+            Math.Max(monitorInfo.WorkArea.Top, monitorInfo.WorkArea.Bottom - visibleHeight));
+        int x = visibleX - (visibleFrame.Left - windowRect.Left);
+        int y = visibleY - (visibleFrame.Top - windowRect.Top);
 
         SetWindowPos(
             dialogHandle,
@@ -686,6 +690,30 @@ internal sealed class FixedPositionOpenFileDialogGuard : IDisposable
             SwpNoSize |
             SwpNoZOrder |
             SwpNoActivate);
+    }
+
+    private void GetOwnerCenter(
+        MonitorInfo monitorInfo,
+        out int centerX,
+        out int centerY)
+    {
+        if (GetWindowRect(_ownerHandle, out Rect ownerRect))
+        {
+            Rect visibleOwner = GetVisibleFrameRect(_ownerHandle, ownerRect);
+            int left = Math.Max(visibleOwner.Left, monitorInfo.WorkArea.Left);
+            int top = Math.Max(visibleOwner.Top, monitorInfo.WorkArea.Top);
+            int right = Math.Min(visibleOwner.Right, monitorInfo.WorkArea.Right);
+            int bottom = Math.Min(visibleOwner.Bottom, monitorInfo.WorkArea.Bottom);
+            if (right > left && bottom > top)
+            {
+                centerX = left + ((right - left) / 2);
+                centerY = top + ((bottom - top) / 2);
+                return;
+            }
+        }
+
+        centerX = monitorInfo.WorkArea.Left + (monitorInfo.WorkArea.Width / 2);
+        centerY = monitorInfo.WorkArea.Top + (monitorInfo.WorkArea.Height / 2);
     }
 
     private static void LockDialogSize(
