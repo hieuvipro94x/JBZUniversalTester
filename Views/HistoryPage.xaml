@@ -440,7 +440,7 @@
                     <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding HistoryOrdinal}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding ExportSequenceNo}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
