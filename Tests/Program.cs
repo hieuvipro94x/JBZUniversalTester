@@ -1927,7 +1927,7 @@ internal static class Program
 
         board.Publish(duplicatedDirections);
         Assert(vm.IsProductRemovalPending &&
-               vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM",
+               vm.ResultStatusText == "THÁO SẢN PHẨM",
             "Background startup scan locks product selection and START while a product or stuck pin remains");
         AssertThrows<InvalidOperationException>(
             () => vm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
@@ -1951,7 +1951,7 @@ internal static class Program
             "Production waits for a clean baseline frame without reporting an IO-capacity warning");
 
         board.Publish(FrameSeq(102, (1, new[] { 18 }), (18, new[] { 1 })));
-        Assert(vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM" &&
+        Assert(vm.ResultStatusText == "THÁO SẢN PHẨM" &&
                vm.IsProductRemovalPending &&
                vm.Faults.Count == 1 &&
                vm.Faults[0].Kind == FaultKind.Info &&
@@ -2825,7 +2825,7 @@ internal static class Program
         faultMainBoard.Publish(FrameSeq(20, (1, new[] { 18 })));
         faultMainVm.StopViewAsync().GetAwaiter().GetResult();
         Assert(faultMainVm.IsProductRemovalPending &&
-               faultMainVm.State == "VUI LÒNG THÁO SẢN PHẨM",
+               faultMainVm.State == "THÁO SẢN PHẨM",
             "Returning to MainWindow during FAIL removal preserves the shared removal lock and warning");
         faultMainBoard.Publish(FrameSeq(21, (1, new[] { 18 })));
         Assert(faultMainVm.IsProductRemovalPending,
@@ -2870,13 +2870,13 @@ internal static class Program
             "Committed final PASS keeps the continuity/final area, stays green, and requests ProductRemoved before scan restart");
         removalVm.StopViewAsync().GetAwaiter().GetResult();
         Assert(removalVm.IsProductRemovalPending &&
-               removalVm.State.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.Ordinal),
+               removalVm.State == "THÁO SẢN PHẨM",
             "Returning to MainWindow preserves the committed PASS removal lock and background IO monitoring");
         removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
         Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
                removalVm.IsProductRemovalPending &&
                removalVm.SelectedOperationTabIndex == 0 &&
-               removalVm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM",
+               removalVm.ResultStatusText == "THÁO SẢN PHẨM",
             "Final PASS remains visible over the continuity area while any product IO is still connected");
         removalBoard.Publish(FrameSeq(4));
         FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(

@@ -502,17 +502,11 @@ public sealed class TestViewModel : ObservableObject
                     return "CHỜ XÁC NHẬN THÙNG LỖI";
                 }
 
-                return value.Contains("VUI LÒNG", StringComparison.OrdinalIgnoreCase)
-                    ? "VUI LÒNG THÁO SẢN PHẨM"
-                    : "THÁO SẢN PHẨM";
+                return "THÁO SẢN PHẨM";
             }
 
             if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
                 return "MANUAL";
-
-            if (!value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
-                value.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
-                return "VUI LÒNG THÁO SẢN PHẨM";
 
             if (value.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
                 return "THÁO SẢN PHẨM";
@@ -580,8 +574,9 @@ public sealed class TestViewModel : ObservableObject
             if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
                 return "#FFF3A0";
 
-            if (!value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
-                value.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
+            if (IsProductRemovalPending &&
+                !value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
+                value.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
                 return "#E65100";
 
             if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
@@ -1484,7 +1479,7 @@ public sealed class TestViewModel : ObservableObject
     private string ReadyStateForCurrentModel()
     {
         if (IsProductRemovalPending)
-            return "VUI LÒNG THÁO SẢN PHẨM";
+            return "THÁO SẢN PHẨM";
 
         if (IsManualModeActive)
             return "MANUAL";
@@ -4233,13 +4228,13 @@ public sealed class TestViewModel : ObservableObject
                 WireName = first?.WireName ?? string.Empty,
                 Section = first?.Section ?? string.Empty,
                 Color = first?.Color ?? string.Empty,
-                Status = "SẢN PHẨM VẪN ĐANG LẮP — VUI LÒNG THÁO SẢN PHẨM"
+                Status = "SẢN PHẨM VẪN ĐANG LẮP — THÁO SẢN PHẨM"
             });
         }
 
         SynchronizeFaultRows(rows);
 
-        State = "VUI LÒNG THÁO SẢN PHẨM";
+        State = "THÁO SẢN PHẨM";
     }
 
     private void CompleteStartupIoInterlock(long generation)
@@ -4287,10 +4282,23 @@ public sealed class TestViewModel : ObservableObject
     {
         if (!IsRuntimeContext(RuntimeMode.Background, generation) ||
             !frame.Complete ||
-            frame.UnknownBytes > 0 ||
-            _waitForProductRelease ||
-            _waitForFaultProductRemoval)
+            frame.UnknownBytes > 0)
         {
+            return;
+        }
+
+        // Khi người vận hành rời màn hình kiểm tra trong lúc đang chờ tháo,
+        // luồng Background vẫn phải tiêu thụ frame để xác nhận ProductRemoved.
+        // Không đưa frame này vào chu trình PASS/FAIL và không cần bấm START.
+        if (Volatile.Read(ref _removalMonitoringFromMain) != 0 &&
+            (_waitForProductRelease || _waitForFaultProductRemoval))
+        {
+            _engine.SetFrameProcessingEnabled(true);
+            _engine.ProcessFrame(frame, false);
+            if (!_engine.IsProductReleased)
+                return;
+
+            InvokeUi(() => CompleteBackgroundProductRemoval(generation));
             return;
         }
 
@@ -4312,7 +4320,7 @@ public sealed class TestViewModel : ObservableObject
                     string.Join(", ", pairs.Select(pair => $"IO{pair.FirstIo}<->IO{pair.SecondIo}")));
             }
 
-            State = "VUI LÒNG THÁO SẢN PHẨM";
+            State = "THÁO SẢN PHẨM";
             return;
         }
 
@@ -4327,6 +4335,38 @@ public sealed class TestViewModel : ObservableObject
             State = ReadyStateForCurrentModel();
             AddLog("MAIN IO INTERLOCK: frame sạch, đã mở khóa chọn mã và START.");
         }
+    }
+
+    private void CompleteBackgroundProductRemoval(long generation)
+    {
+        if (!IsRuntimeContext(RuntimeMode.Background, generation) ||
+            !_engine.IsProductReleased)
+        {
+            return;
+        }
+
+        if (_waitForFaultProductRemoval)
+        {
+            if (Interlocked.Exchange(ref _faultProductRemoved, 1) == 0)
+                MarkProductRemoved();
+            TryCompleteFaultProductRemoval();
+            return;
+        }
+
+        if (!_waitForProductRelease)
+            return;
+
+        MarkProductRemoved();
+        _waitForProductRelease = false;
+        SetProductRemovalPending(false);
+        Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
+        _waterProofEquipmentErrorAwaitingRemoval = false;
+        ResetFullCycleAfterProductRemoved();
+        _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingProduct);
+        _engine.SetFrameProcessingEnabled(false);
+        State = ReadyStateForCurrentModel();
+        AddLog("Đã tháo sản phẩm tại màn hình chính; xóa khóa ProductRemoved và trở về LẮP SẢN PHẨM.");
     }
 
     private static void LogProbeLatency(ScanFrame frame, DateTime uiRequestedAt, IReadOnlyList<int> ios)
@@ -5581,7 +5621,7 @@ public sealed class TestViewModel : ObservableObject
             bool discardLocked = Volatile.Read(ref _discardStandaloneLocked) != 0;
             State = discardLocked
                 ? "THÙNG LỖI ĐÃ KHÓA - CHỜ NHẢ CẢM BIẾN"
-                : "VUI LÒNG THÁO SẢN PHẨM";
+                : "THÁO SẢN PHẨM";
             AddLog(discardLocked
                 ? "BLOCKED: _DISCARD đã nhận hàng; chờ cảm biến nhả để hoàn tất xác nhận 1/1."
                 : "BLOCKED: chưa thể bắt đầu kiểm tra vì sản phẩm chưa được tháo hoàn toàn khỏi JIG.");
@@ -5839,12 +5879,13 @@ public sealed class TestViewModel : ObservableObject
             Interlocked.Exchange(ref _removalMonitoringFromMain, 1);
             _cycleActive = true;
             SetProductionPhase(ProductionPhase.WaitingProductRemoval);
+            SwitchRuntimeMode(RuntimeMode.Background);
             _engine.SetFrameProcessingEnabled(true);
             Interlocked.Exchange(ref _postContinuityStarted, 0);
             Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
             _sound.SetTestPointContactSound(false);
             _sound.SetWiringFaultAlarm(false);
-            State = "VUI LÒNG THÁO SẢN PHẨM";
+            State = "THÁO SẢN PHẨM";
 
             if (_board.IsConnected && !_board.IsScanning)
                 await EnsureContinuousProductionScanAsync();
@@ -8856,7 +8897,7 @@ public sealed class TestViewModel : ObservableObject
     private void SetModel(ProductModel model, TestEngine.PreparedModelState? preparedEngineModel)
     {
         if (IsProductRemovalPending)
-            throw new InvalidOperationException("VUI LÒNG THÁO SẢN PHẨM");
+            throw new InvalidOperationException("THÁO SẢN PHẨM");
 
         // Đổi mã hàng phải hủy sạch chu trình cũ trước khi thay _model; nếu
         // không một task PASS/FAIL cũ hoàn thành muộn có thể cộng sản lượng
