@@ -170,7 +170,47 @@ public sealed class TestEngine : IDisposable
     public event EventHandler? Changed;
     public event Action<ResistanceStep>? ResistanceChannelMeasurementStarted;
 
-    public IReadOnlyCollection<string> PassedNets => _passedNets;
+    // UI and the frame worker run on different threads. Never expose the mutable
+    // HashSet itself to bindings/diagnostics while ProcessFrame can mutate it.
+    public IReadOnlyCollection<string> PassedNets
+    {
+        get
+        {
+            lock (_gate)
+                return _passedNets.ToArray();
+        }
+    }
+
+    public int PassedNetCount
+    {
+        get
+        {
+            lock (_gate)
+                return _passedNets.Count;
+        }
+    }
+    private void NotifyChanged()
+    {
+        EventHandler? handlers = Changed;
+        if (handlers is null)
+            return;
+
+        // A presentation subscriber must never corrupt the authoritative engine
+        // state. The transport/VM can recover presentation independently.
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((EventHandler)subscriber)(this, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(
+                    $"TestEngine Changed subscriber failed: {subscriber.Method.DeclaringType?.FullName}.{subscriber.Method.Name}: {ex}");
+            }
+        }
+    }
+
     public IReadOnlyCollection<int> UnexpectedIo => _unexpectedIo;
 
     public IReadOnlyCollection<WiringFaultPair> WiringFaults
@@ -639,7 +679,7 @@ public sealed class TestEngine : IDisposable
             _latchedClipKeys.Clear();
             ResetUnsafe();
         }
-        Changed?.Invoke(this, EventArgs.Empty);
+        NotifyChanged();
     }
 
     public void SetModel(ProductModel model) => CommitPreparedModel(PrepareModel(model));
@@ -926,7 +966,7 @@ public sealed class TestEngine : IDisposable
         lock (_gate)
             ResetUnsafe();
 
-        Changed?.Invoke(this, EventArgs.Empty);
+        NotifyChanged();
     }
 
     private void ResetUnsafe()
@@ -1301,9 +1341,9 @@ public sealed class TestEngine : IDisposable
                 Stopwatch.GetElapsedTime(computeStarted).TotalMilliseconds;
         }
 
-        // Không block worker D2XX. TestViewModel sẽ marshal async sang UI.
+        // Không block transport reader. TestViewModel chỉ schedule presentation async sang UI.
         if (changed)
-            Changed?.Invoke(this, EventArgs.Empty);
+            NotifyChanged();
 
         return changed;
     }
@@ -1529,7 +1569,7 @@ public sealed class TestEngine : IDisposable
         }
 
         if (changed)
-            Changed?.Invoke(this, EventArgs.Empty);
+            NotifyChanged();
     }
 
     public IReadOnlyList<FaultDetail> BuildConfirmedOpenFaults()
@@ -2322,7 +2362,7 @@ public sealed class TestEngine : IDisposable
         }
 
         if (changed)
-            Changed?.Invoke(this, EventArgs.Empty);
+            NotifyChanged();
         return changed;
     }
 

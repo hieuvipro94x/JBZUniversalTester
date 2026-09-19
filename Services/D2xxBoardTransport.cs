@@ -95,6 +95,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
     long _framesDropped;
     long _d2xxErrorCount;
     long _probePreviewsPublished;
+    long _frameSubscriberCalls;
+    long _slowFrameSubscriberCalls;
+    long _maxFrameSubscriberTicks;
     long _framesReceivedTotal;
     long _completeFramesReceivedTotal;
     long _lastFrameSequence;
@@ -1252,6 +1255,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
         long invalidFrames = Interlocked.Exchange(ref _invalidFramesReceived, 0);
         long droppedFrames = Interlocked.Exchange(ref _framesDropped, 0);
         long probePreviews = Interlocked.Exchange(ref _probePreviewsPublished, 0);
+        long subscriberCalls = Interlocked.Exchange(ref _frameSubscriberCalls, 0);
+        long slowSubscriberCalls = Interlocked.Exchange(ref _slowFrameSubscriberCalls, 0);
+        long maxSubscriberTicks = Interlocked.Exchange(ref _maxFrameSubscriberTicks, 0);
         long decodeTicks = Interlocked.Exchange(ref _decodeTicks, 0);
         double intervalSeconds = previous == 0 ? 5.0 : Math.Max(0.001, (now - previous) / 1000.0);
         double decodeMs = decodeTicks <= 0
@@ -1281,6 +1287,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
             $"partial_frames={partialFrames} parser_error_bytes={parserErrorBytes} " +
             $"invalid_frames={invalidFrames} dropped_frames={droppedFrames} " +
             $"probe_previews={probePreviews} bytes={bytes} " +
+            $"subscriber_calls={subscriberCalls} slow_subscribers={slowSubscriberCalls} " +
+            $"subscriber_max_ms={(maxSubscriberTicks > 0 ? TicksToMilliseconds(maxSubscriberTicks) : 0):0.###} " +
             $"decode_avg_ms={(frames > 0 ? decodeMs / frames : 0):0.###} " +
             $"opens={Interlocked.Read(ref _openCount)} closes={Interlocked.Read(ref _closeCount)} " +
             $"reconnects={Math.Max(0, Interlocked.Read(ref _openCount) - 1)} " +
@@ -1703,6 +1711,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         {
             var handler = (EventHandler<ScanFrame>)subscriber;
             long started = Stopwatch.GetTimestamp();
+            Interlocked.Increment(ref _frameSubscriberCalls);
             try
             {
                 handler(this, frame);
@@ -1716,9 +1725,21 @@ public sealed class D2xxBoardTransport : IBoardTransport
             }
             finally
             {
-                double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                long elapsedTicks = Stopwatch.GetTimestamp() - started;
+                double elapsedMs = elapsedTicks * 1000.0 / Stopwatch.Frequency;
+                long observedMax = Volatile.Read(ref _maxFrameSubscriberTicks);
+                while (elapsedTicks > observedMax &&
+                       Interlocked.CompareExchange(
+                           ref _maxFrameSubscriberTicks,
+                           elapsedTicks,
+                           observedMax) != observedMax)
+                {
+                    observedMax = Volatile.Read(ref _maxFrameSubscriberTicks);
+                }
+
                 if (elapsedMs >= SlowFrameSubscriberMs)
                 {
+                    Interlocked.Increment(ref _slowFrameSubscriberCalls);
                     SafeDiagnostic(
                         $"D2XX_FRAME_SUBSCRIBER_SLOW source={source} seq={frame.Sequence} " +
                         $"handler={SanitizeDiagnostic(handler.Method.DeclaringType?.FullName ?? "unknown")}.{handler.Method.Name} " +

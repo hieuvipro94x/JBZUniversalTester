@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -24,6 +25,7 @@ public partial class TestWindow : Window
     private readonly DispatcherTimer _yellowPulseTimer;
     private readonly DispatcherTimer _whitePulseTimer;
     private NotifyCollectionChangedEventHandler? _faultsChangedHandler;
+    private readonly CancellationTokenSource _viewLifetimeCts = new();
     private int _scrollDispatchQueued;
     private CancellationTokenSource? _greenBlinkCts;
     private Task _greenBlinkTask = Task.CompletedTask;
@@ -148,9 +150,20 @@ public partial class TestWindow : Window
         ModelTitleText.Visibility = viewModel.ShowTitle ? Visibility.Visible : Visibility.Collapsed;
         ConnectorColumn.Visibility = Visibility.Visible;
 
+        // Keep the test grid virtualized even when the model exposes hundreds
+        // of rows. Recycling avoids a full visual-tree rebuild when the VM
+        // applies a Reset/delta after one Production frame.
+        FaultGrid.EnableRowVirtualization = true;
+        FaultGrid.EnableColumnVirtualization = true;
+        System.Windows.Controls.VirtualizingPanel.SetIsVirtualizing(FaultGrid, true);
+        System.Windows.Controls.VirtualizingPanel.SetVirtualizationMode(
+            FaultGrid,
+            System.Windows.Controls.VirtualizationMode.Recycling);
+        System.Windows.Controls.ScrollViewer.SetCanContentScroll(FaultGrid, true);
+
         _faultsChangedHandler = (_, args) =>
         {
-            if (ShouldAutoScrollToFirstFault(args))
+            if (ShouldAutoScrollToFirstFault(args, viewModel))
                 ScheduleScrollToFirstFault(viewModel);
         };
         viewModel.Faults.CollectionChanged += _faultsChangedHandler;
@@ -159,7 +172,7 @@ public partial class TestWindow : Window
         {
             await Dispatcher.Yield(DispatcherPriority.Background);
             if (_autoStartProduction)
-                await viewModel.StartProductionTestAsync();
+                await viewModel.StartProductionTestAsync(_viewLifetimeCts.Token);
         }
         catch (Exception ex)
         {
@@ -498,13 +511,30 @@ public partial class TestWindow : Window
         }, DispatcherPriority.Background);
     }
 
-    private static bool ShouldAutoScrollToFirstFault(NotifyCollectionChangedEventArgs args) =>
-        // Remove là đường nóng khi một network PASS và biến mất. Không ép
-        // DataGrid ScrollIntoView/layout lại chỉ vì các row còn lại dịch lên.
-        // Add/Replace là fault mới; Reset dùng cho lần đầu dựng/xóa cả bảng.
-        args.Action is NotifyCollectionChangedAction.Add or
-            NotifyCollectionChangedAction.Replace or
-            NotifyCollectionChangedAction.Reset;
+    private static bool ShouldAutoScrollToFirstFault(
+        NotifyCollectionChangedEventArgs args,
+        TestViewModel viewModel)
+    {
+        // Normal continuity rows can be added/removed rapidly while the operator
+        // is installing the product. Scrolling on those deltas forces DataGrid
+        // measure/layout and steals time from the real test presentation. Only an
+        // actual product fault is allowed to take scroll ownership.
+        if (viewModel.WiringFaultCount <= 0)
+            return false;
+
+        if (args.Action == NotifyCollectionChangedAction.Reset)
+            return true;
+
+        if (args.Action is not (NotifyCollectionChangedAction.Add or
+            NotifyCollectionChangedAction.Replace))
+        {
+            return false;
+        }
+
+        return args.NewItems?.OfType<FaultRow>().Any(row =>
+            row.ProductFaultType is ProductFaultType.WrongWiring or
+                ProductFaultType.ShortCircuit) == true;
+    }
 
     private bool IsFaultRowVisible(FaultRow row)
     {
@@ -559,6 +589,7 @@ public partial class TestWindow : Window
         if (_closeInProgress)
             return;
         _closeInProgress = true;
+        CancelPendingAutoStart();
 
         try
         {
@@ -599,6 +630,7 @@ public partial class TestWindow : Window
             return;
 
         _closeInProgress = true;
+        CancelPendingAutoStart();
         try
         {
             if (DataContext is TestViewModel viewModel)
@@ -613,8 +645,18 @@ public partial class TestWindow : Window
         }
     }
 
+    private void CancelPendingAutoStart()
+    {
+        if (_viewLifetimeCts.IsCancellationRequested)
+            return;
+
+        try { _viewLifetimeCts.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+
     private void CleanupUiHandlers()
     {
+        CancelPendingAutoStart();
         ContentRendered -= TestWindow_ContentRendered;
         _clockTimer.Stop();
         _clockTimer.Tick -= ClockTimer_Tick;

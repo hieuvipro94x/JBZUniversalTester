@@ -1,0 +1,1019 @@
+Hãy thực hiện một đợt AUDIT + FIX hoàn chỉnh trên toàn bộ project JBZUniversalTester hiện tại.
+
+KHÔNG chỉ đọc vài file riêng lẻ.
+Trước khi sửa:
+- đọc AGENTS.md nếu có;
+- chạy git status;
+- xem git diff;
+- xác định toàn bộ thay đổi chưa commit;
+- lần theo tất cả dependency/call-site liên quan;
+- hiểu kiến trúc hiện tại trước khi sửa.
+
+MỤC TIÊU TỔNG THỂ
+
+1. Rà soát toàn bộ các thay đổi gần đây liên quan Test pipeline:
+   - TestWindow.xaml / TestWindow.xaml.cs
+   - TestViewModel.cs
+   - TestEngine.cs
+   - D2xxBoardTransport.cs
+   - ScanSupervisor
+   - MainViewModel
+   - các service/state/persistence liên quan.
+
+2. Rà soát toàn bộ phần Production Settings:
+   - ProductionSettingsPage.xaml
+   - ProductionSettingsPage.xaml.cs
+   - ProductionSettingsViewModel.cs
+   - ProductionSettings / AppSettings
+   - ProductionConfigService
+   - Printer / Label
+   - Leak
+   - Resistance
+   - Relay
+   - các binding/event/service liên quan.
+
+3. Sửa triệt để:
+   - race condition;
+   - Dispatcher storm;
+   - UI block D2XX;
+   - duplicate event;
+   - stale state;
+   - cancellation lỗi;
+   - scan watchdog race;
+   - state machine rung;
+   - collection thread safety;
+   - memory/resource leak;
+   - duplicated save;
+   - XAML layout lỗi.
+
+4. Thay UX Settings thành:
+   NGƯỜI DÙNG CHỈ CẦN CHỈNH CẤU HÌNH -> BẤM TRỞ VỀ -> TỰ ĐỘNG LƯU TOÀN BỘ.
+   Không bắt buộc phải bấm nút LƯU.
+
+5. Sửa khu vực "ĐO ĐIỆN TRỞ BẰNG TAY":
+   - bảng nằm sát dòng trạng thái Keysight;
+   - bảng rộng hơn;
+   - cao hơn;
+   - dùng hết vùng trống;
+   - hỗ trợ hiển thị đầy đủ tối đa 10 kênh;
+   - không bị cắt chữ/cột/nút.
+
+==================================================
+A. AUDIT TOÀN BỘ TEST PIPELINE
+==================================================
+
+Rà từ đầu đến cuối:
+
+D2xxBoardTransport
+ -> FrameReceived
+ -> TestViewModel
+ -> TestEngine
+ -> logical/electrical snapshot
+ -> UI presentation
+ -> Dispatcher
+ -> TestWindow
+ -> PASS/FAIL
+ -> DB/history/LOT
+ -> relay sequence
+ -> WaitingForRemoval
+ -> WaitingForProduct
+ -> cycle tiếp theo.
+
+PHẢI KIỂM TRA CÁC INVARIANT SAU:
+
+1. D2XX HOT PATH
+
+D2XX reader tuyệt đối không được chờ UI.
+
+Không được để:
+
+FrameReceived
+ -> UI Dispatcher
+ -> render
+ -> return về D2XX
+
+theo kiểu synchronous.
+
+D2XX phải đọc/decode/publish nhanh rồi tiếp tục.
+
+Nếu subscriber TestViewModel/TestEngine có công việc nặng:
+- đưa sang worker/queue phù hợp;
+- hoặc xử lý logic nhanh rồi tạo immutable snapshot;
+- tuyệt đối không làm FTDI reader thread đứng hàng trăm ms.
+
+Rà:
+- FrameReceived invocation;
+- subscriber timing;
+- async worker;
+- cancellation;
+- queue ownership;
+- shutdown;
+- disposal.
+
+Không được tạo Task.Run vô hạn theo mỗi frame.
+
+2. TESTENGINE KHÔNG PHỤ THUỘC UI
+
+PASS/FAIL phải được quyết định bởi engine/state machine.
+
+UI chỉ trình bày kết quả.
+
+WRONG_WIRING / SHORT_CIRCUIT khi confirmed:
+- phải được chốt ngay;
+- không chờ DataGrid render;
+- không chờ Dispatcher;
+- không chờ animation/LED.
+
+Mỗi cycle:
+- DB commit đúng 1 lần;
+- counter đúng 1 lần;
+- relay đúng 1 sequence;
+- NG dialog đúng policy;
+- LOT đúng 1 lần.
+
+3. UI DISPATCHER / COALESCING
+
+Kiểm tra kỹ:
+
+_enginePresentationWorkerRunning
+_latestEngineUiUpdateRequest
+_engineUiUpdateRevision
+_engineUiLastCompletedRevision
+_productionUiCycleEpoch
+_engineUiUpdatesScheduled
+_engineUiUpdatesRendered
+_uiRequestCount
+_uiDispatcherEnqueueCount
+_uiRenderedCount
+_continuityPreviewUiQueued
+probe presentation
+IO mapping UI.
+
+Phải bảo đảm:
+
+- tối đa 1 presentation worker;
+- tối đa 1 Dispatcher operation pending cho cùng pipeline;
+- snapshot mới có thể thay snapshot cũ nếu UI chưa render;
+- không enqueue hàng nghìn callback cho vài chục frame;
+- stale revision không được schedule lại vô hạn;
+- completed/rejected revision phải advance trạng thái đúng.
+
+Nếu log dạng:
+requests=100
+dispatcher_enqueued=50000
+rendered=90
+thì coi là bug P0 và sửa triệt để.
+
+4. PRODUCT STATE MACHINE
+
+State chuẩn:
+
+WaitingForProduct
+ -> TestingRealtime
+ -> PassSequence hoặc Failed
+ -> WaitingForRemoval
+ -> WaitingForProduct
+
+Không được rung:
+
+WaitingForProduct
+ <-> TestingRealtime
+
+chỉ vì một frame tạm thời mất candidate.
+
+Realtime wrong/short detection vẫn phải hoạt động ngay khi đang lắp sản phẩm.
+
+Tách rõ:
+
+- electrical evidence từng frame;
+- presentation/lifecycle state.
+
+Sau khi đã có bằng chứng sản phẩm và vào TestingRealtime:
+không được quay về WaitingForProduct vì một frame ngắn hạn không còn candidate.
+
+Chỉ chuyển về WaitingForProduct sau khi:
+- đang ở Removal state phù hợp;
+- nhận authoritative complete Production frame;
+- xác nhận sản phẩm đã tháo hoàn toàn theo policy hiện tại.
+
+5. START GATING
+
+Nút START/TestWindow và TestEngine phải dùng cùng một nguồn sự thật.
+
+Không để:
+UI cho bấm START
+nhưng engine lại báo BLOCKED.
+
+Rà điều kiện:
+
+- ScanHealth == Monitoring
+- board connected
+- !device fault
+- !hardware reconfiguration
+- ProductState == WaitingForProduct
+- !ProductRemoved lock
+- Main IO interlock clear
+- đúng scan mode Production
+- fresh generation hợp lệ.
+
+Nếu TestWindow mở khi sản phẩm cũ chưa tháo:
+- không ARM sai;
+- hiển thị trạng thái chờ tháo;
+- START disabled;
+- tiếp tục monitor IO;
+- khi nhận frame sạch xác nhận removal thì tự chuyển sang trạng thái sẵn sàng;
+- không bắt người dùng đóng/mở TestWindow.
+
+6. SCAN WATCHDOG / CONTROLLED REOPEN
+
+Kiểm tra race giữa:
+
+SCAN_CAPACITY_CONTROLLED_REOPEN
+hardware reconfiguration
+model change
+manual mode
+relay sequence
+stop scan chủ động
+ScanWatchdog
+soft recovery
+reopen recovery.
+
+Nếu scan được dừng CÓ CHỦ Ý để đổi:
+2 card -> 4 card
+hoặc capacity khác,
+
+Watchdog tuyệt đối không được coi đó là stall và recovery chồng lên.
+
+Phải có shared authoritative state/gate tương đương:
+
+Monitoring
+Reconfiguring
+Starting
+Recovering
+Suspended
+ShuttingDown
+
+Watchdog phải ignore intentional reconfiguration.
+
+Không tạo hai luồng cùng Close/Open/StartScan.
+
+7. EVENT / RESOURCE LIFETIME
+
+Rà toàn bộ:
+
++= FrameReceived
++= PropertyChanged
++= CollectionChanged
++= BoardFrameActivity
++= Changed
+DispatcherTimer
+CancellationTokenSource
+background worker
+SemaphoreSlim
+Task loop.
+
+Mở/đóng TestWindow nhiều lần không được:
+- tăng số subscriber;
+- tăng worker;
+- tăng timer;
+- tăng handler;
+- để task cũ còn chạy.
+
+Dispose/Close phải unsubscribe đúng.
+
+8. THREAD SAFETY
+
+Không expose trực tiếp:
+HashSet
+Dictionary
+List
+
+đang bị worker khác mutate.
+
+Nếu public property cần đọc:
+- snapshot;
+- ToArray;
+- immutable structure;
+- lock đúng.
+
+ObservableCollection chỉ mutate trên UI thread.
+
+9. PERFORMANCE
+
+Không tối ưu mù.
+
+Giữ các metric cần thiết nhưng:
+- log state/signature giống nhau liên tục phải throttle/deduplicate;
+- không format danh sách hàng trăm IO nếu không cần mỗi frame;
+- không repaint DataGrid khi dữ liệu không đổi;
+- không rebuild row collection nếu snapshot giống nhau.
+
+==================================================
+B. SETTINGS: TRỞ VỀ = TỰ LƯU
+==================================================
+
+BỎ YÊU CẦU NGƯỜI DÙNG PHẢI BẤM LƯU.
+
+UX mong muốn:
+
+Người dùng:
+1. vào Cài đặt;
+2. thay đổi Checkbox/ComboBox/TextBox/COM/Relay/Label/Resistance/Leak;
+3. bấm TRỞ VỀ;
+4. toàn bộ cấu hình hợp lệ tự lưu;
+5. sau đó mới đóng trang.
+
+Không cần autosave từng keystroke.
+Không ghi file liên tục.
+
+Đây là cơ chế "SAVE ON EXIT".
+
+--------------------------------------------------
+B1. FLOW TRỞ VỀ
+--------------------------------------------------
+
+Không được để Cancel_Click/TRỞ VỀ hiện tại chỉ:
+
+ReleaseManualOutputsAsync()
+-> RequestClose
+
+Hãy tạo một persistence flow tập trung, ví dụ:
+
+SaveSettingsAsync()
+SaveAndCloseAsync()
+
+Tên method tùy kiến trúc thực tế.
+
+Flow đúng:
+
+TRỞ VỀ
+ ->
+CommitPendingEditorValues()
+ ->
+ValidateSettings()
+ ->
+SyncCompatibilityFields()
+ ->
+Persist settings
+ ->
+SettingsSaved
+ ->
+ReleaseManualOutputsAsync()
+ ->
+RequestClose
+
+KHÔNG được đóng page trước khi save hoàn thành.
+
+Nếu save fail:
+- giữ trang mở;
+- giữ nguyên dữ liệu user vừa nhập;
+- log exception;
+- chỉ hiện một MessageBox phù hợp;
+- KHÔNG đóng.
+
+Nếu validation fail:
+- không save partial config;
+- không đóng;
+- báo field/config nào sai.
+
+--------------------------------------------------
+B2. COMMIT BINDING TRƯỚC KHI SAVE
+--------------------------------------------------
+
+Phải bảo đảm control đang focus cũng được cập nhật vào ViewModel trước save.
+
+Rà tất cả Binding:
+
+TextBox
+ComboBox
+SelectedValue
+SelectedItem
+Text
+IsChecked
+numeric fields.
+
+CommitPendingEditorValues() phải cập nhật các BindingExpression còn pending.
+
+Đặc biệt kiểm tra:
+
+PrinterComComboBox
+WaterProofComComboBox
+Label type
+Card count
+Start card
+relay values
+Resistance values
+Leak settings
+LOT start
+device/company/line
+IO confirmation settings.
+
+Không được để người dùng vừa nhập xong rồi bấm TRỞ VỀ quá nhanh khiến giá trị cuối chưa vào ViewModel.
+
+--------------------------------------------------
+B3. DÙNG CHUNG MỘT SAVE PIPELINE
+--------------------------------------------------
+
+Không duplicate logic giữa:
+
+Save_Click
+Cancel_Click
+Back_Click
+TRỞ VỀ
+Printer SelectionChanged
+các handler khác.
+
+Tạo một function trung tâm.
+
+Ví dụ về ý tưởng:
+
+private async Task<bool> PersistSettingsAsync(bool showSuccessMessage)
+{
+    CommitPendingEditorValues();
+
+    if (!ValidateSettings(out string error))
+    {
+        ShowValidation(error);
+        return false;
+    }
+
+    SyncCompatibilityFields();
+
+    await SaveCoreAsync();
+
+    SettingsSaved?.Invoke(this, EventArgs.Empty);
+    return true;
+}
+
+private async void Back_Click(...)
+{
+    if (!await PersistSettingsAsync(false))
+        return;
+
+    await ReleaseManualOutputsAsync();
+    RequestClose?.Invoke(this, EventArgs.Empty);
+}
+
+KHÔNG copy nguyên nếu project hiện tại dùng API khác.
+Tích hợp đúng architecture thực tế.
+
+--------------------------------------------------
+B4. NÚT LƯU
+--------------------------------------------------
+
+Vì TRỞ VỀ đã tự lưu:
+
+Nếu không còn dependency:
+- bỏ nút LƯU khỏi giao diện.
+
+Hoặc an toàn hơn:
+- giữ nút LƯU;
+- đổi nó thành "LƯU NGAY";
+- dùng cùng PersistSettingsAsync();
+- không đóng trang.
+
+TRỞ VỀ:
+- PersistSettingsAsync()
+- rồi đóng.
+
+Không có hai bộ validation/save riêng.
+
+--------------------------------------------------
+B5. DIRTY TRACKING
+--------------------------------------------------
+
+Nếu triển khai được sạch thì thêm dirty tracking:
+
+Settings page load:
+dirty = false
+
+User thay đổi:
+dirty = true
+
+Save success:
+dirty = false
+
+TRỞ VỀ:
+if dirty:
+   validate + save
+else:
+   close
+
+NHƯNG:
+
+dirty không được bị set trong:
+- InitializeComponent;
+- load cfg;
+- InitializeComboBoxItems;
+- RefreshPortsAsync;
+- programmatic SelectedValue;
+- ItemsSource population;
+- model/config normalization.
+
+Cần suppression gate nếu cần.
+
+Nếu dirty tracking làm code phức tạp/rủi ro hơn:
+không bắt buộc.
+
+Có thể validate + save một lần mỗi lần TRỞ VỀ.
+Một lần ghi cfg khi rời Settings là hoàn toàn chấp nhận được.
+
+--------------------------------------------------
+B6. SIDE EFFECT HIỆN TẠI
+--------------------------------------------------
+
+Các feature có live side-effect phải giữ behavior cũ.
+
+Ví dụ:
+- chọn Printer COM có thể connect/test live;
+- manual relay hoạt động ngay;
+- leak COM refresh;
+- preview/in thử label;
+- resistance manual test.
+
+Nhưng persistence file config chỉ cần chắc chắn được thực hiện khi TRỞ VỀ/LƯU NGAY.
+
+Không để:
+SelectionChanged -> Save
+TRỞ VỀ -> Save
+SettingsSaved -> Reload -> Save lại
+
+gây duplicate/recursive persistence.
+
+--------------------------------------------------
+B7. ATOMIC SAVE
+--------------------------------------------------
+
+Rà ProductionConfigService.Save/_vm.Save.
+
+Nếu hiện tại ghi trực tiếp file cfg:
+xem có khả năng file bị truncate/corrupt nếu crash giữa lúc write không.
+
+Nếu hợp lý:
+- write temp file;
+- flush;
+- replace/move atomic.
+
+Không đổi format cfg nếu không cần.
+
+==================================================
+C. SỬA "ĐO ĐIỆN TRỞ BẰNG TAY"
+==================================================
+
+Ảnh hiện tại có vấn đề:
+
+- dòng:
+  "KHÔNG KẾT NỐI ĐƯỢC KEYSIGHT 34461A"
+
+  nằm gần trên;
+
+- DataGrid kết quả lại nằm rất xa phía dưới;
+
+- giữa status và DataGrid có khoảng trắng rất lớn;
+
+- bảng nhỏ;
+
+- không tận dụng chiều ngang/chiều cao card;
+
+- cần dùng thực tế cho tới 10 kênh.
+
+Hãy sửa triệt để layout này.
+
+--------------------------------------------------
+C1. LAYOUT CARD
+--------------------------------------------------
+
+Card "ĐO ĐIỆN TRỞ BẰNG TAY" nên dùng Grid, KHÔNG dùng StackPanel tạo khoảng trống bất hợp lý.
+
+Bố cục mong muốn:
+
+Row 0 = tiêu đề "ĐO ĐIỆN TRỞ BẰNG TAY"
+Row 1 = ComboBox chọn kênh + nút CHẠY ĐO
+Row 2 = trạng thái Keysight
+Row 3 = DataGrid kết quả
+
+Row 3 Height="*"
+
+DataGrid phải nằm ngay bên dưới status với khoảng cách nhỏ khoảng 4-8px.
+
+Không còn khoảng trắng hàng trăm pixel giữa:
+
+"KHÔNG KẾT NỐI ĐƯỢC KEYSIGHT 34461A"
+
+và bảng.
+
+--------------------------------------------------
+C2. DATAGRID PHẢI RỘNG
+--------------------------------------------------
+
+DataGrid:
+
+HorizontalAlignment="Stretch"
+VerticalAlignment="Stretch"
+Width="Auto"
+Height="Auto"
+
+Không dùng Width cứng nhỏ như 340 nếu card thực tế rộng hơn.
+
+DataGrid phải chiếm gần toàn bộ:
+- chiều ngang card;
+- chiều cao còn lại.
+
+Border/parent phải Stretch.
+
+Nếu có ScrollViewer cha làm DataGrid không stretch:
+sửa container cho đúng.
+
+Ưu tiên DataGrid tự scroll bên trong.
+
+--------------------------------------------------
+C3. HIỂN THỊ 10 KÊNH
+--------------------------------------------------
+
+Phần đo điện trở bằng tay phải hỗ trợ đầy đủ tối đa:
+
+R1
+R2
+R3
+R4
+R5
+R6
+R7
+R8
+R9
+R10
+
+Kiểm tra collection/ItemsSource hiện tại.
+
+Nếu chỉ thấy 2 dòng do hiện chỉ chọn/config R1/R2:
+không được tự tạo kết quả giả.
+
+Nhưng architecture phải cho phép collection chứa đủ 10 row.
+
+Rà ViewModel:
+- ManualResistanceRows
+- ResistanceRows
+- Result rows
+hoặc collection thực tế tương đương.
+
+Nếu code hiện hard-code chỉ tạo 2 row:
+sửa thành dựng row từ 10 Resistance channel configurations hoặc enabled/available channel list phù hợp.
+
+Không thay đổi tiêu chí đo.
+
+Không hard-code dữ liệu kết quả.
+
+--------------------------------------------------
+C4. CỘT DATAGRID
+--------------------------------------------------
+
+Phải đọc rõ:
+
+R
+KÊNH
+GIÁ TRỊ ĐO
+MIN
+MAX
+MẪU
+ỔN ĐỊNH
+KẾT QUẢ
+
+Cân Width:
+
+R:
+Auto hoặc khoảng 35-45
+
+KÊNH:
+Auto hoặc 50-65
+
+GIÁ TRỊ ĐO:
+*
+
+MIN:
+khoảng 70-90
+
+MAX:
+khoảng 70-90
+
+MẪU:
+khoảng 50-65
+
+ỔN ĐỊNH:
+khoảng 70-90
+
+KẾT QUẢ:
+khoảng 85-110 hoặc *
+
+Không được:
+- cắt "KẾT QUẢ";
+- cắt "ỔN ĐỊNH";
+- cắt giá trị Ω;
+- mất Border;
+- nút LỖI/PASS bị mất chữ.
+
+Nếu card hẹp:
+cho DataGrid có horizontal scrollbar nội bộ thay vì phá toàn trang.
+
+--------------------------------------------------
+C5. TRẠNG THÁI KEYSIGHT
+--------------------------------------------------
+
+Dòng:
+
+KHÔNG KẾT NỐI ĐƯỢC KEYSIGHT 34461A
+
+phải:
+- nằm ngay dưới control CHẠY ĐO;
+- DataGrid ngay dưới;
+- không chiếm Row Height="*";
+- TextWrapping nếu cần;
+- không làm đẩy bảng xuống đáy.
+
+Nếu Keysight kết nối được:
+status thay đổi theo logic cũ.
+
+Không hard-code trạng thái lỗi.
+
+--------------------------------------------------
+C6. KHÔNG PHÁ LOGIC ĐO
+--------------------------------------------------
+
+Giữ nguyên:
+
+- Connect Keysight;
+- VISA;
+- channel routing;
+- relay safety;
+- threshold;
+- Min/Max;
+- sample/stability logic;
+- kết quả PASS/FAIL/LỖI;
+- cancellation;
+- Manual Mode;
+- Production scan suspend/resume.
+
+Chỉ refactor ViewModel nếu cần để hỗ trợ 10 row và binding sạch hơn.
+
+==================================================
+D. RÀ SOÁT TOÀN BỘ PRODUCTION SETTINGS UI
+==================================================
+
+Ngoài card Resistance, rà luôn trang Settings sau các thay đổi UI gần đây.
+
+Bốn vùng chính phải:
+- chia đều hợp lý;
+- không dồn trái;
+- không còn khoảng trắng lớn vô lý;
+- không mất viền;
+- không cắt chữ;
+- không cắt Button;
+- không cắt ComboBox;
+- không overflow TextBox;
+- không phá Binding.
+
+Không đưa breakpoint độ phân giải phức tạp trở lại nếu không cần.
+
+Ưu tiên Grid + Star sizing.
+
+Scroll toàn trang chỉ xuất hiện khi thật sự thiếu không gian.
+
+DataGrid con có thể tự scroll.
+
+==================================================
+E. XAML/BINDING SAFETY
+==================================================
+
+Trước và sau sửa hãy thống kê/so sánh:
+
+x:Name
+Binding
+Command
+Click
+SelectionChanged
+Checked
+Unchecked
+LostFocus
+ItemsSource.
+
+Không được vô tình làm mất reference code-behind.
+
+Đặc biệt không thay binding property name nếu không update tất cả call-site.
+
+Kiểm tra:
+- UpdateSourceTrigger;
+- OneWay/TwoWay;
+- SelectedValuePath;
+- DisplayMemberPath;
+- converter;
+- validation.
+
+XAML phải parse/build sạch.
+
+==================================================
+F. SEARCH TOÀN REPO
+==================================================
+
+Search ít nhất các pattern:
+
+FrameReceived
+Changed +=
+PropertyChanged +=
+CollectionChanged +=
+Dispatcher.Invoke
+Dispatcher.BeginInvoke
+InvokeAsync
+Task.Run
+ContinueWith
+CancellationTokenSource
+ScanWatchdog
+SCAN_RECOVERY
+CONTROLLED_REOPEN
+hardware reconfiguration
+WaitingForProduct
+TestingRealtime
+WaitingForRemoval
+ProductionConfigService.Save
+.Save(
+Save_Click
+Cancel_Click
+Back_Click
+RequestClose
+SettingsSaved
+ValidateSettings
+Resistance
+ManualResistance
+Keysight
+34461
+VISA
+ItemsSource
+
+Xác định duplicated logic trước khi sửa.
+
+==================================================
+G. BUILD + TEST
+==================================================
+
+Sau khi sửa:
+
+1. dotnet build project/solution đúng.
+
+2. Chạy toàn bộ self-tests/unit tests hiện có.
+
+3. Nếu có test cho:
+- endpoint/probe display;
+- state machine;
+- pass/fail;
+- history;
+- scan supervisor;
+- resistance;
+thì chạy hết.
+
+4. Nếu test fail:
+không được sửa test chỉ để PASS.
+Phải xác định regression thật.
+
+5. Tự audit git diff sau sửa.
+
+Kiểm tra lại:
+- race;
+- null;
+- event leak;
+- duplicate save;
+- deadlock;
+- stale revision;
+- reentrancy;
+- UI-thread violations;
+- collection modified;
+- task sống sau dispose;
+- watchdog/reconfigure race;
+- PASS/FAIL chạy hai lần.
+
+==================================================
+H. ACCEPTANCE CRITERIA
+==================================================
+
+Sau sửa phải hướng tới log như sau:
+
+TEST PIPELINE:
+- subscriber_max_ms thấp;
+- không còn UI làm D2XX subscriber >500-1000ms;
+- không còn Dispatcher enqueue hàng nghìn lần bất hợp lý;
+- UI_STALL lớn giảm mạnh;
+- ProcessFrame không chờ UI;
+- state không rung vô lý;
+- wrong/short vẫn bắt realtime;
+- PASS/FAIL chính xác;
+- removal đúng;
+- controlled reopen không bị watchdog chen vào.
+
+SETTINGS:
+- chỉnh cấu hình;
+- KHÔNG cần bấm LƯU;
+- bấm TRỞ VỀ;
+- pending binding được commit;
+- validate;
+- save đúng một lần;
+- SettingsSaved đúng policy;
+- release output;
+- đóng.
+
+Nếu config sai:
+- không đóng;
+- không ghi config sai.
+
+Nếu save exception:
+- không đóng;
+- không mất edit.
+
+RESISTANCE UI:
+- dòng trạng thái Keysight ngay trên DataGrid;
+- không có khoảng trắng lớn;
+- DataGrid rộng full card;
+- DataGrid cao full phần còn lại;
+- hỗ trợ tối đa 10 channel row;
+- không cắt cột;
+- không mất chữ;
+- không mất Border.
+
+==================================================
+I. CÁC THỨ TUYỆT ĐỐI KHÔNG ĐƯỢC PHÁ
+==================================================
+
+KHÔNG:
+
+- thay protocol D2XX nếu không có bằng chứng;
+- thay byte command;
+- thay relay pulse/timing tùy tiện;
+- thay PASS/FAIL criteria;
+- bỏ realtime wrong/short detection;
+- bỏ confirmation/debounce chỉ để nhanh;
+- hard-code model;
+- thay database schema không cần thiết;
+- tăng LOT khi preview/in thử label;
+- thay format THT;
+- swallow exception;
+- Thread.Sleep UI thread;
+- polling timer mới không cần thiết;
+- save config mỗi keystroke;
+- duplicate SettingsSaved;
+- restart scan vì thay một setting nếu behavior cũ không yêu cầu;
+- sửa rộng các module không liên quan chỉ để "clean code".
+
+==================================================
+J. CÁCH THỰC HIỆN
+==================================================
+
+BƯỚC 1:
+Audit và liệt kê issue thực tế:
+P0
+P1
+P2
+
+Mỗi issue ghi:
+- file;
+- method;
+- root cause;
+- hậu quả;
+- cách sửa.
+
+BƯỚC 2:
+Sửa P0/P1 có bằng chứng.
+
+BƯỚC 3:
+Refactor Settings thành:
+TRỞ VỀ = VALIDATE + SAVE + RELEASE + CLOSE.
+
+BƯỚC 4:
+Sửa Resistance Manual UI + data source để hỗ trợ 10 kênh.
+
+BƯỚC 5:
+Build/test.
+
+BƯỚC 6:
+Review git diff lần cuối như senior reviewer.
+
+Nếu phát hiện lỗi mới:
+sửa tiếp trước khi kết thúc.
+
+==================================================
+K. BÁO CÁO CUỐI
+==================================================
+
+KHÔNG chỉ audit rồi dừng.
+Hãy trực tiếp sửa code.
+
+Khi hoàn tất chỉ báo cáo ngắn nhưng cụ thể:
+
+1. Các root cause quan trọng đã tìm thấy.
+2. Danh sách file đã sửa.
+3. Pipeline Test đã thay đổi điểm gì.
+4. Watchdog/reconfigure đã xử lý thế nào.
+5. Settings "TRỞ VỀ tự lưu" hoạt động thế nào.
+6. Nút LƯU hiện được xử lý ra sao.
+7. Card ĐO ĐIỆN TRỞ BẰNG TAY đã bố trí lại thế nào.
+8. Collection nào quyết định 10 kênh.
+9. Build/test nào PASS/FAIL.
+10. Những gì vẫn cần xác minh trên máy thật FTDI/Keysight.
+
+Ưu tiên:
+CORRECTNESS > THREAD SAFETY > STATE CONSISTENCY > RELIABILITY > UI RESPONSIVENESS > PERFORMANCE > CODE CLEANUP.

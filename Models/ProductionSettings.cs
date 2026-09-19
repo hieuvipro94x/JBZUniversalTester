@@ -125,6 +125,13 @@ public sealed class ProductionSettings
     /// </summary>
     public bool EnableSystemLogs { get; set; }
 
+    /// <summary>
+    /// Bật: Wrong/Short đã xác nhận sẽ dừng chu kỳ và mở cửa sổ XÁC NHẬN như hiện tại.
+    /// Tắt: Wrong/Short chỉ là cảnh báo realtime; scan tiếp tục, tháo kết nối lỗi thì
+    /// cảnh báo tự mất và cắm sai lại sẽ cảnh báo lại. Không commit FAIL/relay/popup.
+    /// </summary>
+    public bool WiringFaultConfirmationEnabled { get; set; } = true;
+
     // ============================================================
     // THỜI GIAN
     // ============================================================

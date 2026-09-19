@@ -3,6 +3,10 @@ using System.IO.Ports;
 using System.Text.RegularExpressions;
 using System.Text;
 using System.Diagnostics;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Windows.Media;
+using System.Windows.Shapes;
 using System.Windows;
 using System.Windows.Controls;
 using JBZUniversalTester.Models;
@@ -47,6 +51,7 @@ public partial class ProductionSettingsPage : UserControl
         InitializeComponent();
         DataContext = _vm;
         InitializeComboBoxItems();
+        ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
         Loaded += ProductionSettingsPage_Loaded;
     }
 
@@ -57,6 +62,8 @@ public partial class ProductionSettingsPage : UserControl
             System.Windows.Threading.DispatcherPriority.ContextIdle);
         if (IsReleased)
             return;
+
+        UpdatePanelWidths(ActualWidth, ActualHeight);
 
         await RefreshPortsAsync();
         if (IsReleased)
@@ -83,73 +90,141 @@ public partial class ProductionSettingsPage : UserControl
 
     private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        double viewportWidth = SettingsScrollViewer?.ViewportWidth ?? 0;
-        if (!double.IsFinite(viewportWidth) || viewportWidth <= 0)
-        {
-            viewportWidth = Math.Max(
-                320,
-                e.NewSize.Width - SystemParameters.VerticalScrollBarWidth);
-        }
-
-        UpdatePanelWidths(viewportWidth);
+        // Dùng chính kích thước thật của UserControl. Không lấy ViewportWidth ở đây:
+        // trong lúc WPF đang layout, ViewportWidth có thể vẫn là giá trị của frame trước
+        // và làm toàn bộ 4 panel bị giữ hẹp ở bên trái.
+        UpdatePanelWidths(e.NewSize.Width, e.NewSize.Height);
     }
 
     private void SettingsScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if (Math.Abs(e.ViewportWidthChange) > 0.1 &&
-            double.IsFinite(e.ViewportWidth) &&
-            e.ViewportWidth > 0)
+        if (Math.Abs(e.ViewportWidthChange) <= 0.1 && Math.Abs(e.ViewportHeightChange) <= 0.1)
+            return;
+
+        // Sau khi scrollbar xuất hiện/biến mất, tính lại theo kích thước thật của trang
+        // để 4 vùng tiếp tục dùng hết chiều ngang khả dụng.
+        double pageWidth = ActualWidth;
+        double pageHeight = ActualHeight;
+        if (!double.IsFinite(pageWidth) || pageWidth <= 0)
+            pageWidth = SettingsScrollViewer?.ActualWidth ?? e.ViewportWidth;
+        if (!double.IsFinite(pageHeight) || pageHeight <= 0)
+            pageHeight = SettingsScrollViewer?.ActualHeight ?? e.ViewportHeight;
+
+        UpdatePanelWidths(pageWidth, pageHeight);
+    }
+
+    private void UpdatePanelWidths(double pageWidth, double pageHeight)
+    {
+        // Bốn vùng chính luôn là 4 cột * bằng nhau và chiếm hết chiều rộng trang.
+        // Chỉ khi cửa sổ nhỏ hơn mức tối thiểu để các nhãn/nút không bị cắt thì
+        // host mới rộng hơn viewport và ScrollViewer mới cho phép cuộn ngang.
+        if (UnifiedSettingsGrid is null ||
+            SettingsPanelsHost is null ||
+            SettingsScrollViewer is null)
         {
-            UpdatePanelWidths(e.ViewportWidth);
+            return;
+        }
+
+        const double minimumUsableContentWidth = 1120d;
+        const double hostHorizontalMargin = 16d; // SettingsPanelsHost Margin="8,6,8,6"
+
+        if (!double.IsFinite(pageWidth) || pageWidth <= 0)
+            return;
+
+        double verticalScrollBarWidth =
+            SettingsScrollViewer.ComputedVerticalScrollBarVisibility == Visibility.Visible
+                ? SystemParameters.VerticalScrollBarWidth
+                : 0d;
+
+        double availableWidth = Math.Max(320d, pageWidth - hostHorizontalMargin - verticalScrollBarWidth);
+        double targetWidth = Math.Max(minimumUsableContentWidth, availableWidth);
+
+        SettingsScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        SettingsScrollViewer.HorizontalScrollBarVisibility =
+            availableWidth + 0.5 < minimumUsableContentWidth
+                ? ScrollBarVisibility.Auto
+                : ScrollBarVisibility.Disabled;
+
+        // Width được cập nhật từ toàn bộ UserControl nên không còn trường hợp cụm 4 card
+        // đứng bên trái và để trống một mảng lớn bên phải.
+        if (!double.IsFinite(SettingsPanelsHost.Width) ||
+            Math.Abs(SettingsPanelsHost.Width - targetWidth) > 0.5)
+        {
+            SettingsPanelsHost.Width = targetWidth;
+        }
+        SettingsPanelsHost.MinWidth = 0;
+        SettingsPanelsHost.MaxWidth = double.PositiveInfinity;
+        SettingsPanelsHost.HorizontalAlignment = HorizontalAlignment.Left;
+
+        // Grid có 4 ColumnDefinition Width="*" => mỗi vùng chính luôn đúng 25%.
+        UnifiedSettingsGrid.Width = double.NaN;
+        UnifiedSettingsGrid.MinWidth = 0;
+        UnifiedSettingsGrid.MaxWidth = double.PositiveInfinity;
+        UnifiedSettingsGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
+
+        if (IoSettingsPanel is not null)
+            IoSettingsPanel.Width = double.NaN;
+        if (RelaySettingsPanel is not null)
+            RelaySettingsPanel.Width = double.NaN;
+        if (WaterProofSettingsPanel is not null)
+            WaterProofSettingsPanel.Width = double.NaN;
+        if (LabelSettingsPanel is not null)
+            LabelSettingsPanel.Width = double.NaN;
+        if (ResistanceSettingsPanel is not null)
+            ResistanceSettingsPanel.Width = double.NaN;
+    }
+
+    private void LabelTemplateTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        string templateType =
+            (LabelTemplateTypeComboBox.SelectedValue as string) ??
+            _vm.Settings.Label.TemplateType;
+        ApplyLabelTemplatePhysicalSize(templateType);
+
+        // Khi người vận hành đổi loại tem, làm mới ngay vùng LỆNH IN TEM nếu
+        // trang đã load và có THT hợp lệ. Không hiện MessageBox ở thao tác đổi
+        // ComboBox để tránh làm gián đoạn cấu hình.
+        if (IsLoaded && !IsReleased && InlineLabelCommandTextBox is not null)
+        {
+            Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Background,
+                new Action(TryRefreshInlineLabelCommandPreview));
         }
     }
 
-    private void UpdatePanelWidths(double viewportWidth)
+    private void TryRefreshInlineLabelCommandPreview()
     {
-        // WPF có thể báo PositiveInfinity trong lượt đo ScrollViewer đầu tiên.
-        // Width của FrameworkElement chỉ nhận số hữu hạn không âm.
-        if (!double.IsFinite(viewportWidth) || viewportWidth <= 0)
+        if (IsReleased || !IsLoaded || InlineLabelCommandTextBox is null)
             return;
 
-        if (IoSettingsPanel is null || RelaySettingsPanel is null || LabelSettingsPanel is null)
+        string thtPath = _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
+            return;
+
+        try
         {
-            return;
+            LabelPrintRequest request = BuildSettingsLabelRequest("PREVIEW");
+            RenderInlineLabelPreview(request, "XEM TRƯỚC");
         }
-
-        // Ưu tiên ba nhóm chức năng trên cùng một hàng từ màn hình 1280 trở lên
-        // theo chiều rộng thực của viewport. Không dùng Width của UserControl
-        // vì phần thanh cuộn dọc sẽ làm mất viền phải của panel cuối.
-        // Tỷ lệ 28/28/44 vẫn dành nhiều chỗ nhất cho TEM / ĐIỆN TRỞ.
-        double available = Math.Max(
-            320,
-            viewportWidth - SettingsPanelsHost.Margin.Left - SettingsPanelsHost.Margin.Right);
-        if (available >= 1160)
+        catch (Exception ex)
         {
-            double content = available - 18;
-            IoSettingsPanel.Width = Math.Floor(content * 0.28);
-            RelaySettingsPanel.Width = Math.Floor(content * 0.28);
-            LabelSettingsPanel.Width = Math.Max(
-                470,
-                content - IoSettingsPanel.Width - RelaySettingsPanel.Width);
-            return;
+            AsyncFileLogService.Current.Error($"Automatic label command preview refresh failed: {ex}");
         }
+    }
 
-        if (available >= 760)
+    private void ApplyLabelTemplatePhysicalSize(string? templateType)
+    {
+        string normalized = LabelProfileResolver.NormalizeTemplateType(templateType);
+        (int widthMm, int heightMm) = normalized switch
         {
-            double halfPanel = Math.Floor((available - 12) / 2);
-            IoSettingsPanel.Width = halfPanel;
-            RelaySettingsPanel.Width = halfPanel;
-            LabelSettingsPanel.Width = available - 6;
-            return;
-        }
+            LabelSettings.SmallTemplate => (60, 25),
+            LabelSettings.SmallQrTemplate => (60, 15),
+            _ => (90, 15)
+        };
 
-        // Màn hình rất hẹp: mỗi panel một hàng. Giữ 500px tối thiểu để form
-        // TEM không ép mất chữ; ScrollViewer chỉ hiện cuộn ngang ở trường hợp
-        // ngoại lệ này thay vì cắt hẳn mép phải.
-        double singlePanel = Math.Max(500, available - 6);
-        IoSettingsPanel.Width = singlePanel;
-        RelaySettingsPanel.Width = singlePanel;
-        LabelSettingsPanel.Width = singlePanel;
+        _vm.Settings.Label.TemplateType = normalized;
+        _vm.Settings.Label.WidthMm = widthMm;
+        _vm.Settings.Label.HeightMm = heightMm;
     }
 
     private void InitializeComboBoxItems()
@@ -379,37 +454,814 @@ public partial class ProductionSettingsPage : UserControl
     {
         try
         {
+            // Preview và Print cùng đi qua LabelPrintRequest.Capture(). Vì vậy dữ liệu,
+            // template và payload ở đây chính là payload mà pipeline in thật sử dụng.
             LabelPrintRequest request = BuildSettingsLabelRequest("PREVIEW");
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            Encoding encoding = Encoding.GetEncoding(
-                request.Profile.EncodingName,
-                EncoderFallback.ExceptionFallback,
-                DecoderFallback.ExceptionFallback);
-            string extension = request.Profile.Mode == LabelPrintMode.RawZpl ? ".zpl" : ".txt";
-            string directory = Path.Combine(Path.GetTempPath(), "JBZUniversalTester", "LabelPreview");
-            Directory.CreateDirectory(directory);
-            string path = Path.Combine(directory, $"PREVIEW_{SafeFileName(request.Profile.Id)}_LOT{request.Data.LotNo}{extension}");
-            File.WriteAllBytes(path, encoding.GetBytes(request.Payload));
-            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            RenderInlineLabelPreview(request, "XEM TRƯỚC");
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Label preview failed: {ex}");
-            ShowMessage("Chưa xem trước được tem. Vui lòng kiểm tra mẫu tem.", "XEM TRƯỚC TEM", MessageBoxImage.Warning);
+            SetInlineLabelPreviewStatus("KHÔNG TẠO ĐƯỢC PAYLOAD", isError: true);
+            ShowMessage(
+                "Chưa tạo được lệnh in tem. Vui lòng kiểm tra mẫu tem/THT.",
+                "XEM TRƯỚC TEM",
+                MessageBoxImage.Warning);
         }
     }
+
+    private void RenderInlineLabelPreview(LabelPrintRequest request, string status)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Không dựng mô phỏng tem đồ họa. Hiển thị nguyên payload cuối cùng mà
+        // pipeline in tạo ra, để người vận hành thấy chính xác lệnh + dữ liệu
+        // sẽ được gửi xuống máy in khi bấm IN THỬ.
+        string payload = FormatPrinterCommandForPreview(request.Payload);
+
+        InlineLabelPreviewViewbox.Child = null;
+        InlineLabelPreviewViewbox.Visibility = Visibility.Collapsed;
+
+        // TextBox của trang có style chung VerticalContentAlignment=Center.
+        // Với preview nhiều dòng điều đó làm command bị nằm giữa/dưới khung.
+        // Ép local alignment + vị trí scroll để dòng đầu (8N/Q/R... tùy mẫu)
+        // luôn xuất hiện ngay ở góc trên-trái.
+        InlineLabelCommandTextBox.HorizontalContentAlignment = HorizontalAlignment.Left;
+        InlineLabelCommandTextBox.VerticalContentAlignment = VerticalAlignment.Top;
+        InlineLabelCommandTextBox.Text = payload;
+        InlineLabelCommandTextBox.Visibility = Visibility.Visible;
+        InlineLabelCommandTextBox.SelectionStart = 0;
+        InlineLabelCommandTextBox.SelectionLength = 0;
+        InlineLabelCommandTextBox.ScrollToHome();
+        InlineLabelCommandTextBox.ScrollToHorizontalOffset(0);
+        InlineLabelCommandTextBox.ScrollToVerticalOffset(0);
+        InlineLabelPreviewPlaceholder.Visibility = Visibility.Collapsed;
+        InlineLabelPreviewInfoText.Text =
+            $"{request.Profile.Id} • {request.WidthMm} × {request.HeightMm} mm • " +
+            $"LOT {request.Data.LotNo} • {LabelProfileResolver.DetectLanguage(request.Payload)}";
+        SetInlineLabelPreviewStatus(status, isError: false);
+    }
+
+    private static string FormatPrinterCommandForPreview(string? payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+            return string.Empty;
+
+        // request.Payload là nguồn dữ liệu duy nhất: chính payload này được pipeline
+        // in sử dụng. Chỉ loại bỏ các ký tự điều khiển không thể hiển thị trong
+        // TextBox (NUL/ESC/BOM...), tuyệt đối không thay đổi nội dung lệnh EPL/ZPL.
+        var builder = new StringBuilder(payload.Length);
+        foreach (char character in payload)
+        {
+            if (character is '\r' or '\n' or '\t')
+            {
+                builder.Append(character);
+                continue;
+            }
+
+            if (character == '\uFEFF' || char.IsControl(character))
+                continue;
+
+            builder.Append(character);
+        }
+
+        string visible = builder.ToString()
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace("\r", "\n", StringComparison.Ordinal);
+
+        // Không để framing/control byte đã bị loại bỏ tạo ra các dòng trắng ở đầu.
+        return visible.TrimStart('\n');
+    }
+
+    private void SetInlineLabelPreviewStatus(string status, bool isError)
+    {
+        if (InlineLabelPreviewStatusText is null)
+            return;
+
+        InlineLabelPreviewStatusText.Text = status ?? string.Empty;
+        InlineLabelPreviewStatusText.Foreground = isError
+            ? new SolidColorBrush(Color.FromRgb(198, 40, 40))
+            : new SolidColorBrush(Color.FromRgb(31, 67, 145));
+    }
+
+    private void ShowLabelPreviewWindow(LabelPrintRequest request)
+    {
+        var previewWindow = new Window
+        {
+            Title = $"XEM TRƯỚC TEM • {request.Profile.Id}",
+            Owner = HostWindow,
+            Width = 1120,
+            Height = 720,
+            MinWidth = 760,
+            MinHeight = 500,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = Brushes.White
+        };
+
+        var root = new Grid { Margin = new Thickness(14) };
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        var header = new Grid { Margin = new Thickness(0, 0, 0, 10) };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var title = new StackPanel();
+        title.Children.Add(new TextBlock
+        {
+            Text = $"{request.Profile.Id}  •  LOT {request.Data.LotNo}",
+            FontSize = 18,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromRgb(31, 67, 145))
+        });
+        title.Children.Add(new TextBlock
+        {
+            Text = $"Kích thước tem thật: {request.WidthMm} × {request.HeightMm} mm  •  " +
+                   $"Payload: {LabelProfileResolver.DetectLanguage(request.Payload)}  •  " +
+                   $"Máy in: {(string.IsNullOrWhiteSpace(request.Printer) ? "CHƯA CHỌN" : request.Printer)}",
+            Margin = new Thickness(0, 3, 0, 0),
+            Foreground = Brushes.DimGray,
+            FontSize = 12
+        });
+        header.Children.Add(title);
+
+        var fidelity = new Border
+        {
+            Background = new SolidColorBrush(Color.FromRgb(238, 245, 255)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(164, 188, 224)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(10, 6, 10, 6),
+            Child = new TextBlock
+            {
+                Text = "CÙNG PAYLOAD VỚI ĐƯỜNG IN",
+                FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(Color.FromRgb(31, 67, 145))
+            }
+        };
+        Grid.SetColumn(fidelity, 1);
+        header.Children.Add(fidelity);
+        Grid.SetRow(header, 0);
+        root.Children.Add(header);
+
+        var tabs = new TabControl();
+        var visualTab = new TabItem { Header = "TEM THỰC TẾ" };
+        var commandTab = new TabItem { Header = "LỆNH IN GỐC" };
+
+        var visualHost = new Grid
+        {
+            Background = new SolidColorBrush(Color.FromRgb(239, 242, 247)),
+            Margin = new Thickness(2)
+        };
+        visualHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        visualHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        FrameworkElement labelVisual = BuildLabelPreviewVisual(request);
+        var viewbox = new Viewbox
+        {
+            Stretch = Stretch.Uniform,
+            StretchDirection = StretchDirection.Both,
+            Margin = new Thickness(24),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Child = labelVisual
+        };
+        visualHost.Children.Add(viewbox);
+
+        var note = new TextBlock
+        {
+            Margin = new Thickness(14, 0, 14, 12),
+            Text = "Preview dựng từ chính payload EPL/ZPL đã render và đúng tỷ lệ kích thước tem vật lý. " +
+                   "TEM_BE_QR được hiển thị dưới dạng QR Code (3 finder ở ba góc), không phải Data Matrix. " +
+                   "Font raster/module cuối cùng có thể chênh nhẹ vì do firmware máy in tạo; dùng ‘IN THỬ ĐÚNG BẢN NÀY’ để kiểm chứng vật lý.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Brushes.DimGray,
+            FontSize = 11.5
+        };
+        Grid.SetRow(note, 1);
+        visualHost.Children.Add(note);
+        visualTab.Content = visualHost;
+
+        commandTab.Content = new TextBox
+        {
+            Text = request.Payload,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            AcceptsTab = true,
+            TextWrapping = TextWrapping.NoWrap,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 13,
+            Margin = new Thickness(6)
+        };
+
+        tabs.Items.Add(visualTab);
+        tabs.Items.Add(commandTab);
+        Grid.SetRow(tabs, 1);
+        root.Children.Add(tabs);
+
+        var footer = new Grid { Margin = new Thickness(0, 10, 0, 0) };
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        footer.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var snapshotText = new TextBlock
+        {
+            Text = $"Part: {request.Data.PartNumber}   •   Barcode: {request.Data.Barcode}",
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Brushes.DimGray,
+            FontSize = 11.5,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        footer.Children.Add(snapshotText);
+
+        var printButton = new Button
+        {
+            Content = "IN THỬ ĐÚNG BẢN NÀY",
+            MinWidth = 190,
+            Height = 34,
+            Margin = new Thickness(8, 0, 8, 0),
+            FontWeight = FontWeights.Bold
+        };
+        Grid.SetColumn(printButton, 1);
+        printButton.Click += async (_, _) =>
+        {
+            if (_main is null)
+            {
+                MessageBox.Show(
+                    previewWindow,
+                    "Trang Cài đặt chưa được nối với chương trình chính.",
+                    "IN THỬ TEM",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            printButton.IsEnabled = false;
+            try
+            {
+                LabelPrintTransportResult result = await _main.Test.PrintSettingsLabelAsync(request);
+                MessageBox.Show(
+                    previewWindow,
+                    result.Printed
+                        ? "Đã in đúng snapshot đang xem. Không tăng LOT hoặc sản lượng."
+                        : "Chưa in được tem. Hãy kiểm tra cổng COM/cáp máy in.",
+                    "IN THỬ TEM",
+                    MessageBoxButton.OK,
+                    result.Printed ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+            catch (Exception ex)
+            {
+                AsyncFileLogService.Current.Error($"Preview snapshot test print failed: {ex}");
+                MessageBox.Show(
+                    previewWindow,
+                    "Chưa in được snapshot đang xem. Hãy kiểm tra kết nối máy in.",
+                    "IN THỬ TEM",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+            }
+            finally
+            {
+                printButton.IsEnabled = true;
+            }
+        };
+        footer.Children.Add(printButton);
+
+        var closeButton = new Button
+        {
+            Content = "ĐÓNG",
+            MinWidth = 100,
+            Height = 34,
+            IsCancel = true
+        };
+        Grid.SetColumn(closeButton, 2);
+        closeButton.Click += (_, _) => previewWindow.Close();
+        footer.Children.Add(closeButton);
+
+        Grid.SetRow(footer, 2);
+        root.Children.Add(footer);
+        previewWindow.Content = root;
+        previewWindow.ShowDialog();
+    }
+
+    private static FrameworkElement BuildLabelPreviewVisual(LabelPrintRequest request)
+    {
+        const double dotsPerMm = 8.0; // máy in tem 203 dpi ≈ 8 dots/mm
+        double logicalWidth = Math.Max(160, request.WidthMm * dotsPerMm);
+        double logicalHeight = Math.Max(80, request.HeightMm * dotsPerMm);
+
+        var canvas = new Canvas
+        {
+            Width = logicalWidth,
+            Height = logicalHeight,
+            Background = Brushes.White,
+            ClipToBounds = true
+        };
+
+        LabelPrintMode language = LabelProfileResolver.DetectLanguage(request.Payload);
+        bool rendered = language switch
+        {
+            LabelPrintMode.RawZpl => RenderZplPreview(canvas, request.Payload),
+            LabelPrintMode.RawEpl => RenderEplPreview(canvas, request),
+            _ => RenderEplPreview(canvas, request) || RenderZplPreview(canvas, request.Payload)
+        };
+
+        if (!rendered)
+        {
+            canvas.Children.Add(new TextBlock
+            {
+                Text = "Không nhận diện được lệnh đồ họa của template này.\nXem tab LỆNH IN GỐC để đối chiếu payload.",
+                Margin = new Thickness(18),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Brushes.DimGray,
+                FontSize = 16,
+                FontWeight = FontWeights.SemiBold
+            });
+        }
+
+        return new Border
+        {
+            Background = Brushes.White,
+            BorderBrush = Brushes.Black,
+            BorderThickness = new Thickness(1.5),
+            Padding = new Thickness(2),
+            Child = canvas,
+            SnapsToDevicePixels = true
+        };
+    }
+
+    private static bool RenderEplPreview(Canvas canvas, LabelPrintRequest request)
+    {
+        string payload = request.Payload;
+        string[] lines = payload.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+
+        // Built-in TEM_BE/TEM_BE_QR were authored against the full printer-head
+        // coordinate space. Their physical 60 mm label starts about 180 dots
+        // from the head origin (the verified QR form even carries the legacy
+        // X180..620 layout reference). Preview must translate that printer-head
+        // X coordinate back to the physical label's left edge. The print payload
+        // itself is NOT modified.
+        string templateType = LabelProfileResolver.NormalizeTemplateType(
+            string.IsNullOrWhiteSpace(request.Profile.Id) ? request.FormatName : request.Profile.Id);
+        double labelOriginX = templateType is LabelSettings.SmallTemplate or LabelSettings.SmallQrTemplate
+            ? 180d
+            : 0d;
+
+        // EPL R command offsets the reference point. Respect it in the preview.
+        double referenceX = 0d;
+        double referenceY = 0d;
+        foreach (string rawReference in lines)
+        {
+            Match reference = Regex.Match(
+                rawReference.Trim(),
+                @"^(?:N)?R(?<x>-?\d+),(?<y>-?\d+)$",
+                RegexOptions.CultureInvariant);
+            if (!reference.Success)
+                continue;
+
+            referenceX = ParseDouble(reference.Groups["x"].Value);
+            referenceY = ParseDouble(reference.Groups["y"].Value);
+            break;
+        }
+
+        double PhysicalX(double printerX) => printerX + referenceX - labelOriginX;
+        double PhysicalY(double printerY) => printerY + referenceY;
+        var variableOrder = new List<string>();
+        foreach (string raw in lines)
+        {
+            Match variable = Regex.Match(raw.Trim(), @"^V(?<id>\d{2}),", RegexOptions.CultureInvariant);
+            if (variable.Success)
+            {
+                string id = "V" + variable.Groups["id"].Value;
+                if (!variableOrder.Contains(id, StringComparer.Ordinal))
+                    variableOrder.Add(id);
+            }
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        int dataMarker = Array.FindIndex(lines, line => line.Trim() == "?");
+        if (dataMarker >= 0)
+        {
+            int valueIndex = 0;
+            for (int index = dataMarker + 1; index < lines.Length && valueIndex < variableOrder.Count; index++)
+            {
+                string value = lines[index].TrimEnd('\r');
+                if (value.StartsWith("P", StringComparison.OrdinalIgnoreCase) &&
+                    value.Length <= 4)
+                {
+                    break;
+                }
+
+                values[variableOrder[valueIndex++]] = value;
+            }
+        }
+
+        bool rendered = false;
+        foreach (string raw in lines)
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("'", StringComparison.Ordinal))
+                continue;
+
+            Match text = Regex.Match(
+                line,
+                @"^A(?<x>-?\d+),(?<y>-?\d+),(?<rot>\d+),(?<font>\d+),(?<hm>\d+),(?<vm>\d+),(?<rev>[NR]),(?<data>.+)$",
+                RegexOptions.CultureInvariant);
+            if (text.Success)
+            {
+                double x = PhysicalX(ParseDouble(text.Groups["x"].Value));
+                double y = PhysicalY(ParseDouble(text.Groups["y"].Value));
+                int font = ParseInt(text.Groups["font"].Value, 1);
+                int hm = Math.Max(1, ParseInt(text.Groups["hm"].Value, 1));
+                int vm = Math.Max(1, ParseInt(text.Groups["vm"].Value, 1));
+                int rotation = ParseInt(text.Groups["rot"].Value, 0) * 90;
+                string value = ResolveEplExpression(text.Groups["data"].Value, values);
+
+                var block = new TextBlock
+                {
+                    Text = value,
+                    FontFamily = new FontFamily("Arial"),
+                    FontSize = (font <= 1 ? 11 : 15) * vm,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = text.Groups["rev"].Value == "R" ? Brushes.White : Brushes.Black,
+                    Background = text.Groups["rev"].Value == "R" ? Brushes.Black : Brushes.Transparent,
+                    Padding = new Thickness(0),
+                    RenderTransformOrigin = new Point(0, 0)
+                };
+                if (hm > 1)
+                    block.LayoutTransform = new ScaleTransform(hm, 1);
+                if (rotation != 0)
+                    block.RenderTransform = new RotateTransform(rotation);
+                Canvas.SetLeft(block, x);
+                Canvas.SetTop(block, y);
+                canvas.Children.Add(block);
+                rendered = true;
+                continue;
+            }
+
+            Match matrix = Regex.Match(
+                line,
+                @"^b(?<x>-?\d+),(?<y>-?\d+),(?<kind>[A-Za-z0-9]+),(?<size>[^,]+),(?<data>.+)$",
+                RegexOptions.CultureInvariant);
+            if (matrix.Success)
+            {
+                double x = PhysicalX(ParseDouble(matrix.Groups["x"].Value));
+                double y = PhysicalY(ParseDouble(matrix.Groups["y"].Value));
+                string kind = matrix.Groups["kind"].Value.ToUpperInvariant();
+                string value = ResolveEplExpression(matrix.Groups["data"].Value, values);
+                int module = ExtractFirstInteger(matrix.Groups["size"].Value, 3);
+                double size = kind == "Q"
+                    ? Math.Clamp(30 + module * 22, 78, 126)
+                    : Math.Clamp(34 + module * 14, 68, 112);
+                if (kind == "Q")
+                    DrawQrPlaceholder(canvas, x, y, size, value);
+                else
+                    DrawDataMatrixPlaceholder(canvas, x, y, size, value);
+                rendered = true;
+                continue;
+            }
+
+            Match box = Regex.Match(
+                line,
+                @"^X(?<x1>\d+),(?<y1>\d+),(?<t>\d+),(?<x2>\d+),(?<y2>\d+)$",
+                RegexOptions.CultureInvariant);
+            if (box.Success)
+            {
+                double x1 = PhysicalX(ParseDouble(box.Groups["x1"].Value));
+                double y1 = PhysicalY(ParseDouble(box.Groups["y1"].Value));
+                double x2 = PhysicalX(ParseDouble(box.Groups["x2"].Value));
+                double y2 = PhysicalY(ParseDouble(box.Groups["y2"].Value));
+                var rect = new Rectangle
+                {
+                    Width = Math.Max(1, x2 - x1),
+                    Height = Math.Max(1, y2 - y1),
+                    Stroke = Brushes.Black,
+                    StrokeThickness = Math.Max(1, ParseDouble(box.Groups["t"].Value))
+                };
+                Canvas.SetLeft(rect, x1);
+                Canvas.SetTop(rect, y1);
+                canvas.Children.Add(rect);
+                rendered = true;
+            }
+        }
+
+        return rendered;
+    }
+
+    private static bool RenderZplPreview(Canvas canvas, string payload)
+    {
+        if (!payload.Contains("^XA", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        bool rendered = false;
+        MatchCollection fields = Regex.Matches(
+            payload,
+            @"\^(?:FO|FT)(?<x>\d+),(?<y>\d+)(?<body>.*?)(?=\^(?:FO|FT)|\^XZ)",
+            RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+        foreach (Match field in fields)
+        {
+            double x = ParseDouble(field.Groups["x"].Value);
+            double y = ParseDouble(field.Groups["y"].Value);
+            string body = field.Groups["body"].Value;
+            Match data = Regex.Match(body, @"\^FD(?<data>.*?)\^FS", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+            string value = data.Success ? data.Groups["data"].Value.Replace("\\&", "\n", StringComparison.Ordinal) : string.Empty;
+
+            bool isQr = body.Contains("^BQ", StringComparison.OrdinalIgnoreCase);
+            bool isDataMatrix = body.Contains("^BX", StringComparison.OrdinalIgnoreCase);
+            bool isLinearBarcode = body.Contains("^BC", StringComparison.OrdinalIgnoreCase);
+            if (isQr)
+            {
+                DrawQrPlaceholder(canvas, x, y, 104, value);
+                rendered = true;
+                continue;
+            }
+            if (isDataMatrix)
+            {
+                DrawDataMatrixPlaceholder(canvas, x, y, 100, value);
+                rendered = true;
+                continue;
+            }
+            if (isLinearBarcode)
+            {
+                DrawLinearBarcodePlaceholder(canvas, x, y, 120, 58, value);
+                rendered = true;
+                continue;
+            }
+
+            Match graphicBox = Regex.Match(body, @"\^GB(?<w>\d+),(?<h>\d+),(?<t>\d+)", RegexOptions.IgnoreCase);
+            if (graphicBox.Success)
+            {
+                var rect = new Rectangle
+                {
+                    Width = ParseDouble(graphicBox.Groups["w"].Value),
+                    Height = ParseDouble(graphicBox.Groups["h"].Value),
+                    Stroke = Brushes.Black,
+                    StrokeThickness = Math.Max(1, ParseDouble(graphicBox.Groups["t"].Value))
+                };
+                Canvas.SetLeft(rect, x);
+                Canvas.SetTop(rect, y);
+                canvas.Children.Add(rect);
+                rendered = true;
+            }
+
+            if (value.Length > 0)
+            {
+                Match font = Regex.Match(body, @"\^A[^,]*,(?<h>\d+),(?<w>\d+)", RegexOptions.IgnoreCase);
+                double fontSize = font.Success ? Math.Clamp(ParseDouble(font.Groups["h"].Value) * 0.78, 9, 42) : 15;
+                var block = new TextBlock
+                {
+                    Text = value,
+                    FontFamily = new FontFamily("Arial"),
+                    FontSize = fontSize,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = Brushes.Black
+                };
+                Canvas.SetLeft(block, x);
+                Canvas.SetTop(block, y);
+                canvas.Children.Add(block);
+                rendered = true;
+            }
+        }
+
+        return rendered;
+    }
+
+    private static string ResolveEplExpression(
+        string expression,
+        IReadOnlyDictionary<string, string> variables)
+    {
+        string resolved = Regex.Replace(
+            expression,
+            @"V\d{2}",
+            match => variables.TryGetValue(match.Value, out string? value) ? value : match.Value,
+            RegexOptions.CultureInvariant);
+        return resolved.Replace("\"", string.Empty, StringComparison.Ordinal).Trim();
+    }
+
+    private static void DrawQrPlaceholder(
+        Canvas canvas,
+        double x,
+        double y,
+        double size,
+        string value)
+    {
+        // Preview QR rõ ràng: quiet zone 4 module + 3 finder chuẩn ở ba góc.
+        // Payload in thật vẫn là lệnh EPL kind=Q; đây chỉ là raster mô phỏng UI.
+        const int dataModules = 29;
+        const int quiet = 4;
+        const int modules = dataModules + quiet * 2;
+        double moduleSize = size / modules;
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(value ?? string.Empty));
+
+        var background = new Rectangle
+        {
+            Width = size,
+            Height = size,
+            Fill = Brushes.White,
+            Stroke = Brushes.Black,
+            StrokeThickness = 0.8
+        };
+        Canvas.SetLeft(background, x);
+        Canvas.SetTop(background, y);
+        canvas.Children.Add(background);
+
+        bool InFinder(int row, int col, int r0, int c0)
+        {
+            int r = row - r0;
+            int c = col - c0;
+            if (r < 0 || r >= 7 || c < 0 || c >= 7)
+                return false;
+            return r == 0 || r == 6 || c == 0 || c == 6 ||
+                   (r >= 2 && r <= 4 && c >= 2 && c <= 4);
+        }
+
+        bool IsFinderOrSeparator(int row, int col)
+        {
+            int[] starts = [quiet, quiet + dataModules - 7];
+            if (InFinder(row, col, starts[0], starts[0]) ||
+                InFinder(row, col, starts[0], starts[1]) ||
+                InFinder(row, col, starts[1], starts[0]))
+                return true;
+
+            bool Around(int r0, int c0) =>
+                row >= r0 - 1 && row <= r0 + 7 &&
+                col >= c0 - 1 && col <= c0 + 7;
+            return Around(starts[0], starts[0]) ||
+                   Around(starts[0], starts[1]) ||
+                   Around(starts[1], starts[0]);
+        }
+
+        bool IsBlack(int row, int col)
+        {
+            if (row < quiet || col < quiet || row >= modules - quiet || col >= modules - quiet)
+                return false;
+
+            int top = quiet;
+            int right = quiet + dataModules - 7;
+            if (InFinder(row, col, top, top) ||
+                InFinder(row, col, top, right) ||
+                InFinder(row, col, right, top))
+                return true;
+
+            if (IsFinderOrSeparator(row, col))
+                return false;
+
+            // Timing pattern làm hình nhận diện là QR thay vì Data Matrix.
+            if (row == quiet + 6 && col >= quiet + 8 && col < right - 1)
+                return col % 2 == 0;
+            if (col == quiet + 6 && row >= quiet + 8 && row < right - 1)
+                return row % 2 == 0;
+
+            int bitIndex = (row - quiet) * dataModules + (col - quiet);
+            return (hash[(bitIndex / 8) % hash.Length] & (1 << (bitIndex % 8))) != 0;
+        }
+
+        for (int row = 0; row < modules; row++)
+        {
+            for (int col = 0; col < modules; col++)
+            {
+                if (!IsBlack(row, col))
+                    continue;
+
+                var pixel = new Rectangle
+                {
+                    Width = moduleSize + 0.12,
+                    Height = moduleSize + 0.12,
+                    Fill = Brushes.Black,
+                    StrokeThickness = 0
+                };
+                Canvas.SetLeft(pixel, x + col * moduleSize);
+                Canvas.SetTop(pixel, y + row * moduleSize);
+                canvas.Children.Add(pixel);
+            }
+        }
+    }
+
+    private static void DrawDataMatrixPlaceholder(
+        Canvas canvas,
+        double x,
+        double y,
+        double size,
+        string value)
+    {
+        const int modules = 20;
+        double moduleSize = size / modules;
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(value ?? string.Empty));
+
+        var background = new Rectangle
+        {
+            Width = size,
+            Height = size,
+            Fill = Brushes.White,
+            Stroke = Brushes.Black,
+            StrokeThickness = 1
+        };
+        Canvas.SetLeft(background, x);
+        Canvas.SetTop(background, y);
+        canvas.Children.Add(background);
+
+        for (int row = 0; row < modules; row++)
+        {
+            for (int col = 0; col < modules; col++)
+            {
+                bool border = col == 0 || row == modules - 1 ||
+                              (row == 0 && col % 2 == 0) ||
+                              (col == modules - 1 && row % 2 == 0);
+                int bitIndex = row * modules + col;
+                bool hashBit = (hash[(bitIndex / 8) % hash.Length] & (1 << (bitIndex % 8))) != 0;
+                if (!border && !hashBit)
+                    continue;
+
+                var pixel = new Rectangle
+                {
+                    Width = moduleSize + 0.12,
+                    Height = moduleSize + 0.12,
+                    Fill = Brushes.Black,
+                    StrokeThickness = 0
+                };
+                Canvas.SetLeft(pixel, x + col * moduleSize);
+                Canvas.SetTop(pixel, y + row * moduleSize);
+                canvas.Children.Add(pixel);
+            }
+        }
+    }
+
+    private static void DrawLinearBarcodePlaceholder(
+        Canvas canvas,
+        double x,
+        double y,
+        double width,
+        double height,
+        string value)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(value ?? string.Empty));
+        double cursor = x;
+        for (int index = 0; index < 80 && cursor < x + width; index++)
+        {
+            bool black = (hash[index % hash.Length] & (1 << (index % 8))) != 0;
+            double barWidth = index % 3 == 0 ? 2.4 : 1.2;
+            if (black)
+            {
+                var bar = new Rectangle
+                {
+                    Width = barWidth,
+                    Height = height,
+                    Fill = Brushes.Black,
+                    StrokeThickness = 0
+                };
+                Canvas.SetLeft(bar, cursor);
+                Canvas.SetTop(bar, y);
+                canvas.Children.Add(bar);
+            }
+            cursor += barWidth + 0.8;
+        }
+    }
+
+    private static int ExtractFirstInteger(string value, int fallback)
+    {
+        Match match = Regex.Match(value ?? string.Empty, @"\d+", RegexOptions.CultureInvariant);
+        return match.Success && int.TryParse(match.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+            ? parsed
+            : fallback;
+    }
+
+    private static int ParseInt(string value, int fallback) =>
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed)
+            ? parsed
+            : fallback;
+
+    private static double ParseDouble(string value) =>
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed)
+            ? parsed
+            : 0d;
 
     private async void TestPrintLabel_Click(object sender, RoutedEventArgs e)
     {
         try
         {
             LabelPrintRequest request = BuildSettingsLabelRequest("TEST-PRINT");
+
+            // Hiển thị chính snapshot/payload sắp được gửi tới máy in ngay trong
+            // khung XEM TRƯỚC TEM. Không dựng request lần hai để tránh lệch LOT,
+            // timestamp, barcode hoặc dữ liệu THT giữa preview và bản in thử.
+            RenderInlineLabelPreview(request, "ĐANG IN THỬ...");
+
             if (_main is null)
                 throw new InvalidOperationException("Trang Cài đặt chưa được nối với chương trình chính.");
+
             LabelPrintTransportResult result = await _main.Test.PrintSettingsLabelAsync(request);
+            SetInlineLabelPreviewStatus(
+                result.Printed ? "ĐÃ IN THỬ" : "IN THỬ KHÔNG THÀNH CÔNG",
+                isError: !result.Printed);
+
             ShowMessage(
                 result.Printed
-                    ? "Đã in thử tem. Không tăng LOT hoặc sản lượng."
+                    ? "Đã in thử đúng snapshot đang hiển thị. Không tăng LOT hoặc sản lượng."
                     : "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
                 result.Printed ? MessageBoxImage.Information : MessageBoxImage.Warning);
@@ -417,6 +1269,7 @@ public partial class ProductionSettingsPage : UserControl
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Test label print failed: {ex}");
+            SetInlineLabelPreviewStatus("IN THỬ LỖI", isError: true);
             ShowMessage(
                 "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
@@ -426,6 +1279,7 @@ public partial class ProductionSettingsPage : UserControl
 
     private LabelPrintRequest BuildSettingsLabelRequest(string purpose)
     {
+        ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
         string thtPath = _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
             throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
@@ -454,9 +1308,9 @@ public partial class ProductionSettingsPage : UserControl
         if (string.IsNullOrWhiteSpace(configured))
             throw new InvalidOperationException("Template tích hợp phải được chỉnh bằng trình soạn thảo trong ứng dụng.");
 
-        string path = Path.GetFullPath(Path.IsPathRooted(configured)
+        string path = System.IO.Path.GetFullPath(System.IO.Path.IsPathRooted(configured)
             ? configured
-            : Path.Combine(AppContext.BaseDirectory, configured));
+            : System.IO.Path.Combine(AppContext.BaseDirectory, configured));
         if (!File.Exists(path))
             throw new FileNotFoundException("Không tìm thấy file template label.", path);
         return path;
@@ -464,7 +1318,7 @@ public partial class ProductionSettingsPage : UserControl
 
     private static string SafeFileName(string value)
     {
-        HashSet<char> invalid = Path.GetInvalidFileNameChars().ToHashSet();
+        HashSet<char> invalid = System.IO.Path.GetInvalidFileNameChars().ToHashSet();
         string safe = new((value ?? string.Empty).Where(character => !invalid.Contains(character)).ToArray());
         return string.IsNullOrWhiteSpace(safe) ? "UNRESOLVED" : safe;
     }

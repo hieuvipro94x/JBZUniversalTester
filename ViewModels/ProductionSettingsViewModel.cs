@@ -1,5 +1,6 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.IO;
+using System.Windows;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
@@ -497,11 +498,14 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            AsyncFileLogService.Current.Error($"Manual resistance measurement failed: {ex}");
+            // Chỉ ghi message ngắn; không format toàn bộ stack trace trên UI path.
+            AsyncFileLogService.Current.Error(
+                $"Manual resistance measurement failed: {ex.GetBaseException().Message}");
+
             for (int index = 0; index < ManualResistanceResults.Count; index++)
             {
                 ResistanceResult current = ManualResistanceResults[index];
-                if (current.ResultText != "ĐANG ĐO")
+                if (current.ResultText is not ("ĐANG ĐO" or "CHỜ ĐO"))
                     continue;
 
                 ManualResistanceResults[index] = new ResistanceResult
@@ -513,8 +517,17 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                     MeasurementStatus = "LỖI"
                 };
             }
-            ManualResistanceStatus = "MẤT KẾT NỐI MÁY TEST - VUI LÒNG KHỞI ĐỘNG LẠI";
-            throw;
+
+            // Lỗi bo/relay thật vẫn giữ DeviceFault toàn cục.
+            if (_test.IsDeviceFault)
+            {
+                ManualResistanceStatus = "LỖI BO TEST / RELAY - THAO TÁC ĐÃ BỊ KHÓA";
+                throw;
+            }
+
+            // Lỗi Keysight manual chỉ là lỗi thiết bị đo phụ. Không MessageBox modal,
+            // không rethrow ra AsyncRelayCommand: UI cập nhật ngay và vẫn tương tác được.
+            ManualResistanceStatus = "KHÔNG KẾT NỐI ĐƯỢC KEYSIGHT 34461A";
         }
         finally
         {
