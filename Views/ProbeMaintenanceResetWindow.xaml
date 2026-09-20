@@ -17,7 +17,7 @@
             <RowDefinition Height="58"/>
         </Grid.RowDefinitions>
 
-        <TextBlock Text="XÁC NHẬN ĐÃ THAY PROBE PIN"
+        <TextBlock Text="XÁC NHẬN ĐÃ THAY PIN"
                    FontSize="22" FontWeight="Bold" Foreground="#991B1B"
                    HorizontalAlignment="Center"/>
         <TextBlock x:Name="ModelText" Grid.Row="1" Margin="0,18,0,0"
@@ -26,7 +26,7 @@
                    FontSize="15" TextWrapping="Wrap"/>
 
         <StackPanel Grid.Row="3" Margin="0,18,0,0">
-            <TextBlock Text="M&#7853;t kh&#7849;u reset Probe Pin" FontWeight="SemiBold"/>
+            <TextBlock Text="VUI LÒNG NHẬP MẬT KHẨU" FontWeight="SemiBold"/>
             <PasswordBox x:Name="AdminPasswordBox" Height="38" Margin="0,6,0,0"
                          FontSize="17" KeyDown="AdminPasswordBox_KeyDown"/>
         </StackPanel>
