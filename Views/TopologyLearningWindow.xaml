@@ -35,7 +35,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="QUÉT IO / HỌC CẤU HÌNH" FontSize="25" FontWeight="Bold" Foreground="#213A78"/>
-                <TextBlock Text="Chẩn đoán trực tiếp • Không phải file THT • Không PASS/FAIL • Không tác động relay"
+                <TextBlock Text="CHUẨN ĐOÁN IO"
                            Margin="0,4,0,0" FontSize="13.5" Foreground="#8A3B00"/>
             </StackPanel>
         </Grid>
