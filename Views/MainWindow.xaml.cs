@@ -346,13 +346,10 @@ public partial class MainWindow : Window
         LogMemory("MEM AFTER_SETTINGS_OPEN");
     }
 
-    private async void SettingsPage_SettingsSaved(object? sender, EventArgs e)
+    private async Task SettingsPage_SettingsSaved(object? sender, EventArgs e)
     {
-        ProductionSettingsPage? savedPage = sender as ProductionSettingsPage;
         try
         {
-            if (savedPage is not null)
-                await savedPage.ReleaseManualOutputsAsync();
             await _viewModel.ReloadProductionSettingsAsync();
 
             // SETTINGS_SAVE_SILENT_2026-09-05:
@@ -362,21 +359,9 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            if (_viewModel.Test.IsDeviceFault)
-                return;
-
             AsyncFileLogService.Current.Error($"Apply production settings failed: {ex}");
-            MessageBox.Show(
-                this,
-                "Chưa áp dụng được Cài đặt. Vui lòng khởi động lại phần mềm.",
-                "CHƯA ÁP DỤNG ĐƯỢC CÀI ĐẶT",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
-            return;
+            throw;
         }
-
-        if (ReferenceEquals(_settingsPage, savedPage))
-            await CloseInternalPageAsync();
     }
 
     private async void OpenHistory_Click(

@@ -180,9 +180,9 @@ public sealed class TestViewModel : ObservableObject
     private readonly ConcurrentQueue<BoardFrameWorkItem> _boardFrameQueue = new();
     private readonly SemaphoreSlim _boardFrameSignal = new(0);
     private readonly Task _boardFrameWorkerTask;
+    private readonly bool _processBoardFramesInline;
     private long _boardFrameQueueDepth;
     private long _boardFrameQueueHighWatermark;
-    private int _productEvidenceMissFrames;
     private const int ProductReleaseConfirmationFrames = 2;
     private long _engineUiUpdateRevision;
     private long _engineUiLastCompletedRevision;
@@ -1138,8 +1138,13 @@ public sealed class TestViewModel : ObservableObject
         // D2XX reader must never execute TestEngine/UI work inline. All board
         // frames are serialized on this VM-owned worker so the USB reader can
         // continue draining the FTDI queue even if WPF is busy rendering.
-        _boardFrameWorkerTask = Task.Run(
-            () => BoardFrameWorkerLoopAsync(_lifetimeCts.Token));
+        // Headless self-tests have no WPF Dispatcher and use an in-memory board.
+        // Keep those deterministic; the production WPF/D2XX path always owns the
+        // dedicated worker so the FTDI reader never runs engine or UI work inline.
+        _processBoardFramesInline = Application.Current?.Dispatcher is null;
+        _boardFrameWorkerTask = _processBoardFramesInline
+            ? Task.CompletedTask
+            : Task.Run(() => BoardFrameWorkerLoopAsync(_lifetimeCts.Token));
 
         _engine.Changed += OnEngineChanged;
         _engine.ResistanceChannelMeasurementStarted += OnResistanceChannelMeasurementStarted;
@@ -2737,7 +2742,7 @@ public sealed class TestViewModel : ObservableObject
         // Frame rỗng đã là nguồn authoritative cho ProductRemoved. Không dựng
         // lại bảng removal hàng trăm dòng trước khi Dispatcher được quyền reset
         // cycle và hiện CHỜ LẮP SẢN PHẨM.
-        if (removal && _engine.IsProductReleased)
+        if (removal && _engine.IsConfirmedProductRemoved)
         {
             ProductionElectricalSnapshot electrical = _engine.GetProductionElectricalSnapshot();
             return new TestEnginePresentationSnapshot(
@@ -2885,7 +2890,7 @@ public sealed class TestViewModel : ObservableObject
         // Sau lỗi: chỉ chờ tháo sản phẩm, không phát lại lỗi.
         if (_waitForFaultProductRemoval)
         {
-            if (_engine.IsProductReleased &&
+            if (_engine.IsConfirmedProductRemoved &&
                 Interlocked.Exchange(ref _faultProductRemoved, 1) == 0)
             {
                 MarkProductRemoved();
@@ -2909,7 +2914,7 @@ public sealed class TestViewModel : ObservableObject
         // reset engine và chuyển về CHỜ LẮP SẢN PHẨM cho lượt tiếp theo.
         if (_waitForProductRelease)
         {
-            if (_engine.IsProductReleased)
+            if (_engine.IsConfirmedProductRemoved)
             {
                 MarkProductRemoved();
                 _waitForProductRelease = false;
@@ -2947,8 +2952,7 @@ public sealed class TestViewModel : ObservableObject
             CurrentProductionPhase == ProductionPhase.Continuity &&
             !electrical.ProductEvidence &&
             _productDetectedThisCycle &&
-            Volatile.Read(ref _productEvidenceMissFrames) >= ProductReleaseConfirmationFrames &&
-            _engine.IsProductReleased &&
+            _engine.IsConfirmedProductRemoved &&
             !_engine.HasWiringFault)
         {
             ResetFullCycleAfterProductRemoved();
@@ -3035,7 +3039,7 @@ public sealed class TestViewModel : ObservableObject
         if (_cycleActive &&
             phase == ProductionPhase.Continuity &&
             _engine.ReadyToEvaluateProductFaults &&
-            _engine.HasProductActivity)
+            electrical.ProductEvidence)
         {
             CaptureProductTestStartedAt();
         }
@@ -3056,7 +3060,7 @@ public sealed class TestViewModel : ObservableObject
             if (hasProductEvidence)
                 State = "TIẾP XÚC JIG/PROBE KHÔNG ỔN ĐỊNH — KIỂM TRA PROBE PIN/JIG";
 
-            if (!_engine.HasProductActivity && _productDetectedThisCycle)
+            if (!hasProductEvidence && _productDetectedThisCycle)
             {
                 // Complete frame hiện tại đã xác nhận mất TOÀN BỘ connectivity
                 // model-aware. Reset ngay trong cùng UI update; không chờ cửa
@@ -3068,7 +3072,7 @@ public sealed class TestViewModel : ObservableObject
                 State = "LẮP SẢN PHẨM";
                 AddLog("Complete frame đã xác nhận tháo hoàn toàn; reset ngay dây thường và toàn bộ nhánh CLIP để lắp lại từ đầu.");
             }
-            else if (_engine.HasProductActivity && !_productDetectedThisCycle)
+            else if (hasProductEvidence && !_productDetectedThisCycle)
             {
                 _cycleStartedAt = DateTime.Now;
                 _productDetectedThisCycle = true;
@@ -3108,6 +3112,7 @@ public sealed class TestViewModel : ObservableObject
             _engine.ContinuityPassed &&
             !_engine.HasWiringFault &&
             _engine.ReadyToEvaluateProductFaults &&
+            electrical.ProductEvidence &&
             Interlocked.CompareExchange(ref _postContinuityStarted, 1, 0) == 0)
         {
             AsyncFileLogService.Current.Performance(
@@ -3128,31 +3133,6 @@ public sealed class TestViewModel : ObservableObject
             !IsProductRemovalPending;
 
         bool hasEvidence = electrical.ProductEvidence;
-        int misses = 0;
-        if (hasEvidence)
-        {
-            Interlocked.Exchange(ref _productEvidenceMissFrames, 0);
-        }
-        else if (continuityPresentation &&
-                 CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime)
-        {
-            misses = Interlocked.Increment(ref _productEvidenceMissFrames);
-        }
-        else
-        {
-            Interlocked.Exchange(ref _productEvidenceMissFrames, 0);
-        }
-
-        // Enter realtime immediately on the first real electrical edge, but do
-        // not bounce back to LẮP SẢN PHẨM because of one transient complete
-        // frame. Two consecutive authoritative no-evidence frames are required.
-        bool holdTestingPresentation =
-            continuityPresentation &&
-            !hasEvidence &&
-            CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
-            misses > 0 &&
-            misses < ProductReleaseConfirmationFrames;
-
         ProductionRuntimeState runtimeState = phase switch
         {
             ProductionPhase.WaitingProduct => ProductionRuntimeState.WaitingForProduct,
@@ -3162,7 +3142,7 @@ public sealed class TestViewModel : ObservableObject
             ProductionPhase.Resistance or ProductionPhase.WaterProof or ProductionPhase.Completed =>
                 ProductionRuntimeState.PassSequence,
             _ when electrical.HasConfirmedWiringFault => ProductionRuntimeState.Failed,
-            _ when hasEvidence || holdTestingPresentation => ProductionRuntimeState.TestingRealtime,
+            _ when hasEvidence => ProductionRuntimeState.TestingRealtime,
             _ => ProductionRuntimeState.WaitingForProduct
         };
 
@@ -3170,9 +3150,7 @@ public sealed class TestViewModel : ObservableObject
             ? "CONFIRMED_WIRING_FAULT"
             : hasEvidence
                 ? "PRODUCT_EVIDENCE"
-                : holdTestingPresentation
-                    ? "PRODUCT_EVIDENCE_DEBOUNCE"
-                    : "NO_PRODUCT_EVIDENCE";
+                : "NO_PRODUCT_EVIDENCE";
 
         SetProductionRuntimeState(runtimeState, electrical.FrameSequence, reason);
         SetProductionPresentationMode(
@@ -3340,7 +3318,6 @@ public sealed class TestViewModel : ObservableObject
         SetProductionPhase(ProductionPhase.Continuity);
         _waterProofEquipmentErrorAwaitingRemoval = false;
         _productDetectedThisCycle = false;
-        Interlocked.Exchange(ref _productEvidenceMissFrames, 0);
         SetProductionRuntimeState(ProductionRuntimeState.WaitingForProduct);
         SetProductionPresentationMode(
             ProductionPresentationMode.Waiting,
@@ -3533,6 +3510,12 @@ public sealed class TestViewModel : ObservableObject
     {
         if (IsDeviceFault || _lifetimeCts.IsCancellationRequested)
             return;
+
+        if (_processBoardFramesInline)
+        {
+            ProcessBoardFrameReceived(frame);
+            return;
+        }
 
         _boardFrameQueue.Enqueue(new BoardFrameWorkItem(
             frame,
@@ -4237,7 +4220,7 @@ public sealed class TestViewModel : ObservableObject
             _waitForFaultProductRemoval ||
             CurrentProductionPhase != ProductionPhase.Continuity ||
             !IsProductionFaultContext(generation) ||
-            !_engine.HasProductActivity ||
+            !_engine.GetProductionElectricalSnapshot().ProductEvidence ||
             Interlocked.CompareExchange(ref _productStartSoundPlayed, 1, 0) != 0)
         {
             return;
@@ -4543,7 +4526,7 @@ public sealed class TestViewModel : ObservableObject
         {
             _engine.SetFrameProcessingEnabled(true);
             bool removalChanged = _engine.ProcessFrame(frame, false);
-            if (!_engine.IsProductReleased)
+            if (!_engine.IsConfirmedProductRemoved)
             {
                 if (removalChanged)
                 {
@@ -4598,7 +4581,7 @@ public sealed class TestViewModel : ObservableObject
     private void CompleteBackgroundProductRemoval(long generation)
     {
         if (!IsRuntimeContext(RuntimeMode.Background, generation) ||
-            !_engine.IsProductReleased)
+            !_engine.IsConfirmedProductRemoved)
         {
             return;
         }
@@ -6110,7 +6093,6 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _uiDispatcherEnqueueCount, 0);
         Interlocked.Exchange(ref _uiRenderedCount, 0);
         Interlocked.Exchange(ref _boardFrameQueueHighWatermark, Interlocked.Read(ref _boardFrameQueueDepth));
-        Interlocked.Exchange(ref _productEvidenceMissFrames, 0);
         Interlocked.Exchange(ref _lastContinuousScanMetricsTick, 0);
         _lastPassGateSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;
@@ -6325,6 +6307,7 @@ public sealed class TestViewModel : ObservableObject
             CurrentProductionPhase != ProductionPhase.Continuity ||
             !_engine.LastFrameValid ||
             !_engine.HasWiringFault ||
+            !_engine.GetProductionElectricalSnapshot().ProductEvidence ||
             !IsProductionFaultContext(generation) ||
             Interlocked.CompareExchange(ref _wiringFaultHandlingStarted, 1, 0) != 0)
         {

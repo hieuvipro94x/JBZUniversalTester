@@ -1,0 +1,831 @@
+Hãy AUDIT + FIX TRIỆT ĐỂ state machine phát hiện sản phẩm của JBZUniversalTester dựa trên code hiện tại và log thực tế gần nhất.
+
+KHÔNG sửa theo phỏng đoán ngay.
+Trước tiên:
+1. Đọc AGENTS.md nếu có.
+2. git status + git diff.
+3. Đọc toàn bộ các file/call-site liên quan:
+   - TestEngine.cs
+   - TestViewModel.cs
+   - D2xxBoardTransport.cs
+   - TestWindow.xaml.cs / TestWindow.xaml
+   - ScanSupervisor
+   - ProbeContactClassifier / ProbeStateTracker / ManualProbeSession nếu có
+   - ProductionFaultConfirmationGate
+   - các class liên quan ProductEvidence / ProductionElectricalSnapshot /
+     ProductionRuntimeState / ProductionPresentationMode.
+4. Search toàn repo:
+   HasProductActivity
+   HasProductActivityUnsafe
+   IsProductConnectivityEdgeUnsafe
+   ProductEvidence
+   ValidProductEvidence
+   ProductPresence
+   ProductRemoved
+   WaitingForProduct
+   TestingRealtime
+   WaitingForRemoval
+   ResetFullCycleAfterProductRemoved
+   RecordProbeCycleStarted
+   ProbeCounter
+   WRONG_CANDIDATE
+   SHORT_CANDIDATE
+   WRONG_CONFIRMED
+   SHORT_CONFIRMED
+   contact loss
+   release
+   removal
+   candidate
+   _productDetectedThisCycle
+
+==================================================
+1. HIỆN TƯỢNG THỰC TẾ CẦN SỬA
+==================================================
+
+Model thử nghiệm hiện có mạng đúng:
+
+IO4 <-> IO8
+
+Khi chập đúng IO4 và IO8:
+- sản phẩm PASS đúng.
+
+Nhưng khi người vận hành cầm/chạm tay vào IO khác, ví dụ IO7,
+do nhiễu/đường dẫn điện tức thời hệ thống có lúc sinh:
+
+SHORT_CANDIDATE
+hoặc
+WRONG_CANDIDATE
+
+và lập tức chuyển:
+
+WaitingForProduct
+-> TestingRealtime
+
+Frame sau mất nhiễu / NO_ACTIVITY lại chuyển:
+
+TestingRealtime
+-> WaitingForProduct
+
+Sau đó chạm lại:
+
+WaitingForProduct
+-> TestingRealtime
+
+Dẫn tới UI nhảy liên tục:
+
+ĐANG KIỂM TRA
+-> CHỜ LẮP
+-> ĐANG KIỂM TRA
+-> CHỜ LẮP
+
+Đây là behavior KHÔNG CHẤP NHẬN ĐƯỢC cho máy sản xuất.
+
+Log gần nhất đã cho thấy pattern dạng:
+
+I/O 7
+-> valid_product_evidence=True
+-> SHORT_CANDIDATE hoặc WRONG_CANDIDATE
+-> WaitingForProduct -> TestingRealtime
+
+sau đó:
+
+NO_ACTIVITY
+-> TestingRealtime -> WaitingForProduct
+-> reset cycle
+
+và lặp lại.
+
+Ngoài ra ProbeCounter tăng theo những cycle giả này.
+Trong một phiên chỉ khoảng 7 PASS thật nhưng ProbeCounter đã lên khoảng 14.
+
+==================================================
+2. ROOT CAUSE CẦN KIỂM CHỨNG
+==================================================
+
+Kiểm tra kỹ giả thuyết sau trên code HIỆN TẠI:
+
+A. ProductPresence đang dùng chung với electrical candidate.
+
+Ví dụ dạng:
+
+ValidProductEvidence =
+    HasProductActivityUnsafe(...)
+
+và HasProductActivityUnsafe chỉ cần:
+
+có bất kỳ connectivity edge nào
+-> true
+
+B. Kiểm tra IsProductConnectivityEdgeUnsafe.
+
+Nếu logic hiện tại tương đương:
+
+- loại self-edge;
+- loại ignored IO;
+- loại probe excluded;
+- sau đó mọi source-target khác đều return true;
+
+thì đây là vấn đề lớn:
+
+Một cạnh do tay/nhiễu giữa các IO không liên quan model cũng có thể
+bị coi là "đã có sản phẩm".
+
+C. Kiểm tra removal logic.
+
+Nếu hiện tại:
+
+_productDetectedThisCycle == true
+AND
+HasProductActivity == false
+
+chỉ trên MỘT complete frame
+
+-> ResetFullCycleAfterProductRemoved()
+-> State = LẮP SẢN PHẨM
+
+thì removal quá nhạy.
+
+D. Kiểm tra RecordProbeCycleStarted().
+
+Nếu nó được gọi ngay khi lần đầu có HasProductActivity/ProductEvidence,
+thì transient noise cũng làm tăng ProbeCounter.
+
+Hãy xác minh từng điểm bằng code thực tế trước khi sửa.
+
+==================================================
+3. NGUYÊN TẮC KIẾN TRÚC BẮT BUỘC
+==================================================
+
+PHẢI TÁCH BA KHÁI NIỆM:
+
+1. Raw electrical activity
+2. Realtime fault candidate
+3. Confirmed product presence / lifecycle
+
+Chúng KHÔNG được là cùng một boolean.
+
+Ví dụ thiết kế mong muốn về mặt ý nghĩa:
+
+RawElectricalActivity
+    = tín hiệu board quan sát được
+
+RealtimeFaultEvidence
+    = wrong/short candidate để bắt lỗi ngay khi đang lắp
+
+ConfirmedProductPresence
+    = bằng chứng đủ mạnh để chuyển lifecycle/UI sang TestingRealtime
+
+Không được dùng:
+
+candidate != 0
+
+đồng nghĩa trực tiếp với:
+
+ProductPresent = true
+
+trừ khi candidate đó có đủ bằng chứng thuộc sản phẩm/model.
+
+==================================================
+4. PRODUCT PRESENCE PHẢI MODEL-AWARE
+==================================================
+
+Sửa việc xác nhận sản phẩm theo topology model.
+
+Với model ví dụ:
+
+IO4 <-> IO8
+
+Các case phải phân biệt:
+
+CASE A
+IO4 <-> IO8
+
+=> expected model connectivity
+=> product evidence mạnh
+=> có thể xác nhận ProductPresence.
+
+CASE B
+IO4 <-> IO7
+
+=> IO4 thuộc model, IO7 unexpected
+=> đây là wrong/short realtime hợp lệ;
+=> KHÔNG được bỏ detection;
+=> có thể là bằng chứng sản phẩm vì ít nhất một endpoint thuộc model,
+   nhưng phải đi qua presence confirmation/debounce thích hợp.
+
+CASE C
+IO8 <-> IO7
+
+=> tương tự CASE B.
+
+CASE D
+IO7 <-> IO20
+trong khi cả IO7 và IO20 không thuộc topology sản phẩm hiện tại
+
+=> có thể log diagnostic/noise;
+=> KHÔNG được dùng làm ProductPresence;
+=> KHÔNG được chuyển UI sang ĐANG KIỂM TRA;
+=> KHÔNG được tạo cycle production;
+=> KHÔNG tăng ProbeCounter.
+
+CASE E
+một IO đơn lẻ / touch noise / raw activity không có authoritative
+product relation
+
+=> KHÔNG được coi là sản phẩm.
+
+Không hard-code IO4/IO8.
+Phải dựa trên model topology hiện tại.
+
+==================================================
+5. KHÔNG ĐƯỢC PHÁ REALTIME WRONG/SHORT
+==================================================
+
+Đây là yêu cầu bắt buộc.
+
+Không được sửa bằng cách:
+
+"chỉ bắt lỗi sau khi đã có một mạng đúng"
+
+vì như vậy nếu người vận hành lắp sai ngay từ đầu thì không phát hiện.
+
+Realtime evaluator vẫn phải nhận candidate sớm.
+
+Ví dụ:
+
+model cần:
+IO4 <-> IO8
+
+nhưng operator đấu:
+IO4 <-> IO7
+
+thì WRONG/SHORT phải vẫn được phát hiện realtime.
+
+Do đó:
+
+Realtime fault eligibility
+và
+Product lifecycle confirmation
+
+phải là hai gate riêng.
+
+Candidate có thể tồn tại trước khi lifecycle đã xác nhận stable product.
+
+==================================================
+6. THÊM PRODUCT PRESENCE CONFIRMATION
+==================================================
+
+Không chuyển WaitingForProduct -> TestingRealtime chỉ vì một transient frame.
+
+Hãy dùng confirmation gate phù hợp với kiến trúc hiện tại.
+
+Ưu tiên reuse cơ chế frame confirmation/debounce đang có,
+không tạo timer/polling rời rạc nếu không cần.
+
+Một phương án có thể dùng nếu phù hợp:
+
+presenceCandidate = model-aware evidence
+
+presenceConfirmed =
+    presenceCandidate tồn tại N complete Production frames liên tiếp
+
+N nên nhỏ, ví dụ 2 frame,
+hoặc sử dụng confirmation policy hiện có của project.
+
+KHÔNG làm chậm fault detection.
+
+Fault candidate vẫn có thể được tính từ frame đầu tiên.
+
+Chỉ lifecycle/UI:
+
+WaitingForProduct
+-> TestingRealtime
+
+mới cần ProductPresenceConfirmed.
+
+Nếu project đã có stable/product confirmation gate thì dùng lại,
+không tạo một cơ chế trùng lặp.
+
+==================================================
+7. PRODUCT REMOVAL PHẢI CÓ DEBOUNCE
+==================================================
+
+Một complete Production frame NO_ACTIVITY duy nhất
+KHÔNG được reset cycle ngay trong TestingRealtime.
+
+Hiện scan khoảng ~150-160 ms/frame trong log thực tế.
+
+Hãy yêu cầu removal confirmation bằng một policy ổn định, ví dụ:
+
+2-3 complete clean Production frames liên tiếp
+
+HOẶC confirmation gate tương đương hiện có.
+
+Mục tiêu:
+
+mất contact 1 frame
+=> KHÔNG đổi lifecycle
+=> vẫn giữ ĐANG KIỂM TRA
+
+mất toàn bộ model-aware product evidence ổn định đủ confirmation
+=> mới coi ProductRemoved
+=> reset cycle
+=> CHỜ LẮP.
+
+Không dùng raw/partial/incomplete frame để xác nhận removal.
+
+Chỉ authoritative complete Production frame hợp lệ.
+
+==================================================
+8. PHÂN BIỆT REMOVAL TRONG 2 GIAI ĐOẠN
+==================================================
+
+Rà riêng:
+
+A. TestingRealtime / đang lắp-test
+B. WaitingForRemoval sau PASS/FAIL
+
+Không nhất thiết dùng cùng policy nếu semantics khác nhau.
+
+Sau PASS/FAIL:
+- operator thực sự phải tháo sản phẩm;
+- ProductRemoved phải chắc chắn;
+- chỉ sau confirmed removal mới ARM cycle mới.
+
+Trong TestingRealtime:
+- contact bounce xảy ra thường xuyên hơn;
+- không được reset cycle bởi một frame sạch ngắn.
+
+Nhưng cả hai đều phải dựa trên complete authoritative Production frame.
+
+==================================================
+9. PROBE / TOUCH NOISE
+==================================================
+
+Rà Probe classifier/router hiện tại.
+
+Nếu tín hiệu touch có signature probe:
+- route đúng sang Probe path;
+- không đi vào ProductPresence.
+
+Nhưng KHÔNG được phụ thuộc hoàn toàn vào probe classifier,
+vì tay người có thể sinh edge không đủ signature để classifier nhận diện.
+
+Vì vậy ProductPresence vẫn bắt buộc phải model-aware.
+
+_probeEvidenceExcludedIo chỉ là một lớp bảo vệ,
+không phải điều kiện duy nhất.
+
+==================================================
+10. PROBECOUNTER ĐANG TĂNG SAI
+==================================================
+
+Audit:
+
+RecordProbeCycleStarted()
+SQLite ProbeCounter
+_probeCycleRecordedThisCycle
+
+Xác định nghĩa nghiệp vụ của ProbeCounter trong project.
+
+Nếu Counter đại diện:
+- một chu kỳ sử dụng fixture/probe;
+- một sản phẩm thật bắt đầu test;
+
+thì transient touch/noise tuyệt đối không được tăng Counter.
+
+Không gọi RecordProbeCycleStarted tại raw HasProductActivity đầu tiên.
+
+Chỉ tăng sau:
+
+ConfirmedProductPresence
+
+hoặc mốc nghiệp vụ chắc chắn tương đương.
+
+Bảo đảm:
+
+mỗi product cycle thật
+=> tối đa tăng một lần.
+
+Touch IO ngoài model 100 lần
+=> ProbeCounter không tăng.
+
+==================================================
+11. UI STATE PHẢI ỔN ĐỊNH
+==================================================
+
+Sau sửa, UI phải có behavior:
+
+IDLE:
+CHỜ LẮP SẢN PHẨM
+
+Chạm tay vào IO ngoài model:
+CHỜ LẮP SẢN PHẨM
+(không nhảy ĐANG TEST)
+
+Có transient noise:
+vẫn CHỜ LẮP.
+
+Có model-aware evidence đủ confirmation:
+-> ĐANG KIỂM TRA.
+
+Đã vào ĐANG KIỂM TRA:
+
+mất evidence 1 frame:
+-> vẫn ĐANG KIỂM TRA.
+
+Evidence trở lại:
+-> tiếp tục bình thường.
+
+Mất toàn bộ evidence đủ removal confirmation:
+-> CHỜ LẮP SẢN PHẨM.
+
+Không được:
+
+ĐANG TEST
+CHỜ LẮP
+ĐANG TEST
+CHỜ LẮP
+
+trong vài trăm ms do contact bounce.
+
+==================================================
+12. SOUND / LED / DATAGRID CŨNG PHẢI THEO CONFIRMED STATE
+==================================================
+
+Rà:
+
+PRODUCT_START_SOUND
+status LED
+PresentationMode
+FaultGrid/DataGrid
+row add/remove
+auto-scroll
+
+Không để transient noise:
+
+- phát PRODUCT_START_SOUND liên tục;
+- thêm rồi xóa rows liên tục;
+- blink LED sai;
+- tăng counter;
+- tạo cycle id mới liên tục.
+
+PRODUCT_START_SOUND chỉ nên phát khi ProductPresence chuyển
+từ chưa xác nhận -> xác nhận.
+
+==================================================
+13. CYCLE ID / HISTORY
+==================================================
+
+Rà việc tạo _activeCycleId.
+
+Transient noise không nên tạo hàng loạt logical cycle mới.
+
+Nếu cycle ID hiện được reset mỗi lần:
+
+TestingRealtime -> WaitingForProduct
+
+thì sau removal debounce mới được reset.
+
+Không được tạo DB/history record cho transient noise.
+
+PASS/FAIL persistence hiện tại phải giữ nguyên.
+
+==================================================
+14. KHÔNG ĐƯỢC PHÁ PASS
+==================================================
+
+Case chuẩn:
+
+IO4 <-> IO8
+
+phải tiếp tục:
+
+ProductPresence confirmed
+-> TestingRealtime
+-> ContinuityPassed
+-> PassSequence
+-> DB commit
+-> LOT increment đúng 1
+-> relay MARKING
+-> relay JIG
+-> WaitingForRemoval
+-> confirmed ProductRemoved
+-> WaitingForProduct.
+
+Không thêm delay đáng kể vào PASS sau khi continuity đã thực sự đạt.
+
+Nếu expected edge hoàn chỉnh xuất hiện ngay,
+presence confirmation không được làm PASS chậm một cách vô lý.
+
+==================================================
+15. KHÔNG ĐƯỢC PHÁ FAIL
+==================================================
+
+Tạo test cho:
+
+model:
+IO4 <-> IO8
+
+operator giữ:
+IO4 <-> IO7
+
+Nếu wiring evaluator xác nhận đây là WRONG/SHORT:
+
+- candidate phải có từ sớm;
+- sau confirmation phải FAIL;
+- không chờ một expected connection đúng;
+- không bị presence filtering vô tình bỏ fault;
+- DB FAIL đúng một lần;
+- NG dialog đúng một lần;
+- relay JIG đúng policy;
+- không chạy MARKING PASS.
+
+==================================================
+16. FRAME QUALITY
+==================================================
+
+Presence/removal state machine chỉ được cập nhật từ frame:
+
+Mode == Production
+Complete == true
+UnknownBytes == 0
+generation hiện hành
+không stale
+không pre-cycle invalid.
+
+Partial frame:
+KHÔNG được xác nhận removal.
+
+Stale generation:
+KHÔNG được đổi lifecycle.
+
+Probe preview:
+KHÔNG được đổi lifecycle.
+
+==================================================
+17. TEST CASES BẮT BUỘC
+==================================================
+
+Nếu project có SelfTests, hãy thêm regression tests.
+
+TEST 1 - idle
+Không I/O activity.
+Expected:
+WaitingForProduct.
+
+TEST 2 - unrelated single IO touch
+Model IO4-IO8.
+Chỉ IO7 noise/touch.
+Expected:
+không ProductPresence;
+không TestingRealtime;
+không ProbeCounter increment.
+
+TEST 3 - unrelated edge
+Model IO4-IO8.
+Edge IO7-IO20.
+Expected:
+có thể diagnostic;
+không ProductPresence;
+không create real product cycle.
+
+TEST 4 - transient model-related wrong edge
+IO4-IO7 xuất hiện 1 frame rồi mất.
+Expected:
+fault candidate có thể tồn tại;
+không UI oscillation;
+không reset/create nhiều cycle.
+
+TEST 5 - persistent wrong wiring
+IO4-IO7 tồn tại đủ fault confirmation.
+Expected:
+confirmed WRONG/SHORT;
+FAIL đúng.
+
+TEST 6 - correct product
+IO4-IO8.
+Expected:
+TestingRealtime -> PASS đúng.
+
+TEST 7 - one-frame contact drop
+Đã confirmed product.
+Một complete frame sạch.
+Frame sau product trở lại.
+Expected:
+vẫn cùng cycle;
+không WaitingForProduct;
+không phát lại PRODUCT_START_SOUND;
+không tăng ProbeCounter lần nữa.
+
+TEST 8 - confirmed removal
+Đã confirmed product.
+Đủ N clean complete frames liên tục.
+Expected:
+ProductRemoved đúng một lần;
+WaitingForProduct;
+reset rows/cycle đúng một lần.
+
+TEST 9 - PASS removal
+Sau PassSequence/WaitingForRemoval.
+Confirmed clean removal.
+Expected:
+cycle mới ARM đúng.
+
+TEST 10 - noise spam
+100 lần touch unrelated IO.
+Expected:
+0 production cycle thật;
+0 ProbeCounter increment;
+không PRODUCT_START_SOUND storm;
+không UI state storm.
+
+==================================================
+18. PERFORMANCE
+==================================================
+
+Không được làm mất các cải thiện hiện tại.
+
+Log gần nhất đã cho thấy D2XX subscriber rất nhanh và UI dispatcher
+đã tốt hơn nhiều.
+
+Sau sửa vẫn phải giữ:
+
+- D2XX reader không chờ UI;
+- subscriber_max_ms thấp;
+- frame queue nhỏ;
+- không Dispatcher storm;
+- ProcessFrame nhanh;
+- no Task.Run per frame;
+- no timer per frame;
+- no lock lớn kéo dài.
+
+Presence/removal confirmation nên là:
+counter/state đơn giản trên authoritative frame,
+không dùng Delay/Timer nếu không cần.
+
+==================================================
+19. LOGGING SAU SỬA
+==================================================
+
+Bổ sung diagnostic gọn để chứng minh behavior.
+
+Ví dụ:
+
+PRODUCT_PRESENCE_CANDIDATE
+seq=
+reason=
+model_related=
+confirm=x/N
+
+PRODUCT_PRESENCE_CONFIRMED
+seq=
+reason=
+
+PRODUCT_REMOVAL_CANDIDATE
+seq=
+clean=x/N
+
+PRODUCT_REMOVAL_CONFIRMED
+seq=
+
+PRODUCT_EVIDENCE_REJECTED
+reason=UNRELATED_IO_NOISE
+
+Không log mỗi frame nếu state/signature không thay đổi.
+Phải deduplicate/throttle.
+
+Trong BOARD_METRICS không cần thêm spam.
+
+==================================================
+20. ACCEPTANCE LOGIC
+==================================================
+
+Sau sửa khi tôi test bằng tay:
+
+Tình huống 1:
+Không có sản phẩm, chạm tay vào IO7.
+=> UI vẫn CHỜ LẮP.
+
+Tình huống 2:
+chạm lung tung IO ngoài topology.
+=> không ĐANG TEST.
+
+Tình huống 3:
+đấu sai từ IO thuộc model sang IO sai.
+=> vẫn phát hiện wrong/short realtime.
+
+Tình huống 4:
+đấu đúng IO4-IO8.
+=> PASS như hiện tại.
+
+Tình huống 5:
+đang test, contact hụt đúng một frame.
+=> không về CHỜ LẮP.
+
+Tình huống 6:
+tháo sản phẩm thật.
+=> sau confirmation ngắn, UI về CHỜ LẮP.
+
+Tình huống 7:
+7 sản phẩm test thật.
+=> ProbeCounter tăng theo đúng số cycle thật,
+không tăng vì touch/noise.
+
+==================================================
+21. KHÔNG ĐƯỢC SỬA THEO CÁC CÁCH SAU
+==================================================
+
+KHÔNG:
+
+- bỏ realtime wrong/short;
+- yêu cầu phải PASS một net rồi mới detect fault;
+- hard-code IO4/IO8;
+- ignore toàn bộ IO ngoài model trong wiring fault evaluator;
+- tăng fault debounce rất lớn để che lỗi;
+- dùng Thread.Sleep;
+- thêm Dispatcher delay để che rung;
+- xử lý bằng UI-only debounce;
+- dùng DataGrid state làm nguồn sự thật;
+- reset TestEngine bằng một raw inactive frame;
+- làm chậm D2XX reader;
+- thay protocol D2XX;
+- thay relay command/timing;
+- thay PASS/FAIL criteria không liên quan.
+
+==================================================
+22. THỨ TỰ THỰC HIỆN
+==================================================
+
+BƯỚC 1:
+Audit và ghi rõ root cause thực tế.
+
+Phân loại P0/P1/P2.
+
+BƯỚC 2:
+Thiết kế ProductPresenceEvidence model-aware riêng khỏi fault candidate.
+
+BƯỚC 3:
+Thêm presence confirmation.
+
+BƯỚC 4:
+Thêm removal confirmation.
+
+BƯỚC 5:
+Chuyển ProbeCounter sang confirmed product cycle.
+
+BƯỚC 6:
+Đồng bộ:
+RuntimeState
+PresentationMode
+State text
+sound
+LED
+DataGrid
+cycle ID.
+
+BƯỚC 7:
+Thêm regression tests.
+
+BƯỚC 8:
+dotnet build + chạy toàn bộ SelfTests.
+
+BƯỚC 9:
+Review git diff lần cuối để tìm:
+race
+double reset
+double counter
+double sound
+stale generation
+partial-frame removal
+event leak
+UI regression.
+
+==================================================
+23. BÁO CÁO CUỐI
+==================================================
+
+Không chỉ báo cáo: hãy trực tiếp sửa code.
+
+Sau khi hoàn thành chỉ cần báo rõ:
+
+1. Root cause chính.
+2. File/method đã sửa.
+3. ProductPresence mới được xác nhận thế nào.
+4. Noise IO ngoài model bị loại thế nào.
+5. Wrong/Short realtime được giữ thế nào.
+6. ProductRemoved được debounce thế nào.
+7. ProbeCounter đã chuyển sang mốc nào.
+8. Các regression test đã thêm.
+9. Build/self-test PASS/FAIL.
+10. Những gì cần xác minh tiếp trên bo JBZ thật.
+
+Ưu tiên:
+
+CORRECTNESS
+> KHÔNG FALSE PRODUCT DETECTION
+> REALTIME FAULT DETECTION
+> STATE STABILITY
+> THREAD SAFETY
+> UI RESPONSIVENESS
+> PERFORMANCE.

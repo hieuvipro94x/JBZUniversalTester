@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
@@ -26,10 +27,11 @@ public partial class ProductionSettingsPage : UserControl
     private int _released;
     private int _portRefreshGeneration;
     private int _printerConnectionGeneration;
+    private int _saveInProgress;
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
 
-    public event EventHandler? SettingsSaved;
+    public event Func<object?, EventArgs, Task>? SettingsSaved;
     public event EventHandler? RequestClose;
 
     public ProductionSettingsPage()
@@ -305,17 +307,8 @@ public partial class ProductionSettingsPage : UserControl
                 ?.UpdateSource();
 
             string portName = _vm.Settings.Label.PrinterCom?.Trim() ?? string.Empty;
-            // Giống phần mềm gốc: lựa chọn COM có hiệu lực ngay và được lưu để
-            // lần PASS kế tiếp dùng đúng cổng, không cần một nút KẾT NỐI riêng.
-            try
-            {
-                ProductionConfigService.Save(_vm.Settings);
-            }
-            catch (Exception saveError)
-            {
-                AsyncFileLogService.Current.Error(
-                    $"Cannot persist automatic label printer port {portName}: {saveError}");
-            }
+            // Kết nối thử là side effect tức thời; file cấu hình chỉ được
+            // ghi qua pipeline chung khi người dùng rời trang Cài đặt.
 
             if (_main is null)
                 return;
@@ -1400,34 +1393,82 @@ public partial class ProductionSettingsPage : UserControl
             : int.MaxValue;
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private void CommitPendingEditorValues()
     {
+        CommitPendingEditorValues(this);
+    }
+
+    private static void CommitPendingEditorValues(DependencyObject parent)
+    {
+        switch (parent)
+        {
+            case TextBox textBox:
+                textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+                break;
+            case ComboBox comboBox:
+                comboBox.GetBindingExpression(Selector.SelectedValueProperty)?.UpdateSource();
+                comboBox.GetBindingExpression(Selector.SelectedItemProperty)?.UpdateSource();
+                comboBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
+                break;
+            case ToggleButton toggleButton:
+                toggleButton.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateSource();
+                break;
+        }
+
+        int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int index = 0; index < childCount; index++)
+            CommitPendingEditorValues(System.Windows.Media.VisualTreeHelper.GetChild(parent, index));
+    }
+
+    private void SyncCompatibilityFields()
+    {
+        BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
+        _vm.Settings.CardCount = capacity.ScanCardCount;
+        _vm.Settings.StampDelay =
+            $"{_vm.Settings.Relay1JigPulseMs},{_vm.Settings.Relay2MarkingPulseMs}";
+    }
+
+    private async Task NotifySettingsSavedAsync()
+    {
+        Func<object?, EventArgs, Task>? handlers = SettingsSaved;
+        if (handlers is null)
+            return;
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+            await ((Func<object?, EventArgs, Task>)subscriber)(this, EventArgs.Empty);
+    }
+
+    private async Task<bool> PersistSettingsAsync()
+    {
+        if (Interlocked.CompareExchange(ref _saveInProgress, 1, 0) != 0)
+            return false;
+
         try
         {
-            PrinterComComboBox
-                .GetBindingExpression(System.Windows.Controls.Primitives.Selector.SelectedValueProperty)
-                ?.UpdateSource();
-            WaterProofComComboBox
-                .GetBindingExpression(ComboBox.TextProperty)
-                ?.UpdateSource();
-
+            CommitPendingEditorValues();
             if (!ValidateSettings(out string error))
             {
                 ShowMessage(error, "Cấu hình chưa hợp lệ", MessageBoxImage.Warning);
-                return;
+                return false;
             }
 
-            // Đồng bộ CardCount compatibility từ BoardCapacity ngay trước save.
-            BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
-            _vm.Settings.CardCount = capacity.ScanCardCount;
+            SyncCompatibilityFields();
             _vm.Save();
-
-            SettingsSaved?.Invoke(this, EventArgs.Empty);
+            await NotifySettingsSavedAsync();
+            return true;
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Save production settings failed: {ex}");
-            ShowMessage("Chưa lưu được Cài đặt. Vui lòng thử lại.", "CHƯA LƯU ĐƯỢC", MessageBoxImage.Error);
+            ShowMessage(
+                "Chưa lưu được Cài đặt. Dữ liệu đang nhập vẫn được giữ nguyên.",
+                "CHƯA LƯU ĐƯỢC",
+                MessageBoxImage.Error);
+            return false;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _saveInProgress, 0);
         }
     }
 
@@ -1514,8 +1555,6 @@ public partial class ProductionSettingsPage : UserControl
             error = "Hãy chọn đúng kiểu đấu Relay MARKING và Relay mở JIG của máy.";
             return false;
         }
-
-        _vm.Settings.StampDelay = $"{_vm.Settings.Relay1JigPulseMs},{_vm.Settings.Relay2MarkingPulseMs}"; // compatibility
 
         if (_vm.Settings.Label.WidthMm <= 0 || _vm.Settings.Label.HeightMm <= 0)
         {
@@ -1626,6 +1665,9 @@ public partial class ProductionSettingsPage : UserControl
 
     private async void Cancel_Click(object sender, RoutedEventArgs e)
     {
+        if (!await PersistSettingsAsync())
+            return;
+
         await ReleaseManualOutputsAsync();
         RequestClose?.Invoke(this, EventArgs.Empty);
     }

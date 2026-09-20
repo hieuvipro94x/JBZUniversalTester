@@ -157,6 +157,11 @@ public sealed class TestEngine : IDisposable
     bool _contactUnstable;
     bool _contactLossTimedOut;
     bool _productStable;
+    bool _confirmedProductPresence;
+    int _productPresenceCandidateFrames;
+    int _productRemovalCandidateFrames;
+    const int ProductPresenceConfirmationFrames = 2;
+    const int ProductRemovalConfirmationFrames = 2;
     bool _readyToEvaluateProductFaults;
     bool _hasExpectedSourceCoverage;
     bool _lastFrameValid;
@@ -331,6 +336,7 @@ public sealed class TestEngine : IDisposable
     {
         ProductEvidenceSnapshot evidence = BuildProductEvidenceSnapshotUnsafe();
         bool productEvidence = evidence.ValidProductEvidence;
+        bool realtimeEvaluationEnabled = _model is not null && HasProductActivityUnsafe(_model);
         int expected = _model is null ? 0 : ProductionExpectedNetCount(_model);
         int passed = _model is null ? 0 : CountPassedExpectedUnsafe(_model);
         bool continuityComplete = _model is not null &&
@@ -343,7 +349,7 @@ public sealed class TestEngine : IDisposable
             _lastFrameScanGeneration,
             productEvidence,
             _productStable,
-            productEvidence,
+            realtimeEvaluationEnabled,
             continuityComplete,
             _wiringFaults.Count > 0,
             _lastEngineComputeMilliseconds);
@@ -360,8 +366,9 @@ public sealed class TestEngine : IDisposable
             item.FaultType == ProductFaultType.ShortCircuit);
         int shortConfirmed = _wiringFaults.Count(item =>
             item.FaultType == ProductFaultType.ShortCircuit);
-        bool valid = _model is not null && HasProductActivityUnsafe(_model);
-        string reason = !valid
+        bool rawModelEvidence = _model is not null && HasProductActivityUnsafe(_model);
+        bool valid = _confirmedProductPresence;
+        string reason = !rawModelEvidence
             ? _currentActive.Count > 0 ? "RAW_ACTIVITY_ONLY" : "NO_ACTIVITY"
             : wrongConfirmed > 0
                 ? "WRONG_CONFIRMED"
@@ -450,6 +457,15 @@ public sealed class TestEngine : IDisposable
                     pair.Value.Any(target =>
                         IsProductConnectivityEdgeUnsafe(_model, pair.Key, target)));
             }
+        }
+    }
+
+    public bool IsConfirmedProductRemoved
+    {
+        get
+        {
+            lock (_gate)
+                return !_confirmedProductPresence;
         }
     }
 
@@ -987,6 +1003,9 @@ public sealed class TestEngine : IDisposable
         _contactUnstable = false;
         _contactLossTimedOut = false;
         _productStable = false;
+        _confirmedProductPresence = false;
+        _productPresenceCandidateFrames = 0;
+        _productRemovalCandidateFrames = 0;
         _readyToEvaluateProductFaults = false;
         _hasExpectedSourceCoverage = false;
         _lastFrameValid = false;
@@ -1169,6 +1188,7 @@ public sealed class TestEngine : IDisposable
             bool previousContactUnstable = _contactUnstable;
             bool previousContactLossTimedOut = _contactLossTimedOut;
             bool previousProductStable = _productStable;
+            bool previousConfirmedProductPresence = _confirmedProductPresence;
             bool previousReadyToEvaluate = _readyToEvaluateProductFaults;
             WiringFaultPair[] previousConfirmedWiringFaults = preserveConfirmedWiringFaults
                 ? _wiringFaults.ToArray()
@@ -1274,6 +1294,39 @@ public sealed class TestEngine : IDisposable
             }
 
             bool hasProductActivity = HasProductActivityUnsafe(model);
+            if (_lastFrameScanGeneration != 0 &&
+                frame.ScanGeneration != _lastFrameScanGeneration)
+            {
+                _confirmedProductPresence = false;
+                _productPresenceCandidateFrames = 0;
+                _productRemovalCandidateFrames = 0;
+            }
+
+            if (hasProductActivity)
+            {
+                _productRemovalCandidateFrames = 0;
+                _productPresenceCandidateFrames = Math.Min(
+                    ProductPresenceConfirmationFrames,
+                    _productPresenceCandidateFrames + 1);
+                if (_productPresenceCandidateFrames >= ProductPresenceConfirmationFrames)
+                    _confirmedProductPresence = true;
+            }
+            else
+            {
+                _productPresenceCandidateFrames = 0;
+                if (_confirmedProductPresence)
+                {
+                    _productRemovalCandidateFrames = Math.Min(
+                        ProductRemovalConfirmationFrames,
+                        _productRemovalCandidateFrames + 1);
+                    if (_productRemovalCandidateFrames >= ProductRemovalConfirmationFrames)
+                        _confirmedProductPresence = false;
+                }
+                else
+                {
+                    _productRemovalCandidateFrames = 0;
+                }
+            }
             bool hasExpectedSourceCoverage = HasExpectedSourceCoverageUnsafe(model);
             bool allExpectedConnectionsPresent =
                 _expectedConnectionScratch.Count > 0 &&
@@ -1334,6 +1387,7 @@ public sealed class TestEngine : IDisposable
                 previousContactUnstable != _contactUnstable ||
                 previousContactLossTimedOut != _contactLossTimedOut ||
                 previousProductStable != _productStable ||
+                previousConfirmedProductPresence != _confirmedProductPresence ||
                 previousReadyToEvaluate != _readyToEvaluateProductFaults;
 
             _forceNextFrameChanged = false;
@@ -1700,11 +1754,10 @@ public sealed class TestEngine : IDisposable
             return false;
         }
 
-        // Do not require either endpoint to belong to the THT. A wrong harness
-        // can physically connect two otherwise-unused fixture I/O; that edge is
-        // still authoritative product evidence and must reach the wiring evaluator.
-        // Probe is filtered by the router/classifier and by _probeEvidenceExcludedIo.
-        return true;
+        // A wrong edge remains realtime fault evidence when either endpoint
+        // belongs to the loaded product. An edge entirely outside the model is
+        // diagnostic board noise and must never create a production lifecycle.
+        return _modelIo.Contains(source) || _modelIo.Contains(target);
     }
 
     private static bool IsClipBranchConnected(

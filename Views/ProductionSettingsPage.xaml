@@ -604,7 +604,7 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
-                                        <Border Grid.Row="3" Margin="0,10,0,0" Padding="7" Background="#F3F7FF" BorderBrush="#9CADCF" BorderThickness="1" CornerRadius="3">
+                                        <Border Grid.Row="3" Margin="0,6,0,0" Padding="7" MinHeight="330" Background="#F3F7FF" BorderBrush="#9CADCF" BorderThickness="1" CornerRadius="3">
                                             <Grid>
                                                 <Grid.RowDefinitions>
                                                     <RowDefinition Height="Auto"/>
@@ -633,16 +633,16 @@
                                                         </Style>
                                                     </TextBlock.Style>
                                                 </TextBlock>
-                                                <DataGrid Grid.Row="3" Margin="0,2,0,0" HorizontalAlignment="Stretch" ItemsSource="{Binding ManualResistanceResults}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" RowHeaderWidth="0" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#D8DEE9" AlternatingRowBackground="#F4F7FC" RowHeight="27" ColumnHeaderHeight="29" FontSize="11.5" FontWeight="SemiBold" SelectionMode="Single" EnableRowVirtualization="True" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Height="150" MaxHeight="150">
+                                                <DataGrid Grid.Row="3" Margin="0,4,0,0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" MinHeight="290" ItemsSource="{Binding ManualResistanceResults}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" RowHeaderWidth="0" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#D8DEE9" AlternatingRowBackground="#F4F7FC" RowHeight="27" ColumnHeaderHeight="29" FontSize="11.5" FontWeight="SemiBold" SelectionMode="Single" EnableRowVirtualization="True" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                                                     <DataGrid.Columns>
-                                                        <DataGridTextColumn Header="R" Binding="{Binding Name}" Width="30"/>
-                                                        <DataGridTextColumn Header="KÊNH" Binding="{Binding ChannelText}" Width="40"/>
-                                                        <DataGridTextColumn Header="GIÁ TRỊ ĐO" Binding="{Binding Display}" Width="*"/>
-                                                        <DataGridTextColumn Header="MIN" Binding="{Binding MinDisplayText}" Width="44"/>
-                                                        <DataGridTextColumn Header="MAX" Binding="{Binding MaxDisplayText}" Width="44"/>
-                                                        <DataGridTextColumn Header="MẪU" Binding="{Binding SampleCount}" Width="38"/>
-                                                        <DataGridTextColumn Header="ỔN ĐỊNH (ms)" Binding="{Binding StabilizationTimeMs}" Width="64"/>
-                                                        <DataGridTemplateColumn Header="KẾT QUẢ" Width="56">
+                                                    <DataGridTextColumn Header="R" Binding="{Binding Name}" Width="40"/>
+                                                    <DataGridTextColumn Header="KÊNH" Binding="{Binding ChannelText}" Width="58"/>
+                                                    <DataGridTextColumn Header="GIÁ TRỊ ĐO" Binding="{Binding Display}" Width="*"/>
+                                                    <DataGridTextColumn Header="MIN" Binding="{Binding MinDisplayText}" Width="76"/>
+                                                    <DataGridTextColumn Header="MAX" Binding="{Binding MaxDisplayText}" Width="76"/>
+                                                    <DataGridTextColumn Header="MẪU" Binding="{Binding SampleCount}" Width="54"/>
+                                                    <DataGridTextColumn Header="ỔN ĐỊNH (ms)" Binding="{Binding StabilizationTimeMs}" Width="82"/>
+                                                    <DataGridTemplateColumn Header="KẾT QUẢ" Width="92">
                                                             <DataGridTemplateColumn.CellTemplate>
                                                                 <DataTemplate>
                                                                     <Border x:Name="ResultBadge" Margin="5,4" Padding="5,1" CornerRadius="3" Background="#E7EBF3">
@@ -683,8 +683,7 @@
         <Border Grid.Row="2" Background="White" BorderBrush="#D7DEE8" BorderThickness="0,1,0,0">
             <Grid Margin="8,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Width="190" Content="LƯU" Click="Save_Click" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
-                    <Button Width="150" Content="TRỞ VỀ" FontWeight="Bold" Click="Cancel_Click" Style="{StaticResource SettingsExitButtonStyle}"/>
+                    <Button Width="190" Content="TRỞ VỀ" FontWeight="Bold" Click="Cancel_Click" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
                 </StackPanel>
             </Grid>
         </Border>

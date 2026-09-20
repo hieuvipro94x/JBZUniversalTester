@@ -863,7 +863,7 @@ internal static class Program
         stopwatch.Stop();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
-        Assert(changed <= 1, "Identical complete frames do not raise unbounded engine UI updates");
+        Assert(changed <= 2, "Identical complete frames only publish initial and presence-confirmed UI updates");
         Console.WriteLine(
             $"PERF: 10,000 identical ProcessFrame calls: {stopwatch.ElapsedMilliseconds} ms, {allocated:N0} bytes allocated");
 
@@ -930,24 +930,31 @@ internal static class Program
 
         engine.ProcessFrame(FrameSeq(100, (1, new[] { 3 })));
         TestEnginePresentationSnapshot installing = engine.CapturePresentationSnapshot(removal: false);
+        Assert(!installing.Electrical.ProductEvidence &&
+               installing.Electrical.RealtimeEvaluationEnabled,
+            "First model-related frame enables realtime evaluation without confirming lifecycle presence");
+        engine.ProcessFrame(FrameSeq(101, (1, new[] { 3 })));
+        installing = engine.CapturePresentationSnapshot(removal: false);
         Assert(installing.Electrical.ProductEvidence &&
-               installing.Electrical.RealtimeEvaluationEnabled &&
                !installing.Electrical.ContinuityComplete &&
                installing.Rows.Count(row => row.WireName == "PAIR-A") == 0 &&
                installing.Rows.Count(row => row.WireName == "PAIR-B") == 2,
-            "One correct pair immediately enables realtime evaluation and removes only its rows");
+            "Second correct frame confirms presence and removes only its rows");
 
-        engine.ProcessFrame(FrameSeq(101));
+        engine.ProcessFrame(FrameSeq(102));
         TestEnginePresentationSnapshot released = engine.CapturePresentationSnapshot(removal: false);
-        Assert(!released.Electrical.ProductEvidence &&
-               !released.Electrical.RealtimeEvaluationEnabled &&
+        Assert(released.Electrical.ProductEvidence && !released.Electrical.RealtimeEvaluationEnabled,
+            "One clean frame does not remove a confirmed product");
+        engine.ProcessFrame(FrameSeq(103));
+        released = engine.CapturePresentationSnapshot(removal: false);
+        Assert(!released.Electrical.ProductEvidence && !released.Electrical.RealtimeEvaluationEnabled &&
                released.Rows.Count(row => row.WireName == "PAIR-A") == 2 &&
                released.Rows.Count(row => row.WireName == "PAIR-B") == 2,
             "Disconnecting the pair immediately restores its rows without waiting for full product state");
 
-        engine.ProcessFrame(FrameSeq(102, (1, new[] { 4 })));
+        engine.ProcessFrame(FrameSeq(104, (1, new[] { 4 })));
         Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
-        engine.ProcessFrame(FrameSeq(103, (1, new[] { 4 })));
+        engine.ProcessFrame(FrameSeq(105, (1, new[] { 4 })));
         ProductionElectricalSnapshot wrong = engine.GetProductionElectricalSnapshot();
         Assert(wrong.ProductEvidence &&
                wrong.RealtimeEvaluationEnabled &&
@@ -985,12 +992,16 @@ internal static class Program
 
         string pipelineSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
-        Assert(pipelineSource.Contains(
-                   "Interlocked.Increment(ref _uiDispatcherEnqueueCount);\r\n                    await dispatcher.InvokeAsync",
-                   StringComparison.Ordinal) ||
-               pipelineSource.Contains(
-                   "Interlocked.Increment(ref _uiDispatcherEnqueueCount);\n                    await dispatcher.InvokeAsync",
-                   StringComparison.Ordinal),
+        int enqueueCounter = pipelineSource.IndexOf(
+            "Interlocked.Increment(ref _uiDispatcherEnqueueCount);",
+            StringComparison.Ordinal);
+        int dispatcherInvoke = pipelineSource.IndexOf(
+            "await dispatcher.InvokeAsync",
+            enqueueCounter,
+            StringComparison.Ordinal);
+        Assert(enqueueCounter >= 0 &&
+               dispatcherInvoke > enqueueCounter &&
+               dispatcherInvoke - enqueueCounter < 200,
             "Dispatcher enqueue counter increments only at the actual InvokeAsync call site");
         Assert(pipelineSource.Contains("UI_PIPELINE requests=", StringComparison.Ordinal) &&
                pipelineSource.Contains("dispatcher_enqueued=", StringComparison.Ordinal) &&
@@ -1032,11 +1043,11 @@ internal static class Program
             FrameSeq(107, (10, new[] { 10 }), (18, new[] { 18 })));
         engine.ProcessFrame(FrameSeq(108, (10, new[] { 18 })));
         ProductEvidenceSnapshot unmappedWrong = engine.GetProductEvidenceSnapshot();
-        Assert(unmappedWrong.ValidProductEvidence &&
+        Assert(!unmappedWrong.ValidProductEvidence &&
                unmappedWrong.ShortCandidateCount == 1 &&
-               unmappedWrong.Reason == "SHORT_CANDIDATE" &&
+               unmappedWrong.Reason == "RAW_ACTIVITY_ONLY" &&
                !engine.HasWiringFault,
-            "A direct pair with both endpoints outside the THT becomes a realtime short candidate");
+            "An unrelated edge remains diagnostic but cannot create product presence");
 
         ScanFrame tenCardPair = FrameSeq(109, (200, [201]), (201, [200])) with
         {
@@ -1062,52 +1073,61 @@ internal static class Program
             "10-card upper boundary IO639-IO640 remains observable and classified SHORT");
 
         engine.ProcessFrame(FrameSeq(111, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        Assert(!engine.GetProductEvidenceSnapshot().ValidProductEvidence,
+            "One model-related frame remains only a presence candidate");
+        engine.ProcessFrame(FrameSeq(112, (1, new[] { 2 })) with { ScanGeneration = 2 });
         ProductEvidenceSnapshot expected = engine.GetProductEvidenceSnapshot();
         Assert(expected.ValidProductEvidence &&
                expected.State == ProductPresenceState.Present &&
                expected.ExpectedConnectedCount == 1 &&
                expected.Reason == "EXPECTED_CONNECTIVITY" &&
                engine.GetProductionElectricalSnapshot().ProductEvidence,
-            "A valid expected pair immediately creates authoritative product presence");
+            "Two consecutive valid expected frames confirm product presence");
         Assert(engine.BuildRows().All(row => row.WireName != "PAIR-A") &&
                engine.BuildRows().Count(row => row.WireName == "PAIR-B") == 2,
             "Realtime row delta removes a connected pair and restores it after disconnect");
 
-        engine.ProcessFrame(FrameSeq(110));
-        Assert(!engine.HasProductActivity &&
+        engine.ProcessFrame(FrameSeq(113));
+        Assert(!engine.HasProductActivity && engine.GetProductEvidenceSnapshot().ValidProductEvidence,
+            "One clean frame does not remove a confirmed product");
+        engine.ProcessFrame(FrameSeq(114));
+        Assert(!engine.HasProductActivity && !engine.GetProductEvidenceSnapshot().ValidProductEvidence &&
                engine.BuildRows().Count(row => row.WireName == "PAIR-A") == 2,
-            "Disconnecting the valid pair restores Waiting and its rows");
+            "Two clean frames confirm removal and restore Waiting rows");
 
-        engine.ProcessFrame(FrameSeq(111, (1, new[] { 4 })));
+        engine.ProcessFrame(FrameSeq(115, (1, new[] { 4 })));
         ProductEvidenceSnapshot wrongCandidate = engine.GetProductEvidenceSnapshot();
-        Assert(wrongCandidate.ValidProductEvidence &&
-               wrongCandidate.WrongCandidateCount == 1 &&
+        Assert(wrongCandidate.WrongCandidateCount == 1 &&
                !engine.ReadyToEvaluateProductFaults,
-            "A first wrong model-aware edge creates product presence before full source coverage");
+            "A first wrong model-aware edge creates a realtime candidate before lifecycle confirmation");
+        Assert(!wrongCandidate.ValidProductEvidence,
+            "One wrong model-related frame does not confirm lifecycle presence");
         clock.Advance(TimeSpan.FromMilliseconds(
             ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 1));
-        engine.ProcessFrame(FrameSeq(112, (1, new[] { 4 })));
+        engine.ProcessFrame(FrameSeq(116, (1, new[] { 4 })));
         Assert(engine.HasWiringFault &&
+               engine.GetProductEvidenceSnapshot().ValidProductEvidence &&
                engine.GetProductEvidenceSnapshot().WrongConfirmedCount == 1,
             "Wrong wiring confirmation remains realtime after semantic presence detection");
 
         engine.SetModel(Model(
             ("PAIR-A", new[] { 1, 2 }),
             ("PAIR-B", new[] { 3, 4 })));
-        engine.ProcessFrame(FrameSeq(113, (2, new[] { 3 })));
+        engine.ProcessFrame(FrameSeq(117, (2, new[] { 3 })));
         ProductEvidenceSnapshot shortCandidate = engine.GetProductEvidenceSnapshot();
-        Assert(shortCandidate.ValidProductEvidence &&
-               shortCandidate.ShortCandidateCount == 1,
-            "A first model-aware cross-network short also creates product presence");
+        Assert(shortCandidate.ShortCandidateCount == 1,
+            "A first model-aware cross-network short creates a realtime candidate");
+        Assert(!shortCandidate.ValidProductEvidence,
+            "One short model-related frame does not confirm lifecycle presence");
         clock.Advance(TimeSpan.FromMilliseconds(
             ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 1));
-        engine.ProcessFrame(FrameSeq(114, (2, new[] { 3 })));
+        engine.ProcessFrame(FrameSeq(118, (2, new[] { 3 })));
         Assert(engine.HasWiringFault &&
                engine.GetProductEvidenceSnapshot().ShortConfirmedCount == 1,
             "Short confirmation remains realtime without waiting for an expected pair");
 
         engine.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
-        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 2 }, sequence: 115) &&
+        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 2 }, sequence: 119) &&
                engine.HasContinuityPreviewProductActivity &&
                !engine.HasProductActivity &&
                !engine.GetProductEvidenceSnapshot().ProbeEvidence,
@@ -1226,15 +1246,19 @@ internal static class Program
                 ?.GetValue(masterExitVm) ?? throw new InvalidOperationException("Master exit TestEngine not found"));
         masterExitEngine.SetFrameProcessingEnabled(true);
         masterExitBoard.Publish(FrameSeq(100, (1, new[] { 18 })));
+        masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
         Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster,
             "Master sample activity starts the good-Master test");
         masterExitVm.StopViewAsync().GetAwaiter().GetResult();
         Assert(masterExitVm.IsProductRemovalPending,
             "Returning to Main during Master keeps the removal gate until a fresh frame is received");
-        masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
+        masterExitBoard.Publish(FrameSeq(102, (1, new[] { 18 })));
         Assert(masterExitVm.IsProductRemovalPending,
             "Master removal gate remains locked while the sample is physically connected");
-        masterExitBoard.Publish(FrameSeq(102));
+        masterExitBoard.Publish(FrameSeq(103));
+        Assert(masterExitVm.IsProductRemovalPending,
+            "One clean frame cannot clear the Master removal gate");
+        masterExitBoard.Publish(FrameSeq(104));
         Assert(!masterExitVm.IsProductRemovalPending &&
                masterExitVm.ResultStatusText == "KIỂM TRA MASTER ĐẠT" &&
                masterExitVm.Faults.Count == 0,
@@ -1536,16 +1560,26 @@ internal static class Program
                !settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
                !settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
                !settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal) &&
-               settingsSource.Contains("ProductionConfigService.Save(_vm.Settings);", StringComparison.Ordinal) &&
+               !settingsSource.Contains("ProductionConfigService.Save(_vm.Settings);", StringComparison.Ordinal) &&
+               settingsSource.Contains("private async Task<bool> PersistSettingsAsync()", StringComparison.Ordinal) &&
+               settingsSource.Contains("CommitPendingEditorValues();", StringComparison.Ordinal) &&
+               settingsSource.Contains("await NotifySettingsSavedAsync();", StringComparison.Ordinal) &&
                settingsSource.Contains("ConnectLabelPrinterAsync(_vm.Settings.Label)", StringComparison.Ordinal) &&
                settingsSource.Contains("DisconnectLabelPrinterAsync()", StringComparison.Ordinal) &&
                settingsSource.Contains("new ComPortOption(savedPort, savedPort)", StringComparison.Ordinal) &&
                !settingsSource.Contains("$\"{savedPort} - chưa kết nối\"", StringComparison.Ordinal),
-            "Selecting a printer COM persists and applies it immediately without a connect button/status label");
-        Assert(settingsXaml.Contains("<ColumnDefinition Width=\"110\"/>", StringComparison.Ordinal) &&
+            "Selecting a printer COM applies live without autosave; Back uses one validated save pipeline");
+        Assert(!settingsXaml.Contains("Click=\"Save_Click\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Content=\"TRỞ VỀ\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (!await PersistSettingsAsync())", StringComparison.Ordinal) &&
+               settingsSource.IndexOf("await ReleaseManualOutputsAsync();", StringComparison.Ordinal) >
+               settingsSource.IndexOf("if (!await PersistSettingsAsync())", StringComparison.Ordinal),
+            "Back commits, validates and saves once before releasing manual outputs and closing");
+        Assert(settingsXaml.Contains("x:Name=\"LabelPrintSettingsForm\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<ColumnDefinition Width=\"48\"/>", StringComparison.Ordinal) &&
                (settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) ||
                 settingsXaml.Contains("Content=\"QUÉT\"", StringComparison.Ordinal)) &&
-               settingsXaml.Contains("Width=\"115\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<RowDefinition Height=\"30\"/>", StringComparison.Ordinal) &&
                settingsXaml.Contains("Grid.Row=\"2\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Grid.Column=\"2\"", StringComparison.Ordinal),
             "Label printer controls use a compact three-row layout so manual resistance stays visible");
@@ -1562,21 +1596,15 @@ internal static class Program
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
-        Assert(settingsSource.Contains("if (available >= 1160)", StringComparison.Ordinal) &&
+        Assert(settingsSource.Contains("double availableWidth =", StringComparison.Ordinal) &&
                settingsXaml.Contains("ScrollChanged=\"SettingsScrollViewer_ScrollChanged\"", StringComparison.Ordinal) &&
-               settingsSource.Contains("e.ViewportWidth", StringComparison.Ordinal) &&
-               settingsSource.Contains("double.IsFinite(e.ViewportWidth)", StringComparison.Ordinal) &&
-               settingsSource.Contains("if (!double.IsFinite(viewportWidth) || viewportWidth <= 0)", StringComparison.Ordinal) &&
-               settingsSource.Contains("SettingsPanelsHost.Margin.Left", StringComparison.Ordinal) &&
+               settingsSource.Contains("Math.Max(minimumUsableContentWidth, availableWidth)", StringComparison.Ordinal) &&
+               settingsSource.Contains("SettingsPanelsHost.Width = targetWidth", StringComparison.Ordinal) &&
+               settingsSource.Contains("SettingsPanelsHost.HorizontalAlignment = HorizontalAlignment.Left", StringComparison.Ordinal) &&
+               settingsSource.Contains("UnifiedSettingsGrid.HorizontalAlignment = HorizontalAlignment.Stretch", StringComparison.Ordinal) &&
                settingsXaml.Contains("<UniformGrid x:Name=\"LabelPrintActionsPanel\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Columns=\"3\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("x:Name=\"WaterProofChannelRows\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<RowDefinition Height=\"96\"/>", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<RowDefinition Height=\"32\"/>", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<Setter Property=\"Height\" Value=\"30\"/>", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<RowDefinition Height=\"46\"/>", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<RowDefinition Height=\"44\"/>", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<RowDefinition Height=\"130\"/>", StringComparison.Ordinal),
+               settingsXaml.Contains("x:Name=\"WaterProofChannelRows\"", StringComparison.Ordinal),
             "Production settings uses the real viewport, preserves the right border, and evenly sizes label buttons");
         Assert(!settingsXaml.Contains("Settings.ItemHeight", StringComparison.Ordinal) &&
                !settingsXaml.Contains("Settings.PageDelay", StringComparison.Ordinal) &&
@@ -1585,9 +1613,9 @@ internal static class Program
                !settingsXaml.Contains("Settings.MinimumErrorLogValue", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) &&
                settingsXaml.IndexOf("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) >
-                   settingsXaml.IndexOf("x:Name=\"RelaySettingsPanel\"", StringComparison.Ordinal) &&
+                    settingsXaml.IndexOf("x:Name=\"RelaySettingsPanel\"", StringComparison.Ordinal) &&
                settingsXaml.IndexOf("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) <
-                   settingsXaml.IndexOf("Text=\"MANUAL RELAY\"", StringComparison.Ordinal) &&
+                    settingsXaml.IndexOf("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal) &&
                !settingsSource.Contains("MoveWaterProofSettingsToRelayColumn", StringComparison.Ordinal),
             "Unused legacy UI fields are hidden and TEST LEAK is grouped in the relay/maintenance column");
         System.Xml.Linq.XElement[] settingsButtons =
@@ -1595,7 +1623,7 @@ internal static class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 14 &&
+        Assert(settingsButtons.Length == 13 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
@@ -1821,7 +1849,8 @@ internal static class Program
         Assert(settingsPageSource.Contains("await _main.Test.ResetManualOutputsAsync();", StringComparison.Ordinal) &&
                mainWindowSource.Contains("await settingsPage.ReleaseManualOutputsAsync();", StringComparison.Ordinal),
             "Every Settings-page close path awaits Manual RESET before releasing the page");
-        Assert(settingsXaml.Contains("T&#7854;T T&#7844;T C&#7842;", StringComparison.Ordinal) &&
+        Assert((settingsXaml.Contains("T&#7854;T T&#7844;T C&#7842;", StringComparison.Ordinal) ||
+                settingsXaml.Contains("TẮT TẤT CẢ", StringComparison.Ordinal)) &&
                !settingsXaml.Contains("ManualRelay2OffCommand", StringComparison.Ordinal),
             "Manual relay UI exposes the proven mutually-exclusive R1/R2 selector and one ALL OFF command");
 
@@ -1933,15 +1962,17 @@ internal static class Program
             () => vm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
             "Product model cannot change while the startup removal gate is locked");
         int commandsBeforeBlockedStart = board.Commands.Count;
-        vm.StartProductionTestAsync().GetAwaiter().GetResult();
-        Assert(board.Commands.Count == commandsBeforeBlockedStart && vm.IsProductRemovalPending,
-            "START cannot arm production while the startup removal gate is locked");
+        Task pendingStart = vm.StartProductionTestAsync();
+        Assert(!pendingStart.IsCompleted &&
+               board.Commands.Count == commandsBeforeBlockedStart &&
+               vm.IsProductRemovalPending,
+            "START remains pending and cannot arm production while the startup removal gate is locked");
 
         board.Publish(FrameSeq(101));
-        Assert(!vm.IsProductRemovalPending && vm.ResultStatusText == "LẮP SẢN PHẨM",
-            "A complete clean background frame unlocks product selection and START");
-
-        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        pendingStart.GetAwaiter().GetResult();
+        Assert(!vm.IsProductRemovalPending &&
+               vm.State.Contains("ĐỒNG BỘ DỮ LIỆU BO", StringComparison.Ordinal),
+            "A complete clean background frame unlocks START and enters the startup baseline gate");
         int totalBeforeWarning = vm.Total;
         int passBeforeWarning = vm.Pass;
         int failBeforeWarning = vm.Fail;
@@ -2241,8 +2272,10 @@ internal static class Program
         Assert(settingsResistanceXaml.Contains("ManualMeasureResistanceCommand", StringComparison.Ordinal) &&
                settingsResistanceXaml.Contains("ManualResistanceOptions", StringComparison.Ordinal) &&
                settingsResistanceXaml.Contains("ManualResistanceResults", StringComparison.Ordinal) &&
-               settingsResistanceXaml.Contains("Value=\"ĐANG ĐO\"", StringComparison.Ordinal),
-            "Settings exposes manual ALL/single-CH measurement and returned results");
+               settingsResistanceXaml.Contains("Value=\"ĐANG ĐO\"", StringComparison.Ordinal) &&
+               settingsResistanceXaml.Contains("MinHeight=\"290\"", StringComparison.Ordinal) &&
+               !settingsResistanceXaml.Contains("Height=\"150\" MaxHeight=\"150\"", StringComparison.Ordinal),
+            "Settings exposes manual ALL/single-CH measurement and a stretchable result grid for ten rows");
 
         string cfgPath = Path.Combine(
             Path.GetTempPath(),
@@ -2828,6 +2861,8 @@ internal static class Program
                 ?.GetValue(removalVm) ?? throw new InvalidOperationException("Leak removal TestEngine not found"));
         removalEngine.SetFrameProcessingEnabled(true);
         removalVm.SelectedOperationTabIndex = 0;
+        removalBoard.Publish(FrameSeq(1, (1, new[] { 18 })));
+        removalBoard.Publish(FrameSeq(2, (1, new[] { 18 })));
 
         MethodInfo armRemoval = typeof(TestViewModel).GetMethod(
             "ArmWaterProofFaultRemovalWait",
@@ -2843,11 +2878,14 @@ internal static class Program
                (bool)(waitForFaultRemoval.GetValue(removalVm) ?? false),
             "Leak FAIL keeps the continuity/final result area visible and arms ProductRemoved confirmation");
 
-        removalBoard.Publish(FrameSeq(1, (1, new[] { 18 })));
+        removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
         Assert((bool)(waitForFaultRemoval.GetValue(removalVm) ?? false) &&
                removalVm.SelectedOperationTabIndex == 0,
             "Leak FAIL must keep the continuity/final area while any product IO remains connected");
-        removalBoard.Publish(FrameSeq(2));
+        removalBoard.Publish(FrameSeq(4));
+        Assert((bool)(waitForFaultRemoval.GetValue(removalVm) ?? false),
+            "One clean frame cannot clear Leak FAIL removal");
+        removalBoard.Publish(FrameSeq(5));
         Assert(!(bool)(waitForFaultRemoval.GetValue(removalVm) ?? true) &&
                removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                removalVm.SelectedOperationTabIndex == 0,
@@ -2926,26 +2964,28 @@ internal static class Program
                    row.RelatedIos.Contains(1) &&
                    row.RelatedIos.Contains(18)),
             "Final PASS shows the remaining wire/IO relation while MainWindow continues removal monitoring");
-        removalVm.StartProductionTestAsync().GetAwaiter().GetResult();
-        Assert(removalVm.IsProductRemovalPending &&
+        Task pendingPassRemovalStart = removalVm.StartProductionTestAsync();
+        Assert(!pendingPassRemovalStart.IsCompleted &&
+               removalVm.IsProductRemovalPending &&
                removalVm.Faults.Any(row =>
                    row.Status == "CHỜ THÁO" &&
                    row.RelatedIos.Contains(1) &&
                    row.RelatedIos.Contains(18)),
             "Re-entering TestWindow while removal is pending preserves the remaining wire/IO rows");
         removalBoard.Publish(FrameSeq(4));
+        pendingPassRemovalStart.GetAwaiter().GetResult();
         FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
             "_cycleActive",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS main-screen cycle-active flag not found");
         Assert(!(bool)(waitForPassRemoval.GetValue(removalVm) ?? true) &&
                !removalVm.IsProductRemovalPending &&
-               !(bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? true) &&
+               (bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? false) &&
                removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                removalVm.IsCenterResultVisible &&
                removalVm.CenterResultText == "LẮP SẢN PHẨM" &&
                removalVm.SelectedOperationTabIndex == 0,
-            "After committed Leak PASS, removal restores both center and small ready states without auto-arming");
+            "A pending START auto-arms only after committed Leak PASS removal is confirmed");
 
         TestViewModel pauseVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -3075,7 +3115,7 @@ internal static class Program
             "phase == ProductionPhase.Continuity",
             StringComparison.Ordinal);
         int wiringFaultGate = processSource.IndexOf(
-            "_engine.LastFrameValid &&",
+            "_engine.ReadyToEvaluateProductFaults &&",
             StringComparison.Ordinal);
         int postContinuityStart = testViewModelSource.IndexOf(
             "private async Task RunAutomaticPostContinuityAsync",
@@ -4963,6 +5003,7 @@ internal static class Program
             "No product activity keeps FaultGrid empty and shows LẮP SẢN PHẨM");
 
         board.Publish(FrameSeq(100, (1, new[] { 3 })));
+        board.Publish(FrameSeq(101, (1, new[] { 3 })));
         Assert(!vm.IsCenterResultVisible &&
                vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
                !vm.Faults.Any(row => row.WireName == "BG1") &&
@@ -4976,7 +5017,7 @@ internal static class Program
         showBoardUnavailable.Invoke(vm, [false]);
         Assert(vm.SelectedOperationTabIndex == 0 && vm.Faults.Count == 0,
             "Transient board loss clears stale rows but leaves the continuity table selected");
-        board.Publish(FrameSeq(101, (1, new[] { 3 })));
+        board.Publish(FrameSeq(102, (1, new[] { 3 })));
         Assert(vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
                !vm.Faults.Any(row => row.WireName == "BG1"),
             "First complete frame after reconnect rebuilds rows even when physical topology is unchanged");
@@ -5157,15 +5198,15 @@ internal static class Program
             ?? throw new InvalidOperationException("Fault-grid auto-scroll filter not found");
         bool scrollOnAdd = (bool)shouldAutoScroll.Invoke(
             null,
-            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, new object())])!;
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, new object()), vm])!;
         bool scrollOnReset = (bool)shouldAutoScroll.Invoke(
             null,
-            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset)])!;
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset), vm])!;
         bool scrollOnPassRemoval = (bool)shouldAutoScroll.Invoke(
             null,
-            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, new object(), 0)])!;
-        Assert(scrollOnAdd && scrollOnReset && !scrollOnPassRemoval,
-            "Passing a network removes rows without scheduling DataGrid ScrollIntoView/layout");
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, new object(), 0), vm])!;
+        Assert(!scrollOnAdd && !scrollOnReset && !scrollOnPassRemoval,
+            "Non-fault continuity changes never schedule DataGrid ScrollIntoView/layout");
 
         Assert(testViewModelCode.Contains(
                    "if (!AsyncFileLogService.Current.FileLoggingEnabled ||",
@@ -5522,21 +5563,28 @@ internal static class Program
             1,
             (1, new[] { 18 }),
             (201, new[] { 202, 203 })));
+        board.Publish(FrameSeq(
+            2,
+            (1, new[] { 18 }),
+            (201, new[] { 202, 203 })));
         Assert(vm.PassedNetworkCount == 3 && vm.State == "ĐANG KIỂM TRA...",
-            "The first complete frame with real product connectivity shows testing immediately");
+            "Two complete frames with real product connectivity confirm Testing");
 
         // Tháo dây thường nhưng AO-a1 vẫn còn: tuyệt đối chưa reset.
-        board.Publish(FrameSeq(2, (201, new[] { 202 })));
+        board.Publish(FrameSeq(3, (201, new[] { 202 })));
         Assert(vm.PassedNetworkCount > 0 && vm.State != "LẮP SẢN PHẨM",
             "One remaining AO-a1 connection prevents cycle reset");
 
         // Complete frame đầu tiên không còn bất kỳ cặp dây thường/CLIP nào
         // phải xóa toàn bộ latch và trả UI về LẮP SẢN PHẨM ngay.
-        board.Publish(FrameSeq(3));
+        board.Publish(FrameSeq(4));
+        Assert(vm.State != "LẮP SẢN PHẨM",
+            "One authoritative clean frame does not reset the cycle");
+        board.Publish(FrameSeq(5));
         Assert(vm.PassedNetworkCount == 0 &&
                vm.State == "LẮP SẢN PHẨM" &&
                vm.ResultStatusText == "LẮP SẢN PHẨM",
-            "First authoritative full-release frame resets normal/CLIP latches and returns UI immediately");
+            "Two authoritative full-release frames reset normal/CLIP latches");
     }
 
     private static void TestPartCounterStore()
@@ -6193,7 +6241,7 @@ internal static class Program
         Assert(isolatedEvidence.WrongCandidateCount == 0 &&
                !isolatedEvidence.ValidProductEvidence &&
                leadingFrameVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
-            "First confirmed Probe-classifier frame removes same-IO candidates and Product evidence before TP UI confirmation");
+            "A transient leading edge followed by Probe never confirms a production lifecycle");
 
         var pointerDisabled = new ProductionSettings
         {
@@ -6375,13 +6423,10 @@ internal static class Program
         PassGateDiagnostics unmappedDiagnostics = unmappedPairEngine.GetPassGateDiagnostics();
         Assert(unmappedDiagnostics.WrongCandidateCount == 0 &&
                unmappedDiagnostics.ShortCandidateCount == 1 &&
-               unmappedDiagnostics.HasProductActivity &&
-               unmappedDiagnostics.ShortConfirmedCount == 1 &&
-               unmappedPairEngine.HasWiringFault &&
-               unmappedPairEngine.BuildRows().Count(row =>
-                    row.Kind == FaultKind.Short &&
-                    (row.Io == 23 || row.Io == 25)) == 2,
-            "CASE C2: a direct physical pair outside the THT is not Probe/noise and confirms CHẬP MẠCH");
+               !unmappedDiagnostics.HasProductActivity &&
+               unmappedDiagnostics.ShortConfirmedCount == 0 &&
+               !unmappedPairEngine.HasWiringFault,
+            "CASE C2: a direct pair outside the THT stays diagnostic-only and cannot start production");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings
@@ -8440,7 +8485,7 @@ internal static class Program
         board = new FakeBoard();
         var app = new AppSettings();
         var engine = new TestEngine(board, new KeysightVisaService(), app, production);
-        return new TestViewModel(
+        TestViewModel viewModel = new(
             new MainViewModel(),
             engine,
             board,
@@ -8450,6 +8495,19 @@ internal static class Program
             production,
             new LegacyPhtHistoryService(enabled: false),
             requireStartupIoClear);
+
+        // START is gated by ScanSupervisor.Monitoring. Prime the in-memory
+        // transport through the same clean complete-frame transition used by
+        // production startup instead of bypassing that safety invariant.
+        var supervisor = (ScanSupervisor)(typeof(TestViewModel).GetField(
+            "_scanSupervisor",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel)
+            ?? throw new InvalidOperationException("Scan supervisor not found"));
+        supervisor.EnsureProductionScanAsync(0, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+        board.Publish(FrameSeq(0));
+        return viewModel;
     }
 
     private static ProductModel Model(params (string Name, int[] Io)[] nets)
