@@ -38,6 +38,7 @@ public partial class TestWindow : Window
     private bool _lastLedBoardConnected;
     private string _lastLedState = string.Empty;
     private string _lastLedResultStatus = string.Empty;
+    private WaterProofTestWindow? _waterProofWindow;
 
     private static readonly Brush YellowLedOffBrush = CreateFrozenBrush(0x6B, 0x62, 0x40);
     private static readonly Brush YellowLedOnBrush = CreateFrozenBrush(0xFF, 0xD4, 0x00);
@@ -193,6 +194,8 @@ public partial class TestWindow : Window
 
         viewModel.BoardFrameActivity += ViewModel_BoardFrameActivity;
         viewModel.PropertyChanged += ViewModel_StatusPropertyChanged;
+        viewModel.WaterProofWindowOpenRequested += ViewModel_WaterProofWindowOpenRequested;
+        viewModel.WaterProofWindowCloseRequested += ViewModel_WaterProofWindowCloseRequested;
         _lastLedBoardConnected = viewModel.IsBoardConnected;
         _lastLedState = viewModel.State ?? string.Empty;
         _lastLedResultStatus = viewModel.ResultStatusText;
@@ -200,6 +203,63 @@ public partial class TestWindow : Window
         bool hardwareReady = viewModel.IsBoardConnected && !viewModel.IsDeviceFault;
         SetGreenLed(hardwareReady);
         SetRedLed(hardwareReady && IsConfirmedFailLedState(viewModel, viewModel.ResultStatusText));
+    }
+
+    private void ViewModel_WaterProofWindowOpenRequested(object? sender, WaterProofTestViewModel viewModel)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => ViewModel_WaterProofWindowOpenRequested(sender, viewModel));
+            return;
+        }
+
+        CloseWaterProofWindow();
+        _waterProofWindow = new WaterProofTestWindow(viewModel) { Owner = this };
+        PositionWaterProofWindow();
+        LocationChanged += TestWindow_LocationChanged;
+        SizeChanged += TestWindow_LocationChanged;
+        _waterProofWindow.Show();
+    }
+
+    private void ViewModel_WaterProofWindowCloseRequested(object? sender, string reason)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(CloseWaterProofWindow);
+            return;
+        }
+        CloseWaterProofWindow();
+    }
+
+    private void TestWindow_LocationChanged(object? sender, EventArgs e) => PositionWaterProofWindow();
+
+    private void PositionWaterProofWindow()
+    {
+        if (_waterProofWindow is null || ProbeCycleHost is null || !IsLoaded)
+            return;
+
+        Point host = ProbeCycleHost.PointToScreen(new Point(0, 0));
+        const double gap = 8;
+        double right = host.X + ProbeCycleHost.ActualWidth + gap;
+        double left = host.X - _waterProofWindow.Width - gap;
+        System.Windows.Forms.Screen screen = System.Windows.Forms.Screen.FromPoint(
+            new System.Drawing.Point((int)host.X, (int)host.Y));
+        double workLeft = screen.WorkingArea.Left;
+        double workRight = screen.WorkingArea.Right;
+        _waterProofWindow.Left = right + _waterProofWindow.Width <= workRight ? right : Math.Max(workLeft, left);
+        _waterProofWindow.Top = Math.Clamp(
+            host.Y + (ProbeCycleHost.ActualHeight - _waterProofWindow.Height) / 2,
+            screen.WorkingArea.Top,
+            screen.WorkingArea.Bottom - _waterProofWindow.Height);
+    }
+
+    private void CloseWaterProofWindow()
+    {
+        LocationChanged -= TestWindow_LocationChanged;
+        SizeChanged -= TestWindow_LocationChanged;
+        WaterProofTestWindow? window = _waterProofWindow;
+        _waterProofWindow = null;
+        window?.CloseOnce();
     }
 
     private void ViewModel_BoardFrameActivity(object? sender, ScanFrame frame)
@@ -671,10 +731,13 @@ public partial class TestWindow : Window
         {
             vm.BoardFrameActivity -= ViewModel_BoardFrameActivity;
             vm.PropertyChanged -= ViewModel_StatusPropertyChanged;
+            vm.WaterProofWindowOpenRequested -= ViewModel_WaterProofWindowOpenRequested;
+            vm.WaterProofWindowCloseRequested -= ViewModel_WaterProofWindowCloseRequested;
             if (_faultsChangedHandler is not null)
                 vm.Faults.CollectionChanged -= _faultsChangedHandler;
         }
         _faultsChangedHandler = null;
+        CloseWaterProofWindow();
         DataContext = null;
     }
 }

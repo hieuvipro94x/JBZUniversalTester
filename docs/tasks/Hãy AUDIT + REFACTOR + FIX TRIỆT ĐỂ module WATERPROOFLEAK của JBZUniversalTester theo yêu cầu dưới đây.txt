@@ -1,0 +1,1097 @@
+Hãy AUDIT + REFACTOR + FIX TRIỆT ĐỂ module WATERPROOF/LEAK của JBZUniversalTester theo yêu cầu dưới đây.
+
+KHÔNG chỉ sửa giao diện.
+Phải sửa cả:
+- UI architecture;
+- production integration;
+- serial lifecycle;
+- timeout/cleanup;
+- realtime progress;
+- manual leak test;
+- performance interaction với D2XX;
+- regression tests.
+
+Trước khi sửa:
+1. Đọc AGENTS.md nếu có.
+2. git status.
+3. git diff.
+4. Search toàn repo các pattern:
+   WaterProof
+   Waterproof
+   Leak
+   WaterProofSerialService
+   RunTestAsync
+   RunManualWaterProofAsync
+   TestManualWaterProofAsync
+   IsWaterProofCardVisible
+   WaterProofChannels
+   WaterProofStageText
+   WaterProofCardBackground
+   WaterProofAccentBrush
+   ProductionPhase.WaterProof
+   ManualMode
+   WaitForPendingCloseAsync
+   AbortRunPort
+   ReleaseRunPort
+   ScheduleClose
+   PUBLIC GATE RELEASED
+   MANUAL RESET
+   ApplySettings
+   SettingsSaved
+   PropertyChanged
+   Dispatcher
+   Progress
+   SafeProgress
+   :PRESS
+   :WAIT
+   :RESULT
+
+Đọc kỹ các file liên quan ít nhất:
+- TestWindow.xaml
+- TestWindow.xaml.cs
+- TestViewModel.cs
+- ProductionSettingsPage.xaml / code-behind / ViewModel
+- WaterProofSerialService.cs
+- WaterProof models/settings/result/progress classes
+- ScanSupervisor / D2xxBoardTransport nếu có interaction với ManualMode
+- các SelfTests/Tests hiện có.
+
+==================================================
+A. ROOT CAUSE TỪ LOG THỰC TẾ PHẢI GIỮ LÀM CƠ SỞ
+==================================================
+
+Log gần nhất cho thấy:
+
+1. Leak RUN #1:
+- COM7 mở thành công.
+- gửi đúng:
+  :TEST,1,0,0,0,1000,500
+- nhận liên tục:
+  :PRESS
+  rồi :WAIT
+- nhưng không nhận :RESULT.
+- sau khoảng 12 giây worker timeout.
+- last RX age gần 10 giây.
+- serial vẫn IsOpen=True.
+
+2. Sau timeout:
+- log có:
+  INVALIDATE OWNED COM
+  ABORT OWNED COM
+  WORKER FINISHED
+  PUBLIC GATE RELEASED
+
+Nhưng COM handle thực tế CHƯA đóng hoàn toàn.
+
+3. RUN #2 và RUN #3 fail:
+"Cổng COM máy Leak chưa nhả handle cũ trong 2 giây; không mở chồng phiên mới."
+
+=> Public gate/lifecycle đang được release trước khi close/dispose thật sự hoàn tất.
+
+4. Sau timeout xuất hiện nhiều:
+MANUAL RESET
+TX relay
+ALL RELAYS OFF
+MANUAL TỰ ĐỘNG OFF
+
+lặp nhiều lần.
+
+=> cleanup không idempotent / nhiều đường cleanup cùng chạy.
+
+5. Trong lúc Leak đang chạy xuất hiện liên tục:
+"Đã áp dụng cấu hình mềm; không restart scan và không reconnect FTDI."
+
+=> có Settings/PropertyChanged storm trong khi progress Leak đang update.
+
+6. D2XX trong ManualMode vẫn có:
+~1700 queue poll/s
+~860 read/s
+CPU process có lúc >10-15%
+trong khi production scan đã suspended.
+
+=> D2XX reader đang busy-poll khi scan suspended/manual mode.
+
+7. RUN #4 với cùng COM7/115200 hoạt động tốt:
+PRESS -> WAIT -> RESULT
+COMPLETE khoảng 1.97s
+PASS.
+
+=> protocol và COM config cơ bản đúng.
+Không được viết lại protocol vô lý.
+Lỗi chính là session ownership/cleanup/state/performance.
+
+==================================================
+B. KIẾN TRÚC MỚI: TÁCH LEAK HOÀN TOÀN KHỎI TESTWINDOW
+==================================================
+
+Hiện tại TestWindow.xaml đang nhúng trực tiếp card:
+"ĐỘ RÒ RỈ"
+
+với binding:
+- IsWaterProofCardVisible
+- WaterProofStageText
+- WaterProofChannels
+- WaterProofCardBackground
+- WaterProofAccentBrush
+- LiveMachineValueText
+...
+
+Hãy XÓA HẲN card Leak khỏi TestWindow visual tree.
+
+KHÔNG chỉ:
+Visibility=Collapsed
+
+Mà thật sự remove section này khỏi TestWindow.xaml.
+
+Mục tiêu:
+- TestWindow không còn render Leak progress.
+- TestWindow không còn chứa leak channel cards.
+- TestWindow chỉ tập trung:
+  I/O
+  wrong/short
+  resistance
+  state
+  PASS/FAIL
+  counters
+  probe cycle.
+
+Leak phải thành module UI riêng.
+
+==================================================
+C. TẠO CỬA SỔ RIÊNG WATERPROOFTESTWINDOW
+==================================================
+
+Tạo:
+
+- WaterProofTestWindow.xaml
+- WaterProofTestWindow.xaml.cs
+
+Nếu architecture phù hợp, tạo thêm:
+- WaterProofTestViewModel.cs
+
+Ưu tiên MVVM sạch.
+
+Cửa sổ này CHỈ tồn tại khi model hiện tại bật Leak.
+
+Điều kiện mở:
+profile.Enabled == true
+AND
+profile.EnabledChannelCount > 0
+
+Nếu model không bật Leak:
+- KHÔNG tạo window.
+- KHÔNG tạo Leak ViewModel.
+- KHÔNG bind progress Leak.
+- KHÔNG mở COM Leak.
+- Production flow bỏ qua Leak hoàn toàn.
+
+==================================================
+D. GIAO DIỆN LEAK PHẢI RẤT NHỎ, GỌN
+==================================================
+
+Thiết kế chỉ cần:
+
+KIỂM TRA ĐỘ RÒ RỈ - MCSM180014
+
+      KÊNH 1       KÊNH 2       KÊNH 3
+        --            --            --
+
+                 PRESS
+
+Không thêm các thông tin không cần thiết.
+
+KHÔNG hiển thị:
+- COM7
+- baudrate
+- Min/Max dài dòng
+- bảng chi tiết
+- áp suất tổng
+- timer lớn
+- log
+- nút thừa.
+
+Kích thước mục tiêu khoảng:
+Width 400-430
+Height 115-140
+
+Có thể điều chỉnh nhẹ nếu font/layout cần.
+
+Window:
+- ResizeMode=NoResize
+- ShowInTaskbar=False
+- Owner=TestWindow
+- không dùng ShowDialog blocking
+- không Topmost toàn hệ thống
+- không chiếm focus vô lý.
+
+==================================================
+E. VỊ TRÍ CỬA SỔ
+==================================================
+
+Cửa sổ Leak phải hiện cạnh khu vực:
+
+CHU KỲ THAY PIN
+
+ở TestWindow hiện tại.
+
+Không hard-code tọa độ màn hình cố định.
+
+Hãy đặt x:Name cho host hiện tại, ví dụ:
+
+ProbeCycleHost
+
+Sau đó dùng:
+
+PointToScreen
+
+để lấy vị trí thật trên monitor hiện tại.
+
+Ưu tiên đặt LeakWindow:
+- cạnh trái hoặc phải của phần CHU KỲ THAY PIN;
+- khoảng cách 6-10 px.
+
+Nếu không đủ chỗ:
+- tự chuyển sang phía còn lại.
+
+Nếu user kéo TestWindow sang màn hình khác:
+- LeakWindow vẫn xuất hiện đúng cạnh host.
+
+Nếu cần reposition khi TestWindow move:
+- dùng LocationChanged nhẹ;
+- không polling timer.
+
+==================================================
+F. PRODUCTION FLOW
+==================================================
+
+Flow production mong muốn:
+
+WaitingForProduct
+    ↓
+TestingRealtime
+    ↓
+Continuity PASS
+    ↓
+Resistance nếu có
+    ↓
+Leak enabled?
+    ├── NO
+    │      ↓
+    │   tiếp tục PASS flow
+    │
+    └── YES
+           ↓
+     ProductionPhase.WaterProof
+           ↓
+     mở WaterProofTestWindow
+           ↓
+     chạy Leak async
+           ↓
+     RESULT PASS/FAIL/TIMEOUT
+           ↓
+     đóng LeakWindow
+           ↓
+     trả kết quả về TestViewModel
+           ↓
+     tiếp tục PASS hoặc FAIL
+
+Không mở LeakWindow trước khi continuity/resistance đạt.
+
+Nếu continuity FAIL hoặc wrong/short:
+- Leak không chạy.
+
+==================================================
+G. KHÔNG BLOCK UI
+==================================================
+
+KHÔNG dùng:
+
+ShowDialog()
+kết hợp synchronous serial call.
+
+KHÔNG dùng:
+Dispatcher.Invoke cho operation dài.
+Thread.Sleep.
+serial ReadLine blocking trên UI thread.
+
+Leak phải chạy async/background.
+
+WaterProofSerialService đã có worker riêng.
+Giữ nguyên nguyên tắc đó.
+
+Window chỉ nhận progress/result.
+
+Dispatcher chỉ cập nhật text/property nhỏ.
+
+==================================================
+H. REALTIME HIỂN THỊ ĐỘ RÒ
+==================================================
+
+Đây là yêu cầu quan trọng.
+
+Cửa sổ có 3 ô:
+
+KÊNH 1
+KÊNH 2
+KÊNH 3
+
+Trong lúc chưa có dữ liệu:
+--
+
+Không được hiển thị trực tiếp pressure value của :PRESS hoặc :WAIT
+như leak result.
+
+Phải hiển thị "độ rò realtime tạm thời".
+
+==================================================
+I. PHÂN BIỆT PRESS / WAIT / RESULT
+==================================================
+
+Protocol hiện tại có:
+
+:PRESS,a,b,c
+:WAIT,a,b,c
+:RESULT,v1,v2,v3,v4,v5,v6
+
+Logic UI mới:
+
+1. PRESS stage
+
+- cập nhật StageText = "PRESS"
+- lưu pressure reference cho từng kênh.
+- không PASS/FAIL.
+- không persist result.
+- không hiển thị raw pressure vào ô Leak.
+
+2. WAIT stage
+
+- cập nhật StageText = "WAIT"
+- mỗi lần nhận WAIT mới:
+  tính live leak realtime.
+
+Ví dụ về ý tưởng:
+
+LiveLeak[ch] =
+    Abs(ReferencePressure[ch] - CurrentWaitPressure[ch])
+
+Kết quả UI có thể chạy kiểu:
+
+0.3
+0.5
+2.0
+5.6
+
+theo từng progress packet.
+
+3. RESULT stage
+
+Khi nhận :RESULT:
+- dùng đúng logic official hiện tại:
+  first
+  second
+  leak = Abs(first - second)
+
+- official result lấy từ:
+  WaterProofChannelMeasurement.Leak
+
+- overwrite số realtime tạm thời bằng official leak cuối cùng.
+- chỉ lúc này mới quyết định PASS/FAIL chính thức.
+
+==================================================
+J. REFERENCE PRESSURE PHẢI AUDIT TRƯỚC KHI IMPLEMENT
+==================================================
+
+KHÔNG được tự giả định mù.
+
+Hãy kiểm tra log/protocol/code hiện tại để xác định reference phù hợp.
+
+Ưu tiên:
+- giá trị PRESS cuối cùng ngay trước khi chuyển sang WAIT
+
+nếu đó đúng với protocol hiện tại.
+
+Nếu phát hiện máy có semantics khác:
+- giữ đúng protocol thực tế.
+
+Nhưng vẫn phải bảo đảm:
+- realtime leak chỉ là display estimate.
+- official PASS/FAIL chỉ từ :RESULT.
+
+==================================================
+K. KÊNH ENABLED/DISABLED
+==================================================
+
+Nếu channel không bật:
+hiển thị:
+
+--
+
+Không tính live leak.
+Không đánh PASS/FAIL channel đó.
+
+Ví dụ:
+
+KÊNH 1   KÊNH 2   KÊNH 3
+  2.1      5.6       --
+
+==================================================
+L. STAGE TEXT
+==================================================
+
+Dòng cuối chỉ cần:
+
+PRESS
+
+hoặc:
+
+WAIT
+
+sau cùng:
+PASS
+hoặc
+FAIL
+
+Nếu TIMEOUT:
+TIMEOUT
+
+Nếu COM error:
+LỖI COM
+
+Không cần hiện raw protocol.
+
+==================================================
+M. KHÔNG ĐƯỢC DÙNG LIVE LEAK ĐỂ QUYẾT ĐỊNH PASS/FAIL
+==================================================
+
+Đây là invariant bắt buộc.
+
+Realtime liveLeak:
+CHỈ để hiển thị.
+
+Production verdict:
+CHỈ từ official :RESULT.
+
+Không được:
+- early fail chỉ vì liveLeak tạm thời vượt threshold;
+- early pass trước :RESULT.
+
+==================================================
+N. TẠO WATERPROOF VIEWMODEL RIÊNG NẾU PHÙ HỢP
+==================================================
+
+Nên có các property đơn giản:
+
+Title
+StageText
+Channel1Text
+Channel2Text
+Channel3Text
+IsRunning
+FinalResultText
+
+hoặc collection nhẹ.
+
+Không reuse cả TestViewModel chỉ để bind một cửa sổ nhỏ.
+
+Không bind cả ProductionSettingsViewModel.
+
+Không để LeakWindow biết về DB/LOT/relay.
+
+LeakWindow chỉ biết:
+- progress
+- display
+- final leak result.
+
+==================================================
+O. TESTVIEWMODEL CHỈ LÀ COORDINATOR
+==================================================
+
+TestViewModel chịu trách nhiệm:
+
+- check model bật Leak hay không;
+- chuyển ProductionPhase;
+- mở LeakWindow;
+- gọi WaterProofSerialService;
+- nhận result;
+- đóng LeakWindow;
+- tiếp tục PASS/FAIL lifecycle.
+
+Không đưa serial parsing vào code-behind window.
+
+Không đưa production logic vào WaterProofTestWindow.
+
+==================================================
+P. FIX WATERPROOFSERIALSERVICE LIFECYCLE
+==================================================
+
+Đây là bắt buộc.
+
+Hiện tại timeout path có thể:
+
+DeactivateRun
+AbortRunPort
+ObserveLateWorker
+finally:
+    _gate.Release()
+    PUBLIC GATE RELEASED
+
+trong khi ScheduleClose(port) vẫn đang chạy nền.
+
+=> gate release trước COM close xong.
+
+Phải redesign state/lifecycle để:
+
+IDLE
+OPENING
+RUNNING
+CLOSING
+IDLE
+
+Một run mới KHÔNG được bắt đầu khi state=CLOSING.
+
+Không chỉ dựa vào:
+_pendingCloseTasks snapshot race.
+
+Phải có single owner/session abstraction hoặc equivalent robust state.
+
+==================================================
+Q. CLOSE/DISPOSE PHẢI DETERMINISTIC
+==================================================
+
+Mỗi run sở hữu đúng 1 SerialPort.
+
+Khi:
+PASS
+FAIL
+TIMEOUT
+CANCEL
+SERIAL ERROR
+
+phải đi qua cleanup đúng một lần.
+
+Không được:
+- AbortRunPort schedule close
+- worker finally ReleaseRunPort schedule close lần nữa
+- DisconnectCore schedule lần nữa
+
+cho cùng một SerialPort.
+
+Phải có idempotent ownership.
+
+Có thể dùng:
+- session object;
+- Interlocked detach;
+- run-local owned handle;
+- state token/generation;
+
+miễn là bảo đảm:
+một SerialPort chỉ close/dispose đúng một lần.
+
+==================================================
+R. PUBLIC GATE CHỈ RELEASE KHI SESSION THẬT SỰ SAFE
+==================================================
+
+Không được log:
+
+PUBLIC GATE RELEASED
+
+khi:
+Close/Dispose vẫn pending
+và run mới sẽ fail 2 giây sau.
+
+Gate/session state chỉ trở lại ready khi:
+- owned port detached;
+- Close/Dispose đã hoàn tất;
+
+hoặc có chiến lược recovery rõ ràng không cho open lại port cũ.
+
+Nếu driver COM thật sự bị treo lâu:
+- không block UI;
+- leak module chuyển state ERROR/CLOSING;
+- disable run mới;
+- production leak fail/timeout đúng policy;
+- background cleanup vẫn theo dõi.
+
+==================================================
+S. CANCEL/TIMEOUT KHÔNG ĐƯỢC GIỮ UI
+==================================================
+
+Timeout operation phải:
+
+- return control về UI nhanh;
+- đóng LeakWindow hoặc hiện TIMEOUT ngắn rồi đóng theo policy;
+- không chặn Dispatcher trong lúc driver Close() lâu.
+
+SerialPort.Close có thể block.
+
+Nếu cần:
+CloseAndDispose chạy background.
+
+Nhưng state vẫn phải ghi nhận:
+CLOSING
+
+để ngăn run mới.
+
+==================================================
+T. MANUAL LEAK TEST
+==================================================
+
+Manual Leak trong Settings vẫn phải dùng cùng WaterProofSerialService.
+
+Không tạo serial code thứ hai.
+
+Manual Leak:
+- không ghi LOT;
+- không ghi PASS/FAIL production;
+- không chạy MARKING/JIG;
+- không làm production cycle.
+
+Nhưng vẫn dùng:
+same session ownership
+same cleanup
+same timeout.
+
+==================================================
+U. CLEANUP STORM PHẢI FIX
+==================================================
+
+Audit toàn repo vì log đã cho thấy:
+MANUAL RESET
+ALL_RELAYS_OFF
+MANUAL AUTO OFF
+
+bị gọi lặp nhiều lần.
+
+Tìm tất cả call-site:
+- finally
+- catch
+- command completion
+- cancel
+- page close
+- settings close
+- manual mode exit
+- leak result callback
+
+Refactor thành một cleanup gate idempotent.
+
+Ví dụ:
+Interlocked.CompareExchange
+hoặc session token.
+
+Một leak run:
+=> ManualMode enter tối đa 1 lần
+=> ManualMode exit tối đa 1 lần
+=> relay safe cleanup đúng 1 lần
+=> production scan resume đúng 1 lần.
+
+==================================================
+V. SETTINGS APPLY STORM
+==================================================
+
+Log cho thấy trong lúc Leak chạy có rất nhiều:
+"Đã áp dụng cấu hình mềm"
+
+Rà:
+ProductionSettingsViewModel
+PropertyChanged
+SelectedValue
+Text
+Progress callbacks
+SettingsSaved
+
+Leak progress KHÔNG được trigger:
+- Save settings
+- Apply settings
+- Reconfigure board
+- reconnect
+- restart scan.
+
+Realtime value phải nằm trong runtime-only ViewModel property.
+
+Không lưu:
+LiveLeak
+PRESS
+WAIT
+StageText
+
+vào ProductionSettings/config.
+
+==================================================
+W. D2XX MANUALMODE BUSY POLLING
+==================================================
+
+Audit D2xxBoardTransport reader loop.
+
+Log cho thấy khi:
+SCAN_HEALTH state=Suspended reason=ManualMode
+
+vẫn còn khoảng:
+1700+ queue calls/s
+860+ reads/s.
+
+Đây là không chấp nhận được.
+
+Khi scan stopped/suspended:
+- reader phải wait/backoff/event-driven;
+- không busy loop FT_GetQueueStatus;
+- không FT_Read liên tục với rất ít byte.
+
+Không được phá scan resume latency.
+
+Mục tiêu:
+ManualMode CPU gần idle.
+
+Khi resume Production:
+first frame vẫn phải xuất hiện nhanh.
+
+==================================================
+X. LEAK PROGRESS UI UPDATE PHẢI COALESCE
+==================================================
+
+PRESS/WAIT có thể đến khoảng mỗi 90-120ms.
+
+Không cần render nhiều callback nếu UI bận.
+
+Có thể dùng latest-value-wins nhẹ.
+
+Không Dispatcher.Invoke sync.
+
+Dùng:
+SynchronizationContext.Post
+hoặc Dispatcher.BeginInvoke
+
+nhưng tối đa 1 pending UI update nếu cần.
+
+Không backlog progress.
+
+Final :RESULT không được drop.
+
+==================================================
+Y. WINDOW LIFETIME
+==================================================
+
+WaterProofTestWindow:
+- chỉ 1 instance mỗi leak production run;
+- không mở duplicate;
+- đóng đúng một lần;
+- unsubscribe progress/event khi đóng;
+- cancellation token theo cycle;
+- không để window cũ nhận progress của run mới.
+
+Nếu TestWindow đóng:
+- cancel Leak;
+- đóng LeakWindow;
+- cleanup serial session.
+
+Nếu app shutdown:
+- LeakWindow không giữ process sống.
+
+==================================================
+Z. RESULT FLOW
+==================================================
+
+PASS:
+
+RESULT
+-> official leak values
+-> UI hiển thị số cuối
+-> PASS
+-> WaterProofRunResult trả về
+-> đóng window
+-> Production PASS flow tiếp tục.
+
+FAIL:
+
+RESULT
+-> official leak values
+-> FAIL
+-> WaterProofRunResult.IsPassed=False
+-> đóng window
+-> production FAIL đúng 1 lần.
+
+TIMEOUT:
+
+-> UI TIMEOUT
+-> no fake RESULT
+-> cleanup
+-> production equipment/fail policy hiện có
+-> không treo app.
+
+==================================================
+AA. GIỮ NGUYÊN OFFICIAL EVALUATION HIỆN TẠI
+==================================================
+
+Không tự ý thay thuật toán official.
+
+Hiện official leak logic:
+
+first = Abs(result[offset])
+second = Abs(result[offset + 1])
+leak = Abs(first - second)
+
+passed =
+    second >= Abs(profile.PressMin)
+    AND
+    leak <= Abs(profile.LeakLimit)
+
+Hãy giữ đúng semantics hiện tại trừ khi tìm thấy bug có bằng chứng.
+
+==================================================
+AB. UI STYLE
+==================================================
+
+LeakWindow nhỏ, industrial, rõ ràng.
+
+Title:
+KIỂM TRA ĐỘ RÒ RỈ - {ModelName}
+
+3 channel cells:
+- cùng chiều rộng
+- font số lớn
+- center
+- channel disabled hiện --
+
+Stage:
+PRESS / WAIT / PASS / FAIL / TIMEOUT
+
+Không animation nặng.
+Không gradient phức tạp.
+Không shadow lớn.
+Không Storyboard lặp.
+
+==================================================
+AC. KHÔNG LÀM CHẬM TESTWINDOW
+==================================================
+
+Sau khi tách:
+
+TestWindow không còn:
+- WaterProofChannels rendering
+- WaterProofStageText rendering
+- leak card redraw
+- leak progress subscription trực tiếp.
+
+Leak progress chỉ tới LeakWindow.
+
+TestWindow UI pipeline D2XX không được bị ảnh hưởng.
+
+==================================================
+AD. REGRESSION TESTS BẮT BUỘC
+==================================================
+
+Thêm tests nếu có infrastructure.
+
+1. Leak disabled model
+Expected:
+- no LeakWindow
+- no serial open
+- Production flow bypass leak.
+
+2. Leak enabled
+Expected:
+- LeakWindow opens exactly once.
+
+3. PRESS progress
+Expected:
+- Stage=PRESS
+- channel official values still unset.
+
+4. WAIT progress
+Given final PRESS reference and WAIT sequence:
+Expected:
+- live leak changes:
+  0.3 -> 0.5 -> 2.0 -> 5.6
+  theo dữ liệu test.
+
+5. RESULT
+Expected:
+- official Leak overrides live estimate.
+
+6. Disabled channel
+Expected:
+--
+
+7. RESULT PASS
+Expected:
+window closes once
+production continues.
+
+8. RESULT FAIL
+Expected:
+window closes once
+production fail exactly once.
+
+9. Timeout
+Expected:
+session enters closing/cleanup
+no duplicate cleanup
+UI remains responsive.
+
+10. Timeout then immediate second run
+Expected:
+second run does NOT enter COM open until prior session truly safe.
+No "handle cũ" race.
+
+11. Close called twice
+Expected:
+no exception
+no duplicate dispose.
+
+12. Manual leak cleanup
+Expected:
+ManualMode enter/exit once.
+
+13. Settings progress
+Expected:
+PRESS/WAIT does not trigger config Save/Apply.
+
+14. D2XX ManualMode
+Expected:
+busy polling drops dramatically while suspended.
+
+15. Window lifetime
+Expected:
+old LeakWindow does not receive next run progress.
+
+==================================================
+AE. PERFORMANCE ACCEPTANCE
+==================================================
+
+Trong Leak run:
+
+- WPF Dispatcher không block.
+- TestWindow vẫn responsive.
+- LeakWindow update realtime.
+- no UI_STALL do serial operation.
+- no Task.Run per progress packet.
+- no config write per progress.
+- no relay reset storm.
+- no restart scan storm.
+- no duplicate window.
+- no duplicate COM close.
+
+==================================================
+AF. LOGGING SAU SỬA
+==================================================
+
+Thêm log gọn, không spam:
+
+LEAK_UI_OPEN cycle=... model=...
+LEAK_STAGE PRESS
+LEAK_STAGE WAIT
+LEAK_LIVE ch1=... ch2=... ch3=...
+LEAK_RESULT ch1=... ch2=... ch3=... pass=...
+LEAK_UI_CLOSE reason=PASS/FAIL/TIMEOUT/CANCEL
+LEAK_SESSION state=OPENING/RUNNING/CLOSING/IDLE
+LEAK_SESSION_CLOSED run=...
+LEAK_CLEANUP once=true
+
+Không log LEAK_LIVE mỗi packet nếu không cần.
+Có thể throttle 100-200ms.
+
+==================================================
+AG. NHỮNG GÌ TUYỆT ĐỐI KHÔNG ĐƯỢC LÀM
+==================================================
+
+KHÔNG:
+
+- giữ card Leak cũ trong TestWindow;
+- dùng ShowDialog blocking serial execution;
+- Thread.Sleep UI thread;
+- Dispatcher.Invoke sync trong hot path;
+- dùng raw PRESS làm final leak;
+- dùng WAIT estimate để PASS/FAIL chính thức;
+- hard-code MCSM180014;
+- hard-code COM7;
+- đổi protocol :TEST/:PRESS/:WAIT/:RESULT;
+- đổi threshold hiện tại tùy tiện;
+- duplicate WaterProofSerialService;
+- duplicate serial parser;
+- tạo run mới khi session cũ đang Closing;
+- release public gate trước safe cleanup;
+- gọi relay cleanup nhiều lần;
+- restart D2XX scan nhiều lần;
+- save settings theo từng progress packet;
+- busy-poll D2XX khi scan suspended;
+- làm TestWindow phụ thuộc LeakWindow internals.
+
+==================================================
+AH. THỨ TỰ THỰC HIỆN
+==================================================
+
+BƯỚC 1:
+Audit toàn bộ call graph Leak.
+
+BƯỚC 2:
+Liệt kê root cause P0/P1/P2.
+
+BƯỚC 3:
+Tách card Leak khỏi TestWindow.
+
+BƯỚC 4:
+Tạo WaterProofTestWindow + ViewModel riêng.
+
+BƯỚC 5:
+Tích hợp production flow chỉ mở khi model Enabled.
+
+BƯỚC 6:
+Implement realtime live leak:
+PRESS reference
+-> WAIT delta realtime
+-> RESULT official override.
+
+BƯỚC 7:
+Fix serial session lifecycle.
+
+BƯỚC 8:
+Fix cleanup storm.
+
+BƯỚC 9:
+Fix settings apply storm.
+
+BƯỚC 10:
+Fix D2XX suspended busy polling nếu xác nhận đúng từ code.
+
+BƯỚC 11:
+Build.
+
+BƯỚC 12:
+Run toàn bộ SelfTests.
+
+BƯỚC 13:
+Review git diff như senior reviewer.
+
+==================================================
+AI. BÁO CÁO CUỐI
+==================================================
+
+Không chỉ audit.
+Hãy trực tiếp sửa code.
+
+Sau khi hoàn thành báo ngắn:
+
+1. Root cause Leak timeout/COM handle.
+2. File đã sửa/tạo.
+3. Card Leak cũ trong TestWindow đã remove thế nào.
+4. LeakWindow được mở điều kiện nào.
+5. LeakWindow được đặt cạnh CHU KỲ THAY PIN thế nào.
+6. PRESS/WAIT realtime leak được tính thế nào.
+7. RESULT official override thế nào.
+8. PASS/FAIL official có giữ nguyên không.
+9. COM lifecycle mới hoạt động thế nào.
+10. Cleanup storm đã chặn thế nào.
+11. Settings apply storm đã xử lý thế nào.
+12. D2XX ManualMode busy-poll đã xử lý thế nào.
+13. Build/test PASS/FAIL.
+14. Những gì còn cần test trên máy Leak thật.
+
+Ưu tiên:
+
+SERIAL CORRECTNESS
+> NO COM HANDLE RACE
+> PRODUCTION CORRECTNESS
+> UI RESPONSIVENESS
+> CLEAN SESSION LIFETIME
+> REALTIME LEAK DISPLAY
+> PERFORMANCE
+> UI POLISH.

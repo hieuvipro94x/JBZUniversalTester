@@ -2653,17 +2653,47 @@ internal static class Program
 
         string xaml = File.ReadAllText(
     Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
+        string leakWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "WaterProofTestWindow.xaml"));
 
         Assert(
-            xaml.Contains("Text=\"ĐỘ RÒ RỈ\"", StringComparison.Ordinal) &&
-            xaml.Contains("Width=\"294\"", StringComparison.Ordinal) &&
-            xaml.Contains("Height=\"92\"", StringComparison.Ordinal) &&
-            xaml.Contains("Text=\"{Binding LiveMachineValueText}\"", StringComparison.Ordinal) &&
-            xaml.Contains("Background=\"{Binding LiveCellBackground}\"", StringComparison.Ordinal) &&
-            xaml.Contains("Foreground=\"{Binding LiveCellForeground}\"", StringComparison.Ordinal) &&
-            !xaml.Contains("x:Name=\"WaterProofGrid\"", StringComparison.Ordinal) &&
-            !xaml.Contains("WaterProofOperationGridStyle", StringComparison.Ordinal),
-            "Leak uses only the compact TEST LEAK card; the lower area remains dedicated to continuity/final results");
+            !xaml.Contains("WaterProofChannels", StringComparison.Ordinal) &&
+            !xaml.Contains("WaterProofStageText", StringComparison.Ordinal) &&
+            xaml.Contains("x:Name=\"ProbeCycleHost\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Width=\"420\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Height=\"136\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Text=\"{Binding Channel1Text}\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Text=\"{Binding StageText}\"", StringComparison.Ordinal),
+            "Leak is removed from TestWindow and rendered only by the compact owned Leak window");
+
+        var leakWindowVm = new WaterProofTestViewModel("MODEL-A", profile);
+        leakWindowVm.ApplyProgress(new WaterProofProgress(
+            WaterProofStage.Pressurizing, [84.0, 0.0, 83.5], ":PRESS,84,0,83.5"));
+        Assert(leakWindowVm.StageText == "PRESS" &&
+               leakWindowVm.Channel1Text == "--" &&
+               leakWindowVm.Channel2Text == "--" &&
+               leakWindowVm.Channel3Text == "--",
+            "PRESS records references without displaying raw pressure or an official result");
+        leakWindowVm.ApplyProgress(new WaterProofProgress(
+            WaterProofStage.Waiting, [83.7, 0.0, 81.5], ":WAIT,83.7,0,81.5"));
+        Assert(leakWindowVm.StageText == "WAIT" &&
+               leakWindowVm.Channel1Text == "0.3" &&
+               leakWindowVm.Channel2Text == "--" &&
+               leakWindowVm.Channel3Text == "2.0",
+            "WAIT displays live PRESS-reference deltas only for enabled channels");
+        leakWindowVm.ApplyFinal(new WaterProofRunResult(
+            [
+                new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
+                new WaterProofChannelMeasurement(2, false, 0, 0, 0, true),
+                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, true)
+            ],
+            true,
+            ":RESULT,84,83.4,0,0,83.5,82.7"));
+        Assert(leakWindowVm.StageText == "PASS" &&
+               leakWindowVm.Channel1Text == "0.6" &&
+               leakWindowVm.Channel3Text == "0.8" &&
+               !leakWindowVm.IsRunning,
+            "RESULT replaces live estimates with official Leak values and final verdict");
 
         // Regression: :PRESS lưu áp cuối làm baseline, từng :WAIT phải cập nhật
         // Leak ngay trên UI nhưng tuyệt đối chưa được chốt PASS/FAIL trước :RESULT.
@@ -3111,12 +3141,6 @@ internal static class Program
             processStart,
             StringComparison.Ordinal);
         string processSource = testViewModelSource[processStart..processEnd];
-        int leakFirstGate = processSource.IndexOf(
-            "phase == ProductionPhase.Continuity",
-            StringComparison.Ordinal);
-        int wiringFaultGate = processSource.IndexOf(
-            "_engine.ReadyToEvaluateProductFaults &&",
-            StringComparison.Ordinal);
         int postContinuityStart = testViewModelSource.IndexOf(
             "private async Task RunAutomaticPostContinuityAsync",
             StringComparison.Ordinal);
@@ -3133,14 +3157,19 @@ internal static class Program
             finalizeLeakStart,
             StringComparison.Ordinal);
         string finalizeLeakSource = testViewModelSource[finalizeLeakStart..finalizeLeakEnd];
-        Assert(leakFirstGate >= 0 && leakFirstGate < wiringFaultGate &&
-               processSource.Contains("RunPreContinuityWaterProofAsync", StringComparison.Ordinal) &&
-               !postContinuitySource.Contains("RunAutomaticWaterProofAsync", StringComparison.Ordinal) &&
+        int resistanceStep = postContinuitySource.IndexOf(
+            "if (IsResistanceEnabledForModel(_model))",
+            StringComparison.Ordinal);
+        int leakStep = postContinuitySource.IndexOf(
+            "await RunAutomaticWaterProofAsync",
+            StringComparison.Ordinal);
+        Assert(!processSource.Contains("RunPreContinuityWaterProofAsync", StringComparison.Ordinal) &&
+               resistanceStep >= 0 && leakStep > resistanceStep &&
                finalizeLeakSource.Contains("_engine.ContinuityPassed", StringComparison.Ordinal) &&
                finalizeLeakSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
                finalizeLeakSource.Contains("failureDetails: faults", StringComparison.Ordinal) &&
                finalizeLeakSource.Contains("ShowFaultConfirmationDialog", StringComparison.Ordinal),
-            "Leak starts before continuity evaluation; Leak FAIL is recorded and confirmed only after full continuity PASS");
+            "Leak starts only after continuity and configured resistance; official Leak FAIL uses the centralized production failure path");
         int durablePassCommit = postContinuitySource.IndexOf(
             "bool passCommitted = await RecordCompletedProductAsync",
             StringComparison.Ordinal);
@@ -3232,12 +3261,12 @@ internal static class Program
                 "ReleaseRunPort(runNumber, port)",
                 StringComparison.Ordinal) &&
             leakServiceSource.Contains(
-                "WaitForPendingCloseBestEffortAsync",
+                "ReleaseGateAfterCleanupAsync",
                 StringComparison.Ordinal) &&
             leakServiceSource.Contains(
-                "next run will reconnect cleanly",
+                "LEAK_SESSION_CLOSED",
                 StringComparison.Ordinal),
-            "A completed Leak result releases only its owned COM session and waits bounded cleanup before cycle 2");
+            "Leak keeps the public gate closed until its single owned COM cleanup has actually completed");
         Assert(productionSettingsXaml.Contains("Content=\"CHẠY TEST\"", StringComparison.Ordinal) &&
                productionSettingsXaml.Contains("ManualWaterProofTestCommand", StringComparison.Ordinal) &&
                productionSettingsXaml.Contains("ManualWaterProofResults", StringComparison.Ordinal) &&
