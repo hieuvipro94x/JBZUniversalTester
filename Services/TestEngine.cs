@@ -167,6 +167,11 @@ public sealed class TestEngine : IDisposable
     bool _lastFrameValid;
     long _lastFrameSequence;
     long _lastFrameScanGeneration;
+    // Model-switch stale-frame barrier. It remembers the last authoritative
+    // frame of the previous model so queued callbacks that were captured before
+    // CommitPreparedModel cannot be reinterpreted as connectivity of the new model.
+    long _modelSwitchBaselineSequence;
+    long _modelSwitchBaselineScanGeneration;
     long _framesProcessed;
     int _lastFrameUnknownBytes;
     double _lastEngineComputeMilliseconds;
@@ -658,6 +663,13 @@ public sealed class TestEngine : IDisposable
         ArgumentNullException.ThrowIfNull(prepared);
         lock (_gate)
         {
+            // Capture the previous authoritative frame before ResetUnsafe clears it.
+            // This is used only to reject callbacks that were already queued before
+            // the model swap. A newer frame on the same stream or any frame from a
+            // new scan generation is accepted normally.
+            long previousFrameSequence = _lastFrameSequence;
+            long previousScanGeneration = _lastFrameScanGeneration;
+
             _model = prepared.Model;
             _componentByIo = prepared.ComponentByIo;
             _modelIo = prepared.ModelIo;
@@ -695,6 +707,8 @@ public sealed class TestEngine : IDisposable
                 : CreateClipCommonDisplayRow(prepared.Model.Clip, PendingConnectionStatus);
             _latchedClipKeys.Clear();
             ResetUnsafe();
+            _modelSwitchBaselineSequence = previousFrameSequence;
+            _modelSwitchBaselineScanGeneration = previousScanGeneration;
         }
         NotifyChanged();
     }
@@ -992,6 +1006,7 @@ public sealed class TestEngine : IDisposable
         _stableCounters.Clear();
         _currentActive.Clear();
         _currentConnections.Clear();
+        _expectedConnectionScratch.Clear();
         _continuityPreviewConnections.Clear();
         _continuityPreviewSequence = 0;
         _actualComponentByIo.Clear();
@@ -1012,6 +1027,8 @@ public sealed class TestEngine : IDisposable
         _lastFrameValid = false;
         _lastFrameSequence = 0;
         _lastFrameScanGeneration = 0;
+        _modelSwitchBaselineSequence = 0;
+        _modelSwitchBaselineScanGeneration = 0;
         _lastFrameUnknownBytes = 0;
         _lastEngineComputeMilliseconds = 0;
         _forceNextFrameChanged = true;
@@ -1182,6 +1199,25 @@ public sealed class TestEngine : IDisposable
             ProductModel? model = _model;
             if (!_frameProcessingEnabled || frame.Mode != BoardScanMode.Production || model is null)
                 return false;
+
+            // Reject only callbacks that belong to the last already-processed
+            // frame of the previous model. This works for both cases:
+            //  - same-capacity model switch reuses the scan generation: the first
+            //    newer sequence is accepted and clears the barrier;
+            //  - capacity transition restarts scan: the new generation is accepted
+            //    immediately and clears the barrier even if its sequence resets.
+            if (_modelSwitchBaselineScanGeneration != 0 &&
+                frame.ScanGeneration != 0)
+            {
+                if (frame.ScanGeneration == _modelSwitchBaselineScanGeneration &&
+                    frame.Sequence <= _modelSwitchBaselineSequence)
+                {
+                    return false;
+                }
+
+                _modelSwitchBaselineSequence = 0;
+                _modelSwitchBaselineScanGeneration = 0;
+            }
 
             bool sameActive = _currentActive.SetEquals(frame.ActiveIo);
             bool sameConnections = ConnectionsEqual(_currentConnections, frame.Connections);

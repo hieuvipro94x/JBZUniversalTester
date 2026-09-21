@@ -204,6 +204,10 @@ public sealed class TestViewModel : ObservableObject
     private int _productionPresentationMode = (int)ProductionPresentationMode.Waiting;
     private int _productionRuntimeState = (int)ProductionRuntimeState.WaitingForProduct;
     private EngineUiUpdateRequest? _latestEngineUiUpdateRequest;
+    // Model-switch barrier: blocks stale Production callbacks/snapshots from the
+    // previous model until scan reconciliation for the selected model completes.
+    private int _modelTransitionActive;
+    private int _modelTransitionGeneration;
     // Separate presentation queue for pre-C0 continuity preview. It never runs
     // ProcessEngineChangedOnUi, so no PASS/FAIL/relay state machine can be entered.
     private int _continuityPreviewUiQueued;
@@ -2059,19 +2063,49 @@ public sealed class TestViewModel : ObservableObject
 
     private async Task ReconcileModelScanAsync(int generation)
     {
-        await Task.Yield();
-        if (_lifetimeCts.IsCancellationRequested ||
-            generation != Volatile.Read(ref _modelLoadGeneration) ||
-            !_board.IsConnected)
-        {
-            return;
-        }
-
         long started = Stopwatch.GetTimestamp();
-        await EnsureContinuousProductionScanAsync();
-        AsyncFileLogService.Current.Performance(
-            $"MODEL_LOAD_PERF phase=SCAN_RECONCILE generation={generation} " +
-            $"duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
+        string completionReason = "ScanReconciled";
+        try
+        {
+            await Task.Yield();
+            if (_lifetimeCts.IsCancellationRequested)
+            {
+                completionReason = "LifetimeCancelled";
+                return;
+            }
+
+            if (generation != Volatile.Read(ref _modelLoadGeneration))
+            {
+                completionReason = "Superseded";
+                return;
+            }
+
+            if (!_board.IsConnected)
+            {
+                completionReason = "BoardDisconnected";
+                return;
+            }
+
+            await EnsureContinuousProductionScanAsync();
+
+            if (!IsDeviceFault && !IsProductionScanReadyForArm())
+            {
+                bool monitoring = await WaitForProductionScanReadyForArmAsync(_lifetimeCts.Token);
+                completionReason = monitoring ? "Monitoring" : "MonitoringTimeout";
+            }
+            else
+            {
+                completionReason = IsDeviceFault ? "DeviceFault" : "Monitoring";
+            }
+        }
+        finally
+        {
+            AsyncFileLogService.Current.Performance(
+                $"MODEL_LOAD_PERF phase=SCAN_RECONCILE generation={generation} " +
+                $"duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###} " +
+                $"reason={completionReason}");
+            CompleteModelTransition(generation, completionReason);
+        }
     }
 
     private async Task StartProductionScanAndVerifyFrameAsync(
@@ -2377,7 +2411,16 @@ public sealed class TestViewModel : ObservableObject
             return null;
 
         _productionSettings.LastThtPartKey = JBZUniversalTester.Views.PartSelectionWindow.PartKey(model);
-        SetModel(model, preparedEngineModel);
+        BeginModelTransition(generation);
+        try
+        {
+            SetModel(model, preparedEngineModel);
+        }
+        catch
+        {
+            CompleteModelTransition(generation, "SetModelFailed");
+            throw;
+        }
 
         // Navigation must not wait for a controlled D2XX capacity reopen. Return
         // the selected model to MainWindow immediately so TestWindow can render;
@@ -2386,6 +2429,8 @@ public sealed class TestViewModel : ObservableObject
         // scan range. Same-capacity model changes therefore feel instantaneous.
         if (_board.IsConnected)
             ScheduleModelScanReconcile(generation);
+        else
+            CompleteModelTransition(generation, "BoardDisconnected");
 
         StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
         State = _board.IsConnected && !IsDeviceFault
@@ -2407,9 +2452,22 @@ public sealed class TestViewModel : ObservableObject
         if (generation != Volatile.Read(ref _modelLoadGeneration))
             return null;
 
-        SetModel(model, prepared);
+        BeginModelTransition(generation);
+        try
+        {
+            SetModel(model, prepared);
+        }
+        catch
+        {
+            CompleteModelTransition(generation, "SetModelFailed");
+            throw;
+        }
+
         if (_board.IsConnected)
             ScheduleModelScanReconcile(generation);
+        else
+            CompleteModelTransition(generation, "BoardDisconnected");
+
         State = _board.IsConnected && !IsDeviceFault
             ? ReadyStateForCurrentModel()
             : "LỖI THIẾT BỊ";
@@ -2522,6 +2580,45 @@ public sealed class TestViewModel : ObservableObject
         CurrentRuntimeMode == mode &&
         Volatile.Read(ref _runtimeGeneration) == generation;
 
+    private bool IsModelTransitionActive =>
+        Volatile.Read(ref _modelTransitionActive) != 0;
+
+    private void BeginModelTransition(int generation)
+    {
+        Volatile.Write(ref _modelTransitionGeneration, generation);
+        Interlocked.Exchange(ref _modelTransitionActive, 1);
+
+        // Invalidate every queued Product/Probe/continuity-preview callback from
+        // the previous model before CommitPreparedModel can emit Changed.
+        long epoch = AdvanceProductionUiCycleEpoch();
+        Interlocked.Increment(ref _inlineProbeUiRevision);
+        Interlocked.Increment(ref _continuityPreviewUiRevision);
+        Volatile.Write(ref _latestEngineUiUpdateRequest, null);
+
+        // Old Production callbacks must fail IsRuntimeContext immediately.
+        SwitchRuntimeMode(RuntimeMode.Background);
+
+        AsyncFileLogService.Current.Performance(
+            $"MODEL_TRANSITION_BEGIN generation={generation} ui_epoch={epoch}");
+    }
+
+    private void CompleteModelTransition(int generation, string reason)
+    {
+        if (generation != Volatile.Read(ref _modelLoadGeneration) ||
+            generation != Volatile.Read(ref _modelTransitionGeneration))
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _modelTransitionActive, 0) == 0)
+            return;
+
+        AsyncFileLogService.Current.Performance(
+            $"MODEL_TRANSITION_READY generation={generation} reason={reason} " +
+            $"scan_state={_scanSupervisor.HealthSnapshot.State} " +
+            $"runtime={CurrentProductionRuntimeState}");
+    }
+
     private ProductionPhase CurrentProductionPhase =>
         (ProductionPhase)Volatile.Read(ref _productionPhase);
 
@@ -2550,10 +2647,22 @@ public sealed class TestViewModel : ObservableObject
         long frameSequence = 0,
         string reason = "LIFECYCLE")
     {
+        // Hard invariant: no path is allowed to expose TestingRealtime while a
+        // model switch is still reconciling its scan session/capacity.
+        if (state == ProductionRuntimeState.TestingRealtime && IsModelTransitionActive)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"PRODUCT_STATE_SUPPRESSED requested=TestingRealtime seq={frameSequence} " +
+                $"reason={reason} guard=MODEL_TRANSITION");
+            state = ProductionRuntimeState.WaitingForProduct;
+            reason = "MODEL_TRANSITION_GUARD";
+        }
+
         int previous = Interlocked.Exchange(ref _productionRuntimeState, (int)state);
         if (previous != (int)state)
         {
             Raise(nameof(CurrentProductionRuntimeState));
+            RaiseCenterPresentation();
             AsyncFileLogService.Current.Performance(
                 $"PRODUCT_STATE old={(ProductionRuntimeState)previous} new={state} " +
                 $"seq={frameSequence} reason={reason}");
@@ -2583,6 +2692,15 @@ public sealed class TestViewModel : ObservableObject
         long frameSequence,
         string reason)
     {
+        if (mode != ProductionPresentationMode.Waiting && IsModelTransitionActive)
+        {
+            AsyncFileLogService.Current.Performance(
+                $"PRESENTATION_STATE_SUPPRESSED requested={mode} seq={frameSequence} " +
+                $"reason={reason} guard=MODEL_TRANSITION");
+            mode = ProductionPresentationMode.Waiting;
+            reason = "MODEL_TRANSITION_GUARD";
+        }
+
         int previous = Interlocked.Exchange(ref _productionPresentationMode, (int)mode);
         if (previous == (int)mode)
             return;
@@ -3207,6 +3325,26 @@ public sealed class TestViewModel : ObservableObject
     private void ApplyAuthoritativeProductionState(ProductionElectricalSnapshot electrical)
     {
         ProductionPhase phase = CurrentProductionPhase;
+
+        // During a model switch the old scan may still be draining while D2XX is
+        // reopening/changing active range. No electrical snapshot is allowed to
+        // own the operator lifecycle until reconciliation finishes.
+        if (IsModelTransitionActive)
+        {
+            SetProductionRuntimeState(
+                ProductionRuntimeState.WaitingForProduct,
+                electrical.FrameSequence,
+                "MODEL_TRANSITION");
+            SetProductionPresentationMode(
+                ProductionPresentationMode.Waiting,
+                electrical.FrameSequence,
+                "MODEL_TRANSITION");
+            // Keep the explicit transition text chosen by the caller
+            // ("ĐANG NẠP MÃ HÀNG..." / "BO ĐANG CHUẨN BỊ"). Do not let a stale
+            // snapshot rewrite State while the transition barrier is active.
+            return;
+        }
+
         bool continuityPresentation =
             phase == ProductionPhase.Continuity &&
             _cycleActive &&
@@ -6136,6 +6274,29 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
+        // Model selection returns before a controlled capacity reopen so TestWindow
+        // can render immediately. ARM, however, must wait for that exact model's
+        // reconciliation task to finish; otherwise a previous scan generation can
+        // briefly own State/presentation.
+        if (IsModelTransitionActive)
+        {
+            State = "BO ĐANG CHUẨN BỊ";
+            AsyncFileLogService.Current.Performance(
+                $"TEST_ARM_WAIT_MODEL_TRANSITION generation={Volatile.Read(ref _modelTransitionGeneration)}");
+            Task? reconcile = _modelScanReconcileTask;
+            if (reconcile is not null)
+            {
+                try
+                {
+                    await reconcile.WaitAsync(startToken);
+                }
+                catch (OperationCanceledException) when (startToken.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
+        }
+
         if (!IsProductionScanReadyForArm())
         {
             State = "BO ĐANG CHUẨN BỊ";
@@ -6169,6 +6330,11 @@ public sealed class TestViewModel : ObservableObject
         // Chu kỳ mới có CancellationToken riêng. Khi đóng TestView/thoát app,
         // mọi delay/relay/đo còn chạy của chu kỳ cũ sẽ bị hủy trước cleanup board.
         CancellationToken cycleToken = BeginCycleOperations();
+
+        // New Production cycle owns a new presentation epoch. Any model-loading
+        // or Background snapshot queued before ARM is stale by definition.
+        AdvanceProductionUiCycleEpoch();
+        Volatile.Write(ref _latestEngineUiUpdateRequest, null);
 
         // Chu kỳ mới bắt đầu với trạng thái cảnh báo sạch.
         _cycleActive = !ioMappingMode && !_requireStartupIoClear && MasterApproved;
@@ -6208,7 +6374,6 @@ public sealed class TestViewModel : ObservableObject
         lock (_probePreviewGate)
             _pendingProductionProbePreview = null;
         Interlocked.Exchange(ref _probePresentationState, (int)ProbePresentationState.Inactive);
-        Interlocked.Exchange(ref _productionPresentationMode, (int)ProductionPresentationMode.Waiting);
         Interlocked.Increment(ref _ioMappingUiRevision);
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
@@ -6217,6 +6382,14 @@ public sealed class TestViewModel : ObservableObject
         // tự xác nhận Good/Bad Master. Context Master không được ghi production result.
         _engine.SetFrameProcessingEnabled(!ioMappingMode);
         _engine.Reset();
+        SetProductionRuntimeState(
+            ProductionRuntimeState.WaitingForProduct,
+            frameSequence: 0,
+            reason: "NEW_CYCLE_ARM");
+        SetProductionPresentationMode(
+            ProductionPresentationMode.Waiting,
+            frameSequence: 0,
+            reason: "NEW_CYCLE_ARM");
         if (ioMappingMode)
         {
             MasterApproved = true;
@@ -9475,10 +9648,29 @@ public sealed class TestViewModel : ObservableObject
         // Đổi mã hàng phải hủy sạch chu trình cũ trước khi thay _model; nếu
         // không một task PASS/FAIL cũ hoàn thành muộn có thể cộng sản lượng
         // nhầm sang mã hàng vừa chọn.
+        //
+        // IMPORTANT: invalidate presentation/runtime BEFORE touching TestEngine.
+        // A queued Dispatcher callback from the previous model must never be able
+        // to repaint ĐANG KIỂM TRA or old fault rows after the new model is chosen.
+        AdvanceProductionUiCycleEpoch();
+        Interlocked.Increment(ref _inlineProbeUiRevision);
+        Interlocked.Increment(ref _continuityPreviewUiRevision);
+        Volatile.Write(ref _latestEngineUiUpdateRequest, null);
+        SwitchRuntimeMode(RuntimeMode.Background);
+
         CancelCycleOperations();
         ResetManualProbeSession("model-change");
+        _engine.SetFrameProcessingEnabled(false);
         _cycleActive = false;
         SetProductionPhase(ProductionPhase.WaitingProduct);
+        SetProductionRuntimeState(
+            ProductionRuntimeState.WaitingForProduct,
+            frameSequence: 0,
+            reason: "MODEL_CHANGE");
+        SetProductionPresentationMode(
+            ProductionPresentationMode.Waiting,
+            frameSequence: 0,
+            reason: "MODEL_CHANGE");
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
         _waterProofEquipmentErrorAwaitingRemoval = false;
@@ -9524,6 +9716,17 @@ public sealed class TestViewModel : ObservableObject
         LifetimeTestCount = 0;
         ProbeCycleCount = 0;
         _pinsByIoLookup = _model.Pins.ToLookup(pin => pin.IoNumber);
+
+        // Clear previous model presentation synchronously. Engine model commit
+        // will rebuild its immutable topology, but waiting mode must stay visually
+        // empty until a fresh authoritative frame of the selected model arrives.
+        ResetProductPresentationCycle();
+        InvokeUi(() =>
+        {
+            MasterFaults.Clear();
+            SynchronizeFaultRows(Array.Empty<FaultRow>());
+            State = "CHỜ LẮP SẢN PHẨM";
+        });
 
         _sound.SetWiringFaultAlarm(false);
         long setModelStarted = Stopwatch.GetTimestamp();
