@@ -100,7 +100,12 @@ public sealed class TestViewModel : ObservableObject
     private readonly SemaphoreSlim _productionPersistenceGate = new(1, 1);
     private readonly SemaphoreSlim _removalPersistenceGate = new(1, 1);
     private readonly SemaphoreSlim _modelPersistenceGate = new(1, 1);
+    // Serialize scan reconciliation so rapid model changes cannot run two
+    // STOP/START capacity transitions in parallel. This gate never blocks the
+    // WPF thread synchronously; all callers await it.
+    private readonly SemaphoreSlim _productionScanEnsureGate = new(1, 1);
     private Task _modelPersistenceTask = Task.CompletedTask;
+    private Task _modelScanReconcileTask = Task.CompletedTask;
     private Task _probePersistenceTask = Task.CompletedTask;
     private Task _removalPersistenceTask = Task.CompletedTask;
     private Task _masterPersistenceTask = Task.CompletedTask;
@@ -1949,7 +1954,6 @@ public sealed class TestViewModel : ObservableObject
     private async Task EnsureContinuousProductionScanAsync()
     {
         if (_lifetimeCts.IsCancellationRequested ||
-            Volatile.Read(ref _hardwareReconfigurationActive) != 0 ||
             IsManualModeActive ||
             Volatile.Read(ref _probeSessionActive) != 0 ||
             Volatile.Read(ref _postContinuityStarted) != 0 ||
@@ -1959,37 +1963,71 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        // Không return chỉ vì firmware đang scan. Model có thể vừa đổi từ
-        // active=1 sang active=8 trong khi stream cũ vẫn đang chạy. ScanSupervisor
-        // so AppliedScanCapacity với requested capacity và chỉ STOP/START khi dải
-        // firmware thực sự cần đổi; cùng dải thì hoàn toàn reuse, không gửi lệnh.
-        BoardCapacity requestedCapacity = _board.Capacity;
-        BoardCapacity? appliedCapacity = _board.AppliedScanCapacity;
-        bool capacityTransition = appliedCapacity is null ||
-            appliedCapacity.StartScanParameter != requestedCapacity.StartScanParameter ||
-            appliedCapacity.TotalIoCapacity != requestedCapacity.TotalIoCapacity;
-        bool ownsReconfigurationGate = capacityTransition &&
-            Interlocked.CompareExchange(ref _hardwareReconfigurationActive, 1, 0) == 0;
-
-        if (ownsReconfigurationGate)
-        {
-            // Model-change capacity reopen is intentional. Put ScanSupervisor in
-            // Suspended before the transport stops so HardwareMonitor cannot
-            // interpret the controlled gap as a scan stall and start a second reopen.
-            _scanSupervisor.Suspend("ProductionReconfigure");
-        }
-
         try
         {
+            await _productionScanEnsureGate.WaitAsync(_lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        bool ownsReconfigurationGate = false;
+        try
+        {
+            // A Settings-driven reconfigure owns the hardware gate independently.
+            // Wait asynchronously instead of launching a second STOP/START on top
+            // of it. This is especially important when an operator changes model
+            // while the previous capacity transition is still finishing.
+            while (Volatile.Read(ref _hardwareReconfigurationActive) != 0 &&
+                   !_lifetimeCts.IsCancellationRequested)
+            {
+                await Task.Delay(20, _lifetimeCts.Token);
+            }
+
+            if (_lifetimeCts.IsCancellationRequested ||
+                IsManualModeActive ||
+                Volatile.Read(ref _probeSessionActive) != 0 ||
+                Volatile.Read(ref _postContinuityStarted) != 0 ||
+                Volatile.Read(ref _wiringFaultHandlingStarted) != 0 ||
+                !_board.IsConnected)
+            {
+                return;
+            }
+
+            // Model may have changed while this caller was waiting. Always read
+            // the current requested/applied capacity at the last responsible
+            // moment so a stale model task cannot reopen the old range.
+            BoardCapacity requestedCapacity = _board.Capacity;
+            BoardCapacity? appliedCapacity = _board.AppliedScanCapacity;
+            bool capacityTransition = appliedCapacity is null ||
+                appliedCapacity.StartScanParameter != requestedCapacity.StartScanParameter ||
+                appliedCapacity.TotalIoCapacity != requestedCapacity.TotalIoCapacity;
+
+            if (capacityTransition)
+            {
+                ownsReconfigurationGate =
+                    Interlocked.CompareExchange(ref _hardwareReconfigurationActive, 1, 0) == 0;
+                if (!ownsReconfigurationGate)
+                    return;
+
+                // Controlled model-capacity reopen is intentional. Suspend the
+                // supervisor before transport STOP so watchdog recovery cannot
+                // race this transition.
+                _scanSupervisor.Suspend("ProductionReconfigure");
+            }
+
             bool backgroundOnly = CurrentRuntimeMode == RuntimeMode.Background &&
                                   !_cycleActive &&
                                   !_waitForProductRelease &&
                                   !_waitForFaultProductRemoval;
             if (backgroundOnly)
                 _engine.SetFrameProcessingEnabled(false);
+
             bool started = await _scanSupervisor.EnsureProductionScanAsync(
                 _model?.MaxIo ?? 0,
                 _lifetimeCts.Token);
+
             if (backgroundOnly)
                 State = ReadyStateForCurrentModel();
             if (started)
@@ -2008,7 +2046,32 @@ public sealed class TestViewModel : ObservableObject
         {
             if (ownsReconfigurationGate)
                 Interlocked.Exchange(ref _hardwareReconfigurationActive, 0);
+            _productionScanEnsureGate.Release();
         }
+    }
+
+    private void ScheduleModelScanReconcile(int generation)
+    {
+        // Task.Yield lets the current model-selection command return first so the
+        // TestWindow can be created/rendered before any capacity STOP/START work.
+        _modelScanReconcileTask = ReconcileModelScanAsync(generation);
+    }
+
+    private async Task ReconcileModelScanAsync(int generation)
+    {
+        await Task.Yield();
+        if (_lifetimeCts.IsCancellationRequested ||
+            generation != Volatile.Read(ref _modelLoadGeneration) ||
+            !_board.IsConnected)
+        {
+            return;
+        }
+
+        long started = Stopwatch.GetTimestamp();
+        await EnsureContinuousProductionScanAsync();
+        AsyncFileLogService.Current.Performance(
+            $"MODEL_LOAD_PERF phase=SCAN_RECONCILE generation={generation} " +
+            $"duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
     }
 
     private async Task StartProductionScanAndVerifyFrameAsync(
@@ -2315,11 +2378,15 @@ public sealed class TestViewModel : ObservableObject
 
         _productionSettings.LastThtPartKey = JBZUniversalTester.Views.PartSelectionWindow.PartKey(model);
         SetModel(model, preparedEngineModel);
-        // SetModel chỉ đổi requested active range. Nếu firmware đang chạy dải của
-        // model trước, reconcile ngay tại đường load async trước khi MainWindow tự
-        // mở TestView. Healthy same-capacity stream được supervisor giữ nguyên.
+
+        // Navigation must not wait for a controlled D2XX capacity reopen. Return
+        // the selected model to MainWindow immediately so TestWindow can render;
+        // reconcile the scan asynchronously. StartProductionTestAsync has its own
+        // capacity-aware readiness gate and cannot ARM on the previous model's
+        // scan range. Same-capacity model changes therefore feel instantaneous.
         if (_board.IsConnected)
-            await EnsureContinuousProductionScanAsync();
+            ScheduleModelScanReconcile(generation);
+
         StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
         State = _board.IsConnected && !IsDeviceFault
             ? ReadyStateForCurrentModel()
@@ -2331,15 +2398,18 @@ public sealed class TestViewModel : ObservableObject
     public async Task<ProductModel?> LoadPreparedModelAsync(ProductModel model)
     {
         if (model is null) throw new ArgumentNullException(nameof(model));
-        Interlocked.Increment(ref _modelLoadGeneration);
+        int generation = Interlocked.Increment(ref _modelLoadGeneration);
         TestEngine.PreparedModelState prepared = await Task.Run(() =>
         {
             ModelFileIdentityService.Capture(model);
             return _engine.PrepareModel(model);
         });
+        if (generation != Volatile.Read(ref _modelLoadGeneration))
+            return null;
+
         SetModel(model, prepared);
         if (_board.IsConnected)
-            await EnsureContinuousProductionScanAsync();
+            ScheduleModelScanReconcile(generation);
         State = _board.IsConnected && !IsDeviceFault
             ? ReadyStateForCurrentModel()
             : "LỖI THIẾT BỊ";
@@ -2983,6 +3053,22 @@ public sealed class TestViewModel : ObservableObject
         }
 
         RefreshFaultsFromSnapshot(rowsSnapshot);
+
+        // Candidate WRONG/SHORT is available on the first authoritative frame.
+        // Surface that fact immediately without committing FAIL/relay/history;
+        // ProductionFaultConfirmationGate still owns the short debounce before
+        // TryBeginConfirmedWiringFaultHandling can finalize the fault.
+        ProductEvidenceSnapshot realtimeEvidence = _engine.GetProductEvidenceSnapshot();
+        if (_cycleActive &&
+            CurrentProductionPhase == ProductionPhase.Continuity &&
+            !_engine.HasWiringFault &&
+            (realtimeEvidence.WrongCandidateCount > 0 || realtimeEvidence.ShortCandidateCount > 0))
+        {
+            State = realtimeEvidence.ShortCandidateCount > 0
+                ? "ĐANG XÁC NHẬN CHẬP MẠCH..."
+                : "ĐANG XÁC NHẬN SAI DÂY...";
+        }
+
         LogFaultGate(generation);
         if (Volatile.Read(ref _firstLogicalStateLogged) != 0 &&
             Interlocked.CompareExchange(ref _firstUiUpdateRenderedLogged, 1, 0) == 0)
@@ -3080,24 +3166,31 @@ public sealed class TestViewModel : ObservableObject
         // Chỉ khi không có lỗi mới cập nhật trạng thái lắp sản phẩm.
         if (_cycleActive)
         {
-            bool hasActivity = rowsSnapshot?.Electrical.ProductEvidence ??
-                               _engine.HasProductActivity;
+            ProductionElectricalSnapshot activitySnapshot =
+                rowsSnapshot?.Electrical ?? _engine.GetProductionElectricalSnapshot();
+            bool realtimeActivity = activitySnapshot.RealtimeEvaluationEnabled;
+            bool confirmedPresence = activitySnapshot.ProductEvidence;
 
-            if (hasActivity)
+            // Operator feedback must react on the first model-related edge; do
+            // not make the UI wait for the 2-frame lifecycle confirmation.
+            if (realtimeActivity &&
+                !State.Equals("PASS", StringComparison.OrdinalIgnoreCase))
             {
-                if (!_productDetectedThisCycle)
-                {
-                    _cycleStartedAt = DateTime.Now;
-                    RecordProbeCycleStarted();
-                }
-                _productDetectedThisCycle = true;
-                if (!State.Equals("PASS", StringComparison.OrdinalIgnoreCase))
-                    State = "ĐANG KIỂM TRA...";
+                State = "ĐANG KIỂM TRA...";
             }
-            else if (_productDetectedThisCycle)
+
+            // ProbeCounter/cycle ownership still starts only after confirmed
+            // presence. This keeps touch/noise from inflating maintenance counts.
+            if (confirmedPresence && !_productDetectedThisCycle)
             {
-                // Không suy diễn "mất hết activity" thành OPEN product.
-                // Confirmation gate sẽ phân nhánh contact warning/re-evaluation.
+                _cycleStartedAt = DateTime.Now;
+                _productDetectedThisCycle = true;
+                RecordProbeCycleStarted();
+            }
+            else if (!realtimeActivity && _productDetectedThisCycle)
+            {
+                // One transient loss does not reset the cycle; the engine's
+                // two-frame removal confirmation owns the actual release.
                 State = "TIẾP XÚC JIG/PROBE KHÔNG ỔN ĐỊNH — KIỂM TRA PROBE PIN/JIG";
             }
         }
@@ -3127,7 +3220,8 @@ public sealed class TestViewModel : ObservableObject
             !_waitForFaultProductRemoval &&
             !IsProductRemovalPending;
 
-        bool hasEvidence = electrical.ProductEvidence;
+        bool confirmedPresence = electrical.ProductEvidence;
+        bool realtimePresence = electrical.RealtimeEvaluationEnabled;
         ProductionRuntimeState runtimeState = phase switch
         {
             ProductionPhase.WaitingProduct => ProductionRuntimeState.WaitingForProduct,
@@ -3137,15 +3231,20 @@ public sealed class TestViewModel : ObservableObject
             ProductionPhase.Resistance or ProductionPhase.WaterProof or ProductionPhase.Completed =>
                 ProductionRuntimeState.PassSequence,
             _ when electrical.HasConfirmedWiringFault => ProductionRuntimeState.Failed,
-            _ when hasEvidence => ProductionRuntimeState.TestingRealtime,
+            // UI/presentation reacts on the first model-related electrical edge.
+            // Confirmed ProductEvidence remains the gate for ProbeCounter/result
+            // lifecycle, so unrelated board noise still cannot create a cycle.
+            _ when realtimePresence => ProductionRuntimeState.TestingRealtime,
             _ => ProductionRuntimeState.WaitingForProduct
         };
 
         string reason = electrical.HasConfirmedWiringFault
             ? "CONFIRMED_WIRING_FAULT"
-            : hasEvidence
-                ? "PRODUCT_EVIDENCE"
-                : "NO_PRODUCT_EVIDENCE";
+            : confirmedPresence
+                ? "PRODUCT_EVIDENCE_CONFIRMED"
+                : realtimePresence
+                    ? "PRODUCT_EVIDENCE_REALTIME"
+                    : "NO_PRODUCT_EVIDENCE";
 
         SetProductionRuntimeState(runtimeState, electrical.FrameSequence, reason);
         SetProductionPresentationMode(
@@ -3159,9 +3258,7 @@ public sealed class TestViewModel : ObservableObject
             return;
 
         State = runtimeState == ProductionRuntimeState.TestingRealtime
-            ? hasEvidence
-                ? "ĐANG KIỂM TRA..."
-                : "TIẾP XÚC JIG/PROBE KHÔNG ỔN ĐỊNH — ĐANG XÁC NHẬN"
+            ? "ĐANG KIỂM TRA..."
             : "CHỜ LẮP SẢN PHẨM";
     }
 
@@ -4225,7 +4322,7 @@ public sealed class TestViewModel : ObservableObject
             _waitForFaultProductRemoval ||
             CurrentProductionPhase != ProductionPhase.Continuity ||
             !IsProductionFaultContext(generation) ||
-            !_engine.GetProductionElectricalSnapshot().ProductEvidence ||
+            !_engine.GetProductionElectricalSnapshot().RealtimeEvaluationEnabled ||
             Interlocked.CompareExchange(ref _productStartSoundPlayed, 1, 0) != 0)
         {
             return;
@@ -5881,7 +5978,14 @@ public sealed class TestViewModel : ObservableObject
     private bool IsProductionScanReadyForArm()
     {
         ScanHealthSnapshot health = _scanSupervisor.HealthSnapshot;
+        BoardCapacity requested = _board.Capacity;
+        BoardCapacity? applied = _board.AppliedScanCapacity;
+        bool capacityReady = applied is not null &&
+                             applied.StartScanParameter == requested.StartScanParameter &&
+                             applied.TotalIoCapacity == requested.TotalIoCapacity;
+
         return Volatile.Read(ref _hardwareReconfigurationActive) == 0 &&
+               capacityReady &&
                _board.IsConnected &&
                _board.IsScanning &&
                _board.CurrentScanMode == BoardScanMode.Production &&
@@ -9443,7 +9547,7 @@ public sealed class TestViewModel : ObservableObject
         // Đồng bộ model lên MainWindow ngay cả khi model được tự nạp lúc startup.
         // Đồng thời lưu ngay lựa chọn model; không chờ tới lúc bắt đầu test.
         _main.Model = model;
-        _main.Home.Refresh();
+        ScheduleHomeRefresh();
         ScheduleSelectedModelPersistence(CurrentModelPath);
 
         Raise(nameof(ModelName));
@@ -9553,6 +9657,27 @@ public sealed class TestViewModel : ObservableObject
             AsyncFileLogService.Current.Performance(
                 $"NETWORK name=\"{net.Name}\" ios=[{ios}] endpoints=[{endpoints}]");
         }
+    }
+
+    private void ScheduleHomeRefresh()
+    {
+        System.Windows.Threading.Dispatcher? dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished)
+        {
+            _main.Home.Refresh();
+            return;
+        }
+
+        // Never hold model selection/navigation behind a potentially expensive
+        // Home refresh. The model properties are already committed; refresh the
+        // home screen at Background priority after TestWindow gets a render slot.
+        _ = dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() =>
+            {
+                if (!_lifetimeCts.IsCancellationRequested)
+                    _main.Home.Refresh();
+            }));
     }
 
     private void ScheduleStatisticsLoadForModel(ProductModel model)
@@ -10548,13 +10673,15 @@ public sealed class TestViewModel : ObservableObject
         else
         {
             bool masterCycleActive = !MasterApproved && IsMasterSequenceActive;
-            bool hasProductEvidence = rowsSnapshot?.Electrical.ProductEvidence ??
-                                      _engine.HasProductActivity;
+            ProductionElectricalSnapshot presentationElectrical =
+                rowsSnapshot?.Electrical ?? _engine.GetProductionElectricalSnapshot();
+            bool hasProductEvidence = presentationElectrical.ProductEvidence;
+            bool hasRealtimeModelEvidence = presentationElectrical.RealtimeEvaluationEnabled;
             bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
             if (!_presentationCycleStarted &&
                 (_cycleActive || masterCycleActive) &&
                 !probeOwnsPresentation &&
-                hasProductEvidence)
+                hasRealtimeModelEvidence)
             {
                 _presentationCycleStarted = true;
                 RaiseCenterPresentation();

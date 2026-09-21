@@ -1296,6 +1296,11 @@ public sealed class TestEngine : IDisposable
             }
 
             bool hasProductActivity = HasProductActivityUnsafe(model);
+            bool hasExpectedSourceCoverage = HasExpectedSourceCoverageUnsafe(model);
+            bool allExpectedConnectionsPresent =
+                _expectedConnectionScratch.Count > 0 &&
+                _expectedConnectionScratch.Values.All(static connected => connected);
+
             if (_lastFrameScanGeneration != 0 &&
                 frame.ScanGeneration != _lastFrameScanGeneration)
             {
@@ -1308,11 +1313,25 @@ public sealed class TestEngine : IDisposable
             if (hasProductActivity)
             {
                 _productRemovalCandidateFrames = 0;
-                _productPresenceCandidateFrames = Math.Min(
-                    ProductPresenceConfirmationFrames,
-                    _productPresenceCandidateFrames + 1);
-                if (_productPresenceCandidateFrames >= ProductPresenceConfirmationFrames)
+
+                // Fast path: a complete authoritative frame that already contains
+                // the full expected topology is itself strong product evidence.
+                // Do not make PASS wait one extra scan frame only to satisfy the
+                // generic 2-frame presence debounce. Ambiguous/partial/wrong
+                // activity still uses the normal confirmation frames below.
+                if (allExpectedConnectionsPresent)
+                {
+                    _productPresenceCandidateFrames = ProductPresenceConfirmationFrames;
                     _confirmedProductPresence = true;
+                }
+                else
+                {
+                    _productPresenceCandidateFrames = Math.Min(
+                        ProductPresenceConfirmationFrames,
+                        _productPresenceCandidateFrames + 1);
+                    if (_productPresenceCandidateFrames >= ProductPresenceConfirmationFrames)
+                        _confirmedProductPresence = true;
+                }
             }
             else
             {
@@ -1323,10 +1342,6 @@ public sealed class TestEngine : IDisposable
                 if (_productRemovalCandidateFrames >= ProductRemovalConfirmationFrames)
                     _confirmedProductPresence = false;
             }
-            bool hasExpectedSourceCoverage = HasExpectedSourceCoverageUnsafe(model);
-            bool allExpectedConnectionsPresent =
-                _expectedConnectionScratch.Count > 0 &&
-                _expectedConnectionScratch.Values.All(static connected => connected);
             _hasExpectedSourceCoverage = hasExpectedSourceCoverage;
             // Một cạnh continuity là hai chiều. Một số bo Htdrv phát đầu THT
             // canonical ở phía source, trong khi bo khác phát chính cạnh đó theo
