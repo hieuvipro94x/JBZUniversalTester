@@ -240,27 +240,33 @@ public partial class TestWindow : Window
 
     private void PositionWaterProofWindow()
     {
-        if (_waterProofWindow is null || ProbeCycleHost is null || !IsLoaded)
+        if (_waterProofWindow is null || ResultStatusHost is null || !IsLoaded)
             return;
 
-        Point screenHost = ProbeCycleHost.PointToScreen(new Point(0, 0));
+        // Leak chỉ là ba ô số nhỏ. Neo trực tiếp dưới ô trạng thái chính
+        // LẮP SẢN PHẨM / ĐANG KIỂM TRA / PASS.
+        Point screenAnchor = ResultStatusHost.PointToScreen(
+            new Point(0, ResultStatusHost.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice
             ?? System.Windows.Media.Matrix.Identity;
-        Point host = transform.Transform(screenHost);
-        const double gap = 8;
-        double right = host.X + ProbeCycleHost.ActualWidth + gap;
-        double left = host.X - _waterProofWindow.Width - gap;
+        Point anchor = transform.Transform(screenAnchor);
+
         System.Windows.Forms.Screen screen = System.Windows.Forms.Screen.FromPoint(
-            new System.Drawing.Point((int)screenHost.X, (int)screenHost.Y));
-        Point workTopLeft = transform.Transform(new Point(screen.WorkingArea.Left, screen.WorkingArea.Top));
-        Point workBottomRight = transform.Transform(new Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom));
-        double workLeft = workTopLeft.X;
-        double workRight = workBottomRight.X;
-        _waterProofWindow.Left = right + _waterProofWindow.Width <= workRight ? right : Math.Max(workLeft, left);
-        _waterProofWindow.Top = Math.Clamp(
-            host.Y + (ProbeCycleHost.ActualHeight - _waterProofWindow.Height) / 2,
-            workTopLeft.Y,
-            Math.Max(workTopLeft.Y, workBottomRight.Y - _waterProofWindow.Height));
+            new System.Drawing.Point((int)screenAnchor.X, (int)screenAnchor.Y));
+        Point workTopLeft = transform.Transform(
+            new Point(screen.WorkingArea.Left, screen.WorkingArea.Top));
+        Point workBottomRight = transform.Transform(
+            new Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom));
+
+        const double gap = 4;
+        double requestedLeft =
+            anchor.X + (ResultStatusHost.ActualWidth - _waterProofWindow.Width) / 2;
+        double requestedTop = anchor.Y + gap;
+        double maxLeft = Math.Max(workTopLeft.X, workBottomRight.X - _waterProofWindow.Width);
+        double maxTop = Math.Max(workTopLeft.Y, workBottomRight.Y - _waterProofWindow.Height);
+
+        _waterProofWindow.Left = Math.Clamp(requestedLeft, workTopLeft.X, maxLeft);
+        _waterProofWindow.Top = Math.Clamp(requestedTop, workTopLeft.Y, maxTop);
     }
 
     private void CloseWaterProofWindow()

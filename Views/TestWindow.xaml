@@ -692,7 +692,7 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0"
+                <Border x:Name="ResultStatusHost" Grid.Column="0"
                         Height="150"
                         VerticalAlignment="Top"
                         Background="{Binding StateBackground}"

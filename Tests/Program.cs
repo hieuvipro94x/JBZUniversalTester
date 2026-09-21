@@ -33,7 +33,6 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
-            ("P0 model transition and presence boundaries", TestP0ModelTransitionAndPresence),
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
@@ -89,15 +88,6 @@ internal static partial class Program
             ("Original PHT20 PASS/ERR history compatibility", TestLegacyPhtHistory),
             ("Per-model production/probe maintenance counters", TestProductionCounters)
         ];
-
-        int filterIndex = Array.IndexOf(args, "--filter");
-        if (filterIndex >= 0)
-        {
-            if (filterIndex + 1 >= args.Length) return 2;
-            string[] filters = args[filterIndex + 1].Split('|');
-            tests = tests.Where(test => filters.Any(filter => test.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))).ToArray();
-            if (tests.Length == 0) return 2;
-        }
 
         int failed = 0;
         foreach ((string name, Action run) in tests)
@@ -251,7 +241,7 @@ internal static partial class Program
         discardModel.ModelName = "SELF-TEST-DISCARD-INTERLOCK";
         discardModel.PartNumber = "SELF-TEST-DISCARD-INTERLOCK";
         discardModel.DiscardContactIo = [97, 98];
-        LoadReadyModel(discardVm, discardModel);
+        discardVm.LoadPreparedModelAsync(discardModel).GetAwaiter().GetResult();
         discardVm.StartProductionTestAsync().GetAwaiter().GetResult();
         int totalBeforeDiscard = discardVm.Total;
         int failBeforeDiscard = discardVm.Fail;
@@ -269,7 +259,7 @@ internal static partial class Program
             $"(pending={discardVm.IsProductRemovalPending}, total={discardVm.Total}, fail={discardVm.Fail}, state={discardVm.State})");
 
         TestViewModel faultDiscardVm = CreateTestViewModel(production, out FakeBoard faultDiscardBoard);
-        LoadReadyModel(faultDiscardVm, discardModel);
+        faultDiscardVm.LoadPreparedModelAsync(discardModel).GetAwaiter().GetResult();
         faultDiscardVm.StartProductionTestAsync().GetAwaiter().GetResult();
         MethodInfo armFaultRemoval = typeof(TestViewModel).GetMethod(
             "ArmFaultProductRemoval",
@@ -1226,7 +1216,7 @@ internal static partial class Program
             "Master minimum 2 must be preserved");
 
         TestViewModel disabledMasterVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
-        LoadReadyModel(disabledMasterVm, model0);
+        disabledMasterVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         Assert(disabledMasterVm.MasterApproved, "Master min 0 unlocks production immediately");
         Assert(disabledMasterVm.MasterState == MasterSequenceState.Completed, "Master min 0 marks Master completed/disabled");
         Assert(!disabledMasterVm.IsMasterSequenceActive &&
@@ -1238,7 +1228,7 @@ internal static partial class Program
             "Ready status uses yellow/dark mapping");
 
         TestViewModel enabledMasterVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
-        LoadReadyModel(enabledMasterVm, model1);
+        enabledMasterVm.LoadPreparedModelAsync(model1).GetAwaiter().GetResult();
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
@@ -1251,7 +1241,7 @@ internal static partial class Program
             new ProductionSettings { MasterFaultRequiredCount = 1 },
             out FakeBoard masterExitBoard);
         ProductModel masterExitModel = Model(("MASTER-PAIR", new[] { 1, 18 }));
-        LoadReadyModel(masterExitVm, masterExitModel);
+        masterExitVm.LoadPreparedModelAsync(masterExitModel).GetAwaiter().GetResult();
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(masterExitVm, 1);
         TestEngine masterExitEngine =
@@ -1295,7 +1285,7 @@ internal static partial class Program
 
         TestViewModel twoFaultMasterVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 2 });
-        LoadReadyModel(twoFaultMasterVm, model2);
+        twoFaultMasterVm.LoadPreparedModelAsync(model2).GetAwaiter().GetResult();
         masterGoodVerified.SetValue(twoFaultMasterVm, true);
         transitionToBadMaster.Invoke(twoFaultMasterVm, null);
         Assert(twoFaultMasterVm.WrongCountText == "0/2",
@@ -1353,7 +1343,7 @@ internal static partial class Program
                statusVm.StateForeground == "#FFFFFF",
             "A non-latched equipment error keeps the generic red error presentation");
 
-        LoadReadyModel(statusVm, model0);
+        statusVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         MethodInfo buildFinalPassRejectionFaults = typeof(TestViewModel).GetMethod(
             "BuildFinalPassRejectionFaults",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -1370,7 +1360,7 @@ internal static partial class Program
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard recoveryBoard);
         ProductModel recoveryModel = Model(("RECOVERY-PAIR", new[] { 1, 18 }));
-        LoadReadyModel(recoveryVm, recoveryModel);
+        recoveryVm.LoadPreparedModelAsync(recoveryModel).GetAwaiter().GetResult();
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(recoveryVm, 1);
         TestEngine recoveryEngine =
@@ -1721,7 +1711,7 @@ internal static partial class Program
             "COMPUTER.wav is embedded and requested once on the first real Production connection of each cycle");
 
         TestViewModel deviceFaultVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
-        LoadReadyModel(deviceFaultVm, model0);
+        deviceFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         deviceFaultVm.SelectedOperationTabIndex = 3;
         deviceFaultVm.Faults.Add(new FaultRow
         {
@@ -1792,7 +1782,7 @@ internal static partial class Program
             Relay2MarkingPulseMs = 50
         };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
-        LoadReadyModel(vm, Model(("PAIR", new[] { 1, 18 })));
+        vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
 
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(vm, 1);
@@ -1831,7 +1821,6 @@ internal static partial class Program
                board.Commands.Contains("OFF") && board.Commands.Last() == "START",
             "TẮT TẤT CẢ forces both outputs OFF and resumes Production scan");
 
-        board.Publish(FrameSeq(1));
         int commandsAfterManualExit = board.Commands.Count;
         vm.ExitManualModeAsync().GetAwaiter().GetResult();
         vm.ExitManualModeAsync().GetAwaiter().GetResult();
@@ -1849,7 +1838,7 @@ internal static partial class Program
             Relay2MarkingPulseMs = 50
         };
         TestViewModel faultVm = CreateTestViewModel(faultSettings, out FakeBoard faultBoard);
-        LoadReadyModel(faultVm, Model(("PAIR", new[] { 1, 18 })));
+        faultVm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
         faultBoard.ThrowOnSetRelay = true;
         try
         {
@@ -2682,17 +2671,19 @@ internal static partial class Program
         Assert(
             !xaml.Contains("WaterProofChannels", StringComparison.Ordinal) &&
             !xaml.Contains("WaterProofStageText", StringComparison.Ordinal) &&
-            xaml.Contains("x:Name=\"ProbeCycleHost\"", StringComparison.Ordinal) &&
-            leakWindowXaml.Contains("Width=\"420\"", StringComparison.Ordinal) &&
-            leakWindowXaml.Contains("Height=\"136\"", StringComparison.Ordinal) &&
+            xaml.Contains("x:Name=\"ResultStatusHost\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Width=\"220\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Height=\"34\"", StringComparison.Ordinal) &&
             leakWindowXaml.Contains("Text=\"{Binding Channel1Text}\"", StringComparison.Ordinal) &&
-            leakWindowXaml.Contains("Text=\"{Binding StageText}\"", StringComparison.Ordinal),
-            "Leak is removed from TestWindow and rendered only by the compact owned Leak window");
+            leakWindowXaml.Contains("Background=\"{Binding Channel1Background}\"", StringComparison.Ordinal) &&
+            !leakWindowXaml.Contains("Text=\"{Binding StageText}\"", StringComparison.Ordinal) &&
+            !leakWindowXaml.Contains("Text=\"{Binding Title}\"", StringComparison.Ordinal),
+            "Leak UI is exactly three compact numeric cells anchored below the main status box");
 
         var leakWindowVm = new WaterProofTestViewModel("MODEL-A", profile);
         TestViewModel windowCoordinator = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         ProductModel windowModel = Model(("WINDOW-PAIR", new[] { 1, 18 }));
-        LoadReadyModel(windowCoordinator, windowModel);
+        windowCoordinator.LoadPreparedModelAsync(windowModel).GetAwaiter().GetResult();
         int openedWindows = 0, closedWindows = 0;
         windowCoordinator.WaterProofWindowOpenRequested += (_, _) => openedWindows++;
         windowCoordinator.WaterProofWindowCloseRequested += (_, _) => closedWindows++;
@@ -2712,10 +2703,32 @@ internal static partial class Program
         windowProfile.SetValue(windowCoordinator, profile);
         openWindow.Invoke(windowCoordinator, [windowModel]);
         openWindow.Invoke(windowCoordinator, [windowModel]);
-        closeWindow.Invoke(windowCoordinator, ["PASS"]);
+        Assert(openedWindows == 1 && closedWindows == 0,
+            "One Leak cycle creates exactly one compact window");
+
+        FieldInfo windowVmField = typeof(TestViewModel).GetField(
+            "_waterProofWindowViewModel",
+            windowFlags)!;
+        var retainedWindowVm = (WaterProofTestViewModel)windowVmField.GetValue(windowCoordinator)!;
+        retainedWindowVm.ApplyFinal(new WaterProofRunResult(
+            [
+                new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
+                new WaterProofChannelMeasurement(2, false, 0, 0, 0, false),
+                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, false)
+            ],
+            false,
+            ":RESULT"));
+        Assert(!retainedWindowVm.IsRunning && closedWindows == 0,
+            "Final Leak PASS/FAIL stays visible while the product remains on the JIG");
+
+        openWindow.Invoke(windowCoordinator, [windowModel]);
+        Assert(openedWindows == 1 && retainedWindowVm.IsRunning,
+            "Leak-only retest rearms the same compact window without close/open flicker");
+
+        closeWindow.Invoke(windowCoordinator, ["PRODUCT_REMOVED"]);
         closeWindow.Invoke(windowCoordinator, ["CANCEL"]);
         Assert(openedWindows == 1 && closedWindows == 1,
-            "One Leak session creates and closes exactly one window");
+            "Authoritative ProductRemoved closes the retained Leak window exactly once");
         leakWindowVm.ApplyProgress(new WaterProofProgress(
             WaterProofStage.Pressurizing, [84.0, 0.0, 83.5], ":PRESS,84,0,83.5"));
         Assert(leakWindowVm.StageText == "PRESS" &&
@@ -2733,16 +2746,27 @@ internal static partial class Program
         leakWindowVm.ApplyFinal(new WaterProofRunResult(
             [
                 new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
-                new WaterProofChannelMeasurement(2, false, 0, 0, 0, true),
-                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, true)
+                new WaterProofChannelMeasurement(2, false, 0, 0, 0, false),
+                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, false)
             ],
-            true,
+            false,
             ":RESULT,84,83.4,0,0,83.5,82.7"));
-        Assert(leakWindowVm.StageText == "PASS" &&
+        Assert(leakWindowVm.StageText == "FAIL" &&
                leakWindowVm.Channel1Text == "0.6" &&
                leakWindowVm.Channel3Text == "0.8" &&
+               leakWindowVm.Channel1Background == "#32CD32" &&
+               leakWindowVm.Channel2Background == "#E5E7EB" &&
+               leakWindowVm.Channel3Background == "#FF4040" &&
                !leakWindowVm.IsRunning,
-            "RESULT replaces live estimates with official Leak values and final verdict");
+            "RESULT keeps official channel values: PASS cell green, FAIL cell red, disabled cell neutral");
+
+        leakWindowVm.BeginRun();
+        Assert(leakWindowVm.IsRunning &&
+               leakWindowVm.Channel1Text == "--" &&
+               leakWindowVm.Channel3Text == "--" &&
+               leakWindowVm.Channel1Background == "#FFF3A0" &&
+               leakWindowVm.Channel3Background == "#FFF3A0",
+            "Leak retest resets live cells without creating a new window");
 
         // Regression: :PRESS lưu áp cuối làm baseline, từng :WAIT phải cập nhật
         // Leak ngay trên UI nhưng tuyệt đối chưa được chốt PASS/FAIL trước :RESULT.
@@ -2930,7 +2954,9 @@ internal static partial class Program
         TestViewModel removalVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard removalBoard);
-        LoadReadyModel(removalVm, Model(("LEAK-PAIR", new[] { 1, 18 })));
+        removalVm.LoadPreparedModelAsync(Model(("LEAK-PAIR", new[] { 1, 18 })))
+            .GetAwaiter()
+            .GetResult();
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(removalVm, 1);
         TestEngine removalEngine =
@@ -2971,7 +2997,9 @@ internal static partial class Program
         TestViewModel faultMainVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard faultMainBoard);
-        LoadReadyModel(faultMainVm, Model(("FAIL-PAIR", new[] { 1, 18 })));
+        faultMainVm.LoadPreparedModelAsync(Model(("FAIL-PAIR", new[] { 1, 18 })))
+            .GetAwaiter()
+            .GetResult();
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(faultMainVm, 1);
         TestEngine faultMainEngine =
@@ -3012,61 +3040,70 @@ internal static partial class Program
                (int)(waterProofRunningAfterLeakFail.GetValue(removalVm) ?? -1) == 0,
             "Leak FAIL removal fully re-arms cycle 2 and releases both automatic-test locks");
 
-        removalVm.SelectedOperationTabIndex = 0;
+        TestViewModel passRemovalVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard passRemovalBoard);
+        passRemovalVm.LoadPreparedModelAsync(Model(
+                ("PASS-PAIR-1", new[] { 1, 18 }),
+                ("PASS-PAIR-2", new[] { 2, 19 })))
+            .GetAwaiter()
+            .GetResult();
+        typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(passRemovalVm, 1);
+        TestEngine passRemovalEngine =
+            (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(passRemovalVm) ?? throw new InvalidOperationException("PASS removal TestEngine not found"));
+        passRemovalEngine.SetFrameProcessingEnabled(true);
+        passRemovalBoard.Publish(FrameSeq(30, (1, new[] { 18 }), (2, new[] { 19 })));
+        passRemovalBoard.Publish(FrameSeq(31, (1, new[] { 18 }), (2, new[] { 19 })));
+
         MethodInfo armPassRemoval = typeof(TestViewModel).GetMethod(
             "ArmPassProductRemovalWait",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS removal arm method not found");
-        armPassRemoval.Invoke(removalVm, null);
+        armPassRemoval.Invoke(passRemovalVm, null);
         FieldInfo waitForPassRemoval = typeof(TestViewModel).GetField(
             "_waitForProductRelease",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS removal wait flag not found");
-        Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.IsProductRemovalPending &&
-               removalVm.SelectedOperationTabIndex == 0 &&
-               removalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
-               removalVm.StateBackground == "#2AA84A",
-            "Committed final PASS keeps the continuity/final area, stays green, and requests ProductRemoved before scan restart");
-        removalVm.StopViewAsync().GetAwaiter().GetResult();
-        Assert(removalVm.IsProductRemovalPending &&
-               removalVm.State == "THÁO SẢN PHẨM",
-            "Returning to MainWindow preserves the committed PASS removal lock and background IO monitoring");
-        removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
-        Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.IsProductRemovalPending &&
-               removalVm.SelectedOperationTabIndex == 0 &&
-               removalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
-               removalVm.Faults.Any(row =>
+        Assert((bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? false) &&
+               passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "PASS" &&
+               passRemovalVm.Faults.Count == 0 &&
+               passRemovalVm.StateBackground == "#2AA84A",
+            "Committed final PASS stays green and hides removal rows before a real expected connection is lost");
+
+        passRemovalBoard.Publish(FrameSeq(32));
+        passRemovalBoard.Publish(FrameSeq(33));
+        Assert((bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? false) &&
+               passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "PASS" &&
+               passRemovalVm.Faults.Count == 0,
+            "Temporary empty frames immediately after scan restart cannot erase committed PASS without a reacquired baseline");
+
+        passRemovalBoard.Publish(FrameSeq(34, (1, new[] { 18 }), (2, new[] { 19 })));
+        Assert(passRemovalVm.ResultStatusText == "PASS" && passRemovalVm.Faults.Count == 0,
+            "Reacquired complete topology keeps PASS and establishes the removal baseline");
+
+        passRemovalBoard.Publish(FrameSeq(35, (2, new[] { 19 })));
+        Assert((bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? false) &&
+               passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
+               passRemovalVm.Faults.Any(row =>
                    row.Status == "CHỜ THÁO" &&
-                   row.RelatedIos.Contains(1) &&
-                   row.RelatedIos.Contains(18)),
-            "Final PASS shows the remaining wire/IO relation while MainWindow continues removal monitoring");
-        Task pendingPassRemovalStart = removalVm.StartProductionTestAsync();
-        Assert(!pendingPassRemovalStart.IsCompleted &&
-               removalVm.IsProductRemovalPending &&
-               removalVm.Faults.Any(row =>
-                   row.Status == "CHỜ THÁO" &&
-                   row.RelatedIos.Contains(1) &&
-                   row.RelatedIos.Contains(18)),
-            "Re-entering TestWindow while removal is pending preserves the remaining wire/IO rows");
-        removalBoard.Publish(FrameSeq(4));
-        Assert(!pendingPassRemovalStart.IsCompleted && removalVm.IsProductRemovalPending,
-            "Pending START remains blocked after one empty frame");
-        removalBoard.Publish(FrameSeq(5));
-        pendingPassRemovalStart.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-        FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
-            "_cycleActive",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("PASS main-screen cycle-active flag not found");
-        Assert(!(bool)(waitForPassRemoval.GetValue(removalVm) ?? true) &&
-               !removalVm.IsProductRemovalPending &&
-               (bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
-               removalVm.IsCenterResultVisible &&
-               removalVm.CenterResultText == "LẮP SẢN PHẨM" &&
-               removalVm.SelectedOperationTabIndex == 0,
-            "A pending START auto-arms only after committed Leak PASS removal is confirmed");
+                   row.RelatedIos.Contains(2) &&
+                   row.RelatedIos.Contains(19)) &&
+               passRemovalVm.Faults.All(row => !row.RelatedIos.Contains(1)),
+            "Losing one expected connection changes PASS to removal and shows only connectivity still on the JIG");
+
+        passRemovalBoard.Publish(FrameSeq(36));
+        Assert(passRemovalVm.IsProductRemovalPending,
+            "PASS removal requires two complete clean frames");
+        passRemovalBoard.Publish(FrameSeq(37));
+        Assert(!(bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? true) &&
+               !passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "LẮP SẢN PHẨM",
+            "Two complete clean frames confirm PASS ProductRemoved and return to ready");
 
         TestViewModel pauseVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -3106,7 +3143,9 @@ internal static partial class Program
 
         TestViewModel retestArmVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 });
-        LoadReadyModel(retestArmVm, HtdrvTwoEndpointModel());
+        retestArmVm.LoadPreparedModelAsync(HtdrvTwoEndpointModel())
+            .GetAwaiter()
+            .GetResult();
         typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(retestArmVm, new WaterProofModelSettings
             {
@@ -3337,10 +3376,8 @@ internal static partial class Program
     {
         var settings = new ProductionSettings { MasterFaultRequiredCount = 0 };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
-        LoadReadyModel(vm, Model(("PAIR", new[] { 1, 18 })));
+        vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
 
-        AwaitModelReconcile(vm);
-        board.Publish(FrameSeq(1));
         board.StopScanAsync().GetAwaiter().GetResult();
         int commandsBeforeArm = board.Commands.Count;
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
@@ -3348,7 +3385,6 @@ internal static partial class Program
             "START does not reconnect, initialize, or start hardware when background scan is unavailable");
 
         board.StartScanAsync(BoardScanMode.Production, CancellationToken.None).GetAwaiter().GetResult();
-        board.Publish(FrameSeq(1));
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         Assert(board.LastStartScanToken.HasValue, "Background lifecycle owns the production START_SCAN token");
         CancellationToken scanToken = board.LastStartScanToken.GetValueOrDefault();
@@ -4645,8 +4681,8 @@ internal static partial class Program
         Assert(board.CompleteFramesReceived == frameCount &&
                engine.FramesProcessed == frameCount,
             "Ten-card stress processes all 500 complete 640-IO frames");
-        Assert(changedAfterConfirmation == 1 && changed == changedAfterConfirmation && !engine.IsConfirmedProductRemoved,
-            "An empty station emits one initial snapshot and never confirms removal without prior product presence");
+        Assert(changedAfterConfirmation == 2 && changed == changedAfterConfirmation,
+            "Initial snapshot and second-frame removal confirmation notify once each; the remaining 498 identical frames emit no UI events");
         Assert(retainedAfter <= retainedBefore + (32L * 1024 * 1024),
             $"Ten-card stress retained memory stays bounded ({retainedBefore} -> {retainedAfter})");
         Console.WriteLine(

@@ -1,0 +1,31 @@
+Rà soát và sửa TỐI THIỂU lỗi lifecycle PASS/FAIL → tháo sản phẩm trong source hiện tại. Không audit toàn project, không đọc file dài toàn bộ, dùng rg rồi chỉ mở đúng đoạn liên quan.
+
+Tập trung:
+- ViewModels/TestViewModel.cs
+- Services/TestEngine.cs chỉ đọc/sửa nếu thật sự cần
+- Tests/Program.cs chỉ thêm/sửa test bắt buộc.
+
+Yêu cầu:
+1. Leak FAIL: nếu sản phẩm đã được xác nhận trước Leak rồi, sau FAIL + restart scan chỉ cần 2 complete clean frames liên tiếp là ProductRemoved; KHÔNG được bắt thấy/chập IO lại.
+2. PASS: sau continuity/Leak PASS, nếu sản phẩm còn nguyên trên JIG thì giữ nguyên trạng thái PASS và 3 ô Leak; KHÔNG hiện RET1/RETxx.
+3. Chỉ khi mất ít nhất 1 expected connection mới đổi sang "THÁO SẢN PHẨM" và lúc đó mới hiển thị các connection còn lại trên JIG.
+4. Khi toàn bộ connectivity mất đủ 2 complete clean frames liên tiếp → ProductRemoved → đóng Leak UI → về "CHỜ LẮP SẢN PHẨM".
+5. Frame rỗng tạm ngay sau relay/scan restart KHÔNG được làm PASS biến mất. Dùng state/baseline đúng, không Thread.Sleep.
+6. Không làm thay đổi PASS/FAIL criteria, Leak result, D2XX protocol, ProbeCounter, history hoặc UI khác.
+7. Giữ fix stale frame/model switch hiện tại.
+
+Kiểm tra logics:
+rg -n "ArmPassProductRemovalWait|ArmFaultProductRemoval|_waitForProductRelease|_waitForFaultProductRemoval|BuildRemovalRows|IsConfirmedProductRemoved|ProductRemoved|WaitingForRemoval|PASS_REMOVAL" ViewModels Services Tests
+
+Sửa ít file nhất có thể.
+
+Sau sửa:
+- dotnet build -c Release
+- chỉ chạy targeted self-tests liên quan removal/PASS/Leak; nếu PASS thì không chạy audit/test lan man.
+- git diff --check
+
+Cuối cùng chỉ trả lời:
+ROOT CAUSE: ...
+FILES CHANGED: ...
+BUILD/TEST: ...
+Không viết report dài, không dump code, không publish, không bump version nếu không cần.
