@@ -158,6 +158,7 @@ public sealed class TestEngine : IDisposable
     bool _contactLossTimedOut;
     bool _productStable;
     bool _confirmedProductPresence;
+    bool _productPresenceSeen;
     int _productPresenceCandidateFrames;
     int _productRemovalCandidateFrames;
     const int ProductPresenceConfirmationFrames = 2;
@@ -470,7 +471,7 @@ public sealed class TestEngine : IDisposable
         get
         {
             lock (_gate)
-                return _lastFrameValid &&
+                return _productPresenceSeen && _lastFrameValid &&
                        _productRemovalCandidateFrames >= ProductRemovalConfirmationFrames;
         }
     }
@@ -1020,6 +1021,7 @@ public sealed class TestEngine : IDisposable
         _contactLossTimedOut = false;
         _productStable = false;
         _confirmedProductPresence = false;
+        _productPresenceSeen = false;
         _productPresenceCandidateFrames = 0;
         _productRemovalCandidateFrames = 0;
         _readyToEvaluateProductFaults = false;
@@ -1040,6 +1042,17 @@ public sealed class TestEngine : IDisposable
             _latchedClipKeys.Clear();
 
         Reset();
+    }
+
+    public void ResetForProductRemoval()
+    {
+        lock (_gate)
+        {
+            bool presenceSeen = _productPresenceSeen;
+            ResetUnsafe();
+            _productPresenceSeen = presenceSeen;
+        }
+        NotifyChanged();
     }
 
     /// <summary>
@@ -1200,23 +1213,22 @@ public sealed class TestEngine : IDisposable
             if (!_frameProcessingEnabled || frame.Mode != BoardScanMode.Production || model is null)
                 return false;
 
-            // Reject only callbacks that belong to the last already-processed
-            // frame of the previous model. This works for both cases:
-            //  - same-capacity model switch reuses the scan generation: the first
-            //    newer sequence is accepted and clears the barrier;
-            //  - capacity transition restarts scan: the new generation is accepted
-            //    immediately and clears the barrier even if its sequence resets.
+            if (frame.ScanGeneration != 0 && _lastFrameScanGeneration != 0 &&
+                (frame.ScanGeneration < _lastFrameScanGeneration ||
+                 (frame.ScanGeneration == _lastFrameScanGeneration && frame.Sequence <= _lastFrameSequence)))
+                return false;
+
+            // Keep the old model's watermark after accepting the first fresh
+            // frame, including when a new scan generation resets its sequence.
             if (_modelSwitchBaselineScanGeneration != 0 &&
                 frame.ScanGeneration != 0)
             {
-                if (frame.ScanGeneration == _modelSwitchBaselineScanGeneration &&
-                    frame.Sequence <= _modelSwitchBaselineSequence)
+                if (frame.ScanGeneration < _modelSwitchBaselineScanGeneration ||
+                    (frame.ScanGeneration == _modelSwitchBaselineScanGeneration &&
+                     frame.Sequence <= _modelSwitchBaselineSequence))
                 {
                     return false;
                 }
-
-                _modelSwitchBaselineSequence = 0;
-                _modelSwitchBaselineScanGeneration = 0;
             }
 
             bool sameActive = _currentActive.SetEquals(frame.ActiveIo);
@@ -1226,7 +1238,7 @@ public sealed class TestEngine : IDisposable
             bool previousContactLossTimedOut = _contactLossTimedOut;
             bool previousProductStable = _productStable;
             bool previousConfirmedProductPresence = _confirmedProductPresence;
-            bool previousConfirmedRemoval = _productRemovalCandidateFrames >= ProductRemovalConfirmationFrames;
+            bool previousConfirmedRemoval = _productPresenceSeen && _productRemovalCandidateFrames >= ProductRemovalConfirmationFrames;
             bool previousReadyToEvaluate = _readyToEvaluateProductFaults;
             WiringFaultPair[] previousConfirmedWiringFaults = preserveConfirmedWiringFaults
                 ? _wiringFaults.ToArray()
@@ -1337,6 +1349,9 @@ public sealed class TestEngine : IDisposable
                 _expectedConnectionScratch.Count > 0 &&
                 _expectedConnectionScratch.Values.All(static connected => connected);
 
+            bool wiringChanged = !preserveConfirmedWiringFaults && UpdateWiringFaults(
+                model, _expectedConnectionScratch, hasProductActivity, hasProductActivity);
+
             if (_lastFrameScanGeneration != 0 &&
                 frame.ScanGeneration != _lastFrameScanGeneration)
             {
@@ -1355,7 +1370,7 @@ public sealed class TestEngine : IDisposable
                 // Do not make PASS wait one extra scan frame only to satisfy the
                 // generic 2-frame presence debounce. Ambiguous/partial/wrong
                 // activity still uses the normal confirmation frames below.
-                if (allExpectedConnectionsPresent)
+                if (allExpectedConnectionsPresent && _candidateWiringFaults.Count == 0)
                 {
                     _productPresenceCandidateFrames = ProductPresenceConfirmationFrames;
                     _confirmedProductPresence = true;
@@ -1378,6 +1393,7 @@ public sealed class TestEngine : IDisposable
                 if (_productRemovalCandidateFrames >= ProductRemovalConfirmationFrames)
                     _confirmedProductPresence = false;
             }
+            _productPresenceSeen |= _confirmedProductPresence;
             _hasExpectedSourceCoverage = hasExpectedSourceCoverage;
             // Một cạnh continuity là hai chiều. Một số bo Htdrv phát đầu THT
             // canonical ở phía source, trong khi bo khác phát chính cạnh đó theo
@@ -1401,12 +1417,6 @@ public sealed class TestEngine : IDisposable
             // Nếu operator chạm đủ hai đầu của một dây sai, BO đã trả về cạnh
             // vật lý đó và phải báo sau debounce riêng, không đợi 99 dây của
             // WH322244 được lắp xong.
-            bool realtimeEvaluationEnabled = hasProductActivity;
-            bool wiringChanged = !preserveConfirmedWiringFaults && UpdateWiringFaults(
-                model,
-                _expectedConnectionScratch,
-                hasProductActivity,
-                realtimeEvaluationEnabled);
 
             if (preserveConfirmedWiringFaults &&
                 previousConfirmedWiringFaults.Length > 0 &&
@@ -1435,7 +1445,7 @@ public sealed class TestEngine : IDisposable
                 previousContactLossTimedOut != _contactLossTimedOut ||
                 previousProductStable != _productStable ||
                 previousConfirmedProductPresence != _confirmedProductPresence ||
-                previousConfirmedRemoval != (_productRemovalCandidateFrames >= ProductRemovalConfirmationFrames) ||
+                previousConfirmedRemoval != (_productPresenceSeen && _productRemovalCandidateFrames >= ProductRemovalConfirmationFrames) ||
                 previousReadyToEvaluate != _readyToEvaluateProductFaults;
 
             _forceNextFrameChanged = false;

@@ -16,7 +16,7 @@ using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.SelfTests;
 
-internal static class Program
+internal static partial class Program
 {
     private static int Main(string[] args)
     {
@@ -33,6 +33,7 @@ internal static class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("P0 model transition and presence boundaries", TestP0ModelTransitionAndPresence),
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
@@ -88,6 +89,15 @@ internal static class Program
             ("Original PHT20 PASS/ERR history compatibility", TestLegacyPhtHistory),
             ("Per-model production/probe maintenance counters", TestProductionCounters)
         ];
+
+        int filterIndex = Array.IndexOf(args, "--filter");
+        if (filterIndex >= 0)
+        {
+            if (filterIndex + 1 >= args.Length) return 2;
+            string[] filters = args[filterIndex + 1].Split('|');
+            tests = tests.Where(test => filters.Any(filter => test.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))).ToArray();
+            if (tests.Length == 0) return 2;
+        }
 
         int failed = 0;
         foreach ((string name, Action run) in tests)
@@ -241,7 +251,7 @@ internal static class Program
         discardModel.ModelName = "SELF-TEST-DISCARD-INTERLOCK";
         discardModel.PartNumber = "SELF-TEST-DISCARD-INTERLOCK";
         discardModel.DiscardContactIo = [97, 98];
-        discardVm.LoadPreparedModelAsync(discardModel).GetAwaiter().GetResult();
+        LoadReadyModel(discardVm, discardModel);
         discardVm.StartProductionTestAsync().GetAwaiter().GetResult();
         int totalBeforeDiscard = discardVm.Total;
         int failBeforeDiscard = discardVm.Fail;
@@ -259,7 +269,7 @@ internal static class Program
             $"(pending={discardVm.IsProductRemovalPending}, total={discardVm.Total}, fail={discardVm.Fail}, state={discardVm.State})");
 
         TestViewModel faultDiscardVm = CreateTestViewModel(production, out FakeBoard faultDiscardBoard);
-        faultDiscardVm.LoadPreparedModelAsync(discardModel).GetAwaiter().GetResult();
+        LoadReadyModel(faultDiscardVm, discardModel);
         faultDiscardVm.StartProductionTestAsync().GetAwaiter().GetResult();
         MethodInfo armFaultRemoval = typeof(TestViewModel).GetMethod(
             "ArmFaultProductRemoval",
@@ -1216,7 +1226,7 @@ internal static class Program
             "Master minimum 2 must be preserved");
 
         TestViewModel disabledMasterVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
-        disabledMasterVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
+        LoadReadyModel(disabledMasterVm, model0);
         Assert(disabledMasterVm.MasterApproved, "Master min 0 unlocks production immediately");
         Assert(disabledMasterVm.MasterState == MasterSequenceState.Completed, "Master min 0 marks Master completed/disabled");
         Assert(!disabledMasterVm.IsMasterSequenceActive &&
@@ -1228,7 +1238,7 @@ internal static class Program
             "Ready status uses yellow/dark mapping");
 
         TestViewModel enabledMasterVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
-        enabledMasterVm.LoadPreparedModelAsync(model1).GetAwaiter().GetResult();
+        LoadReadyModel(enabledMasterVm, model1);
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
@@ -1241,7 +1251,7 @@ internal static class Program
             new ProductionSettings { MasterFaultRequiredCount = 1 },
             out FakeBoard masterExitBoard);
         ProductModel masterExitModel = Model(("MASTER-PAIR", new[] { 1, 18 }));
-        masterExitVm.LoadPreparedModelAsync(masterExitModel).GetAwaiter().GetResult();
+        LoadReadyModel(masterExitVm, masterExitModel);
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(masterExitVm, 1);
         TestEngine masterExitEngine =
@@ -1285,7 +1295,7 @@ internal static class Program
 
         TestViewModel twoFaultMasterVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 2 });
-        twoFaultMasterVm.LoadPreparedModelAsync(model2).GetAwaiter().GetResult();
+        LoadReadyModel(twoFaultMasterVm, model2);
         masterGoodVerified.SetValue(twoFaultMasterVm, true);
         transitionToBadMaster.Invoke(twoFaultMasterVm, null);
         Assert(twoFaultMasterVm.WrongCountText == "0/2",
@@ -1343,7 +1353,7 @@ internal static class Program
                statusVm.StateForeground == "#FFFFFF",
             "A non-latched equipment error keeps the generic red error presentation");
 
-        statusVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
+        LoadReadyModel(statusVm, model0);
         MethodInfo buildFinalPassRejectionFaults = typeof(TestViewModel).GetMethod(
             "BuildFinalPassRejectionFaults",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -1360,7 +1370,7 @@ internal static class Program
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard recoveryBoard);
         ProductModel recoveryModel = Model(("RECOVERY-PAIR", new[] { 1, 18 }));
-        recoveryVm.LoadPreparedModelAsync(recoveryModel).GetAwaiter().GetResult();
+        LoadReadyModel(recoveryVm, recoveryModel);
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(recoveryVm, 1);
         TestEngine recoveryEngine =
@@ -1711,7 +1721,7 @@ internal static class Program
             "COMPUTER.wav is embedded and requested once on the first real Production connection of each cycle");
 
         TestViewModel deviceFaultVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
-        deviceFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
+        LoadReadyModel(deviceFaultVm, model0);
         deviceFaultVm.SelectedOperationTabIndex = 3;
         deviceFaultVm.Faults.Add(new FaultRow
         {
@@ -1782,7 +1792,7 @@ internal static class Program
             Relay2MarkingPulseMs = 50
         };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
-        vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
+        LoadReadyModel(vm, Model(("PAIR", new[] { 1, 18 })));
 
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(vm, 1);
@@ -1821,6 +1831,7 @@ internal static class Program
                board.Commands.Contains("OFF") && board.Commands.Last() == "START",
             "TẮT TẤT CẢ forces both outputs OFF and resumes Production scan");
 
+        board.Publish(FrameSeq(1));
         int commandsAfterManualExit = board.Commands.Count;
         vm.ExitManualModeAsync().GetAwaiter().GetResult();
         vm.ExitManualModeAsync().GetAwaiter().GetResult();
@@ -1838,7 +1849,7 @@ internal static class Program
             Relay2MarkingPulseMs = 50
         };
         TestViewModel faultVm = CreateTestViewModel(faultSettings, out FakeBoard faultBoard);
-        faultVm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
+        LoadReadyModel(faultVm, Model(("PAIR", new[] { 1, 18 })));
         faultBoard.ThrowOnSetRelay = true;
         try
         {
@@ -2681,7 +2692,7 @@ internal static class Program
         var leakWindowVm = new WaterProofTestViewModel("MODEL-A", profile);
         TestViewModel windowCoordinator = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         ProductModel windowModel = Model(("WINDOW-PAIR", new[] { 1, 18 }));
-        windowCoordinator.LoadPreparedModelAsync(windowModel).GetAwaiter().GetResult();
+        LoadReadyModel(windowCoordinator, windowModel);
         int openedWindows = 0, closedWindows = 0;
         windowCoordinator.WaterProofWindowOpenRequested += (_, _) => openedWindows++;
         windowCoordinator.WaterProofWindowCloseRequested += (_, _) => closedWindows++;
@@ -2919,9 +2930,7 @@ internal static class Program
         TestViewModel removalVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard removalBoard);
-        removalVm.LoadPreparedModelAsync(Model(("LEAK-PAIR", new[] { 1, 18 })))
-            .GetAwaiter()
-            .GetResult();
+        LoadReadyModel(removalVm, Model(("LEAK-PAIR", new[] { 1, 18 })));
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(removalVm, 1);
         TestEngine removalEngine =
@@ -2962,9 +2971,7 @@ internal static class Program
         TestViewModel faultMainVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard faultMainBoard);
-        faultMainVm.LoadPreparedModelAsync(Model(("FAIL-PAIR", new[] { 1, 18 })))
-            .GetAwaiter()
-            .GetResult();
+        LoadReadyModel(faultMainVm, Model(("FAIL-PAIR", new[] { 1, 18 })));
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(faultMainVm, 1);
         TestEngine faultMainEngine =
@@ -3099,9 +3106,7 @@ internal static class Program
 
         TestViewModel retestArmVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 });
-        retestArmVm.LoadPreparedModelAsync(HtdrvTwoEndpointModel())
-            .GetAwaiter()
-            .GetResult();
+        LoadReadyModel(retestArmVm, HtdrvTwoEndpointModel());
         typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(retestArmVm, new WaterProofModelSettings
             {
@@ -3332,8 +3337,10 @@ internal static class Program
     {
         var settings = new ProductionSettings { MasterFaultRequiredCount = 0 };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
-        vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
+        LoadReadyModel(vm, Model(("PAIR", new[] { 1, 18 })));
 
+        AwaitModelReconcile(vm);
+        board.Publish(FrameSeq(1));
         board.StopScanAsync().GetAwaiter().GetResult();
         int commandsBeforeArm = board.Commands.Count;
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
@@ -3341,6 +3348,7 @@ internal static class Program
             "START does not reconnect, initialize, or start hardware when background scan is unavailable");
 
         board.StartScanAsync(BoardScanMode.Production, CancellationToken.None).GetAwaiter().GetResult();
+        board.Publish(FrameSeq(1));
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         Assert(board.LastStartScanToken.HasValue, "Background lifecycle owns the production START_SCAN token");
         CancellationToken scanToken = board.LastStartScanToken.GetValueOrDefault();
@@ -4637,8 +4645,8 @@ internal static class Program
         Assert(board.CompleteFramesReceived == frameCount &&
                engine.FramesProcessed == frameCount,
             "Ten-card stress processes all 500 complete 640-IO frames");
-        Assert(changedAfterConfirmation == 2 && changed == changedAfterConfirmation,
-            "Initial snapshot and second-frame removal confirmation notify once each; the remaining 498 identical frames emit no UI events");
+        Assert(changedAfterConfirmation == 1 && changed == changedAfterConfirmation && !engine.IsConfirmedProductRemoved,
+            "An empty station emits one initial snapshot and never confirms removal without prior product presence");
         Assert(retainedAfter <= retainedBefore + (32L * 1024 * 1024),
             $"Ten-card stress retained memory stays bounded ({retainedBefore} -> {retainedAfter})");
         Console.WriteLine(

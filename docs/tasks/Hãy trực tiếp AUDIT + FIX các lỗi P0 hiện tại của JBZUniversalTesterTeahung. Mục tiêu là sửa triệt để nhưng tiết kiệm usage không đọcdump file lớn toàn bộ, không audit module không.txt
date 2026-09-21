@@ -1,0 +1,128 @@
+Hãy trực tiếp AUDIT + FIX các lỗi P0 hiện tại của JBZUniversalTesterTeahung. Mục tiêu là sửa triệt để nhưng tiết kiệm usage: không đọc/dump file lớn toàn bộ, không audit module không liên quan, dùng rg + đọc đúng đoạn code cần thiết, chạy targeted tests trong lúc sửa và chỉ chạy full SelfTests một lần ở cuối.
+
+TRƯỚC KHI SỬA:
+- đọc AGENTS.md
+- git status / git diff
+- đọc log V16.0.376 mới nhất
+- build hiện tại
+- xác định đúng call graph:
+  D2XX frame -> TestEngine -> ProductEvidence -> fault/PASS -> TestViewModel state/UI
+  và WaterProofSerialService nếu Leak lifecycle vẫn còn lỗi.
+
+CÁC INVARIANT BẮT BUỘC:
+
+1. ĐỔI MODEL
+Model A -> B tuyệt đối không được dùng frame/UI callback của A cho B.
+Phải có barrier đủ cho cả:
+- same scan capacity
+- khác capacity 2 card <-> 4 card.
+
+Trong lúc model đang transition:
+- không TestingRealtime
+- không Product presentation
+- không product-start sound
+- không ProbeCounter
+- không PASS/FAIL.
+
+Chỉ sau scan của model mới đạt Monitoring + fresh authoritative frame mới cho Production hoạt động.
+
+2. UI STATE
+ProductionRuntimeState là source of truth.
+Không dùng trực tiếp:
+_engine.HasProductActivity
+RealtimeEvaluationEnabled
+raw IO activity
+để set "ĐANG KIỂM TRA".
+
+Flow đúng:
+đổi mã -> BO ĐANG CHUẨN BỊ -> CHỜ LẮP SẢN PHẨM
+confirmed product -> ĐANG KIỂM TRA.
+
+3. TESTENGINE / PASS
+Full correct authoritative topology phải PASS ngay frame hợp lệ đầu tiên.
+Không thêm debounce làm PASS chậm.
+
+4. WRONG/SHORT
+Candidate phải phát hiện ngay frame điện đầu tiên.
+Official FAIL vẫn qua fault-confirmation debounce.
+Không bắt confirmed presence mới được tạo fault candidate.
+
+5. PRODUCT PRESENCE
+Partial/raw/probe/noise không được false presence.
+Full correct topology là strong evidence và có thể confirm ngay.
+
+6. REMOVAL
+Chỉ coi removed nếu cycle trước đã từng confirmed presence và đủ clean-frame confirmation.
+Không dùng !confirmedPresence == removed.
+
+7. PROBECOUNTER
+Chỉ tăng đúng 1 lần/cycle khi product presence thật đã confirm.
+Không tăng từ preview/candidate/stale frame/model transition.
+
+8. RESET
+Audit ResetUnsafe / ResetProductCycle.
+Không được còn recursion:
+ResetFullCycleAfterProductRemoved -> ResetProductCycle -> Changed -> ResetFullCycleAfterProductRemoved.
+Xóa sạch runtime cache của model cũ, kể cả expected scratch/candidate/presence/frame state.
+
+9. UI CALLBACK
+Queued callback phải có epoch/generation phù hợp.
+Old model snapshot không được repaint model mới.
+Continuity preview chỉ presentation, không được vào production PASS/FAIL lifecycle.
+
+10. D2XX MODEL RECONFIG
+Log hiện tại cho thấy 2<->4 card controlled reopen mất khoảng 2.7-2.8s.
+Tìm xem reopen có thực sự cần thiết không.
+KHÔNG bỏ reopen nếu chưa chứng minh protocol an toàn.
+Dù giữ reopen, UI không được block/nháy sai state.
+
+11. UI STALL
+Tìm đúng nguyên nhân các UI_STALL ~170-244ms trong log.
+Ưu tiên kiểm tra Home.Refresh, RebuildActiveCards, RefreshFaults, Dispatcher, collection rebuild.
+Không tối ưu mù.
+
+12. LEAK
+Nếu source hiện tại vẫn có lỗi session:
+timeout/cancel -> SerialPort phải close/dispose exactly once.
+Run mới không được mở khi session cũ còn Closing.
+Không release gate trước khi close thật sự safe.
+Không cleanup relay/manual mode nhiều lần.
+Không để Leak progress trigger settings Apply/Save.
+
+KHÔNG:
+- Thread.Sleep để che race
+- tăng debounce mù
+- rewrite protocol D2XX
+- thay production threshold
+- suppress exception
+- xóa test để PASS
+- sửa UI unrelated
+- publish/merge main.
+
+CÁCH TIẾT KIỆM USAGE:
+- dùng rg trước, chỉ đọc đoạn ±100-200 dòng cần thiết
+- không cat toàn bộ file lớn
+- không chạy full SelfTests sau từng sửa
+- viết/rerun targeted test cho lỗi đang sửa
+- cuối cùng mới build Release + full SelfTests một lần
+- nếu một root cause đã chứng minh xong thì sửa luôn, không tiếp tục audit lan man.
+
+ACCEPTANCE:
+- 1.tht <-> WH322244 không sản phẩm: không bao giờ flash ĐANG KIỂM TRA.
+- sản phẩm đúng: PASS nhanh từ authoritative frame đầu.
+- sai/chập: candidate nhanh, official FAIL đúng debounce.
+- rapid model switch không stale frame/UI.
+- removal đúng và không StackOverflow.
+- ProbeCounter đúng 1 lần.
+- Leak timeout không làm run sau dính stale COM.
+- build sạch và full SelfTests PASS.
+
+Hãy sửa source trực tiếp.
+Cuối cùng chỉ báo:
+- root cause chính
+- file source đã sửa
+- build/test result
+- những gì còn cần test hardware thật.
+
+Không tạo report dài.
+Không gửi lại file không thay đổi.
