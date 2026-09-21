@@ -6282,15 +6282,27 @@ public sealed class TestViewModel : ObservableObject
         }
 
         // Scan nền có thể phát frame ngay trong lúc StartTestAsync đang ARM.
-        // Không được ghi đè ĐANG KIỂM TRA/ĐO ĐIỆN TRỞ vừa được callback cập
-        // nhật bằng trạng thái CHỜ LẮP (UI=SẴN SÀNG).
+        // Tuyệt đối không suy trạng thái UI từ _engine.HasProductActivity ở đây:
+        // snapshot engine có thể vẫn chứa activity của model/generation trước,
+        // làm TestWindow nháy "ĐANG KIỂM TRA..." rồi mới trở về "CHỜ LẮP".
+        //
+        // ApplyAuthoritativeProductionState là chủ sở hữu duy nhất của lifecycle
+        // WaitingForProduct <-> TestingRealtime sau khi một FRESH frame của đúng
+        // generation hiện tại đã được chấp nhận. Nếu callback fresh-frame đã
+        // chuyển sang TestingRealtime thì không ghi đè State; còn nếu runtime
+        // vẫn WaitingForProduct thì ép đúng trạng thái chờ.
         if (CurrentProductionPhase == ProductionPhase.Continuity &&
-            Volatile.Read(ref _postContinuityStarted) == 0)
+            Volatile.Read(ref _postContinuityStarted) == 0 &&
+            CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct)
         {
-            State = _engine.HasProductActivity
-                ? "ĐANG KIỂM TRA..."
-                : "CHỜ LẮP SẢN PHẨM";
+            State = "CHỜ LẮP SẢN PHẨM";
         }
+
+        AsyncFileLogService.Current.Performance(
+            $"TEST_ARM_UI_STATE runtime={CurrentProductionRuntimeState} " +
+            $"state=\"{State}\" fresh_gate={Volatile.Read(ref _freshFrameGateActive) != 0} " +
+            $"cycle_start_seq={Volatile.Read(ref _cycleStartFrameSequence)} " +
+            $"cycle_start_generation={Volatile.Read(ref _cycleStartScanGeneration)}");
         AddLog("Đã ARM chu kỳ production trên luồng scan I/O đang chạy liên tục.");
         AsyncFileLogService.Current.Performance("TEST_ARM_READY");
     }
