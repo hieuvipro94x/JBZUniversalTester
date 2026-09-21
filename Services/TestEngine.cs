@@ -465,7 +465,8 @@ public sealed class TestEngine : IDisposable
         get
         {
             lock (_gate)
-                return !_confirmedProductPresence;
+                return _lastFrameValid &&
+                       _productRemovalCandidateFrames >= ProductRemovalConfirmationFrames;
         }
     }
 
@@ -1189,6 +1190,7 @@ public sealed class TestEngine : IDisposable
             bool previousContactLossTimedOut = _contactLossTimedOut;
             bool previousProductStable = _productStable;
             bool previousConfirmedProductPresence = _confirmedProductPresence;
+            bool previousConfirmedRemoval = _productRemovalCandidateFrames >= ProductRemovalConfirmationFrames;
             bool previousReadyToEvaluate = _readyToEvaluateProductFaults;
             WiringFaultPair[] previousConfirmedWiringFaults = preserveConfirmedWiringFaults
                 ? _wiringFaults.ToArray()
@@ -1297,7 +1299,8 @@ public sealed class TestEngine : IDisposable
             if (_lastFrameScanGeneration != 0 &&
                 frame.ScanGeneration != _lastFrameScanGeneration)
             {
-                _confirmedProductPresence = false;
+                // A scan restart is not physical removal. Keep the presence latch
+                // until fresh complete frames confirm that connectivity is gone.
                 _productPresenceCandidateFrames = 0;
                 _productRemovalCandidateFrames = 0;
             }
@@ -1314,18 +1317,11 @@ public sealed class TestEngine : IDisposable
             else
             {
                 _productPresenceCandidateFrames = 0;
-                if (_confirmedProductPresence)
-                {
-                    _productRemovalCandidateFrames = Math.Min(
-                        ProductRemovalConfirmationFrames,
-                        _productRemovalCandidateFrames + 1);
-                    if (_productRemovalCandidateFrames >= ProductRemovalConfirmationFrames)
-                        _confirmedProductPresence = false;
-                }
-                else
-                {
-                    _productRemovalCandidateFrames = 0;
-                }
+                _productRemovalCandidateFrames = Math.Min(
+                    ProductRemovalConfirmationFrames,
+                    _productRemovalCandidateFrames + 1);
+                if (_productRemovalCandidateFrames >= ProductRemovalConfirmationFrames)
+                    _confirmedProductPresence = false;
             }
             bool hasExpectedSourceCoverage = HasExpectedSourceCoverageUnsafe(model);
             bool allExpectedConnectionsPresent =
@@ -1388,6 +1384,7 @@ public sealed class TestEngine : IDisposable
                 previousContactLossTimedOut != _contactLossTimedOut ||
                 previousProductStable != _productStable ||
                 previousConfirmedProductPresence != _confirmedProductPresence ||
+                previousConfirmedRemoval != (_productRemovalCandidateFrames >= ProductRemovalConfirmationFrames) ||
                 previousReadyToEvaluate != _readyToEvaluateProductFaults;
 
             _forceNextFrameChanged = false;

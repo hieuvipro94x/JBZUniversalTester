@@ -54,6 +54,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
     readonly SemaphoreSlim _connectLock = new(1, 1);
     readonly SemaphoreSlim _scanSwitchLock = new(1, 1);
     readonly AutoResetEvent _rxEvent = new(false);
+    readonly ManualResetEvent _scanActiveEvent = new(false);
 
     IntPtr _handle;
     CancellationTokenSource? _readerCts;
@@ -745,6 +746,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             long generation = Interlocked.Increment(ref _scanGeneration);
             _scanMode = mode;
             Volatile.Write(ref _firmwareScanning, 1);
+            _scanActiveEvent.Set();
             Volatile.Write(ref _connectionState, (int)BoardConnectionState.Scanning);
             _activeScanConfiguration = requestedConfiguration;
 
@@ -797,6 +799,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         }
 
         Volatile.Write(ref _firmwareScanning, 0);
+        _scanActiveEvent.Reset();
         if (IsConnected)
             Volatile.Write(ref _connectionState, (int)BoardConnectionState.PausedForHardwareOperation);
         _activeScanConfiguration = string.Empty;
@@ -970,6 +973,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         _readerCts = null;
         cts?.Dispose();
         Volatile.Write(ref _firmwareScanning, 0);
+        _scanActiveEvent.Reset();
     }
 
     Task ScanLoopAsync(CancellationToken ct)
@@ -985,11 +989,18 @@ public sealed class D2xxBoardTransport : IBoardTransport
     {
         var buffer = new byte[65536];
         WaitHandle[] receiveWaitHandles = [_rxEvent, ct.WaitHandle];
+        WaitHandle[] scanWaitHandles = [_scanActiveEvent, ct.WaitHandle];
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
+                if (!IsScanning)
+                {
+                    if (WaitHandle.WaitAny(scanWaitHandles) == 1)
+                        break;
+                    continue;
+                }
                 // Drain-to-empty: khi stream đang có dữ liệu, đọc/poll liên tục cho
                 // tới khi FTDI queue rỗng. Chỉ chờ RX event khi queue thực sự rỗng.
                 // Cách này tránh bị giới hạn bởi nhịp event ~16 ms (~62 read/s),
@@ -1028,6 +1039,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     handle = _handle;
                     if (handle == IntPtr.Zero)
                         break;
+
+                    if (!IsScanning)
+                        continue;
 
                     uint queueStatus = FT_GetQueueStatus(handle, out queued);
                     Interlocked.Increment(ref _queueCallCount);
@@ -1183,6 +1197,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             Volatile.Write(ref _firmwareScanning, 0);
+            _scanActiveEvent.Reset();
             Volatile.Write(ref _connectionState, (int)BoardConnectionState.Faulted);
             SafeDiagnostic(
                 $"D2XX_READER_FAULT type={ex.GetType().Name} " +
@@ -1892,6 +1907,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
             _connectLock.Dispose();
             _scanSwitchLock.Dispose();
             _rxEvent.Dispose();
+            _scanActiveEvent.Dispose();
         }
     }
 }

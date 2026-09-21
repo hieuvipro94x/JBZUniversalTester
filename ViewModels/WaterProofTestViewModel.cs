@@ -59,9 +59,11 @@ public sealed class WaterProofTestViewModel : ObservableObject
 
     public void ApplyFinal(WaterProofRunResult result)
     {
+        if (!IsRunning)
+            return;
         foreach (WaterProofChannelMeasurement measurement in result.Channels)
         {
-            if (measurement.Enabled)
+            if (measurement.Enabled && _profile.IsChannelEnabled(measurement.Channel))
                 SetChannelText(measurement.Channel, measurement.Leak);
         }
 

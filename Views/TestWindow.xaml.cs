@@ -213,6 +213,11 @@ public partial class TestWindow : Window
             return;
         }
 
+        if (!IsLoaded || !viewModel.IsRunning ||
+            Volatile.Read(ref _statusLedHandlersAttached) == 0)
+            return;
+        if (ReferenceEquals(_waterProofWindow?.DataContext, viewModel))
+            return;
         CloseWaterProofWindow();
         _waterProofWindow = new WaterProofTestWindow(viewModel) { Owner = this };
         PositionWaterProofWindow();
@@ -238,19 +243,24 @@ public partial class TestWindow : Window
         if (_waterProofWindow is null || ProbeCycleHost is null || !IsLoaded)
             return;
 
-        Point host = ProbeCycleHost.PointToScreen(new Point(0, 0));
+        Point screenHost = ProbeCycleHost.PointToScreen(new Point(0, 0));
+        var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice
+            ?? System.Windows.Media.Matrix.Identity;
+        Point host = transform.Transform(screenHost);
         const double gap = 8;
         double right = host.X + ProbeCycleHost.ActualWidth + gap;
         double left = host.X - _waterProofWindow.Width - gap;
         System.Windows.Forms.Screen screen = System.Windows.Forms.Screen.FromPoint(
-            new System.Drawing.Point((int)host.X, (int)host.Y));
-        double workLeft = screen.WorkingArea.Left;
-        double workRight = screen.WorkingArea.Right;
+            new System.Drawing.Point((int)screenHost.X, (int)screenHost.Y));
+        Point workTopLeft = transform.Transform(new Point(screen.WorkingArea.Left, screen.WorkingArea.Top));
+        Point workBottomRight = transform.Transform(new Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom));
+        double workLeft = workTopLeft.X;
+        double workRight = workBottomRight.X;
         _waterProofWindow.Left = right + _waterProofWindow.Width <= workRight ? right : Math.Max(workLeft, left);
         _waterProofWindow.Top = Math.Clamp(
             host.Y + (ProbeCycleHost.ActualHeight - _waterProofWindow.Height) / 2,
-            screen.WorkingArea.Top,
-            screen.WorkingArea.Bottom - _waterProofWindow.Height);
+            workTopLeft.Y,
+            Math.Max(workTopLeft.Y, workBottomRight.Y - _waterProofWindow.Height));
     }
 
     private void CloseWaterProofWindow()

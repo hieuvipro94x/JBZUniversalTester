@@ -55,8 +55,12 @@ public sealed class WaterProofSerialService : IAsyncDisposable
     private int _activeRunId;
 
     private int _runSequence;
+    private long _connectionEpoch;
+    private bool _disposed;
+    private int _cleanupFailed;
     private int _sessionState = (int)WaterProofSessionState.Idle;
     private WaterProofProgress? _latestProgress;
+    private WaterProofProgress? _latestPressProgress;
     private Action<WaterProofProgress>? _latestProgressCallback;
     private int _latestProgressRun;
     private bool _progressDispatchPending;
@@ -111,11 +115,13 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            SetSessionState(WaterProofSessionState.Opening, 0);
             await EnsureConnectedCoreAsync(machine, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            _gate.Release();
+            ReleasePublicGate(0, null);
         }
     }
 
@@ -144,10 +150,10 @@ public sealed class WaterProofSerialService : IAsyncDisposable
 
         int runNumber = Interlocked.Increment(ref _runSequence);
         Task<WaterProofRunResult>? worker = null;
-        bool gateReleaseDeferred = false;
 
         try
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
             ActivateRun(runNumber);
             SetSessionState(WaterProofSessionState.Opening, runNumber);
 
@@ -201,18 +207,7 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         finally
         {
             DeactivateRun(runNumber);
-            if ((worker is not null && !worker.IsCompleted) || HasPendingClose())
-            {
-                gateReleaseDeferred = true;
-                SetSessionState(WaterProofSessionState.Closing, runNumber);
-                _ = ReleaseGateAfterCleanupAsync(runNumber, worker);
-            }
-
-            if (!gateReleaseDeferred)
-            {
-                SetSessionState(WaterProofSessionState.Idle, runNumber);
-                _gate.Release();
-            }
+            ReleasePublicGate(runNumber, worker);
         }
     }
 
@@ -232,17 +227,24 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         {
             port = await OpenRunPortAsync(runNumber, machine, cancellationToken)
                 .ConfigureAwait(false);
-            SetSessionState(WaterProofSessionState.Running, runNumber);
+            lock (_stateGate)
+            {
+                ThrowIfRunInactive(runNumber);
+                SetSessionState(WaterProofSessionState.Running, runNumber);
+            }
 
             RaiseLog(
                 $"[WP] COM state before test port={machine.PortName?.Trim()} baud={machine.BaudRate} " +
                 $"isOpen={SafeIsOpen(port)} readTimeout={port.ReadTimeout} writeTimeout={port.WriteTimeout}");
 
-            ClearStaleSerialBuffers(port);
-
             string command = BuildTestCommand(profile);
             RaiseLog($"[WP] RUN #{runNumber} TX {command.Trim()}");
-            port.Write(command);
+            lock (port)
+            {
+                ThrowIfRunInactive(runNumber);
+                ClearStaleSerialBuffers(port);
+                port.Write(command);
+            }
 
             var buffer = new StringBuilder();
             int timeoutMs = Math.Max(
@@ -253,7 +255,12 @@ public sealed class WaterProofSerialService : IAsyncDisposable
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                string chunk = port.ReadExisting();
+                string chunk;
+                lock (port)
+                {
+                    ThrowIfRunInactive(runNumber);
+                    chunk = port.ReadExisting();
+                }
                 if (!string.IsNullOrEmpty(chunk))
                 {
                     lastRxWatch.Restart();
@@ -365,7 +372,7 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         }
         finally
         {
-            _gate.Release();
+            ReleasePublicGate(0, null);
         }
     }
 
@@ -380,19 +387,21 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         lock (_stateGate)
         {
             _activeRunId = 0;
+            _connectionEpoch++;
 
             port = _port;
             _port = null;
             _connectedPort = string.Empty;
             _connectedBaud = 0;
             _portOwnerRun = 0;
+            if (port is not null)
+                ScheduleClose(port);
         }
 
         if (port is null)
             return;
 
         RaiseLog("[WP] ABORT ACTIVE COM - yêu cầu hủy I/O đang chờ.");
-        ScheduleClose(port);
     }
 
     private async Task EnsureConnectedCoreAsync(
@@ -415,6 +424,9 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         DisconnectCore();
         await WaitForPendingCloseAsync(cancellationToken).ConfigureAwait(false);
 
+        long epoch;
+        lock (_stateGate)
+            epoch = _connectionEpoch;
         SerialPort port = await OpenSerialPortAsync(machine, cancellationToken)
             .ConfigureAwait(false);
 
@@ -422,6 +434,7 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         lock (_stateGate)
         {
             registered =
+                !_disposed && epoch == _connectionEpoch &&
                 _activeRunId == 0 &&
                 _port is null;
 
@@ -527,8 +540,10 @@ public sealed class WaterProofSerialService : IAsyncDisposable
                 {
                     port.Dispose();
                 }
-                catch
+                catch (Exception disposeError)
                 {
+                    Interlocked.Exchange(ref _cleanupFailed, 1);
+                    RaiseLog($"[WP] dispose after failed open: {disposeError.Message}");
                 }
 
                 throw;
@@ -565,6 +580,15 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         }
     }
 
+    private void ThrowIfRunInactive(int runNumber)
+    {
+        lock (_stateGate)
+        {
+            if (_activeRunId != runNumber)
+                throw new OperationCanceledException($"Leak run {runNumber} is no longer active.");
+        }
+    }
+
     private void DeactivateRun(int runNumber)
     {
         lock (_stateGate)
@@ -590,6 +614,7 @@ public sealed class WaterProofSerialService : IAsyncDisposable
                 _connectedPort = string.Empty;
                 _connectedBaud = 0;
                 _portOwnerRun = 0;
+                ScheduleClose(port);
             }
         }
 
@@ -597,13 +622,10 @@ public sealed class WaterProofSerialService : IAsyncDisposable
             return;
 
         RaiseLog($"[WP] RUN #{runNumber} ABORT OWNED COM");
-        ScheduleClose(port);
     }
 
     private void ReleaseRunPort(int runNumber, SerialPort port)
     {
-        bool detached = false;
-
         lock (_stateGate)
         {
             if (_portOwnerRun == runNumber &&
@@ -613,13 +635,11 @@ public sealed class WaterProofSerialService : IAsyncDisposable
                 _connectedPort = string.Empty;
                 _connectedBaud = 0;
                 _portOwnerRun = 0;
-                detached = true;
+                ScheduleClose(port);
             }
         }
 
         // If AbortRunPort already detached it, that path already scheduled Close().
-        if (detached)
-            ScheduleClose(port);
     }
 
     private WaterProofRunResult? ProcessLine(
@@ -847,10 +867,9 @@ public sealed class WaterProofSerialService : IAsyncDisposable
             _connectedPort = string.Empty;
             _connectedBaud = 0;
             _portOwnerRun = 0;
+            if (port is not null)
+                ScheduleClose(port);
         }
-
-        if (port is not null)
-            ScheduleClose(port);
     }
 
     private void ScheduleClose(SerialPort port)
@@ -912,8 +931,29 @@ public sealed class WaterProofSerialService : IAsyncDisposable
 
     private bool HasPendingClose()
     {
+        lock (_stateGate)
         lock (_closeGate)
-            return _pendingCloseTasks.Any(static task => !task.IsCompleted);
+            return Volatile.Read(ref _cleanupFailed) != 0 ||
+                   _pendingCloseTasks.Any(static task => !task.IsCompleted);
+    }
+
+    private void ReleasePublicGate(int runNumber, Task<WaterProofRunResult>? worker)
+    {
+        // Detach and cleanup registration use this same lock. A concurrent abort
+        // cannot leave an untracked handle between this check and gate release.
+        lock (_stateGate)
+        {
+            if ((worker is not null && !worker.IsCompleted) || HasPendingClose())
+            {
+                SetSessionState(WaterProofSessionState.Closing, runNumber);
+                _ = ReleaseGateAfterCleanupAsync(runNumber, worker);
+            }
+            else
+            {
+                SetSessionState(WaterProofSessionState.Idle, runNumber);
+                _gate.Release();
+            }
+        }
     }
 
     private async Task ReleaseGateAfterCleanupAsync(
@@ -925,7 +965,7 @@ public sealed class WaterProofSerialService : IAsyncDisposable
             if (worker is not null)
             {
                 try { await worker.ConfigureAwait(false); }
-                catch { }
+                catch (Exception ex) { RaiseLog($"[WP] cleanup observed worker: {ex.Message}"); }
             }
 
             // A late Open() can register a close after the worker has ended. Keep
@@ -945,14 +985,21 @@ public sealed class WaterProofSerialService : IAsyncDisposable
                     break;
 
                 try { await Task.WhenAll(closeTasks).ConfigureAwait(false); }
-                catch { }
+                catch (Exception ex) { RaiseLog($"[WP] cleanup task failed: {ex.Message}"); }
             }
         }
         finally
         {
-            SetSessionState(WaterProofSessionState.Idle, runNumber);
-            RaiseLog($"LEAK_SESSION_CLOSED run={runNumber}");
-            _gate.Release();
+            if (Volatile.Read(ref _cleanupFailed) == 0)
+            {
+                SetSessionState(WaterProofSessionState.Idle, runNumber);
+                RaiseLog($"LEAK_SESSION_CLOSED run={runNumber}");
+                _gate.Release();
+            }
+            else
+            {
+                RaiseLog("[WP] COM disposal failed; session remains CLOSING and reopening is blocked.");
+            }
         }
     }
 
@@ -980,48 +1027,55 @@ public sealed class WaterProofSerialService : IAsyncDisposable
 
     private void CloseAndDispose(SerialPort port)
     {
-        try
-        {
-            if (SafeIsOpen(port))
-                port.Close();
-        }
-        catch (Exception ex)
-        {
-            RaiseLog($"[WP] close COM skipped: {ex.Message}");
-        }
-        finally
+        // Wait for the sole reader/writer to leave its native call. A hung driver
+        // keeps this background cleanup and the public gate in CLOSING.
+        lock (port)
         {
             try
             {
-                port.Dispose();
+                if (SafeIsOpen(port))
+                    port.Close();
             }
             catch (Exception ex)
             {
-                RaiseLog($"[WP] dispose COM skipped: {ex.Message}");
+                RaiseLog($"[WP] close COM failed: {ex.Message}");
+            }
+            finally
+            {
+                try
+                {
+                    port.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Interlocked.Exchange(ref _cleanupFailed, 1);
+                    RaiseLog($"[WP] dispose COM failed; reopening blocked: {ex.Message}");
+                }
             }
         }
     }
 
     private void ObserveLateOpen(Task<SerialPort> openTask)
     {
-        _ = openTask.ContinueWith(
-            completed =>
+        // Register BEFORE the opening worker unwinds. Tracking only a future
+        // Close() leaves a gap in which a second run can open the same COM.
+        Task cleanup = Task.Run(async () =>
+        {
+            try
             {
-                if (completed.Status == TaskStatus.RanToCompletion)
-                {
-                    // Open() returned after its watchdog/cancellation.
-                    // Never let that late handle re-enter service state.
-                    RaiseLog("[WP] LATE COM OPEN COMPLETED - closing stale handle.");
-                    ScheduleClose(completed.Result);
-                }
-                else
-                {
-                    _ = completed.Exception;
-                }
-            },
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
+                SerialPort port = await openTask.ConfigureAwait(false);
+                RaiseLog("[WP] LATE COM OPEN COMPLETED - closing stale handle.");
+                CloseAndDispose(port);
+            }
+            catch (Exception ex) { RaiseLog($"[WP] late COM open failed: {ex.Message}"); }
+        });
+        lock (_closeGate)
+            _pendingCloseTasks.Add(cleanup);
+        _ = cleanup.ContinueWith(completed =>
+        {
+            lock (_closeGate)
+                _pendingCloseTasks.Remove(completed);
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     private static void ObserveLateWorker(Task worker)
@@ -1054,6 +1108,10 @@ public sealed class WaterProofSerialService : IAsyncDisposable
                 {
                     lock (_progressGate)
                     {
+                        if (_latestProgressRun != runNumber)
+                            _latestPressProgress = null;
+                        if (value.Stage == WaterProofStage.Pressurizing)
+                            _latestPressProgress = value;
                         _latestProgress = value;
                         _latestProgressCallback = progress;
                         _latestProgressRun = runNumber;
@@ -1086,18 +1144,23 @@ public sealed class WaterProofSerialService : IAsyncDisposable
     private void DrainLatestProgress()
     {
         WaterProofProgress? value;
+        WaterProofProgress? reference;
         Action<WaterProofProgress>? callback;
         int runNumber;
         lock (_progressGate)
         {
             value = _latestProgress;
+            reference = _latestPressProgress;
             callback = _latestProgressCallback;
             runNumber = _latestProgressRun;
             _latestProgress = null;
+            _latestPressProgress = null;
             _latestProgressCallback = null;
             _progressDispatchPending = false;
         }
 
+        if (reference is not null && value?.Stage == WaterProofStage.Waiting && callback is not null)
+            InvokeProgressSubscribers(callback, reference, runNumber);
         if (value is not null && callback is not null)
             InvokeProgressSubscribers(callback, value, runNumber);
     }
@@ -1107,6 +1170,11 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         WaterProofProgress value,
         int runNumber)
     {
+        lock (_stateGate)
+        {
+            if (_activeRunId != runNumber)
+                return;
+        }
         foreach (Delegate subscriber in progress.GetInvocationList())
         {
             try
@@ -1203,6 +1271,8 @@ public sealed class WaterProofSerialService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        lock (_stateGate)
+            _disposed = true;
         try
         {
             await DisconnectAsync(CancellationToken.None).ConfigureAwait(false);

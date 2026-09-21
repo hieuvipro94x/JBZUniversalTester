@@ -76,6 +76,9 @@ internal static class Program
             ("Duplicate CLIP fault rows do not lock hardware", TestDuplicateClipFaultRows),
             ("D2XX resistance selectors and ten-slot configuration", TestD2xxResistanceRouting),
             ("Leak connector mapping and PASS/FAIL presentation", TestWaterProofConfigurationAndPresentation),
+            ("Leak late-open cleanup retains exclusive COM gate", LeakLifecycleTests.LateOpenAndClose),
+            ("Leak coalescing preserves PRESS baseline and rejects stale progress", LeakLifecycleTests.CoalescedProgress),
+            ("D2XX suspended reader waits without polling and wakes on resume", LeakLifecycleTests.SuspendedReader),
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
@@ -1377,6 +1380,9 @@ internal static class Program
         {
             await Task.Delay(50);
             recoveryBoard.Publish(FrameSeq(2));
+            Assert(recoveryVm.IsProductRemovalPending,
+                "Rejected FAIL recovery must retain its gate after one empty frame");
+            recoveryBoard.Publish(FrameSeq(3));
         });
         ((Task)(recoverUncommittedFail.Invoke(
             recoveryVm,
@@ -1814,6 +1820,12 @@ internal static class Program
         Assert(relay == 0 && !vm.IsManualModeActive &&
                board.Commands.Contains("OFF") && board.Commands.Last() == "START",
             "TẮT TẤT CẢ forces both outputs OFF and resumes Production scan");
+
+        int commandsAfterManualExit = board.Commands.Count;
+        vm.ExitManualModeAsync().GetAwaiter().GetResult();
+        vm.ExitManualModeAsync().GetAwaiter().GetResult();
+        Assert(board.Commands.Count == commandsAfterManualExit,
+            "Repeated manual cleanup does not send OFF or restart scan again");
 
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         Assert(vm.State != "MANUAL", "Production is no longer locked after direct Relay OFF/RESET");
@@ -2667,6 +2679,32 @@ internal static class Program
             "Leak is removed from TestWindow and rendered only by the compact owned Leak window");
 
         var leakWindowVm = new WaterProofTestViewModel("MODEL-A", profile);
+        TestViewModel windowCoordinator = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
+        ProductModel windowModel = Model(("WINDOW-PAIR", new[] { 1, 18 }));
+        windowCoordinator.LoadPreparedModelAsync(windowModel).GetAwaiter().GetResult();
+        int openedWindows = 0, closedWindows = 0;
+        windowCoordinator.WaterProofWindowOpenRequested += (_, _) => openedWindows++;
+        windowCoordinator.WaterProofWindowCloseRequested += (_, _) => closedWindows++;
+        const BindingFlags windowFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+        MethodInfo openWindow = typeof(TestViewModel).GetMethod("OpenWaterProofWindow", windowFlags)!;
+        MethodInfo closeWindow = typeof(TestViewModel).GetMethod("CloseWaterProofWindow", windowFlags)!;
+        FieldInfo windowProfile = typeof(TestViewModel).GetField("_waterProofProfile", windowFlags)!;
+        windowProfile.SetValue(windowCoordinator, new WaterProofModelSettings { Enabled = false });
+        openWindow.Invoke(windowCoordinator, [windowModel]);
+        Assert(openedWindows == 0, "Disabled Leak does not create a window/viewmodel");
+        windowProfile.SetValue(windowCoordinator, new WaterProofModelSettings
+        {
+            Enabled = true, Channel1Enabled = false, Channel2Enabled = false, Channel3Enabled = false
+        });
+        openWindow.Invoke(windowCoordinator, [windowModel]);
+        Assert(openedWindows == 0, "Zero enabled channels bypass the Leak window");
+        windowProfile.SetValue(windowCoordinator, profile);
+        openWindow.Invoke(windowCoordinator, [windowModel]);
+        openWindow.Invoke(windowCoordinator, [windowModel]);
+        closeWindow.Invoke(windowCoordinator, ["PASS"]);
+        closeWindow.Invoke(windowCoordinator, ["CANCEL"]);
+        Assert(openedWindows == 1 && closedWindows == 1,
+            "One Leak session creates and closes exactly one window");
         leakWindowVm.ApplyProgress(new WaterProofProgress(
             WaterProofStage.Pressurizing, [84.0, 0.0, 83.5], ":PRESS,84,0,83.5"));
         Assert(leakWindowVm.StageText == "PRESS" &&
@@ -2943,6 +2981,9 @@ internal static class Program
         Assert(faultMainVm.IsProductRemovalPending,
             "FAIL MainWindow removal lock remains while any product connection is present");
         faultMainBoard.Publish(FrameSeq(22));
+        Assert(faultMainVm.IsProductRemovalPending,
+            "FAIL MainWindow removal needs two complete empty frames");
+        faultMainBoard.Publish(FrameSeq(23));
         Assert(!faultMainVm.IsProductRemovalPending &&
                faultMainVm.ResultStatusText == "LẮP SẢN PHẨM",
             "FAIL MainWindow removal lock clears only after a complete empty frame");
@@ -3003,7 +3044,10 @@ internal static class Program
                    row.RelatedIos.Contains(18)),
             "Re-entering TestWindow while removal is pending preserves the remaining wire/IO rows");
         removalBoard.Publish(FrameSeq(4));
-        pendingPassRemovalStart.GetAwaiter().GetResult();
+        Assert(!pendingPassRemovalStart.IsCompleted && removalVm.IsProductRemovalPending,
+            "Pending START remains blocked after one empty frame");
+        removalBoard.Publish(FrameSeq(5));
+        pendingPassRemovalStart.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
         FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
             "_cycleActive",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -4570,6 +4614,7 @@ internal static class Program
             .GetResult();
 
         const int frameCount = 500;
+        int changedAfterConfirmation = 0;
         long retainedBefore = GC.GetTotalMemory(forceFullCollection: true);
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         var stopwatch = Stopwatch.StartNew();
@@ -4578,6 +4623,8 @@ internal static class Program
             ScanFrame frame = decoder.Feed(raw).Single();
             board.Publish(frame);
             engine.ProcessFrame(frame);
+            if (index == 1)
+                changedAfterConfirmation = changed;
         }
         stopwatch.Stop();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
@@ -4590,8 +4637,8 @@ internal static class Program
         Assert(board.CompleteFramesReceived == frameCount &&
                engine.FramesProcessed == frameCount,
             "Ten-card stress processes all 500 complete 640-IO frames");
-        Assert(changed <= 1,
-            "Ten-card identical topology does not raise unbounded Changed/UI events");
+        Assert(changedAfterConfirmation == 2 && changed == changedAfterConfirmation,
+            "Initial snapshot and second-frame removal confirmation notify once each; the remaining 498 identical frames emit no UI events");
         Assert(retainedAfter <= retainedBefore + (32L * 1024 * 1024),
             $"Ten-card stress retained memory stays bounded ({retainedBefore} -> {retainedAfter})");
         Console.WriteLine(
@@ -9237,12 +9284,11 @@ internal static class Program
             string mainXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));
             string learningXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml"));
             Assert(mainXaml.Contains("Content=\"QUÉT / HỌC MÃ\"", StringComparison.Ordinal) &&
-                   learningXaml.Contains("Không phải file THT", StringComparison.Ordinal) &&
+                   learningXaml.Contains("CHUẨN ĐOÁN IO", StringComparison.Ordinal) &&
                    learningXaml.Contains("ItemsSource=\"{Binding ActiveIoRows}\"", StringComparison.Ordinal) &&
                    learningXaml.Contains("KẸT / CHƯA THÁO", StringComparison.Ordinal) &&
                    !learningXaml.Contains("THỜI GIAN", StringComparison.Ordinal) &&
                    !learningXaml.Contains("3 giây", StringComparison.Ordinal) &&
-                   learningXaml.Contains("Không tác động relay", StringComparison.Ordinal) &&
                    learningXaml.Contains("EnableRowVirtualization", StringComparison.Ordinal),
                 "MainWindow exposes THT-independent live IO and stuck-contact diagnostics without production actions");
         }

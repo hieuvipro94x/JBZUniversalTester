@@ -160,8 +160,6 @@ public sealed class TestViewModel : ObservableObject
     private int _removalMonitoringFromMain;
     private bool _waitForFaultProductRemoval;
     private int _faultProductRemoved;
-    private int _faultRemovalSawProduct;
-    private int _passRemovalSawProduct;
     private int _discardRequiredForFault;
     private int _discardContactClosed;
     private int _discardStandaloneLocked;
@@ -1287,6 +1285,8 @@ public sealed class TestViewModel : ObservableObject
         await _manualRelayGate.WaitAsync();
         try
         {
+            if (!IsManualModeActive)
+                return;
             if (_board.IsConnected && !outputsAlreadyOff)
                 await _board.AllRelaysOffAsync();
             Volatile.Write(ref _manualActiveRelay, 0);
@@ -1919,6 +1919,7 @@ public sealed class TestViewModel : ObservableObject
         // SerialPort driver có thể đang kẹt trong ReadExisting/Write. Tách và
         // đóng handle trên worker riêng để đóng view/app không chờ COM vô hạn.
         _waterProof.AbortActiveRun();
+        CloseWaterProofWindow("CANCEL");
     }
 
     /// <summary>
@@ -2869,7 +2870,7 @@ public sealed class TestViewModel : ObservableObject
     private void ProcessMasterRemovalAfterReturningToMain(long generation)
     {
         if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
-            !_engine.IsProductReleased)
+            !_engine.IsConfirmedProductRemoved)
         {
             return;
         }
@@ -2892,7 +2893,7 @@ public sealed class TestViewModel : ObservableObject
         long generation,
         TestEnginePresentationSnapshot? rowsSnapshot = null)
     {
-        if (IsDeviceFault)
+        if (IsDeviceFault || Volatile.Read(ref _fullCycleResetInProgress) != 0)
             return;
 
         if (!IsProductionFaultContext(generation))
@@ -2906,10 +2907,7 @@ public sealed class TestViewModel : ObservableObject
         if (_waitForFaultProductRemoval)
         {
             bool productPresent = electrical.ProductEvidence || electrical.RealtimeEvaluationEnabled;
-            if (productPresent)
-                Interlocked.Exchange(ref _faultRemovalSawProduct, 1);
             if (!productPresent &&
-                Volatile.Read(ref _faultRemovalSawProduct) != 0 &&
                 _engine.IsConfirmedProductRemoved &&
                 Interlocked.Exchange(ref _faultProductRemoved, 1) == 0)
             {
@@ -2935,10 +2933,7 @@ public sealed class TestViewModel : ObservableObject
         if (_waitForProductRelease)
         {
             bool productPresent = electrical.ProductEvidence || electrical.RealtimeEvaluationEnabled;
-            if (productPresent)
-                Interlocked.Exchange(ref _passRemovalSawProduct, 1);
             if (!productPresent &&
-                Volatile.Read(ref _passRemovalSawProduct) != 0 &&
                 _engine.IsConfirmedProductRemoved)
             {
                 MarkProductRemoved();
@@ -3060,7 +3055,7 @@ public sealed class TestViewModel : ObservableObject
             if (hasProductEvidence)
                 State = "TIẾP XÚC JIG/PROBE KHÔNG ỔN ĐỊNH — KIỂM TRA PROBE PIN/JIG";
 
-            if (!hasProductEvidence && _productDetectedThisCycle)
+            if (!hasProductEvidence && _productDetectedThisCycle && _engine.IsConfirmedProductRemoved)
             {
                 // Complete frame hiện tại đã xác nhận mất TOÀN BỘ connectivity
                 // model-aware. Reset ngay trong cùng UI update; không chờ cửa
@@ -4019,7 +4014,6 @@ public sealed class TestViewModel : ObservableObject
     {
         _waitForFaultProductRemoval = true;
         Interlocked.Exchange(ref _faultProductRemoved, 0);
-        Interlocked.Exchange(ref _faultRemovalSawProduct, 1);
         SetProductRemovalPending(true);
         Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         SetProductionPhase(ProductionPhase.WaitingProductRemoval);
@@ -7792,10 +7786,15 @@ public sealed class TestViewModel : ObservableObject
         if (viewModel is null)
             return;
 
-        _waterProofWindowViewModel = null;
-        viewModel.Cancel();
-        AddLog($"LEAK_UI_CLOSE reason={reason}");
-        WaterProofWindowCloseRequested?.Invoke(this, reason);
+        InvokeUi(() =>
+        {
+            if (!ReferenceEquals(_waterProofWindowViewModel, viewModel))
+                return;
+            _waterProofWindowViewModel = null;
+            viewModel.Cancel();
+            AddLog($"LEAK_UI_CLOSE reason={reason}");
+            WaterProofWindowCloseRequested?.Invoke(this, reason);
+        });
     }
 
     private void LoadWaterProofProfileForCurrentModel()
@@ -8063,7 +8062,6 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _postContinuityStarted, 0);
         _waterProofEquipmentErrorAwaitingRemoval = false;
         _waitForProductRelease = true;
-        Interlocked.Exchange(ref _passRemovalSawProduct, 1);
         SetProductRemovalPending(true);
         Interlocked.Exchange(ref _removalMonitoringFromMain, 0);
         _cycleActive = true;
@@ -8622,7 +8620,7 @@ public sealed class TestViewModel : ObservableObject
 
             _cycleWaterProofStartedAt ??= DateTime.Now;
             _ = PersistActiveCycleStageAsync("LEAK_STARTED");
-            OpenWaterProofWindow(cycleModel);
+            await InvokeUiAsync(() => OpenWaterProofWindow(cycleModel));
             State = "ĐANG TEST LEAK";
             ShowWaterProofOperationPanel();
             SetWaterProofStage(WaterProofStage.Connecting, "ĐANG KẾT NỐI", "---");
@@ -8639,13 +8637,21 @@ public sealed class TestViewModel : ObservableObject
                 run = await _waterProof.RunTestAsync(
                     _productionSettings.WaterProofMachine,
                     _waterProofProfile,
-                    ApplyWaterProofProgress,
+                    progress => InvokeUi(() =>
+                    {
+                        if (!ct.IsCancellationRequested && IsProductionFaultContext(generation) &&
+                            ReferenceEquals(_model, cycleModel))
+                            ApplyWaterProofProgress(progress);
+                    }),
                     ct);
+                ct.ThrowIfCancellationRequested();
+                if (!IsProductionFaultContext(generation) || !ReferenceEquals(_model, cycleModel))
+                    throw new OperationCanceledException("Leak cycle is no longer current.");
                 _cycleWaterProofCompletedAt = DateTime.Now;
                 _ = PersistActiveCycleStageAsync("LEAK_COMPLETED");
                 _cycleWaterProofSummary = BuildWaterProofHistorySummary(run);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
                 CloseWaterProofWindow("CANCEL");
                 throw;
