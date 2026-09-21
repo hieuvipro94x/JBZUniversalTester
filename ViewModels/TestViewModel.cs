@@ -3054,20 +3054,12 @@ public sealed class TestViewModel : ObservableObject
 
         RefreshFaultsFromSnapshot(rowsSnapshot);
 
-        // Candidate WRONG/SHORT is available on the first authoritative frame.
-        // Surface that fact immediately without committing FAIL/relay/history;
-        // ProductionFaultConfirmationGate still owns the short debounce before
-        // TryBeginConfirmedWiringFaultHandling can finalize the fault.
-        ProductEvidenceSnapshot realtimeEvidence = _engine.GetProductEvidenceSnapshot();
-        if (_cycleActive &&
-            CurrentProductionPhase == ProductionPhase.Continuity &&
-            !_engine.HasWiringFault &&
-            (realtimeEvidence.WrongCandidateCount > 0 || realtimeEvidence.ShortCandidateCount > 0))
-        {
-            State = realtimeEvidence.ShortCandidateCount > 0
-                ? "ĐANG XÁC NHẬN CHẬP MẠCH..."
-                : "ĐANG XÁC NHẬN SAI DÂY...";
-        }
+        // WRONG/SHORT candidate remains realtime inside TestEngine and the
+        // confirmation gate, but must not own the main operator lifecycle.
+        // Otherwise one transient edge while changing model makes the screen
+        // flash ĐANG TEST/ĐANG XÁC NHẬN before returning to LẮP SẢN PHẨM.
+        // Only confirmed presence or a confirmed wiring fault may change the
+        // main production state.
 
         LogFaultGate(generation);
         if (Volatile.Read(ref _firstLogicalStateLogged) != 0 &&
@@ -3171,16 +3163,18 @@ public sealed class TestViewModel : ObservableObject
             bool realtimeActivity = activitySnapshot.RealtimeEvaluationEnabled;
             bool confirmedPresence = activitySnapshot.ProductEvidence;
 
-            // Operator feedback must react on the first model-related edge; do
-            // not make the UI wait for the 2-frame lifecycle confirmation.
-            if (realtimeActivity &&
+            // Main lifecycle follows CONFIRMED product presence only. Realtime
+            // candidate detection continues in TestEngine, but a single transient
+            // edge must not flash ĐANG KIỂM TRA during model change/insertion.
+            if (confirmedPresence &&
                 !State.Equals("PASS", StringComparison.OrdinalIgnoreCase))
             {
                 State = "ĐANG KIỂM TRA...";
             }
 
-            // ProbeCounter/cycle ownership still starts only after confirmed
-            // presence. This keeps touch/noise from inflating maintenance counts.
+            // ProbeCounter/cycle ownership starts on the same confirmed presence.
+            // Full correct topology uses the engine fast-path, so the normal
+            // LẮP SẢN PHẨM -> ĐANG KIỂM TRA transition remains immediate.
             if (confirmedPresence && !_productDetectedThisCycle)
             {
                 _cycleStartedAt = DateTime.Now;
@@ -3221,7 +3215,6 @@ public sealed class TestViewModel : ObservableObject
             !IsProductRemovalPending;
 
         bool confirmedPresence = electrical.ProductEvidence;
-        bool realtimePresence = electrical.RealtimeEvaluationEnabled;
         ProductionRuntimeState runtimeState = phase switch
         {
             ProductionPhase.WaitingProduct => ProductionRuntimeState.WaitingForProduct,
@@ -3231,10 +3224,13 @@ public sealed class TestViewModel : ObservableObject
             ProductionPhase.Resistance or ProductionPhase.WaterProof or ProductionPhase.Completed =>
                 ProductionRuntimeState.PassSequence,
             _ when electrical.HasConfirmedWiringFault => ProductionRuntimeState.Failed,
-            // UI/presentation reacts on the first model-related electrical edge.
-            // Confirmed ProductEvidence remains the gate for ProbeCounter/result
-            // lifecycle, so unrelated board noise still cannot create a cycle.
-            _ when realtimePresence => ProductionRuntimeState.TestingRealtime,
+            // RealtimeEvaluationEnabled is intentionally NOT a lifecycle gate.
+            // A first-frame WRONG/SHORT candidate may be a transient contact while
+            // changing model or inserting the harness. Keep operator state at
+            // LẮP SẢN PHẨM until product presence is confirmed. Full correct
+            // topology still takes the TestEngine fast-path and confirms on the
+            // first authoritative frame, so normal PASS entry is not slowed.
+            _ when confirmedPresence => ProductionRuntimeState.TestingRealtime,
             _ => ProductionRuntimeState.WaitingForProduct
         };
 
@@ -3242,9 +3238,7 @@ public sealed class TestViewModel : ObservableObject
             ? "CONFIRMED_WIRING_FAULT"
             : confirmedPresence
                 ? "PRODUCT_EVIDENCE_CONFIRMED"
-                : realtimePresence
-                    ? "PRODUCT_EVIDENCE_REALTIME"
-                    : "NO_PRODUCT_EVIDENCE";
+                : "NO_CONFIRMED_PRODUCT_EVIDENCE";
 
         SetProductionRuntimeState(runtimeState, electrical.FrameSequence, reason);
         SetProductionPresentationMode(
@@ -4322,7 +4316,7 @@ public sealed class TestViewModel : ObservableObject
             _waitForFaultProductRemoval ||
             CurrentProductionPhase != ProductionPhase.Continuity ||
             !IsProductionFaultContext(generation) ||
-            !_engine.GetProductionElectricalSnapshot().RealtimeEvaluationEnabled ||
+            !_engine.GetProductionElectricalSnapshot().ProductEvidence ||
             Interlocked.CompareExchange(ref _productStartSoundPlayed, 1, 0) != 0)
         {
             return;
@@ -9481,6 +9475,7 @@ public sealed class TestViewModel : ObservableObject
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _resultRecordedThisCycle, 0);
         Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+        Interlocked.Exchange(ref _productStartSoundPlayed, 0);
         Interlocked.Exchange(ref _startupIoInterlockState, 0);
         _startupIoWarningSignature = string.Empty;
         _lastIoMappingSignature = string.Empty;
@@ -10676,12 +10671,11 @@ public sealed class TestViewModel : ObservableObject
             ProductionElectricalSnapshot presentationElectrical =
                 rowsSnapshot?.Electrical ?? _engine.GetProductionElectricalSnapshot();
             bool hasProductEvidence = presentationElectrical.ProductEvidence;
-            bool hasRealtimeModelEvidence = presentationElectrical.RealtimeEvaluationEnabled;
             bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
             if (!_presentationCycleStarted &&
                 (_cycleActive || masterCycleActive) &&
                 !probeOwnsPresentation &&
-                hasRealtimeModelEvidence)
+                hasProductEvidence)
             {
                 _presentationCycleStarted = true;
                 RaiseCenterPresentation();
