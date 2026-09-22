@@ -1709,15 +1709,16 @@ internal static partial class Program
                    "CurrentProductionPhase != ProductionPhase.Continuity",
                    StringComparison.Ordinal),
             "COMPUTER.wav is embedded and requested once on the first real Production connection of each cycle");
-        Assert(typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
+        Assert(!typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
                    name.EndsWith(".Assets.Sounds.STAGEOK.wav", StringComparison.OrdinalIgnoreCase)) &&
                typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
                    name.EndsWith(".Assets.Sounds.NG.wav", StringComparison.OrdinalIgnoreCase)) &&
-               soundSource.Contains("CreatePlayer(\"STAGEOK.wav\"", StringComparison.Ordinal) &&
+               !soundSource.Contains("CreatePlayer(\"STAGEOK.wav\"", StringComparison.Ordinal) &&
                soundSource.Contains("CreatePlayer(\"NG.wav\"", StringComparison.Ordinal) &&
-               soundSource.Contains("public void PlayLeakResult(bool passed)", StringComparison.Ordinal) &&
-               testViewModelSource.Contains("_sound.PlayLeakResult(result.Passed);", StringComparison.Ordinal),
-            "Leak PASS/FAIL uses the dedicated embedded STAGEOK/NG result sounds");
+               soundSource.Contains("public void PlayLeakFail()", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("if (!result.Passed)", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("_sound.PlayLeakFail();", StringComparison.Ordinal),
+            "Only Leak FAIL uses the dedicated embedded NG sound; Leak PASS is silent");
 
         TestViewModel deviceFaultVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         deviceFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();

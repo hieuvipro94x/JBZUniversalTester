@@ -1568,7 +1568,8 @@ public sealed class TestViewModel : ObservableObject
                     profile,
                     progress,
                     ct);
-                _sound.PlayLeakResult(result.Passed);
+                if (!result.Passed)
+                    _sound.PlayLeakFail();
                 AddLog($"[MANUAL-LEAK] COMPLETE result={(result.Passed ? "PASS" : "FAIL")}");
                 return result;
             }
@@ -8491,7 +8492,8 @@ public sealed class TestViewModel : ObservableObject
     {
         if (captureForProductHistory)
             _lastWaterProofMeasurements = result.Channels.ToArray();
-        _sound.PlayLeakResult(result.Passed);
+        if (!result.Passed)
+            _sound.PlayLeakFail();
         return InvokeUiAsync(() =>
         {
             _waterProofWindowViewModel?.ApplyFinal(result);

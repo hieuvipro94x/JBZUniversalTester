@@ -28,7 +28,6 @@ public sealed class AppSoundService : IDisposable
     private SoundPlayer? _testPointContactPlayer;
     private SoundPlayer? _wiringFaultPlayer;
     private SoundPlayer? _discardContactPlayer;
-    private SoundPlayer? _leakPassPlayer;
     private SoundPlayer? _leakFailPlayer;
 
     // Giữ stream sống trong toàn bộ vòng đời SoundPlayer.
@@ -39,7 +38,6 @@ public sealed class AppSoundService : IDisposable
     private MemoryStream? _testPointContactStream;
     private MemoryStream? _wiringFaultStream;
     private MemoryStream? _discardContactStream;
-    private MemoryStream? _leakPassStream;
     private MemoryStream? _leakFailStream;
 
     private bool _initialized;
@@ -100,7 +98,6 @@ public sealed class AppSoundService : IDisposable
                 _testPointContactPlayer = CreatePlayer("TESTPOINT.wav", out _testPointContactStream);
                 _wiringFaultPlayer = CreatePlayer("TESTPOINT.wav", out _wiringFaultStream);
                 _discardContactPlayer = CreatePlayer("DRIP.wav", out _discardContactStream);
-                _leakPassPlayer = CreatePlayer("STAGEOK.wav", out _leakPassStream);
                 _leakFailPlayer = CreatePlayer("NG.wav", out _leakFailStream);
 
                 _initialized = true;
@@ -279,8 +276,8 @@ public sealed class AppSoundService : IDisposable
         }
     }
 
-    /// <summary>Phát đúng âm kết quả riêng của một lượt test Leak.</summary>
-    public void PlayLeakResult(bool passed)
+    /// <summary>Phát âm cảnh báo riêng khi một lượt test Leak FAIL.</summary>
+    public void PlayLeakFail()
     {
         EnsureInitialized();
         lock (_gate)
@@ -288,7 +285,7 @@ public sealed class AppSoundService : IDisposable
             if (_disposed)
                 return;
 
-            SafePlay(passed ? _leakPassPlayer : _leakFailPlayer);
+            SafePlay(_leakFailPlayer);
         }
     }
 
@@ -399,7 +396,6 @@ public sealed class AppSoundService : IDisposable
             SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
             SafeStop(_discardContactPlayer);
-            SafeStop(_leakPassPlayer);
             SafeStop(_leakFailPlayer);
         }
     }
@@ -564,7 +560,6 @@ public sealed class AppSoundService : IDisposable
             _testPointContactPlayer?.Dispose();
             _wiringFaultPlayer?.Dispose();
             _discardContactPlayer?.Dispose();
-            _leakPassPlayer?.Dispose();
             _leakFailPlayer?.Dispose();
 
             _clickStream?.Dispose();
@@ -574,7 +569,6 @@ public sealed class AppSoundService : IDisposable
             _testPointContactStream?.Dispose();
             _wiringFaultStream?.Dispose();
             _discardContactStream?.Dispose();
-            _leakPassStream?.Dispose();
             _leakFailStream?.Dispose();
 
             _disposed = true;
