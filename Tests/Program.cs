@@ -300,8 +300,8 @@ internal static partial class Program
                 "new JBZUniversalTester\\.Views\\.FaultConfirmationWindow\\(").Count == 2 &&
             System.Text.RegularExpressions.Regex.Matches(
                 testViewModelSource,
-                "ShowFaultConfirmationDialog\\(").Count == 5,
-            "Product FAIL and device communication faults use the shared confirmation window");
+                "ShowFaultConfirmationDialog\\(").Count == 4,
+            "Non-Leak product FAIL and device communication faults use the shared confirmation window");
 
         int confirmationStart = testViewModelSource.IndexOf(
             "private void ShowFaultConfirmationDialog(",
@@ -3223,12 +3223,12 @@ internal static partial class Program
             retestMethodStart,
             StringComparison.Ordinal);
         string retestMethodSource = testViewModelSource[retestMethodStart..retestMethodEnd];
-        Assert(!retestMethodSource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
-               retestMethodSource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal) &&
+        Assert(retestMethodSource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("EjectFaultProductAsync", StringComparison.Ordinal),
-            "Transient Leak retest does not write separate production history; only the centralized full-continuity FAIL gate may finalize it");
+            "Every Leak-only retest writes its own history without finalizing/ejecting the production cycle");
 
         int processStart = testViewModelSource.IndexOf(
             "private void ProcessEngineChangedOnUi",
@@ -3246,27 +3246,18 @@ internal static partial class Program
             postContinuityStart,
             StringComparison.Ordinal);
         string postContinuitySource = testViewModelSource[postContinuityStart..postContinuityEnd];
-        int finalizeLeakStart = testViewModelSource.IndexOf(
-            "private async Task FinalizeWaterProofProductFailureAsync",
-            StringComparison.Ordinal);
-        int finalizeLeakEnd = testViewModelSource.IndexOf(
-            "private async Task<bool> RunAutomaticWaterProofAsync",
-            finalizeLeakStart,
-            StringComparison.Ordinal);
-        string finalizeLeakSource = testViewModelSource[finalizeLeakStart..finalizeLeakEnd];
         int resistanceStep = postContinuitySource.IndexOf(
-            "if (IsResistanceEnabledForModel(_model))",
+            "if (!resumedAfterLeakRetest && IsResistanceEnabledForModel(_model))",
             StringComparison.Ordinal);
         int leakStep = postContinuitySource.IndexOf(
             "await RunAutomaticWaterProofAsync",
             StringComparison.Ordinal);
         Assert(!processSource.Contains("RunPreContinuityWaterProofAsync", StringComparison.Ordinal) &&
                resistanceStep >= 0 && leakStep > resistanceStep &&
-               finalizeLeakSource.Contains("_engine.ContinuityPassed", StringComparison.Ordinal) &&
-               finalizeLeakSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
-               finalizeLeakSource.Contains("failureDetails: faults", StringComparison.Ordinal) &&
-               finalizeLeakSource.Contains("ShowFaultConfirmationDialog", StringComparison.Ordinal),
-            "Leak starts only after continuity and configured resistance; official Leak FAIL uses the centralized production failure path");
+               postContinuitySource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
+               postContinuitySource.Contains("ArmWaterProofRetestConnectorCycle", StringComparison.Ordinal) &&
+               !postContinuitySource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal),
+            "Leak starts after continuity/resistance; Leak FAIL is historized then waits for connector-only retest without popup/eject");
         int durablePassCommit = postContinuitySource.IndexOf(
             "bool passCommitted = await RecordCompletedProductAsync",
             StringComparison.Ordinal);
