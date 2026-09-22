@@ -8644,6 +8644,22 @@ public sealed class TestViewModel : ObservableObject
         RaiseActiveFault();
     }
 
+    private void MarkPassRemovalScanReady()
+    {
+        if (!_waitForProductRelease ||
+            Volatile.Read(ref _passRemovalArmed) == 0 ||
+            Volatile.Read(ref _passProductRemoved) != 0)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _passRemovalBaselineSeen, 1) == 0)
+        {
+            AsyncFileLogService.Current.Performance(
+                "PASS_REMOVAL_BASELINE_READY source=VERIFIED_SCAN_AFTER_COMMITTED_PASS");
+        }
+    }
+
     private bool TryValidateWaterProofConnectorGate(
         ProductModel model,
         out string error)
@@ -8839,6 +8855,9 @@ public sealed class TestViewModel : ObservableObject
             {
                 Interlocked.Exchange(ref _preContinuityWaterProofPassed, 1);
                 Interlocked.Exchange(ref _preContinuityWaterProofStarted, 0);
+                // The previous Leak run owns this gate. Its successful retest must
+                // re-arm post-continuity so the same cycle can reach final PASS.
+                Interlocked.Exchange(ref _postContinuityStarted, 0);
                 Interlocked.Exchange(
                     ref _waterProofRetestConnectorState,
                     (int)WaterProofRetestConnectorState.Inactive);
@@ -9545,6 +9564,10 @@ public sealed class TestViewModel : ObservableObject
             try
             {
                 await StartProductionScanAndVerifyFrameAsync(ct, "PASS_RELAY_SEQUENCE");
+                // Ignore bootstrap frames until the scan supervisor has accepted
+                // the current generation; then two clean frames can confirm an
+                // operator who removed the product before topology reacquisition.
+                MarkPassRemovalScanReady();
                 AddLog("Đã restart scan. Chờ nhả sản phẩm/jig trước chu kỳ tiếp theo.");
             }
             catch (Exception ex)

@@ -3091,11 +3091,26 @@ internal static partial class Program
                passRemovalVm.Faults.Count == 0,
             "Temporary empty frames immediately after scan restart cannot erase committed PASS without a reacquired baseline");
 
-        passRemovalBoard.Publish(FrameSeq(34, (1, new[] { 18 }), (2, new[] { 19 })));
+        MethodInfo markPassRemovalScanReady = typeof(TestViewModel).GetMethod(
+            "MarkPassRemovalScanReady",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("PASS removal verified-scan marker not found");
+        markPassRemovalScanReady.Invoke(passRemovalVm, null);
+        passRemovalBoard.Publish(FrameSeq(34));
+        Assert(passRemovalVm.IsProductRemovalPending,
+            "Immediate PASS removal still requires two clean frames after scan verification");
+        passRemovalBoard.Publish(FrameSeq(35));
+        Assert(!(bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? true) &&
+               !passRemovalVm.IsProductRemovalPending,
+            "Removal before topology reacquisition completes after two verified clean frames");
+
+        armPassRemoval.Invoke(passRemovalVm, null);
+
+        passRemovalBoard.Publish(FrameSeq(36, (1, new[] { 18 }), (2, new[] { 19 })));
         Assert(passRemovalVm.ResultStatusText == "PASS" && passRemovalVm.Faults.Count == 0,
             "Reacquired complete topology keeps PASS and establishes the removal baseline");
 
-        passRemovalBoard.Publish(FrameSeq(35, (2, new[] { 19 })));
+        passRemovalBoard.Publish(FrameSeq(37, (2, new[] { 19 })));
         Assert((bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? false) &&
                passRemovalVm.IsProductRemovalPending &&
                passRemovalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
@@ -3106,10 +3121,10 @@ internal static partial class Program
                passRemovalVm.Faults.All(row => !row.RelatedIos.Contains(1)),
             "Losing one expected connection changes PASS to removal and shows only connectivity still on the JIG");
 
-        passRemovalBoard.Publish(FrameSeq(36));
+        passRemovalBoard.Publish(FrameSeq(38));
         Assert(passRemovalVm.IsProductRemovalPending,
             "PASS removal requires two complete clean frames");
-        passRemovalBoard.Publish(FrameSeq(37));
+        passRemovalBoard.Publish(FrameSeq(39));
         Assert(!(bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? true) &&
                !passRemovalVm.IsProductRemovalPending &&
                passRemovalVm.ResultStatusText == "LẮP SẢN PHẨM",
@@ -3225,6 +3240,7 @@ internal static partial class Program
             StringComparison.Ordinal);
         string retestMethodSource = testViewModelSource[retestMethodStart..retestMethodEnd];
         Assert(retestMethodSource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
+               retestMethodSource.Contains("Interlocked.Exchange(ref _postContinuityStarted, 0)", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
