@@ -373,7 +373,12 @@ public sealed class AppSoundService : IDisposable
                 {
                     try
                     {
+                        // Reset the native PlaySound channel before replaying.
+                        // The logical flag can remain true even after another
+                        // SoundPlayer has interrupted the physical loop.
+                        _wiringFaultPlayer?.Stop();
                         _wiringFaultPlayer?.PlayLooping();
+                        AsyncFileLogService.Current.Application("WIRING_FAULT_SOUND REASSERT");
                     }
                     catch (Exception ex)
                     {
@@ -389,11 +394,17 @@ public sealed class AppSoundService : IDisposable
             {
                 if (active)
                 {
+                    // Always start from a known native-player state. This is
+                    // required after START/CLICK/Probe used the shared Windows
+                    // WAV channel during a previous product cycle.
+                    _wiringFaultPlayer?.Stop();
                     _wiringFaultPlayer?.PlayLooping();
+                    AsyncFileLogService.Current.Application("WIRING_FAULT_SOUND START");
                 }
                 else
                 {
                     _wiringFaultPlayer?.Stop();
+                    AsyncFileLogService.Current.Application("WIRING_FAULT_SOUND STOP");
                 }
             }
             catch (Exception ex)
