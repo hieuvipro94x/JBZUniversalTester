@@ -11177,8 +11177,12 @@ public sealed class TestViewModel : ObservableObject
                 rowsSnapshot?.Electrical ?? _engine.GetProductionElectricalSnapshot();
             bool hasProductEvidence = presentationElectrical.ProductEvidence;
             bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
+            bool confirmedWiringFaultPresentation =
+                CurrentProductionRuntimeState == ProductionRuntimeState.Failed &&
+                _engine.LastFrameValid &&
+                _engine.HasWiringFault;
             if (!_presentationCycleStarted &&
-                (_cycleActive || masterCycleActive) &&
+                (_cycleActive || masterCycleActive || confirmedWiringFaultPresentation) &&
                 !probeOwnsPresentation &&
                 hasProductEvidence)
             {
