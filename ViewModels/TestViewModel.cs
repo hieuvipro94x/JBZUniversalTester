@@ -11261,7 +11261,16 @@ public sealed class TestViewModel : ObservableObject
         // giai đoạn chờ tháo sản phẩm. HandleWiringFaultAsync giữ âm lặp cho
         // tới khi popup được xác nhận.
         if (!_waitForFaultProductRemoval)
-            _sound.SetWiringFaultAlarm(WiringFaultCount > 0 && (_cycleActive || _sound.IsWiringFaultAlarmActive));
+        {
+            // Safety alarm follows the authoritative confirmed engine state,
+            // never the asynchronously rendered Faults collection. On a fast
+            // FAIL transition the UI rows can still be empty for one dispatcher
+            // turn; using WiringFaultCount there stopped TESTPOINT after 30-40 ms.
+            bool confirmedWiringFault = _engine.LastFrameValid && _engine.HasWiringFault;
+            _sound.SetWiringFaultAlarm(
+                confirmedWiringFault &&
+                (_cycleActive || _sound.IsWiringFaultAlarmActive));
+        }
         else
             _sound.SetWiringFaultAlarm(false);
 
