@@ -70,28 +70,12 @@ public static class LiveTopologyPresenter
         // IsNetworkStart=true ở dòng đầu để DataGrid vẽ đường phân cách cyan.
         // Đây chỉ là presentation: FaultKind.Info + ProductFaultType.None đảm bảo
         // LiveTopology không bị tính là OPEN/SAI DÂY/CHẬP MẠCH hay PASS/FAIL.
-        FaultRow[] rows = orderedPairs
-            .SelectMany((pair, pairIndex) =>
-            {
-                int[] related = [pair.FirstIo, pair.SecondIo];
-                int baseOrder = pairIndex * 2;
-
-                return new[]
-                {
-                    BuildPairRow(
-                        io: pair.FirstIo,
-                        peerIo: pair.SecondIo,
-                        related: related,
-                        displayOrder: baseOrder,
-                        isPairStart: true),
-                    BuildPairRow(
-                        io: pair.SecondIo,
-                        peerIo: pair.FirstIo,
-                        related: related,
-                        displayOrder: baseOrder + 1,
-                        isPairStart: false)
-                };
-            })
+        // One block represents one connected component, with one IO per row.
+        // For example, IO3-IO4 and IO3-IO5 render as IO3, IO4, IO5 without
+        // repeating IO3 in separate pair blocks. This is presentation-only.
+        FaultRow[] rows = components
+            .SelectMany((component, componentIndex) =>
+                BuildComponentRows(component.ToArray(), componentIndex))
             .ToArray();
 
         string signature = string.Join('|', orderedPairs.Select(pair => $"{pair.FirstIo}-{pair.SecondIo}"));
@@ -105,32 +89,35 @@ public static class LiveTopologyPresenter
             signature);
     }
 
-    private static FaultRow BuildPairRow(
-        int io,
-        int peerIo,
+    private static IEnumerable<FaultRow> BuildComponentRows(
         int[] related,
-        int displayOrder,
-        bool isPairStart)
+        int componentIndex)
     {
-        int zeroBased = io - 1;
-        int connector = (zeroBased / BoardCapacity.IoPerPort) + 1;
-        int pin = (zeroBased % BoardCapacity.IoPerPort) + 1;
-
-        return new FaultRow
+        for (int rowIndex = 0; rowIndex < related.Length; rowIndex++)
         {
-            Kind = FaultKind.Info,
-            ProductFaultType = ProductFaultType.None,
-            FaultType = "CHẬP MẠCH",
-            Io = io,
-            IoTextOverride = $"IO ({io})",
-            ActualSourceIo = related[0],
-            ActualTargetIo = related[1],
-            RelatedIos = related,
-            DisplayOrder = displayOrder,
-            IsNetworkStart = isPairStart,
-            IoCnPnOverride = $"{io}-{connector}-{pin}",
-            Status = $"NỐI VỚI IO({peerIo})"
-        };
+            int io = related[rowIndex];
+            int zeroBased = io - 1;
+            int connector = (zeroBased / BoardCapacity.IoPerPort) + 1;
+            int pin = (zeroBased % BoardCapacity.IoPerPort) + 1;
+
+            yield return new FaultRow
+            {
+                Kind = FaultKind.Info,
+                ProductFaultType = ProductFaultType.None,
+                FaultType = "CHẬP MẠCH",
+                Io = io,
+                IoTextOverride = $"IO ({io})",
+                ActualSourceIo = related[0],
+                ActualTargetIo = related[1],
+                RelatedIos = related,
+                DisplayOrder = (componentIndex * 1000) + rowIndex,
+                IsNetworkStart = rowIndex == 0,
+                IoCnPnOverride = $"{io}-{connector}-{pin}",
+                Status = related.Length > 2
+                    ? $"NỐI CHUNG {related.Length} IO"
+                    : $"NỐI VỚI IO({related[1 - rowIndex]})"
+            };
+        }
     }
 
     private static IReadOnlyList<IReadOnlyList<int>> BuildComponents(

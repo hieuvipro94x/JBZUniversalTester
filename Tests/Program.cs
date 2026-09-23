@@ -9128,8 +9128,10 @@ internal static partial class Program
                    twoPairTopology.Components.Count == 2 &&
                    twoPairTopology.Rows.All(row => row.IsLiveTopologyPresentation) &&
                    twoPairTopology.Rows.Select(row => row.IsNetworkStart)
-                       .SequenceEqual([true, false, true, false]),
-                "LiveTopology renders two safe rows per exact board edge and canonicalizes reverse directions once");
+                       .SequenceEqual([true, false, true, false]) &&
+                   twoPairTopology.Rows.Select(row => row.IoText)
+                       .SequenceEqual(["IO (1)", "IO (3)", "IO (2)", "IO (4)"]),
+                "LiveTopology renders one IO per row in each connected component");
 
             LiveTopologySnapshot onePairRemoved = LiveTopologyPresenter.Build(
                 FrameSeq(21, (4, new[] { 2 })),
@@ -9144,8 +9146,13 @@ internal static partial class Program
             Assert(component.Pairs.SequenceEqual([
                        new LiveTopologyPair(1, 3),
                        new LiveTopologyPair(3, 5)]) &&
-                   component.Components.Single().SequenceEqual([1, 3, 5]),
-                "A component larger than two keeps only observed physical edges and a deterministic component diagnostic");
+                   component.Components.Single().SequenceEqual([1, 3, 5]) &&
+                   component.Rows.Count == 3 &&
+                   component.Rows.Select(row => row.IoText)
+                       .SequenceEqual(["IO (1)", "IO (3)", "IO (5)"]) &&
+                   component.Rows.All(row => row.Status == "NỐI CHUNG 3 IO") &&
+                   component.Rows.All(row => row.RelatedIos.SequenceEqual([1, 3, 5])),
+                "A shared component displays each IO once on its own row");
 
             IReadOnlyList<FaultRow> connectionRows = IoMappingFramePresenter.BuildRows(
                 FrameSeq(1, (2, new[] { 1, 3 }), (1, new[] { 2 })),
@@ -9202,7 +9209,7 @@ internal static partial class Program
                 BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(vm) ?? throw new InvalidOperationException("Empty-model engine not found"));
             Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
-                   vm.Faults.Count == 1 &&
+                   vm.Faults.Count == 2 &&
                    vm.Faults[0].Kind == FaultKind.Probe &&
                    vm.Faults[0].Io == 63 &&
                    vm.Faults[0].Status == "TP - IO(63)" &&
@@ -9218,7 +9225,7 @@ internal static partial class Program
 
             board.Publish(FrameSeq(5));
             Assert(!AppSoundService.Current.IsTestPointContactSoundActive &&
-                   vm.Faults.Count == 2 &&
+                   vm.Faults.Count == 1 &&
                    vm.Faults.All(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 9) &&
                    vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
                    vm.CurrentProbePresentationState == ProbePresentationState.Released &&

@@ -69,7 +69,10 @@ public sealed class WaterProofTestViewModel : ObservableObject
             for (int index = 0; index < 3 && index < progress.Values.Count; index++)
             {
                 if (_profile.IsChannelEnabled(index + 1))
+                {
                     _pressReference[index] = Math.Abs(progress.Values[index]);
+                    SetChannelText(index + 1, progress.Values[index]);
+                }
             }
             return;
         }
@@ -83,9 +86,7 @@ public sealed class WaterProofTestViewModel : ObservableObject
             if (!_profile.IsChannelEnabled(index + 1) || !_pressReference[index].HasValue)
                 continue;
 
-            SetChannelText(
-                index + 1,
-                Math.Abs(_pressReference[index]!.Value - Math.Abs(progress.Values[index])));
+            SetChannelText(index + 1, progress.Values[index]);
         }
     }
 
@@ -143,4 +144,5 @@ public sealed class WaterProofTestViewModel : ObservableObject
             case 3: Channel3Background = value; break;
         }
     }
+
 }
