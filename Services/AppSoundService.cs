@@ -310,6 +310,14 @@ public sealed class AppSoundService : IDisposable
                 return;
             }
 
+            if (active && _wiringFaultAlarmActive)
+            {
+                // Wiring fault is the safety-priority loop. Remember the probe
+                // state, but do not replace the active alarm sound.
+                _testPointContactSoundActive = true;
+                return;
+            }
+
             // RELEASE luôn cưỡng bức Stop, kể cả cờ trạng thái đã về false
             // từ một callback trước đó. Điều này tránh WAV looping bị sót khi
             // frame/UI release đến gần nhau.
@@ -321,7 +329,8 @@ public sealed class AppSoundService : IDisposable
             {
                 if (active)
                     _testPointContactPlayer?.PlayLooping();
-                else if (Volatile.Read(ref _startupPlaybackActive) == 0)
+                else if (Volatile.Read(ref _startupPlaybackActive) == 0 &&
+                         !_wiringFaultAlarmActive)
                     _testPointContactPlayer?.Stop();
             }
             catch (Exception ex)
@@ -355,7 +364,24 @@ public sealed class AppSoundService : IDisposable
             }
 
             if (_wiringFaultAlarmActive == active)
+            {
+                // SoundPlayer ultimately shares the Windows PlaySound channel.
+                // A late Stop/Play from Probe or another short UI sound may have
+                // interrupted TESTPOINT while this logical flag stayed true.
+                // Reassert an active safety alarm instead of silently returning.
+                if (active)
+                {
+                    try
+                    {
+                        _wiringFaultPlayer?.PlayLooping();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Không thể phát lại âm cảnh báo: {ex}");
+                    }
+                }
                 return;
+            }
 
             _wiringFaultAlarmActive = active;
 

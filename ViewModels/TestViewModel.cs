@@ -3267,6 +3267,25 @@ public sealed class TestViewModel : ObservableObject
             phase == ProductionPhase.WaterProof &&
             Volatile.Read(ref _preContinuityWaterProofPassed) == 0)
         {
+            // D2XX is intentionally stopped while the Leak COM run is active. Once
+            // production scan resumes for connector retest, confirmed WRONG/SHORT
+            // must still drive TESTPOINT even though this cycle remains in the
+            // WaterProof phase. Do not enter the normal FAIL popup/history/relay
+            // lifecycle: Leak FAIL only permits connector removal and retest.
+            bool leakRetestWiringFault =
+                Volatile.Read(ref _waterProofRunning) == 0 &&
+                _engine.LastFrameValid &&
+                _engine.HasWiringFault &&
+                electrical.ProductEvidence;
+            bool alarmWasActive = _sound.IsWiringFaultAlarmActive;
+            _sound.SetWiringFaultAlarm(leakRetestWiringFault);
+            if (leakRetestWiringFault && !alarmWasActive)
+            {
+                AddLog(
+                    "[WATERPROOF-RETEST] Đã xác nhận sai dây/chập mạch; " +
+                    "phát TESTPOINT cho tới khi lỗi được tháo.");
+            }
+
             var retestState = (WaterProofRetestConnectorState)Volatile.Read(
                 ref _waterProofRetestConnectorState);
             if (retestState is WaterProofRetestConnectorState.AwaitingConnectorReconnect or
