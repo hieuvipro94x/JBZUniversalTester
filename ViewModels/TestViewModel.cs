@@ -8744,6 +8744,32 @@ public sealed class TestViewModel : ObservableObject
         return true;
     }
 
+    private async Task HandleWaterProofConfigurationErrorAsync(
+        ProductModel model,
+        string error)
+    {
+        string diagnostic =
+            $"[WATERPROOF-CONFIG] Model={model.ModelName} Part={model.PartNumber} " +
+            $"CycleId={_activeCycleId} Error={error}";
+        AsyncFileLogService.Current.Error(diagnostic);
+        AddLog(diagnostic);
+
+        _sound.SetWiringFaultAlarm(false);
+        ArmWaterProofEquipmentErrorRemovalWait();
+        State = "CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ - CHỜ THÁO SẢN PHẨM";
+
+        await InvokeUiAsync(() => MessageBox.Show(
+            ResolveOperatorDialogOwner(),
+            "Mã hàng đang bật TEST LEAK nhưng file THT không có cặp dây RET/RT hợp lệ " +
+            "qua connector đã chọn.\n\n" +
+            error + "\n\n" +
+            "Hãy tháo sản phẩm, vào CÀI ĐẶT và tắt TEST LEAK hoặc cấu hình lại " +
+            "file THT/connector RET. Ứng dụng vẫn tiếp tục hoạt động, không cần đóng/mở lại.",
+            "CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning));
+    }
+
     private string[] ConfiguredWaterProofConnectorIds() =>
         Enumerable.Range(1, 3)
             .Where(_waterProofProfile.IsChannelEnabled)
@@ -9483,7 +9509,12 @@ public sealed class TestViewModel : ObservableObject
             if (!resumedAfterLeakRetest && IsWaterProofEnabledForCurrentModel())
             {
                 if (!TryValidateWaterProofConnectorGate(cycleModel, out string connectorGateError))
-                    throw new InvalidOperationException(connectorGateError);
+                {
+                    await HandleWaterProofConfigurationErrorAsync(
+                        cycleModel,
+                        connectorGateError);
+                    return;
+                }
 
                 SetProductionPhase(ProductionPhase.WaterProof);
                 await PauseProductionScanForWaterProofAsync(ct);

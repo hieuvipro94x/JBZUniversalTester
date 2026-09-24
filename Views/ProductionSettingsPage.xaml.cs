@@ -2,6 +2,7 @@
 using System.IO.Ports;
 using System.Text.RegularExpressions;
 using System.Text;
+using System.Text.Json;
 using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -24,6 +25,7 @@ public partial class ProductionSettingsPage : UserControl
 {
     private readonly MainViewModel? _main;
     private readonly ProductionSettingsViewModel _vm;
+    private readonly string _initialSettingsSnapshot;
     private int _released;
     private int _portRefreshGeneration;
     private int _printerConnectionGeneration;
@@ -33,6 +35,7 @@ public partial class ProductionSettingsPage : UserControl
 
     public event Func<object?, EventArgs, Task>? SettingsSaved;
     public event EventHandler? RequestClose;
+    public bool LastSaveChanged { get; private set; }
 
     public ProductionSettingsPage()
         : this(null)
@@ -54,6 +57,8 @@ public partial class ProductionSettingsPage : UserControl
         DataContext = _vm;
         InitializeComboBoxItems();
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
+        SyncCompatibilityFields();
+        _initialSettingsSnapshot = CaptureEditableSettingsSnapshot();
         Loaded += ProductionSettingsPage_Loaded;
     }
 
@@ -1443,6 +1448,14 @@ public partial class ProductionSettingsPage : UserControl
         SettingsSavedStatusText.Visibility = Visibility.Visible;
     }
 
+    private string CaptureEditableSettingsSnapshot() => JsonSerializer.Serialize(new
+    {
+        _vm.Settings,
+        _vm.MasterFaultRequiredCount,
+        ResistanceChannels = _vm.ResistanceChannels.Select(editor => editor.ToSetting()).ToArray(),
+        _vm.WaterProof
+    });
+
     private async Task<bool> PersistSettingsAsync()
     {
         if (Interlocked.CompareExchange(ref _saveInProgress, 1, 0) != 0)
@@ -1458,6 +1471,13 @@ public partial class ProductionSettingsPage : UserControl
             }
 
             SyncCompatibilityFields();
+            LastSaveChanged = !string.Equals(
+                _initialSettingsSnapshot,
+                CaptureEditableSettingsSnapshot(),
+                StringComparison.Ordinal);
+            if (!LastSaveChanged)
+                return true;
+
             _vm.Save();
             await NotifySettingsSavedAsync();
             return true;

@@ -358,7 +358,8 @@ public partial class MainWindow : Window
         try
         {
             await _viewModel.ReloadProductionSettingsAsync();
-            _showSettingsSavedConfirmation = true;
+            _showSettingsSavedConfirmation = sender is ProductionSettingsPage settingsPage &&
+                                             settingsPage.LastSaveChanged;
 
             // SETTINGS_SAVE_SILENT_2026-09-05:
             // Lưu và đồng bộ runtime thành công thì đóng trang Cài đặt luôn.
