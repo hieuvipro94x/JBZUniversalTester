@@ -30,6 +30,8 @@ public partial class TestWindow : Window
     private int _scrollDispatchQueued;
     private CancellationTokenSource? _greenBlinkCts;
     private Task _greenBlinkTask = Task.CompletedTask;
+
+    public event EventHandler? ReturningToMain;
     private int _greenBlinkRequestGeneration;
     private int _statusLedHandlersAttached;
     private int _statusPulseDispatchQueued;
@@ -704,6 +706,7 @@ public partial class TestWindow : Window
         catch { }
         finally
         {
+            await RevealMainBeforeCloseAsync();
             _allowClose = true;
             Close();
         }
@@ -744,10 +747,89 @@ public partial class TestWindow : Window
         catch { }
         finally
         {
+            await RevealMainBeforeCloseAsync();
             _allowClose = true;
             CleanupUiHandlers();
             Close();
         }
+    }
+
+    private async Task RevealMainBeforeCloseAsync()
+    {
+        EventHandler? returningHandler = ReturningToMain;
+        if (returningHandler is null ||
+            Dispatcher.HasShutdownStarted ||
+            Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        // MainWindow được Show/Activate đồng bộ trong callback này trong khi
+        // TestWindow vẫn còn phủ toàn màn hình. Vì vậy không có khoảng trống
+        // giữa hai top-level window giống kiểu Close -> Show.
+        returningHandler(this, EventArgs.Empty);
+
+        // ContextIdle không đảm bảo DWM đã thực sự có frame của MainWindow.
+        // Cho WPF xử lý layout/render trước, sau đó giữ TestWindow sống thêm
+        // hai nhịp CompositionTarget.Rendering rồi mới Close().
+        await Dispatcher.InvokeAsync(
+            static () => { },
+            DispatcherPriority.Render);
+
+        await WaitForCompositionFramesAsync(2);
+    }
+
+    private async Task WaitForCompositionFramesAsync(int requiredFrames)
+    {
+        if (requiredFrames <= 0 ||
+            Dispatcher.HasShutdownStarted ||
+            Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        int frameCount = 0;
+        EventHandler? renderingHandler = null;
+        EventHandler? timeoutHandler = null;
+
+        var fallbackTimer = new DispatcherTimer(
+            DispatcherPriority.Background,
+            Dispatcher)
+        {
+            // Tránh treo việc đóng cửa sổ nếu Rendering tạm ngừng
+            // (ví dụ RDP/minimize/display transition).
+            Interval = TimeSpan.FromMilliseconds(180)
+        };
+
+        void Complete()
+        {
+            if (renderingHandler is not null)
+                CompositionTarget.Rendering -= renderingHandler;
+
+            if (timeoutHandler is not null)
+                fallbackTimer.Tick -= timeoutHandler;
+
+            fallbackTimer.Stop();
+            completion.TrySetResult(true);
+        }
+
+        renderingHandler = (_, _) =>
+        {
+            frameCount++;
+            if (frameCount >= requiredFrames)
+                Complete();
+        };
+
+        timeoutHandler = (_, _) => Complete();
+
+        CompositionTarget.Rendering += renderingHandler;
+        fallbackTimer.Tick += timeoutHandler;
+        fallbackTimer.Start();
+
+        await completion.Task;
     }
 
     private void CancelPendingAutoStart()
@@ -761,6 +843,7 @@ public partial class TestWindow : Window
 
     private void CleanupUiHandlers()
     {
+        ReturningToMain = null;
         CancelPendingAutoStart();
         ContentRendered -= TestWindow_ContentRendered;
         _clockTimer.Stop();
