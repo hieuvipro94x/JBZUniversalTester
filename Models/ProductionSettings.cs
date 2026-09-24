@@ -126,9 +126,9 @@ public sealed class ProductionSettings
     public bool EnableSystemLogs { get; set; }
 
     /// <summary>
-    /// Bật: Wrong/Short đã xác nhận sẽ dừng chu kỳ và mở cửa sổ XÁC NHẬN như hiện tại.
-    /// Tắt: Wrong/Short chỉ là cảnh báo realtime; scan tiếp tục, tháo kết nối lỗi thì
-    /// cảnh báo tự mất và cắm sai lại sẽ cảnh báo lại. Không commit FAIL/relay/popup.
+    /// Bật: lỗi vẫn được chốt FAIL và ghi History nhưng không mở cửa sổ xác nhận,
+    /// không kích relay; bảng lỗi/âm báo hướng dẫn người vận hành tháo sản phẩm.
+    /// Tắt: giữ quy trình xác nhận lỗi truyền thống (popup rồi kích relay JIG).
     /// </summary>
     public bool WiringFaultConfirmationEnabled { get; set; } = true;
 

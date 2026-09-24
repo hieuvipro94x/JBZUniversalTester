@@ -24,6 +24,7 @@ public partial class TestWindow : Window
     private readonly DispatcherTimer _clockTimer;
     private readonly DispatcherTimer _yellowPulseTimer;
     private readonly DispatcherTimer _whitePulseTimer;
+    private readonly DispatcherTimer _greenPulseTimer;
     private NotifyCollectionChangedEventHandler? _faultsChangedHandler;
     private readonly CancellationTokenSource _viewLifetimeCts = new();
     private int _scrollDispatchQueued;
@@ -79,6 +80,12 @@ public partial class TestWindow : Window
             Interval = TimeSpan.FromMilliseconds(90)
         };
         _whitePulseTimer.Tick += WhitePulseTimer_Tick;
+
+        _greenPulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(90)
+        };
+        _greenPulseTimer.Tick += GreenPulseTimer_Tick;
 
         UpdateClock();
         ContentRendered += TestWindow_ContentRendered;
@@ -306,6 +313,7 @@ public partial class TestWindow : Window
                 PulseWhiteLed();
             if (Interlocked.Exchange(ref _yellowPulsePending, 0) != 0)
                 PulseYellowLed();
+            PulseGreenLed();
         }, DispatcherPriority.Background);
     }
 
@@ -434,6 +442,17 @@ public partial class TestWindow : Window
         _whitePulseTimer.Start();
     }
 
+    private void PulseGreenLed()
+    {
+        // Green is the board/RX heartbeat. Coalesce dense frames into one short
+        // visible OFF pulse; never allocate a task or restart the timer per frame.
+        if (_greenPulseTimer.IsEnabled || !_greenBlinkTask.IsCompleted)
+            return;
+
+        GreenStatusLed.Fill = GreenLedOffBrush;
+        _greenPulseTimer.Start();
+    }
+
     private void YellowPulseTimer_Tick(object? sender, EventArgs e)
     {
         _yellowPulseTimer.Stop();
@@ -444,6 +463,15 @@ public partial class TestWindow : Window
     {
         _whitePulseTimer.Stop();
         WhiteStatusLed.Fill = WhiteLedOffBrush;
+    }
+
+    private void GreenPulseTimer_Tick(object? sender, EventArgs e)
+    {
+        _greenPulseTimer.Stop();
+        bool boardReady = DataContext is TestViewModel viewModel &&
+                          viewModel.IsBoardConnected &&
+                          !viewModel.IsDeviceFault;
+        SetGreenLed(boardReady);
     }
 
     private void ResetActivityLeds()
@@ -542,6 +570,7 @@ public partial class TestWindow : Window
     private void CancelGreenPassBlink(bool restoreConnectedState)
     {
         Interlocked.Increment(ref _greenBlinkRequestGeneration);
+        _greenPulseTimer.Stop();
         CancellationTokenSource? cts = Interlocked.Exchange(ref _greenBlinkCts, null);
         if (cts is not null)
         {
@@ -740,6 +769,8 @@ public partial class TestWindow : Window
         _yellowPulseTimer.Tick -= YellowPulseTimer_Tick;
         _whitePulseTimer.Stop();
         _whitePulseTimer.Tick -= WhitePulseTimer_Tick;
+        _greenPulseTimer.Stop();
+        _greenPulseTimer.Tick -= GreenPulseTimer_Tick;
         Interlocked.Exchange(ref _scrollDispatchQueued, 0);
         Interlocked.Exchange(ref _statusLedHandlersAttached, 0);
         CancelGreenPassBlink(false);

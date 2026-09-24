@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private TestWindow? _testWindow;
     private ProductionSettingsPage? _settingsPage;
     private HistoryPage? _historyPage;
+    private bool _showSettingsSavedConfirmation;
     private bool _shutdownStarted;
     private bool _shutdownComplete;
     private bool _startupStarted;
@@ -341,6 +342,12 @@ public partial class MainWindow : Window
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
 
+        if (_showSettingsSavedConfirmation)
+        {
+            _settingsPage.ShowSavedConfirmation();
+            _showSettingsSavedConfirmation = false;
+        }
+
         InternalPageHost.Content = _settingsPage;
         InternalPageHost.Visibility = Visibility.Visible;
         LogMemory("MEM AFTER_SETTINGS_OPEN");
@@ -351,6 +358,7 @@ public partial class MainWindow : Window
         try
         {
             await _viewModel.ReloadProductionSettingsAsync();
+            _showSettingsSavedConfirmation = true;
 
             // SETTINGS_SAVE_SILENT_2026-09-05:
             // Lưu và đồng bộ runtime thành công thì đóng trang Cài đặt luôn.

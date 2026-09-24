@@ -25,7 +25,7 @@ public partial class TopologyLearningWindow : Window
     private string _displayedSignature = string.Empty;
     private LearnedTopologySnapshot? _capturedSnapshot;
 
-    public ObservableCollection<LearnedTopologyRow> Rows { get; } = [];
+    public ObservableCollection<TopologyLearningDisplayRow> Rows { get; } = [];
     public ObservableCollection<ActiveIoDiagnosticRow> ActiveIoRows { get; } = [];
 
     public TopologyLearningWindow(TestViewModel test)
@@ -117,8 +117,18 @@ public partial class TopologyLearningWindow : Window
         {
             _displayedSignature = snapshot.Signature;
             Rows.Clear();
-            foreach (LearnedTopologyRow row in snapshot.Rows)
-                Rows.Add(row);
+            foreach ((LearnedTopologyNetwork network, int networkIndex) in
+                     snapshot.Networks.Select((network, index) => (network, index)))
+            {
+                string topologyType = network.Ios.Count == 2 ? "Đơn" : "Nối chung";
+                foreach (int io in network.Ios.OrderBy(value => value))
+                {
+                    Rows.Add(new TopologyLearningDisplayRow(
+                        networkIndex + 1,
+                        topologyType,
+                        $"IO ({io})"));
+                }
+            }
         }
 
         if (!_diagnosing)
@@ -166,9 +176,10 @@ public partial class TopologyLearningWindow : Window
             .SelectMany(network => network.Ios.Select(io => new
             {
                 Io = io,
+                TopologyType = network.Ios.Count == 2 ? "Đơn" : "Nối chung",
                 Related = string.Join(" ↔ ", network.Ios.Select(value => $"IO({value})"))
             }))
-            .ToDictionary(item => item.Io, item => item.Related);
+            .ToDictionary(item => item.Io, item => item.TopologyType);
 
         int[] displayedIos = ActiveIoRows.Select(row => row.Io).ToArray();
         int[] desiredIos = activeIos.ToArray();
@@ -286,6 +297,11 @@ public partial class TopologyLearningWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }
+
+public sealed record TopologyLearningDisplayRow(
+    int Number,
+    string TopologyType,
+    string IoText);
 
 public sealed class ActiveIoDiagnosticRow : INotifyPropertyChanged
 {

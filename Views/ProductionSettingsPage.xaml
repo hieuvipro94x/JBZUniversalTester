@@ -188,6 +188,15 @@
             <Grid Margin="8,3">
                 <Button Width="138" HorizontalAlignment="Left" VerticalAlignment="Center" Content="TRANG CHÍNH" Click="Cancel_Click" Style="{StaticResource SettingsExitButtonStyle}"/>
                 <TextBlock Text="CÀI ĐẶT PRODUCTION" FontSize="21" FontWeight="Bold" Foreground="{StaticResource BrandBlue}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <TextBlock x:Name="SettingsSavedStatusText"
+                           Text="Đã lưu cài đặt"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="#16803A"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
+                           Margin="0,0,8,0"
+                           Visibility="Collapsed"/>
             </Grid>
         </Border>
         <ScrollViewer Grid.Row="1" x:Name="SettingsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged" PanningMode="Both">
@@ -284,7 +293,7 @@
                                             <TextBlock Grid.Row="11" Text="Số lỗi Master tối thiểu" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBox Grid.Row="11" Grid.Column="1" Text="{Binding MasterFaultRequiredCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="0 = bỏ kiểm tra Master. 1 trở lên = số lỗi Master tối thiểu cần xác nhận."/>
                                             <TextBlock Grid.Row="12" Text="Xác nhận lỗi dây" Style="{StaticResource FieldLabelStyle}"/>
-                                            <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.WiringFaultConfirmationEnabled, Mode=TwoWay}" ToolTip="Bật: sai dây/chập mạch dừng test và phải bấm XÁC NHẬN. Tắt: chỉ cảnh báo realtime; tháo kết nối sai thì cảnh báo tự mất, cắm sai lại sẽ báo lại."/>
+                                            <CheckBox Grid.Row="12" Grid.Column="1" IsChecked="{Binding Settings.WiringFaultConfirmationEnabled, Mode=TwoWay}" ToolTip="Bật: vẫn tính FAIL và ghi lịch sử nhưng không hiện cửa sổ xác nhận, không kích relay; lỗi hiển thị trên bảng để tháo sản phẩm. Tắt: hiện cửa sổ XÁC NHẬN và kích relay JIG như bình thường."/>
                                             <TextBlock Grid.Row="13" Text="Tự lưu lỗi" Style="{StaticResource FieldLabelStyle}"/>
                                             <CheckBox Grid.Row="13" Grid.Column="1" IsChecked="{Binding Settings.AutoSaveErrors, Mode=TwoWay}" ToolTip="Chỉ tạo JSON lỗi sản phẩm khi Bật tất cả log hệ thống cũng đang bật."/>
                                             <TextBlock Grid.Row="14" Text="Bật tất cả log hệ thống" Style="{StaticResource FieldLabelStyle}"/>

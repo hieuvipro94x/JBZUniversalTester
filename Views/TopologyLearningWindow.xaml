@@ -98,7 +98,8 @@
                 <DataGrid x:Name="TopologyGrid" Grid.Row="1" ItemsSource="{Binding Rows}">
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="50"/>
-                        <DataGridTextColumn Header="KẾT NỐI HIỆN TẠI" Binding="{Binding Connection}" Width="*"/>
+                        <DataGridTextColumn Header="LOẠI" Binding="{Binding TopologyType}" Width="120"/>
+                        <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="*"/>
                     </DataGrid.Columns>
                 </DataGrid>
             </Grid></Border>

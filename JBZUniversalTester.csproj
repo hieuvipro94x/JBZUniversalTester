@@ -73,8 +73,12 @@
 
   <!-- Icon -->
   <ItemGroup>
+    <None Remove="Assets\mainlogo.gif" />
     <None Remove="Assets\reset_probe_cycle.png" />
     <None Remove="logo.ico" />
+    <Resource Include="Assets\mainlogo.gif">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
     <Resource Include="Assets\reset_probe_cycle.png" />
     <Resource Include="logo.ico" />
   </ItemGroup>

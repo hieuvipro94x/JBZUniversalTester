@@ -196,30 +196,15 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
 
-                <Border Width="220"
+                <Border Width="452"
+                        Height="137"
                         Background="White"
                         HorizontalAlignment="Center"
                         BorderBrush="#D0D0CE"
                         BorderThickness="1">
-
-                    <StackPanel>
-
-                        <TextBlock Text="VINA"
-                                   Foreground="{StaticResource BrandBlue}"
-                                   FontSize="58"
-                                   FontWeight="Bold"
-                                   TextAlignment="Center"
-                                   Margin="16,4"/>
-
-                        <Border Background="{StaticResource BrandBlue}">
-                            <TextBlock Text="JBZVINA-2026"
-                                       Foreground="White"
-                                       FontSize="22"
-                                       FontWeight="Bold"
-                                       TextAlignment="Center"
-                                       Padding="8,4"/>
-                        </Border>
-                    </StackPanel>
+                    <Image Source="/Assets/mainlogo.gif"
+                           Stretch="Uniform"
+                           SnapsToDevicePixels="True"/>
                 </Border>
 
             </StackPanel>

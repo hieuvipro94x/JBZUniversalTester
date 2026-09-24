@@ -1438,6 +1438,11 @@ public partial class ProductionSettingsPage : UserControl
             await ((Func<object?, EventArgs, Task>)subscriber)(this, EventArgs.Empty);
     }
 
+    public void ShowSavedConfirmation()
+    {
+        SettingsSavedStatusText.Visibility = Visibility.Visible;
+    }
+
     private async Task<bool> PersistSettingsAsync()
     {
         if (Interlocked.CompareExchange(ref _saveInProgress, 1, 0) != 0)

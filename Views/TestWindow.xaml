@@ -153,7 +153,10 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
         </Style>
 
-        <Style x:Key="PiLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource IndustrialLabelStyle}"/>
+        <Style x:Key="PiLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource IndustrialLabelStyle}">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
 
         <Style x:Key="IndustrialCounterLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource IndustrialLabelStyle}">
             <Setter Property="FontSize" Value="17"/>
@@ -163,6 +166,8 @@
         <Style x:Key="ProductRightLabelStyle" TargetType="TextBlock" BasedOn="{StaticResource IndustrialLabelStyle}">
             <Setter Property="Margin" Value="10,0,6,0"/>
             <Setter Property="TextTrimming" Value="None"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="IndustrialValueStyle" TargetType="TextBox">
@@ -184,7 +189,9 @@
             <Setter Property="Focusable" Value="False"/>
         </Style>
 
-        <Style x:Key="PiFieldStyle" TargetType="TextBox" BasedOn="{StaticResource IndustrialValueStyle}"/>
+        <Style x:Key="PiFieldStyle" TargetType="TextBox" BasedOn="{StaticResource IndustrialValueStyle}">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
 
         <Style x:Key="IndustrialCounterValueStyle" TargetType="TextBox" BasedOn="{StaticResource IndustrialValueStyle}">
             <Setter Property="Height" Value="34"/>
@@ -589,10 +596,10 @@
                         <ColumnDefinition Width="96"/>
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="34"/>
-                        <RowDefinition Height="34"/>
-                        <RowDefinition Height="34"/>
-                        <RowDefinition Height="34"/>
+                        <RowDefinition Height="38"/>
+                        <RowDefinition Height="38"/>
+                        <RowDefinition Height="38"/>
+                        <RowDefinition Height="38"/>
                     </Grid.RowDefinitions>
                     <TextBlock Text="S&#7889; LOT" Style="{StaticResource IndustrialCounterLabelStyle}"/>
                     <Border Grid.Column="1" Style="{StaticResource PiCounterValueBorderStyle}">
@@ -644,10 +651,8 @@
                             VerticalAlignment="Top"
                             Margin="0,2,2,0"
                             Padding="8,6"
-                            Background="#FFF7D6"
-                            BorderBrush="#B68A00"
-                            BorderThickness="2"
-                            CornerRadius="4">
+                            Background="Transparent"
+                            BorderThickness="0">
                         <TextBlock x:Name="CurrentTimeText"
                                    Foreground="#1E293B"
                                    FontSize="36"
@@ -674,11 +679,9 @@
                     <TextBlock Grid.Column="2" Text="Lo&#7841;i xe" Style="{StaticResource ProductRightLabelStyle}"/>
                     <TextBox Grid.Column="3" Text="{Binding VehicleType, Mode=OneWay}" ToolTip="{Binding VehicleType, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
 
-                    <Grid Grid.Row="1">
-                        <TextBlock Text="T&#234;n s&#7843;n ph&#7849;m"
-                                   Style="{StaticResource PiLabelStyle}"
-                                   VerticalAlignment="Top"/>
-                    </Grid>
+                    <TextBlock Grid.Row="1"
+                               Text="T&#234;n s&#7843;n ph&#7849;m"
+                               Style="{StaticResource PiLabelStyle}"/>
                     <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ProductName, Mode=OneWay}" ToolTip="{Binding ProductName, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
                     <TextBlock Grid.Row="1" Grid.Column="2" Text="M&#227; kh&#225;ch h&#224;ng" Style="{StaticResource ProductRightLabelStyle}"/>
                     <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding CustomerCode, Mode=OneWay}" ToolTip="{Binding CustomerCode, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
@@ -722,7 +725,7 @@
                         <RowDefinition Height="4"/>
                         <RowDefinition Height="39"/>
                         <RowDefinition Height="4"/>
-                        <RowDefinition Height="22"/>
+                        <RowDefinition Height="39"/>
                         <RowDefinition Height="4"/>
                         <RowDefinition Height="39"/>
                         <RowDefinition Height="4"/>

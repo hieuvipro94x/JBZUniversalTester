@@ -4380,6 +4380,22 @@ public sealed class TestViewModel : ObservableObject
         dialog.ShowDialog();
     }
 
+    private async Task ArmFaultRemovalWithoutConfirmationAsync(
+        ProductModel model,
+        string reason)
+    {
+        AddLog(
+            $"[FAIL-NO-DIALOG] Reason={reason}; kết quả FAIL đã ghi History; " +
+            "không mở FaultConfirmationWindow, không kích relay.");
+        ArmFaultProductRemoval(model);
+        await StartProductionScanAndVerifyFrameAsync(
+            CurrentCycleToken(),
+            $"{reason}_NO_CONFIRMATION");
+        State = _waitForFaultProductRemoval
+            ? FaultRemovalWaitingText(model)
+            : "LẮP SẢN PHẨM";
+    }
+
     private static string FaultRemovalWaitingText(ProductModel model) =>
         model.HasDiscardInterlock
             ? "CHỜ XÁC NHẬN THÙNG LỖI"
@@ -7021,6 +7037,21 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
+        if (_productionSettings.WiringFaultConfirmationEnabled)
+        {
+            try
+            {
+                await ArmFaultRemovalWithoutConfirmationAsync(
+                    cycleModel,
+                    "WIRING_FAIL");
+            }
+            catch (Exception ex)
+            {
+                EnterDeviceFault(ex, "WiringFault.NoConfirmationRemoval");
+            }
+            return;
+        }
+
         AddLog(
             "[NG-DIALOG] " +
             $"CycleId={_activeCycleId} Reason=Committed{FaultTypeCatalog.Code(primaryType)} " +
@@ -9397,6 +9428,22 @@ public sealed class TestViewModel : ObservableObject
                         .Where(item => !item.Passed)
                         .Select(CreateResistanceFaultDetail)
                         .ToArray();
+
+                    if (_productionSettings.WiringFaultConfirmationEnabled)
+                    {
+                        try
+                        {
+                            await ArmFaultRemovalWithoutConfirmationAsync(
+                                cycleModel,
+                                "RESISTANCE_FAIL");
+                        }
+                        catch (Exception ex)
+                        {
+                            EnterDeviceFault(ex, "ResistanceFail.NoConfirmationRemoval");
+                        }
+                        return;
+                    }
+
                     ShowFaultConfirmationDialog(resistanceFaults, cycleModel);
                     SelectedOperationTabIndex = 0;
 
@@ -9664,6 +9711,21 @@ public sealed class TestViewModel : ObservableObject
             $"CycleId={_activeCycleId} Reason=FinalPassRejected " +
             $"ContinuityPassed={_engine.ContinuityPassed} " +
             $"Resistance={Resistance.Count}/{ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count}");
+
+        if (_productionSettings.WiringFaultConfirmationEnabled)
+        {
+            try
+            {
+                await ArmFaultRemovalWithoutConfirmationAsync(
+                    cycleModel,
+                    "FINAL_PASS_REJECT");
+            }
+            catch (Exception ex)
+            {
+                EnterDeviceFault(ex, "FinalPassRejected.NoConfirmationRemoval");
+            }
+            return;
+        }
 
         ShowFaultConfirmationDialog(faults, cycleModel);
 
@@ -11274,6 +11336,13 @@ public sealed class TestViewModel : ObservableObject
             _sound.SetWiringFaultAlarm(
                 confirmedWiringFault &&
                 (_cycleActive || _sound.IsWiringFaultAlarmActive));
+        }
+        else if (_productionSettings.WiringFaultConfirmationEnabled)
+        {
+            // Chế độ không popup/không relay vẫn giữ cảnh báo TESTPOINT trong
+            // lúc lỗi dây còn hiện hữu; âm tự dừng khi scan xác nhận đã tháo lỗi.
+            _sound.SetWiringFaultAlarm(
+                _engine.LastFrameValid && _engine.HasWiringFault);
         }
         else
             _sound.SetWiringFaultAlarm(false);
