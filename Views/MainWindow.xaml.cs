@@ -357,9 +357,21 @@ public partial class MainWindow : Window
     {
         try
         {
+            BoardCapacity previousCapacity = _viewModel.CurrentBoardCapacity;
             await _viewModel.ReloadProductionSettingsAsync();
             _showSettingsSavedConfirmation = sender is ProductionSettingsPage settingsPage &&
                                              settingsPage.LastSaveChanged;
+
+            BoardCapacity currentCapacity = _viewModel.CurrentBoardCapacity;
+            bool capacityChanged =
+                previousCapacity.StartScanParameter != currentCapacity.StartScanParameter ||
+                previousCapacity.TotalIoCapacity != currentCapacity.TotalIoCapacity;
+            if (capacityChanged)
+            {
+                _viewModel.Status =
+                    $"ĐANG ĐỒNG BỘ CARD: {previousCapacity.ScanCardCount} → " +
+                    $"{currentCapacity.ScanCardCount}. CÓ THỂ CHỌN MÃ HÀNG NGAY.";
+            }
 
             // SETTINGS_SAVE_SILENT_2026-09-05:
             // Lưu và đồng bộ runtime thành công thì đóng trang Cài đặt luôn.

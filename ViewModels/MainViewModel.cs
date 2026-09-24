@@ -314,7 +314,7 @@ public sealed class MainViewModel : ObservableObject
     /// V12.9: dùng sau khi Save trang Cài đặt. Ngoài reload file còn stop/restart
     /// scan để capacity mới thực sự đi xuống transport/decoder/TestView.
     /// </summary>
-    public async Task ReloadProductionSettingsAsync()
+    public Task ReloadProductionSettingsAsync()
     {
         ProductionSettings old = new()
         {
@@ -337,18 +337,35 @@ public sealed class MainViewModel : ObservableObject
         // Manual relay là trạng thái runtime tức thời, không reload từ file.
         _productionSettings.ManualModeEnabled = false;
 
+        Task hardwareApplyTask = Task.CompletedTask;
         if (boardSelectionChanged)
             Test.RequireApplicationRestartAfterBoardSettingsChange();
-        else if (scanHardwareChanged)
-            await Test.RefreshProductionConfigurationAsync(
+        else if (scanHardwareChanged || Test.RequiresProductionScanSynchronization)
+            hardwareApplyTask = Test.RefreshProductionConfigurationAsync(
                 forceNativeRestart: old.UsbDelay != _productionSettings.UsbDelay ||
                                     old.UseTestPointer != _productionSettings.UseTestPointer);
         else
             Test.RefreshProductionSettingsOnly();
 
-        await Test.AutoConnectLabelPrinterAsync();
-
         RefreshSettingsBindings();
+        _ = ObserveSettingsApplyAsync(
+            hardwareApplyTask,
+            Test.AutoConnectLabelPrinterAsync());
+        return Task.CompletedTask;
+    }
+
+    private static async Task ObserveSettingsApplyAsync(
+        Task hardwareApplyTask,
+        Task printerApplyTask)
+    {
+        try
+        {
+            await Task.WhenAll(hardwareApplyTask, printerApplyTask);
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Background settings apply failed: {ex}");
+        }
     }
 
     private void RefreshSettingsBindings()

@@ -698,6 +698,15 @@ public sealed class TestViewModel : ObservableObject
 
     public bool IsBoardConnected => _board.IsConnected;
 
+    public bool LastProductionConfigurationSyncSucceeded { get; private set; }
+
+    public string LastProductionConfigurationSyncMessage { get; private set; } = string.Empty;
+
+    public bool RequiresProductionScanSynchronization =>
+        _board.AppliedScanCapacity is not BoardCapacity appliedCapacity ||
+        appliedCapacity.StartScanParameter != _board.Capacity.StartScanParameter ||
+        appliedCapacity.TotalIoCapacity != _board.Capacity.TotalIoCapacity;
+
     public string BoardConnectionMessage
     {
         get => _boardConnectionMessage;
@@ -2038,6 +2047,7 @@ public sealed class TestViewModel : ObservableObject
         }
 
         bool ownsReconfigurationGate = false;
+        bool capacityTransition = false;
         try
         {
             // A Settings-driven reconfigure owns the hardware gate independently.
@@ -2062,10 +2072,10 @@ public sealed class TestViewModel : ObservableObject
 
             // Model may have changed while this caller was waiting. Always read
             // the current requested/applied capacity at the last responsible
-            // moment so a stale model task cannot reopen the old range.
+            // moment so a stale model task cannot restore the old range.
             BoardCapacity requestedCapacity = _board.Capacity;
             BoardCapacity? appliedCapacity = _board.AppliedScanCapacity;
-            bool capacityTransition = appliedCapacity is null ||
+            capacityTransition = appliedCapacity is null ||
                 appliedCapacity.StartScanParameter != requestedCapacity.StartScanParameter ||
                 appliedCapacity.TotalIoCapacity != requestedCapacity.TotalIoCapacity;
 
@@ -2076,9 +2086,8 @@ public sealed class TestViewModel : ObservableObject
                 if (!ownsReconfigurationGate)
                     return;
 
-                // Controlled model-capacity reopen is intentional. Suspend the
-                // supervisor before transport STOP so watchdog recovery cannot
-                // race this transition.
+                // Capacity is switched on the current FTDI handle. Suspend the
+                // supervisor so watchdog recovery cannot race STOP/RESET/INIT/START.
                 _scanSupervisor.Suspend("ProductionReconfigure");
             }
 
@@ -2097,6 +2106,8 @@ public sealed class TestViewModel : ObservableObject
                 State = ReadyStateForCurrentModel();
             if (started)
                 AddLog("Bo đã kết nối và START SCAN I/O liên tục ở chế độ nền.");
+            if (capacityTransition && _scanSupervisor.HealthSnapshot.State == ScanHealthState.Starting)
+                State = $"ĐANG ĐỒNG BỘ {requestedCapacity.ScanCardCount} CARD...";
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
@@ -2104,8 +2115,19 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             _scanSupervisor.BeginRecovery("ensure-production-failed");
-            if (!await RecoverProductionScanAsync("EnsureProductionScan"))
+            if (!await RecoverProductionScanAsync(
+                    "EnsureProductionScan",
+                    allowTransportReopen: !capacityTransition))
+            {
+                if (capacityTransition)
+                {
+                    _scanSupervisor.Suspend("capacity-sync-failed");
+                    State = "CHƯA ĐỒNG BỘ CARD/MÃ HÀNG - HÃY THỬ LẠI";
+                    AddLog($"Không đồng bộ được capacity/model tại chỗ: {ex.Message}");
+                    return;
+                }
                 EnterDeviceFault(ex, "EnsureProductionScan");
+            }
         }
         finally
         {
@@ -2158,6 +2180,16 @@ public sealed class TestViewModel : ObservableObject
             {
                 completionReason = IsDeviceFault ? "DeviceFault" : "Monitoring";
             }
+
+            if (completionReason == "Monitoring" && generation == Volatile.Read(ref _modelLoadGeneration))
+            {
+                State = $"ĐÃ ĐỒNG BỘ MÃ HÀNG: {ModelName} • {_board.Capacity.ScanCardCount} CARD";
+                AddLog(State);
+            }
+            else if (completionReason == "MonitoringTimeout" && !IsDeviceFault)
+            {
+                State = "CHƯA NHẬN ĐƯỢC FRAME CỦA MÃ HÀNG - HÃY THỬ LẠI";
+            }
         }
         finally
         {
@@ -2169,9 +2201,11 @@ public sealed class TestViewModel : ObservableObject
         }
     }
 
-    private async Task StartProductionScanAndVerifyFrameAsync(
+    private async Task<bool> StartProductionScanAndVerifyFrameAsync(
         CancellationToken ct,
-        string reason)
+        string reason,
+        bool allowTransportReopen = true,
+        bool enterDeviceFaultOnFailure = true)
     {
         try
         {
@@ -2179,6 +2213,7 @@ public sealed class TestViewModel : ObservableObject
                 _model?.MaxIo ?? 0,
                 ct,
                 reason);
+            return true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -2187,11 +2222,20 @@ public sealed class TestViewModel : ObservableObject
         catch (Exception ex)
         {
             _scanSupervisor.BeginRecovery($"start-first-frame-failed:{reason}");
-            if (await RecoverProductionScanAsync($"ProductionScan:{reason}"))
-                return;
+            if (await RecoverProductionScanAsync(
+                    $"ProductionScan:{reason}",
+                    allowTransportReopen))
+                return true;
 
-            EnterDeviceFault(ex, $"ProductionScan:{reason}");
-            throw;
+            if (enterDeviceFaultOnFailure)
+            {
+                EnterDeviceFault(ex, $"ProductionScan:{reason}");
+                throw;
+            }
+
+            _scanSupervisor.Suspend($"configuration-sync-failed:{reason}");
+            AddLog($"Không đồng bộ được scan tại chỗ sau {reason}: {ex.Message}");
+            return false;
         }
     }
 
@@ -2205,7 +2249,9 @@ public sealed class TestViewModel : ObservableObject
         await _board.StopScanAsync(ct);
     }
 
-    private async Task<bool> RecoverProductionScanAsync(string reason)
+    private async Task<bool> RecoverProductionScanAsync(
+        string reason,
+        bool allowTransportReopen = true)
     {
         bool recoveryGateEntered = false;
         try
@@ -2228,6 +2274,12 @@ public sealed class TestViewModel : ObservableObject
             {
                 InvokeUi(UpdateCardScanningState);
                 return true;
+            }
+
+            if (!allowTransportReopen)
+            {
+                _scanSupervisor.Suspend($"soft-recovery-failed:{reason}");
+                return false;
             }
 
             bool reopened = await _scanSupervisor.RecoverReopenAsync(
@@ -2483,7 +2535,7 @@ public sealed class TestViewModel : ObservableObject
             throw;
         }
 
-        // Navigation must not wait for a controlled D2XX capacity reopen. Return
+        // Navigation must not wait for the in-place D2XX capacity switch. Return
         // the selected model to MainWindow immediately so TestWindow can render;
         // reconcile the scan asynchronously. StartProductionTestAsync has its own
         // capacity-aware readiness gate and cannot ARM on the previous model's
@@ -6593,7 +6645,7 @@ public sealed class TestViewModel : ObservableObject
             return;
         }
 
-        // Model selection returns before a controlled capacity reopen so TestWindow
+        // Model selection returns before the in-place capacity switch so TestWindow
         // can render immediately. ARM, however, must wait for that exact model's
         // reconciliation task to finish; otherwise a previous scan generation can
         // briefly own State/presentation.
@@ -9938,8 +9990,13 @@ public sealed class TestViewModel : ObservableObject
     /// </summary>
     public async Task RefreshProductionConfigurationAsync(bool forceNativeRestart = false)
     {
+        LastProductionConfigurationSyncSucceeded = false;
+        LastProductionConfigurationSyncMessage = string.Empty;
         if (IsDeviceFault)
+        {
+            LastProductionConfigurationSyncMessage = "Bo đang ở trạng thái lỗi thiết bị.";
             return;
+        }
 
         Interlocked.Exchange(ref _hardwareReconfigurationActive, 1);
         try
@@ -9953,6 +10010,7 @@ public sealed class TestViewModel : ObservableObject
 
             _board.ConfigureActiveScanRange(maxIo);
             BoardCapacity requestedActiveCapacity = _board.Capacity;
+            State = $"ĐANG ĐỒNG BỘ {requestedActiveCapacity.ScanCardCount} CARD...";
             BoardCapacity? appliedActiveCapacity = _board.AppliedScanCapacity;
             bool activeCapacityChanged = appliedActiveCapacity is null ||
                 appliedActiveCapacity.StartScanParameter != requestedActiveCapacity.StartScanParameter ||
@@ -9989,14 +10047,14 @@ public sealed class TestViewModel : ObservableObject
                 }
             }
 
-            if (_board.IsConnected && wasScanning && restartRequired &&
+            if (_board.IsConnected && restartRequired &&
                 _board.ScanCapacity.IsModelWithinInstalledCapacity)
             {
                 if (resumeMode == BoardScanMode.Production)
                 {
-                    await StartProductionScanAndVerifyFrameAsync(
-                        _lifetimeCts.Token,
-                        "PRODUCTION_RECONFIGURE");
+                    await _scanSupervisor.EnsureProductionScanAsync(
+                        maxIo,
+                        _lifetimeCts.Token);
                 }
                 else
                 {
@@ -10013,18 +10071,65 @@ public sealed class TestViewModel : ObservableObject
             AddLog(
                 $"Đã reconfigure card runtime không đóng/mở FTDI: {_board.Capacity}; " +
                 $"resume={resumeMode}, wasScanning={wasScanning}, restart={restartRequired}.");
+            if (restartRequired && resumeMode == BoardScanMode.Production)
+            {
+                LastProductionConfigurationSyncMessage =
+                    $"Đã gửi cấu hình {_board.Capacity.ScanCardCount} card; đang xác nhận frame nền.";
+                State = $"ĐANG ĐỒNG BỘ {_board.Capacity.ScanCardCount} CARD...";
+                _ = ConfirmProductionConfigurationFrameAsync(requestedActiveCapacity);
+            }
+            else
+            {
+                LastProductionConfigurationSyncSucceeded = true;
+                LastProductionConfigurationSyncMessage =
+                    $"Đã áp dụng {_board.Capacity.ScanCardCount} card / {_board.Capacity.TotalIoCapacity} IO.";
+            }
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
         }
         catch (Exception ex)
         {
-            EnterDeviceFault(ex, "ProductionReconfigure");
+            _scanSupervisor.Suspend("ProductionReconfigureFailed");
+            LastProductionConfigurationSyncMessage =
+                $"Chưa đồng bộ được cấu hình card: {ex.Message}";
+            State = "CHƯA ĐỒNG BỘ CẤU HÌNH CARD - HÃY THỬ LẠI";
+            AddLog(LastProductionConfigurationSyncMessage);
         }
         finally
         {
             Interlocked.Exchange(ref _hardwareReconfigurationActive, 0);
         }
+    }
+
+    private async Task ConfirmProductionConfigurationFrameAsync(BoardCapacity expectedCapacity)
+    {
+        bool ready;
+        try
+        {
+            ready = await WaitForProductionScanReadyForArmAsync(_lifetimeCts.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        BoardCapacity current = _board.Capacity;
+        if (current.StartScanParameter != expectedCapacity.StartScanParameter ||
+            current.TotalIoCapacity != expectedCapacity.TotalIoCapacity ||
+            IsModelTransitionActive)
+        {
+            return;
+        }
+
+        LastProductionConfigurationSyncSucceeded = ready;
+        LastProductionConfigurationSyncMessage = ready
+            ? $"Đã đồng bộ {current.ScanCardCount} card / {current.TotalIoCapacity} IO tại chỗ."
+            : "Chưa nhận được frame của capacity mới. Hãy kiểm tra card và thử lại.";
+        InvokeUi(() => State = ready
+            ? $"ĐÃ ĐỒNG BỘ {current.ScanCardCount} CARD"
+            : "CHƯA ĐỒNG BỘ CẤU HÌNH CARD - HÃY THỬ LẠI");
+        AddLog(LastProductionConfigurationSyncMessage);
     }
 
     private void RefreshProductionUiSettings()

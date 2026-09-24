@@ -95,11 +95,9 @@ public sealed class ScanSupervisor
         bool capacityChanged = _board.AppliedScanCapacity is not BoardCapacity appliedCapacity ||
                                !HasSameActiveRange(appliedCapacity, requestedCapacity);
 
-        if (capacityChanged && _board.AppliedScanCapacity is not null)
-        {
-            await ReopenForCapacityTransitionAsync(maxIo, ct);
-            requestedCapacity = _board.Capacity;
-        }
+        if (capacityChanged && _board.AppliedScanCapacity is BoardCapacity previousCapacity)
+            _log($"SCAN_CAPACITY_IN_PLACE old={previousCapacity.ScanCardCount}/{previousCapacity.TotalIoCapacity} " +
+                 $"new={requestedCapacity.ScanCardCount}/{requestedCapacity.TotalIoCapacity}");
 
         if (!capacityChanged &&
             _board.IsScanning &&
@@ -154,11 +152,9 @@ public sealed class ScanSupervisor
                      _board.IsScanning &&
                      _board.CurrentScanMode == BoardScanMode.Production;
 
-        if (capacityChanged && _board.AppliedScanCapacity is not null)
-        {
-            await ReopenForCapacityTransitionAsync(maxIo, ct);
-            configuredCapacity = _board.Capacity;
-        }
+        if (capacityChanged && _board.AppliedScanCapacity is BoardCapacity previousCapacity)
+            _log($"SCAN_CAPACITY_IN_PLACE old={previousCapacity.ScanCardCount}/{previousCapacity.TotalIoCapacity} " +
+                 $"new={configuredCapacity.ScanCardCount}/{configuredCapacity.TotalIoCapacity} reason={reason}");
 
         long baselineFrameCount = _board.CompleteFramesReceived;
         TaskCompletionSource<ScanFrame> firstFrame = BeginFirstFrameWait(
@@ -504,18 +500,6 @@ public sealed class ScanSupervisor
         (frame.ExpectedIoCount == 0 && frame.ScanUnitCount == 0) ||
         (frame.ExpectedIoCount == expected.TotalIoCapacity &&
          frame.ScanUnitCount == expected.ScanCardCount);
-
-    private async Task ReopenForCapacityTransitionAsync(int maxIo, CancellationToken ct)
-    {
-        BoardCapacity previous = _board.AppliedScanCapacity!;
-        BoardCapacity requested = _board.Capacity;
-        _log($"SCAN_CAPACITY_CONTROLLED_REOPEN old={previous.ScanCardCount}/{previous.TotalIoCapacity} " +
-             $"new={requested.ScanCardCount}/{requested.TotalIoCapacity}");
-        await _board.DisconnectAsync();
-        ct.ThrowIfCancellationRequested();
-        await _board.ConnectAsync(ct);
-        _board.ConfigureActiveScanRange(maxIo);
-    }
 
     private string BuildFrameTimeoutDiagnostic(string reason, long baselineFrameCount)
     {
