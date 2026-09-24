@@ -1563,11 +1563,42 @@ public sealed class TestViewModel : ObservableObject
                 AddLog(
                     $"[MANUAL-LEAK] START port={machine.PortName?.Trim()} baud={WaterProofMachineSettings.DefaultBaudRate}; " +
                     "không ghi sản lượng, không chạy relay.");
-                WaterProofRunResult result = await _waterProof.RunTestAsync(
-                    machine,
-                    profile,
-                    progress,
-                    ct);
+                int firstResponseTimeoutMs = Math.Clamp(
+                    machine.ReadTimeoutMs + 1_000,
+                    2_000,
+                    3_000);
+                using var firstResponseCts =
+                    CancellationTokenSource.CreateLinkedTokenSource(ct);
+                firstResponseCts.CancelAfter(firstResponseTimeoutMs);
+                int firstResponseReceived = 0;
+
+                void ReportProgress(WaterProofProgress update)
+                {
+                    if (Interlocked.Exchange(ref firstResponseReceived, 1) == 0)
+                        firstResponseCts.CancelAfter(Timeout.InfiniteTimeSpan);
+                    progress?.Invoke(update);
+                }
+
+                WaterProofRunResult result;
+                try
+                {
+                    result = await _waterProof.RunTestAsync(
+                        machine,
+                        profile,
+                        ReportProgress,
+                        firstResponseCts.Token);
+                }
+                catch (OperationCanceledException ex) when (
+                    !ct.IsCancellationRequested &&
+                    firstResponseCts.IsCancellationRequested &&
+                    Volatile.Read(ref firstResponseReceived) == 0)
+                {
+                    throw new TimeoutException(
+                        $"Không nhận được phản hồi hợp lệ từ máy Leak trên {machine.PortName} " +
+                        $"trong {firstResponseTimeoutMs / 1000.0:0.#} giây. " +
+                        "Hãy chọn đúng cổng COM và kiểm tra cáp/kết nối máy Leak.",
+                        ex);
+                }
                 if (!result.Passed)
                     _sound.PlayLeakFail();
                 AddLog($"[MANUAL-LEAK] COMPLETE result={(result.Passed ? "PASS" : "FAIL")}");
