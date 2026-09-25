@@ -1044,15 +1044,37 @@ internal static partial class Program
         AssertWaiting(
             "Two raw IOs without a logical edge",
             FrameSeq(107, (10, new[] { 10 }), (18, new[] { 18 })));
-        engine.ProcessFrame(FrameSeq(108, (10, new[] { 18 })));
+        engine.SetModel(Model(("PAIR-A", new[] { 4, 8 })));
+        ScanFrame externalBoundaryShort = FrameSeq(
+            108,
+            (127, new[] { 128 }),
+            (128, new[] { 127 })) with
+        {
+            ExpectedIoCount = 128,
+            SourceCount = 128,
+            ScanUnitCount = 2
+        };
+        engine.ProcessFrame(externalBoundaryShort);
         ProductEvidenceSnapshot unmappedWrong = engine.GetProductEvidenceSnapshot();
         Assert(!unmappedWrong.ValidProductEvidence &&
                unmappedWrong.ShortCandidateCount == 1 &&
                unmappedWrong.Reason == "RAW_ACTIVITY_ONLY" &&
                !engine.HasWiringFault,
-            "An unrelated edge remains diagnostic but cannot create product presence");
+            "IO127-IO128 outside THT starts SHORT debounce without creating model product presence");
+        clock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 1));
+        engine.ProcessFrame(externalBoundaryShort with { Sequence = 109 });
+        ProductEvidenceSnapshot confirmedExternalShort = engine.GetProductEvidenceSnapshot();
+        Assert(engine.HasWiringFault &&
+               confirmedExternalShort.ShortConfirmedCount == 1 &&
+               confirmedExternalShort.Reason == "SHORT_CONFIRMED" &&
+               !confirmedExternalShort.ValidProductEvidence,
+            "Stable IO127-IO128 short outside a two-IO THT is always confirmed as product fault");
 
-        ScanFrame tenCardPair = FrameSeq(109, (200, [201]), (201, [200])) with
+        engine.SetModel(Model(
+            ("PAIR-A", new[] { 1, 2 }),
+            ("PAIR-B", new[] { 3, 4 })));
+        ScanFrame tenCardPair = FrameSeq(110, (200, [201]), (201, [200])) with
         {
             ExpectedIoCount = 640,
             SourceCount = 640,
@@ -1063,7 +1085,7 @@ internal static partial class Program
                LiveTopologyPresenter.Build(tenCardPair, BoardCapacity.Create(10)).Pairs
                    .Contains(new LiveTopologyPair(200, 201)),
             "10-card physical coverage retains IO200-IO201 as one SHORT outside the model");
-        ScanFrame upperBoundaryPair = FrameSeq(110, (639, [640]), (640, [639])) with
+        ScanFrame upperBoundaryPair = FrameSeq(111, (639, [640]), (640, [639])) with
         {
             ExpectedIoCount = 640,
             SourceCount = 640,
@@ -1075,10 +1097,10 @@ internal static partial class Program
                    .Contains(new LiveTopologyPair(639, 640)),
             "10-card upper boundary IO639-IO640 remains observable and classified SHORT");
 
-        engine.ProcessFrame(FrameSeq(111, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        engine.ProcessFrame(FrameSeq(112, (1, new[] { 2 })) with { ScanGeneration = 2 });
         Assert(!engine.GetProductEvidenceSnapshot().ValidProductEvidence,
             "One model-related frame remains only a presence candidate");
-        engine.ProcessFrame(FrameSeq(112, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        engine.ProcessFrame(FrameSeq(113, (1, new[] { 2 })) with { ScanGeneration = 2 });
         ProductEvidenceSnapshot expected = engine.GetProductEvidenceSnapshot();
         Assert(expected.ValidProductEvidence &&
                expected.State == ProductPresenceState.Present &&
@@ -1090,15 +1112,15 @@ internal static partial class Program
                engine.BuildRows().Count(row => row.WireName == "PAIR-B") == 2,
             "Realtime row delta removes a connected pair and restores it after disconnect");
 
-        engine.ProcessFrame(FrameSeq(113));
+        engine.ProcessFrame(FrameSeq(114));
         Assert(!engine.HasProductActivity && engine.GetProductEvidenceSnapshot().ValidProductEvidence,
             "One clean frame does not remove a confirmed product");
-        engine.ProcessFrame(FrameSeq(114));
+        engine.ProcessFrame(FrameSeq(115));
         Assert(!engine.HasProductActivity && !engine.GetProductEvidenceSnapshot().ValidProductEvidence &&
                engine.BuildRows().Count(row => row.WireName == "PAIR-A") == 2,
             "Two clean frames confirm removal and restore Waiting rows");
 
-        engine.ProcessFrame(FrameSeq(115, (1, new[] { 4 })));
+        engine.ProcessFrame(FrameSeq(116, (1, new[] { 4 })));
         ProductEvidenceSnapshot wrongCandidate = engine.GetProductEvidenceSnapshot();
         Assert(wrongCandidate.WrongCandidateCount == 1 &&
                !engine.ReadyToEvaluateProductFaults,
@@ -1107,7 +1129,7 @@ internal static partial class Program
             "One wrong model-related frame does not confirm lifecycle presence");
         clock.Advance(TimeSpan.FromMilliseconds(
             ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 1));
-        engine.ProcessFrame(FrameSeq(116, (1, new[] { 4 })));
+        engine.ProcessFrame(FrameSeq(117, (1, new[] { 4 })));
         Assert(engine.HasWiringFault &&
                engine.GetProductEvidenceSnapshot().ValidProductEvidence &&
                engine.GetProductEvidenceSnapshot().WrongConfirmedCount == 1,
@@ -1116,7 +1138,7 @@ internal static partial class Program
         engine.SetModel(Model(
             ("PAIR-A", new[] { 1, 2 }),
             ("PAIR-B", new[] { 3, 4 })));
-        engine.ProcessFrame(FrameSeq(117, (2, new[] { 3 })));
+        engine.ProcessFrame(FrameSeq(118, (2, new[] { 3 })));
         ProductEvidenceSnapshot shortCandidate = engine.GetProductEvidenceSnapshot();
         Assert(shortCandidate.ShortCandidateCount == 1,
             "A first model-aware cross-network short creates a realtime candidate");
@@ -1124,13 +1146,13 @@ internal static partial class Program
             "One short model-related frame does not confirm lifecycle presence");
         clock.Advance(TimeSpan.FromMilliseconds(
             ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 1));
-        engine.ProcessFrame(FrameSeq(118, (2, new[] { 3 })));
+        engine.ProcessFrame(FrameSeq(119, (2, new[] { 3 })));
         Assert(engine.HasWiringFault &&
                engine.GetProductEvidenceSnapshot().ShortConfirmedCount == 1,
             "Short confirmation remains realtime without waiting for an expected pair");
 
         engine.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
-        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 2 }, sequence: 119) &&
+        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 2 }, sequence: 120) &&
                engine.HasContinuityPreviewProductActivity &&
                !engine.HasProductActivity &&
                !engine.GetProductEvidenceSnapshot().ProbeEvidence,
@@ -6561,9 +6583,9 @@ internal static partial class Program
         Assert(unmappedDiagnostics.WrongCandidateCount == 0 &&
                unmappedDiagnostics.ShortCandidateCount == 1 &&
                !unmappedDiagnostics.HasProductActivity &&
-               unmappedDiagnostics.ShortConfirmedCount == 0 &&
-               !unmappedPairEngine.HasWiringFault,
-            "CASE C2: a direct pair outside the THT stays diagnostic-only and cannot start production");
+               unmappedDiagnostics.ShortConfirmedCount == 1 &&
+               unmappedPairEngine.HasWiringFault,
+            "CASE C2: a non-Probe IO23<->IO25 edge outside THT is confirmed as SHORT without manufacturing model presence");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings

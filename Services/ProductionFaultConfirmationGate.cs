@@ -64,7 +64,11 @@ public sealed class ProductionFaultConfirmationGate
         // Wrong/Short là tín hiệu chủ động từ một frame Production hợp lệ. Không
         // bắt chúng chờ thêm ProductSettleTime: debounce riêng 100 ms đã đủ lọc
         // một frame nhiễu và giúp lỗi được báo ngay ở frame ổn định kế tiếp.
-        bool readyForUnexpectedFault = readyToEvaluateFaults && hasProductActivity;
+        // Một cạnh điện thật đã được TestEngine loại Probe/self-edge trước khi
+        // tới đây. Vì vậy chính observation WRONG/SHORT là bằng chứng đủ để chạy
+        // debounce, kể cả cả hai đầu IO đều nằm ngoài topology THT. Không được
+        // phụ thuộc hasProductActivity vì cờ đó cố ý chỉ nhận topology của model.
+        bool readyForUnexpectedFault = unexpectedConnections.Count > 0;
         UpdateOpenCandidates(expectedConnections, productSettled, now);
         UpdateUnexpectedCandidates(unexpectedConnections, readyForUnexpectedFault, now);
         UpdateCleanStability(expectedConnections, unexpectedConnections, hasProductActivity, now);

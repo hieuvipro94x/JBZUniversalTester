@@ -374,12 +374,12 @@ public sealed class TestEngine : IDisposable
             item.FaultType == ProductFaultType.ShortCircuit);
         bool rawModelEvidence = _model is not null && HasProductActivityUnsafe(_model);
         bool valid = _confirmedProductPresence;
-        string reason = !rawModelEvidence
-            ? _currentActive.Count > 0 ? "RAW_ACTIVITY_ONLY" : "NO_ACTIVITY"
-            : wrongConfirmed > 0
-                ? "WRONG_CONFIRMED"
-                : shortConfirmed > 0
-                    ? "SHORT_CONFIRMED"
+        string reason = wrongConfirmed > 0
+            ? "WRONG_CONFIRMED"
+            : shortConfirmed > 0
+                ? "SHORT_CONFIRMED"
+                : !rawModelEvidence
+                    ? _currentActive.Count > 0 ? "RAW_ACTIVITY_ONLY" : "NO_ACTIVITY"
                     : wrongCandidates > 0
                         ? "WRONG_CANDIDATE"
                         : shortCandidates > 0
