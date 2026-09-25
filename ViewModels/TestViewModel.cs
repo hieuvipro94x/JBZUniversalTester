@@ -7042,6 +7042,11 @@ public sealed class TestViewModel : ObservableObject
         State = "ĐANG XỬ LÝ LỖI DÂY";
         SelectedOperationTabIndex = 0;
 
+        // Chập hoàn toàn ngoài THT không có ProductEvidence của model nhưng
+        // TestEngine đã có hai FaultRow authoritative cho hai đầu IO. Hiển thị
+        // ngay trước khi dừng scan/mở popup để bảng không còn trống.
+        InvokeUi(RefreshFaults);
+
         // TESTPOINT.wav phải kêu liên tục cho tới khi người vận hành xác nhận.
         _sound.SetWiringFaultAlarm(true);
 
@@ -11582,13 +11587,13 @@ public sealed class TestViewModel : ObservableObject
             bool hasProductEvidence = presentationElectrical.ProductEvidence;
             bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
             bool confirmedWiringFaultPresentation =
-                CurrentProductionRuntimeState == ProductionRuntimeState.Failed &&
+                presentationElectrical.HasConfirmedWiringFault &&
                 _engine.LastFrameValid &&
                 _engine.HasWiringFault;
             if (!_presentationCycleStarted &&
                 (_cycleActive || masterCycleActive || confirmedWiringFaultPresentation) &&
                 !probeOwnsPresentation &&
-                hasProductEvidence)
+                (hasProductEvidence || confirmedWiringFaultPresentation))
             {
                 _presentationCycleStarted = true;
                 RaiseCenterPresentation();

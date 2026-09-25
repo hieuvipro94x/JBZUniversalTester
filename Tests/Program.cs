@@ -1070,6 +1070,15 @@ internal static partial class Program
                confirmedExternalShort.Reason == "SHORT_CONFIRMED" &&
                !confirmedExternalShort.ValidProductEvidence,
             "Stable IO127-IO128 short outside a two-IO THT is always confirmed as product fault");
+        FaultRow[] externalShortRows = engine.BuildRows()
+            .Where(row => row.Kind == FaultKind.Short)
+            .ToArray();
+        Assert(externalShortRows.Length == 2 &&
+               externalShortRows.Select(row => row.Io).SequenceEqual([127, 128]) &&
+               externalShortRows.All(row => row.ProductFaultType == ProductFaultType.ShortCircuit &&
+                                            row.Status == "CHẬP MẠCH") &&
+               externalShortRows.Select(row => row.IoText).SequenceEqual(["IO (127)", "IO (128)"]),
+            "Confirmed IO127-IO128 outside THT renders as two separate operator rows");
 
         engine.SetModel(Model(
             ("PAIR-A", new[] { 1, 2 }),
