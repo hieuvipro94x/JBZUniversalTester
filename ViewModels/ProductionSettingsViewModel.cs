@@ -597,6 +597,59 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ProductionConfigService.Save(Settings);
     }
 
+    public long PrepareBulkPrintLot()
+    {
+        ProductLotSettings productLot = ProductionConfigService.GetOrCreateProductLot(
+            Settings,
+            _lotProductKey,
+            migrateCurrentLot: true);
+        long configuredStart = Math.Max(0, Settings.LotNo);
+        if (configuredStart != productLot.StartLotNo)
+        {
+            ProductionConfigService.SetProductLot(
+                Settings,
+                _lotProductKey,
+                configuredStart,
+                DateTime.Today.ToString(
+                    "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            ProductionConfigService.Save(Settings);
+            productLot = ProductionConfigService.GetOrCreateProductLot(
+                Settings,
+                _lotProductKey,
+                migrateCurrentLot: false);
+        }
+
+        return Math.Max(0, productLot.BulkPrintLotNo);
+    }
+
+    public void CommitBulkPrintedLot(long printedLot)
+    {
+        ProductLotSettings productLot = ProductionConfigService.GetOrCreateProductLot(
+            Settings,
+            _lotProductKey,
+            migrateCurrentLot: true);
+        long previousLot = Math.Max(0, productLot.BulkPrintLotNo);
+        long expectedLot = checked(previousLot + 1L);
+        if (printedLot != expectedLot)
+        {
+            throw new InvalidOperationException(
+                $"LOT in hàng loạt không liên tục: hiện tại {previousLot}, nhận {printedLot}.");
+        }
+
+        productLot.BulkPrintLotNo = printedLot;
+        try
+        {
+            // Bộ đếm này tách biệt hoàn toàn với LOT Production và SQLite history.
+            ProductionConfigService.Save(Settings);
+        }
+        catch
+        {
+            productLot.BulkPrintLotNo = previousLot;
+            throw;
+        }
+    }
+
     private void RefreshManualCommands()
     {
         ManualRelay1OnCommand?.RaiseCanExecuteChanged();

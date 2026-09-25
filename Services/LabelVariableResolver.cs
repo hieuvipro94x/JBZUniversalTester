@@ -45,7 +45,9 @@ public static class LabelVariableResolver
         string templateType = LabelProfileResolver.NormalizeTemplateType(settings.TemplateType);
         bool isSmallLabel = templateType == LabelSettings.SmallTemplate;
         bool isSmallQrLabel = templateType == LabelSettings.SmallQrTemplate;
-        bool usesFourDigitLot = isSmallLabel || isSmallQrLabel;
+        bool isLargeSqdzLabel = templateType == LabelSettings.LargeSqdzTemplate;
+        bool usesSqdzDateCode = isSmallLabel || isLargeSqdzLabel;
+        bool usesFourDigitLot = usesSqdzDateCode || isSmallQrLabel;
         long labelLotNo = isSmallQrLabel
             ? ResolveSmallQrSequence(data.LotNo)
             : data.LotNo;
@@ -65,18 +67,21 @@ public static class LabelVariableResolver
             ? barcode
             : data.BarcodePrint;
 
-        if (isSmallLabel)
+        if (usesSqdzDateCode)
         {
             string yearCode = ResolveSmallLabelYearCode(data.TestedAt.Year);
             string monthCode = ResolveSmallLabelMonthCode(data.TestedAt.Month);
             string dayCode = ResolveSmallLabelDayCode(data.TestedAt.Day);
             string smallLabelBarcode =
                 $"{data.PartNumber},{SmallLabelCustomerPrefix}{yearCode}{monthCode}{dayCode}{lot}";
+            string sqdzSerial = $"{SmallLabelCustomerPrefix}{yearCode}{monthCode}{dayCode}{lot}";
 
             values["YEAR_CODE"] = yearCode;
             values["MONTH_CODE"] = monthCode;
             values["DAY_CODE"] = dayCode;
             values["SMALL_LABEL_BARCODE"] = smallLabelBarcode;
+            values["SQDZ_LABEL_BARCODE"] = smallLabelBarcode;
+            values["SQDZ_SERIAL"] = sqdzSerial;
             values["PART_NUMBER"] = data.PartNumber;
             barcode = smallLabelBarcode;
             barcodePrint = smallLabelBarcode;

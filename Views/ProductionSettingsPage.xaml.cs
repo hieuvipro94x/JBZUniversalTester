@@ -30,6 +30,7 @@ public partial class ProductionSettingsPage : UserControl
     private int _portRefreshGeneration;
     private int _printerConnectionGeneration;
     private int _saveInProgress;
+    private int _batchPrintInProgress;
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
 
@@ -1275,14 +1276,110 @@ public partial class ProductionSettingsPage : UserControl
         }
     }
 
-    private LabelPrintRequest BuildSettingsLabelRequest(string purpose)
+    private async void BatchPrintLabel_Click(object sender, RoutedEventArgs e)
+    {
+        if (Interlocked.Exchange(ref _batchPrintInProgress, 1) != 0)
+            return;
+
+        try
+        {
+            if (!int.TryParse(
+                    BatchLabelCountTextBox.Text,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int quantity) ||
+                quantity is < 1 or > 100)
+            {
+                ShowMessage(
+                    "Số lượng in hàng loạt phải từ 1 đến 100.",
+                    "IN HÀNG LOẠT",
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            if (_main is null)
+                throw new InvalidOperationException("Trang Cài đặt chưa được nối với chương trình chính.");
+
+            CommitPendingEditorValues();
+            string thtPath = _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
+                throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
+
+            ProductModel model = new ThtModelParser().Load(thtPath);
+            long completedLot = _vm.PrepareBulkPrintLot();
+            long firstLot = checked(completedLot + 1L);
+            int printed = 0;
+            LabelPrintTransportResult? lastResult = null;
+            BatchPrintLabelButton.IsEnabled = false;
+
+            for (int index = 0; index < quantity; index++)
+            {
+                long lot = checked(firstLot + index);
+                LabelPrintRequest request = BuildSettingsLabelRequest(
+                    "BATCH-PRINT",
+                    lot,
+                    model);
+                if (index == 0)
+                    RenderInlineLabelPreview(request, $"ĐANG IN 1/{quantity}...");
+
+                lastResult = await _main.Test.PrintSettingsLabelAsync(request);
+                if (!lastResult.Printed)
+                    break;
+
+                printed++;
+                completedLot = lot;
+                // Persist after every accepted job. If a later label fails or the
+                // application closes, the next batch resumes after the last LOT
+                // already sent and never silently reuses it.
+                _vm.CommitBulkPrintedLot(completedLot);
+                SetInlineLabelPreviewStatus(
+                    $"ĐÃ GỬI {printed}/{quantity} • LOT {completedLot}",
+                    isError: false);
+            }
+
+            bool allPrinted = printed == quantity;
+            SetInlineLabelPreviewStatus(
+                allPrinted
+                    ? $"ĐÃ GỬI {quantity} TEM • LOT {firstLot}-{completedLot}"
+                    : $"DỪNG Ở {printed}/{quantity} • LOT CUỐI {completedLot}",
+                isError: !allPrinted);
+
+            ShowMessage(
+                allPrinted
+                    ? $"Đã gửi {quantity} tem, LOTNO hàng loạt từ {firstLot} đến {completedLot}. LOT Production, Tổng/PASS/FAIL và lịch sử test không thay đổi."
+                    : $"Đã gửi {printed}/{quantity} tem. LOTNO cuối đã lưu là {completedLot}. " +
+                      (lastResult?.Message ?? "Hãy kiểm tra kết nối và cổng máy in."),
+                "IN HÀNG LOẠT",
+                allPrinted ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Batch label print failed: {ex}");
+            SetInlineLabelPreviewStatus("IN HÀNG LOẠT LỖI", isError: true);
+            ShowMessage(
+                "Chưa in hàng loạt được. Hãy kiểm tra kết nối và cổng máy in.",
+                "IN HÀNG LOẠT",
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (BatchPrintLabelButton is not null)
+                BatchPrintLabelButton.IsEnabled = true;
+            Volatile.Write(ref _batchPrintInProgress, 0);
+        }
+    }
+
+    private LabelPrintRequest BuildSettingsLabelRequest(
+        string purpose,
+        long? lotNo = null,
+        ProductModel? loadedModel = null)
     {
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
         string thtPath = _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
             throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
 
-        ProductModel model = new ThtModelParser().Load(thtPath);
+        ProductModel model = loadedModel ?? new ThtModelParser().Load(thtPath);
         DateTime now = DateTime.Now;
         var history = new TestHistoryRecord
         {
@@ -1292,10 +1389,11 @@ public partial class ProductionSettingsPage : UserControl
             Eco = model.Eco,
             Nco = model.Nco,
             Alc = model.Alc,
-            LotNo = Math.Max(0, _vm.Settings.LotNo),
+            LotNo = Math.Max(0, lotNo ?? _vm.Settings.LotNo),
             ModelName = model.ModelName,
             ModelFile = model.SourcePath,
-            CycleId = purpose + "-" + now.ToString("yyyyMMddHHmmssfff")
+            CycleId = purpose + "-" + Math.Max(0, lotNo ?? _vm.Settings.LotNo) + "-" +
+                      now.ToString("yyyyMMddHHmmssfff")
         };
         return LabelPrintRequest.Capture(history, model, _vm.Settings.Label);
     }

@@ -378,16 +378,17 @@ public sealed record LabelPrintRequest(
             JBZUniversalTester.Services.LabelProfileResolver.NormalizeTemplateType(settings.TemplateType);
         bool isSmallLabel = templateType == LabelSettings.SmallTemplate;
         bool isSmallQrLabel = templateType == LabelSettings.SmallQrTemplate;
+        bool isLargeSqdzLabel = templateType == LabelSettings.LargeSqdzTemplate;
         LabelIdentity identity = JBZUniversalTester.Services.EplLabelService.BuildIdentity(
             data,
-            includeAlcLotSuffix: !isSmallLabel && !isSmallQrLabel);
+            includeAlcLotSuffix: !isSmallLabel && !isSmallQrLabel && !isLargeSqdzLabel);
         data = data with { Barcode = identity.BarcodeValue, BarcodePrint = identity.BarcodeValue };
         IReadOnlyDictionary<string, string> variables =
             JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
 
-        if (isSmallLabel)
+        if (isSmallLabel || isLargeSqdzLabel)
         {
-            string barcode = variables["SMALL_LABEL_BARCODE"];
+            string barcode = variables["SQDZ_LABEL_BARCODE"];
             data = data with { Barcode = barcode, BarcodePrint = barcode };
             variables = JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
         }
@@ -435,14 +436,22 @@ public sealed record LabelPrintRequest(
         // payload của TEM_BE, TEM_TO hoặc template tùy chỉnh khác.
         if (isSmallQrLabel)
             payload = JBZUniversalTester.Services.LabelTemplateRenderer.NormalizeEplJob(payload);
-        else if (templateType == LabelSettings.LargeTemplate &&
-                 JBZUniversalTester.Services.BuiltInLabelTemplateStore.IsReference(profile.TemplatePath))
+        else if ((templateType is LabelSettings.LargeTemplate or LabelSettings.LargeSqdzTemplate) &&
+                  JBZUniversalTester.Services.BuiltInLabelTemplateStore.IsReference(profile.TemplatePath))
             payload = payload.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
         if (isSmallLabel)
         {
             JBZUniversalTester.Services.AsyncFileLogService.Current.Application(
                 $"[LABEL] Type={LabelSettings.SmallTemplate} PartNumber={data.PartNumber} " +
+                $"YearCode={variables["YEAR_CODE"]} MonthCode={variables["MONTH_CODE"]} " +
+                $"DayCode={variables["DAY_CODE"]} Lot={variables["LOT_NO"]} Barcode={data.Barcode}",
+                JBZUniversalTester.Services.AppLogLevel.Diagnostic);
+        }
+        else if (isLargeSqdzLabel)
+        {
+            JBZUniversalTester.Services.AsyncFileLogService.Current.Application(
+                $"[LABEL] Type={LabelSettings.LargeSqdzTemplate} PartNumber={data.PartNumber} " +
                 $"YearCode={variables["YEAR_CODE"]} MonthCode={variables["MONTH_CODE"]} " +
                 $"DayCode={variables["DAY_CODE"]} Lot={variables["LOT_NO"]} Barcode={data.Barcode}",
                 JBZUniversalTester.Services.AppLogLevel.Diagnostic);

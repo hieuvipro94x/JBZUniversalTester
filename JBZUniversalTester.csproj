@@ -100,6 +100,9 @@
     <EmbeddedResource Include="Labels\TEM_TO.txt">
       <LogicalName>JBZUniversalTester.Labels.TEM_TO.txt</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Labels\TEM_TO_SQDZ.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_TO_SQDZ.txt</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="Labels\TEM_BE.txt">
       <LogicalName>JBZUniversalTester.Labels.TEM_BE.txt</LogicalName>
     </EmbeddedResource>

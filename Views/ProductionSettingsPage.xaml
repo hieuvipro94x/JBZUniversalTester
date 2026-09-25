@@ -502,16 +502,33 @@
                                             <TextBlock Grid.Row="1" Text="Loại tem" Style="{StaticResource FieldLabelStyle}"/>
                                             <ComboBox x:Name="LabelTemplateTypeComboBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" SelectedValuePath="Tag" SelectedValue="{Binding Settings.Label.TemplateType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionChanged="LabelTemplateTypeComboBox_SelectionChanged">
                                                 <ComboBoxItem Content="TEM TO" Tag="TEM_TO"/>
+                                                <ComboBoxItem Content="TEM TO SQDZ" Tag="TEM_TO_SQDZ"/>
                                                 <ComboBoxItem Content="TEM BÉ" Tag="TEM_BE"/>
                                                 <ComboBoxItem Content="TEM BÉ QR" Tag="TEM_BE_QR"/>
                                             </ComboBox>
                                             <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Content="BẬT IN NHÃN" VerticalAlignment="Center" IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
                                         </Grid>
-                                        <UniformGrid x:Name="LabelPrintActionsPanel" Grid.Row="2" Columns="3" Margin="0,6,0,0">
-                                            <Button Content="CHỈNH TEM" Height="28" Margin="1" Padding="2,0" FontSize="10.5" Style="{StaticResource SettingsInfoButtonStyle}" Click="EditLabelTemplate_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                            <Button Content="XEM TRƯỚC" Height="28" Margin="1" Padding="2,0" FontSize="10.5" Style="{StaticResource SettingsInfoButtonStyle}" Click="PreviewLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                            <Button Content="IN THỬ" Height="28" Margin="1" Padding="2,0" FontSize="10.5" Style="{StaticResource SettingsWarningButtonStyle}" Click="TestPrintLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                        </UniformGrid>
+                                        <Grid x:Name="LabelPrintActionsPanel" Grid.Row="2" Margin="0,6,0,0">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <UniformGrid Columns="3">
+                                                <Button Content="CHỈNH TEM" Height="28" Margin="1" Padding="2,0" FontSize="10.5" Style="{StaticResource SettingsInfoButtonStyle}" Click="EditLabelTemplate_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <Button Content="XEM TRƯỚC" Height="28" Margin="1" Padding="2,0" FontSize="10.5" Style="{StaticResource SettingsInfoButtonStyle}" Click="PreviewLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <Button Content="IN THỬ" Height="28" Margin="1" Padding="2,0" FontSize="10.5" Style="{StaticResource SettingsWarningButtonStyle}" Click="TestPrintLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                            </UniformGrid>
+                                            <Grid Grid.Row="1" Margin="1,4,1,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="70"/>
+                                                    <ColumnDefinition Width="55"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="Số lượng" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
+                                                <TextBox x:Name="BatchLabelCountTextBox" Grid.Column="1" Height="28" Text="10" TextAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <Button x:Name="BatchPrintLabelButton" Grid.Column="2" Content="IN HÀNG LOẠT" Height="28" Margin="6,0,0,0" Padding="3,0" FontSize="10.5" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchPrintLabel_Click"/>
+                                            </Grid>
+                                        </Grid>
                                         <Border Grid.Row="3" Margin="0,8,0,0" Padding="6" Background="#F7F9FC" BorderBrush="#CAD5E5" BorderThickness="1" CornerRadius="4">
                                             <Grid>
                                                 <Grid.RowDefinitions>

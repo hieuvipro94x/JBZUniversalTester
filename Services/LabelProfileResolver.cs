@@ -16,6 +16,19 @@ public static class LabelProfileResolver
             ? "us-ascii"
             : settings.EncodingName.Trim();
 
+        // TEM_TO_SQDZ is an explicit operator-selected built-in format. It must
+        // not silently fall back to an older EPL payload embedded in the THT.
+        if (templateType == LabelSettings.LargeSqdzTemplate)
+        {
+            return new LabelProfile(
+                templateType,
+                LabelPrintMode.ExternalTemplate,
+                TemplatePath: ResolveBuiltInTemplatePath(templateType),
+                EncodingName: encoding,
+                Copies: 1,
+                InlineTemplate: BuiltInLabelTemplateStore.LoadOverride(settings, templateType));
+        }
+
         if (!string.IsNullOrWhiteSpace(model.LabelTemplate.RawTemplate))
         {
             return new LabelProfile(
@@ -97,6 +110,8 @@ public static class LabelProfileResolver
         string normalized = value?.Trim() ?? string.Empty;
         if (string.Equals(normalized, LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase))
             return LabelSettings.SmallTemplate;
+        if (string.Equals(normalized, LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase))
+            return LabelSettings.LargeSqdzTemplate;
         if (string.Equals(normalized, LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase))
             return LabelSettings.SmallQrTemplate;
         return LabelSettings.LargeTemplate;

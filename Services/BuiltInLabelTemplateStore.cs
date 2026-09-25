@@ -6,7 +6,7 @@ using JBZUniversalTester.Models;
 namespace JBZUniversalTester.Services;
 
 /// <summary>
-/// Loads the three verified built-in label templates from the application
+/// Loads the verified built-in label templates from the application
 /// assembly so production deployment does not require a Labels directory.
 /// Explicit custom template paths remain supported by LabelProfileResolver.
 /// </summary>
@@ -25,6 +25,7 @@ public static class BuiltInLabelTemplateStore
     {
         string profile = profileId?.Trim() ?? string.Empty;
         if (profile.Equals(LabelSettings.LargeTemplate, StringComparison.OrdinalIgnoreCase) ||
+            profile.Equals(LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase) ||
             profile.Equals(LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase) ||
             profile.Equals(LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase))
         {
@@ -63,6 +64,7 @@ public static class BuiltInLabelTemplateStore
         ArgumentNullException.ThrowIfNull(settings);
         string encoded = LabelProfileResolver.NormalizeTemplateType(templateType) switch
         {
+            LabelSettings.LargeSqdzTemplate => settings.LargeSqdzTemplateOverrideBase64,
             LabelSettings.SmallTemplate => settings.SmallTemplateOverrideBase64,
             LabelSettings.SmallQrTemplate => settings.SmallQrTemplateOverrideBase64,
             _ => settings.LargeTemplateOverrideBase64
@@ -87,6 +89,9 @@ public static class BuiltInLabelTemplateStore
         string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(template));
         switch (LabelProfileResolver.NormalizeTemplateType(templateType))
         {
+            case LabelSettings.LargeSqdzTemplate:
+                settings.LargeSqdzTemplateOverrideBase64 = encoded;
+                break;
             case LabelSettings.SmallTemplate:
                 settings.SmallTemplateOverrideBase64 = encoded;
                 break;
@@ -104,6 +109,9 @@ public static class BuiltInLabelTemplateStore
         ArgumentNullException.ThrowIfNull(settings);
         switch (LabelProfileResolver.NormalizeTemplateType(templateType))
         {
+            case LabelSettings.LargeSqdzTemplate:
+                settings.LargeSqdzTemplateOverrideBase64 = string.Empty;
+                break;
             case LabelSettings.SmallTemplate:
                 settings.SmallTemplateOverrideBase64 = string.Empty;
                 break;

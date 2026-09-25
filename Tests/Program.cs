@@ -1639,8 +1639,8 @@ internal static partial class Program
                settingsSource.Contains("SettingsPanelsHost.Width = targetWidth", StringComparison.Ordinal) &&
                settingsSource.Contains("SettingsPanelsHost.HorizontalAlignment = HorizontalAlignment.Left", StringComparison.Ordinal) &&
                settingsSource.Contains("UnifiedSettingsGrid.HorizontalAlignment = HorizontalAlignment.Stretch", StringComparison.Ordinal) &&
-               settingsXaml.Contains("<UniformGrid x:Name=\"LabelPrintActionsPanel\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Columns=\"3\"", StringComparison.Ordinal) &&
+                settingsXaml.Contains("<Grid x:Name=\"LabelPrintActionsPanel\"", StringComparison.Ordinal) &&
+                settingsXaml.Contains("Columns=\"3\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"WaterProofChannelRows\"", StringComparison.Ordinal),
             "Production settings uses the real viewport, preserves the right border, and evenly sizes label buttons");
         Assert(!settingsXaml.Contains("Settings.ItemHeight", StringComparison.Ordinal) &&
@@ -1660,7 +1660,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 13 &&
+        Assert(settingsButtons.Length == 14 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
@@ -1672,6 +1672,16 @@ internal static partial class Program
             "Every Production Settings button uses the shared semantic palette and interaction template");
         Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
             "Production settings exposes the dedicated TEM BE QR selection");
+        Assert(settingsXaml.Contains("Tag=\"TEM_TO_SQDZ\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchLabelCountTextBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Click=\"BatchPrintLabel_Click\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("long firstLot = checked(completedLot + 1L);", StringComparison.Ordinal) &&
+               settingsSource.Contains("_vm.PrepareBulkPrintLot()", StringComparison.Ordinal) &&
+               settingsSource.Contains("_vm.CommitBulkPrintedLot(completedLot);", StringComparison.Ordinal) &&
+               !settingsSource[settingsSource.IndexOf("private async void BatchPrintLabel_Click", StringComparison.Ordinal)..
+                    settingsSource.IndexOf("private LabelPrintRequest BuildSettingsLabelRequest", StringComparison.Ordinal)]
+                   .Contains("NotifySettingsSavedAsync", StringComparison.Ordinal),
+            "TEM TO SQDZ batch LOT is sequential and does not reload or mutate the Production test state");
 
         Assert(System.Text.RegularExpressions.Regex.Matches(
                    testViewModelSource,
@@ -8188,6 +8198,7 @@ internal static partial class Program
                 .Count(item => item.value == (byte)'\n' &&
                                (item.index == 0 || qrPayloadBytes[item.index - 1] != (byte)'\r'));
             Assert(LabelProfileResolver.NormalizeTemplateType("TEM_BE_QR") == LabelSettings.SmallQrTemplate &&
+                   LabelProfileResolver.NormalizeTemplateType("TEM_TO_SQDZ") == LabelSettings.LargeSqdzTemplate &&
                    qrLabel.Profile.Id == LabelSettings.SmallQrTemplate &&
                    qrLabel.Profile.Mode == LabelPrintMode.ExternalTemplate &&
                    qrValues["LOT_NO"] == "0004" &&
@@ -8294,6 +8305,27 @@ internal static partial class Program
                 "P11",
                 "BE331H6000,SQDZP117002");
 
+            model.PartNumber = "1200020430";
+            model.ProductName = "BMS EXT";
+            model.Eco = "US4 HEV";
+            model.VehicleType = model.Eco;
+            model.Alc = "12000/20430";
+            model.CustomerCode = model.Alc;
+            history.LotNo = 7001;
+            history.Finished = new DateTime(2026, 7, 31, 8, 9, 10);
+            labelSettings.TemplateType = LabelSettings.LargeSqdzTemplate;
+            model.LabelTemplate = new LabelTemplateDefinition(
+                "N\nLEGACY-THT-TEMPLATE\nP1\n",
+                ProfileId: LabelSettings.LargeTemplate);
+            LabelPrintRequest largeSqdz = LabelPrintRequest.Capture(history, model, labelSettings);
+            Assert(largeSqdz.Profile.Id == LabelSettings.LargeSqdzTemplate &&
+                   largeSqdz.Data.Barcode == "1200020430,SQDZQ7V7001" &&
+                   largeSqdz.Payload.Contains("SQDZQ7V7001WH", StringComparison.Ordinal) &&
+                   largeSqdz.Payload.Contains("1200020430,SQDZQ7V7001", StringComparison.Ordinal) &&
+                   !largeSqdz.Payload.Contains("LEGACY-THT-TEMPLATE", StringComparison.Ordinal),
+                "TEM_TO_SQDZ keeps the large layout, uses SQDZ date/LOT and overrides legacy THT EPL when explicitly selected");
+            model.LabelTemplate = new LabelTemplateDefinition();
+
             InvalidDataException undefinedYear = AssertThrows<InvalidDataException>(
                 () => SmallLabel(1, new DateTime(2036, 8, 25)),
                 "TEM_BE year 2036 must be rejected before creating a print request");
@@ -8307,12 +8339,6 @@ internal static partial class Program
             Assert(smallDuplicateGuard.LoadLast()?.Barcode == expectedSmallBarcode,
                 "TEM_BE duplicate state persists the physical SQDZ barcode");
 
-            model.PartNumber = "1200020430";
-            model.ProductName = "BMS EXT";
-            model.Eco = "US4 HEV";
-            model.VehicleType = model.Eco;
-            model.Alc = "12000/20430";
-            model.CustomerCode = model.Alc;
             model.LabelVariables.Clear();
             history.LotNo = 7001;
             history.Finished = new DateTime(2026, 7, 31, 8, 9, 10);

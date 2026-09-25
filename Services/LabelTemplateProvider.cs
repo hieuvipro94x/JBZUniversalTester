@@ -15,7 +15,10 @@ public static class LabelTemplateProvider
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        if (!string.IsNullOrWhiteSpace(embeddedTemplate))
+        bool forceSelectedSqdzTemplate =
+            profile.Id.Equals(LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase) &&
+            BuiltInLabelTemplateStore.IsReference(profile.TemplatePath);
+        if (!forceSelectedSqdzTemplate && !string.IsNullOrWhiteSpace(embeddedTemplate))
             return embeddedTemplate;
 
         if (!string.IsNullOrWhiteSpace(profile.InlineTemplate))

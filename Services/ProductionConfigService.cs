@@ -182,6 +182,7 @@ public static class ProductionConfigService
             $"[LabelTemplateType]{settings.Label.TemplateType}",
             $"[LabelTemplatePath]{settings.Label.TemplatePath}",
             $"[LabelTemplateTEMTOBase64]{settings.Label.LargeTemplateOverrideBase64}",
+            $"[LabelTemplateTEMTOSQDZBase64]{settings.Label.LargeSqdzTemplateOverrideBase64}",
             $"[LabelTemplateTEMBEBase64]{settings.Label.SmallTemplateOverrideBase64}",
             $"[LabelTemplateTEMBEQRBase64]{settings.Label.SmallQrTemplateOverrideBase64}",
             $"[LabelEncodingName]{settings.Label.EncodingName}",
@@ -204,7 +205,7 @@ public static class ProductionConfigService
             string encodedKey = Uri.EscapeDataString(productKey);
             lines.Add(
                 $"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate};" +
-                $"{Math.Max(0, lot.StartLotNo)}");
+                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)}");
         }
 
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
@@ -291,6 +292,7 @@ public static class ProductionConfigService
             {
                 StartLotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
                 LotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
+                BulkPrintLotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
                 LotNoDate = migrateCurrentLot ? settings.LotNoDate : string.Empty
             };
             settings.LotSettingsByProduct[key] = lot;
@@ -313,6 +315,7 @@ public static class ProductionConfigService
             // cũ khi lưu các cài đặt độc lập như số card mở rộng.
             lot.StartLotNo = normalizedStart;
             lot.LotNo = normalizedStart;
+            lot.BulkPrintLotNo = normalizedStart;
             lot.LotNoDate = normalizedDate;
         }
         settings.LotNo = lot.LotNo;
@@ -520,7 +523,14 @@ public static class ProductionConfigService
                 StartLotNo = parts.Length > 2 &&
                              long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long startLotNo)
                     ? Math.Max(0, startLotNo)
-                    : Math.Max(0, lotNo)
+                    : Math.Max(0, lotNo),
+                BulkPrintLotNo = parts.Length > 3 &&
+                                 long.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out long bulkPrintLotNo)
+                    ? Math.Max(0, bulkPrintLotNo)
+                    : parts.Length > 2 &&
+                      long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long legacyStartLotNo)
+                        ? Math.Max(0, legacyStartLotNo)
+                        : Math.Max(0, lotNo)
             };
         }
 
@@ -595,6 +605,7 @@ public static class ProductionConfigService
         settings.Label.TemplateType = S(map, "LabelTemplateType", settings.Label.TemplateType);
         settings.Label.TemplatePath = S(map, "LabelTemplatePath", settings.Label.TemplatePath);
         settings.Label.LargeTemplateOverrideBase64 = S(map, "LabelTemplateTEMTOBase64", settings.Label.LargeTemplateOverrideBase64);
+        settings.Label.LargeSqdzTemplateOverrideBase64 = S(map, "LabelTemplateTEMTOSQDZBase64", settings.Label.LargeSqdzTemplateOverrideBase64);
         settings.Label.SmallTemplateOverrideBase64 = S(map, "LabelTemplateTEMBEBase64", settings.Label.SmallTemplateOverrideBase64);
         settings.Label.SmallQrTemplateOverrideBase64 = S(map, "LabelTemplateTEMBEQRBase64", settings.Label.SmallQrTemplateOverrideBase64);
         settings.Label.EncodingName = S(map, "LabelEncodingName", settings.Label.EncodingName);
@@ -735,6 +746,9 @@ public static class ProductionConfigService
                 lot.StartLotNo = lot.LotNo;
             lot.StartLotNo = Math.Max(0, lot.StartLotNo);
             lot.LotNo = Math.Max(0, lot.LotNo);
+            if (lot.BulkPrintLotNo < 0)
+                lot.BulkPrintLotNo = lot.StartLotNo;
+            lot.BulkPrintLotNo = Math.Max(0, lot.BulkPrintLotNo);
             lot.LotNoDate = (lot.LotNoDate ?? string.Empty).Trim();
         }
         ProductionTimingPolicy.Normalize(settings);
@@ -813,6 +827,7 @@ public static class ProductionConfigService
         settings.Label.TemplateType = LabelProfileResolver.NormalizeTemplateType(settings.Label.TemplateType);
         settings.Label.TemplatePath = (settings.Label.TemplatePath ?? string.Empty).Trim();
         settings.Label.LargeTemplateOverrideBase64 = (settings.Label.LargeTemplateOverrideBase64 ?? string.Empty).Trim();
+        settings.Label.LargeSqdzTemplateOverrideBase64 = (settings.Label.LargeSqdzTemplateOverrideBase64 ?? string.Empty).Trim();
         settings.Label.SmallTemplateOverrideBase64 = (settings.Label.SmallTemplateOverrideBase64 ?? string.Empty).Trim();
         settings.Label.SmallQrTemplateOverrideBase64 = (settings.Label.SmallQrTemplateOverrideBase64 ?? string.Empty).Trim();
         settings.Label.EncodingName = string.IsNullOrWhiteSpace(settings.Label.EncodingName)

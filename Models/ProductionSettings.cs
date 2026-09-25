@@ -336,6 +336,12 @@ public sealed class ProductLotSettings
     /// <summary>LOT kế tiếp thực tế dành cho giao dịch in tem an toàn.</summary>
     public long LotNo { get; set; }
 
+    /// <summary>
+    /// LOT riêng của chế độ in hàng loạt. Không được dùng để tính sản lượng,
+    /// lịch sử test hoặc LOT của chu kỳ Production.
+    /// </summary>
+    public long BulkPrintLotNo { get; set; } = -1;
+
     public string LotNoDate { get; set; } = string.Empty;
 }
 
@@ -355,6 +361,7 @@ public sealed class ResistanceChannelSetting
 public sealed class LabelSettings
 {
     public const string LargeTemplate = "TEM_TO";
+    public const string LargeSqdzTemplate = "TEM_TO_SQDZ";
     public const string SmallTemplate = "TEM_BE";
     public const string SmallQrTemplate = "TEM_BE_QR";
 
@@ -389,6 +396,7 @@ public sealed class LabelSettings
 
     /// <summary>UTF-8/Base64 overrides stored in the single canonical CFG.</summary>
     public string LargeTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string LargeSqdzTemplateOverrideBase64 { get; set; } = string.Empty;
     public string SmallTemplateOverrideBase64 { get; set; } = string.Empty;
     public string SmallQrTemplateOverrideBase64 { get; set; } = string.Empty;
 
