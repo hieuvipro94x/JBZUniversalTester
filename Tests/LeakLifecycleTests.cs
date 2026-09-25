@@ -78,23 +78,23 @@ internal static class LeakLifecycleTests
         Report(WaterProofStage.Waiting, 83.7);
         Check(context.Pending == 1, "PRESS/WAIT burst queues only one UI callback");
         context.Drain();
-        Check(vm.Channel1Text == "0.3" && vm.StageText == "WAIT",
-            "Coalescing retains the last PRESS reference when WAIT supersedes it");
+        Check(vm.Channel1Text == "83.7" && vm.StageText == "WAIT",
+            "Coalescing shows the newest WAIT pressure when WAIT supersedes PRESS");
         foreach (double delta in new[] { 0.5, 2.0, 5.6 })
         {
             Report(WaterProofStage.Waiting, 84 - delta);
             context.Drain();
-            Check(vm.Channel1Text == delta.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) && vm.IsRunning,
-                "Live leak changes without producing an official verdict");
+            Check(vm.Channel1Text == (84 - delta).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) && vm.IsRunning,
+                "WAIT displays the live hold pressure without producing an official verdict");
         }
         Report(WaterProofStage.Waiting, 70);
         Call(service, "DeactivateRun", 1);
         Call(service, "ActivateRun", 2);
         context.Drain();
-        Check(vm.Channel1Text == "5.6", "Queued old-run progress cannot mutate the old or new UI");
+        Check(vm.Channel1Text == "78.4", "Queued old-run progress cannot mutate the old or new UI");
         vm.Cancel();
         vm.ApplyFinal(new WaterProofRunResult([new(1, true, 84, 83, 1, true)], true, ""));
-        Check(vm.Channel1Text == "5.6", "Closed window ignores a late final result");
+        Check(vm.Channel1Text == "78.4", "Closed window ignores a late final result");
         service.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 

@@ -287,7 +287,7 @@ internal static partial class Program
             "Discard OFF-to-ON is only the entry edge and cannot complete fault removal");
         faultDiscardBoard.Publish(FrameSeq(21));
         Assert(!faultDiscardVm.IsProductRemovalPending &&
-               faultDiscardVm.State == "CHỜ LẮP SẢN PHẨM" &&
+               faultDiscardVm.State == "LẮP SẢN PHẨM" &&
                faultDiscardVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                faultDiscardVm.CenterResultText == "LẮP SẢN PHẨM",
             "One discard ON-to-OFF pass completes both gates and returns every UI state to ready");
@@ -376,8 +376,8 @@ internal static partial class Program
         board.SetRequestedScanCapacityForTest(10);
         supervisor.StartProductionScanAndVerifyFrameAsync(640, CancellationToken.None, "SELF_TEST_2_TO_10_AGAIN")
             .GetAwaiter().GetResult();
-        Assert(board.Commands.Count(command => command == "START") == 3 && board.ConnectAttempts == 3,
-            "2 -> 10 -> 2 -> 10 uses one controlled reopen and one START per physical capacity transition");
+        Assert(board.Commands.Count(command => command == "START") == 3 && board.ConnectAttempts == 0,
+            "2 -> 10 -> 2 -> 10 applies each capacity transition in place without reopening the board");
 
         var sameCapacityBoard = new FakeBoard();
         _ = Task.Run(async () =>
@@ -2724,9 +2724,10 @@ internal static partial class Program
             !xaml.Contains("WaterProofStageText", StringComparison.Ordinal) &&
             xaml.Contains("x:Name=\"ResultStatusHost\"", StringComparison.Ordinal) &&
             leakWindowXaml.Contains("Width=\"220\"", StringComparison.Ordinal) &&
-            leakWindowXaml.Contains("Height=\"34\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Height=\"50\"", StringComparison.Ordinal) &&
             leakWindowXaml.Contains("Text=\"{Binding Channel1Text}\"", StringComparison.Ordinal) &&
-            leakWindowXaml.Contains("Background=\"{Binding Channel1Background}\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("<Setter Property=\"Background\" Value=\"{Binding Channel1Background}\"/>", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("<DataTrigger Binding=\"{Binding IsRunning}\" Value=\"True\">", StringComparison.Ordinal) &&
             !leakWindowXaml.Contains("Text=\"{Binding StageText}\"", StringComparison.Ordinal) &&
             !leakWindowXaml.Contains("Text=\"{Binding Title}\"", StringComparison.Ordinal),
             "Leak UI is exactly three compact numeric cells anchored below the main status box");
@@ -2783,17 +2784,17 @@ internal static partial class Program
         leakWindowVm.ApplyProgress(new WaterProofProgress(
             WaterProofStage.Pressurizing, [84.0, 0.0, 83.5], ":PRESS,84,0,83.5"));
         Assert(leakWindowVm.StageText == "PRESS" &&
-               leakWindowVm.Channel1Text == "--" &&
+               leakWindowVm.Channel1Text == "84.0" &&
                leakWindowVm.Channel2Text == "--" &&
-               leakWindowVm.Channel3Text == "--",
-            "PRESS records references without displaying raw pressure or an official result");
+               leakWindowVm.Channel3Text == "83.5",
+            "PRESS displays the live fill pressure for enabled channels without an official result");
         leakWindowVm.ApplyProgress(new WaterProofProgress(
             WaterProofStage.Waiting, [83.7, 0.0, 81.5], ":WAIT,83.7,0,81.5"));
         Assert(leakWindowVm.StageText == "WAIT" &&
-               leakWindowVm.Channel1Text == "0.3" &&
+               leakWindowVm.Channel1Text == "83.7" &&
                leakWindowVm.Channel2Text == "--" &&
-               leakWindowVm.Channel3Text == "2.0",
-            "WAIT displays live PRESS-reference deltas only for enabled channels");
+               leakWindowVm.Channel3Text == "81.5",
+            "WAIT replaces the cells with live hold pressure only for enabled channels");
         leakWindowVm.ApplyFinal(new WaterProofRunResult(
             [
                 new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
@@ -3435,6 +3436,15 @@ internal static partial class Program
         var settings = new ProductionSettings { MasterFaultRequiredCount = 0 };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
         vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
+
+        PropertyInfo modelTransitionActive = typeof(TestViewModel).GetProperty(
+            "IsModelTransitionActive",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Model-transition state not found.");
+        Assert(SpinWait.SpinUntil(
+                () => !(bool)(modelTransitionActive.GetValue(vm) ?? true),
+                TimeSpan.FromSeconds(2)),
+            "Asynchronous model scan reconciliation completes before testing START behavior");
 
         board.StopScanAsync().GetAwaiter().GetResult();
         int commandsBeforeArm = board.Commands.Count;
@@ -4739,8 +4749,8 @@ internal static partial class Program
         Assert(board.CompleteFramesReceived == frameCount &&
                engine.FramesProcessed == frameCount,
             "Ten-card stress processes all 500 complete 640-IO frames");
-        Assert(changedAfterConfirmation == 2 && changed == changedAfterConfirmation,
-            "Initial snapshot and second-frame removal confirmation notify once each; the remaining 498 identical frames emit no UI events");
+        Assert(changedAfterConfirmation == 1 && changed == changedAfterConfirmation,
+            "A never-present empty product emits only the initial snapshot; identical empty frames cannot manufacture ProductRemoved UI events");
         Assert(retainedAfter <= retainedBefore + (32L * 1024 * 1024),
             $"Ten-card stress retained memory stays bounded ({retainedBefore} -> {retainedAfter})");
         Console.WriteLine(
@@ -5745,8 +5755,8 @@ internal static partial class Program
             2,
             (1, new[] { 18 }),
             (201, new[] { 202, 203 })));
-        Assert(vm.PassedNetworkCount == 3 && vm.State == "ĐANG KIỂM TRA...",
-            "Two complete frames with real product connectivity confirm Testing");
+        Assert(vm.PassedNetworkCount == 3 && vm.State == "ĐANG LẮP SẢN PHẨM...",
+            "Two complete frames with incomplete product connectivity confirm realtime installation state");
 
         // Tháo dây thường nhưng AO-a1 vẫn còn: tuyệt đối chưa reset.
         board.Publish(FrameSeq(3, (201, new[] { 202 })));
@@ -6651,7 +6661,6 @@ internal static partial class Program
         unusedVm.SetModel(model);
         unusedVm.StartProductionTestAsync().GetAwaiter().GetResult();
         long processedBeforeUnusedProbe = unusedVm.ProductionFramesProcessed;
-        string stateBeforeUnusedProbe = unusedVm.State;
         unusedBoard.Publish(ProbeFrameSeq(30, 7));
         unusedBoard.Publish(ProbeFrameSeq(31, 7));
         Assert(unusedVm.HasInlineProbeContacts &&
@@ -6668,10 +6677,10 @@ internal static partial class Program
                unusedVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
                unusedVm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
                unusedVm.CurrentProbePresentationState == ProbePresentationState.Touch &&
-               unusedVm.State == stateBeforeUnusedProbe &&
+               unusedVm.State == "LẮP SẢN PHẨM" &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
             "CASE E: always-on Probe shows an unmapped physical IO while Probe owns presentation, without starting the product cycle; " +
-            $"state={unusedVm.State}/{stateBeforeUnusedProbe}, runtime={unusedVm.CurrentProductionRuntimeState}, " +
+            $"state={unusedVm.State}, runtime={unusedVm.CurrentProductionRuntimeState}, " +
             $"presentation={unusedVm.CurrentProductionPresentationMode}, probe={unusedVm.CurrentProbePresentationState}, " +
             $"center='{unusedVm.CenterResultText}', processed={unusedVm.ProductionFramesProcessed}/{processedBeforeUnusedProbe}, rows=" +
             string.Join("|", unusedVm.Faults.Select(row =>
@@ -9266,7 +9275,7 @@ internal static partial class Program
                 BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(vm) ?? throw new InvalidOperationException("Empty-model engine not found"));
             Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
-                   vm.Faults.Count == 2 &&
+                   vm.Faults.Count == 1 &&
                    vm.Faults[0].Kind == FaultKind.Probe &&
                    vm.Faults[0].Io == 63 &&
                    vm.Faults[0].Status == "TP - IO(63)" &&
@@ -9282,7 +9291,7 @@ internal static partial class Program
 
             board.Publish(FrameSeq(5));
             Assert(!AppSoundService.Current.IsTestPointContactSoundActive &&
-                   vm.Faults.Count == 1 &&
+                   vm.Faults.Count == 2 &&
                    vm.Faults.All(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 9) &&
                    vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
                    vm.CurrentProbePresentationState == ProbePresentationState.Released &&
