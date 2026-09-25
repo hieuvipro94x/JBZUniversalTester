@@ -2555,6 +2555,50 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// Xác nhận riêng các mạng RET/RT thuộc connector Leak đã được tháo.
+    /// Không yêu cầu những mạng dây thường hoặc connector khác của sản phẩm
+    /// phải mất continuity; dùng cho chu kỳ Leak-only retest.
+    /// </summary>
+    public bool IsRetWireDisconnected(string? connectorId)
+    {
+        if (string.IsNullOrWhiteSpace(connectorId))
+            return false;
+
+        string selectedConnector = connectorId.Trim();
+        lock (_gate)
+        {
+            if (_model is null || !_model.Connectors.Any(connector =>
+                    string.Equals(
+                        connector.ConnectorId,
+                        selectedConnector,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            bool foundRetNet = false;
+            foreach (WireNet net in _model.Nets)
+            {
+                if (!IsEligibleProductionNet(net) ||
+                    !IsRetWireName(net.Name) ||
+                    !net.Pins.Any(pin => string.Equals(
+                        pin.Connector,
+                        selectedConnector,
+                        StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                foundRetNet = true;
+                if (IsWireNetConnected(net))
+                    return false;
+            }
+
+            return foundRetNet;
+        }
+    }
+
     private static bool IsRetWireName(string? wireName)
     {
         if (string.IsNullOrWhiteSpace(wireName))

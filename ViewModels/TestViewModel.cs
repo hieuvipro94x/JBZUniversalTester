@@ -8120,7 +8120,7 @@ public sealed class TestViewModel : ObservableObject
                 await StartProductionScanAndVerifyFrameAsync(ct, $"{masterLabel.Replace(' ', '_')}_LEAK_RETRY");
 
                 while (IsMasterWaterProofContext(masterModel, generation, expectedState) &&
-                       !connectorIds.All(_engine.IsConnectorDisconnected))
+                       !connectorIds.All(_engine.IsRetWireDisconnected))
                 {
                     await Task.Delay(50, ct);
                 }
@@ -9106,7 +9106,7 @@ public sealed class TestViewModel : ObservableObject
             ref _waterProofRetestConnectorState);
         if (current == WaterProofRetestConnectorState.AwaitingConnectorRemoval)
         {
-            bool allDisconnected = connectorIds.All(_engine.IsConnectorDisconnected);
+            bool allDisconnected = connectorIds.All(_engine.IsRetWireDisconnected);
             if (!allDisconnected)
                 return;
 
@@ -9118,8 +9118,8 @@ public sealed class TestViewModel : ObservableObject
             {
                 State = $"LẮP LẠI CONNECTOR LEAK {string.Join(", ", connectorIds)}";
                 AddLog(
-                    $"[WATERPROOF-RETEST] Đã xác nhận tháo connector {string.Join(", ", connectorIds)}; " +
-                    "sản phẩm vẫn còn trên JIG, chờ lắp lại.");
+                    $"[WATERPROOF-RETEST] Đã xác nhận mất cặp RET/RT tại connector {string.Join(", ", connectorIds)}; " +
+                    "các connector khác giữ nguyên, chờ lắp lại connector Leak.");
             }
             return;
         }

@@ -222,10 +222,15 @@ public partial class MainWindow : Window
         {
             _testWindow = new TestWindow(
                 _viewModel.Test,
-                autoStartProduction: hasCapacity);
+                autoStartProduction: hasCapacity)
+            {
+                // Giữ MainWindow đã render sẵn ngay phía sau TestWindow. Khi
+                // đóng màn hình test, DWM luôn có sẵn bề mặt để hiển thị và
+                // không thể lộ desktop trong lúc dựng lại MainWindow.
+                Owner = this
+            };
             _testWindow.Closed += TestWindow_Closed;
             _testWindow.ReturningToMain += TestWindow_ReturningToMain;
-            _testWindow.ContentRendered += TestWindow_ContentRenderedForTransition;
 
             // Faults đã được SetModel/BuildRows trước khi Show(), vì vậy DataGrid
             // có cấu hình THT ngay frame render đầu tiên của TestWindow.
@@ -236,7 +241,6 @@ public partial class MainWindow : Window
         {
             if (_testWindow is not null)
             {
-                _testWindow.ContentRendered -= TestWindow_ContentRenderedForTransition;
                 _testWindow.ReturningToMain -= TestWindow_ReturningToMain;
                 _testWindow.Closed -= TestWindow_Closed;
                 _testWindow = null;
@@ -251,33 +255,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private void TestWindow_ContentRenderedForTransition(object? sender, EventArgs e)
-    {
-        if (sender is TestWindow renderedWindow)
-            renderedWindow.ContentRendered -= TestWindow_ContentRenderedForTransition;
-
-        if (_shutdownStarted ||
-            !ReferenceEquals(sender, _testWindow) ||
-            sender is not TestWindow testWindow ||
-            !testWindow.IsVisible)
-        {
-            return;
-        }
-
-        // Chỉ ẩn MainWindow sau khi TestWindow đã có frame render đầu tiên.
-        // Như vậy khi chuyển Main -> Test sẽ không có một frame lộ desktop.
-        if (IsVisible)
-            Hide();
-    }
-
     private void TestWindow_ReturningToMain(object? sender, EventArgs e)
     {
         if (_shutdownStarted || _viewModel.Test.IsDeviceFault)
             return;
 
+        WindowState = WindowState.Maximized;
         if (!IsVisible)
             Show();
-        WindowState = WindowState.Maximized;
+
         UpdateProductRemovalGate();
         Activate();
         Focus();
@@ -289,7 +275,6 @@ public partial class MainWindow : Window
     {
         if (_testWindow is not null)
         {
-            _testWindow.ContentRendered -= TestWindow_ContentRenderedForTransition;
             _testWindow.ReturningToMain -= TestWindow_ReturningToMain;
             _testWindow.Closed -= TestWindow_Closed;
             _testWindow = null;
@@ -298,14 +283,13 @@ public partial class MainWindow : Window
         if (_shutdownStarted || _viewModel.Test.IsDeviceFault)
             return;
 
-        // Bình thường MainWindow đã được hiện trước khi TestWindow Close().
-        // Đây chỉ là fallback để không bao giờ để desktop lộ ra nếu cửa sổ Test
-        // bị đóng bởi một nhánh khác.
+        // MainWindow bình thường luôn tồn tại phía sau TestWindow. Đây là
+        // fallback nếu một nhánh khác từng ẩn cửa sổ chính.
+        WindowState = WindowState.Maximized;
         if (!IsVisible)
             Show();
 
         LogMemory("MEM TESTWINDOW_CLOSE");
-        WindowState = WindowState.Maximized;
         UpdateProductRemovalGate();
         Activate();
         Focus();

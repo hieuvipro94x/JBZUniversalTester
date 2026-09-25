@@ -754,82 +754,22 @@ public partial class TestWindow : Window
         }
     }
 
-    private async Task RevealMainBeforeCloseAsync()
+    private Task RevealMainBeforeCloseAsync()
     {
         EventHandler? returningHandler = ReturningToMain;
         if (returningHandler is null ||
             Dispatcher.HasShutdownStarted ||
             Dispatcher.HasShutdownFinished)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        // MainWindow được Show/Activate đồng bộ trong callback này trong khi
-        // TestWindow vẫn còn phủ toàn màn hình. Vì vậy không có khoảng trống
-        // giữa hai top-level window giống kiểu Close -> Show.
+        // MainWindow luôn còn hiển thị và đã được DWM compose phía sau cửa sổ
+        // test. Chỉ cần cập nhật/activate trước Close(); không chờ các nhịp
+        // CompositionTarget.Rendering toàn cục vì chúng không chứng minh frame
+        // của MainWindow và còn tạo cảm giác chuyển trang chậm.
         returningHandler(this, EventArgs.Empty);
-
-        // ContextIdle không đảm bảo DWM đã thực sự có frame của MainWindow.
-        // Cho WPF xử lý layout/render trước, sau đó giữ TestWindow sống thêm
-        // hai nhịp CompositionTarget.Rendering rồi mới Close().
-        await Dispatcher.InvokeAsync(
-            static () => { },
-            DispatcherPriority.Render);
-
-        await WaitForCompositionFramesAsync(2);
-    }
-
-    private async Task WaitForCompositionFramesAsync(int requiredFrames)
-    {
-        if (requiredFrames <= 0 ||
-            Dispatcher.HasShutdownStarted ||
-            Dispatcher.HasShutdownFinished)
-        {
-            return;
-        }
-
-        var completion = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-
-        int frameCount = 0;
-        EventHandler? renderingHandler = null;
-        EventHandler? timeoutHandler = null;
-
-        var fallbackTimer = new DispatcherTimer(
-            DispatcherPriority.Background,
-            Dispatcher)
-        {
-            // Tránh treo việc đóng cửa sổ nếu Rendering tạm ngừng
-            // (ví dụ RDP/minimize/display transition).
-            Interval = TimeSpan.FromMilliseconds(180)
-        };
-
-        void Complete()
-        {
-            if (renderingHandler is not null)
-                CompositionTarget.Rendering -= renderingHandler;
-
-            if (timeoutHandler is not null)
-                fallbackTimer.Tick -= timeoutHandler;
-
-            fallbackTimer.Stop();
-            completion.TrySetResult(true);
-        }
-
-        renderingHandler = (_, _) =>
-        {
-            frameCount++;
-            if (frameCount >= requiredFrames)
-                Complete();
-        };
-
-        timeoutHandler = (_, _) => Complete();
-
-        CompositionTarget.Rendering += renderingHandler;
-        fallbackTimer.Tick += timeoutHandler;
-        fallbackTimer.Start();
-
-        await completion.Task;
+        return Task.CompletedTask;
     }
 
     private void CancelPendingAutoStart()
