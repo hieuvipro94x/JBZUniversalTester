@@ -1322,6 +1322,12 @@ public sealed class TestViewModel : ObservableObject
     public bool IsProductRemovalPending =>
         Volatile.Read(ref _productRemovalPending) != 0;
 
+    public bool HasProductOnTestTable =>
+        IsProductRemovalPending ||
+        _productDetectedThisCycle ||
+        _engine.HasProductActivity ||
+        MasterState is MasterSequenceState.TestingGoodMaster or MasterSequenceState.TestingBadMaster;
+
     private void SetProductRemovalPending(bool pending)
     {
         if (pending && Volatile.Read(ref _resultRecordedThisCycle) != 0)
@@ -6239,11 +6245,18 @@ public sealed class TestViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Dừng mọi thao tác của TestView/PinProbe nhưng giữ kết nối board để có
-    /// thể quay về MainWindow rồi test lại ngay. Cửa sổ phải await hàm này
-    /// trước khi đóng để không để worker scan chạy ngầm.
+    /// Chỉ dừng TestView khi snapshot Production đã xác nhận bàn test sạch.
+    /// Nếu còn sản phẩm hoặc đang chờ ProductRemoved thì trả false và giữ nguyên
+    /// TestView; khi được phép vẫn giữ scan nền cho lần mở tiếp theo.
     /// </summary>
-    public Task StopViewAsync() => StopTestAsync();
+    public async Task<bool> StopViewAsync()
+    {
+        if (HasProductOnTestTable)
+            return false;
+
+        await StopTestAsync();
+        return !HasProductOnTestTable;
+    }
 
     /// <summary>
     /// Shutdown cuối cùng của ứng dụng. Idempotent: chỉ chạy một lần.
@@ -9884,6 +9897,7 @@ public sealed class TestViewModel : ObservableObject
 
             // Từ đây PASS đã durable. UI/âm thanh và relay chỉ được chạy sau commit.
             TriggerPassUi();
+            long passRelaySequenceStartedTimestamp = Stopwatch.GetTimestamp();
             await PauseProductionScanForFinalPassAsync(ct);
             bool ok = await _engine.CompletePassAsync(
                 Resistance,
@@ -9929,7 +9943,35 @@ public sealed class TestViewModel : ObservableObject
 
             try
             {
+                await PassRelayDeadline.DelayUntilAsync(
+                    _engine.LastPassRelayOffTimestamp,
+                    ProductionTimingPolicy.PassFinalRelayOffToStartScanMs,
+                    ct);
                 await StartProductionScanAndVerifyFrameAsync(ct, "PASS_RELAY_SEQUENCE");
+                long sequenceStopTimestamp = passRelaySequenceStartedTimestamp;
+                long sequenceStartTimestamp = Stopwatch.GetTimestamp();
+                if (_board is IBoardCommandTimingDiagnostics timing &&
+                    timing.LastStopScanTxTimestamp > 0 &&
+                    timing.LastStartScanTxTimestamp >= timing.LastStopScanTxTimestamp)
+                {
+                    sequenceStopTimestamp = timing.LastStopScanTxTimestamp;
+                    sequenceStartTimestamp = timing.LastStartScanTxTimestamp;
+                }
+
+                double stopToStartMs = Stopwatch.GetElapsedTime(
+                    sequenceStopTimestamp,
+                    sequenceStartTimestamp).TotalMilliseconds;
+                long finalRelayOffTimestamp = _engine.LastPassRelayOffTimestamp;
+                double finalOffToStartMs = finalRelayOffTimestamp > 0 &&
+                    sequenceStartTimestamp >= finalRelayOffTimestamp
+                        ? Stopwatch.GetElapsedTime(
+                            finalRelayOffTimestamp,
+                            sequenceStartTimestamp).TotalMilliseconds
+                        : 0;
+                AsyncFileLogService.Current.Performance(
+                    $"PASS_RELAY_TIMING event=SEQUENCE_COMPLETE " +
+                    $"stop_to_start_ms={stopToStartMs:0.###} " +
+                    $"final_off_to_start_ms={finalOffToStartMs:0.###}");
                 // Ignore bootstrap frames until the scan supervisor has accepted
                 // the current generation; then two clean frames can confirm an
                 // operator who removed the product before topology reacquisition.

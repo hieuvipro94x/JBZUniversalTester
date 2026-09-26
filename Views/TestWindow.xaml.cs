@@ -696,19 +696,26 @@ public partial class TestWindow : Window
         if (_closeInProgress)
             return;
         _closeInProgress = true;
-        CancelPendingAutoStart();
 
         try
         {
-            if (DataContext is TestViewModel viewModel)
-                await viewModel.StopViewAsync();
-        }
-        catch { }
-        finally
-        {
+            if (DataContext is TestViewModel viewModel &&
+                !await viewModel.StopViewAsync())
+            {
+                ShowProductRemovalRequired();
+                _closeInProgress = false;
+                return;
+            }
+
+            CancelPendingAutoStart();
             await RevealMainBeforeCloseAsync();
             _allowClose = true;
             Close();
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Return to Main failed: {ex}");
+            _closeInProgress = false;
         }
     }
 
@@ -731,6 +738,13 @@ public partial class TestWindow : Window
         if (_closeInProgress)
             return;
 
+        if (DataContext is TestViewModel productViewModel &&
+            productViewModel.HasProductOnTestTable)
+        {
+            ShowProductRemovalRequired();
+            return;
+        }
+
         MessageBoxResult result = MessageBox.Show(this,
             "Bạn có muốn dừng kiểm tra và quay về màn hình chọn mã?",
             "Xác nhận", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -738,20 +752,37 @@ public partial class TestWindow : Window
             return;
 
         _closeInProgress = true;
-        CancelPendingAutoStart();
         try
         {
-            if (DataContext is TestViewModel viewModel)
-                await viewModel.StopViewAsync();
-        }
-        catch { }
-        finally
-        {
+            if (DataContext is TestViewModel viewModel &&
+                !await viewModel.StopViewAsync())
+            {
+                ShowProductRemovalRequired();
+                _closeInProgress = false;
+                return;
+            }
+
+            CancelPendingAutoStart();
             await RevealMainBeforeCloseAsync();
             _allowClose = true;
             CleanupUiHandlers();
             Close();
         }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Close TestWindow failed: {ex}");
+            _closeInProgress = false;
+        }
+    }
+
+    private void ShowProductRemovalRequired()
+    {
+        MessageBox.Show(
+            this,
+            "Vui lòng tháo sản phẩm ra khỏi bàn test !!",
+            "CHƯA THÁO SẢN PHẨM",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
     }
 
     private Task RevealMainBeforeCloseAsync()

@@ -25,7 +25,7 @@ public sealed record D2xxProtocolTrace(
 /// 2026-08-07. Scan initialization is stateful: INIT_1/INIT_2 prepare the board,
 /// then START_SCAN is sent separately.
 /// </summary>
-public sealed class D2xxBoardTransport : IBoardTransport
+public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDiagnostics
 {
     const uint FT_OK = 0;
     const uint FT_OPEN_BY_SERIAL_NUMBER = 1;
@@ -113,6 +113,9 @@ public sealed class D2xxBoardTransport : IBoardTransport
     int _frameIntervalSampleCount;
     int _frameIntervalSampleWriteIndex;
     long _lastCompleteFrameStopwatchTimestamp;
+    long _lastStopScanTxTimestamp;
+    long _lastResetClearTxTimestamp;
+    long _lastStartScanTxTimestamp;
     long _lastFrameIntervalGeneration = -1;
     long _lastProcessCpuTicks;
     long _openCount;
@@ -169,6 +172,12 @@ public sealed class D2xxBoardTransport : IBoardTransport
         }
     }
     public int LastFrameUnknownBytes => Volatile.Read(ref _lastFrameUnknownBytes);
+    long IBoardCommandTimingDiagnostics.LastStopScanTxTimestamp =>
+        Interlocked.Read(ref _lastStopScanTxTimestamp);
+    long IBoardCommandTimingDiagnostics.LastResetClearTxTimestamp =>
+        Interlocked.Read(ref _lastResetClearTxTimestamp);
+    long IBoardCommandTimingDiagnostics.LastStartScanTxTimestamp =>
+        Interlocked.Read(ref _lastStartScanTxTimestamp);
 
     public event EventHandler<ScanFrame>? FrameReceived;
     public event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceived;
@@ -889,29 +898,42 @@ public sealed class D2xxBoardTransport : IBoardTransport
         _preparedScanCapacity = _capacity;
     }
 
-    public Task SetRelayAsync(int relay, CancellationToken ct = default) => relay switch
+    public async Task SetRelayAsync(int relay, CancellationToken ct = default) =>
+        _ = await SetRelayWithTxTimestampAsync(relay, ct);
+
+    Task<long> IBoardCommandTimingDiagnostics.SetRelayWithTxTimestampAsync(
+        int relay,
+        CancellationToken ct) => SetRelayWithTxTimestampAsync(relay, ct);
+
+    Task<long> SetRelayWithTxTimestampAsync(int relay, CancellationToken ct) => relay switch
     {
         1 => WriteRelayAsync([0x8E, 0x00, 0x00, 0x01], "RELAY1", 1, ct),
         2 => WriteRelayAsync([0x8E, 0x00, 0x00, 0x02], "RELAY2", 2, ct),
         _ => throw new ArgumentOutOfRangeException(nameof(relay))
     };
 
-    public Task AllRelaysOffAsync(CancellationToken ct = default) =>
+    public async Task AllRelaysOffAsync(CancellationToken ct = default) =>
+        _ = await AllRelaysOffWithTxTimestampAsync(ct);
+
+    Task<long> IBoardCommandTimingDiagnostics.AllRelaysOffWithTxTimestampAsync(
+        CancellationToken ct) => AllRelaysOffWithTxTimestampAsync(ct);
+
+    Task<long> AllRelaysOffWithTxTimestampAsync(CancellationToken ct) =>
         IsConnected
             ? WriteRelayAsync([0x8E, 0x00, 0x00, 0x00], "ALL_RELAYS_OFF", 0, ct)
-            : Task.CompletedTask;
+            : Task.FromResult(0L);
 
-    async Task WriteRelayAsync(byte[] command, string reason, int relayState, CancellationToken ct)
+    async Task<long> WriteRelayAsync(byte[] command, string reason, int relayState, CancellationToken ct)
     {
         // Lệnh OFF là lệnh an toàn cưỡng bức: luôn ghi lại 00, kể cả khi cache
         // phần mềm đang nghĩ relay đã OFF. Nhờ đó Manual/PASS không phụ thuộc
         // vào trạng thái cache nếu một relay cơ khí vừa nhả chậm hoặc bị nhiễu.
         if (relayState != 0 && Volatile.Read(ref _activeRelay) == relayState)
-            return;
+            return 0;
         // JBZ I/O Monitor V1.9 purge RX/TX ngay trước mọi frame relay.
         // Manual đã dừng scan nên purge không làm mất frame Production;
         // thao tác này ngăn BO bỏ qua frame OFF 8E 00 00 00 trên một số máy.
-        await WriteAsync(command, ct, purgeBeforeWrite: true);
+        long txTimestamp = await WriteAsync(command, ct, purgeBeforeWrite: true);
 
         // Sau khi FT_Write đã thành công, không cho cancellation cắt ngang khoảng
         // settle bắt buộc. Nếu cập nhật cache trước rồi bị cancel, lần gọi sau có
@@ -926,6 +948,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
         // tại đây; nếu invalid sẽ làm startup và mỗi chu kỳ relay bị cộng thêm
         // một vòng INIT không cần thiết.
         SafeLog($"D2XX RELAY {reason}; scan prepare preserved.");
+        return txTimestamp;
     }
 
     private string BuildScanConfiguration(BoardScanMode mode) =>
@@ -1560,12 +1583,13 @@ public sealed class D2xxBoardTransport : IBoardTransport
         return true;
     }
 
-    async Task WriteAsync(
+    async Task<long> WriteAsync(
         byte[] data,
         CancellationToken ct,
         bool purgeBeforeWrite = false)
     {
         EnsureConnected();
+        long txTimestamp = 0;
 
         Interlocked.Increment(ref _controlWaiters);
         try
@@ -1593,6 +1617,14 @@ public sealed class D2xxBoardTransport : IBoardTransport
                     throw new IOException(
                         $"FT_Write thiếu byte: {written}/{data.Length}");
                 }
+
+                txTimestamp = Stopwatch.GetTimestamp();
+                if (data.AsSpan().SequenceEqual(CmdStopScan))
+                    Interlocked.Exchange(ref _lastStopScanTxTimestamp, txTimestamp);
+                else if (data.AsSpan().SequenceEqual(CmdResetClear))
+                    Interlocked.Exchange(ref _lastResetClearTxTimestamp, txTimestamp);
+                else if (data.Length == 4 && data[0] == 0x8C)
+                    Interlocked.Exchange(ref _lastStartScanTxTimestamp, txTimestamp);
             }
             finally
             {
@@ -1606,7 +1638,8 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
         SafeLog(
             $"TX {BitConverter.ToString(data).Replace("-", " ")}");
-        PublishProtocolTrace("TX", data);
+        PublishProtocolTrace("TX", data, txTimestamp);
+        return txTimestamp;
     }
 
     async Task PurgeAsync(CancellationToken ct)
@@ -1847,7 +1880,10 @@ public sealed class D2xxBoardTransport : IBoardTransport
         }
     }
 
-    void PublishProtocolTrace(string direction, ReadOnlySpan<byte> data)
+    void PublishProtocolTrace(
+        string direction,
+        ReadOnlySpan<byte> data,
+        long stopwatchTimestamp = 0)
     {
         EventHandler<D2xxProtocolTrace>? handlers = ProtocolTrace;
         if (handlers is null || data.IsEmpty)
@@ -1855,7 +1891,7 @@ public sealed class D2xxBoardTransport : IBoardTransport
 
         var trace = new D2xxProtocolTrace(
             DateTime.UtcNow,
-            Stopwatch.GetTimestamp(),
+            stopwatchTimestamp > 0 ? stopwatchTimestamp : Stopwatch.GetTimestamp(),
             direction,
             data.ToArray());
 

@@ -57,3 +57,16 @@ public interface IBoardTransport : IAsyncDisposable
     Task SetRelayAsync(int relay, CancellationToken ct = default);
     Task AllRelaysOffAsync(CancellationToken ct = default);
 }
+
+/// <summary>
+/// Internal timing surface for the D2XX PASS-relay path. Timestamps are captured
+/// immediately after the successful FT_Write and use the Stopwatch clock.
+/// </summary>
+internal interface IBoardCommandTimingDiagnostics
+{
+    long LastStopScanTxTimestamp { get; }
+    long LastResetClearTxTimestamp { get; }
+    long LastStartScanTxTimestamp { get; }
+    Task<long> SetRelayWithTxTimestampAsync(int relay, CancellationToken ct = default);
+    Task<long> AllRelaysOffWithTxTimestampAsync(CancellationToken ct = default);
+}

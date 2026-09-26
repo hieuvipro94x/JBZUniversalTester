@@ -79,6 +79,41 @@ public readonly record struct ProductEvidenceSnapshot(
     ProductPresenceState State,
     string Reason);
 
+internal readonly record struct PassRelayPulseTiming(
+    int Relay,
+    long TxOnTimestamp,
+    long TxOffTimestamp);
+
+internal static class PassRelayDeadline
+{
+    // The original trace holds a configured 120 ms pulse for about 140 ms at
+    // the D2XX TX boundary. Keep that fixed delivery margin independent from
+    // the measured transport-settle time; never add the whole transport delay.
+    internal const int TxDeliveryMarginMs = 20;
+
+    internal static int TargetTxToTxMs(int configuredPulseMs) =>
+        Math.Clamp(configuredPulseMs, 50, 5_000) + TxDeliveryMarginMs;
+
+    internal static int RemainingDelayMs(long txTimestamp, int targetMs, long nowTimestamp)
+    {
+        if (txTimestamp <= 0 || nowTimestamp <= txTimestamp || targetMs <= 0)
+            return txTimestamp > 0 && nowTimestamp <= txTimestamp ? targetMs : 0;
+
+        double elapsedMs = Stopwatch.GetElapsedTime(txTimestamp, nowTimestamp).TotalMilliseconds;
+        return Math.Max(0, (int)Math.Ceiling(targetMs - elapsedMs));
+    }
+
+    internal static async Task DelayUntilAsync(
+        long txTimestamp,
+        int targetMs,
+        CancellationToken ct)
+    {
+        int remainingMs = RemainingDelayMs(txTimestamp, targetMs, Stopwatch.GetTimestamp());
+        if (remainingMs > 0)
+            await Task.Delay(remainingMs, ct);
+    }
+}
+
 public sealed record TestEnginePresentationSnapshot(
     ProductionElectricalSnapshot Electrical,
     bool Removal,
@@ -117,6 +152,7 @@ public sealed class TestEngine : IDisposable
     readonly ProductionFaultConfirmationGate _faultConfirmation;
     readonly object _gate = new();
     readonly SemaphoreSlim _relayPulseGate = new(1, 1);
+    long _lastPassRelayOffTimestamp;
 
     ProductModel? _model;
     readonly HashSet<string> _passedNets = new(StringComparer.OrdinalIgnoreCase);
@@ -180,6 +216,8 @@ public sealed class TestEngine : IDisposable
 
     public event EventHandler? Changed;
     public event Action<ResistanceStep>? ResistanceChannelMeasurementStarted;
+    internal long LastPassRelayOffTimestamp =>
+        Interlocked.Read(ref _lastPassRelayOffTimestamp);
 
     // UI and the frame worker run on different threads. Never expose the mutable
     // HashSet itself to bindings/diagnostics while ProcessFrame can mutate it.
@@ -2951,6 +2989,175 @@ public sealed class TestEngine : IDisposable
         throw new InvalidOperationException($"Không thể cưỡng bức ALL RELAYS OFF ({reason}).", last);
     }
 
+    private async Task<long> SetPassRelayWithTxTimestampAsync(int relay, CancellationToken ct)
+    {
+        if (_board is IBoardCommandTimingDiagnostics timing)
+            return await timing.SetRelayWithTxTimestampAsync(relay, ct);
+
+        await _board.SetRelayAsync(relay, ct);
+        return Stopwatch.GetTimestamp();
+    }
+
+    private async Task<long> ForcePassRelaysOffWithTxTimestampAsync(
+        string reason,
+        CancellationToken ct)
+    {
+        Exception? last = null;
+        for (int attempt = 1; attempt <= 3; attempt++)
+        {
+            try
+            {
+                long txTimestamp;
+                if (_board is IBoardCommandTimingDiagnostics timing)
+                    txTimestamp = await timing.AllRelaysOffWithTxTimestampAsync(ct);
+                else
+                {
+                    await _board.AllRelaysOffAsync(ct);
+                    txTimestamp = Stopwatch.GetTimestamp();
+                }
+
+                AsyncFileLogService.Current.Test($"ALL RELAYS OFF [{reason}] attempt={attempt}");
+                return txTimestamp;
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                AsyncFileLogService.Current.Error(
+                    $"ALL RELAYS OFF FAILED [{reason}] attempt={attempt}: {ex.Message}");
+                if (attempt < 3)
+                    await Task.Delay(80, CancellationToken.None);
+            }
+        }
+
+        throw new InvalidOperationException($"Không thể cưỡng bức ALL RELAYS OFF ({reason}).", last);
+    }
+
+    private async Task<PassRelayPulseTiming> PulseProductionPassRelayAsync(
+        int relay,
+        string relayName,
+        CancellationToken ct)
+    {
+        int configuredPulseMs = Math.Clamp(PulseDurationForRelay(relay), 50, 5_000);
+        int targetTxToTxMs = PassRelayDeadline.TargetTxToTxMs(configuredPulseMs);
+        long txOnTimestamp = 0;
+        long txOffTimestamp = 0;
+        Exception? offFailure = null;
+
+        try
+        {
+            txOnTimestamp = await SetPassRelayWithTxTimestampAsync(relay, ct);
+            AsyncFileLogService.Current.Performance(
+                $"PASS_RELAY_TIMING relay={relay} event=TX_ON timestamp={txOnTimestamp} " +
+                $"configured_pulse_ms={configuredPulseMs} target_tx_to_tx_ms={targetTxToTxMs}");
+            AsyncFileLogService.Current.Test(
+                $"RELAY {relayName} ON - pulse {configuredPulseMs} ms");
+            await PassRelayDeadline.DelayUntilAsync(txOnTimestamp, targetTxToTxMs, ct);
+        }
+        finally
+        {
+            try
+            {
+                txOffTimestamp = await ForcePassRelaysOffWithTxTimestampAsync(
+                    relayName + " POST",
+                    CancellationToken.None);
+                double txToTxMs = txOnTimestamp > 0 && txOffTimestamp >= txOnTimestamp
+                    ? Stopwatch.GetElapsedTime(txOnTimestamp, txOffTimestamp).TotalMilliseconds
+                    : 0;
+                AsyncFileLogService.Current.Performance(
+                    $"PASS_RELAY_TIMING relay={relay} event=TX_OFF timestamp={txOffTimestamp} " +
+                    $"tx_to_tx_ms={txToTxMs:0.###}");
+                AsyncFileLogService.Current.Test($"RELAY {relayName} OFF - safe idle");
+            }
+            catch (Exception ex)
+            {
+                offFailure = ex;
+                AsyncFileLogService.Current.Error(
+                    $"RELAY SAFE-OFF FAILED after {relayName}: {ex.Message}");
+            }
+        }
+
+        if (offFailure is not null)
+            throw new InvalidOperationException(
+                $"Không thể đưa relay về OFF sau {relayName}.",
+                offFailure);
+
+        return new PassRelayPulseTiming(relay, txOnTimestamp, txOffTimestamp);
+    }
+
+    private async Task RunProductionPassRelaySequenceAsync(
+        bool runMarking,
+        Action? onPassStarted,
+        long resetClearTxTimestamp,
+        CancellationToken ct)
+    {
+        await _relayPulseGate.WaitAsync(ct);
+        try
+        {
+            Interlocked.Exchange(ref _lastPassRelayOffTimestamp, 0);
+            long initialOffTimestamp = await ForcePassRelaysOffWithTxTimestampAsync(
+                "PASS SEQUENCE PRE",
+                ct);
+            Interlocked.Exchange(ref _lastPassRelayOffTimestamp, initialOffTimestamp);
+
+            await PassRelayDeadline.DelayUntilAsync(
+                resetClearTxTimestamp,
+                ProductionTimingPolicy.PassResetClearToFirstRelayMs,
+                ct);
+
+            onPassStarted?.Invoke();
+            PassRelayPulseTiming? firstPulse = null;
+            if (runMarking)
+            {
+                int markingRelay = ConfiguredMarkingRelay;
+                firstPulse = await PulseProductionPassRelayAsync(
+                    markingRelay,
+                    $"R{markingRelay} MARKING",
+                    ct);
+                Interlocked.Exchange(ref _lastPassRelayOffTimestamp, firstPulse.Value.TxOffTimestamp);
+
+                int interlockMs = Math.Clamp(_production.PassMarkingToJigDelayMs, 0, 5_000);
+                await PassRelayDeadline.DelayUntilAsync(
+                    firstPulse.Value.TxOffTimestamp,
+                    interlockMs,
+                    ct);
+            }
+
+            if (_production.JigEjectRelayEnabled)
+            {
+                int jigRelay = ConfiguredJigRelay;
+                PassRelayPulseTiming secondPulse = await PulseProductionPassRelayAsync(
+                    jigRelay,
+                    $"R{jigRelay} JIG",
+                    ct);
+                Interlocked.Exchange(ref _lastPassRelayOffTimestamp, secondPulse.TxOffTimestamp);
+
+                if (firstPulse is PassRelayPulseTiming first)
+                {
+                    double betweenMs = Stopwatch.GetElapsedTime(
+                        first.TxOffTimestamp,
+                        secondPulse.TxOnTimestamp).TotalMilliseconds;
+                    AsyncFileLogService.Current.Performance(
+                        $"PASS_RELAY_TIMING event=BETWEEN_RELAYS " +
+                        $"first_relay={first.Relay} second_relay={secondPulse.Relay} " +
+                        $"elapsed_ms={betweenMs:0.###}");
+                }
+            }
+            else
+            {
+                long skippedOffTimestamp = await ForcePassRelaysOffWithTxTimestampAsync(
+                    $"R{ConfiguredJigRelay} JIG DISABLED",
+                    ct);
+                Interlocked.Exchange(ref _lastPassRelayOffTimestamp, skippedOffTimestamp);
+                AsyncFileLogService.Current.Test(
+                    $"RELAY R{ConfiguredJigRelay} JIG SKIPPED - disabled by Production Settings");
+            }
+        }
+        finally
+        {
+            _relayPulseGate.Release();
+        }
+    }
+
     private async Task SkipDisabledRelayAsync(string relayName, CancellationToken ct)
     {
         await ForceAllRelaysOffAsync(relayName + " DISABLED", ct);
@@ -3248,6 +3455,7 @@ public sealed class TestEngine : IDisposable
             return false;
 
         int expectedResistanceCount = ResistanceMeasurementPlan.BuildEnabledSteps(_production).Count;
+        long resetClearTxTimestamp = 0;
 
         if (expectedResistanceCount == 0)
         {
@@ -3257,7 +3465,16 @@ public sealed class TestEngine : IDisposable
             // STOP/RESET không làm mất trạng thái INIT, vì sau relay Htdrv
             // START_SCAN lại trực tiếp.
             await _board.StopScanAsync(ct);
+            if (markingEnabled && _board is IBoardCommandTimingDiagnostics stopTiming)
+            {
+                await PassRelayDeadline.DelayUntilAsync(
+                    stopTiming.LastStopScanTxTimestamp,
+                    ProductionTimingPolicy.PassStopScanToResetClearMs,
+                    ct);
+            }
             await _board.ResetClearAsync(ct);
+            if (markingEnabled && _board is IBoardCommandTimingDiagnostics resetTiming)
+                resetClearTxTimestamp = resetTiming.LastResetClearTxTimestamp;
         }
 
         int relayStartDelayMs = expectedResistanceCount > 0
@@ -3270,25 +3487,20 @@ public sealed class TestEngine : IDisposable
         // Vai trò relay lấy từ kiểu đấu của từng máy. Dù R1/R2 bị đảo vật lý,
         // production PASS luôn MARKING trước rồi mới mở JIG. Master/FAIL chỉ
         // gọi relay mở JIG và không đi vào chuỗi MARKING.
-        await _board.AllRelaysOffAsync(ct);
-
-        bool runMarking = markingEnabled && _production.PassMarkingRelayEnabled;
-        if (runMarking)
+        if (!markingEnabled)
         {
             onPassStarted?.Invoke();
-            await PulseMarkingRelayAsync(ct);
-
-            int interlockMs = Math.Clamp(_production.PassMarkingToJigDelayMs, 0, 5_000);
-            if (interlockMs > 0)
-                await Task.Delay(interlockMs, ct);
+            await PulseJigRelayAsync(ct);
         }
         else
         {
             // Master sample, cấu hình tắt MARKING, hoặc cấu hình JIG chạy trước.
-            onPassStarted?.Invoke();
+            await RunProductionPassRelaySequenceAsync(
+                _production.PassMarkingRelayEnabled,
+                onPassStarted,
+                resetClearTxTimestamp,
+                ct);
         }
-
-        await PulseJigRelayAsync(ct);
 
         return true;
     }

@@ -1,0 +1,654 @@
+Hãy **chỉ AUDIT / RÀ SOÁT / TÌM NGUYÊN NHÂN**, tuyệt đối **KHÔNG sửa code ở bước này**.
+
+Mục tiêu là tìm chính xác vì sao ở JBZUniversalTester V16.0.423, sau mỗi `START_SCAN` phần mềm thường nhận một `BOARD_FRAME_INCOMPLETE` trước khi nhận được frame Production hoàn chỉnh.
+
+## HIỆN TƯỢNG ĐÃ QUAN SÁT
+
+Ở bản V16.0.423:
+
+```text
+START_SCAN
+8C 00 02 00
+```
+
+sau khoảng:
+
+```text
+~75–105 ms
+```
+
+thường xuất hiện:
+
+```text
+RX frame #1
+BOARD_FRAME_INCOMPLETE
+sources khoảng 55–78 / 128
+end=C0 00
+```
+
+sau đó phải chờ thêm khoảng:
+
+```text
+~145–160 ms
+```
+
+mới nhận:
+
+```text
+RX frame #2
+frame production hoàn chỉnh
+127/128 source
+```
+
+Tổng:
+
+```text
+START_SCAN -> first usable complete frame
+≈ 232–249 ms
+```
+
+trung bình khoảng:
+
+```text
+~241 ms
+```
+
+Trong khi:
+
+```text
+Htdrv3 gốc:
+~169–181 ms
+
+JBZ V16.0.378:
+~164–175 ms
+```
+
+Vì vậy V16.0.423 có vẻ bị mất thêm khoảng:
+
+```text
+~60–75 ms
+```
+
+ở quá trình đồng bộ frame sau `START_SCAN`.
+
+## ĐIỂM QUAN TRỌNG
+
+Khi scan đã chạy ổn định thì V16.0.423 vẫn rất tốt:
+
+```text
+frame_interval_avg ≈ 154–155 ms
+frame_interval_median ≈ 159–160 ms
+
+queue_calls_per_frame ≈ 19–20
+reads_per_frame ≈ 9–10
+avg_bytes_per_read ≈ 26–27 bytes
+
+parser_error_bytes=0
+invalid_frames=0
+dropped_frames=0
+```
+
+FTDI cũng ổn định:
+
+```text
+opens=1
+closes=0
+reconnects=0
+d2xx_errors=0
+reader_starts=1
+reader_active=1
+```
+
+Do đó KHÔNG được mặc định cho rằng board scan chậm.
+
+Khả năng cao vấn đề chỉ nằm ở:
+
+```text
+restart / alignment / parser state / RX buffer
+```
+
+sau `START_SCAN`.
+
+## BẰNG CHỨNG QUAN TRỌNG KHÁC
+
+Khi không gửi `START_SCAN` mới mà giữ production stream đang chạy, ví dụ đường:
+
+```text
+MASTER_BAD_EJECT
+SCAN KEEP-ALIVE
+```
+
+thì frame mới xuất hiện sau khoảng:
+
+```text
+~161 ms
+```
+
+tức gần đúng một cadence tự nhiên của board.
+
+Điều này cho thấy:
+
+```text
+continuous stream:
+~160 ms/frame
+```
+
+nhưng:
+
+```text
+restart bằng START_SCAN:
+~240 ms để có usable complete frame
+```
+
+Cần tìm nguyên nhân chính xác của sự khác biệt này.
+
+---
+
+# PHẠM VI AUDIT
+
+Hãy rà soát toàn bộ đường đi từ:
+
+```text
+Stop scan / suspend
+        ↓
+Reset / Relay sequence nếu có
+        ↓
+StartProductionScan
+        ↓
+TX 8C
+        ↓
+D2XX reader
+        ↓
+FT_GetQueueStatus
+        ↓
+FT_Read
+        ↓
+RX byte buffer
+        ↓
+frame parser
+        ↓
+source coverage
+        ↓
+IO_CONFIRM_READY
+        ↓
+SCAN_HEALTH first_frame
+```
+
+Tập trung vào các file/method thực sự liên quan.
+
+## 1. START_SCAN
+
+Tìm tất cả nơi gọi:
+
+```text
+StartScan
+StartProductionScan
+EnsureProductionScan
+RestartScan
+ResumeScan
+SetScanMode
+```
+
+và tất cả nơi gửi:
+
+```text
+8C xx xx xx
+```
+
+Kiểm tra:
+
+- trước `8C` có Purge RX không;
+- trước `8C` có reset parser không;
+- có clear accumulated RX bytes không;
+- có reset frame state không;
+- có đổi generation trước hay sau TX;
+- có delay mới được thêm từ V16.0.378 đến V16.0.423 không;
+- có khác nhau giữa cold startup và restart sau relay không.
+
+## 2. D2XX RX BUFFER
+
+Audit:
+
+```text
+FT_GetQueueStatus
+FT_Read
+FT_Purge
+FT_ResetDevice
+FT_SetTimeouts
+```
+
+hoặc wrapper tương ứng.
+
+Cần xác định sau khi gửi:
+
+```text
+8D STOP_SCAN
+```
+
+board/driver có còn byte cũ trong RX queue hay không.
+
+Tìm khả năng:
+
+```text
+STOP_SCAN
+↓
+RX queue vẫn chứa phần còn lại của frame cũ
+↓
+START_SCAN
+↓
+reader đọc phần tail của frame cũ
+↓
+gặp C0
+↓
+parser kết luận đây là frame mới nhưng sources không đủ
+```
+
+Đây chỉ là giả thuyết.
+
+Phải xác minh bằng code/log, không được tự kết luận nếu chưa đủ bằng chứng.
+
+## 3. FRAME PARSER
+
+Audit toàn bộ parser nhận dữ liệu Production.
+
+Tìm các thành phần tương tự:
+
+```text
+FrameParser
+ProductionFrameParser
+D2xxFrameParser
+ParseByte
+AppendBytes
+ConsumeBuffer
+CompleteFrame
+SourceCoverage
+C0 terminator
+```
+
+Xác định:
+
+- điều kiện nào mở một frame mới;
+- điều kiện nào kết thúc frame;
+- `C0 00` được xử lý thế nào;
+- frame bắt đầu từ byte nào;
+- parser có biết command `START_SCAN` vừa được gửi không;
+- parser có reset state tại generation change không;
+- buffer parser có được clear không;
+- source bitmap có được clear không;
+- parser có thể bắt đầu từ giữa một hardware frame hay không.
+
+Đặc biệt giải thích vì sao log ghi:
+
+```text
+BOARD_FRAME_INCOMPLETE sources=63/128
+end=C0 00
+known=True
+```
+
+Nếu parser bắt đầu scan ở giữa hardware frame thì kết quả kiểu:
+
+```text
+55/128
+63/128
+69/128
+73/128
+```
+
+rất hợp lý.
+
+Nhưng phải chứng minh từ code.
+
+## 4. GENERATION / IO_CONFIRM_READY
+
+Audit:
+
+```text
+generation
+IO_CONFIRM_READY
+SCAN_HEALTH first_frame
+first complete frame
+fresh frame
+source coverage
+```
+
+Xác định rõ:
+
+- generation tăng lúc nào;
+- partial frame có thuộc generation mới không;
+- incomplete frame có tăng sequence không;
+- incomplete frame có đi vào engine không;
+- incomplete frame có thể ảnh hưởng state machine không;
+- tại sao `first_frame` log dùng frame #2 chứ không phải frame #1;
+- logic này có cố ý thay đổi gần đây không.
+
+KHÔNG được đề xuất bỏ validation source coverage chỉ để giảm latency.
+
+## 5. SO SÁNH CÁC ĐƯỜNG RESTART
+
+So sánh riêng ít nhất các trường hợp:
+
+```text
+startup initial START_SCAN
+
+PASS_RELAY_SEQUENCE -> START_SCAN
+
+MASTER_GOOD_EJECT -> START_SCAN
+
+MASTER_BAD_EJECT -> KEEP-ALIVE
+
+Manual mode exit -> Production scan
+
+Waterproof/Resistance exit -> Production scan
+```
+
+Lập bảng:
+
+```text
+path
+có STOP_SCAN?
+có RESET?
+có PURGE?
+có clear parser?
+có START_SCAN mới?
+generation change?
+frame đầu partial?
+first complete latency?
+```
+
+Mục tiêu là tìm điểm khác biệt giúp giải thích vì sao:
+
+```text
+KEEP-ALIVE ≈ 160 ms
+```
+
+nhưng:
+
+```text
+restart START_SCAN ≈ 240 ms
+```
+
+## 6. SO SÁNH VỚI HÀNH VI CŨ
+
+Nếu Git history còn đầy đủ, hãy audit diff giữa:
+
+```text
+V16.0.378
+```
+
+và:
+
+```text
+V16.0.423
+```
+
+ở các file liên quan D2XX / scan / parser.
+
+Tìm mọi commit/change có thể làm thay đổi:
+
+- parser reset;
+- RX buffer ownership;
+- D2XX read batching;
+- QueueStatus polling;
+- generation;
+- frame coverage validation;
+- production restart;
+- purge behavior;
+- cancellation;
+- stale-frame protection;
+- fresh-frame gate.
+
+Không sửa.
+
+Chỉ chỉ ra thay đổi nào có khả năng tạo regression.
+
+## 7. KHÔNG ĐƯỢC ĐÁNH ĐỔI SAFETY
+
+Không được đề xuất kiểu:
+
+```text
+chấp nhận 63/128 sources là full frame
+```
+
+hoặc:
+
+```text
+bỏ source coverage
+```
+
+hoặc:
+
+```text
+dùng partial frame cho PASS/FAIL
+```
+
+Partial frame phải tiếp tục bị loại.
+
+Mục tiêu là:
+
+```text
+nhận đúng full frame sớm hơn
+```
+
+không phải:
+
+```text
+hạ tiêu chuẩn full frame
+```
+
+---
+
+# LOG / CODE CẦN ĐỌC
+
+Tìm các log/event:
+
+```text
+START_SCAN
+SCAN_HEALTH
+IO_CONFIRM_READY
+BOARD_FRAME_INCOMPLETE
+RX frame
+BOARD_METRICS
+generation
+fresh frame
+partial_frames
+parser_error_bytes
+dropped_frames
+reader_starts
+FTDI
+D2XX
+queue
+read
+purge
+```
+
+Nếu cần, dùng `rg` toàn solution.
+
+Ví dụ:
+
+```powershell
+rg -n "START_SCAN|BOARD_FRAME_INCOMPLETE|IO_CONFIRM_READY|SCAN_HEALTH|generation|Purge|GetQueueStatus|FT_Read|QueueStatus|FrameParser|sourceCoverage|partial_frames" .
+```
+
+Sau đó đọc code theo call chain thật, không chỉ dựa vào tên log.
+
+---
+
+# TUYỆT ĐỐI KHÔNG SỬA
+
+Ở bước này:
+
+```text
+KHÔNG sửa .cs
+KHÔNG sửa XAML
+KHÔNG đổi constant
+KHÔNG đổi delay
+KHÔNG thêm Purge
+KHÔNG xóa Purge
+KHÔNG đổi polling
+KHÔNG đổi parser
+KHÔNG commit
+```
+
+Chỉ phân tích.
+
+Nếu phát hiện root cause rất rõ thì cũng chỉ báo cáo.
+
+Tôi sẽ xem kết quả audit trước rồi mới quyết định sửa.
+
+---
+
+# ĐẦU RA TÔI MUỐN
+
+Báo cáo theo đúng cấu trúc:
+
+## 1. KẾT LUẬN NGẮN
+
+Một câu:
+
+```text
+Nguyên nhân chính có khả năng là ...
+```
+
+và mức độ chắc chắn:
+
+```text
+CONFIRMED
+HIGH CONFIDENCE
+MEDIUM CONFIDENCE
+CHƯA ĐỦ BẰNG CHỨNG
+```
+
+## 2. CALL FLOW THỰC TẾ
+
+Ví dụ:
+
+```text
+PassSequence
+→ StopScanAsync
+→ ...
+→ StartProductionScanAsync
+→ Write 8C
+→ ...
+→ ReaderLoop
+→ ...
+→ FrameParser
+→ ...
+→ IO_CONFIRM_READY
+```
+
+Ghi rõ file và method.
+
+## 3. TIMELINE
+
+Mô tả chính xác:
+
+```text
+T0 TX START_SCAN
+T+xx ms first bytes
+T+xx ms C0
+T+xx ms BOARD_FRAME_INCOMPLETE
+T+xx ms next frame
+T+xx ms IO_CONFIRM_READY
+```
+
+## 4. TẠI SAO FRAME #1 BỊ THIẾU
+
+Giải thích dựa trên code.
+
+Ví dụ cần trả lời được:
+
+```text
+63/128 nguồn là tail của frame trước hay head của frame mới?
+```
+
+Nếu chưa chứng minh được thì ghi rõ chưa chứng minh được.
+
+## 5. V16.0.378 VS V16.0.423
+
+Chỉ ra diff nào liên quan.
+
+Nếu không tìm thấy regression từ source history thì ghi rõ.
+
+## 6. KEEP-ALIVE VS RESTART
+
+Giải thích vì sao:
+
+```text
+keep-alive ~160 ms
+restart ~240 ms
+```
+
+## 7. CÁC ROOT CAUSE CANDIDATE
+
+Xếp theo bằng chứng:
+
+```text
+Candidate A
+Evidence:
+Against:
+Confidence:
+
+Candidate B
+Evidence:
+Against:
+Confidence:
+```
+
+Không được đoán suông.
+
+## 8. PHƯƠNG ÁN SỬA CÓ THỂ
+
+Chỉ mô tả, KHÔNG IMPLEMENT.
+
+Ví dụ:
+
+```text
+Option A ...
+Ưu điểm
+Rủi ro
+
+Option B ...
+Ưu điểm
+Rủi ro
+```
+
+Đặc biệt đánh giá các phương án như:
+
+```text
+purge RX đúng thời điểm
+clear parser state
+discard until frame boundary
+generation-aware parser sync
+không restart stream nếu không cần
+```
+
+Nhưng không được mặc định rằng một phương án là đúng nếu chưa chứng minh root cause.
+
+## 9. ĐỀ XUẤT PHƯƠNG ÁN ÍT RỦI RO NHẤT
+
+Chỉ đề xuất sau khi đã có evidence.
+
+Không sửa code.
+
+## 10. FILE / METHOD LIÊN QUAN
+
+Liệt kê chính xác:
+
+```text
+file
+class
+method
+line
+vai trò
+```
+
+## 11. XÁC NHẬN CUỐI
+
+Cuối báo cáo phải ghi:
+
+```text
+CODE CHANGED: NO
+FILES MODIFIED: NONE
+```
+
+Mục tiêu của audit này là **tìm chính xác nguyên nhân trước**, không tối ưu mù và không làm ảnh hưởng parser/safety đang hoạt động tốt.

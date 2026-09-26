@@ -1,0 +1,417 @@
+Hãy audit và sửa phần điều khiển Relay của JBZUniversalTester để **tối ưu timing theo trace Htdrv3-JBZ27000_RT gốc**, nhưng PHẢI tuân thủ tuyệt đối các giới hạn dưới đây.
+
+## MỤC TIÊU
+
+Chỉ sửa **timing / latency thực tế của Relay trên D2XX**.
+
+KHÔNG sửa logic lựa chọn Relay nào chạy trước.
+
+Trong JBZ hiện tại có tùy chọn/cấu hình quyết định Relay nào bật trước. Vì vậy:
+
+- Nếu cấu hình hiện tại là `R2 -> R1` thì PHẢI giữ `R2 -> R1`.
+- Nếu cấu hình là `R1 -> R2` thì PHẢI giữ `R1 -> R2`.
+- KHÔNG hard-code thứ tự theo trace phần mềm gốc.
+- KHÔNG đổi tên/chức năng Relay MARKING/JIG.
+- KHÔNG thay đổi setting quyết định thứ tự Relay.
+- KHÔNG thay đổi automatic PASS sequence ngoài phần timing.
+- KHÔNG sửa UI/XAML/binding.
+- KHÔNG sửa Manual Relay.
+- KHÔNG sửa state machine sản phẩm.
+- KHÔNG sửa continuity/resistance/waterproof/history/printing.
+- KHÔNG thay đổi protocol byte của board nếu hiện tại đã đúng.
+
+Protocol hiện có cần giữ:
+
+```text
+RESET_CLEAR     = 80 00 00 00
+STOP_SCAN       = 8D 00 00 00
+ALL_RELAYS_OFF  = 8E 00 00 00
+RELAY1_ON       = 8E 00 00 01
+RELAY2_ON       = 8E 00 00 02
+START_SCAN      = 8C ...
+```
+
+## VẤN ĐỀ CẦN SỬA
+
+JBZ hiện cấu hình:
+
+```text
+pulse_ms = 120
+```
+
+nhưng thời gian thực tế từ TX Relay ON đến TX Relay OFF khoảng:
+
+```text
+~239–241 ms
+```
+
+Ví dụ:
+
+```text
+TX 8E 00 00 02
+...
+~240 ms
+TX 8E 00 00 00
+```
+
+Nguyên nhân cần audit kỹ.
+
+Có khả năng delay 120 ms hiện được bắt đầu **sau khi SendRelayAsync/transport hoàn thành**, trong khi bản thân một transaction D2XX mất khoảng 105–115 ms.
+
+Kết quả:
+
+```text
+~110 ms transport/command
++ 120 ms Task.Delay
+= ~230–240 ms TX-to-TX
+```
+
+Điều này làm Relay giữ thực tế lâu hơn mong muốn.
+
+## TIMING THAM CHIẾU TỪ PHẦN MỀM GỐC
+
+Trace Htdrv3 gốc cho thấy timing rất ổn định qua nhiều cycle.
+
+Mục tiêu gần đúng:
+
+```text
+STOP_SCAN -> RESET_CLEAR
+≈ 280 ms
+
+RESET_CLEAR -> Relay đầu tiên ON
+≈ 170 ms
+
+Relay ON -> ALL_RELAYS_OFF
+≈ 140 ms thực tế tính TX-to-TX
+
+Relay thứ nhất OFF -> Relay thứ hai ON
+≈ 430 ms
+
+Relay thứ hai ON -> ALL_RELAYS_OFF
+≈ 140 ms thực tế tính TX-to-TX
+
+Relay cuối OFF -> START_SCAN
+≈ 120 ms
+```
+
+Tổng chuỗi từ:
+
+```text
+STOP_SCAN -> START_SCAN
+```
+
+của phần mềm gốc khoảng:
+
+```text
+~1.28 giây
+```
+
+Đây là TIMING tham chiếu.
+
+KHÔNG được dùng thông tin này để thay đổi thứ tự R1/R2 của JBZ.
+
+## YÊU CẦU AUDIT TRƯỚC KHI SỬA
+
+Tìm toàn bộ đường đi thực tế của PASS Relay sequence, bao gồm:
+
+- nơi bắt đầu PASS relay
+- StopScan
+- Reset/Clear
+- Relay ON
+- Relay OFF
+- delay giữa hai Relay
+- StartProductionScan
+- D2xxBoardTransport
+- semaphore/lock/queue của D2XX
+- SetRelayAsync / SendRelay / WriteCommand tương ứng
+- Task.Delay
+- Stopwatch
+- timeout
+- retry
+- acknowledgement/wait sau mỗi command
+- Dispatcher/UI delay nếu có
+- bất kỳ fixed delay 100/110/120/200/... ms nào liên quan Relay
+
+Phải xác định rõ tại sao:
+
+```text
+pulse_ms=120
+```
+
+nhưng:
+
+```text
+TX ON -> TX OFF ≈ 240 ms
+```
+
+Không được chỉ giảm một constant một cách mù quáng.
+
+## CÁCH SỬA MONG MUỐN
+
+Timing Relay phải được tính theo **thời điểm command thực sự được enqueue/write xuống D2XX**, không phải đơn giản:
+
+```csharp
+await SetRelayAsync(on);
+await Task.Delay(pulseMs);
+await SetRelayAsync(off);
+```
+
+nếu `SetRelayAsync(on)` tự nó đã mất ~110 ms.
+
+Hãy dùng monotonic timing, ví dụ `Stopwatch.GetTimestamp()` / `Stopwatch`, để deadline của OFF được tính từ thời điểm ON thực sự được phát.
+
+Ý tưởng:
+
+```text
+target OFF deadline = thời điểm TX Relay ON + targetPulse
+```
+
+Sau khi command ON hoàn thành:
+
+```text
+remaining = deadline - elapsed
+```
+
+chỉ delay phần `remaining`.
+
+Nếu transport đã tiêu tốn một phần thời gian pulse thì KHÔNG cộng thêm toàn bộ pulse một lần nữa.
+
+Ví dụ:
+
+```text
+Target TX-to-TX ≈ 140 ms
+
+Nếu command ON/processing đã dùng 108 ms
+=> chỉ còn khoảng 32 ms trước khi enqueue/send OFF
+```
+
+Nhưng phải implement dựa trên timestamp thực tế trong transport, không hard-code giả định 108/110 ms nếu có cách đo chính xác.
+
+## CỰC KỲ QUAN TRỌNG
+
+Không dùng:
+
+```csharp
+Thread.Sleep(...)
+```
+
+trên UI thread.
+
+Không busy-wait.
+
+Không spin CPU để cố đạt timing.
+
+Ưu tiên:
+
+- async/await
+- Task.Delay phần thời gian còn lại
+- Stopwatch monotonic
+- CancellationToken hiện có
+- cùng D2XX synchronization/lock hiện tại
+
+Không làm mất thread safety của D2XX transport.
+
+## GIỮ NGUYÊN SAFETY
+
+Không được vì tối ưu nhanh mà tạo khả năng:
+
+```text
+R1 ON + R2 ON đồng thời
+```
+
+Giữ nguyên interlock an toàn hiện có.
+
+Mọi đường exit/cancel/error vẫn phải đảm bảo cuối cùng Relay OFF.
+
+Nếu code hiện tại có `try/finally` bảo vệ Relay OFF thì phải giữ.
+
+Không bỏ error handling/retry chỉ để benchmark đẹp hơn.
+
+## KHÔNG ĐỤNG THỨ TỰ RELAY
+
+Đặc biệt KHÔNG sửa đoạn kiểu:
+
+```text
+Relay 2 MARKING -> Relay 1 JIG
+```
+
+thành:
+
+```text
+Relay 1 -> Relay 2
+```
+
+chỉ vì trace Htdrv3 vừa phân tích chạy R1 trước.
+
+Thứ tự này là **tùy chọn của model/config JBZ**.
+
+Hãy coi:
+
+```text
+firstRelay
+secondRelay
+```
+
+là đầu vào đã được quyết định đúng từ config.
+
+Nhiệm vụ chỉ là làm timing của:
+
+```text
+firstRelay ON/OFF
+secondRelay ON/OFF
+```
+
+nhanh và sát Htdrv3.
+
+## LOG CHẨN ĐOÁN SAU KHI SỬA
+
+Bổ sung hoặc tận dụng diagnostic log hiện có để tôi có thể kiểm chứng timing thực tế.
+
+Mỗi sequence cần log tối thiểu:
+
+```text
+PASS_RELAY_TIMING
+relay=...
+event=TX_ON
+timestamp=...
+
+PASS_RELAY_TIMING
+relay=...
+event=TX_OFF
+timestamp=...
+tx_to_tx_ms=...
+
+PASS_RELAY_TIMING
+event=BETWEEN_RELAYS
+elapsed_ms=...
+
+PASS_RELAY_TIMING
+event=SEQUENCE_COMPLETE
+stop_to_start_ms=...
+```
+
+Không spam log mỗi polling D2XX.
+
+Chỉ log tại transition quan trọng.
+
+## ACCEPTANCE CRITERIA
+
+Sau sửa, với hardware thật và cùng model:
+
+### 1. Thứ tự Relay
+
+Phải giữ đúng config trước sửa.
+
+Ví dụ nếu trước sửa:
+
+```text
+R2 -> R1
+```
+
+thì sau sửa vẫn:
+
+```text
+R2 -> R1
+```
+
+### 2. Pulse thực tế
+
+Đo từ TX Relay ON đến TX ALL_RELAYS_OFF:
+
+```text
+mục tiêu ≈ 140 ms
+```
+
+Cho phép sai số thực tế hợp lý của Windows/D2XX, ví dụ:
+
+```text
+130–155 ms
+```
+
+Không còn khoảng:
+
+```text
+~230–250 ms
+```
+
+như hiện tại.
+
+### 3. Khoảng giữa hai Relay
+
+OFF của Relay đầu -> ON Relay tiếp theo:
+
+```text
+mục tiêu ≈ 430 ms
+```
+
+### 4. Relay cuối -> scan
+
+```text
+Relay cuối OFF -> START_SCAN
+≈ 120 ms
+```
+
+### 5. Tổng sequence
+
+Từ STOP_SCAN đến START_SCAN nên tiến gần:
+
+```text
+~1.28 s
+```
+
+nhưng không được hy sinh safety/reliability chỉ để đạt đúng một con số.
+
+### 6. Production scan
+
+Sau chuỗi Relay phải quay lại Production scan bình thường và nhận frame mới.
+
+Không reconnect FTDI nếu trước đây không cần reconnect.
+
+Không làm mất realtime scan sau sequence.
+
+## TEST BẮT BUỘC
+
+Sau khi sửa:
+
+1. Build toàn bộ solution.
+2. Chạy self-tests hiện có.
+3. Tìm và sửa compile warning/error do thay đổi này.
+4. Nếu có test Relay sequence thì cập nhật/thêm test timing theo kiến trúc hiện tại.
+5. Test phải xác nhận:
+   - thứ tự Relay vẫn phụ thuộc config
+   - không hard-code R1/R2
+   - cancellation vẫn ALL OFF
+   - exception vẫn ALL OFF
+   - sequence kết thúc vẫn START Production scan
+   - không double-ON hai Relay
+6. Không dùng unit test với yêu cầu timing quá chặt gây flaky trên Windows; tách:
+   - logic/deadline test deterministic
+   - hardware timing measurement qua diagnostic log.
+
+## PHẠM VI THAY ĐỔI
+
+Ưu tiên sửa tối thiểu các file thật sự liên quan.
+
+Không refactor toàn project.
+
+Không đổi public API nếu không cần.
+
+Không thay đổi database/schema/config format.
+
+Không đổi version/config của model chỉ để đạt timing.
+
+## KẾT QUẢ CUỐI CÙNG CẦN BÁO CÁO
+
+Sau khi sửa, báo rõ:
+
+1. Root cause tại sao `pulse_ms=120` thành ~240 ms thực tế.
+2. File + method đã sửa.
+3. Cơ chế timing mới.
+4. Có thay đổi thứ tự Relay hay không — câu trả lời bắt buộc phải là **KHÔNG**.
+5. Timing trước/sau dự kiến hoặc đo được.
+6. Build/test result.
+7. Những rủi ro còn lại nếu Windows scheduler hoặc D2XX tạo jitter.
+
+Mục tiêu cuối cùng:
+
+**Giữ nguyên toàn bộ logic lựa chọn/thứ tự Relay hiện có của JBZUniversalTester, chỉ làm cho timing vật lý của chuỗi Relay nhanh, ổn định và gần Htdrv3 gốc hơn.**

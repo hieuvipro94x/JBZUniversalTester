@@ -1283,20 +1283,20 @@ internal static partial class Program
         masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
         Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster,
             "Master sample activity starts the good-Master test");
-        masterExitVm.StopViewAsync().GetAwaiter().GetResult();
-        Assert(masterExitVm.IsProductRemovalPending,
-            "Returning to Main during Master keeps the removal gate until a fresh frame is received");
+        bool masterExitAllowed = masterExitVm.StopViewAsync().GetAwaiter().GetResult();
+        Assert(!masterExitAllowed,
+            "Returning to Main during Master is blocked until the sample is removed");
         masterExitBoard.Publish(FrameSeq(102, (1, new[] { 18 })));
-        Assert(masterExitVm.IsProductRemovalPending,
-            "Master removal gate remains locked while the sample is physically connected");
+        Assert(masterExitVm.HasProductOnTestTable,
+            "Master exit remains blocked while the sample is physically connected");
         masterExitBoard.Publish(FrameSeq(103));
-        Assert(masterExitVm.IsProductRemovalPending,
-            "One clean frame cannot clear the Master removal gate");
+        Assert(!masterExitVm.HasProductOnTestTable,
+            "A fresh empty Master frame releases the blocked exit");
         masterExitBoard.Publish(FrameSeq(104));
-        Assert(!masterExitVm.IsProductRemovalPending &&
+        Assert(!masterExitVm.HasProductOnTestTable &&
                masterExitVm.ResultStatusText == "KIỂM TRA MASTER ĐẠT" &&
                masterExitVm.Faults.Count == 0,
-            "Fresh empty frame after leaving Master clears the stale removal latch/table without losing the required Master type");
+            "Further empty frames keep Master clear without losing the required Master type");
 
         FieldInfo masterGoodVerified = typeof(TestViewModel).GetField(
             "_masterGoodVerified",
@@ -3060,10 +3060,9 @@ internal static partial class Program
         faultMainEngine.SetFrameProcessingEnabled(true);
         armRemoval.Invoke(faultMainVm, null);
         faultMainBoard.Publish(FrameSeq(20, (1, new[] { 18 })));
-        faultMainVm.StopViewAsync().GetAwaiter().GetResult();
-        Assert(faultMainVm.IsProductRemovalPending &&
-               faultMainVm.State == "THÁO SẢN PHẨM",
-            "Returning to MainWindow during FAIL removal preserves the shared removal lock and warning");
+        bool faultMainExitAllowed = faultMainVm.StopViewAsync().GetAwaiter().GetResult();
+        Assert(!faultMainExitAllowed && faultMainVm.IsProductRemovalPending,
+            "Returning to MainWindow during FAIL removal is blocked until the product is removed");
         faultMainBoard.Publish(FrameSeq(21, (1, new[] { 18 })));
         Assert(faultMainVm.IsProductRemovalPending,
             "FAIL MainWindow removal lock remains while any product connection is present");

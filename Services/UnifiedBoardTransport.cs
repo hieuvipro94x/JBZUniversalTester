@@ -6,7 +6,7 @@ namespace JBZUniversalTester.Services;
 /// D2XX-only board transport. Auto is kept as a config value, but it resolves to
 /// the FTDI D2XX board so this application stays separated from other board families.
 /// </summary>
-public sealed class UnifiedBoardTransport : IBoardTransport
+public sealed class UnifiedBoardTransport : IBoardTransport, IBoardCommandTimingDiagnostics
 {
     readonly ProductionSettings _production;
     readonly D2xxBoardTransport _d2xx;
@@ -101,6 +101,19 @@ public sealed class UnifiedBoardTransport : IBoardTransport
     public Task ReleaseResistanceRouteAsync(CancellationToken ct = default) => _d2xx.ReleaseResistanceRouteAsync(ct);
     public Task SetRelayAsync(int relay, CancellationToken ct = default) => _d2xx.SetRelayAsync(relay, ct);
     public Task AllRelaysOffAsync(CancellationToken ct = default) => _d2xx.AllRelaysOffAsync(ct);
+    long IBoardCommandTimingDiagnostics.LastStopScanTxTimestamp =>
+        ((IBoardCommandTimingDiagnostics)_d2xx).LastStopScanTxTimestamp;
+    long IBoardCommandTimingDiagnostics.LastResetClearTxTimestamp =>
+        ((IBoardCommandTimingDiagnostics)_d2xx).LastResetClearTxTimestamp;
+    long IBoardCommandTimingDiagnostics.LastStartScanTxTimestamp =>
+        ((IBoardCommandTimingDiagnostics)_d2xx).LastStartScanTxTimestamp;
+    Task<long> IBoardCommandTimingDiagnostics.SetRelayWithTxTimestampAsync(
+        int relay,
+        CancellationToken ct) =>
+        ((IBoardCommandTimingDiagnostics)_d2xx).SetRelayWithTxTimestampAsync(relay, ct);
+    Task<long> IBoardCommandTimingDiagnostics.AllRelaysOffWithTxTimestampAsync(
+        CancellationToken ct) =>
+        ((IBoardCommandTimingDiagnostics)_d2xx).AllRelaysOffWithTxTimestampAsync(ct);
 
     void ThrowIfDisposed()
     {
