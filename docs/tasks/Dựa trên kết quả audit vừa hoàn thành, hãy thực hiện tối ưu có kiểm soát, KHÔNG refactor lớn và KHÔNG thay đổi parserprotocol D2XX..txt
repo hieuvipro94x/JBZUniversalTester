@@ -1,0 +1,521 @@
+Dựa trên kết quả audit vừa hoàn thành, hãy thực hiện **tối ưu có kiểm soát**, KHÔNG refactor lớn và KHÔNG thay đổi parser/protocol D2XX.
+
+## KẾT LUẬN AUDIT ĐÃ ĐƯỢC CHẤP NHẬN
+
+Hiện tượng:
+
+```text
+START_SCAN -> incomplete frame ~75–105 ms
+-> complete frame ~232–249 ms
+```
+
+không có bằng chứng là lỗi của:
+
+- RX queue cũ phía PC
+- parser không reset
+- FT_Read batching
+- GetQueueStatus polling
+- generation
+- IO_CONFIRM_READY
+- source coverage
+
+Audit cho thấy:
+
+```text
+decoder reset
+FT_Purge RX|TX
+_ioLock bảo vệ reader
+TX 8C
+```
+
+đã đúng.
+
+Khả năng cao START_SCAN mở output khi firmware đang ở giữa một vòng scan nội bộ.
+
+Do đó:
+
+**KHÔNG sửa parser, purge, source coverage hoặc polling để cố giảm 240 ms.**
+
+---
+
+# MỤC TIÊU
+
+Chỉ tìm và loại bỏ những:
+
+```text
+STOP_SCAN -> START_SCAN
+```
+
+không thực sự cần thiết.
+
+Nếu Production stream đã chạy đúng mode/capacity và hardware operation không yêu cầu dừng scan thì ưu tiên:
+
+```text
+KEEP-ALIVE / REUSE EXISTING PRODUCTION STREAM
+```
+
+thay vì:
+
+```text
+STOP
+RESET
+START_SCAN
+```
+
+Mục tiêu:
+
+```text
+~160 ms tới frame đầy đủ kế tiếp
+```
+
+thay vì:
+
+```text
+~240 ms sau hardware restart
+```
+
+NHƯNG chỉ ở những path được chứng minh an toàn.
+
+---
+
+# TUYỆT ĐỐI KHÔNG ĐƯỢC SỬA
+
+Không thay đổi:
+
+```text
+Services/BoardIoDecoder.cs
+```
+
+trừ khi chỉ thêm diagnostic không ảnh hưởng behavior.
+
+Không thay đổi:
+
+- điều kiện `HasCompleteProductionCoverage`
+- yêu cầu full 128 IO coverage
+- C0 terminator
+- generation guard
+- stale frame protection
+- incomplete-frame rejection
+- parser buffer semantics
+- D2XX queue polling cadence
+- FT_Read batching
+- source bitmap logic
+- `IO_CONFIRM_READY`
+- safety interlock
+
+Không được:
+
+```text
+accept partial frame
+```
+
+Không được:
+
+```text
+55/128
+63/128
+69/128
+...
+```
+
+coi là complete frame.
+
+Không được bỏ `FT_Purge` trong những path thực sự gọi hardware START mới.
+
+---
+
+# BƯỚC 1 — PHÂN LOẠI TẤT CẢ RESTART PATH
+
+Audit lại và lập bảng cho:
+
+```text
+Cold startup
+PASS_RELAY_SEQUENCE
+MASTER_GOOD_EJECT
+MASTER_BAD_EJECT
+Manual Relay enter
+Manual Relay exit
+Resistance start/end
+Waterproof start/end
+Model change
+Test ARM
+Settings change
+Reconnect recovery
+Watchdog recovery
+Application shutdown
+```
+
+Cho từng path ghi:
+
+```text
+NeedsHardwareStop = true/false
+NeedsReset80 = true/false
+NeedsRelayControl = true/false
+NeedsNewStart8C = true/false
+CanReuseProductionStream = true/false
+Reason
+```
+
+Chỉ sửa path có:
+
+```text
+CanReuseProductionStream = true
+```
+
+với bằng chứng rõ ràng.
+
+---
+
+# BƯỚC 2 — GIỮ NGUYÊN CÁC PATH BẮT BUỘC STOP
+
+Các path liên quan trực tiếp tới:
+
+```text
+Relay switching
+Resistance hardware operation
+Leak/Waterproof hardware operation
+board reconfiguration
+capacity/mode change
+real recovery/reconnect
+shutdown
+```
+
+mặc định phải GIỮ hành vi hiện tại trừ khi code chứng minh chắc chắn không cần STOP.
+
+Đặc biệt:
+
+```text
+PASS_RELAY_SEQUENCE
+```
+
+hiện có Relay MARKING/JIG.
+
+KHÔNG được bỏ STOP chỉ để giảm latency.
+
+Nếu Relay yêu cầu scan dừng để tránh xung đột hardware thì giữ nguyên.
+
+---
+
+# BƯỚC 3 — DÙNG KEEP-ALIVE CHO PATH THỰC SỰ KHÔNG CẦN RESTART
+
+Dùng logic hiện có trong:
+
+```text
+ScanSupervisor.StartProductionScanAndVerifyFrameAsync
+```
+
+hoặc abstraction tương đương.
+
+Điều kiện reuse tối thiểu:
+
+```text
+transport connected
+IsScanning == true
+current mode == Production
+capacity không thay đổi
+generation hợp lệ
+reader_active == true
+không có hardware operation đang sở hữu D2XX
+không có Relay/Resistance/Leak transaction đang chạy
+không có recovery/reconnect pending
+```
+
+Nếu tất cả điều kiện đúng:
+
+```text
+KHÔNG gửi 8D
+KHÔNG purge
+KHÔNG reset decoder
+KHÔNG gửi 8C
+```
+
+Chỉ:
+
+```text
+arm fresh-frame waiter
+chờ complete frame kế tiếp
+```
+
+Tương tự behavior đã chứng minh ở `MASTER_BAD_EJECT`.
+
+---
+
+# BƯỚC 4 — KHÔNG PHÁ FRESH FRAME SAFETY
+
+Ngay cả khi reuse stream:
+
+không được dùng frame cũ trước thời điểm ARM.
+
+Phải giữ logic tương đương:
+
+```text
+cycleStartSeq = current sequence
+
+accept only:
+frame.Sequence > cycleStartSeq
+AND frame.Generation == expectedGeneration
+AND frame.Complete
+AND full source coverage
+```
+
+Mục tiêu là:
+
+```text
+reuse hardware stream
+```
+
+chứ KHÔNG phải reuse dữ liệu cũ.
+
+---
+
+# BƯỚC 5 — KHÔNG CỐ TỐI ƯU RESTART 240 ms
+
+Nếu một path bắt buộc phải:
+
+```text
+STOP
+...
+START
+```
+
+thì hiện tại CHẤP NHẬN:
+
+```text
+partial frame đầu
+-> reject
+-> complete frame tiếp theo
+```
+
+Không thử:
+
+- random delay trước 8C
+- giảm delay để căn pha
+- busy wait
+- tăng polling
+- double START_SCAN
+- gửi 8C nhiều lần
+- bỏ purge
+- ghép frame trước/sau START
+- giữ bitmap cũ
+- chấp nhận incomplete
+
+240 ms ở path restart bắt buộc là acceptable nếu đó là giới hạn hành vi firmware.
+
+---
+
+# BƯỚC 6 — THÊM DIAGNOSTIC NHẸ
+
+Để xác nhận optimization, mỗi lần yêu cầu Production scan hãy log:
+
+```text
+SCAN_RESUME_DECISION
+reason=...
+reuse=true/false
+isScanning=...
+mode=...
+capacity=...
+generation=...
+hardwareOwner=...
+```
+
+Nếu reuse:
+
+```text
+SCAN_KEEP_ALIVE
+reason=...
+start_seq=...
+generation=...
+```
+
+Khi nhận complete frame:
+
+```text
+SCAN_KEEP_ALIVE_READY
+elapsed_ms=...
+seq=...
+```
+
+Nếu restart:
+
+```text
+SCAN_HARD_RESTART
+reason=...
+```
+
+Không spam mỗi frame.
+
+Chỉ log transition.
+
+---
+
+# BƯỚC 7 — OPTIONAL DIAGNOSTIC CHO FRAME ĐẦU
+
+Có thể bổ sung diagnostic DEVELOPMENT-ONLY cho duy nhất first frame sau hard START:
+
+```text
+first_source
+last_source
+source_count
+source_bitmap/range summary
+tx8c_to_first_rx_ms
+tx8c_to_c0_ms
+```
+
+Mục đích là xác nhận giả thuyết firmware phase.
+
+Không ghi toàn bộ 128 source ở mọi frame Production.
+
+Không ảnh hưởng hot path đáng kể.
+
+---
+
+# SELF TEST BẮT BUỘC
+
+Thêm/cập nhật self-test để xác nhận:
+
+## Reuse path
+
+Khi:
+
+```text
+connected=true
+scanning=true
+mode=Production
+capacity unchanged
+no hardware owner
+```
+
+thì:
+
+```text
+không TX 8D
+không TX 8C
+không Purge
+không Reset decoder
+```
+
+nhưng vẫn:
+
+```text
+wait fresh complete frame
+```
+
+## Restart path
+
+Khi:
+
+```text
+scanning=false
+mode changed
+capacity changed
+hardware lifecycle requires restart
+recovery active
+```
+
+thì vẫn thực hiện hardware restart đúng như trước.
+
+## Safety
+
+Test:
+
+- stale frame không được accept
+- incomplete frame không được accept
+- wrong generation không được accept
+- cancellation không làm transport kẹt
+- Relay path vẫn STOP nếu yêu cầu
+- Resistance/Waterproof ownership không bị bypass
+- recovery path vẫn thực sự restart/reconnect khi cần
+
+---
+
+# KHÔNG THAY ĐỔI UI
+
+Không sửa:
+
+```text
+XAML
+binding
+layout
+button behavior
+model settings
+relay ordering configuration
+database
+history
+printer
+```
+
+---
+
+# ACCEPTANCE CRITERIA
+
+Sau sửa:
+
+### Continuous scan
+
+Giữ khoảng:
+
+```text
+frame_interval ≈ 155–160 ms
+queue_calls/frame ≈ 19–20
+reads/frame ≈ 9–10
+parser_error=0
+invalid=0
+dropped=0
+```
+
+### Reuse path
+
+Fresh complete frame:
+
+```text
+~1 cadence
+≈ 150–175 ms
+```
+
+Không xuất hiện hard restart nếu không cần.
+
+### Mandatory restart path
+
+Có thể vẫn:
+
+```text
+~230–250 ms
+```
+
+và điều này KHÔNG được coi là failure nếu path thực sự cần STOP/START.
+
+### Stability
+
+Không tăng:
+
+```text
+reconnect
+d2xx_errors
+reader restart
+CPU usage
+partial-frame acceptance
+```
+
+---
+
+# KẾT QUẢ CUỐI CÙNG CẦN BÁO
+
+Sau khi thực hiện, báo:
+
+1. Những path nào trước đây restart nhưng thực tế có thể reuse.
+2. Những path nào vẫn bắt buộc restart và lý do.
+3. File/method đã sửa.
+4. Có thay đổi parser không — phải là `NO`.
+5. Có thay đổi source coverage không — phải là `NO`.
+6. Có thay đổi polling không — phải là `NO`.
+7. Test trước/sau.
+8. Latency reuse trước/sau.
+9. Build result.
+10. Self-test result.
+11. Git diff tóm tắt.
+
+Không tối ưu chỉ để đạt một con số benchmark.
+
+Ưu tiên số 1 là:
+
+**đúng I/O + không mất fault + không false PASS + không phá hardware safety.**

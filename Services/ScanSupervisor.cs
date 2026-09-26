@@ -45,6 +45,7 @@ public sealed class ScanSupervisor
     private long _lastObservedScanGeneration;
     private long _previousScanGeneration;
     private long _baselineCompleteFrames;
+    private long _baselineCompleteFrameSequence;
     private bool _requireNewGeneration;
     private BoardCapacity _expectedCapacity = BoardCapacity.Create(1);
     private TaskCompletionSource<ScanFrame>? _firstFrameWaiter;
@@ -148,15 +149,46 @@ public sealed class ScanSupervisor
         int firstFrameTimeoutMs = ResolveFirstFrameTimeoutMs(configuredCapacity);
         bool capacityChanged = _board.AppliedScanCapacity is not BoardCapacity appliedCapacity ||
                                !HasSameActiveRange(appliedCapacity, configuredCapacity);
-        bool reuse = !capacityChanged &&
+        ScanHealthSnapshot health = HealthSnapshot;
+        BoardConnectionState connectionState = _board.ConnectionState;
+        bool hardwareOwner = connectionState == BoardConnectionState.PausedForHardwareOperation;
+        bool recoveryPending = health.State is ScanHealthState.Recovering or ScanHealthState.Faulted;
+        bool generationValid = health.ScanGeneration > 0;
+        bool reuse = _board.IsConnected &&
+                     !capacityChanged &&
                      _board.IsScanning &&
-                     _board.CurrentScanMode == BoardScanMode.Production;
+                     _board.CurrentScanMode == BoardScanMode.Production &&
+                     connectionState == BoardConnectionState.Scanning &&
+                     generationValid &&
+                     !recoveryPending;
+        string decisionReason = !_board.IsConnected
+            ? "transport-disconnected"
+            : capacityChanged
+                ? "capacity-changed"
+                : !_board.IsScanning
+                    ? "stream-stopped"
+                    : _board.CurrentScanMode != BoardScanMode.Production
+                        ? "mode-changed"
+                        : connectionState != BoardConnectionState.Scanning
+                            ? $"connection-state-{connectionState}"
+                            : !generationValid
+                                ? "generation-invalid"
+                                : recoveryPending
+                                    ? $"health-{health.State}"
+                                    : "stream-compatible";
+
+        _log(
+            $"SCAN_RESUME_DECISION reason={reason}:{decisionReason} reuse={reuse.ToString().ToLowerInvariant()} " +
+            $"isScanning={_board.IsScanning.ToString().ToLowerInvariant()} mode={_board.CurrentScanMode} " +
+            $"capacity={configuredCapacity.ScanCardCount}/{configuredCapacity.TotalIoCapacity} " +
+            $"generation={health.ScanGeneration} hardwareOwner={hardwareOwner.ToString().ToLowerInvariant()}");
 
         if (capacityChanged && _board.AppliedScanCapacity is BoardCapacity previousCapacity)
             _log($"SCAN_CAPACITY_IN_PLACE old={previousCapacity.ScanCardCount}/{previousCapacity.TotalIoCapacity} " +
                  $"new={configuredCapacity.ScanCardCount}/{configuredCapacity.TotalIoCapacity} reason={reason}");
 
         long baselineFrameCount = _board.CompleteFramesReceived;
+        long resumeStartedAt = _timeProvider.GetTimestamp();
         TaskCompletionSource<ScanFrame> firstFrame = BeginFirstFrameWait(
             BoardScanMode.Production,
             requireNewGeneration: !reuse,
@@ -164,8 +196,17 @@ public sealed class ScanSupervisor
             baselineFrameCount,
             configuredCapacity,
             reason);
-        if (!reuse)
+        if (reuse)
+        {
+            _log(
+                $"SCAN_KEEP_ALIVE reason={reason} start_seq={_board.LastCompleteFrameSequence} " +
+                $"generation={health.ScanGeneration}");
+        }
+        else
+        {
+            _log($"SCAN_HARD_RESTART reason={reason}:{decisionReason}");
             await _board.StartScanAsync(BoardScanMode.Production, ct);
+        }
         MarkStartCommandCompleted();
 
         ScanFrame frame = await WaitForFirstFrameAsync(
@@ -174,9 +215,16 @@ public sealed class ScanSupervisor
             firstFrameTimeoutMs,
             ct,
             reason);
-        _log(reuse
-            ? $"SCAN KEEP-ALIVE sau {reason}: giữ stream production hiện tại, đã nhận frame mới."
-            : $"START_SCAN OK sau {reason}: đã nhận frame production mới generation={frame.ScanGeneration}.");
+        if (reuse)
+        {
+            _log(
+                $"SCAN_KEEP_ALIVE_READY elapsed_ms={ElapsedMilliseconds(resumeStartedAt, _timeProvider.GetTimestamp()):0.###} " +
+                $"seq={frame.Sequence}");
+        }
+        else
+        {
+            _log($"START_SCAN OK sau {reason}: đã nhận frame production mới generation={frame.ScanGeneration}.");
+        }
     }
 
     public bool TryBeginWatchdogRecovery(
@@ -371,7 +419,10 @@ public sealed class ScanSupervisor
             _firstFrameWaiter = waiter;
             _expectedMode = mode;
             _previousScanGeneration = _lastObservedScanGeneration;
-            _baselineCompleteFrames = baselineCompleteFrames;
+            _baselineCompleteFrames = Math.Max(
+                baselineCompleteFrames,
+                _board.CompleteFramesReceived);
+            _baselineCompleteFrameSequence = _board.LastCompleteFrameSequence;
             _expectedCapacity = expectedCapacity;
             _requireNewGeneration = requireNewGeneration;
             _healthState = recovering ? ScanHealthState.Recovering : ScanHealthState.Starting;
@@ -434,9 +485,10 @@ public sealed class ScanSupervisor
                                           frame.ScanGeneration == 0 ||
                                           _previousScanGeneration == 0 ||
                                           frame.ScanGeneration != _previousScanGeneration;
-                bool frameCountAccepted = frame.ScanGeneration != 0 ||
-                                          _board.CompleteFramesReceived > _baselineCompleteFrames;
-                if (!generationAccepted || !frameCountAccepted)
+                bool freshFrameAccepted = frame.Sequence > 0
+                    ? frame.Sequence > _baselineCompleteFrameSequence
+                    : _board.CompleteFramesReceived > _baselineCompleteFrames;
+                if (!generationAccepted || !freshFrameAccepted)
                     return;
 
                 long now = _timeProvider.GetTimestamp();
