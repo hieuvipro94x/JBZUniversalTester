@@ -485,9 +485,16 @@ public sealed class ScanSupervisor
                                           frame.ScanGeneration == 0 ||
                                           _previousScanGeneration == 0 ||
                                           frame.ScanGeneration != _previousScanGeneration;
-                bool freshFrameAccepted = frame.Sequence > 0
-                    ? frame.Sequence > _baselineCompleteFrameSequence
-                    : _board.CompleteFramesReceived > _baselineCompleteFrames;
+                // D2XX resets the frame sequence to 1 after a real STOP/START.
+                // A new hardware generation is therefore the freshness proof for
+                // hard restart; sequence monotonicity applies only to keep-alive.
+                bool freshFrameAccepted = _requireNewGeneration &&
+                                          frame.ScanGeneration != 0 &&
+                                          _previousScanGeneration != 0
+                    ? frame.ScanGeneration != _previousScanGeneration
+                    : frame.Sequence > 0
+                        ? frame.Sequence > _baselineCompleteFrameSequence
+                        : _board.CompleteFramesReceived > _baselineCompleteFrames;
                 if (!generationAccepted || !freshFrameAccepted)
                     return;
 
