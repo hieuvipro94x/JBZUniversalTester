@@ -616,7 +616,7 @@ public sealed class TestViewModel : ObservableObject
                 return "CHỜ THÁO";
 
             if (value.Contains("ĐANG", StringComparison.OrdinalIgnoreCase))
-                return "ĐANG TEST";
+                return "ĐANG KIỂM TRA";
 
             if (!_presentationCycleStarted &&
                 !IsProductRemovalPending &&
@@ -673,7 +673,7 @@ public sealed class TestViewModel : ObservableObject
                 return "#C62828";
 
             if (value.Contains("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
-                return "#FFF3A0";
+                return "#1976D2";
 
             if (value.Contains("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
                 value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase))
@@ -3871,7 +3871,7 @@ public sealed class TestViewModel : ObservableObject
 
                 _presentationCycleStarted = true;
                 RaiseCenterPresentation();
-                State = "ĐANG TEST";
+                State = "ĐANG KIỂM TRA";
             });
         }
         QueueContinuityPreviewUi(generation);
