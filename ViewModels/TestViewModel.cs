@@ -7932,6 +7932,12 @@ public sealed class TestViewModel : ObservableObject
                 return;
             }
 
+            // CompletePassAsync dừng D2XX scan trước RESET/relay. Báo trước cho
+            // ScanSupervisor để watchdog không coi lần dừng có chủ ý này là
+            // scan-stopped và chạy recovery song song với MASTER_GOOD_EJECT.
+            if (_board.IsConnected && _board.IsScanning)
+                await StopScanIntentionallyAsync("MasterGoodPass", ct);
+
             bool ok = await _engine.CompletePassAsync(
                 Resistance,
                 onPassStarted: () =>
