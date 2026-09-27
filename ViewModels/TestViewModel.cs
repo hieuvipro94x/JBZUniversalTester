@@ -39,7 +39,7 @@ public enum ProductionPresentationMode
     LiveTopology = 3
 }
 
-public sealed class TestViewModel : ObservableObject
+public sealed class TestViewModel : ObservableObject, IProductionPresentationState
 {
     // Lỗi Keysight trong phép đo điện trở BẰNG TAY là lỗi thiết bị đo phụ.
     // Không được nâng thành DeviceFault của bo D2XX vì DeviceFault sẽ khóa phần cứng
@@ -537,156 +537,33 @@ public sealed class TestViewModel : ObservableObject
             return _pendingProductionProbePreview is not null;
     }
 
-    public string ResultStatusText
-    {
-        get
-        {
-            if (IsDeviceFault)
-                return "LỖI THIẾT BỊ";
-
-            string value = State ?? string.Empty;
-
-            // Sau PASS, khi sản phẩm vẫn nguyên vẹn trên JIG thì PASS phải là
-            // trạng thái duy nhất người vận hành nhìn thấy. Chỉ khi một
-            // connection kỳ vọng thực sự mất sau khi scan đã ổn định mới đổi
-            // sang THÁO SẢN PHẨM.
-            if (IsPassResultHeldDuringRemoval)
-                return "PASS";
-
-            if (IsProductRemovalPending ||
-                CurrentProductionPhase == ProductionPhase.WaitingProductRemoval)
-            {
-                // FAIL có cấu hình _DISCARD: ô nhỏ chỉ báo trạng thái chờ xác nhận.
-                // Hướng dẫn thao tác lớn được hiển thị ở CenterResultText.
-                if (_waitForFaultProductRemoval &&
-                    Volatile.Read(ref _discardRequiredForFault) != 0)
-                {
-                    return "CHỜ XÁC NHẬN THÙNG LỖI";
-                }
-
-                return "THÁO SẢN PHẨM";
-            }
-
-            if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
-                return "MANUAL";
-
-            if (value.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
-                return "THÁO SẢN PHẨM";
-
-            if (value.Contains("ĐỒNG BỘ DỮ LIỆU BO", StringComparison.OrdinalIgnoreCase))
-                return "ĐỒNG BỘ BO";
-
-            if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
-                return "CHƯA KẾT NỐI BO";
-
-            if (value.Contains("KẾT NỐI BO", StringComparison.OrdinalIgnoreCase))
-                return "ĐANG KẾT NỐI BO";
-
-            if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
-                return "PASS";
-
-            if (value.Contains("ĐANG TEST LEAK", StringComparison.OrdinalIgnoreCase))
-                return "ĐANG TEST LEAK";
-
-            if (value.Contains("THÁO CONNECTOR LEAK", StringComparison.OrdinalIgnoreCase))
-                return "THÁO CONNECTOR LEAK";
-
-            if (value.Contains("LẮP LẠI CONNECTOR LEAK", StringComparison.OrdinalIgnoreCase))
-                return "LẮP CONNECTOR LEAK";
-
-            if (IsMasterSequenceActive)
-            {
-                // Ô trạng thái lớn phải luôn cho người vận hành biết chính xác
-                // loại mẫu Master cần kiểm tra. Trạng thái THÁO SẢN PHẨM ở trên
-                // vẫn có ưu tiên cao hơn để không che mất hướng dẫn an toàn.
-                return IsMasterBadPhase
-                    ? "KIỂM TRA MASTER LỖI"
-                    : "KIỂM TRA MASTER ĐẠT";
-            }
-
-            if (value.Contains("ĐANG LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
-                return "ĐANG LẮP SẢN PHẨM";
-
-            if (value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("LỖI", StringComparison.OrdinalIgnoreCase))
-                return "KHÔNG ĐẠT";
-
-            if (value.Contains("CHỜ THÁO", StringComparison.OrdinalIgnoreCase))
-                return "CHỜ THÁO";
-
-            if (value.Contains("ĐANG", StringComparison.OrdinalIgnoreCase))
-                return "ĐANG KIỂM TRA";
-
-            if (!_presentationCycleStarted &&
-                !IsProductRemovalPending &&
-                CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity &&
-                !_engine.HasProductActivity)
-                return "LẮP SẢN PHẨM";
-
-            return "LẮP SẢN PHẨM";
-        }
-    }
+    public string ResultStatusText =>
+        ProductionPresentationService.GetResultStatusText(this);
 
     /// <summary>
     /// Màu trạng thái lớn giống máy production: PASS phải xanh lá; lỗi đỏ;
     /// chờ/đang kiểm tra dùng nền vàng dễ quan sát từ xa.
     /// </summary>
-    public string StateBackground
-    {
-        get
-        {
-            if (IsDeviceFault)
-                return "#C62828";
+    public string StateBackground =>
+        ProductionPresentationService.GetStateBackground(this);
 
-            string value = State ?? string.Empty;
+    public string StateForeground =>
+        ProductionPresentationService.GetStateForeground(StateBackground);
 
-            if (IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
-                return "#FFF3A0";
-
-            if (IsProductRemovalPending &&
-                !value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
-                value.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
-                return "#E65100";
-
-            if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
-                return "#C62828";
-
-            if (IsMasterSequenceActive)
-            {
-                if (value.Contains("LỖI THIẾT BỊ", StringComparison.OrdinalIgnoreCase) ||
-                    value.Contains("FAIL", StringComparison.OrdinalIgnoreCase))
-                    return "#C62828";
-
-                return "#FFF3A0";
-            }
-
-            if (MasterApproved && value.Contains("CHỜ LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
-                return "#FFF3A0";
-
-            if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
-                return "#2AA84A";
-
-            if (value.Contains("LỖI", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase))
-                return "#C62828";
-
-            if (value.Contains("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
-                return "#1976D2";
-
-            if (value.Contains("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase))
-                return "#FFF3A0";
-
-            return "#FFF3A0";
-        }
-    }
-
-    public string StateForeground => StateBackground.Equals("#FFF3A0", StringComparison.OrdinalIgnoreCase)
-        ? "#222222"
-        : "#FFFFFF";
+    bool IProductionPresentationState.IsPassResultHeldDuringRemoval =>
+        IsPassResultHeldDuringRemoval;
+    bool IProductionPresentationState.IsWaitingProductRemovalPhase =>
+        CurrentProductionPhase == ProductionPhase.WaitingProductRemoval;
+    bool IProductionPresentationState.IsWaitingOrContinuityPhase =>
+        CurrentProductionPhase is ProductionPhase.WaitingProduct or ProductionPhase.Continuity;
+    bool IProductionPresentationState.WaitForFaultProductRemoval =>
+        _waitForFaultProductRemoval;
+    bool IProductionPresentationState.DiscardRequiredForFault =>
+        Volatile.Read(ref _discardRequiredForFault) != 0;
+    bool IProductionPresentationState.PresentationCycleStarted =>
+        _presentationCycleStarted;
+    bool IProductionPresentationState.HasProductActivity =>
+        _engine.HasProductActivity;
 
     public string Lot
     {

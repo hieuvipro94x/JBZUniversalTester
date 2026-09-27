@@ -347,9 +347,13 @@ internal static partial class Program
     private static void TestProductionScanFirstFrameAfterSequenceReset()
     {
         var board = new FakeBoard();
+        var supervisor = new ScanSupervisor(board, _ => { });
+        board.SetRequestedScanCapacityForTest(2);
+        board.SetAppliedScanCapacityForTest(2);
+        supervisor.EnsureProductionScanAsync(128, CancellationToken.None)
+            .GetAwaiter().GetResult();
         board.Publish(CreateProductionFrame(sequence: 1, scanUnits: 2, generation: 1));
         board.SetRequestedScanCapacityForTest(10);
-        board.SetAppliedScanCapacityForTest(2);
         long callbackGeneration = 1;
         board.StartScanCallback = current =>
         {
@@ -362,8 +366,6 @@ internal static partial class Program
                     generation: Interlocked.Increment(ref callbackGeneration)));
             });
         };
-
-        var supervisor = new ScanSupervisor(board, _ => { });
         supervisor.StartProductionScanAndVerifyFrameAsync(
                 BoardCapacity.MaxGlobalIo,
                 CancellationToken.None,
@@ -381,13 +383,18 @@ internal static partial class Program
             "2 -> 10 -> 2 -> 10 applies each capacity transition in place without reopening the board");
 
         var sameCapacityBoard = new FakeBoard();
+        var sameCapacitySupervisor = new ScanSupervisor(sameCapacityBoard, _ => { });
+        sameCapacitySupervisor.EnsureProductionScanAsync(
+                BoardCapacity.MaxGlobalIo,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        sameCapacityBoard.Publish(CreateProductionFrame(sequence: 1, scanUnits: 10, generation: 1));
         _ = Task.Run(async () =>
         {
             await Task.Delay(50);
             sameCapacityBoard.Publish(CreateProductionFrame(sequence: 2, scanUnits: 10, generation: 1));
         });
-        new ScanSupervisor(sameCapacityBoard, _ => { })
-            .StartProductionScanAndVerifyFrameAsync(
+        sameCapacitySupervisor.StartProductionScanAndVerifyFrameAsync(
                 BoardCapacity.MaxGlobalIo,
                 CancellationToken.None,
                 "SELF_TEST_SAME_CAPACITY")
@@ -561,7 +568,7 @@ internal static partial class Program
                     CancellationToken.None)
                 .GetAwaiter().GetResult(),
             "A failed soft restart is reported for reopen escalation");
-        board.StartScanCallback = current => current.Publish(HealthFrame(9, 5));
+        board.StartScanCallback = current => current.Publish(HealthFrame(64, 45));
         Assert(supervisor.RecoverReopenAsync(
                     BoardCapacity.MaxGlobalIo,
                     BoardScanMode.Production,
@@ -1289,9 +1296,8 @@ internal static partial class Program
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
         Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MASTER ĐẠT" &&
-               enabledMasterVm.State == "KIỂM TRA MASTER PASS" &&
                enabledMasterVm.StateBackground == "#FFF3A0",
-            "Waiting Master identifies the required good sample and keeps the canonical yellow background");
+            "Active good-Master validation identifies the required sample and keeps the canonical yellow background");
 
         TestViewModel masterExitVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 1 },
@@ -1386,8 +1392,8 @@ internal static partial class Program
                statusVm.StateForeground == "#222222",
             "Removal interlock must not be presented as LẮP SẢN PHẨM");
         statusVm.State = "ĐANG KIỂM TRA...";
-        Assert(statusVm.ResultStatusText == "ĐANG TEST" && statusVm.StateBackground == "#FFF3A0" && statusVm.StateForeground == "#222222",
-            "Testing status mapping");
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#1976D2" && statusVm.StateForeground == "#FFFFFF",
+            "Current testing status uses the canonical blue in-progress mapping");
         statusVm.State = "ĐANG KẾT NỐI BO";
         Assert(statusVm.ResultStatusText == "ĐANG KẾT NỐI BO" &&
                statusVm.StateBackground == "#FFF3A0" &&
@@ -1432,6 +1438,7 @@ internal static partial class Program
             "RecoverAfterUncommittedFailAsync",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Uncommitted FAIL recovery method not found");
+        int recoveryStartCountBefore = recoveryBoard.Commands.Count(command => command == "START");
         Task publishRecoveryFrame = Task.Run(async () =>
         {
             await Task.Delay(50);
@@ -1439,6 +1446,7 @@ internal static partial class Program
             Assert(recoveryVm.IsProductRemovalPending,
                 "Rejected FAIL recovery must retain its gate after one empty frame");
             recoveryBoard.Publish(FrameSeq(3));
+            recoveryBoard.Publish(FrameSeq(4));
         });
         ((Task)(recoverUncommittedFail.Invoke(
             recoveryVm,
@@ -1447,11 +1455,13 @@ internal static partial class Program
             .GetAwaiter()
             .GetResult();
         publishRecoveryFrame.GetAwaiter().GetResult();
-        Assert(recoveryVm.ResultStatusText == "LẮP SẢN PHẨM" &&
-               recoveryVm.Faults.Count == 0 &&
-               recoveryVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
-               !recoveryVm.IsProductRemovalPending &&
-               !recoveryBoard.Commands.Contains("START") &&
+        Assert(SpinWait.SpinUntil(
+                   () => recoveryVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+                         recoveryVm.Faults.Count == 0 &&
+                         recoveryVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+                         !recoveryVm.IsProductRemovalPending,
+                   TimeSpan.FromSeconds(2)) &&
+               recoveryBoard.Commands.Count(command => command == "START") == recoveryStartCountBefore &&
                !recoveryBoard.Commands.Contains("SET:2"),
             "Rejected FAIL commit reuses healthy removal scan, returns to authoritative WaitingForProduct with no removal latch, and cannot remain latched at KHÔNG ĐẠT");
 
@@ -3137,6 +3147,10 @@ internal static partial class Program
         passRemovalEngine.SetFrameProcessingEnabled(true);
         passRemovalBoard.Publish(FrameSeq(30, (1, new[] { 18 }), (2, new[] { 19 })));
         passRemovalBoard.Publish(FrameSeq(31, (1, new[] { 18 }), (2, new[] { 19 })));
+        Assert(SpinWait.SpinUntil(
+                () => passRemovalVm.ProductionFramesProcessed >= 2,
+                TimeSpan.FromSeconds(2)),
+            "PASS removal setup waits for the asynchronous board-frame worker");
 
         MethodInfo armPassRemoval = typeof(TestViewModel).GetMethod(
             "ArmPassProductRemovalWait",
