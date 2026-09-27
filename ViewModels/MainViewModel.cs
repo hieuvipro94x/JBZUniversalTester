@@ -170,8 +170,10 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
 
-        if (Test.IsDeviceFault || !Test.IsBoardConnected)
+        if (Test.IsDeviceFault)
             Status = "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG";
+        else if (Test.IsBoardStartupUnavailable)
+            Status = "CHƯA KẾT NỐI BO - CHỈ XEM MÃ HÀNG, KHÔNG THỂ TEST";
         else if (Model is not null)
             Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName} - BO ĐÃ KẾT NỐI";
         else

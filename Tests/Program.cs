@@ -34,6 +34,7 @@ internal static partial class Program
         (string Name, Action Run)[] tests =
         [
             ("Board capacity/address boundaries", TestBoardCapacity),
+            ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
@@ -436,6 +437,30 @@ internal static partial class Program
             scanUnits,
             true,
             generation);
+    }
+
+    private static void TestStartupWithoutBoardStaysUiOnly()
+    {
+        TestViewModel viewModel = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard board);
+        board.SetConnectionStateForTest(false);
+        board.ThrowOnConnect = true;
+
+        viewModel.InitializeHardwareAsync().GetAwaiter().GetResult();
+        viewModel.InitializeHardwareAsync().GetAwaiter().GetResult();
+        viewModel.LoadPreparedModelAsync(Model(("OFFLINE", new[] { 1, 2 })))
+            .GetAwaiter().GetResult();
+        viewModel.StartProductionTestAsync().GetAwaiter().GetResult();
+
+        Assert(!viewModel.IsDeviceFault &&
+               viewModel.IsBoardStartupUnavailable &&
+               viewModel.DeviceFaultTransitionCount == 0 &&
+               viewModel.DeviceFaultDialogCount == 0 &&
+               board.ConnectAttempts == 1 &&
+               !board.Commands.Contains("START", StringComparer.Ordinal) &&
+               viewModel.State == "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST",
+            "No-board startup keeps model UI available without scan, Production ARM, or DeviceFault");
     }
 
     private static void TestScanWatchdogRecovery()
@@ -1521,21 +1546,21 @@ internal static partial class Program
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
         Assert(mainWindowSource.Contains("bool hardwareReady =", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("bool offlineUiAvailable =", StringComparison.Ordinal) &&
                mainWindowSource.Contains(
-                   "StartTestButton.IsEnabled = hardwareReady && _viewModel.Model is not null;",
+                   "StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null;",
                    StringComparison.Ordinal) &&
                mainWindowSource.Contains(
-                   "SelectModelButton.IsEnabled = hardwareReady && !blocked;",
-                   StringComparison.Ordinal) &&
-               !mainWindowSource.Contains("offlinePreview", StringComparison.Ordinal),
-            "Main hardware actions stay locked for the remainder of a disconnected session");
+                   "SelectModelButton.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;",
+                   StringComparison.Ordinal),
+            "Main allows model selection and TestView entry offline while hardware-only actions remain locked");
 
         string mainViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
         Assert(mainViewModelSource.Contains(
-                   "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG",
+                   "CHƯA KẾT NỐI BO - CHỈ XEM MÃ HÀNG, KHÔNG THỂ TEST",
                    StringComparison.Ordinal),
-            "Main status directs the operator to restart instead of advertising an offline model");
+            "Main status clearly identifies the no-board UI-only state");
         Assert(mainViewModelSource.Contains("requireStartupIoClear: false", StringComparison.Ordinal),
             "Production startup accepts the first live frame for the remembered model without requiring a clean baseline");
 
@@ -1550,9 +1575,9 @@ internal static partial class Program
                xaml.Contains("Header=\"Tr&#7841;ng th&#225;i\"", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"IO-CN-PN\"", StringComparison.Ordinal) &&
                !testWindowSource.Contains("OperationTablesHost.Visibility = Visibility.Collapsed;", StringComparison.Ordinal) &&
-               !testWindowSource.Contains("offlinePreview", StringComparison.Ordinal) &&
-               testWindowSource.Contains("if (_autoStartProduction)", StringComparison.Ordinal),
-            "TestWindow has no offline preview path; MainWindow must reject entry without a healthy board");
+               testWindowSource.Contains("if (_autoStartProduction)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("viewModel.IsBoardConnected", StringComparison.Ordinal),
+            "TestWindow remains visible offline, skips Production start, and keeps status LEDs tied to real board state");
         int typeColumnIndex = xaml.IndexOf("Header=\"Lo&#7841;i\"", StringComparison.Ordinal);
         int ioColumnIndex = xaml.IndexOf("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal);
         int connectorColumnIndex = xaml.IndexOf("Header=\"Connector\"", StringComparison.Ordinal);
@@ -1816,11 +1841,16 @@ internal static partial class Program
         startupFaultBoard.ThrowOnConnect = true;
         startupFaultVm.InitializeHardwareAsync().GetAwaiter().GetResult();
         startupFaultVm.InitializeHardwareAsync().GetAwaiter().GetResult();
-        Assert(startupFaultVm.IsDeviceFault &&
-               startupFaultVm.DeviceFaultTransitionCount == 1 &&
-               startupFaultVm.DeviceFaultDialogCount == 1 &&
-               startupFaultBoard.ConnectAttempts == 1,
-            "Startup board failure tries once, shows one fault episode, and never reconnects in the same process");
+        startupFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
+        startupFaultVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(!startupFaultVm.IsDeviceFault &&
+               startupFaultVm.IsBoardStartupUnavailable &&
+               startupFaultVm.DeviceFaultTransitionCount == 0 &&
+               startupFaultVm.DeviceFaultDialogCount == 0 &&
+               startupFaultBoard.ConnectAttempts == 1 &&
+               !startupFaultBoard.Commands.Contains("START", StringComparer.Ordinal) &&
+               startupFaultVm.State == "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST",
+            "Startup board failure allows model UI but never arms scan or raises a DeviceFault dialog");
     }
 
     private static void TestManualModeInterlock()

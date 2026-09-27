@@ -151,6 +151,7 @@ public sealed class TestViewModel : ObservableObject
     private readonly double?[] _waterProofLivePressBaseline = new double?[3];
     private string _hardwareStatus = "Bo: đang khởi tạo...";
     private string _boardConnectionMessage = "Chưa kết nối bo JBZ.";
+    private int _boardStartupUnavailable;
     private string? _currentModelPath;
 
     private int _total;
@@ -706,6 +707,13 @@ public sealed class TestViewModel : ObservableObject
     }
 
     public bool IsBoardConnected => _board.IsConnected;
+
+    /// <summary>
+    /// Bo không sẵn sàng ngay từ lúc khởi động. Ứng dụng vẫn cho phép nạp mã và
+    /// xem TestView, nhưng tuyệt đối không ARM test, nhận scan hay điều khiển relay.
+    /// Mất kết nối sau khi bo đã chạy vẫn đi theo DeviceFault.
+    /// </summary>
+    public bool IsBoardStartupUnavailable => Volatile.Read(ref _boardStartupUnavailable) != 0;
 
     public bool LastProductionConfigurationSyncSucceeded { get; private set; }
 
@@ -1759,6 +1767,27 @@ public sealed class TestViewModel : ObservableObject
         ShowDeviceFaultDialogOnce();
     }
 
+    private void EnterBoardStartupUnavailable(Exception exception, string source)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        bool firstTransition = Interlocked.Exchange(ref _boardStartupUnavailable, 1) == 0;
+        AsyncFileLogService.Current.Error(
+            $"BOARD STARTUP UNAVAILABLE [{source}] {exception.GetType().Name}: {exception.Message}");
+        AddLog($"Không kết nối được bo lúc khởi động: {exception.Message}");
+
+        if (!firstTransition)
+            return;
+
+        _engine.SetFrameProcessingEnabled(false);
+        BoardConnectionMessage =
+            "Chưa kết nối bo mạch. Chỉ có thể xem giao diện và mã hàng; không thể kiểm tra.";
+        HardwareStatus = "Bo: CHƯA KẾT NỐI";
+        State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+        Raise(nameof(IsBoardStartupUnavailable));
+        Raise(nameof(IsBoardConnected));
+    }
+
     private async Task SafeLockHardwareForDeviceFaultAsync()
     {
         try
@@ -2428,38 +2457,36 @@ public sealed class TestViewModel : ObservableObject
         // đoạn transport còn đang khởi tạo.
         await InitializeHardwareAsync();
 
-        if (IsDeviceFault || !_board.IsConnected)
+        if (IsDeviceFault)
         {
-            if (!IsDeviceFault)
-            {
-                EnterDeviceFault(
-                    new IOException("Bo không còn kết nối sau bước khởi tạo."),
-                    "InitializeCore.NoBoard");
-            }
-            AddLog("Khởi động bo thất bại; phiên hiện tại bị khóa đến khi thoát và mở lại ứng dụng.");
+            AddLog("Khởi động bo gặp lỗi thiết bị; phiên hiện tại bị khóa đến khi thoát và mở lại ứng dụng.");
             StartupPerformanceTrace.Mark("T12 STARTUP_BOARD_FAULT");
             return;
         }
 
+        if (_model is null)
+        {
+            await LoadLastTestedModelAsync();
+        }
+        else
+        {
+            CurrentModelPath = ResolveOptionalModelPath(_model.SourcePath);
+            AddLog($"Giữ model đang chọn: {ModelName}");
+        }
+
         if (_board.IsConnected)
         {
-            if (_model is null)
-            {
-                await LoadLastTestedModelAsync();
-            }
-            else
-            {
-                CurrentModelPath = ResolveOptionalModelPath(_model.SourcePath);
-                AddLog($"Giữ model đang chọn: {ModelName}");
-            }
+            await EnsureContinuousProductionScanAsync();
+
+            // Watchdog chỉ khóa phiên khi mất bo/scan; không tự reconnect.
+            _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeCts.Token);
+            State = ReadyStateForCurrentModel();
+            StartupPerformanceTrace.Mark("T12 STARTUP_READY");
+            return;
         }
-        await EnsureContinuousProductionScanAsync();
 
-        // Watchdog chỉ khóa phiên khi mất bo/scan; không tự reconnect.
-        _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeCts.Token);
-
-        State = ReadyStateForCurrentModel();
-        StartupPerformanceTrace.Mark("T12 STARTUP_READY");
+        State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+        StartupPerformanceTrace.Mark("T12 STARTUP_OFFLINE");
     }
 
     private static void ValidateModelPath(string path, out string fullPath)
@@ -2564,7 +2591,9 @@ public sealed class TestViewModel : ObservableObject
         StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
         State = _board.IsConnected && !IsDeviceFault
             ? ReadyStateForCurrentModel()
-            : "LỖI THIẾT BỊ";
+            : IsBoardStartupUnavailable
+                ? "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST"
+                : "LỖI THIẾT BỊ";
         return model;
     }
 
@@ -2599,7 +2628,9 @@ public sealed class TestViewModel : ObservableObject
 
         State = _board.IsConnected && !IsDeviceFault
             ? ReadyStateForCurrentModel()
-            : "LỖI THIẾT BỊ";
+            : IsBoardStartupUnavailable
+                ? "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST"
+                : "LỖI THIẾT BỊ";
         return model;
     }
 
@@ -6176,7 +6207,7 @@ public sealed class TestViewModel : ObservableObject
 
             // MainWindow có thể đã chốt startup timeout trong lúc driver còn
             // mở handle. Không cho kết nối hoàn tất muộn hồi sinh phiên đã lỗi.
-            if (IsDeviceFault)
+            if (IsDeviceFault || IsBoardStartupUnavailable)
             {
                 await _board.DisconnectAsync();
                 return;
@@ -6203,12 +6234,19 @@ public sealed class TestViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            EnterDeviceFault(ex, "BoardStartup");
+            EnterBoardStartupUnavailable(ex, "BoardStartup");
         }
     }
 
     public void ReportBoardUnavailableForOperatorAction(string source)
     {
+        if (IsBoardStartupUnavailable)
+        {
+            State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+            AddLog($"Bỏ qua thao tác phần cứng [{source}]: bo không kết nối từ lúc khởi động.");
+            return;
+        }
+
         if (!IsDeviceFault)
         {
             EnterDeviceFault(
@@ -6221,7 +6259,7 @@ public sealed class TestViewModel : ObservableObject
     }
 
     public void ReportStartupBoardTimeout() =>
-        EnterDeviceFault(
+        EnterBoardStartupUnavailable(
             new TimeoutException("Khởi tạo bo vượt quá thời gian cho phép."),
             "BoardStartupTimeout");
 
@@ -6565,6 +6603,16 @@ public sealed class TestViewModel : ObservableObject
 
         AsyncFileLogService.Current.Performance("TEST_START_CLICK");
 
+        // Chế độ giao diện khi bo không có từ lúc khởi động: không đi qua bất kỳ
+        // preflight/ARM/scan/relay nào. TestWindow vẫn hiển thị model đã chọn và
+        // bốn LED giữ tắt vì không có BoardFrameActivity.
+        if (IsBoardStartupUnavailable && !_board.IsConnected)
+        {
+            State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+            AddLog("Không ARM Production: bo không kết nối từ lúc khởi động.");
+            return;
+        }
+
         // Sản phẩm do scan nền phát hiện chỉ khóa thao tác ĐỔI MÃ. Khi process
         // vừa mở lại và vẫn giữ model cuối, chuyển thẳng sang Production để
         // frame kế tiếp nhận diện continuity đang có. Gate sau kết quả đã commit
@@ -6673,7 +6721,15 @@ public sealed class TestViewModel : ObservableObject
 
         if (!_board.IsConnected)
         {
-            ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
+            if (IsBoardStartupUnavailable)
+            {
+                State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+                AddLog("Không ARM Production: bo không kết nối từ lúc khởi động.");
+            }
+            else
+            {
+                ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
+            }
             return;
         }
 

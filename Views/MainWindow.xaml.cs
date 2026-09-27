@@ -94,7 +94,7 @@ public partial class MainWindow : Window
                 // mở khóa test hoặc hồi sinh kết nối.
                 _viewModel.Test.ReportStartupBoardTimeout();
                 _viewModel.Status =
-                    "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG";
+                    "CHƯA KẾT NỐI BO - CHỈ XEM MÃ HÀNG, KHÔNG THỂ TEST";
                 AsyncFileLogService.Current.Error(
                     $"STARTUP HARDWARE TIMEOUT after {StartupControlUnlockTimeout.TotalSeconds:0}s; " +
                     "session latched until application restart.");
@@ -174,7 +174,8 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
-        if (!_viewModel.Test.IsBoardConnected || _viewModel.Test.IsDeviceFault)
+        if (_viewModel.Test.IsDeviceFault ||
+            (!_viewModel.Test.IsBoardConnected && !_viewModel.Test.IsBoardStartupUnavailable))
         {
             _viewModel.Test.ReportBoardUnavailableForOperatorAction("OpenTestWindow");
             return;
@@ -222,7 +223,7 @@ public partial class MainWindow : Window
         {
             _testWindow = new TestWindow(
                 _viewModel.Test,
-                autoStartProduction: hasCapacity)
+                autoStartProduction: hasCapacity && _viewModel.Test.IsBoardConnected)
             {
                 // Giữ MainWindow đã render sẵn ngay phía sau TestWindow. Khi
                 // đóng màn hình test, DWM luôn có sẵn bề mặt để hiển thị và
@@ -299,7 +300,8 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName is nameof(TestViewModel.IsProductRemovalPending) or
             nameof(TestViewModel.IsBoardConnected) or
-            nameof(TestViewModel.IsDeviceFault))
+            nameof(TestViewModel.IsDeviceFault) or
+            nameof(TestViewModel.IsBoardStartupUnavailable))
         {
             if (_viewModel.Test.IsDeviceFault)
             {
@@ -316,9 +318,12 @@ public partial class MainWindow : Window
         bool hardwareReady =
             _viewModel.Test.IsBoardConnected &&
             !_viewModel.Test.IsDeviceFault;
+        bool offlineUiAvailable =
+            _viewModel.Test.IsBoardStartupUnavailable &&
+            !_viewModel.Test.IsDeviceFault;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
-        StartTestButton.IsEnabled = hardwareReady && _viewModel.Model is not null;
-        SelectModelButton.IsEnabled = hardwareReady && !blocked;
+        StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null;
+        SelectModelButton.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;
         LearnTopologyButton.IsEnabled = hardwareReady;
     }
 

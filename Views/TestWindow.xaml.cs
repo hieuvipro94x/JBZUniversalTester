@@ -62,7 +62,7 @@ public partial class TestWindow : Window
         DataContext = viewModel;
         _autoStartProduction = autoStartProduction;
 
-        if (!_autoStartProduction)
+        if (!_autoStartProduction && viewModel.IsBoardConnected)
             viewModel.State = "CẤU HÌNH CARD KHÔNG ĐỦ";
 
         _clockTimer = new DispatcherTimer(DispatcherPriority.Background)
