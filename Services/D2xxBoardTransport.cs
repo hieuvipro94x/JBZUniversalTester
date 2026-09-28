@@ -650,9 +650,7 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
         _scanCapacity = BoardScanCapacity.Create(
             _production,
             maxIo,
-            // TESTPIN phải nhìn thấy toàn bộ IO của các card đã cấu hình,
-            // kể cả khi file THT chỉ sử dụng một phạm vi IO nhỏ.
-            scanAllInstalledIo: _production.UseTestPointer);
+            scanAllInstalledIo: false);
         _installedCapacity = _scanCapacity.Installed;
         _capacity = _scanCapacity.Active;
         _production.ExpansionCardCount = _installedCapacity.ExpansionCardCount;

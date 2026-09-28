@@ -211,6 +211,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private long _engineUiLastCompletedRevision;
     private long _productionUiCycleEpoch;
     private long _inlineProbeUiRevision;
+    private long _productionProbePreviewUiRevision;
     private long _ioMappingUiRevision;
     private readonly object _probePreviewGate = new();
     private ProductionProbePreview? _pendingProductionProbePreview;
@@ -2713,9 +2714,31 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         IReadOnlyList<int> ios,
         long frameSequence)
     {
-        int previous = Interlocked.Exchange(ref _probePresentationState, (int)state);
-        if (previous == (int)state)
-            return;
+        int requested = (int)state;
+        int previous;
+        while (true)
+        {
+            previous = Volatile.Read(ref _probePresentationState);
+            if (previous == requested)
+                return;
+
+            // Preview là tín hiệu đến sớm trong cùng chu kỳ quét. Sau khi một
+            // tiếp điểm đã được xác nhận Touch, preview tiếp theo tuyệt đối không
+            // được hạ presentation trở lại Candidate.
+            if (previous == (int)ProbePresentationState.Touch &&
+                state == ProbePresentationState.Candidate)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(
+                    ref _probePresentationState,
+                    requested,
+                    previous) == previous)
+            {
+                break;
+            }
+        }
 
         Raise(nameof(CurrentProbePresentationState));
         // Center overlay depends on Probe state: hide "LẮP SẢN PHẨM" while
@@ -4334,7 +4357,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // presentation ngay. Đây chỉ là UI; Product state/engine/sound giữ nguyên.
         lock (_probePreviewGate)
             _pendingProductionProbePreview = preview with { ActiveIo = probeIos };
-        long probeRevision = Interlocked.Increment(ref _inlineProbeUiRevision);
+        long contactRevision = Volatile.Read(ref _inlineProbeUiRevision);
+        long previewRevision = Interlocked.Increment(ref _productionProbePreviewUiRevision);
         SetProbePresentationState(
             ProbePresentationState.Candidate,
             probeIos,
@@ -4344,7 +4368,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
                 Volatile.Read(ref _probeSessionActive) != 0 ||
-                probeRevision != Volatile.Read(ref _inlineProbeUiRevision))
+                contactRevision != Volatile.Read(ref _inlineProbeUiRevision) ||
+                previewRevision != Volatile.Read(ref _productionProbePreviewUiRevision) ||
+                CurrentProbePresentationState == ProbePresentationState.Touch ||
+                Volatile.Read(ref _inlineProbeContactIo) != 0)
             {
                 return;
             }
