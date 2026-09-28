@@ -50,6 +50,7 @@ public readonly record struct ProductionElectricalSnapshot(
     bool ProductEvidence,
     bool StableProductPresence,
     bool RealtimeEvaluationEnabled,
+    int PassedExpectedConnectionCount,
     bool ContinuityComplete,
     bool HasConfirmedWiringFault,
     double EngineComputeMilliseconds);
@@ -394,6 +395,7 @@ public sealed class TestEngine : IDisposable
             productEvidence,
             _productStable,
             realtimeEvaluationEnabled,
+            passed,
             continuityComplete,
             _wiringFaults.Count > 0,
             _lastEngineComputeMilliseconds);
@@ -1403,6 +1405,16 @@ public sealed class TestEngine : IDisposable
             {
                 _productRemovalCandidateFrames = 0;
 
+                // Human/body capacitance can manufacture a different WRONG edge on
+                // every complete frame (for example 1-4, then 21-4, then 42-4).
+                // Keep observing those edges in the fault debounce, but do not turn
+                // changing candidates into product presence. A correct partial edge
+                // remains valid installation evidence; a real WRONG/SHORT becomes
+                // presence as soon as that same physical edge is confirmed.
+                bool stablePresenceEvidence =
+                    _candidateWiringFaults.Count == 0 ||
+                    _wiringFaults.Count > 0;
+
                 // Fast path: a complete authoritative frame that already contains
                 // the full expected topology is itself strong product evidence.
                 // Do not make PASS wait one extra scan frame only to satisfy the
@@ -1413,13 +1425,24 @@ public sealed class TestEngine : IDisposable
                     _productPresenceCandidateFrames = ProductPresenceConfirmationFrames;
                     _confirmedProductPresence = true;
                 }
-                else
+                else if (_wiringFaults.Count > 0)
+                {
+                    // The per-edge time debounce already proved this is a stable
+                    // wiring fault. Do not add another frame of operator latency.
+                    _productPresenceCandidateFrames = ProductPresenceConfirmationFrames;
+                    _confirmedProductPresence = true;
+                }
+                else if (stablePresenceEvidence)
                 {
                     _productPresenceCandidateFrames = Math.Min(
                         ProductPresenceConfirmationFrames,
                         _productPresenceCandidateFrames + 1);
                     if (_productPresenceCandidateFrames >= ProductPresenceConfirmationFrames)
                         _confirmedProductPresence = true;
+                }
+                else
+                {
+                    _productPresenceCandidateFrames = 0;
                 }
             }
             else

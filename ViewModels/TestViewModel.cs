@@ -316,6 +316,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int[] _inlineProbeContactIos = Array.Empty<int>();
     private long _inlineProbeLastSeenUtcTicks;
     private readonly ProbeStateTracker _probeStateTracker = new(confirmFrames: 2, releaseFrames: 1, maxContacts: 64);
+    private readonly ProbeContactClassifier.ChangingFanInTracker _changingFanInProbeTracker = new();
     private readonly ManualProbeSession _manualProbeSession = new(confirmFrames: 2, releaseFrames: 1);
     // V12.9.2: Probe UI tuyệt đối không dùng TTL/quarantine dài.
     // Timestamp chỉ còn phục vụ interlock relay chống rung cực ngắn sau RELEASE,
@@ -3365,14 +3366,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 rowsSnapshot?.Electrical ?? _engine.GetProductionElectricalSnapshot();
             bool realtimeActivity = activitySnapshot.RealtimeEvaluationEnabled;
             bool confirmedPresence = activitySnapshot.ProductEvidence;
+            bool hasCompletedConnection = activitySnapshot.PassedExpectedConnectionCount > 0;
 
-            // Main lifecycle follows CONFIRMED product presence only. Realtime
-            // candidate detection continues in TestEngine, but a single transient
-            // edge must not flash ĐANG KIỂM TRA during model change/insertion.
-            if (confirmedPresence &&
+            // Presentation enters ĐANG KIỂM TRA as soon as one expected network
+            // is electrically complete. Product ownership/PASS still follows the
+            // existing confirmed-presence and full-continuity safety gates.
+            if ((confirmedPresence || hasCompletedConnection) &&
                 !State.Equals("PASS", StringComparison.OrdinalIgnoreCase))
             {
-                State = activitySnapshot.ContinuityComplete
+                State = hasCompletedConnection
                     ? "ĐANG KIỂM TRA..."
                     : "ĐANG LẮP SẢN PHẨM...";
             }
@@ -3440,6 +3442,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             !IsProductRemovalPending;
 
         bool confirmedPresence = electrical.ProductEvidence;
+        bool hasCompletedConnection = electrical.PassedExpectedConnectionCount > 0;
         ProductionRuntimeState runtimeState = phase switch
         {
             ProductionPhase.WaitingProduct => ProductionRuntimeState.WaitingForProduct,
@@ -3479,7 +3482,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         State = runtimeState switch
         {
-            ProductionRuntimeState.TestingRealtime when electrical.ContinuityComplete =>
+            ProductionRuntimeState.TestingRealtime when hasCompletedConnection =>
+                "ĐANG KIỂM TRA...",
+            ProductionRuntimeState.WaitingForProduct when hasCompletedConnection =>
                 "ĐANG KIỂM TRA...",
             ProductionRuntimeState.TestingRealtime =>
                 "ĐANG LẮP SẢN PHẨM...",
@@ -5493,6 +5498,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // vẫn đi vào TestEngine/LiveTopology và báo CHẬP MẠCH. Consume preview cùng
         // frame để candidate cũ không rò sang snapshot kế tiếp.
         int[] previewIos = TakeProbePreviewForFrame(frame);
+        int changingFanInIo = _changingFanInProbeTracker.Observe(
+            frame,
+            _model,
+            _board.Capacity);
+        if (changingFanInIo > 0)
+        {
+            ios = [changingFanInIo];
+            Interlocked.Exchange(ref _inlineProbeLastSeenUtcTicks, DateTime.UtcNow.Ticks);
+            return true;
+        }
+
         if (ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(frame, _model) &&
             (previewIos.Length == 0 ||
              ProbeContactClassifier.HasAuthoritativeDirectConnectionBeyondProbe(
@@ -5692,6 +5708,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private bool ClearInlineProbeContactsState(bool clearLastSeen = false)
     {
         bool changed = _probeStateTracker.Clear();
+        _changingFanInProbeTracker.Reset();
         if (clearLastSeen)
             Interlocked.Increment(ref _inlineProbeUiRevision);
         _sound.SetTestPointContactSound(false);

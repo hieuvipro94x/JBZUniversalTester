@@ -12,6 +12,67 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public static class ProbeContactClassifier
 {
+    /// <summary>
+    /// Tracks the Htdrv-style body/table contact signature: one visible target IO
+    /// while the apparent source set changes between complete scans. A real wire
+    /// keeps the same physical edge and therefore never confirms through this path.
+    /// </summary>
+    public sealed class ChangingFanInTracker
+    {
+        private long _generation;
+        private int _targetIo;
+        private string _sourceSignature = string.Empty;
+        private bool _confirmed;
+
+        public int Observe(
+            ScanFrame frame,
+            ProductModel? model,
+            BoardCapacity boardCapacity)
+        {
+            if (!TryBuildChangingFanInObservation(
+                    frame,
+                    model,
+                    boardCapacity,
+                    out int targetIo,
+                    out string sourceSignature))
+            {
+                Reset();
+                return 0;
+            }
+
+            bool newContact = targetIo != _targetIo ||
+                              (frame.ScanGeneration != 0 &&
+                               _generation != 0 &&
+                               frame.ScanGeneration != _generation);
+            if (newContact)
+            {
+                _generation = frame.ScanGeneration;
+                _targetIo = targetIo;
+                _sourceSignature = sourceSignature;
+                _confirmed = false;
+                return 0;
+            }
+
+            _generation = frame.ScanGeneration;
+            if (!_confirmed &&
+                !string.Equals(_sourceSignature, sourceSignature, StringComparison.Ordinal))
+            {
+                _confirmed = true;
+            }
+
+            _sourceSignature = sourceSignature;
+            return _confirmed ? targetIo : 0;
+        }
+
+        public void Reset()
+        {
+            _generation = 0;
+            _targetIo = 0;
+            _sourceSignature = string.Empty;
+            _confirmed = false;
+        }
+    }
+
     public sealed record Detection(
         int Io,
         int Score,
@@ -179,6 +240,54 @@ public static class ProbeContactClassifier
         // Giữ sàn 6 để một/vài cạnh thường không thành Probe và trần 12 để không
         // bỏ lọt phần đầu/phần đuôi của thao tác chạm đang chuyển tiếp.
         Math.Clamp((sourceCount + 15) / 16, 6, 12);
+
+    private static bool TryBuildChangingFanInObservation(
+        ScanFrame frame,
+        ProductModel? model,
+        BoardCapacity boardCapacity,
+        out int targetIo,
+        out string sourceSignature)
+    {
+        targetIo = 0;
+        sourceSignature = string.Empty;
+        if (frame.Mode != BoardScanMode.Production ||
+            !frame.Complete ||
+            frame.UnknownBytes != 0 ||
+            !frame.TerminatorKnown ||
+            frame.ActiveIo.Count != 1)
+        {
+            return false;
+        }
+
+        int activeTarget = frame.ActiveIo.First();
+        if (!boardCapacity.ContainsGlobalIo(activeTarget))
+            return false;
+
+        HashSet<long> expectedEdges = BuildExpectedEdges(model);
+        var sources = new HashSet<int>();
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target <= 0 || pair.Key <= 0 || target == pair.Key)
+                    continue;
+
+                // Mixed targets or any real expected topology are product wiring,
+                // not the single-target capacitive signature seen in the trace.
+                if (target != activeTarget || expectedEdges.Contains(EdgeKey(pair.Key, target)))
+                    return false;
+
+                sources.Add(pair.Key);
+            }
+        }
+
+        if (sources.Count == 0)
+            return false;
+
+        targetIo = activeTarget;
+        sourceSignature = string.Join(",", sources.OrderBy(value => value));
+        return true;
+    }
 
     /// <summary>
     /// Htdrv trace phân biệt cạnh điện thật (mỗi target chỉ có một/vài source)

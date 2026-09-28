@@ -1425,11 +1425,29 @@ internal static partial class Program
         recoveryVm.LoadPreparedModelAsync(recoveryModel).GetAwaiter().GetResult();
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(recoveryVm, 1);
+        ScanSupervisor recoverySupervisor =
+            (ScanSupervisor)(typeof(TestViewModel).GetField(
+                "_scanSupervisor",
+                BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(recoveryVm)
+                ?? throw new InvalidOperationException("Recovery ScanSupervisor not found"));
+        recoveryBoard.SetRequestedScanCapacityForTest(1);
+        recoveryBoard.SetAppliedScanCapacityForTest(1);
+        recoverySupervisor.Suspend("self-test-healthy-stream");
+        recoverySupervisor.EnsureProductionScanAsync(
+                recoveryModel.MaxIo,
+                CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
         TestEngine recoveryEngine =
             (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(recoveryVm) ?? throw new InvalidOperationException("Recovery TestEngine not found"));
         recoveryEngine.SetFrameProcessingEnabled(true);
-        recoveryBoard.Publish(FrameSeq(1, (1, new[] { 18 })));
+        recoveryBoard.Publish(FrameSeq(1, (1, new[] { 18 })) with { ScanGeneration = 1 });
+        ScanHealthSnapshot recoveryHealth = recoverySupervisor.HealthSnapshot;
+        Assert(recoveryHealth.State == ScanHealthState.Monitoring &&
+               recoveryHealth.ScanGeneration == 1,
+            $"Rejected FAIL recovery setup establishes a healthy generation-aware production stream; " +
+            $"state={recoveryHealth.State}, generation={recoveryHealth.ScanGeneration}, reason={recoveryHealth.Reason}");
         Assert(recoveryVm.Faults.Count == 0, "Passed recovery model hides completed network rows before removal");
         long recoveryGeneration = (long)(typeof(TestViewModel).GetField(
             "_runtimeGeneration",
@@ -1455,15 +1473,20 @@ internal static partial class Program
             .GetAwaiter()
             .GetResult();
         publishRecoveryFrame.GetAwaiter().GetResult();
-        Assert(SpinWait.SpinUntil(
-                   () => recoveryVm.ResultStatusText == "LẮP SẢN PHẨM" &&
-                         recoveryVm.Faults.Count == 0 &&
-                         recoveryVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
-                         !recoveryVm.IsProductRemovalPending,
-                   TimeSpan.FromSeconds(2)) &&
-               recoveryBoard.Commands.Count(command => command == "START") == recoveryStartCountBefore &&
+        bool recoveryCompleted = SpinWait.SpinUntil(
+            () => recoveryVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+                  recoveryVm.Faults.Count == 0 &&
+                  recoveryVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+                  !recoveryVm.IsProductRemovalPending,
+            TimeSpan.FromSeconds(2));
+        int recoveryStartCountAfter = recoveryBoard.Commands.Count(command => command == "START");
+        Assert(recoveryCompleted &&
+               recoveryStartCountAfter == recoveryStartCountBefore &&
                !recoveryBoard.Commands.Contains("SET:2"),
-            "Rejected FAIL commit reuses healthy removal scan, returns to authoritative WaitingForProduct with no removal latch, and cannot remain latched at KHÔNG ĐẠT");
+            "Rejected FAIL commit reuses healthy removal scan, returns to authoritative WaitingForProduct with no removal latch, " +
+            $"and cannot remain latched at KHÔNG ĐẠT; status={recoveryVm.ResultStatusText}, state={recoveryVm.State}, " +
+            $"runtime={recoveryVm.CurrentProductionRuntimeState}, removal={recoveryVm.IsProductRemovalPending}, " +
+            $"starts={recoveryStartCountBefore}->{recoveryStartCountAfter}");
 
         string xaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
         Assert(!xaml.Contains("ProbeToggleText", StringComparison.Ordinal) &&
@@ -5798,8 +5821,8 @@ internal static partial class Program
             2,
             (1, new[] { 18 }),
             (201, new[] { 202, 203 })));
-        Assert(vm.PassedNetworkCount == 3 && vm.State == "ĐANG LẮP SẢN PHẨM...",
-            "Two complete frames with incomplete product connectivity confirm realtime installation state");
+        Assert(vm.PassedNetworkCount == 3 && vm.State == "ĐANG KIỂM TRA...",
+            "The first completed expected connection moves presentation to the checking state without granting PASS");
 
         // Tháo dây thường nhưng AO-a1 vẫn còn: tuyệt đối chưa reset.
         board.Publish(FrameSeq(3, (201, new[] { 202 })));

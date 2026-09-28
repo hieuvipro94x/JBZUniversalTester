@@ -188,10 +188,10 @@ public sealed class ProductionSettings
     public int FaultJigRelayNumber { get; set; } = 1;
 
     /// <summary>Khoảng chờ an toàn sau khi R2 MARKING OFF trước khi R1 JIG ON trong chu trình PASS.</summary>
-    public int PassMarkingToJigDelayMs { get; set; } = 120;
+    public int PassMarkingToJigDelayMs { get; set; } = 350;
 
     /// <summary>Compatibility V15.1 trở về trước: "R1,R2". V15.2 UI không còn dùng trực tiếp.</summary>
-    public string StampDelay { get; set; } = "250,250";
+    public string StampDelay { get; set; } = "120,120";
 
     public int OversizeWaitSeconds { get; set; }
 
