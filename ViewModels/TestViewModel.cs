@@ -3495,10 +3495,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 : "NO_CONFIRMED_PRODUCT_EVIDENCE";
 
         SetProductionRuntimeState(runtimeState, electrical.FrameSequence, reason);
+        // Presentation may react to the first completed expected connection.
+        // Keep the debounced runtime state authoritative for PASS/FAIL, but do
+        // not let WaitingForProduct repaint the center "LẮP SẢN PHẨM" overlay
+        // on top of a product that is already electrically visible.
+        bool productPresentationActive =
+            runtimeState != ProductionRuntimeState.WaitingForProduct ||
+            (continuityPresentation && hasCompletedConnection);
         SetProductionPresentationMode(
-            runtimeState == ProductionRuntimeState.WaitingForProduct
-                ? ProductionPresentationMode.Waiting
-                : ProductionPresentationMode.Product,
+            productPresentationActive
+                ? ProductionPresentationMode.Product
+                : ProductionPresentationMode.Waiting,
             electrical.FrameSequence,
             "ENGINE_SNAPSHOT");
 
@@ -5795,18 +5802,19 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 _presentationCycleStarted = presentationCycleStarted;
                 RaiseCenterPresentation();
             }
-            desiredRows = waitingForProduct
+            desiredRows = waitingForProduct && !presentationCycleStarted
                 ? Array.Empty<FaultRow>()
                 : productSnapshot.Rows;
 
             if (waitingForProduct &&
-                CurrentProductionPhase == ProductionPhase.Continuity)
+                CurrentProductionPhase == ProductionPhase.Continuity &&
+                !presentationCycleStarted)
             {
                 State = "LẮP SẢN PHẨM";
             }
 
             SetProductionPresentationMode(
-                waitingForProduct
+                waitingForProduct && !presentationCycleStarted
                     ? ProductionPresentationMode.Waiting
                     : ProductionPresentationMode.Product,
                 frameSequence,

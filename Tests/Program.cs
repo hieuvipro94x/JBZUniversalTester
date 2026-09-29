@@ -5266,6 +5266,10 @@ internal static partial class Program
             "No product activity keeps FaultGrid empty and shows LẮP SẢN PHẨM");
 
         board.Publish(FrameSeq(100, (1, new[] { 3 })));
+        Assert(!vm.IsCenterResultVisible &&
+               vm.State == "ĐANG KIỂM TRA..." &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
+            "The first completed expected connection hides the waiting overlay without bypassing product debounce");
         board.Publish(FrameSeq(101, (1, new[] { 3 })));
         Assert(!vm.IsCenterResultVisible &&
                vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
