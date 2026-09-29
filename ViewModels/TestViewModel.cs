@@ -5787,7 +5787,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             bool waitingForProduct =
                 CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct;
-            bool presentationCycleStarted = productSnapshot.Electrical.ProductEvidence;
+            bool presentationCycleStarted = CurrentProductionPhase == ProductionPhase.Continuity
+                ? _engine.HasRealtimePresentationProductActivity
+                : productSnapshot.Electrical.ProductEvidence;
             if (_presentationCycleStarted != presentationCycleStarted)
             {
                 _presentationCycleStarted = presentationCycleStarted;
@@ -11614,6 +11616,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ProductionElectricalSnapshot presentationElectrical =
                 rowsSnapshot?.Electrical ?? _engine.GetProductionElectricalSnapshot();
             bool hasProductEvidence = presentationElectrical.ProductEvidence;
+            // Presentation follows the merged realtime SOURCE view. Lifecycle
+            // ProductEvidence remains debounced and authoritative for
+            // PASS/FAIL/relay/ProductRemoved.
+            bool hasRealtimePresentationActivity =
+                CurrentProductionPhase == ProductionPhase.Continuity
+                    ? _engine.HasRealtimePresentationProductActivity
+                    : hasProductEvidence;
             bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
             bool confirmedWiringFaultPresentation =
                 presentationElectrical.HasConfirmedWiringFault &&
@@ -11622,16 +11631,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (!_presentationCycleStarted &&
                 (_cycleActive || masterCycleActive || confirmedWiringFaultPresentation) &&
                 !probeOwnsPresentation &&
-                (hasProductEvidence || confirmedWiringFaultPresentation))
+                (hasRealtimePresentationActivity || confirmedWiringFaultPresentation))
             {
                 _presentationCycleStarted = true;
                 RaiseCenterPresentation();
             }
-            else if (rowsSnapshot is not null &&
-                     !hasProductEvidence &&
+            else if (CurrentProductionPhase == ProductionPhase.Continuity &&
+                     !hasRealtimePresentationActivity &&
+                     !confirmedWiringFaultPresentation &&
                      !probeOwnsPresentation &&
-                     CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
-                     CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
                      CurrentProbePresentationState is ProbePresentationState.Inactive or ProbePresentationState.Released &&
                      _presentationCycleStarted)
             {

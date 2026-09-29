@@ -1200,6 +1200,9 @@ internal static partial class Program
                !engine.GetProductEvidenceSnapshot().ProbeEvidence,
             "Presentation/Probe evidence is independent from authoritative ProductPresence");
         engine.ProcessFrame(FrameSeq(120, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 3 }, sequence: 121) &&
+               engine.HasRealtimePresentationProductActivity,
+            "A remaining wrong edge keeps realtime product presentation active after the expected edge is removed");
         Assert(engine.ApplyContinuityPreviewSource(1, Array.Empty<int>(), sequence: 121) &&
                !engine.HasRealtimePresentationProductActivity &&
                engine.HasProductActivity,
@@ -5270,6 +5273,27 @@ internal static partial class Program
                vm.Faults.All(row => row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
             "First real product edge starts presentation and only the passed network disappears");
 
+        TestViewModel removalPreviewVm = CreateTestViewModel(production, out FakeBoard removalPreviewBoard);
+        removalPreviewVm.SetModel(Model(
+            ("PAIR-A", new[] { 1, 3 }),
+            ("PAIR-B", new[] { 2, 4 }),
+            ("PAIR-C", new[] { 5, 6 })));
+        removalPreviewVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        removalPreviewBoard.Publish(FrameSeq(90, (1, new[] { 3 }), (2, new[] { 4 })));
+        removalPreviewBoard.Publish(FrameSeq(91, (1, new[] { 3 }), (2, new[] { 4 })));
+        Assert(!removalPreviewVm.IsCenterResultVisible,
+            "Installed product hides waiting overlay before realtime removal previews");
+
+        removalPreviewBoard.Publish(ContinuityPreviewFrame(92, 1, Array.Empty<int>()));
+        Assert(!removalPreviewVm.IsCenterResultVisible,
+            "Removing only one product network must not restore LẮP SẢN PHẨM");
+
+        removalPreviewBoard.Publish(ContinuityPreviewFrame(92, 2, Array.Empty<int>()));
+        Assert(removalPreviewVm.IsCenterResultVisible &&
+               removalPreviewVm.CenterResultText == "LẮP SẢN PHẨM" &&
+               removalPreviewVm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime,
+            "Removing every product network restores waiting overlay before C0 without mutating lifecycle state");
+
         MethodInfo showBoardUnavailable = typeof(TestViewModel).GetMethod(
             "ShowBoardUnavailablePresentation",
             BindingFlags.Instance | BindingFlags.NonPublic)
@@ -8914,6 +8938,15 @@ internal static partial class Program
             .GroupBy(value => value).ToDictionary(group => group.Key, group => group.Count());
         return new ScanFrame(DateTime.Now, 1, active, [], true, 0, sequence, map, hits, BoardScanMode.Production);
     }
+
+    private static ScanFrame ContinuityPreviewFrame(long sequence, int source, int[] targets) =>
+        FrameSeq(sequence, (source, targets)) with
+        {
+            Complete = false,
+            SourceCount = 1,
+            EndMarkerCode = null,
+            TerminatorKnown = false
+        };
 
     private static ScanFrame ProbeFrameSeq(long sequence, int target, int fanIn = 20) =>
         ProbeFrameSeq(sequence, [target], fanIn);

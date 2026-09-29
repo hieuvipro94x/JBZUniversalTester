@@ -163,6 +163,10 @@ public sealed class TestEngine : IDisposable
     // Presentation-only overlay populated from changed SOURCE relations before C0.
     // It never participates in PASS/FAIL, fault debounce, relay or counters.
     readonly Dictionary<int, HashSet<int>> _continuityPreviewConnections = [];
+    // Raw SOURCE overrides are kept separately so realtime removal presentation
+    // cannot hide a still-connected wrong/short edge that the expected-only
+    // continuity overlay intentionally filters out.
+    readonly Dictionary<int, HashSet<int>> _continuityPreviewRawConnections = [];
     long _continuityPreviewSequence;
     readonly HashSet<int> _unexpectedIo = [];
     readonly HashSet<WiringFaultPair> _wiringFaults = [];
@@ -1049,6 +1053,7 @@ public sealed class TestEngine : IDisposable
         _currentConnections.Clear();
         _expectedConnectionScratch.Clear();
         _continuityPreviewConnections.Clear();
+        _continuityPreviewRawConnections.Clear();
         _continuityPreviewSequence = 0;
         _actualComponentByIo.Clear();
         _unexpectedIo.Clear();
@@ -1110,20 +1115,45 @@ public sealed class TestEngine : IDisposable
 
         lock (_gate)
         {
-            if (!_frameProcessingEnabled || _model is null ||
-                !_componentByIo.TryGetValue(sourceIo, out int expectedComponent))
-            {
+            if (!_frameProcessingEnabled || _model is null)
                 return false;
-            }
 
             if (_continuityPreviewSequence != 0 &&
                 sequence > 0 &&
                 sequence != _continuityPreviewSequence)
             {
                 _continuityPreviewConnections.Clear();
+                _continuityPreviewRawConnections.Clear();
             }
             if (sequence > 0)
                 _continuityPreviewSequence = sequence;
+
+            HashSet<int> rawTargets = targets.Where(target => target > 0).ToHashSet();
+            bool rawMatchesAuthoritative = _currentConnections.TryGetValue(
+                sourceIo,
+                out HashSet<int>? rawAuthoritativeTargets)
+                ? rawAuthoritativeTargets.SetEquals(rawTargets)
+                : rawTargets.Count == 0;
+            bool rawChanged;
+            if (rawMatchesAuthoritative)
+            {
+                rawChanged = _continuityPreviewRawConnections.Remove(sourceIo);
+            }
+            else if (_continuityPreviewRawConnections.TryGetValue(
+                         sourceIo,
+                         out HashSet<int>? existingRaw) &&
+                     existingRaw.SetEquals(rawTargets))
+            {
+                rawChanged = false;
+            }
+            else
+            {
+                _continuityPreviewRawConnections[sourceIo] = rawTargets;
+                rawChanged = true;
+            }
+
+            if (!_componentByIo.TryGetValue(sourceIo, out int expectedComponent))
+                return rawChanged;
 
             var filteredTargets = new HashSet<int>();
             foreach (int target in targets)
@@ -1146,19 +1176,25 @@ public sealed class TestEngine : IDisposable
                     expectedComponent).SetEquals(filteredTargets)
                 : filteredTargets.Count == 0;
 
+            bool expectedChanged;
             if (matchesAuthoritative)
-                return _continuityPreviewConnections.Remove(sourceIo);
-
-            if (_continuityPreviewConnections.TryGetValue(
-                    sourceIo,
-                    out HashSet<int>? existing) &&
-                existing.SetEquals(filteredTargets))
             {
-                return false;
+                expectedChanged = _continuityPreviewConnections.Remove(sourceIo);
+            }
+            else if (_continuityPreviewConnections.TryGetValue(
+                         sourceIo,
+                         out HashSet<int>? existing) &&
+                     existing.SetEquals(filteredTargets))
+            {
+                expectedChanged = false;
+            }
+            else
+            {
+                _continuityPreviewConnections[sourceIo] = filteredTargets;
+                expectedChanged = true;
             }
 
-            _continuityPreviewConnections[sourceIo] = filteredTargets;
-            return true;
+            return rawChanged || expectedChanged;
         }
     }
 
@@ -1196,12 +1232,12 @@ public sealed class TestEngine : IDisposable
                 if (_model is null)
                     return false;
 
-                if (_continuityPreviewConnections.Count == 0)
+                if (_continuityPreviewRawConnections.Count == 0)
                     return HasProductActivityUnsafe(_model);
 
                 foreach ((int source, HashSet<int> authoritativeTargets) in _currentConnections)
                 {
-                    HashSet<int> targets = _continuityPreviewConnections.TryGetValue(
+                    HashSet<int> targets = _continuityPreviewRawConnections.TryGetValue(
                         source,
                         out HashSet<int>? previewTargets)
                         ? previewTargets
@@ -1213,7 +1249,7 @@ public sealed class TestEngine : IDisposable
                     }
                 }
 
-                foreach ((int source, HashSet<int> targets) in _continuityPreviewConnections)
+                foreach ((int source, HashSet<int> targets) in _continuityPreviewRawConnections)
                 {
                     if (!_currentConnections.ContainsKey(source) &&
                         targets.Any(target =>
@@ -1245,13 +1281,15 @@ public sealed class TestEngine : IDisposable
     {
         lock (_gate)
         {
-            if (_continuityPreviewConnections.Count == 0)
+            if (_continuityPreviewConnections.Count == 0 &&
+                _continuityPreviewRawConnections.Count == 0)
             {
                 _continuityPreviewSequence = 0;
                 return false;
             }
 
             _continuityPreviewConnections.Clear();
+            _continuityPreviewRawConnections.Clear();
             _continuityPreviewSequence = 0;
             return true;
         }

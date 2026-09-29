@@ -48,6 +48,16 @@ function Assert-SynchronizedVersion {
     return $parsed
 }
 
+function Format-ReleaseVersion {
+    param([Version]$Value)
+
+    if ($Value.Major -ge 2000) {
+        return "{0}.{1:D2}.{2}" -f $Value.Major, $Value.Minor, $Value.Build
+    }
+
+    return $Value.ToString()
+}
+
 [xml]$workingXml = Get-Content -LiteralPath $versionPath -Raw
 $workingGroup = Get-VersionGroup -Document $workingXml
 [Version]$workingVersion = Assert-SynchronizedVersion -Group $workingGroup
@@ -85,13 +95,13 @@ $sourceChanges = @($statusLines | Where-Object {
     return -not $path.Equals("Version.props", [StringComparison]::OrdinalIgnoreCase)
 })
 
-$release = $workingVersion.ToString()
+$release = [string]$workingGroup.Version
 $action = "UNCHANGED_REBUILD"
 
 if ($workingVersion -eq $headVersion -and $sourceChanges.Count -gt 0) {
     $patch = if ($workingVersion.Build -lt 0) { 0 } else { $workingVersion.Build }
     $next = New-Object Version($workingVersion.Major, $workingVersion.Minor, ($patch + 1))
-    $release = $next.ToString()
+    $release = Format-ReleaseVersion -Value $next
     $tag = $release.Replace('.', '_')
 
     $workingGroup.VersionPrefix = $release
