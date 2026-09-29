@@ -9,6 +9,10 @@ public sealed record OperatorFaultDisplay(
     string Title,
     IReadOnlyList<FaultDisplayLine> Lines);
 
+public sealed record CompactOperatorFaultDisplay(
+    string Title,
+    string Summary);
+
 public sealed record CustomerFaultDisplay(
     string FaultType,
     string FaultLocation,
@@ -120,6 +124,27 @@ public static class FaultDisplayFormatter
             Add(lines, "Chi tiết", string.IsNullOrWhiteSpace(fault.Message) ? "KHÔNG CÓ DỮ LIỆU CHI TIẾT" : fault.Message);
 
         return new OperatorFaultDisplay(OperatorInstruction(fault.Type), lines);
+    }
+
+    public static CompactOperatorFaultDisplay FormatCompactOperator(FaultDetail fault)
+    {
+        ArgumentNullException.ThrowIfNull(fault);
+
+        string title = OperatorInstruction(fault.Type);
+        if (title.StartsWith("KIỂM TRA ", StringComparison.Ordinal))
+            title = title[9..];
+
+        string summary = fault.Type switch
+        {
+            ProductFaultType.WrongWiring => CompactWrongWiring(fault),
+            ProductFaultType.ShortCircuit => ActualConnection(fault, vietnamese: true),
+            ProductFaultType.OpenCircuit => StandardConnection(fault, vietnamese: true),
+            _ => string.IsNullOrWhiteSpace(fault.Message)
+                ? ActualConnection(fault, vietnamese: true)
+                : fault.Message.Trim()
+        };
+
+        return new CompactOperatorFaultDisplay(title, summary);
     }
 
     public static CustomerFaultDisplay FormatCustomer(FaultDetail fault)
@@ -462,6 +487,22 @@ public static class FaultDisplayFormatter
         return string.IsNullOrWhiteSpace(actualConnection)
             ? "KIỂM TRA LẠI VỊ TRÍ CẮM"
             : $"KIỂM TRA LẠI {actualConnection}";
+    }
+
+    private static string CompactWrongWiring(FaultDetail fault)
+    {
+        int[] expected = [fault.ExpectedSourceIo ?? 0, fault.ExpectedTargetIo ?? 0];
+        int[] actual = [fault.ActualSourceIo ?? 0, fault.ActualTargetIo ?? 0];
+        int unexpectedActual = actual.FirstOrDefault(io => io > 0 && !expected.Contains(io));
+        string wire = string.IsNullOrWhiteSpace(fault.WireName)
+            ? fault.ExpectedSourceIo is int expectedIo && expectedIo > 0
+                ? $"IO {expectedIo}"
+                : "DÂY"
+            : fault.WireName.Trim();
+
+        return unexpectedActual > 0
+            ? $"{wire} CẮM NHẦM {FormatFaultEndpoint(fault, unexpectedActual, expected: false)}"
+            : ActualConnection(fault, vietnamese: true);
     }
 
     private static string FormatFaultEndpoint(FaultDetail fault, int io, bool expected)

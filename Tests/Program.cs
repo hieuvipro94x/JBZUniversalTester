@@ -5630,13 +5630,13 @@ internal static partial class Program
             : faultDialogXaml[faultItemsStart..faultItemsTagEnd];
         Assert(faultDialogXaml.Contains("SizeToContent=\"Height\"", StringComparison.Ordinal) &&
                faultDialogXaml.Contains("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal) &&
-               faultDialogXaml.Contains("ItemsSource=\"{Binding Lines}\"", StringComparison.Ordinal) &&
+               faultDialogXaml.Contains("Text=\"{Binding Summary}\"", StringComparison.Ordinal) &&
                !faultItemsOpeningTag.Contains("Visibility=\"Collapsed\"", StringComparison.Ordinal) &&
                !faultDialogXaml.Contains("x:Name=\"FaultTypeText\"", StringComparison.Ordinal) &&
                !faultDialogXaml.Contains("x:Name=\"SummaryText\"", StringComparison.Ordinal) &&
-               faultDialogSource.Contains(".Select(FaultDisplayFormatter.FormatOperator)", StringComparison.Ordinal) &&
+               faultDialogSource.Contains(".Select(FaultDisplayFormatter.FormatCompactOperator)", StringComparison.Ordinal) &&
                !faultDialogSource.Contains("BuildShortSummary", StringComparison.Ordinal),
-            "FAIL dialog renders every detailed fault instead of hiding the list behind a first-fault summary");
+            "FAIL dialog renders every fault as a concise item instead of hiding all but the first fault");
 
         FaultDetail[] popupFaults =
         [
@@ -5669,12 +5669,14 @@ internal static partial class Program
                 ActualTargetIo = 316
             }
         ];
-        OperatorFaultDisplay[] popupDisplays = popupFaults
-            .Select(FaultDisplayFormatter.FormatOperator)
+        CompactOperatorFaultDisplay[] popupDisplays = popupFaults
+            .Select(FaultDisplayFormatter.FormatCompactOperator)
             .ToArray();
         Assert(popupDisplays.Length == 2 &&
-               popupDisplays.All(display => display.Lines.Any(line => line.Label == "CẦN SỬA")),
-            "FAIL popup keeps every confirmed wrong-wire pair with a direct correction instruction");
+               popupDisplays[0].Title == "LỖI SAI DÂY" &&
+               popupDisplays[0].Summary.Contains("IO 43 [JIG 2 - Chân 11]", StringComparison.Ordinal) &&
+               popupDisplays[1].Summary.Contains("IO 44 [JIG 2 - Chân 12]", StringComparison.Ordinal),
+            "FAIL popup keeps every confirmed wrong-wire pair in a short operator summary");
 
         string mainWindowXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));

@@ -11701,20 +11701,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     : Array.Empty<FaultRow>();
             }
 
-            // Khi lỗi dây đã được xác nhận, bảng vận hành chỉ giữ đúng quan hệ
-            // gây FAIL. Không để hàng trăm dòng CHƯA KẾT NỐI che khuất vị trí
-            // sai dây/chập mạch mà người vận hành cần sửa ngay.
-            if (CurrentProductionPhase == ProductionPhase.WaitingFaultConfirmation &&
-                presentationElectrical.HasConfirmedWiringFault)
-            {
-                WiringFaultPair[] confirmedPairs = _engine.WiringFaults.ToArray();
-                desiredRows = desiredRows
-                    .Where(row => confirmedPairs.Any(pair =>
-                        row.ProductFaultType == pair.FaultType &&
-                        row.RelatedIos.Contains(pair.SourceIo) &&
-                        row.RelatedIos.Contains(pair.TargetIo)))
-                    .ToArray();
-            }
         }
 
         FaultRow[] probeRows = ProbeContacts.ToArray();

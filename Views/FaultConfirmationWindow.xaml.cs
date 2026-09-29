@@ -30,11 +30,11 @@ public partial class FaultConfirmationWindow : Window
             Closing += PreventUnauthorizedClose;
         }
 
-        IReadOnlyList<OperatorFaultDisplay> displays = faults
+        IReadOnlyList<CompactOperatorFaultDisplay> displays = faults
             .OrderBy(fault => FaultTypeCatalog.Priority(fault.Type))
             .ThenBy(fault => fault.ActualSourceIo ?? int.MaxValue)
             .ThenBy(fault => fault.ActualTargetIo ?? int.MaxValue)
-            .Select(FaultDisplayFormatter.FormatOperator)
+            .Select(FaultDisplayFormatter.FormatCompactOperator)
             .ToArray();
 
         FaultItemsControl.ItemsSource = displays;
