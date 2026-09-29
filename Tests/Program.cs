@@ -1561,6 +1561,15 @@ internal static partial class Program
                xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#23E6E6\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,8,0,0\"/>", StringComparison.Ordinal),
             "TestView uses bold open rows and a thick cyan separator between wire networks");
+        int operatorWireStyleStart = xaml.IndexOf("x:Key=\"OperatorWireTextStyle\"", StringComparison.Ordinal);
+        int operatorConnectorStyleStart = xaml.IndexOf("x:Key=\"OperatorConnectorTextStyle\"", StringComparison.Ordinal);
+        string operatorWireStyle = operatorWireStyleStart >= 0 && operatorConnectorStyleStart > operatorWireStyleStart
+            ? xaml[operatorWireStyleStart..operatorConnectorStyleStart]
+            : string.Empty;
+        Assert(operatorWireStyle.Contains("Value=\"WrongWiring\"", StringComparison.Ordinal) &&
+               operatorWireStyle.Contains("Value=\"Short\"", StringComparison.Ordinal) &&
+               operatorWireStyle.Contains("Foreground\" Value=\"{StaticResource PiFailBrush}", StringComparison.Ordinal),
+            "Wrong-wiring and short rows override blue connector/wire text with the red FAIL brush");
         Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&

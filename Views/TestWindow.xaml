@@ -278,6 +278,14 @@
             <Setter Property="FontSize" Value="22"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Foreground" Value="{StaticResource PiBlueTextBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding KindName}" Value="WrongWiring">
+                    <Setter Property="Foreground" Value="{StaticResource PiFailBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding KindName}" Value="Short">
+                    <Setter Property="Foreground" Value="{StaticResource PiFailBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="OperatorConnectorTextStyle"
