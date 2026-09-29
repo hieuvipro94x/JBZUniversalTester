@@ -12,7 +12,7 @@ public sealed class WaterProofTestViewModel : ObservableObject
     private const string PassBackground = "#32CD32";
     private const string FailBackground = "#FF4040";
 
-    private readonly WaterProofModelSettings _profile;
+    private WaterProofModelSettings _profile;
     private readonly double?[] _pressReference = new double?[3];
 
     private string _stageText = "PRESS";
@@ -45,16 +45,28 @@ public sealed class WaterProofTestViewModel : ObservableObject
     /// Re-arms the same compact Leak window for a connector retest on the same product.
     /// The window remains owned by the current physical product until ProductRemoved.
     /// </summary>
-    public void BeginRun()
+    public void BeginRun(WaterProofModelSettings? runProfile = null)
     {
+        bool firstRun = runProfile is null;
+        if (runProfile is not null)
+            _profile = runProfile.Clone();
         Array.Clear(_pressReference, 0, _pressReference.Length);
         StageText = "PRESS";
-        Channel1Text = "--";
-        Channel2Text = "--";
-        Channel3Text = "--";
-        Channel1Background = _profile.IsChannelEnabled(1) ? ActiveBackground : DisabledBackground;
-        Channel2Background = _profile.IsChannelEnabled(2) ? ActiveBackground : DisabledBackground;
-        Channel3Background = _profile.IsChannelEnabled(3) ? ActiveBackground : DisabledBackground;
+        if (firstRun || _profile.Channel1Enabled)
+        {
+            Channel1Text = "--";
+            Channel1Background = _profile.Channel1Enabled ? ActiveBackground : DisabledBackground;
+        }
+        if (firstRun || _profile.Channel2Enabled)
+        {
+            Channel2Text = "--";
+            Channel2Background = _profile.Channel2Enabled ? ActiveBackground : DisabledBackground;
+        }
+        if (firstRun || _profile.Channel3Enabled)
+        {
+            Channel3Text = "--";
+            Channel3Background = _profile.Channel3Enabled ? ActiveBackground : DisabledBackground;
+        }
         IsRunning = true;
     }
 

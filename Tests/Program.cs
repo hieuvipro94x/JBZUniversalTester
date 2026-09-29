@@ -788,6 +788,10 @@ internal static partial class Program
         Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#FFFFFF" &&
                BrushHex(wrongRow.RowForegroundBrush) == "#C62828",
             "Wrong wiring uses red text on an absolute white row");
+        Assert(wrongRow.IsWireNameMissing && wrongRow.WireNameDisplay == "-" &&
+               new FaultRow { WireName = "  " }.WireNameDisplay == "-" &&
+               new FaultRow { WireName = "MC4" }.WireNameDisplay == "MC4",
+            "An empty wire code displays a dash without changing populated wire codes");
 
         var probeRow = new FaultRow { Kind = FaultKind.Probe, Color = "B/L" };
         Assert(BrushHex(probeRow.RowBackgroundBrush) == "#FFFFFF" &&
@@ -1542,8 +1546,7 @@ internal static partial class Program
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridCenterTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("ElementStyle=\"{StaticResource HtdrvGridStrongCenterTextStyle}\"", StringComparison.Ordinal) &&
-               !xaml.Contains("x:Key=\"OperatorWireNameTextStyle\"", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireName}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource OperatorWireTextStyle}\"", StringComparison.Ordinal) &&
+                xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireNameDisplay}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource OperatorWireNameTextStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\" Width=\"0.85*\" MinWidth=\"90\"", StringComparison.Ordinal) &&
@@ -1567,9 +1570,12 @@ internal static partial class Program
             ? xaml[operatorWireStyleStart..operatorConnectorStyleStart]
             : string.Empty;
         Assert(operatorWireStyle.Contains("Value=\"WrongWiring\"", StringComparison.Ordinal) &&
-               operatorWireStyle.Contains("Value=\"Short\"", StringComparison.Ordinal) &&
-               operatorWireStyle.Contains("Foreground\" Value=\"{StaticResource PiFailBrush}", StringComparison.Ordinal),
+                operatorWireStyle.Contains("Value=\"Short\"", StringComparison.Ordinal) &&
+                operatorWireStyle.Contains("Foreground\" Value=\"{StaticResource PiFailBrush}", StringComparison.Ordinal),
             "Wrong-wiring and short rows override blue connector/wire text with the red FAIL brush");
+        Assert(xaml.Contains("x:Key=\"OperatorWireNameTextStyle\"", StringComparison.Ordinal) &&
+               xaml.Contains("Binding=\"{Binding IsWireNameMissing}\" Value=\"True\"", StringComparison.Ordinal),
+            "Missing wire codes use the red FAIL brush only in the wire-name column");
         Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&
@@ -2839,17 +2845,17 @@ internal static partial class Program
         MethodInfo closeWindow = typeof(TestViewModel).GetMethod("CloseWaterProofWindow", windowFlags)!;
         FieldInfo windowProfile = typeof(TestViewModel).GetField("_waterProofProfile", windowFlags)!;
         windowProfile.SetValue(windowCoordinator, new WaterProofModelSettings { Enabled = false });
-        openWindow.Invoke(windowCoordinator, [windowModel]);
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
         Assert(openedWindows == 0, "Disabled Leak does not create a window/viewmodel");
         windowProfile.SetValue(windowCoordinator, new WaterProofModelSettings
         {
             Enabled = true, Channel1Enabled = false, Channel2Enabled = false, Channel3Enabled = false
         });
-        openWindow.Invoke(windowCoordinator, [windowModel]);
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
         Assert(openedWindows == 0, "Zero enabled channels bypass the Leak window");
         windowProfile.SetValue(windowCoordinator, profile);
-        openWindow.Invoke(windowCoordinator, [windowModel]);
-        openWindow.Invoke(windowCoordinator, [windowModel]);
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
         Assert(openedWindows == 1 && closedWindows == 0,
             "One Leak cycle creates exactly one compact window");
 
@@ -2868,7 +2874,7 @@ internal static partial class Program
         Assert(!retainedWindowVm.IsRunning && closedWindows == 0,
             "Final Leak PASS/FAIL stays visible while the product remains on the JIG");
 
-        openWindow.Invoke(windowCoordinator, [windowModel]);
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
         Assert(openedWindows == 1 && retainedWindowVm.IsRunning,
             "Leak-only retest rearms the same compact window without close/open flicker");
 
@@ -3066,6 +3072,74 @@ internal static partial class Program
         Assert(retTriggerEngine.HasConnectedRetWire("1") &&
                !retTriggerEngine.HasConnectedRetWire("UNKNOWN"),
             "RET1 connected to its matching RET1 topology through the selected connector starts Leak");
+
+        ProductModel twoChannelLeakModel = TopologyModel(
+            new Terminal(40, "LEAK-1", "1", "2", "RET1"),
+            new Terminal(41, "OTHER-1", "1", "2", "RET1"),
+            new Terminal(42, "LEAK-2", "1", "2", "RET2"),
+            new Terminal(43, "OTHER-2", "1", "2", "RET2"));
+        TestViewModel earlyLeakVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
+        earlyLeakVm.SetModel(twoChannelLeakModel);
+        typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(earlyLeakVm, new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel2Enabled = true,
+                Channel3Enabled = false,
+                Channel1Connector = "LEAK-1",
+                Channel2Connector = "LEAK-2"
+            });
+        TestEngine earlyLeakEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(earlyLeakVm)
+            ?? throw new InvalidOperationException("Early Leak engine not found"));
+        earlyLeakEngine.SetFrameProcessingEnabled(true);
+        MethodInfo selectReadyLeakChannel = typeof(TestViewModel).GetMethod(
+            "SelectReadyWaterProofChannel", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Early Leak channel selector not found");
+        earlyLeakEngine.ProcessFrame(FrameSeq(2, (40, new[] { 41 })));
+        int firstReadyLeakChannel = (int)(selectReadyLeakChannel.Invoke(earlyLeakVm, null) ?? 0);
+        Assert(firstReadyLeakChannel == 1,
+            $"CH1 starts as soon as its RET connector is installed, before CH2 or full continuity (actual={firstReadyLeakChannel})");
+        typeof(TestViewModel).GetField("_waterProofPassedChannelsMask", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(earlyLeakVm, 1);
+        earlyLeakEngine.ProcessFrame(FrameSeq(3, (40, new[] { 41 }), (42, new[] { 43 })));
+        Assert((int)(selectReadyLeakChannel.Invoke(earlyLeakVm, null) ?? 0) == 2,
+            "A completed CH1 is not repeated; CH2 starts when its own connector is installed");
+        MethodInfo recordPassedLeakChannels = typeof(TestViewModel).GetMethod(
+            "RecordPassedWaterProofChannels", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak completion recorder not found");
+        FieldInfo passedLeakMask = typeof(TestViewModel).GetField(
+            "_waterProofPassedChannelsMask", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak channel mask not found");
+        FieldInfo allLeakPassed = typeof(TestViewModel).GetField(
+            "_preContinuityWaterProofPassed", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak completion gate not found");
+        passedLeakMask.SetValue(earlyLeakVm, 0);
+        recordPassedLeakChannels.Invoke(earlyLeakVm, [new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(1, true, 80, 79.5, 0.5, true)], true, "CH1_PASS")]);
+        Assert((int)(allLeakPassed.GetValue(earlyLeakVm) ?? 0) == 0,
+            "Product PASS remains gated while another configured Leak channel has not passed");
+        recordPassedLeakChannels.Invoke(earlyLeakVm, [new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(2, true, 80, 79.6, 0.4, true)], true, "CH2_PASS")]);
+        Assert((int)(allLeakPassed.GetValue(earlyLeakVm) ?? 0) == 1,
+            "Product PASS gate opens only after every configured Leak channel passes");
+
+        var sequentialLeakWindow = new WaterProofTestViewModel("TWO-CHANNEL", new WaterProofModelSettings
+        {
+            Enabled = true, Channel1Enabled = true, Channel2Enabled = false, Channel3Enabled = false
+        });
+        sequentialLeakWindow.ApplyFinal(new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(1, true, 80, 79.5, 0.5, true)], true, "CH1_PASS"));
+        sequentialLeakWindow.BeginRun(new WaterProofModelSettings
+        {
+            Enabled = true, Channel1Enabled = false, Channel2Enabled = true, Channel3Enabled = false
+        });
+        Assert(sequentialLeakWindow.Channel1Text == "0.5" &&
+               sequentialLeakWindow.Channel1Background == "#32CD32" &&
+               sequentialLeakWindow.Channel2Text == "--" &&
+               sequentialLeakWindow.Channel2Background == "#FFF3A0",
+            "Starting CH2 retains CH1's completed result and resets only CH2's cell");
 
         foreach (string supportedRetName in new[] { "RET1", "RET01", "RT1" })
         {
@@ -3318,6 +3392,14 @@ internal static partial class Program
                 Channel1Enabled = true,
                 Channel1Connector = "1"
             });
+        typeof(TestViewModel).GetField("_waterProofCurrentRunProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel2Enabled = false,
+                Channel1Connector = "1"
+            });
         typeof(TestViewModel).GetField("_lastWaterProofMeasurements", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(retestArmVm, new WaterProofChannelMeasurement[]
             {
@@ -3404,17 +3486,13 @@ internal static partial class Program
             StringComparison.Ordinal);
         string postContinuitySource = testViewModelSource[postContinuityStart..postContinuityEnd];
         int resistanceStep = postContinuitySource.IndexOf(
-            "if (!resumedAfterLeakRetest && IsResistanceEnabledForModel(_model))",
+            "if (IsResistanceEnabledForModel(_model))",
             StringComparison.Ordinal);
-        int leakStep = postContinuitySource.IndexOf(
-            "await RunAutomaticWaterProofAsync",
-            StringComparison.Ordinal);
-        Assert(!processSource.Contains("RunPreContinuityWaterProofAsync", StringComparison.Ordinal) &&
-               resistanceStep >= 0 && leakStep > resistanceStep &&
-               postContinuitySource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
-               postContinuitySource.Contains("ArmWaterProofRetestConnectorCycle", StringComparison.Ordinal) &&
-               !postContinuitySource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal),
-            "Leak starts after continuity/resistance; Leak FAIL is historized then waits for connector-only retest without popup/eject");
+        Assert(processSource.Contains("TryBeginWaterProofOnConnector(generation)", StringComparison.Ordinal) &&
+               resistanceStep >= 0 &&
+               postContinuitySource.Contains("Volatile.Read(ref _preContinuityWaterProofPassed) == 0", StringComparison.Ordinal) &&
+               !postContinuitySource.Contains("await RunAutomaticWaterProofAsync", StringComparison.Ordinal),
+            "Each RET connector starts its Leak channel before full continuity; final product PASS waits for all enabled channels");
         int durablePassCommit = postContinuitySource.IndexOf(
             "bool passCommitted = await RecordCompletedProductAsync",
             StringComparison.Ordinal);

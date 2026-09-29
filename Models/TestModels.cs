@@ -51,6 +51,8 @@ public sealed class FaultRow : ObservableObject
     public string Connector { get; init; } = "";
     public string Pin { get; init; } = "";
     public string WireName { get; init; } = "";
+    public bool IsWireNameMissing => string.IsNullOrWhiteSpace(WireName);
+    public string WireNameDisplay => IsWireNameMissing ? "-" : WireName;
     public string Splice { get; init; } = "";
     public string Section { get; init; } = "";
     public string Color { get; init; } = "";
