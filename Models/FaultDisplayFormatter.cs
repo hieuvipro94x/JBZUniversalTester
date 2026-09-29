@@ -91,16 +91,15 @@ public static class FaultDisplayFormatter
                 break;
 
             case ProductFaultType.WrongWiring:
-                Add(lines, "Dây", fault.WireName);
-                Add(lines, "Màu tiêu chuẩn", FormatColor(fault.WireColor, vietnamese: true));
-                Add(lines, "Vị trí tiêu chuẩn", StandardConnection(fault, vietnamese: true));
-                Add(lines, "Vị trí thực tế", ActualConnection(fault, vietnamese: true));
+                Add(lines, "DÂY", fault.WireName);
+                Add(lines, "VỊ TRÍ ĐÚNG", StandardConnection(fault, vietnamese: true));
+                Add(lines, "ĐANG CẮM SAI", ActualConnection(fault, vietnamese: true));
+                Add(lines, "CẦN SỬA", WiringCorrection(fault));
                 break;
 
             case ProductFaultType.ShortCircuit:
-                Add(lines, "Phát hiện kết nối ngoài tiêu chuẩn", ActualConnection(fault, vietnamese: true));
-                Add(lines, "Tiêu chuẩn", "KHÔNG ĐƯỢC CÓ KẾT NỐI");
-                Add(lines, "Thực tế", "CÓ KẾT NỐI");
+                Add(lines, "ĐANG CHẬP", ActualConnection(fault, vietnamese: true));
+                Add(lines, "CẦN SỬA", $"TÁCH RỜI {ActualConnection(fault, vietnamese: true)}");
                 break;
 
             case ProductFaultType.ResistanceOutOfRange:
@@ -422,13 +421,67 @@ public static class FaultDisplayFormatter
     {
         string connectorText = connector?.Trim() ?? string.Empty;
         string pinText = pin?.Trim() ?? string.Empty;
+        string ioText = io is int number && number > 0 ? $"IO {number}" : string.Empty;
         if (!string.IsNullOrWhiteSpace(connectorText) && !string.IsNullOrWhiteSpace(pinText))
-            return vietnamese
+        {
+            string position = vietnamese
                 ? $"{connectorText} - Chân {pinText}"
                 : $"{connectorText} - Pin {pinText}";
+            return string.IsNullOrWhiteSpace(ioText)
+                ? position
+                : $"{position} ({ioText})";
+        }
         if (!string.IsNullOrWhiteSpace(connectorText))
-            return connectorText;
-        return io is int number && number > 0 ? $"IO {number}" : string.Empty;
+            return string.IsNullOrWhiteSpace(ioText)
+                ? connectorText
+                : $"{connectorText} ({ioText})";
+        if (io is not int ioNumber || ioNumber <= 0)
+            return string.Empty;
+
+        int jigConnector = ((ioNumber - 1) / BoardCapacity.IoPerPort) + 1;
+        int jigPin = ((ioNumber - 1) % BoardCapacity.IoPerPort) + 1;
+        return vietnamese
+            ? $"IO {ioNumber} [JIG {jigConnector} - Chân {jigPin}]"
+            : $"IO {ioNumber} [JIG {jigConnector} - Pin {jigPin}]";
+    }
+
+    private static string WiringCorrection(FaultDetail fault)
+    {
+        int[] expected = [fault.ExpectedSourceIo ?? 0, fault.ExpectedTargetIo ?? 0];
+        int[] actual = [fault.ActualSourceIo ?? 0, fault.ActualTargetIo ?? 0];
+        int missingExpected = expected.FirstOrDefault(io => io > 0 && !actual.Contains(io));
+        int unexpectedActual = actual.FirstOrDefault(io => io > 0 && !expected.Contains(io));
+
+        if (missingExpected > 0 && unexpectedActual > 0)
+        {
+            return $"RÚT {FormatFaultEndpoint(fault, unexpectedActual, expected: false)} " +
+                   $"→ CẮM VÀO {FormatFaultEndpoint(fault, missingExpected, expected: true)}";
+        }
+
+        string actualConnection = ActualConnection(fault, vietnamese: true);
+        return string.IsNullOrWhiteSpace(actualConnection)
+            ? "KIỂM TRA LẠI VỊ TRÍ CẮM"
+            : $"KIỂM TRA LẠI {actualConnection}";
+    }
+
+    private static string FormatFaultEndpoint(FaultDetail fault, int io, bool expected)
+    {
+        if (expected)
+        {
+            if (fault.ExpectedSourceIo == io)
+                return FormatPosition(fault.ConnectorFrom, fault.PinFrom, io, vietnamese: true);
+            if (fault.ExpectedTargetIo == io)
+                return FormatPosition(fault.ConnectorTo, fault.PinTo, io, vietnamese: true);
+        }
+        else
+        {
+            if (fault.ActualSourceIo == io)
+                return FormatPosition(fault.ActualConnectorFrom, fault.ActualPinFrom, io, vietnamese: true);
+            if (fault.ActualTargetIo == io)
+                return FormatPosition(fault.ActualConnectorTo, fault.ActualPinTo, io, vietnamese: true);
+        }
+
+        return FormatPosition(null, null, io, vietnamese: true);
     }
 
     private static string FormatRelatedIos(IEnumerable<int> ios, bool vietnamese) =>

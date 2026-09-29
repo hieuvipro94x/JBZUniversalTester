@@ -695,21 +695,30 @@ internal static partial class Program
         var wrong = new FaultDetail
         {
             Type = ProductFaultType.WrongWiring,
-            WireName = "W12",
-            WireColor = "RED",
-            ConnectorFrom = "CN1",
-            PinFrom = "3",
-            ConnectorTo = "CN2",
-            PinTo = "8",
-            ActualConnectorFrom = "CN1",
-            ActualPinFrom = "3",
-            ActualConnectorTo = "CN1",
-            ActualPinTo = "5"
+            WireName = "BE21",
+            ConnectorFrom = "CN2",
+            PinFrom = "2",
+            ConnectorTo = "CN10",
+            PinTo = "27",
+            ActualConnectorTo = "CN10",
+            ActualPinTo = "27",
+            ExpectedSourceIo = 34,
+            ExpectedTargetIo = 315,
+            ActualSourceIo = 43,
+            ActualTargetIo = 315
         };
         OperatorFaultDisplay wrongOperator = FaultDisplayFormatter.FormatOperator(wrong);
         Assert(wrongOperator.Title == "KIỂM TRA LỖI SAI DÂY", "Wrong connection operator instruction");
-        Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí tiêu chuẩn"), "Wrong standard position");
-        Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí thực tế"), "Wrong actual position");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "VỊ TRÍ ĐÚNG" &&
+                                                  line.Value.Contains("CN2 - Chân 2 (IO 34)", StringComparison.Ordinal)),
+            "Wrong wiring shows the configured connector/pin and IO");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "ĐANG CẮM SAI" &&
+                                                  line.Value.Contains("IO 43 [JIG 2 - Chân 11]", StringComparison.Ordinal)),
+            "Wrong wiring identifies an unmapped physical JIG position");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "CẦN SỬA" &&
+                                                  line.Value.Contains("IO 43 [JIG 2 - Chân 11]", StringComparison.Ordinal) &&
+                                                  line.Value.Contains("CN2 - Chân 2 (IO 34)", StringComparison.Ordinal)),
+            "Wrong wiring gives one unambiguous move instruction");
         Assert(FaultDisplayFormatter.FormatCustomer(wrong).FaultType == "INCORRECT CONNECTION", "Wrong customer mapping");
 
         var shortFault = new FaultDetail
@@ -723,6 +732,8 @@ internal static partial class Program
         OperatorFaultDisplay shortOperator = FaultDisplayFormatter.FormatOperator(shortFault);
         Assert(shortOperator.Title == "KIỂM TRA LỖI CHẬP MẠCH", "Short operator instruction");
         Assert(shortOperator.Lines.Any(line => line.Value.Contains("CN4 - Chân 2 ↔ CN6 - Chân 9", StringComparison.Ordinal)), "Short actual connection");
+        Assert(shortOperator.Lines.Count == 2 && shortOperator.Lines.Any(line => line.Label == "CẦN SỬA"),
+            "Short circuit display contains only the actual short and correction");
         Assert(FaultDisplayFormatter.FormatCustomer(shortFault).FaultType == "SHORT CIRCUIT", "Short customer mapping");
 
         var resistanceHigh = new FaultDetail
@@ -1295,7 +1306,8 @@ internal static partial class Program
                typeof(TestViewModel).GetProperty("IsMasterBannerVisible") is null,
             "Master workflow no longer exposes a separate Master banner");
         Assert(disabledMasterVm.ProductionEnabled, "Master min 0 allows production");
-        Assert(disabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM", "Waiting-product result text is canonical");
+        Assert(disabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM",
+            $"Waiting-product result text is canonical (actual='{disabledMasterVm.ResultStatusText}', state='{disabledMasterVm.State}')");
         Assert(disabledMasterVm.StateBackground == "#FFF3A0" && disabledMasterVm.StateForeground == "#222222",
             "Ready status uses yellow/dark mapping");
 
@@ -5358,6 +5370,14 @@ internal static partial class Program
                unusedRow.IoCnPnText == "IO40",
             "Unused actual IO is identified in the IO column while Connector stays empty");
 
+        engine.SetModel(Model(("BE21", new[] { 34, 315 })));
+        bool resolvedTargetSideFault = engine.TryResolveExpectedWiringRelation(
+            new WiringFaultPair(43, 315, "wrong", ProductFaultType.WrongWiring),
+            out int resolvedExpectedSource,
+            out int resolvedExpectedTarget);
+        Assert(resolvedTargetSideFault && resolvedExpectedSource == 34 && resolvedExpectedTarget == 315,
+            "Wrong wiring through the configured target IO resolves the missing standard source position");
+
         engine.ProcessFrame(FrameSeq(123));
         FaultRow[] repairedRows = engine.BuildRows().ToArray();
         Assert(!engine.HasWiringFault &&
@@ -5601,72 +5621,60 @@ internal static partial class Program
             Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml"));
         string faultDialogSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml.cs"));
+        int faultItemsStart = faultDialogXaml.IndexOf("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal);
+        int faultItemsTagEnd = faultItemsStart < 0
+            ? -1
+            : faultDialogXaml.IndexOf('>', faultItemsStart);
+        string faultItemsOpeningTag = faultItemsStart < 0 || faultItemsTagEnd < 0
+            ? string.Empty
+            : faultDialogXaml[faultItemsStart..faultItemsTagEnd];
         Assert(faultDialogXaml.Contains("SizeToContent=\"Height\"", StringComparison.Ordinal) &&
-               faultDialogXaml.Contains("x:Name=\"FaultTypeText\"", StringComparison.Ordinal) &&
-               faultDialogXaml.Contains("x:Name=\"SummaryText\"", StringComparison.Ordinal) &&
-               faultDialogSource.Contains("ApplyCompactSummary(summary);", StringComparison.Ordinal),
-            "FAIL dialog uses a compact auto-height layout without duplicating its fault title");
+               faultDialogXaml.Contains("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal) &&
+               faultDialogXaml.Contains("ItemsSource=\"{Binding Lines}\"", StringComparison.Ordinal) &&
+               !faultItemsOpeningTag.Contains("Visibility=\"Collapsed\"", StringComparison.Ordinal) &&
+               !faultDialogXaml.Contains("x:Name=\"FaultTypeText\"", StringComparison.Ordinal) &&
+               !faultDialogXaml.Contains("x:Name=\"SummaryText\"", StringComparison.Ordinal) &&
+               faultDialogSource.Contains(".Select(FaultDisplayFormatter.FormatOperator)", StringComparison.Ordinal) &&
+               !faultDialogSource.Contains("BuildShortSummary", StringComparison.Ordinal),
+            "FAIL dialog renders every detailed fault instead of hiding the list behind a first-fault summary");
 
-        MethodInfo compactFaultSummary = typeof(FaultConfirmationWindow).GetMethod(
-            "BuildShortSummary",
-            BindingFlags.Static | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Compact fault summary formatter not found");
-        var popupPins = new Dictionary<int, PinRecord>
-        {
-            [4] = new PinRecord("CN1", "BG1", 4, "1"),
-            [8] = new PinRecord("CN2", "BF2", 8, "2")
-        };
-        Func<int, PinRecord?> popupResolver = io => popupPins.GetValueOrDefault(io);
-        string popupMappedWrongSummary = (string)(compactFaultSummary.Invoke(null, [
+        FaultDetail[] popupFaults =
+        [
             new FaultDetail
             {
                 Type = ProductFaultType.WrongWiring,
-                ActualSourceIo = 4,
-                ActualTargetIo = 8
+                ConnectorFrom = "CN2",
+                PinFrom = "2",
+                ConnectorTo = "CN10",
+                PinTo = "27",
+                ActualConnectorTo = "CN10",
+                ActualPinTo = "27",
+                ExpectedSourceIo = 34,
+                ExpectedTargetIo = 315,
+                ActualSourceIo = 43,
+                ActualTargetIo = 315
             },
-            popupResolver
-        ]) ?? string.Empty);
-        string popupUnmappedWrongSummary = (string)(compactFaultSummary.Invoke(null, [
             new FaultDetail
             {
                 Type = ProductFaultType.WrongWiring,
-                ActualSourceIo = 4,
-                ActualTargetIo = 12
-            },
-            popupResolver
-        ]) ?? string.Empty);
-        Assert(popupMappedWrongSummary == "LỖI SAI DÂY\n\nBG1 NỐI NHẦM BF2" &&
-               popupUnmappedWrongSummary == "LỖI SAI DÂY\n\nBG1 NỐI IO(12)",
-            "Fault popup prioritizes THT wire names and falls back to compact IO(n) only for unmapped endpoints");
-        PinRecord bg1 = new("CN1", "BG1", 4, "1");
-        PinRecord bf2 = new("CN2", "BF2", 8, "2");
-        Func<int, PinRecord?> namedResolver = io => io switch
-        {
-            4 => bg1,
-            8 => bf2,
-            _ => null
-        };
-        string namedWrongSummary = (string)(compactFaultSummary.Invoke(null, [
-            new FaultDetail
-            {
-                Type = ProductFaultType.WrongWiring,
-                ActualSourceIo = 4,
-                ActualTargetIo = 8
-            },
-            namedResolver
-        ]) ?? string.Empty);
-        string unmappedWrongSummary = (string)(compactFaultSummary.Invoke(null, [
-            new FaultDetail
-            {
-                Type = ProductFaultType.WrongWiring,
-                ActualSourceIo = 4,
-                ActualTargetIo = 12
-            },
-            namedResolver
-        ]) ?? string.Empty);
-        Assert(namedWrongSummary == "LỖI SAI DÂY\n\nBG1 NỐI NHẦM BF2" &&
-               unmappedWrongSummary == "LỖI SAI DÂY\n\nBG1 NỐI IO(12)",
-            "FAIL popup prioritizes THT wire names and falls back to compact IO(n) only for unmapped endpoints");
+                ConnectorFrom = "CN2",
+                PinFrom = "4",
+                ConnectorTo = "CN10",
+                PinTo = "28",
+                ActualConnectorTo = "CN10",
+                ActualPinTo = "28",
+                ExpectedSourceIo = 36,
+                ExpectedTargetIo = 316,
+                ActualSourceIo = 44,
+                ActualTargetIo = 316
+            }
+        ];
+        OperatorFaultDisplay[] popupDisplays = popupFaults
+            .Select(FaultDisplayFormatter.FormatOperator)
+            .ToArray();
+        Assert(popupDisplays.Length == 2 &&
+               popupDisplays.All(display => display.Lines.Any(line => line.Label == "CẦN SỬA")),
+            "FAIL popup keeps every confirmed wrong-wire pair with a direct correction instruction");
 
         string mainWindowXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));

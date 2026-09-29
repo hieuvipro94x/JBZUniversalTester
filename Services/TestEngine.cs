@@ -2433,6 +2433,29 @@ public sealed class TestEngine : IDisposable
         return rows;
     }
 
+    public bool TryResolveExpectedWiringRelation(
+        WiringFaultPair fault,
+        out int expectedSource,
+        out int expectedTarget)
+    {
+        lock (_gate)
+        {
+            if (_model is not null &&
+                TryResolveExpectedDisplayRelation(
+                    _model,
+                    fault,
+                    out expectedSource,
+                    out expectedTarget))
+            {
+                return true;
+            }
+
+            expectedSource = 0;
+            expectedTarget = 0;
+            return false;
+        }
+    }
+
     private static bool TryResolveExpectedDisplayRelation(
         ProductModel model,
         WiringFaultPair fault,
@@ -2452,13 +2475,19 @@ public sealed class TestEngine : IDisposable
         // ProductFaultType/classifier.
         WireNet? sourceNet = model.Nets.FirstOrDefault(net =>
             net.SourceIo == fault.SourceIo || net.SourceIo == fault.TargetIo);
+        sourceNet ??= model.Nets.FirstOrDefault(net =>
+            net.IoNumbers.Contains(fault.SourceIo) ||
+            net.IoNumbers.Contains(fault.TargetIo));
         if (sourceNet is not null)
         {
             expectedSource = sourceNet.SourceIo;
             int actualPeer = expectedSource == fault.SourceIo
                 ? fault.TargetIo
                 : fault.SourceIo;
-            expectedTarget = sourceNet.ExpectedActiveIo.FirstOrDefault(io => io != actualPeer);
+            expectedTarget = sourceNet.ExpectedActiveIo.FirstOrDefault(io =>
+                io == fault.SourceIo || io == fault.TargetIo);
+            if (expectedTarget <= 0)
+                expectedTarget = sourceNet.ExpectedActiveIo.FirstOrDefault(io => io != actualPeer);
             if (expectedTarget <= 0)
                 expectedTarget = sourceNet.ExpectedActiveIo.FirstOrDefault();
             return expectedTarget > 0;

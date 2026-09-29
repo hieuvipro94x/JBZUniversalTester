@@ -45,6 +45,16 @@ internal static class ProductionPresentationService
         if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
             return "PASS";
 
+        // Đồng bộ model là thông báo nền, không phải một pha kiểm tra sản phẩm.
+        // Nếu chưa có hoạt động sản phẩm thì ô trạng thái vẫn phải mời lắp hàng.
+        if (value.StartsWith("ĐÃ ĐỒNG BỘ MÃ HÀNG", StringComparison.OrdinalIgnoreCase) &&
+            !state.PresentationCycleStarted &&
+            state.IsWaitingOrContinuityPhase &&
+            !state.HasProductActivity)
+        {
+            return "LẮP SẢN PHẨM";
+        }
+
         if (state.IsDeviceFault ||
             value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase) ||

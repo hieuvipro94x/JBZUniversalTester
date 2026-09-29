@@ -4429,8 +4429,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             faults,
             model.HasDiscardInterlock
                 ? "Bấm XÁC NHẬN để mở JIG. Sau đó đưa hàng lỗi qua cảm biến thùng NG 1 lần."
-                : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
-            FindPinByIo);
+                : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
         Window? resolvedOwner = owner ?? ResolveOperatorDialogOwner();
         if (resolvedOwner is not null)
             dialog.Owner = resolvedOwner;
@@ -7081,16 +7080,31 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .ToArray();
 
         FaultDetail[] dialogFaults = wiringPairs
-            .Select(pair => EnrichFaultDetail(new FaultDetail
+            .Select(pair =>
             {
-                Type = pair.FaultType,
-                ExpectedSourceIo = pair.ExpectedSourceIo,
-                ExpectedTargetIo = pair.ExpectedTargetIo,
-                ActualSourceIo = pair.SourceIo,
-                ActualTargetIo = pair.TargetIo,
-                RelatedIos = [pair.SourceIo, pair.TargetIo],
-                Message = pair.Reason
-            }))
+                int? expectedSource = pair.ExpectedSourceIo;
+                int? expectedTarget = pair.ExpectedTargetIo;
+                if ((!expectedSource.HasValue || !expectedTarget.HasValue) &&
+                    _engine.TryResolveExpectedWiringRelation(
+                        pair,
+                        out int resolvedSource,
+                        out int resolvedTarget))
+                {
+                    expectedSource = resolvedSource;
+                    expectedTarget = resolvedTarget;
+                }
+
+                return EnrichFaultDetail(new FaultDetail
+                {
+                    Type = pair.FaultType,
+                    ExpectedSourceIo = expectedSource,
+                    ExpectedTargetIo = expectedTarget,
+                    ActualSourceIo = pair.SourceIo,
+                    ActualTargetIo = pair.TargetIo,
+                    RelatedIos = [pair.SourceIo, pair.TargetIo],
+                    Message = pair.Reason
+                });
+            })
             .GroupBy(fault => new
             {
                 fault.Type,
@@ -11685,6 +11699,21 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         ? rowsSnapshot.Rows
                         : _engine.BuildRows()
                     : Array.Empty<FaultRow>();
+            }
+
+            // Khi lỗi dây đã được xác nhận, bảng vận hành chỉ giữ đúng quan hệ
+            // gây FAIL. Không để hàng trăm dòng CHƯA KẾT NỐI che khuất vị trí
+            // sai dây/chập mạch mà người vận hành cần sửa ngay.
+            if (CurrentProductionPhase == ProductionPhase.WaitingFaultConfirmation &&
+                presentationElectrical.HasConfirmedWiringFault)
+            {
+                WiringFaultPair[] confirmedPairs = _engine.WiringFaults.ToArray();
+                desiredRows = desiredRows
+                    .Where(row => confirmedPairs.Any(pair =>
+                        row.ProductFaultType == pair.FaultType &&
+                        row.RelatedIos.Contains(pair.SourceIo) &&
+                        row.RelatedIos.Contains(pair.TargetIo)))
+                    .ToArray();
             }
         }
 
