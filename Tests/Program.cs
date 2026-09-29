@@ -1304,9 +1304,10 @@ internal static partial class Program
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
-        Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MASTER ĐẠT" &&
-               enabledMasterVm.StateBackground == "#FFF3A0",
-            "Active good-Master validation identifies the required sample and keeps the canonical yellow background");
+        Assert(enabledMasterVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               enabledMasterVm.StateBackground == "#1976D2" &&
+               enabledMasterVm.StateForeground == "#222222",
+            "Active good-Master validation uses the canonical blue checking status with dark text");
 
         TestViewModel masterExitVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 1 },
@@ -1334,9 +1335,9 @@ internal static partial class Program
             "A fresh empty Master frame releases the blocked exit");
         masterExitBoard.Publish(FrameSeq(104));
         Assert(!masterExitVm.HasProductOnTestTable &&
-               masterExitVm.ResultStatusText == "KIỂM TRA MASTER ĐẠT" &&
+               masterExitVm.ResultStatusText == "ĐANG KIỂM TRA" &&
                masterExitVm.Faults.Count == 0,
-            "Further empty frames keep Master clear without losing the required Master type");
+            "Further empty frames keep Master clear in the canonical checking state");
 
         FieldInfo masterGoodVerified = typeof(TestViewModel).GetField(
             "_masterGoodVerified",
@@ -1349,7 +1350,7 @@ internal static partial class Program
             ?? throw new InvalidOperationException("Bad-Master transition not found");
         transitionToBadMaster.Invoke(enabledMasterVm, null);
         Assert(enabledMasterVm.MasterState == MasterSequenceState.WaitingBadMaster &&
-               enabledMasterVm.ResultStatusText == "KIỂM TRA MASTER LỖI" &&
+               enabledMasterVm.ResultStatusText == "ĐANG KIỂM TRA" &&
                enabledMasterVm.WrongCountText == "0/1" &&
                enabledMasterVm.Faults.Count == 0,
             "Bad Master starts at 0/N in the wrong-wiring counter and keeps an empty table");
@@ -1389,9 +1390,10 @@ internal static partial class Program
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" && statusVm.StateBackground == "#2AA84A",
             "Committed PASS explicitly asks for product removal until ProductRemoved returns the UI to ready");
         statusVm.State = "ĐANG TEST LEAK";
-        Assert(statusVm.ResultStatusText == "ĐANG TEST LEAK" &&
-               statusVm.StateBackground == "#FFF3A0",
-            "Leak stage has an explicit in-progress presentation before PASS");
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               statusVm.StateBackground == "#1976D2" &&
+               statusVm.StateForeground == "#222222",
+            "Leak stage uses the canonical checking presentation before PASS");
         statusVm.State = "CHƯA ĐẠT";
         Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
             "FAIL state keeps the existing Vietnamese KHÔNG ĐẠT header mapping");
@@ -1401,13 +1403,13 @@ internal static partial class Program
                statusVm.StateForeground == "#222222",
             "Removal interlock must not be presented as LẮP SẢN PHẨM");
         statusVm.State = "ĐANG KIỂM TRA...";
-        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#1976D2" && statusVm.StateForeground == "#FFFFFF",
-            "Current testing status uses the canonical blue in-progress mapping");
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#1976D2" && statusVm.StateForeground == "#222222",
+            "Current testing status uses the canonical blue/dark in-progress mapping");
         statusVm.State = "ĐANG KẾT NỐI BO";
-        Assert(statusVm.ResultStatusText == "ĐANG KẾT NỐI BO" &&
-               statusVm.StateBackground == "#FFF3A0" &&
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               statusVm.StateBackground == "#1976D2" &&
                statusVm.StateForeground == "#222222",
-            "Board connection progress must not be presented as production testing");
+            "Board connection progress uses the canonical checking presentation");
         statusVm.State = "LỖI THIẾT BỊ";
         Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" &&
                statusVm.StateBackground == "#C62828" &&
@@ -1846,7 +1848,7 @@ internal static partial class Program
         Assert(deviceFaultVm.IsDeviceFault, "DeviceFault latches after index exception");
         Assert(deviceFaultVm.DeviceFaultTransitionCount == 1, "Repeated index exceptions produce one DeviceFault transition");
         Assert(deviceFaultVm.DeviceFaultDialogCount == 1, "Repeated index exceptions produce one operator dialog episode");
-        Assert(deviceFaultVm.ResultStatusText == "LỖI THIẾT BỊ" &&
+        Assert(deviceFaultVm.ResultStatusText == "KHÔNG ĐẠT" &&
                deviceFaultVm.StateBackground == "#C62828" &&
                deviceFaultVm.StateForeground == "#FFFFFF",
             "DeviceFault status mapping");
@@ -2113,7 +2115,7 @@ internal static partial class Program
         int failBeforeWarning = vm.Fail;
 
         Assert(vm.State.Contains("ĐỒNG BỘ DỮ LIỆU BO", StringComparison.Ordinal) &&
-               vm.ResultStatusText == "ĐỒNG BỘ BO",
+               vm.ResultStatusText == "ĐANG KIỂM TRA",
             "Production waits for a clean baseline frame without reporting an IO-capacity warning");
 
         board.Publish(FrameSeq(102, (1, new[] { 18 }), (18, new[] { 1 })));

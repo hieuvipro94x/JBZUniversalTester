@@ -3399,9 +3399,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if ((confirmedPresence || hasCompletedConnection) &&
                 !State.Equals("PASS", StringComparison.OrdinalIgnoreCase))
             {
-                State = hasCompletedConnection
-                    ? "ĐANG KIỂM TRA..."
-                    : "ĐANG LẮP SẢN PHẨM...";
+                State = "ĐANG KIỂM TRA...";
             }
 
             // ProbeCounter/cycle ownership starts on the same confirmed presence.
@@ -3519,7 +3517,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ProductionRuntimeState.WaitingForProduct when hasCompletedConnection =>
                 "ĐANG KIỂM TRA...",
             ProductionRuntimeState.TestingRealtime =>
-                "ĐANG LẮP SẢN PHẨM...",
+                "ĐANG KIỂM TRA...",
             ProductionRuntimeState.WaitingForProduct =>
                 "LẮP SẢN PHẨM",
             _ => State
