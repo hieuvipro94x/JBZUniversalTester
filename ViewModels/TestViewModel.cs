@@ -505,8 +505,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private bool IsWaitingProductPresentation =>
         !IsDeviceFault &&
-        CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
-        CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
+        ((CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+          CurrentProductionPresentationMode == ProductionPresentationMode.Waiting) ||
+         (CurrentProductionPhase == ProductionPhase.Continuity &&
+          !_presentationCycleStarted)) &&
         CurrentProbePresentationState is ProbePresentationState.Inactive or ProbePresentationState.Released &&
         !IsProbeOwningProductionPresentation() &&
         !IsProductRemovalPending &&
@@ -3784,30 +3786,32 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return true;
 
         long generation = Volatile.Read(ref _runtimeGeneration);
-        if (!_presentationCycleStarted &&
-            CurrentProductionPhase == ProductionPhase.Continuity &&
+        bool realtimeProductActivity = _engine.HasRealtimePresentationProductActivity;
+        if (CurrentProductionPhase == ProductionPhase.Continuity &&
             !IsProbeOwningProductionPresentation() &&
-            _engine.HasContinuityPreviewProductActivity)
+            _presentationCycleStarted != realtimeProductActivity)
         {
-            // Lần lắp đầu tiên không được chờ C0 của toàn bộ dải 4/10 card.
-            // Preview đã được TestEngine lọc về đúng expected product edge và
-            // chỉ được phép đổi presentation, không PASS/FAIL/counter/relay.
+            // Không chờ C0 của toàn bộ dải 4/10 card để ẩn/hiện chữ giữa màn
+            // hình. Preview chỉ đổi presentation; PASS/FAIL/counter/relay và
+            // ProductRemoved vẫn dùng snapshot authoritative hoàn chỉnh.
             long cycleEpoch = Volatile.Read(ref _productionUiCycleEpoch);
             InvokeUi(() =>
             {
                 if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
                     cycleEpoch != Volatile.Read(ref _productionUiCycleEpoch) ||
-                    _presentationCycleStarted ||
                     CurrentProductionPhase != ProductionPhase.Continuity ||
                     IsProbeOwningProductionPresentation() ||
-                    IsProductRemovalPending)
+                    IsProductRemovalPending ||
+                    _engine.HasRealtimePresentationProductActivity != realtimeProductActivity)
                 {
                     return;
                 }
 
-                _presentationCycleStarted = true;
+                _presentationCycleStarted = realtimeProductActivity;
                 RaiseCenterPresentation();
-                State = "ĐANG KIỂM TRA";
+                State = realtimeProductActivity
+                    ? "ĐANG KIỂM TRA"
+                    : "LẮP SẢN PHẨM";
             });
         }
         QueueContinuityPreviewUi(generation);

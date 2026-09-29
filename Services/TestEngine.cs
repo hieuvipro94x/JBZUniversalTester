@@ -1182,6 +1182,52 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// Trạng thái có sản phẩm chỉ dành cho presentation, ghép snapshot C0 gần
+    /// nhất với các SOURCE đã hoàn tất trong frame đang quét. Không được dùng
+    /// cho PASS/FAIL, counter, relay hoặc xác nhận ProductRemoved.
+    /// </summary>
+    public bool HasRealtimePresentationProductActivity
+    {
+        get
+        {
+            lock (_gate)
+            {
+                if (_model is null)
+                    return false;
+
+                if (_continuityPreviewConnections.Count == 0)
+                    return HasProductActivityUnsafe(_model);
+
+                foreach ((int source, HashSet<int> authoritativeTargets) in _currentConnections)
+                {
+                    HashSet<int> targets = _continuityPreviewConnections.TryGetValue(
+                        source,
+                        out HashSet<int>? previewTargets)
+                        ? previewTargets
+                        : authoritativeTargets;
+                    if (targets.Any(target =>
+                            IsProductConnectivityEdgeUnsafe(_model, source, target)))
+                    {
+                        return true;
+                    }
+                }
+
+                foreach ((int source, HashSet<int> targets) in _continuityPreviewConnections)
+                {
+                    if (!_currentConnections.ContainsKey(source) &&
+                        targets.Any(target =>
+                            IsProductConnectivityEdgeUnsafe(_model, source, target)))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        }
+    }
+
     public long ContinuityPreviewSequence
     {
         get
@@ -2108,6 +2154,18 @@ public sealed class TestEngine : IDisposable
             Dictionary<int, int>? previewComponents =
                 BuildContinuityPreviewComponentsUnsafe(out HashSet<int> previewExpectedComponents);
 
+            // Preview được phát ngay khi từng SOURCE kết thúc nên có thể làm hàng
+            // chờ cuối cùng biến mất trước C0 tới gần một chu kỳ 10-card. Không
+            // trình bày "đã đủ toàn bộ" trước snapshot authoritative: giữ các
+            // hàng còn thiếu của frame hoàn chỉnh gần nhất cho tới khi C0 thật sự
+            // xác nhận PASS. Preview từng phần vẫn tiếp tục cập nhật bình thường.
+            if (previewComponents is not null &&
+                WouldPreviewCompleteProductionTopologyUnsafe(model, previewComponents))
+            {
+                previewComponents = null;
+                previewExpectedComponents.Clear();
+            }
+
             // HTDRV_WIRING_FAIL_DISPLAY_2026-09-05: chỉ confirmed fault trong
             // _wiringFaults được phép thay presentation. Candidate tuyệt đối
             // không đi vào bảng operator.
@@ -2250,6 +2308,37 @@ public sealed class TestEngine : IDisposable
     {
         return _componentByIo.TryGetValue(net.SourceIo, out int expectedComponent) &&
                affectedExpectedComponents.Contains(expectedComponent);
+    }
+
+    private bool WouldPreviewCompleteProductionTopologyUnsafe(
+        ProductModel model,
+        IReadOnlyDictionary<int, int> previewComponents)
+    {
+        bool hasExpectedNetwork = false;
+        foreach (WireNet net in model.Nets)
+        {
+            if (!IsEligibleProductionNet(net))
+                continue;
+
+            hasExpectedNetwork = true;
+            if (!IsWireNetConnected(net, previewComponents))
+                return false;
+        }
+
+        if (model.Clip is not null)
+        {
+            foreach (ClipBranch branch in model.Clip.Branches)
+            {
+                if (!IsEligibleClipBranch(model.Clip, branch))
+                    continue;
+
+                hasExpectedNetwork = true;
+                if (!IsClipBranchConnected(model.Clip, branch, _currentConnections))
+                    return false;
+            }
+        }
+
+        return hasExpectedNetwork;
     }
 
     private IReadOnlyList<FaultRow> BuildConfirmedWiringDisplayRows(

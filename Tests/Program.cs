@@ -1195,9 +1195,15 @@ internal static partial class Program
         engine.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
         Assert(engine.ApplyContinuityPreviewSource(1, new[] { 2 }, sequence: 120) &&
                engine.HasContinuityPreviewProductActivity &&
+               engine.HasRealtimePresentationProductActivity &&
                !engine.HasProductActivity &&
                !engine.GetProductEvidenceSnapshot().ProbeEvidence,
             "Presentation/Probe evidence is independent from authoritative ProductPresence");
+        engine.ProcessFrame(FrameSeq(120, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        Assert(engine.ApplyContinuityPreviewSource(1, Array.Empty<int>(), sequence: 121) &&
+               !engine.HasRealtimePresentationProductActivity &&
+               engine.HasProductActivity,
+            "In-progress SOURCE removal restores waiting presentation before C0 without changing authoritative activity");
 
         TestViewModel vm = CreateTestViewModel(production, out FakeBoard vmBoard);
         vm.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
