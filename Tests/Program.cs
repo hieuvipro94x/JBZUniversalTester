@@ -1320,10 +1320,12 @@ internal static partial class Program
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
-        Assert(enabledMasterVm.ResultStatusText == "ĐANG KIỂM TRA" &&
-               enabledMasterVm.StateBackground == "#1976D2" &&
+        Assert(enabledMasterVm.ResultStatusText == "LẮP MẪU MASTER" &&
+               (!enabledMasterVm.IsCenterResultVisible ||
+                enabledMasterVm.CenterResultText == "LẮP MẪU MASTER") &&
+               enabledMasterVm.StateBackground == "#FFF3A0" &&
                enabledMasterVm.StateForeground == "#222222",
-            "Active good-Master validation uses the canonical blue checking status with dark text");
+            $"Good-Master waiting state prompts for the sample before any product activity: status={enabledMasterVm.ResultStatusText}, center={enabledMasterVm.CenterResultText}, background={enabledMasterVm.StateBackground}, foreground={enabledMasterVm.StateForeground}, master={enabledMasterVm.MasterState}, runtime={enabledMasterVm.CurrentProductionRuntimeState}");
 
         TestViewModel masterExitVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 1 },
@@ -1336,10 +1338,23 @@ internal static partial class Program
             (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(masterExitVm) ?? throw new InvalidOperationException("Master exit TestEngine not found"));
         masterExitEngine.SetFrameProcessingEnabled(true);
+        Assert(masterExitVm.ResultStatusText == "LẮP MẪU MASTER",
+            "Good-Master status remains a sample prompt before a scan detects it");
+        HashSet<string> masterPresentationChanges = new(StringComparer.Ordinal);
+        masterExitVm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+                masterPresentationChanges.Add(args.PropertyName);
+        };
         masterExitBoard.Publish(FrameSeq(100, (1, new[] { 18 })));
         masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
-        Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster,
-            "Master sample activity starts the good-Master test");
+        Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster &&
+               masterExitVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               masterExitVm.StateBackground == "#1976D2" &&
+               masterPresentationChanges.Contains(nameof(TestViewModel.ResultStatusText)) &&
+               masterPresentationChanges.Contains(nameof(TestViewModel.StateBackground)) &&
+               masterPresentationChanges.Contains(nameof(TestViewModel.CenterResultText)),
+            "Detected Master sample starts the good-Master test and checking presentation");
         bool masterExitAllowed = masterExitVm.StopViewAsync().GetAwaiter().GetResult();
         Assert(!masterExitAllowed,
             "Returning to Main during Master is blocked until the sample is removed");
@@ -1351,9 +1366,9 @@ internal static partial class Program
             "A fresh empty Master frame releases the blocked exit");
         masterExitBoard.Publish(FrameSeq(104));
         Assert(!masterExitVm.HasProductOnTestTable &&
-               masterExitVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               masterExitVm.ResultStatusText == "LẮP MẪU MASTER" &&
                masterExitVm.Faults.Count == 0,
-            "Further empty frames keep Master clear in the canonical checking state");
+            "Further empty frames restore the Master sample prompt");
 
         FieldInfo masterGoodVerified = typeof(TestViewModel).GetField(
             "_masterGoodVerified",
@@ -1366,10 +1381,12 @@ internal static partial class Program
             ?? throw new InvalidOperationException("Bad-Master transition not found");
         transitionToBadMaster.Invoke(enabledMasterVm, null);
         Assert(enabledMasterVm.MasterState == MasterSequenceState.WaitingBadMaster &&
-               enabledMasterVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               enabledMasterVm.ResultStatusText == "LẮP MẪU MASTER" &&
+               (!enabledMasterVm.IsCenterResultVisible ||
+                enabledMasterVm.CenterResultText == "LẮP MẪU MASTER") &&
                enabledMasterVm.WrongCountText == "0/1" &&
                enabledMasterVm.Faults.Count == 0,
-            "Bad Master starts at 0/N in the wrong-wiring counter and keeps an empty table");
+            "Bad Master waits for its sample at 0/N with an empty table");
 
         TestViewModel twoFaultMasterVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 2 });

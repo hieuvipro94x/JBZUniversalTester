@@ -473,7 +473,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         : IsDiscardFaultConfirmationPresentation
             ? "ĐƯA HÀNG VÀO THÙNG HÀNG LỖI"
             : IsWaitingProductPresentation
-                ? "LẮP SẢN PHẨM"
+                ? IsWaitingMasterSample ? "LẮP MẪU MASTER" : "LẮP SẢN PHẨM"
                 : string.Empty;
 
     public bool IsCenterResultVisible =>
@@ -571,6 +571,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _presentationCycleStarted;
     bool IProductionPresentationState.HasProductActivity =>
         _engine.HasProductActivity;
+    bool IProductionPresentationState.IsWaitingMasterSample => IsWaitingMasterSample;
 
     public string Lot
     {
@@ -957,6 +958,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 Raise(nameof(IsMasterBadPhase));
                 Raise(nameof(ProductionEnabled));
                 Raise(nameof(ResultStatusText));
+                Raise(nameof(StateBackground));
+                Raise(nameof(StateForeground));
+                RaiseCenterPresentation();
                 Raise(nameof(WrongCountText));
                 Raise(nameof(NetworkProgress));
                 RaiseActiveFault();
@@ -988,6 +992,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public ProductionPresentationMode CurrentProductionPresentationMode =>
         (ProductionPresentationMode)Volatile.Read(ref _productionPresentationMode);
     public bool IsMasterSequenceActive => _model is not null && !MasterApproved;
+    private bool IsWaitingMasterSample =>
+        IsMasterSequenceActive &&
+        MasterState is (MasterSequenceState.WaitingGoodMaster or MasterSequenceState.WaitingBadMaster) &&
+        !_engine.HasProductActivity;
     public bool IsMasterBadPhase => MasterState is
         MasterSequenceState.WaitingBadMaster or
         MasterSequenceState.TestingBadMaster or

@@ -12,6 +12,7 @@ internal interface IProductionPresentationState
     bool DiscardRequiredForFault { get; }
     bool IsManualModeActive { get; }
     bool IsMasterSequenceActive { get; }
+    bool IsWaitingMasterSample { get; }
     bool IsMasterBadPhase { get; }
     bool PresentationCycleStarted { get; }
     bool HasProductActivity { get; }
@@ -45,16 +46,6 @@ internal static class ProductionPresentationService
         if (value.StartsWith("PASS", StringComparison.OrdinalIgnoreCase))
             return "PASS";
 
-        // Đồng bộ model là thông báo nền, không phải một pha kiểm tra sản phẩm.
-        // Nếu chưa có hoạt động sản phẩm thì ô trạng thái vẫn phải mời lắp hàng.
-        if (value.StartsWith("ĐÃ ĐỒNG BỘ MÃ HÀNG", StringComparison.OrdinalIgnoreCase) &&
-            !state.PresentationCycleStarted &&
-            state.IsWaitingOrContinuityPhase &&
-            !state.HasProductActivity)
-        {
-            return "LẮP SẢN PHẨM";
-        }
-
         if (state.IsDeviceFault ||
             value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase) ||
@@ -63,6 +54,19 @@ internal static class ProductionPresentationService
             value.Contains("LỖI", StringComparison.OrdinalIgnoreCase))
         {
             return "KHÔNG ĐẠT";
+        }
+
+        if (state.IsWaitingMasterSample)
+            return "LẮP MẪU MASTER";
+
+        // Đồng bộ model là thông báo nền, không phải một pha kiểm tra sản phẩm.
+        // Nếu chưa có hoạt động sản phẩm thì ô trạng thái vẫn phải mời lắp hàng.
+        if (value.StartsWith("ĐÃ ĐỒNG BỘ MÃ HÀNG", StringComparison.OrdinalIgnoreCase) &&
+            !state.PresentationCycleStarted &&
+            state.IsWaitingOrContinuityPhase &&
+            !state.HasProductActivity)
+        {
+            return "LẮP SẢN PHẨM";
         }
 
         if (state.IsManualModeActive ||
