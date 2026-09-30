@@ -135,11 +135,24 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
+        <Style x:Key="HistoryCalendarDayButtonStyle" TargetType="CalendarDayButton">
+            <Style.Triggers>
+                <Trigger Property="IsInactive" Value="True">
+                    <Setter Property="Visibility" Value="Hidden"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="HistoryCalendarStyle" TargetType="Calendar">
+            <Setter Property="CalendarDayButtonStyle" Value="{StaticResource HistoryCalendarDayButtonStyle}"/>
+        </Style>
+
         <Style x:Key="FilterDatePicker"
                TargetType="DatePicker">
             <Setter Property="Height" Value="46"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="CalendarStyle" Value="{StaticResource HistoryCalendarStyle}"/>
         </Style>
 
         <Style x:Key="FilterComboBox"

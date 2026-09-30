@@ -8545,10 +8545,19 @@ internal static partial class Program
             LabelPrintRequest largeSqdz = LabelPrintRequest.Capture(history, model, labelSettings);
             Assert(largeSqdz.Profile.Id == LabelSettings.LargeSqdzTemplate &&
                    largeSqdz.Data.Barcode == "1200020430,SQDZQ7V7001" &&
-                   largeSqdz.Payload.Contains("SQDZQ7V7001WH", StringComparison.Ordinal) &&
+                   largeSqdz.Payload.Contains("2607317001WH", StringComparison.Ordinal) &&
                    largeSqdz.Payload.Contains("1200020430,SQDZQ7V7001", StringComparison.Ordinal) &&
                    !largeSqdz.Payload.Contains("LEGACY-THT-TEMPLATE", StringComparison.Ordinal),
-                "TEM_TO_SQDZ keeps the large layout, uses SQDZ date/LOT and overrides legacy THT EPL when explicitly selected");
+                "TEM_TO_SQDZ keeps the large layout, uses calendar date/LOT on line four and SQDZ in the barcode");
+            history.LotNo = 0;
+            history.Finished = new DateTime(2026, 9, 30, 8, 9, 10);
+            LabelPrintRequest largeSqdzSeptember = LabelPrintRequest.Capture(history, model, labelSettings);
+            string[] largeSqdzLines = largeSqdzSeptember.Payload.Split('\n');
+            int variableStart = Array.IndexOf(largeSqdzLines, "?");
+            Assert(variableStart >= 0 &&
+                   largeSqdzLines[variableStart + 4] == "2609300000WH" &&
+                   largeSqdzLines[variableStart + 5].StartsWith("1200020430,SQDZ", StringComparison.Ordinal),
+                "TEM_TO_SQDZ line four after ? is yyMMdd plus four-digit LOTNO plus WH; barcode stays SQDZ");
             model.LabelTemplate = new LabelTemplateDefinition();
 
             InvalidDataException undefinedYear = AssertThrows<InvalidDataException>(
