@@ -25,7 +25,7 @@ public partial class ProductionSettingsPage : UserControl
 {
     private readonly MainViewModel? _main;
     private readonly ProductionSettingsViewModel _vm;
-    private readonly string _initialSettingsSnapshot;
+    private string _savedSettingsSnapshot;
     private int _released;
     private int _portRefreshGeneration;
     private int _printerConnectionGeneration;
@@ -59,7 +59,7 @@ public partial class ProductionSettingsPage : UserControl
         InitializeComboBoxItems();
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
         SyncCompatibilityFields();
-        _initialSettingsSnapshot = CaptureEditableSettingsSnapshot();
+        _savedSettingsSnapshot = CaptureEditableSettingsSnapshot();
         Loaded += ProductionSettingsPage_Loaded;
     }
 
@@ -1523,6 +1523,21 @@ public partial class ProductionSettingsPage : UserControl
             CommitPendingEditorValues(System.Windows.Media.VisualTreeHelper.GetChild(parent, index));
     }
 
+    private static bool HasEditorValidationErrors(DependencyObject parent)
+    {
+        if (Validation.GetHasError(parent))
+            return true;
+
+        int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int index = 0; index < childCount; index++)
+        {
+            if (HasEditorValidationErrors(System.Windows.Media.VisualTreeHelper.GetChild(parent, index)))
+                return true;
+        }
+
+        return false;
+    }
+
     private void SyncCompatibilityFields()
     {
         BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
@@ -1562,6 +1577,12 @@ public partial class ProductionSettingsPage : UserControl
         try
         {
             CommitPendingEditorValues();
+            if (HasEditorValidationErrors(this))
+            {
+                ShowMessage("Hãy sửa các ô nhập chưa hợp lệ trước khi lưu.",
+                    "Cấu hình chưa hợp lệ", MessageBoxImage.Warning);
+                return false;
+            }
             if (!ValidateSettings(out string error))
             {
                 ShowMessage(error, "Cấu hình chưa hợp lệ", MessageBoxImage.Warning);
@@ -1570,7 +1591,7 @@ public partial class ProductionSettingsPage : UserControl
 
             SyncCompatibilityFields();
             LastSaveChanged = !string.Equals(
-                _initialSettingsSnapshot,
+                _savedSettingsSnapshot,
                 CaptureEditableSettingsSnapshot(),
                 StringComparison.Ordinal);
             if (!LastSaveChanged)
@@ -1578,6 +1599,7 @@ public partial class ProductionSettingsPage : UserControl
 
             _vm.Save();
             await NotifySettingsSavedAsync();
+            _savedSettingsSnapshot = CaptureEditableSettingsSnapshot();
             return true;
         }
         catch (Exception ex)
@@ -1786,13 +1808,81 @@ public partial class ProductionSettingsPage : UserControl
         return true;
     }
 
+    private async void Save_Click(object sender, RoutedEventArgs e)
+    {
+        if (await PersistSettingsAsync())
+            ShowSavedConfirmation();
+    }
+
     private async void Cancel_Click(object sender, RoutedEventArgs e)
     {
-        if (!await PersistSettingsAsync())
+        if (Volatile.Read(ref _saveInProgress) != 0)
             return;
+
+        try
+        {
+            CommitPendingEditorValues();
+            SyncCompatibilityFields();
+            if (HasEditorValidationErrors(this) || !string.Equals(
+                    _savedSettingsSnapshot,
+                    CaptureEditableSettingsSnapshot(),
+                    StringComparison.Ordinal))
+            {
+                if (!ConfirmSaveBeforeLeaving() || !await PersistSettingsAsync())
+                    return;
+            }
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Check unsaved production settings failed: {ex}");
+            ShowMessage("Chưa kiểm tra được các thay đổi cài đặt. Vui lòng thử lại.",
+                "CHƯA THỂ TRỞ VỀ", MessageBoxImage.Error);
+            return;
+        }
 
         await ReleaseManualOutputsAsync();
         RequestClose?.Invoke(this, EventArgs.Empty);
+    }
+
+    private bool ConfirmSaveBeforeLeaving()
+    {
+        var dialog = new Window
+        {
+            Title = "THAY ĐỔI CHƯA LƯU",
+            Owner = HostWindow,
+            Width = 430,
+            Height = 175,
+            ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = false,
+            WindowStartupLocation = HostWindow is null
+                ? WindowStartupLocation.CenterScreen
+                : WindowStartupLocation.CenterOwner
+        };
+        var layout = new Grid { Margin = new Thickness(18) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.Children.Add(new TextBlock
+        {
+            Text = "Cài đặt đã thay đổi nhưng chưa được lưu.\nLưu trước khi trở về Trang chính?",
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 14
+        });
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right
+        };
+        var saveButton = new Button { Content = "LƯU", MinWidth = 90, Margin = new Thickness(4) };
+        var cancelButton = new Button { Content = "HỦY", MinWidth = 90, Margin = new Thickness(4), IsCancel = true };
+        saveButton.Click += (_, _) => dialog.DialogResult = true;
+        cancelButton.Click += (_, _) => dialog.DialogResult = false;
+        buttons.Children.Add(saveButton);
+        buttons.Children.Add(cancelButton);
+        Grid.SetRow(buttons, 1);
+        layout.Children.Add(buttons);
+        dialog.Content = layout;
+        return dialog.ShowDialog() == true;
     }
 
     private void ShowMessage(string message, string title, MessageBoxImage image)

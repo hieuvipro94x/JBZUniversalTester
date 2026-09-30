@@ -1718,13 +1718,18 @@ internal static partial class Program
                settingsSource.Contains("DisconnectLabelPrinterAsync()", StringComparison.Ordinal) &&
                settingsSource.Contains("new ComPortOption(savedPort, savedPort)", StringComparison.Ordinal) &&
                !settingsSource.Contains("$\"{savedPort} - chưa kết nối\"", StringComparison.Ordinal),
-            "Selecting a printer COM applies live without autosave; Back uses one validated save pipeline");
-        Assert(!settingsXaml.Contains("Click=\"Save_Click\"", StringComparison.Ordinal) &&
+            "Selecting a printer COM applies live without autosave; explicit Save uses one validated save pipeline");
+        Assert(settingsXaml.Contains("Content=\"LƯU CÀI ĐẶT\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Click=\"Save_Click\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Content=\"TRỞ VỀ\"", StringComparison.Ordinal) &&
-               settingsSource.Contains("if (!await PersistSettingsAsync())", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (await PersistSettingsAsync())", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (!ConfirmSaveBeforeLeaving() || !await PersistSettingsAsync())", StringComparison.Ordinal) &&
+               settingsSource.Contains("_savedSettingsSnapshot = CaptureEditableSettingsSnapshot();", StringComparison.Ordinal) &&
+               settingsSource.Contains("Content = \"LƯU\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("Content = \"HỦY\"", StringComparison.Ordinal) &&
                settingsSource.IndexOf("await ReleaseManualOutputsAsync();", StringComparison.Ordinal) >
-               settingsSource.IndexOf("if (!await PersistSettingsAsync())", StringComparison.Ordinal),
-            "Back commits, validates and saves once before releasing manual outputs and closing");
+               settingsSource.IndexOf("if (!ConfirmSaveBeforeLeaving() || !await PersistSettingsAsync())", StringComparison.Ordinal),
+            "Save persists explicitly; Back asks to save dirty settings or stays on the page");
         Assert(settingsXaml.Contains("x:Name=\"LabelPrintSettingsForm\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("<ColumnDefinition Width=\"48\"/>", StringComparison.Ordinal) &&
                (settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) ||
@@ -1773,7 +1778,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 14 &&
+        Assert(settingsButtons.Length == 15 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
