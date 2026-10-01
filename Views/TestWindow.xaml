@@ -385,9 +385,26 @@
                         <Setter Property="FontWeight" Value="Normal"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsNetworkStart}" Value="True">
-                                <Setter Property="BorderBrush" Value="#23E6E6"/>
-                                <Setter Property="BorderThickness" Value="0,8,0,0"/>
+                                <Setter Property="BorderBrush" Value="#2563EB"/>
+                                <Setter Property="BorderThickness" Value="0,10,0,0"/>
+                                <Setter Property="MinHeight" Value="44"/>
                             </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsNetworkStart}" Value="True"/>
+                                    <Condition Binding="{Binding KindName}" Value="WrongWiring"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="BorderBrush" Value="#C62828"/>
+                                <Setter Property="BorderThickness" Value="0,10,0,0"/>
+                            </MultiDataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsNetworkStart}" Value="True"/>
+                                    <Condition Binding="{Binding KindName}" Value="Short"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="BorderBrush" Value="#C62828"/>
+                                <Setter Property="BorderThickness" Value="0,10,0,0"/>
+                            </MultiDataTrigger>
                             <DataTrigger Binding="{Binding KindName}" Value="Open">
                                 <Setter Property="FontWeight" Value="Bold"/>
                             </DataTrigger>

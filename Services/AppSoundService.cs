@@ -159,7 +159,12 @@ public sealed class AppSoundService : IDisposable
             Volatile.Read(ref _productStartPlaybackActive) != 0 ||
             Volatile.Read(ref _testOkPlaybackActive) != 0)
             return;
-        SafePlay(_clickPlayer);
+        lock (_gate)
+        {
+            if (_disposed || _wiringFaultAlarmActive)
+                return;
+            SafePlay(_clickPlayer);
+        }
     }
 
     /// <summary>Phát COMPUTER.wav một lần khi chu kỳ nhận kết nối sản phẩm đầu tiên.</summary>
@@ -173,7 +178,8 @@ public sealed class AppSoundService : IDisposable
         SoundPlayer? player;
         lock (_gate)
         {
-            if (_disposed || Volatile.Read(ref _testOkPlaybackActive) != 0)
+            if (_disposed || _wiringFaultAlarmActive ||
+                Volatile.Read(ref _testOkPlaybackActive) != 0)
             {
                 Interlocked.Exchange(ref _productStartPlaybackActive, 0);
                 return;
@@ -193,9 +199,15 @@ public sealed class AppSoundService : IDisposable
         // SoundPlayer.Play() trả về ngay. PlaySync giữ tài nguyên PlaySound suốt
         // file COMPUTER.wav (~2,8 s), khiến Stop/Play của đầu dò, lỗi hoặc PASS
         // có thể chặn Dispatcher đúng lúc cần phản hồi nhanh nhất.
-        AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_ASYNC");
-        SafePlay(player);
-        Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+        lock (_gate)
+        {
+            if (!_disposed && !_wiringFaultAlarmActive)
+            {
+                AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_ASYNC");
+                SafePlay(player);
+            }
+            Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+        }
     }
 
     public void PlayTestOk()
@@ -269,7 +281,8 @@ public sealed class AppSoundService : IDisposable
         EnsureInitialized();
         lock (_gate)
         {
-            if (_disposed || Volatile.Read(ref _testOkPlaybackActive) != 0)
+            if (_disposed || _wiringFaultAlarmActive ||
+                Volatile.Read(ref _testOkPlaybackActive) != 0)
                 return;
 
             SafePlay(_discardContactPlayer);
@@ -282,7 +295,7 @@ public sealed class AppSoundService : IDisposable
         EnsureInitialized();
         lock (_gate)
         {
-            if (_disposed)
+            if (_disposed || _wiringFaultAlarmActive)
                 return;
 
             SafePlay(_leakFailPlayer);
@@ -365,26 +378,8 @@ public sealed class AppSoundService : IDisposable
 
             if (_wiringFaultAlarmActive == active)
             {
-                // SoundPlayer ultimately shares the Windows PlaySound channel.
-                // A late Stop/Play from Probe or another short UI sound may have
-                // interrupted TESTPOINT while this logical flag stayed true.
-                // Reassert an active safety alarm instead of silently returning.
-                if (active)
-                {
-                    try
-                    {
-                        // Reset the native PlaySound channel before replaying.
-                        // The logical flag can remain true even after another
-                        // SoundPlayer has interrupted the physical loop.
-                        _wiringFaultPlayer?.Stop();
-                        _wiringFaultPlayer?.PlayLooping();
-                        AsyncFileLogService.Current.Application("WIRING_FAULT_SOUND REASSERT");
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"Không thể phát lại âm cảnh báo: {ex}");
-                    }
-                }
+                // UI cập nhật theo từng frame: không khởi động lại TESTPOINT
+                // khi cảnh báo đang phát, vì Stop/Play tạo khoảng ngắt rõ rệt.
                 return;
             }
 

@@ -1122,6 +1122,7 @@ internal static partial class Program
             .ToArray();
         Assert(externalShortRows.Length == 2 &&
                externalShortRows.Select(row => row.Io).SequenceEqual([127, 128]) &&
+               externalShortRows.Select(row => row.IsNetworkStart).SequenceEqual([true, false]) &&
                externalShortRows.All(row => row.ProductFaultType == ProductFaultType.ShortCircuit &&
                                             row.Status == "CHẬP MẠCH") &&
                externalShortRows.Select(row => row.IoText).SequenceEqual(["IO (127)", "IO (128)"]),
@@ -1412,6 +1413,7 @@ internal static partial class Program
                 RelatedIos = [1, 18, 19]
             }]) ?? throw new InvalidOperationException("Master fault row was not built"));
         Assert(masterWrongWireRow.Kind == FaultKind.WrongWiring &&
+               masterWrongWireRow.IsNetworkStart &&
                masterWrongWireRow.Status == "SAI DÂY",
             "Confirmed bad-Master wrong wiring uses the same red SAI DÂY row semantics as production");
 
@@ -1578,9 +1580,12 @@ internal static partial class Program
             "TestView renders full-cell wire colors with outlined readable codes and no #1..#4 columns");
         Assert(xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"Open\">", StringComparison.Ordinal) &&
                xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"MissingConnection\">", StringComparison.Ordinal) &&
-               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#23E6E6\"/>", StringComparison.Ordinal) &&
-               xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,8,0,0\"/>", StringComparison.Ordinal),
-            "TestView uses bold open rows and a thick cyan separator between wire networks");
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#2563EB\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,10,0,0\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#C62828\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"WrongWiring\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"Short\"/>", StringComparison.Ordinal),
+            "TestView uses 10px blue separators for normal networks and red separators for confirmed wiring fault groups");
         int operatorWireStyleStart = xaml.IndexOf("x:Key=\"OperatorWireTextStyle\"", StringComparison.Ordinal);
         int operatorConnectorStyleStart = xaml.IndexOf("x:Key=\"OperatorConnectorTextStyle\"", StringComparison.Ordinal);
         string operatorWireStyle = operatorWireStyleStart >= 0 && operatorConnectorStyleStart > operatorWireStyleStart
@@ -3280,6 +3285,96 @@ internal static partial class Program
         Assert(!faultMainVm.IsProductRemovalPending &&
                faultMainVm.ResultStatusText == "LẮP SẢN PHẨM",
             "FAIL MainWindow removal lock clears only after a complete empty frame");
+
+        var shortRemovalClock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
+        TestViewModel shortRemovalVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard shortRemovalBoard,
+            timeProvider: shortRemovalClock);
+        shortRemovalVm.SetModel(Model(("EXPECTED", new[] { 4, 8 })));
+        ((Task)(typeof(TestViewModel).GetField("_statisticsLoadTask", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(shortRemovalVm) ?? Task.CompletedTask)).GetAwaiter().GetResult();
+        typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(shortRemovalVm, 1);
+        TestEngine shortRemovalEngine =
+            (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(shortRemovalVm) ?? throw new InvalidOperationException("Short removal engine not found"));
+        shortRemovalEngine.SetFrameProcessingEnabled(true);
+        armRemoval.Invoke(shortRemovalVm, null);
+        typeof(TestViewModel).GetField("_cycleActive", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(shortRemovalVm, false);
+        typeof(TestViewModel).GetField("_wiringFaultHandlingStarted", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(shortRemovalVm, 1);
+        shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.ShortCircuit);
+        shortRemovalBoard.Publish(FrameSeq(30, (4, new[] { 8 }), (3, new[] { 7 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(31, (3, new[] { 7 })));
+        shortRemovalBoard.Publish(FrameSeq(32, (3, new[] { 7 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               !shortRemovalEngine.IsFaultConnectionReleased &&
+               shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+               shortRemovalVm.StateBackground == "#C62828" &&
+               shortRemovalVm.ActiveFaultTitle == "KIỂM TRA LỖI CHẬP MẠCH" &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 &&
+                                                row.ActualTargetIo == 7 &&
+                                                row.Kind == FaultKind.Short),
+            "FAIL screen and counter stay latched while IO3-IO7 remains after IO4-IO8 disappears; " +
+            $"pending={shortRemovalVm.IsProductRemovalPending} status={shortRemovalVm.ResultStatusText} state={shortRemovalVm.State} " +
+            $"title={shortRemovalVm.ActiveFaultTitle} rows={string.Join(" | ", shortRemovalVm.Faults.Select(row => $"{row.Kind}:{row.ActualSourceIo}->{row.ActualTargetIo}"))} " +
+            $"engine={string.Join(" | ", shortRemovalEngine.WiringFaults.Select(pair => $"{pair.FaultType}:{pair.SourceIo}->{pair.TargetIo}"))}");
+        shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.WrongWiring);
+        Assert(shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+               shortRemovalVm.StateBackground == "#C62828",
+            "Wrong-wiring FAIL also stays red while awaiting full product removal");
+        shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.ShortCircuit);
+        shortRemovalBoard.Publish(FrameSeq(33, (3, new[] { 7 }), (5, new[] { 6 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(34, (3, new[] { 7 }), (5, new[] { 6 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 && row.ActualTargetIo == 7) &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 5 && row.ActualTargetIo == 6) &&
+               shortRemovalVm.ActiveFaultActualText.Contains("IO 5", StringComparison.Ordinal),
+            "A second short is added immediately to the same FAIL screen while the first short remains; " +
+            $"rows={string.Join(" | ", shortRemovalVm.Faults.Select(row => $"{row.Kind}:{row.ActualSourceIo}->{row.ActualTargetIo}"))}; " +
+            $"engine={string.Join(" | ", shortRemovalEngine.WiringFaults.Select(pair => $"{pair.FaultType}:{pair.SourceIo}->{pair.TargetIo}"))}; " +
+            $"active={shortRemovalVm.ActiveFaultActualText}");
+        shortRemovalBoard.Publish(FrameSeq(35, (3, new[] { 7 }), (5, new[] { 6 }), (4, new[] { 5 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultProductSettleTimeMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(36, (3, new[] { 7 }), (5, new[] { 6 }), (4, new[] { 5 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(37, (3, new[] { 7 }), (5, new[] { 6 }), (4, new[] { 5 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 4 &&
+                                              row.ActualTargetIo == 5 &&
+                                              row.Kind == FaultKind.WrongWiring) &&
+               shortRemovalVm.ActiveFaultActualText.Contains("IO 4", StringComparison.Ordinal),
+            "A new wrong-wiring pair is recognized while two earlier shorts are still displayed");
+        shortRemovalBoard.Publish(FrameSeq(38, (5, new[] { 6 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               !shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 && row.ActualTargetIo == 7) &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 5 && row.ActualTargetIo == 6) &&
+               !shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 5) &&
+               shortRemovalVm.ActiveFaultActualText.Contains("IO 5", StringComparison.Ordinal),
+            "Released pairs disappear immediately while the remaining short stays visible");
+        shortRemovalBoard.Publish(FrameSeq(39, (7, new[] { 7 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               !shortRemovalEngine.IsFaultConnectionReleased &&
+               shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+               shortRemovalVm.Faults.Count == 0 &&
+               shortRemovalVm.ActiveFaultActualText == string.Empty,
+            "All fault rows clear when their pairs release, while an active IO keeps the FAIL cycle pending");
+        shortRemovalBoard.Publish(FrameSeq(40));
+        Assert(shortRemovalVm.IsProductRemovalPending,
+            "One fully clear frame cannot release an outside-THT short FAIL");
+        shortRemovalBoard.Publish(FrameSeq(41));
+        Assert(!shortRemovalVm.IsProductRemovalPending,
+            "Two fully clear frames release the short FAIL exactly once");
 
         FieldInfo cycleActiveAfterLeakFail = typeof(TestViewModel).GetField(
             "_cycleActive",
@@ -5468,6 +5563,7 @@ internal static partial class Program
         engine.ProcessFrame(crossed with { Sequence = 112 });
         FaultRow[] crossedRows = engine.BuildRows().ToArray();
         Assert(engine.HasWiringFault &&
+               crossedRows.Take(3).Select(row => row.IsNetworkStart).SequenceEqual([true, false, false]) &&
                crossedRows.Count(row => row.Io == 1 && row.WireName == "BG1" && row.Status == "SAI DÂY") == 1 &&
                crossedRows.Count(row => row.Io == 4 && row.WireName == "BG2" && row.Status == "CHẬP MẠCH") == 1 &&
                crossedRows.Count(row => row.Io == 3 && row.WireName == "BG1" && row.Status == "HỞ MẠCH") == 1 &&
@@ -5475,6 +5571,30 @@ internal static partial class Program
                crossedRows.Where(row => row.Io is 1 or 3 or 4).All(row => !string.IsNullOrWhiteSpace(row.IoCnPnText)),
             "Confirmed crossed wire preserves topology/operator metadata and emits SAI/CHẬP/HỞ exactly once. Rows=" +
             string.Join(" | ", crossedRows.Select(row => $"{row.Io}/{row.WireName}/{row.FaultType}/{row.Status}/{row.IoCnPnText}")));
+
+        engine.SetModel(model);
+        ScanFrame twoCrossed = FrameSeq(113, (1, new[] { 4 }), (2, new[] { 3 }));
+        engine.ProcessFrame(twoCrossed);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(twoCrossed with { Sequence = 114 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(twoCrossed with { Sequence = 115 });
+        FaultRow[] twoCrossedRows = engine.BuildRows().ToArray();
+        Assert(twoCrossedRows.Count(row => row.IsNetworkStart &&
+                   row.Kind is (FaultKind.WrongWiring or FaultKind.Short)) == 2,
+            "Each confirmed wrong IO pair starts its own FAIL separator");
+
+        engine.SetModel(Model(("SPLICE", new[] { 5, 20, 33 })));
+        ScanFrame wrongCommon = FrameSeq(116, (5, new[] { 40 }));
+        engine.ProcessFrame(wrongCommon);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(wrongCommon with { Sequence = 117 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(wrongCommon with { Sequence = 118 });
+        FaultRow[] wrongCommonRows = engine.BuildRows().ToArray();
+        Assert(wrongCommonRows.Any(row => row.IsNetworkStart &&
+                   row.Kind == FaultKind.WrongWiring && row.FaultType == "Nối chung"),
+            "Confirmed wrong splice connection starts a FAIL separator for the common network");
 
         engine.SetModel(model);
         ScanFrame unused = FrameSeq(120, (1, new[] { 40 }));
@@ -5657,6 +5777,18 @@ internal static partial class Program
 
     private static void TestProductionFaultConfirmation()
     {
+        MethodInfo continueAlarm = typeof(TestViewModel).GetMethod(
+            "ShouldContinueWiringFaultAlarm", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Wiring alarm transition policy not found");
+        bool Alarm(bool active, bool valid, bool confirmed, bool candidate) =>
+            (bool)(continueAlarm.Invoke(null, [active, valid, confirmed, candidate]) ?? false);
+        Assert(!Alarm(false, true, false, true) &&
+               Alarm(false, true, true, false) &&
+               Alarm(true, true, false, true) &&
+               Alarm(true, false, false, false) &&
+               !Alarm(true, true, false, false),
+            "TESTPOINT starts on confirmed fault, stays continuous across a new candidate/invalid frame, and stops on a clean frame");
+
         var settings = new ProductionSettings
         {
             OpenCircuitConfirmMs = 100,
@@ -8929,11 +9061,12 @@ internal static partial class Program
     private static TestViewModel CreateTestViewModel(
         ProductionSettings production,
         out FakeBoard board,
-        bool requireStartupIoClear = false)
+        bool requireStartupIoClear = false,
+        TimeProvider? timeProvider = null)
     {
         board = new FakeBoard();
         var app = new AppSettings();
-        var engine = new TestEngine(board, new KeysightVisaService(), app, production);
+        var engine = new TestEngine(board, new KeysightVisaService(), app, production, timeProvider);
         TestViewModel viewModel = new(
             new MainViewModel(),
             engine,

@@ -37,6 +37,11 @@ internal static class ProductionPresentationService
             if (state.WaitForFaultProductRemoval && state.DiscardRequiredForFault)
                 return "CHỜ XÁC NHẬN THÙNG LỖI";
 
+            if (state.WaitForFaultProductRemoval &&
+                (value.Contains("LỖI SAI DÂY", StringComparison.OrdinalIgnoreCase) ||
+                 value.Contains("LỖI CHẬP MẠCH", StringComparison.OrdinalIgnoreCase)))
+                return "KHÔNG ĐẠT";
+
             return "THÁO SẢN PHẨM";
         }
 

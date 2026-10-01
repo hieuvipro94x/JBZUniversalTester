@@ -510,6 +510,27 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    public bool IsFaultConnectionReleased
+    {
+        get
+        {
+            lock (_gate)
+            {
+                // A confirmed short may connect only I/O outside the loaded THT.
+                // A single active pin also means removal is not fully observed.
+                return _currentActive.Count == 0 &&
+                    !_currentConnections.Any(pair =>
+                    pair.Value.Any(target =>
+                        pair.Key > 0 && target > 0 && pair.Key != target &&
+                        !_probeEvidenceExcludedIo.Contains(pair.Key) &&
+                        !_probeEvidenceExcludedIo.Contains(target) &&
+                        (_model is null ||
+                         (!_model.IgnoredIo.Contains(pair.Key) &&
+                          !_model.IgnoredIo.Contains(target)))));
+            }
+        }
+    }
+
     public bool IsConfirmedProductRemoved
     {
         get
@@ -2390,6 +2411,7 @@ public sealed class TestEngine : IDisposable
                      .OrderBy(item => item.SourceIo)
                      .ThenBy(item => item.TargetIo))
         {
+            int groupStartIndex = rows.Count;
             int[] relation = [fault.SourceIo, fault.TargetIo];
             if (TryResolveExpectedDisplayRelation(
                     model,
@@ -2402,13 +2424,13 @@ public sealed class TestEngine : IDisposable
                     : fault.SourceIo;
                 AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
                     expectedSource, "SAI DÂY", FaultKind.WrongWiring,
-                    ProductFaultType.WrongWiring, relation);
+                    ProductFaultType.WrongWiring, relation, groupStartIndex);
                 AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
                     wrongPeer, "CHẬP MẠCH", FaultKind.Short,
-                    ProductFaultType.ShortCircuit, relation);
+                    ProductFaultType.ShortCircuit, relation, groupStartIndex);
                 AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
                     expectedTarget, "HỞ MẠCH", FaultKind.Open,
-                    ProductFaultType.OpenCircuit, relation);
+                    ProductFaultType.OpenCircuit, relation, groupStartIndex);
                 continue;
             }
 
@@ -2424,10 +2446,10 @@ public sealed class TestEngine : IDisposable
 
             AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
                 fault.SourceIo, fallbackStatus, fallbackKind,
-                fallbackType, relation);
+                fallbackType, relation, groupStartIndex);
             AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
                 fault.TargetIo, fallbackStatus, fallbackKind,
-                fallbackType, relation);
+                fallbackType, relation, groupStartIndex);
         }
 
         return rows;
@@ -2521,7 +2543,8 @@ public sealed class TestEngine : IDisposable
         string status,
         FaultKind kind,
         ProductFaultType productFaultType,
-        int[] relation)
+        int[] relation,
+        int groupStartIndex)
     {
         if (io <= 0)
             return;
@@ -2540,6 +2563,7 @@ public sealed class TestEngine : IDisposable
             ProductFaultType = productFaultType,
             FaultType = unused ? string.Empty : ResolveTopologyType(model, io),
             Io = io,
+            IsNetworkStart = rows.Count == groupStartIndex,
             IoTextOverride = unused ? $"IO ({io})" : string.Empty,
             DisplayOrder = pin is null ? int.MaxValue : ResolveDisplayOrder(pin),
             ExpectedSourceIo = fault.ExpectedSourceIo,

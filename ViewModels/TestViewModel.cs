@@ -190,6 +190,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _postContinuityStarted;
     private int _fullCycleResetInProgress;
     private int _wiringFaultHandlingStarted;
+    // Only the FAIL lifecycle is latched. These rows/details track the pairs
+    // currently confirmed in each complete production frame.
+    private FaultRow[] _latchedWiringFaultRows = [];
+    private FaultDetail[] _latchedWiringFaultDetails = [];
     private Task? _hardwareInitializationTask;
     private Task? _hardwareMonitorTask;
     private int _selectedOperationTabIndex;
@@ -3181,15 +3185,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // Sau lỗi: chỉ chờ tháo sản phẩm, không phát lại lỗi.
         if (_waitForFaultProductRemoval)
         {
-            bool productPresent = electrical.ProductEvidence || electrical.RealtimeEvaluationEnabled;
-            if (!productPresent &&
-                _engine.IsConfirmedProductRemoved &&
-                Interlocked.Exchange(ref _faultProductRemoved, 1) == 0)
-            {
-                MarkProductRemoved();
-                AddLog("Đã tháo sản phẩm lỗi khỏi JIG.");
-            }
-
+            // The frame worker owns the two consecutive fully-clear frames.
+            // Model-only removal can be true while an outside-THT short remains.
             TryCompleteFaultProductRemoval();
             if (_waitForFaultProductRemoval)
             {
@@ -3319,8 +3316,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // lifecycle: Leak FAIL only permits connector removal and retest.
             bool leakRetestWiringFault =
                 Volatile.Read(ref _waterProofRunning) == 0 &&
-                _engine.LastFrameValid &&
-                _engine.HasWiringFault;
+                ShouldKeepWiringFaultAlarm();
             bool alarmWasActive = _sound.IsWiringFaultAlarmActive;
             _sound.SetWiringFaultAlarm(leakRetestWiringFault);
             if (leakRetestWiringFault && !alarmWasActive)
@@ -3686,6 +3682,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         AdvanceProductionUiCycleEpoch();
         ResetManualProbeSession("product-removed");
         _engine.ResetProductCycle();
+        _latchedWiringFaultRows = [];
+        _latchedWiringFaultDetails = [];
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
         Interlocked.Exchange(ref _faultRemovalClearFrames, 0);
         Interlocked.Exchange(ref _passRemovalArmed, 0);
@@ -4314,6 +4312,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     // This fixes Leak FAIL when the operator removes the product
                     // while D2XX is stopped: the restarted scan sees only empty
                     // frames and must return to CHỜ LẮP after two clean frames.
+                    ObserveLiveWiringFaultsDuringRemoval(generation);
                     ObserveFaultProductRemovalFrame(frame, generation);
                     ObservePassProductRemovalFrame(frame, generation);
                 }
@@ -4457,8 +4456,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task ArmFaultRemovalWithoutConfirmationAsync(
         ProductModel model,
-        string reason)
+        string reason,
+        bool retainFaultState = false)
     {
+        string faultState = State;
         AddLog(
             $"[FAIL-NO-DIALOG] Reason={reason}; kết quả FAIL đã ghi History; " +
             "không mở FaultConfirmationWindow, không kích relay.");
@@ -4467,7 +4468,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             CurrentCycleToken(),
             $"{reason}_NO_CONFIRMATION");
         State = _waitForFaultProductRemoval
-            ? FaultRemovalWaitingText(model)
+            ? (retainFaultState ? faultState : FaultRemovalWaitingText(model))
             : "LẮP SẢN PHẨM";
     }
 
@@ -4475,6 +4476,53 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         model.HasDiscardInterlock
             ? "CHỜ XÁC NHẬN THÙNG LỖI"
             : "CHỜ THÁO SẢN PHẨM";
+
+    private static (int First, int Second) WiringPairKey(int source, int target) =>
+        (Math.Min(source, target), Math.Max(source, target));
+
+    private void ObserveLiveWiringFaultsDuringRemoval(long generation)
+    {
+        if (!IsProductionFaultContext(generation) ||
+            (!_waitForFaultProductRemoval &&
+             CurrentProductionPhase != ProductionPhase.WaitingFaultConfirmation) ||
+            Volatile.Read(ref _wiringFaultHandlingStarted) == 0)
+        {
+            return;
+        }
+
+        FaultRow[] currentRows = _engine.BuildRows()
+            .Where(row => row.ProductFaultType != ProductFaultType.None &&
+                          row.ActualSourceIo.HasValue && row.ActualTargetIo.HasValue)
+            .ToArray();
+        FaultRow[] previousRows = _latchedWiringFaultRows;
+        if (previousRows.Select(row => row.PresentationKey)
+            .SequenceEqual(currentRows.Select(row => row.PresentationKey), StringComparer.Ordinal))
+            return;
+
+        HashSet<(int First, int Second)> previousPairs = previousRows
+            .Where(row => row.ActualSourceIo.HasValue && row.ActualTargetIo.HasValue)
+            .Select(row => WiringPairKey(row.ActualSourceIo!.Value, row.ActualTargetIo!.Value))
+            .ToHashSet();
+        HashSet<(int First, int Second)> currentPairs = currentRows
+            .Select(row => WiringPairKey(row.ActualSourceIo!.Value, row.ActualTargetIo!.Value))
+            .ToHashSet();
+        _latchedWiringFaultRows = currentRows;
+        _latchedWiringFaultDetails = _engine.WiringFaults
+            .OrderBy(pair => previousPairs.Contains(WiringPairKey(pair.SourceIo, pair.TargetIo)) ? 1 : 0)
+            .ThenBy(pair => pair.SourceIo)
+            .ThenBy(pair => pair.TargetIo)
+            .Select(BuildWiringFaultDetail)
+            .ToArray();
+        AddLog($"[FAIL-LIVE] added={string.Join(", ", currentPairs.Except(previousPairs))} " +
+               $"removed={string.Join(", ", previousPairs.Except(currentPairs))}");
+        InvokeUi(() =>
+        {
+            if (IsProductionFaultContext(generation) &&
+                (_waitForFaultProductRemoval ||
+                 CurrentProductionPhase == ProductionPhase.WaitingFaultConfirmation))
+                RefreshFaults();
+        });
+    }
 
     private void ObserveFaultProductRemovalFrame(ScanFrame frame, long generation)
     {
@@ -4488,11 +4536,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        // IsProductReleased is based on the current authoritative connectivity
-        // snapshot, not the debounced ProductEvidence latch. That distinction is
-        // important after Leak: ArmWaterProofFaultRemovalWait resets the engine
-        // and the operator may have already removed the product before scan resumes.
-        if (!_engine.IsProductReleased)
+        // A short entirely outside the THT is still an occupied JIG. Require
+        // every real connection to clear before re-arming the next cycle.
+        if (!_engine.IsFaultConnectionReleased)
         {
             Interlocked.Exchange(ref _faultRemovalClearFrames, 0);
             return;
@@ -4665,6 +4711,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         _waitForFaultProductRemoval = false;
+        _sound.SetWiringFaultAlarm(false);
         Interlocked.Exchange(ref _faultRemovalClearFrames, 0);
         SetProductRemovalPending(false);
         bool returnedToMain =
@@ -5185,6 +5232,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (_waitForFaultProductRemoval)
         {
+            if (!_engine.IsFaultConnectionReleased)
+                return;
             if (Interlocked.Exchange(ref _faultProductRemoved, 1) == 0)
                 MarkProductRemoved();
             TryCompleteFaultProductRemoval();
@@ -7001,6 +7050,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void AbortProductionFaultForProbe()
     {
         Interlocked.Exchange(ref _wiringFaultHandlingStarted, 0);
+        _latchedWiringFaultRows = [];
+        _latchedWiringFaultDetails = [];
         _sound.SetWiringFaultAlarm(false);
     }
 
@@ -7036,11 +7087,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             $"FrameId={_engine.LastFrameSequence} FaultType={faultType} FaultCount={faultCount} " +
             $"ResultCommitted={Volatile.Read(ref _resultRecordedThisCycle) != 0} Reason=ConfirmedProductFault");
 
-        _ = HandleWiringFaultAsync(generation);
+        _ = HandleWiringFaultAsync(
+            generation,
+            wiringFaults.ToArray(),
+            _engine.BuildRows().ToArray());
         return true;
     }
 
-    private async Task HandleWiringFaultAsync(long generation)
+    private async Task HandleWiringFaultAsync(
+        long generation,
+        WiringFaultPair[] confirmedPairs,
+        FaultRow[] confirmedRows)
     {
         // Callback production cũ có thể đã được schedule ngay trước khi mở
         // TestPin. Probe mode tuyệt đối không được hiện popup chập/đấu sai.
@@ -7056,10 +7113,36 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         ProductModel cycleModel = _model;
         CancellationToken cycleToken = CurrentCycleToken();
+        ProductFaultType primaryType = confirmedPairs
+            .Select(fault => fault.FaultType)
+            .OrderBy(FaultTypeCatalog.Priority)
+            .First();
+        WiringFaultPair[] wiringPairs = confirmedPairs
+            .OrderBy(pair => pair.SourceIo)
+            .ThenBy(pair => pair.TargetIo)
+            .ToArray();
+        FaultDetail[] dialogFaults = wiringPairs
+            .Select(BuildWiringFaultDetail)
+            .GroupBy(fault => new
+            {
+                fault.Type,
+                fault.ExpectedSourceIo,
+                fault.ExpectedTargetIo,
+                fault.ActualSourceIo,
+                fault.ActualTargetIo,
+                fault.WireName
+            })
+            .Select(group => group.First())
+            .ToArray();
 
         _cycleActive = false;
         SetProductionPhase(ProductionPhase.WaitingFaultConfirmation);
-        State = "ĐANG XỬ LÝ LỖI DÂY";
+        _latchedWiringFaultRows = confirmedRows
+            .Where(row => row.ProductFaultType != ProductFaultType.None &&
+                          row.ActualSourceIo.HasValue && row.ActualTargetIo.HasValue)
+            .ToArray();
+        _latchedWiringFaultDetails = dialogFaults;
+        State = FaultDisplayFormatter.OperatorInstruction(primaryType);
         SelectedOperationTabIndex = 0;
 
         // Chập hoàn toàn ngoài THT không có ProductEvidence của model nhưng
@@ -7074,7 +7157,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (_board.IsConnected)
             {
-                await StopScanIntentionallyAsync("WiringFaultConfirmation");
+                if (!_productionSettings.WiringFaultConfirmationEnabled)
+                    await StopScanIntentionallyAsync("WiringFaultConfirmation");
                 await _board.AllRelaysOffAsync();
             }
         }
@@ -7093,49 +7177,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        WiringFaultPair[] wiringPairs = _engine.WiringFaults
-            .OrderBy(x => x.SourceIo)
-            .ThenBy(x => x.TargetIo)
-            .ToArray();
-
-        FaultDetail[] dialogFaults = wiringPairs
-            .Select(pair =>
-            {
-                int? expectedSource = pair.ExpectedSourceIo;
-                int? expectedTarget = pair.ExpectedTargetIo;
-                if ((!expectedSource.HasValue || !expectedTarget.HasValue) &&
-                    _engine.TryResolveExpectedWiringRelation(
-                        pair,
-                        out int resolvedSource,
-                        out int resolvedTarget))
-                {
-                    expectedSource = resolvedSource;
-                    expectedTarget = resolvedTarget;
-                }
-
-                return EnrichFaultDetail(new FaultDetail
-                {
-                    Type = pair.FaultType,
-                    ExpectedSourceIo = expectedSource,
-                    ExpectedTargetIo = expectedTarget,
-                    ActualSourceIo = pair.SourceIo,
-                    ActualTargetIo = pair.TargetIo,
-                    RelatedIos = [pair.SourceIo, pair.TargetIo],
-                    Message = pair.Reason
-                });
-            })
-            .GroupBy(fault => new
-            {
-                fault.Type,
-                fault.ExpectedSourceIo,
-                fault.ExpectedTargetIo,
-                fault.ActualSourceIo,
-                fault.ActualTargetIo,
-                fault.WireName
-            })
-            .Select(group => group.First())
-            .ToArray();
-
         if (dialogFaults.Length == 0)
         {
             AbortProductionFaultForProbe();
@@ -7144,10 +7185,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        ProductFaultType primaryType = dialogFaults
-            .Select(fault => fault.Type)
-            .OrderBy(FaultTypeCatalog.Priority)
-            .First();
         string primaryName = FaultTypeCatalog.DisplayName(primaryType);
         State = FaultDisplayFormatter.OperatorInstruction(primaryType);
 
@@ -7166,7 +7203,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         // Popup NG chỉ được mở sau khi result FAIL đã commit thành công.
-        bool committed = await RecordCompletedProductAsync(false, primaryName, cycleModel, generation, cycleToken);
+        bool committed = await RecordCompletedProductAsync(
+            false, primaryName, cycleModel, generation, cycleToken, dialogFaults);
         if (!committed)
         {
             if (!IsPersistenceFault)
@@ -7187,7 +7225,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 await ArmFaultRemovalWithoutConfirmationAsync(
                     cycleModel,
-                    "WIRING_FAIL");
+                    "WIRING_FAIL",
+                    retainFaultState: true);
             }
             catch (Exception ex)
             {
@@ -7220,13 +7259,39 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 CurrentCycleToken(),
                 "FAIL_CONFIRM_RELAY");
             State = _waitForFaultProductRemoval
-                ? FaultRemovalWaitingText(cycleModel)
+                ? (cycleModel.HasDiscardInterlock
+                    ? FaultRemovalWaitingText(cycleModel)
+                    : FaultDisplayFormatter.OperatorInstruction(primaryType))
                 : "LẮP SẢN PHẨM";
         }
         catch (Exception ex)
         {
             EnterDeviceFault(ex, "WiringFault.EjectOrScan");
         }
+    }
+
+    private FaultDetail BuildWiringFaultDetail(WiringFaultPair pair)
+    {
+        int? expectedSource = pair.ExpectedSourceIo;
+        int? expectedTarget = pair.ExpectedTargetIo;
+        if ((!expectedSource.HasValue || !expectedTarget.HasValue) &&
+            _engine.TryResolveExpectedWiringRelation(
+                pair, out int resolvedSource, out int resolvedTarget))
+        {
+            expectedSource = resolvedSource;
+            expectedTarget = resolvedTarget;
+        }
+
+        return EnrichFaultDetail(new FaultDetail
+        {
+            Type = pair.FaultType,
+            ExpectedSourceIo = expectedSource,
+            ExpectedTargetIo = expectedTarget,
+            ActualSourceIo = pair.SourceIo,
+            ActualTargetIo = pair.TargetIo,
+            RelatedIos = [pair.SourceIo, pair.TargetIo],
+            Message = pair.Reason
+        });
     }
 
     private string DescribeIoCompact(int io)
@@ -7394,6 +7459,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         if (_visiblePrimaryFaultSnapshotValid)
             return _visiblePrimaryFaultSnapshot;
+
+        if (Volatile.Read(ref _wiringFaultHandlingStarted) != 0 &&
+            (_waitForFaultProductRemoval ||
+             CurrentProductionPhase == ProductionPhase.WaitingFaultConfirmation))
+        {
+            _visiblePrimaryFaultSnapshot = _latchedWiringFaultDetails.FirstOrDefault();
+            _visiblePrimaryFaultSnapshotValid = true;
+            return _visiblePrimaryFaultSnapshot;
+        }
 
         bool stateIsFault =
             State.Contains("LỖI", StringComparison.OrdinalIgnoreCase) ||
@@ -7809,6 +7883,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return new FaultRow
         {
             Kind = kind,
+            IsNetworkStart = kind is FaultKind.WrongWiring or FaultKind.Short,
             ProductFaultType = fault.Type,
             FaultType = FaultTypeCatalog.DisplayName(fault.Type),
             Io = primaryIo,
@@ -10301,6 +10376,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         string reason)
     {
         _sound.SetWiringFaultAlarm(false);
+        _latchedWiringFaultRows = [];
+        _latchedWiringFaultDetails = [];
         _waitForFaultProductRemoval = false;
 
         bool currentProductionContext =
@@ -10619,6 +10696,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             reason: "MODEL_CHANGE");
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
+        _latchedWiringFaultRows = [];
+        _latchedWiringFaultDetails = [];
         _waterProofEquipmentErrorAwaitingRemoval = false;
         Interlocked.Exchange(ref _waterProofRunning, 0);
         Interlocked.Exchange(ref _postContinuityStarted, 0);
@@ -11823,7 +11902,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         IReadOnlyList<FaultRow> desiredRows;
-        if (!MasterApproved && IsMasterBadPhase)
+        if (Volatile.Read(ref _wiringFaultHandlingStarted) != 0 &&
+            (_waitForFaultProductRemoval ||
+             CurrentProductionPhase == ProductionPhase.WaitingFaultConfirmation))
+        {
+            desiredRows = _latchedWiringFaultRows;
+        }
+        else if (!MasterApproved && IsMasterBadPhase)
         {
             // Master lỗi dùng cùng bảng lỗi sản xuất, nhưng trước khi có mẫu
             // thật trên JIG bảng phải hoàn toàn trống.
@@ -11938,23 +12023,49 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // never the asynchronously rendered Faults collection. On a fast
             // FAIL transition the UI rows can still be empty for one dispatcher
             // turn; using WiringFaultCount there stopped TESTPOINT after 30-40 ms.
-            bool confirmedWiringFault = _engine.LastFrameValid && _engine.HasWiringFault;
+            bool confirmedWiringFault = ShouldKeepWiringFaultAlarm();
             _sound.SetWiringFaultAlarm(
                 confirmedWiringFault &&
                 (_cycleActive || _sound.IsWiringFaultAlarmActive));
         }
         else if (_productionSettings.WiringFaultConfirmationEnabled)
         {
-            // Chế độ không popup/không relay vẫn giữ cảnh báo TESTPOINT trong
-            // lúc lỗi dây còn hiện hữu; âm tự dừng khi scan xác nhận đã tháo lỗi.
+            // A committed wiring FAIL keeps one continuous alarm until the
+            // product has been fully removed, even while one pair releases.
             _sound.SetWiringFaultAlarm(
-                _engine.LastFrameValid && _engine.HasWiringFault);
+                Volatile.Read(ref _wiringFaultHandlingStarted) != 0 || ShouldKeepWiringFaultAlarm());
         }
         else
             _sound.SetWiringFaultAlarm(false);
 
 
     }
+
+    private bool ShouldKeepWiringFaultAlarm()
+    {
+        bool alarmActive = _sound.IsWiringFaultAlarmActive;
+        bool frameValid = _engine.LastFrameValid;
+        bool confirmedFault = _engine.HasWiringFault;
+        bool candidateFault = false;
+        if (alarmActive && frameValid && !confirmedFault)
+        {
+            PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
+            candidateFault = gate.WrongCandidateCount > 0 || gate.ShortCandidateCount > 0;
+        }
+
+        return ShouldContinueWiringFaultAlarm(
+            alarmActive, frameValid, confirmedFault, candidateFault);
+    }
+
+    // Chỉ confirmed fault được khởi động âm. Khi âm đã phát, candidate kế tiếp
+    // hoặc một frame không hợp lệ không đủ bằng chứng để ngắt âm giữa hai cặp.
+    private static bool ShouldContinueWiringFaultAlarm(
+        bool alarmActive,
+        bool frameValid,
+        bool confirmedFault,
+        bool candidateFault) =>
+        (frameValid && confirmedFault) ||
+        (alarmActive && (!frameValid || candidateFault));
 
     private void SynchronizeFaultRows(IReadOnlyList<FaultRow> desiredRows)
     {
