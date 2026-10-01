@@ -57,7 +57,7 @@
                         <DataTemplate>
                             <Border Margin="0,0,0,8"
                                     Padding="12,10"
-                                    Background="#FFF8F8"
+                                    Background="White"
                                     BorderBrush="#E7A7A7"
                                     BorderThickness="1"
                                     CornerRadius="6">
@@ -69,7 +69,7 @@
                                                HorizontalAlignment="Center"
                                                TextAlignment="Center"
                                                TextWrapping="Wrap"/>
-                                    <TextBlock Text="{Binding Summary}"
+                                    <TextBlock Loaded="FaultSummary_Loaded"
                                                Margin="0,7,0,0"
                                                Foreground="#111827"
                                                FontSize="17"

@@ -4448,7 +4448,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             faults,
             model.HasDiscardInterlock
                 ? "Bấm XÁC NHẬN để mở JIG. Sau đó đưa hàng lỗi qua cảm biến thùng NG 1 lần."
-                : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.");
+                : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
+            model: model);
         Window? resolvedOwner = owner ?? ResolveOperatorDialogOwner();
         if (resolvedOwner is not null)
             dialog.Owner = resolvedOwner;
