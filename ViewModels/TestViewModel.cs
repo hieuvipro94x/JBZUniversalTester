@@ -4312,7 +4312,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     // This fixes Leak FAIL when the operator removes the product
                     // while D2XX is stopped: the restarted scan sees only empty
                     // frames and must return to CHỜ LẮP after two clean frames.
-                    ObserveLiveWiringFaultsDuringRemoval(generation);
+                    if (engineChanged)
+                        ObserveLiveWiringFaultsDuringRemoval(generation);
                     ObserveFaultProductRemovalFrame(frame, generation);
                     ObservePassProductRemovalFrame(frame, generation);
                 }
