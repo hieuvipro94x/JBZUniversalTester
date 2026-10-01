@@ -150,6 +150,36 @@
             <Setter Property="Padding" Value="7"/>
             <Setter Property="Margin" Value="2"/>
         </Style>
+        <Style x:Key="SettingsNavigationStyle" TargetType="RadioButton">
+            <Setter Property="Height" Value="46"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="NavigationSurface" Background="White" BorderBrush="#D5DBE5"
+                                BorderThickness="1" CornerRadius="7" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="NavigationSurface" Property="Background" Value="#EAF1FF"/>
+                                <Setter TargetName="NavigationSurface" Property="BorderBrush" Value="#23449B"/>
+                                <Setter Property="Foreground" Value="#23449B"/>
+                                <Setter Property="FontWeight" Value="Bold"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="NavigationSurface" Property="BorderBrush" Value="#7C9CDD"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="MiniHeaderStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="Bold"/>
@@ -201,7 +231,21 @@
         </Border>
         <ScrollViewer Grid.Row="1" x:Name="SettingsScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged" PanningMode="Both">
             <Grid x:Name="SettingsPanelsHost" Margin="8,6,8,6" HorizontalAlignment="Left" VerticalAlignment="Stretch">
-                <TabControl x:Name="ProductionSettingsTabs" SelectedIndex="0" Padding="0" BorderThickness="0" Background="Transparent" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <UniformGrid Columns="4" MaxWidth="1100" HorizontalAlignment="Stretch" Margin="6,4,6,10">
+                    <RadioButton Content="I/O &amp; PRODUCTION" Tag="IO" GroupName="ProductionSettingsSections"
+                                 IsChecked="True" Checked="SettingsSection_Checked" Style="{StaticResource SettingsNavigationStyle}"/>
+                    <RadioButton Content="RELAY &amp; LEAK" Tag="RELAY" GroupName="ProductionSettingsSections"
+                                 Checked="SettingsSection_Checked" Style="{StaticResource SettingsNavigationStyle}"/>
+                    <RadioButton Content="IN TEM" Tag="LABEL" GroupName="ProductionSettingsSections"
+                                 Checked="SettingsSection_Checked" Style="{StaticResource SettingsNavigationStyle}"/>
+                    <RadioButton Content="ĐIỆN TRỞ" Tag="RESISTANCE" GroupName="ProductionSettingsSections"
+                                 Checked="SettingsSection_Checked" Style="{StaticResource SettingsNavigationStyle}"/>
+                </UniformGrid>
+                <TabControl x:Name="ProductionSettingsTabs" Grid.Row="1" SelectedIndex="0" Padding="0" BorderThickness="0" Background="Transparent" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
                     <TabControl.Template>
                         <ControlTemplate TargetType="{x:Type TabControl}">
                             <ContentPresenter ContentSource="SelectedContent" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
@@ -220,7 +264,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
-                                        <TextBlock Text="CẤU HÌNH HỆ THỐNG SẢN XUẤT" FontSize="14" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
+                                        <TextBlock x:Name="SettingsSectionTitleText" Text="I/O VÀ PRODUCTION" FontSize="14" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
                                     </StackPanel>
                                     <Border Grid.Column="1" Background="White" BorderBrush="#C9D8F2" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="12,0,0,0" VerticalAlignment="Center">
                                         <TextBlock Text="PRODUCTION" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
@@ -229,11 +273,12 @@
                             </Border>
                             <Grid x:Name="UnifiedSettingsGrid" Grid.Row="1" Margin="4,0,4,2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
-                                <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Margin="3">
+                                <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" MaxWidth="1100" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Margin="3">
                                     <StackPanel>
                                         <TextBlock Text="I/O / PRODUCTION" Style="{StaticResource SectionTitleStyle}"/>
                                         <Grid>
@@ -340,7 +385,7 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </Border>
-                                <Border x:Name="RelayLeakMainPanel" Grid.Column="1" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Margin="3"><StackPanel x:Name="RelayLeakSettingsColumn" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="0">
+                                <Border x:Name="RelayLeakMainPanel" Grid.Column="0" Grid.Row="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" MaxWidth="1100" Visibility="Collapsed" Style="{StaticResource SettingsPanelStyle}" Margin="3"><StackPanel x:Name="RelayLeakSettingsColumn" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="0">
                                     <Border x:Name="RelaySettingsPanel" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="0,0,0,8" Padding="0" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" CornerRadius="0">
                                         <StackPanel>
                                             <TextBlock Text="RELAY / BẢO TRÌ" Style="{StaticResource SectionTitleStyle}"/>
@@ -476,13 +521,12 @@
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
-                            </Border><Border x:Name="LabelSettingsPanel" Grid.Column="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Row="0" Margin="3">
+                            </Border><Border x:Name="LabelSettingsPanel" Grid.Column="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" MaxWidth="1100" Visibility="Collapsed" Style="{StaticResource SettingsPanelStyle}" Grid.Row="0" Margin="3">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="*"/>
                                         </Grid.RowDefinitions>
                                         <TextBlock Text="TEM" Style="{StaticResource SectionTitleStyle}"/>
                                         <Grid x:Name="LabelPrintSettingsForm" Grid.Row="1" Margin="0,6,0,0">
@@ -512,6 +556,9 @@
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto"/>
                                                 <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
                                             </Grid.RowDefinitions>
                                             <UniformGrid Columns="3">
                                                 <Button Content="CHỈNH TEM" Height="28" Margin="1" Padding="2,0" FontSize="10.5" Style="{StaticResource SettingsInfoButtonStyle}" Click="EditLabelTemplate_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
@@ -521,74 +568,47 @@
                                             <Grid Grid.Row="1" Margin="1,4,1,0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="70"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="LOT in thử" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
+                                                <TextBox x:Name="SinglePrintLotTextBox" Grid.Column="1" Height="28" TextAlignment="Center" VerticalContentAlignment="Center" ToolTip="LOTNO dùng riêng khi xem trước hoặc in thử; không đổi LOT Production."/>
+                                            </Grid>
+                                            <Grid Grid.Row="2" Margin="1,4,1,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="70"/>
+                                                    <ColumnDefinition Width="55"/>
+                                                    <ColumnDefinition Width="22"/>
                                                     <ColumnDefinition Width="55"/>
                                                     <ColumnDefinition Width="*"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="Số lượng" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
-                                                <TextBox x:Name="BatchLabelCountTextBox" Grid.Column="1" Height="28" Text="10" TextAlignment="Center" VerticalContentAlignment="Center"/>
-                                                <Button x:Name="BatchPrintLabelButton" Grid.Column="2" Content="IN HÀNG LOẠT" Height="28" Margin="6,0,0,0" Padding="3,0" FontSize="10.5" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchPrintLabel_Click"/>
+                                                <TextBlock Text="LOT từ" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
+                                                <TextBox x:Name="BatchPrintStartLotTextBox" Grid.Column="1" Height="28" TextAlignment="Center" VerticalContentAlignment="Center" ToolTip="LOTNO đầu tiên cần in."/>
+                                                <TextBlock Grid.Column="2" Text="→" TextAlignment="Center" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
+                                                <TextBox x:Name="BatchPrintEndLotTextBox" Grid.Column="3" Height="28" TextAlignment="Center" VerticalContentAlignment="Center" ToolTip="LOTNO cuối cùng cần in (tính cả LOT này)."/>
+                                            </Grid>
+                                            <UniformGrid Grid.Row="3" Columns="2" Margin="1,4,1,0">
+                                                <Button x:Name="BatchPrintLabelButton" Content="IN HÀNG LOẠT" Height="28" Margin="0,0,3,0" Padding="3,0" FontSize="10.5" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchPrintLabel_Click"/>
+                                                <Button x:Name="BatchStopPrintButton" Content="DỪNG IN" Height="28" Margin="3,0,0,0" Padding="3,0" FontSize="10.5" IsEnabled="False" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchStopPrint_Click"/>
+                                            </UniformGrid>
+                                            <Grid Grid.Row="4" Margin="1,4,1,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="70"/>
+                                                    <ColumnDefinition Width="85"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="Delay (ms)" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
+                                                <ComboBox x:Name="BatchPrintDelayMsComboBox" Grid.Column="1" Height="28" SelectedValuePath="Tag" ToolTip="Thời gian chờ sau khi gửi xong một lệnh in và trước lệnh tiếp theo.">
+                                                    <ComboBoxItem Content="500 ms" Tag="500"/>
+                                                    <ComboBoxItem Content="1000 ms" Tag="1000"/>
+                                                    <ComboBoxItem Content="1500 ms" Tag="1500"/>
+                                                    <ComboBoxItem Content="2000 ms" Tag="2000"/>
+                                                </ComboBox>
+                                                <TextBlock Grid.Column="2" Text="Giữa hai tem" Margin="6,0,0,0" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
                                             </Grid>
                                         </Grid>
-                                        <Border Grid.Row="3" Margin="0,8,0,0" Padding="6" Background="#F7F9FC" BorderBrush="#CAD5E5" BorderThickness="1" CornerRadius="4">
-                                            <Grid>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="Auto"/>
-                                                    <RowDefinition Height="*"/>
-                                                </Grid.RowDefinitions>
-                                                <TextBlock Text="LỆNH IN TEM" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,8"/>
-                                        
-                                                <Border Grid.Row="2" Margin="0,8,0,0" MinHeight="140" Background="#EEF2F7" BorderBrush="#D9E1ED" BorderThickness="1" CornerRadius="3">
-                                                    <Grid Margin="6">
-                                                        <Grid.RowDefinitions>
-                                                            <RowDefinition Height="Auto"/>
-                                                            <RowDefinition Height="*"/>
-                                                        </Grid.RowDefinitions>
-                                                        <Grid Margin="2,0,2,8">
-                                                            <Grid.ColumnDefinitions>
-                                                                <ColumnDefinition Width="*"/>
-                                                                <ColumnDefinition Width="Auto"/>
-                                                            </Grid.ColumnDefinitions>
-                                                            <TextBlock x:Name="InlineLabelPreviewInfoText" Text="DỮ LIỆU SẼ ĐƯỢC GỬI ĐẾN MÁY IN" Foreground="{StaticResource TextMuted}" FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                                                            <TextBlock x:Name="InlineLabelPreviewStatusText" Grid.Column="1" Margin="10,0,0,0" Text="" Foreground="{StaticResource BrandBlue}" FontSize="11.5" FontWeight="Bold" VerticalAlignment="Center"/>
-                                                        </Grid>
-                                                        <Border Grid.Row="1" Background="White" BorderBrush="#C8D4E5" BorderThickness="1" CornerRadius="3" Padding="4" ClipToBounds="True">
-                                                            <Grid>
-                                                                <!-- Giữ x:Name cũ để không phá tham chiếu, nhưng không còn render tem đồ họa. -->
-                                                                <Viewbox x:Name="InlineLabelPreviewViewbox" Visibility="Collapsed"/>
-                                                                <TextBox x:Name="InlineLabelCommandTextBox"
-                                                                         Style="{x:Null}"
-                                                                         Visibility="Collapsed"
-                                                                         IsReadOnly="True"
-                                                                         AcceptsReturn="True"
-                                                                         AcceptsTab="True"
-                                                                         TextWrapping="NoWrap"
-                                                                         HorizontalScrollBarVisibility="Auto"
-                                                                         VerticalScrollBarVisibility="Auto"
-                                                                         HorizontalAlignment="Stretch"
-                                                                         VerticalAlignment="Stretch"
-                                                                         HorizontalContentAlignment="Left"
-                                                                         VerticalContentAlignment="Top"
-                                                                         FontFamily="Consolas"
-                                                                         FontSize="13"
-                                                                         Padding="8,7"
-                                                                         BorderThickness="0"
-                                                                         Background="White"
-                                                                         Foreground="#111827"
-                                                                         ScrollViewer.CanContentScroll="False"/>
-                                                                <StackPanel x:Name="InlineLabelPreviewPlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="18">
-                                                                    <TextBlock Text="EPL / ZPL" HorizontalAlignment="Center" Foreground="#B5C0CF" FontSize="27" FontWeight="Bold"/>
-                                                                    <TextBlock Margin="0,8,0,0" Text="Bấm XEM TRƯỚC hoặc IN THỬ để xem nguyên lệnh và dữ liệu thực tế sẽ gửi tới máy in" TextAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
-                                                                </StackPanel>
-                                                            </Grid>
-                                                        </Border>
-                                                    </Grid>
-                                                </Border>
-                                            </Grid>
-                                        </Border>
                                     </Grid>
                                 </Border>
-                                <Border Grid.Column="3" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" x:Name="ResistanceSettingsPanel" Grid.Row="0" Margin="3">
+                                <Border Grid.Column="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" MaxWidth="1100" Visibility="Collapsed" Style="{StaticResource SettingsPanelStyle}" x:Name="ResistanceSettingsPanel" Grid.Row="0" Margin="3">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>

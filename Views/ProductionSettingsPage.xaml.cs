@@ -18,8 +18,7 @@ using JBZUniversalTester.ViewModels;
 namespace JBZUniversalTester.Views;
 
 /// <summary>
-/// V12.9: trang Cài đặt nhúng trực tiếp trong MainWindow. Không tạo Window,
-/// không xuất hiện thêm mục Alt+Tab và không mở một shell ứng dụng thứ hai.
+/// Trang Cài đặt được đặt trong cửa sổ riêng khi mở từ MainWindow.
 /// </summary>
 public partial class ProductionSettingsPage : UserControl
 {
@@ -31,6 +30,7 @@ public partial class ProductionSettingsPage : UserControl
     private int _printerConnectionGeneration;
     private int _saveInProgress;
     private int _batchPrintInProgress;
+    private CancellationTokenSource? _batchPrintCts;
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
 
@@ -55,6 +55,8 @@ public partial class ProductionSettingsPage : UserControl
         _main = main;
         _vm = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
+        ShowSettingsSection("IO");
+        SinglePrintLotTextBox.Text = _vm.Settings.LotNo.ToString(CultureInfo.InvariantCulture);
         DataContext = _vm;
         InitializeComboBoxItems();
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
@@ -84,6 +86,7 @@ public partial class ProductionSettingsPage : UserControl
         if (Interlocked.Exchange(ref _released, 1) != 0)
             return;
 
+        _batchPrintCts?.Cancel();
         Interlocked.Increment(ref _portRefreshGeneration);
         Interlocked.Increment(ref _printerConnectionGeneration);
         Loaded -= ProductionSettingsPage_Loaded;
@@ -95,6 +98,33 @@ public partial class ProductionSettingsPage : UserControl
     private bool IsReleased => Volatile.Read(ref _released) != 0;
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
+
+    private void SettingsSection_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton { Tag: string section })
+            ShowSettingsSection(section);
+    }
+
+    private void ShowSettingsSection(string section)
+    {
+        // Checked có thể chạy trong InitializeComponent trước khi các panel được tạo.
+        if (IoSettingsPanel is null || RelayLeakMainPanel is null ||
+            LabelSettingsPanel is null || ResistanceSettingsPanel is null)
+            return;
+
+        IoSettingsPanel.Visibility = section == "IO" ? Visibility.Visible : Visibility.Collapsed;
+        RelayLeakMainPanel.Visibility = section == "RELAY" ? Visibility.Visible : Visibility.Collapsed;
+        LabelSettingsPanel.Visibility = section == "LABEL" ? Visibility.Visible : Visibility.Collapsed;
+        ResistanceSettingsPanel.Visibility = section == "RESISTANCE" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsSectionTitleText.Text = section switch
+        {
+            "RELAY" => "RELAY VÀ MÁY LEAK",
+            "LABEL" => "CÀI ĐẶT VÀ IN TEM",
+            "RESISTANCE" => "CÀI ĐẶT ĐIỆN TRỞ",
+            _ => "I/O VÀ PRODUCTION"
+        };
+        SettingsScrollViewer?.ScrollToTop();
+    }
 
     private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -123,9 +153,8 @@ public partial class ProductionSettingsPage : UserControl
 
     private void UpdatePanelWidths(double pageWidth, double pageHeight)
     {
-        // Bốn vùng chính luôn là 4 cột * bằng nhau và chiếm hết chiều rộng trang.
-        // Chỉ khi cửa sổ nhỏ hơn mức tối thiểu để các nhãn/nút không bị cắt thì
-        // host mới rộng hơn viewport và ScrollViewer mới cho phép cuộn ngang.
+        // Mỗi nhóm cài đặt hiển thị riêng. Giữ chiều rộng tối thiểu để bảng
+        // điện trở và các trường COM không bị cắt khi cửa sổ hẹp.
         if (UnifiedSettingsGrid is null ||
             SettingsPanelsHost is null ||
             SettingsScrollViewer is null)
@@ -133,7 +162,7 @@ public partial class ProductionSettingsPage : UserControl
             return;
         }
 
-        const double minimumUsableContentWidth = 1120d;
+        const double minimumUsableContentWidth = 760d;
         const double hostHorizontalMargin = 16d; // SettingsPanelsHost Margin="8,6,8,6"
 
         if (!double.IsFinite(pageWidth) || pageWidth <= 0)
@@ -153,8 +182,7 @@ public partial class ProductionSettingsPage : UserControl
                 ? ScrollBarVisibility.Auto
                 : ScrollBarVisibility.Disabled;
 
-        // Width được cập nhật từ toàn bộ UserControl nên không còn trường hợp cụm 4 card
-        // đứng bên trái và để trống một mảng lớn bên phải.
+        // Width dựa trên toàn bộ UserControl, cho phép cuộn ngang chỉ khi cần.
         if (!double.IsFinite(SettingsPanelsHost.Width) ||
             Math.Abs(SettingsPanelsHost.Width - targetWidth) > 0.5)
         {
@@ -164,7 +192,7 @@ public partial class ProductionSettingsPage : UserControl
         SettingsPanelsHost.MaxWidth = double.PositiveInfinity;
         SettingsPanelsHost.HorizontalAlignment = HorizontalAlignment.Left;
 
-        // Grid có 4 ColumnDefinition Width="*" => mỗi vùng chính luôn đúng 25%.
+        // Grid một cột chứa duy nhất nhóm đang chọn.
         UnifiedSettingsGrid.Width = double.NaN;
         UnifiedSettingsGrid.MinWidth = 0;
         UnifiedSettingsGrid.MaxWidth = double.PositiveInfinity;
@@ -188,36 +216,6 @@ public partial class ProductionSettingsPage : UserControl
             (LabelTemplateTypeComboBox.SelectedValue as string) ??
             _vm.Settings.Label.TemplateType;
         ApplyLabelTemplatePhysicalSize(templateType);
-
-        // Khi người vận hành đổi loại tem, làm mới ngay vùng LỆNH IN TEM nếu
-        // trang đã load và có THT hợp lệ. Không hiện MessageBox ở thao tác đổi
-        // ComboBox để tránh làm gián đoạn cấu hình.
-        if (IsLoaded && !IsReleased && InlineLabelCommandTextBox is not null)
-        {
-            Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.Background,
-                new Action(TryRefreshInlineLabelCommandPreview));
-        }
-    }
-
-    private void TryRefreshInlineLabelCommandPreview()
-    {
-        if (IsReleased || !IsLoaded || InlineLabelCommandTextBox is null)
-            return;
-
-        string thtPath = _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
-            return;
-
-        try
-        {
-            LabelPrintRequest request = BuildSettingsLabelRequest("PREVIEW");
-            RenderInlineLabelPreview(request, "XEM TRƯỚC");
-        }
-        catch (Exception ex)
-        {
-            AsyncFileLogService.Current.Error($"Automatic label command preview refresh failed: {ex}");
-        }
     }
 
     private void ApplyLabelTemplatePhysicalSize(string? templateType)
@@ -453,94 +451,23 @@ public partial class ProductionSettingsPage : UserControl
     {
         try
         {
+            long? lotNo = TryReadSinglePrintLot();
+            if (lotNo is null)
+                return;
+
             // Preview và Print cùng đi qua LabelPrintRequest.Capture(). Vì vậy dữ liệu,
             // template và payload ở đây chính là payload mà pipeline in thật sử dụng.
-            LabelPrintRequest request = BuildSettingsLabelRequest("PREVIEW");
-            RenderInlineLabelPreview(request, "XEM TRƯỚC");
+            LabelPrintRequest request = BuildSettingsLabelRequest("PREVIEW", lotNo);
+            ShowLabelPreviewWindow(request);
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Label preview failed: {ex}");
-            SetInlineLabelPreviewStatus("KHÔNG TẠO ĐƯỢC PAYLOAD", isError: true);
             ShowMessage(
                 "Chưa tạo được lệnh in tem. Vui lòng kiểm tra mẫu tem/THT.",
                 "XEM TRƯỚC TEM",
                 MessageBoxImage.Warning);
         }
-    }
-
-    private void RenderInlineLabelPreview(LabelPrintRequest request, string status)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        // Không dựng mô phỏng tem đồ họa. Hiển thị nguyên payload cuối cùng mà
-        // pipeline in tạo ra, để người vận hành thấy chính xác lệnh + dữ liệu
-        // sẽ được gửi xuống máy in khi bấm IN THỬ.
-        string payload = FormatPrinterCommandForPreview(request.Payload);
-
-        InlineLabelPreviewViewbox.Child = null;
-        InlineLabelPreviewViewbox.Visibility = Visibility.Collapsed;
-
-        // TextBox của trang có style chung VerticalContentAlignment=Center.
-        // Với preview nhiều dòng điều đó làm command bị nằm giữa/dưới khung.
-        // Ép local alignment + vị trí scroll để dòng đầu (8N/Q/R... tùy mẫu)
-        // luôn xuất hiện ngay ở góc trên-trái.
-        InlineLabelCommandTextBox.HorizontalContentAlignment = HorizontalAlignment.Left;
-        InlineLabelCommandTextBox.VerticalContentAlignment = VerticalAlignment.Top;
-        InlineLabelCommandTextBox.Text = payload;
-        InlineLabelCommandTextBox.Visibility = Visibility.Visible;
-        InlineLabelCommandTextBox.SelectionStart = 0;
-        InlineLabelCommandTextBox.SelectionLength = 0;
-        InlineLabelCommandTextBox.ScrollToHome();
-        InlineLabelCommandTextBox.ScrollToHorizontalOffset(0);
-        InlineLabelCommandTextBox.ScrollToVerticalOffset(0);
-        InlineLabelPreviewPlaceholder.Visibility = Visibility.Collapsed;
-        InlineLabelPreviewInfoText.Text =
-            $"{request.Profile.Id} • {request.WidthMm} × {request.HeightMm} mm • " +
-            $"LOT {request.Data.LotNo} • {LabelProfileResolver.DetectLanguage(request.Payload)}";
-        SetInlineLabelPreviewStatus(status, isError: false);
-    }
-
-    private static string FormatPrinterCommandForPreview(string? payload)
-    {
-        if (string.IsNullOrEmpty(payload))
-            return string.Empty;
-
-        // request.Payload là nguồn dữ liệu duy nhất: chính payload này được pipeline
-        // in sử dụng. Chỉ loại bỏ các ký tự điều khiển không thể hiển thị trong
-        // TextBox (NUL/ESC/BOM...), tuyệt đối không thay đổi nội dung lệnh EPL/ZPL.
-        var builder = new StringBuilder(payload.Length);
-        foreach (char character in payload)
-        {
-            if (character is '\r' or '\n' or '\t')
-            {
-                builder.Append(character);
-                continue;
-            }
-
-            if (character == '\uFEFF' || char.IsControl(character))
-                continue;
-
-            builder.Append(character);
-        }
-
-        string visible = builder.ToString()
-            .Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace("\r", "\n", StringComparison.Ordinal);
-
-        // Không để framing/control byte đã bị loại bỏ tạo ra các dòng trắng ở đầu.
-        return visible.TrimStart('\n');
-    }
-
-    private void SetInlineLabelPreviewStatus(string status, bool isError)
-    {
-        if (InlineLabelPreviewStatusText is null)
-            return;
-
-        InlineLabelPreviewStatusText.Text = status ?? string.Empty;
-        InlineLabelPreviewStatusText.Foreground = isError
-            ? new SolidColorBrush(Color.FromRgb(198, 40, 40))
-            : new SolidColorBrush(Color.FromRgb(31, 67, 145));
     }
 
     private void ShowLabelPreviewWindow(LabelPrintRequest request)
@@ -1243,24 +1170,19 @@ public partial class ProductionSettingsPage : UserControl
     {
         try
         {
-            LabelPrintRequest request = BuildSettingsLabelRequest("TEST-PRINT");
+            long? lotNo = TryReadSinglePrintLot();
+            if (lotNo is null)
+                return;
 
-            // Hiển thị chính snapshot/payload sắp được gửi tới máy in ngay trong
-            // khung XEM TRƯỚC TEM. Không dựng request lần hai để tránh lệch LOT,
-            // timestamp, barcode hoặc dữ liệu THT giữa preview và bản in thử.
-            RenderInlineLabelPreview(request, "ĐANG IN THỬ...");
+            LabelPrintRequest request = BuildSettingsLabelRequest("TEST-PRINT", lotNo);
 
             if (_main is null)
                 throw new InvalidOperationException("Trang Cài đặt chưa được nối với chương trình chính.");
 
             LabelPrintTransportResult result = await _main.Test.PrintSettingsLabelAsync(request);
-            SetInlineLabelPreviewStatus(
-                result.Printed ? "ĐÃ IN THỬ" : "IN THỬ KHÔNG THÀNH CÔNG",
-                isError: !result.Printed);
-
             ShowMessage(
                 result.Printed
-                    ? "Đã in thử đúng snapshot đang hiển thị. Không tăng LOT hoặc sản lượng."
+                    ? $"Đã gửi tem LOTNO {request.Data.LotNo}. Không tăng LOT Production hoặc sản lượng."
                     : "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
                 result.Printed ? MessageBoxImage.Information : MessageBoxImage.Warning);
@@ -1268,7 +1190,6 @@ public partial class ProductionSettingsPage : UserControl
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Test label print failed: {ex}");
-            SetInlineLabelPreviewStatus("IN THỬ LỖI", isError: true);
             ShowMessage(
                 "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
@@ -1276,22 +1197,56 @@ public partial class ProductionSettingsPage : UserControl
         }
     }
 
+    private long? TryReadSinglePrintLot()
+    {
+        if (!long.TryParse(SinglePrintLotTextBox.Text, NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out long lot) || lot < 0)
+        {
+            ShowMessage("LOT in thử phải là số nguyên từ 0 trở lên.",
+                "LOT IN TEM", MessageBoxImage.Warning);
+            return null;
+        }
+
+        return lot;
+    }
+
     private async void BatchPrintLabel_Click(object sender, RoutedEventArgs e)
     {
         if (Interlocked.Exchange(ref _batchPrintInProgress, 1) != 0)
             return;
 
+        CancellationTokenSource? batchCts = null;
+        bool stopped = false;
+        bool disconnectSucceeded = true;
+        int printed = 0;
         try
         {
-            if (!int.TryParse(
-                    BatchLabelCountTextBox.Text,
+            if (!long.TryParse(
+                    BatchPrintStartLotTextBox.Text,
                     NumberStyles.Integer,
                     CultureInfo.InvariantCulture,
-                    out int quantity) ||
-                quantity is < 1 or > 100)
+                    out long firstLot) || firstLot < 0 ||
+                !long.TryParse(
+                    BatchPrintEndLotTextBox.Text,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out long lastLot) || lastLot < firstLot || lastLot - firstLot >= 100)
             {
                 ShowMessage(
-                    "Số lượng in hàng loạt phải từ 1 đến 100.",
+                    "Nhập LOT bắt đầu và kết thúc hợp lệ (từ 0 trở lên, tối đa 100 tem).",
+                    "IN HÀNG LOẠT",
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!int.TryParse(
+                    BatchPrintDelayMsComboBox.SelectedValue as string,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int delayMs))
+            {
+                ShowMessage(
+                    "Chọn Delay giữa hai tem từ 500 đến 2000 ms.",
                     "IN HÀNG LOẠT",
                     MessageBoxImage.Warning);
                 return;
@@ -1306,56 +1261,57 @@ public partial class ProductionSettingsPage : UserControl
                 throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
 
             ProductModel model = new ThtModelParser().Load(thtPath);
-            long completedLot = _vm.PrepareBulkPrintLot();
-            long firstLot = checked(completedLot + 1L);
-            int printed = 0;
+            int quantity = checked((int)(lastLot - firstLot + 1L));
+            long? completedLot = null;
             LabelPrintTransportResult? lastResult = null;
+            batchCts = new CancellationTokenSource();
+            _batchPrintCts = batchCts;
             BatchPrintLabelButton.IsEnabled = false;
+            BatchStopPrintButton.IsEnabled = true;
 
             for (int index = 0; index < quantity; index++)
             {
-                long lot = checked(firstLot + index);
+                if (IsReleased)
+                    return;
+                batchCts.Token.ThrowIfCancellationRequested();
+
+                long lot = firstLot + index;
                 LabelPrintRequest request = BuildSettingsLabelRequest(
                     "BATCH-PRINT",
                     lot,
                     model);
-                if (index == 0)
-                    RenderInlineLabelPreview(request, $"ĐANG IN 1/{quantity}...");
-
-                lastResult = await _main.Test.PrintSettingsLabelAsync(request);
+                lastResult = await _main.Test.PrintSettingsLabelAsync(request, batchCts.Token);
                 if (!lastResult.Printed)
                     break;
 
                 printed++;
                 completedLot = lot;
-                // Persist after every accepted job. If a later label fails or the
-                // application closes, the next batch resumes after the last LOT
-                // already sent and never silently reuses it.
-                _vm.CommitBulkPrintedLot(completedLot);
-                SetInlineLabelPreviewStatus(
-                    $"ĐÃ GỬI {printed}/{quantity} • LOT {completedLot}",
-                    isError: false);
+                if (index + 1 < quantity)
+                    await Task.Delay(delayMs, batchCts.Token);
             }
 
-            bool allPrinted = printed == quantity;
-            SetInlineLabelPreviewStatus(
-                allPrinted
-                    ? $"ĐÃ GỬI {quantity} TEM • LOT {firstLot}-{completedLot}"
-                    : $"DỪNG Ở {printed}/{quantity} • LOT CUỐI {completedLot}",
-                isError: !allPrinted);
-
-            ShowMessage(
-                allPrinted
-                    ? $"Đã gửi {quantity} tem, LOTNO hàng loạt từ {firstLot} đến {completedLot}. LOT Production, Tổng/PASS/FAIL và lịch sử test không thay đổi."
-                    : $"Đã gửi {printed}/{quantity} tem. LOTNO cuối đã lưu là {completedLot}. " +
-                      (lastResult?.Message ?? "Hãy kiểm tra kết nối và cổng máy in."),
-                "IN HÀNG LOẠT",
-                allPrinted ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            if (batchCts.IsCancellationRequested)
+                stopped = true;
+            else
+            {
+                bool allPrinted = printed == quantity;
+                ShowMessage(
+                    allPrinted
+                        ? $"Đã gửi {quantity} tem, LOTNO từ {firstLot} đến {lastLot}. LOT Production, Tổng/PASS/FAIL và lịch sử test không thay đổi."
+                        : $"Đã gửi {printed}/{quantity} tem. LOTNO cuối đã gửi: {(completedLot?.ToString(CultureInfo.InvariantCulture) ?? "chưa có")}. " +
+                          (lastResult?.Message ?? "Hãy kiểm tra kết nối và cổng máy in."),
+                    "IN HÀNG LOẠT",
+                    allPrinted ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }
+        }
+        catch (Exception ex) when (batchCts?.IsCancellationRequested == true)
+        {
+            AsyncFileLogService.Current.Application($"Batch label print stopped: {ex}");
+            stopped = true;
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Batch label print failed: {ex}");
-            SetInlineLabelPreviewStatus("IN HÀNG LOẠT LỖI", isError: true);
             ShowMessage(
                 "Chưa in hàng loạt được. Hãy kiểm tra kết nối và cổng máy in.",
                 "IN HÀNG LOẠT",
@@ -1363,10 +1319,41 @@ public partial class ProductionSettingsPage : UserControl
         }
         finally
         {
+            if (batchCts?.IsCancellationRequested == true && _main is not null)
+            {
+                try
+                {
+                    await _main.Test.DisconnectLabelPrinterAsync();
+                }
+                catch (Exception ex)
+                {
+                    disconnectSucceeded = false;
+                    AsyncFileLogService.Current.Error($"Close label printer after batch stop failed: {ex}");
+                }
+            }
+
+            _batchPrintCts = null;
+            batchCts?.Dispose();
             if (BatchPrintLabelButton is not null)
                 BatchPrintLabelButton.IsEnabled = true;
+            if (BatchStopPrintButton is not null)
+                BatchStopPrintButton.IsEnabled = false;
             Volatile.Write(ref _batchPrintInProgress, 0);
         }
+
+        if (stopped && !IsReleased)
+            ShowMessage(
+                disconnectSucceeded
+                    ? $"Đã dừng in sau {printed} tem và đóng kết nối COM máy in."
+                    : $"Đã dừng gửi lệnh sau {printed} tem nhưng chưa đóng được COM máy in; kiểm tra cổng in.",
+                "DỪNG IN HÀNG LOẠT",
+                disconnectSucceeded ? MessageBoxImage.Information : MessageBoxImage.Warning);
+    }
+
+    private void BatchStopPrint_Click(object sender, RoutedEventArgs e)
+    {
+        BatchStopPrintButton.IsEnabled = false;
+        _batchPrintCts?.Cancel();
     }
 
     private LabelPrintRequest BuildSettingsLabelRequest(
@@ -1810,12 +1797,31 @@ public partial class ProductionSettingsPage : UserControl
 
     private async void Save_Click(object sender, RoutedEventArgs e)
     {
+        if (Volatile.Read(ref _batchPrintInProgress) != 0)
+        {
+            ShowMessage("Đang in hàng loạt. Vui lòng chờ in xong trước khi lưu và trở về.",
+                "IN HÀNG LOẠT", MessageBoxImage.Warning);
+            return;
+        }
+
         if (await PersistSettingsAsync())
-            ShowSavedConfirmation();
+            RequestClose?.Invoke(this, EventArgs.Empty);
     }
 
     private async void Cancel_Click(object sender, RoutedEventArgs e)
     {
+        await TryLeaveAsync();
+    }
+
+    public async Task TryLeaveAsync()
+    {
+        if (Volatile.Read(ref _batchPrintInProgress) != 0)
+        {
+            ShowMessage("Đang in hàng loạt. Vui lòng chờ in xong trước khi trở về.",
+                "IN HÀNG LOẠT", MessageBoxImage.Warning);
+            return;
+        }
+
         if (Volatile.Read(ref _saveInProgress) != 0)
             return;
 
@@ -1840,7 +1846,6 @@ public partial class ProductionSettingsPage : UserControl
             return;
         }
 
-        await ReleaseManualOutputsAsync();
         RequestClose?.Invoke(this, EventArgs.Empty);
     }
 

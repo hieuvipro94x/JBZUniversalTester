@@ -191,7 +191,7 @@ public sealed class ProductionSettings
     public int PassMarkingToJigDelayMs { get; set; } = 350;
 
     /// <summary>Compatibility V15.1 trở về trước: "R1,R2". V15.2 UI không còn dùng trực tiếp.</summary>
-    public string StampDelay { get; set; } = "120,120";
+    public string StampDelay { get; set; } = "200,200";
 
     public int OversizeWaitSeconds { get; set; }
 

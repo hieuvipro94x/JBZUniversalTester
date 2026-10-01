@@ -108,6 +108,7 @@ public sealed class LabelPrintService : IAsyncDisposable
                 request.WriteTimeoutMs,
                 request.Profile.EncodingName,
                 ct);
+            ct.ThrowIfCancellationRequested();
             await WriteToConnectedComAsync(payload, request.Copies, ct);
             return new LabelPrintTransportResult(
                 true,
@@ -173,6 +174,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         try
         {
             await Task.Run(port.Open, ct);
+            ct.ThrowIfCancellationRequested();
             _printerPort = port;
             _connectedPort = portName;
             _connectedBaudRate = baudRate;

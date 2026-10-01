@@ -17,6 +17,10 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private TestWindow? _testWindow;
     private ProductionSettingsPage? _settingsPage;
+    private Window? _settingsWindow;
+    private bool _closingSettingsWindow;
+    private bool _settingsCloseRequested;
+    private bool _settingsPageCloseInProgress;
     private HistoryPage? _historyPage;
     private bool _showSettingsSavedConfirmation;
     private bool _shutdownStarted;
@@ -352,6 +356,12 @@ public partial class MainWindow : Window
 
     private async Task ShowSettingsPageAsync()
     {
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Activate();
+            return;
+        }
+
         await CloseInternalPageAsync();
         long navigationGeneration = Volatile.Read(ref _internalPageGeneration);
         LogMemory("MEM BEFORE_SETTINGS");
@@ -379,9 +389,59 @@ public partial class MainWindow : Window
             _showSettingsSavedConfirmation = false;
         }
 
-        InternalPageHost.Content = _settingsPage;
-        InternalPageHost.Visibility = Visibility.Visible;
+        double availableWidth = SystemParameters.WorkArea.Width;
+        double availableHeight = SystemParameters.WorkArea.Height;
+        _settingsWindow = new Window
+        {
+            Title = $"Cài đặt Production - {AppVersion.DisplayVersion}",
+            Width = Math.Min(500, availableWidth - 32),
+            Height = Math.Min(1080, availableHeight - 32),
+            MinWidth = Math.Min(800, availableWidth - 32),
+            MinHeight = Math.Min(500, availableHeight - 32),
+            ResizeMode = ResizeMode.NoResize,
+            WindowStyle = WindowStyle.None,
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Content = _settingsPage
+        };
+        _settingsWindow.Closing += SettingsWindow_Closing;
+        _settingsWindow.Show();
+        Hide();
         LogMemory("MEM AFTER_SETTINGS_OPEN");
+    }
+
+    private void SettingsWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_closingSettingsWindow || _shutdownStarted)
+            return;
+
+        e.Cancel = true;
+        if (_settingsCloseRequested || _settingsPageCloseInProgress)
+            return;
+
+        _settingsCloseRequested = true;
+        // Closing chưa kết thúc: gọi Close ngay tại đây sẽ khiến WPF ném
+        // InvalidOperationException. Xử lý yêu cầu rời trang ở lượt UI kế tiếp.
+        _ = Dispatcher.BeginInvoke(new Action(() => _ = TryLeaveSettingsWindowAsync()));
+    }
+
+    private async Task TryLeaveSettingsWindowAsync()
+    {
+        try
+        {
+            if (_settingsPage is not null)
+                await _settingsPage.TryLeaveAsync();
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Close Settings window failed: {ex}");
+            if (_settingsWindow is not null)
+                MessageBox.Show(_settingsWindow, "Chưa thể đóng Cài đặt. Vui lòng thử lại.",
+                    "CHƯA THỂ TRỞ VỀ", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            _settingsCloseRequested = false;
+        }
     }
 
     private async Task SettingsPage_SettingsSaved(object? sender, EventArgs e)
@@ -447,6 +507,14 @@ public partial class MainWindow : Window
 
     private async void InternalPage_RequestClose(object? sender, EventArgs e)
     {
+        bool closingSettings = sender is ProductionSettingsPage;
+        if (closingSettings)
+        {
+            if (_settingsPageCloseInProgress)
+                return;
+            _settingsPageCloseInProgress = true;
+        }
+
         try
         {
             await CloseInternalPageAsync();
@@ -462,11 +530,16 @@ public partial class MainWindow : Window
                 "Hardware.SettingsCloseRelaySafety",
                 $"Model={_viewModel.Model?.ModelName ?? "(none)"}");
             MessageBox.Show(
-                this,
+                _settingsWindow ?? this,
                 "Máy test chưa về trạng thái an toàn. Vui lòng khởi động lại phần mềm.",
                 "VUI LÒNG KHỞI ĐỘNG LẠI",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+        }
+        finally
+        {
+            if (closingSettings)
+                _settingsPageCloseInProgress = false;
         }
     }
 
@@ -487,6 +560,29 @@ public partial class MainWindow : Window
                 settingsPage.ReleasePageResources();
                 _settingsPage = null;
                 LogMemory("MEM SETTINGS_CLOSE");
+            }
+        }
+
+        Window? settingsWindow = _settingsWindow;
+        if (settingsWindow is not null)
+        {
+            _settingsWindow = null;
+            settingsWindow.Closing -= SettingsWindow_Closing;
+            settingsWindow.Content = null;
+            _closingSettingsWindow = true;
+            try
+            {
+                settingsWindow.Close();
+            }
+            finally
+            {
+                _closingSettingsWindow = false;
+            }
+
+            if (!_shutdownStarted)
+            {
+                Show();
+                Activate();
             }
         }
 

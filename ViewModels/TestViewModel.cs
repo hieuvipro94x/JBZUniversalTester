@@ -6391,11 +6391,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         await _labelPrintService.DisconnectAsync(ct);
         InvokeUi(() =>
         {
-            LabelStatusText = "TEM: KHÔNG DÙNG CỔNG COM";
+            LabelStatusText = "TEM: ĐÃ NGẮT KẾT NỐI COM";
             Raise(nameof(IsLabelPrinterConnected));
             Raise(nameof(LabelPrinterConnectedPort));
         });
-        AddLog("LABEL PRINTER: đã đóng cổng COM theo lựa chọn của người vận hành.");
+        AddLog("LABEL PRINTER: đã đóng kết nối COM máy in.");
     }
 
     public Task<LabelPrintTransportResult> PrintSettingsLabelAsync(
@@ -10581,6 +10581,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Raise(nameof(ShowConnector));
         Raise(nameof(BoardCapacity));
         Raise(nameof(BoardCapacityText));
+        Raise(nameof(WaterProofPortText));
     }
 
     public void SetModel(ProductModel model) => SetModel(model, preparedEngineModel: null);

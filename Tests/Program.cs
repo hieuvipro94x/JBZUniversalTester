@@ -1727,9 +1727,16 @@ internal static partial class Program
                settingsSource.Contains("_savedSettingsSnapshot = CaptureEditableSettingsSnapshot();", StringComparison.Ordinal) &&
                settingsSource.Contains("Content = \"LƯU\"", StringComparison.Ordinal) &&
                settingsSource.Contains("Content = \"HỦY\"", StringComparison.Ordinal) &&
-               settingsSource.IndexOf("await ReleaseManualOutputsAsync();", StringComparison.Ordinal) >
-               settingsSource.IndexOf("if (!ConfirmSaveBeforeLeaving() || !await PersistSettingsAsync())", StringComparison.Ordinal),
-            "Save persists explicitly; Back asks to save dirty settings or stays on the page");
+               mainWindowSource.Contains("await settingsPage.ReleaseManualOutputsAsync();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("_settingsWindow.Show();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("Hide();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("ResizeMode = ResizeMode.NoResize", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("WindowStyle = WindowStyle.None", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("WindowStartupLocation = WindowStartupLocation.CenterScreen", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("Dispatcher.BeginInvoke(new Action(() => _ = TryLeaveSettingsWindowAsync()))", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("settingsWindow.Close();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("Show();", StringComparison.Ordinal),
+            "Settings opens in a separate window, restores Main after safe relay reset, and warns before leaving with dirty settings");
         Assert(settingsXaml.Contains("x:Name=\"LabelPrintSettingsForm\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("<ColumnDefinition Width=\"48\"/>", StringComparison.Ordinal) &&
                (settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) ||
@@ -1778,7 +1785,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 15 &&
+        Assert(settingsButtons.Length == 16 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
@@ -1791,15 +1798,24 @@ internal static partial class Program
         Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
             "Production settings exposes the dedicated TEM BE QR selection");
         Assert(settingsXaml.Contains("Tag=\"TEM_TO_SQDZ\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("x:Name=\"BatchLabelCountTextBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchPrintStartLotTextBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchPrintEndLotTextBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchPrintDelayMsComboBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchStopPrintButton\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Click=\"BatchStopPrint_Click\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Tag=\"500\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Tag=\"2000\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"SinglePrintLotTextBox\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Click=\"BatchPrintLabel_Click\"", StringComparison.Ordinal) &&
-               settingsSource.Contains("long firstLot = checked(completedLot + 1L);", StringComparison.Ordinal) &&
-               settingsSource.Contains("_vm.PrepareBulkPrintLot()", StringComparison.Ordinal) &&
-               settingsSource.Contains("_vm.CommitBulkPrintedLot(completedLot);", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("x:Name=\"BatchLabelCountTextBox\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("InlineLabelCommandTextBox", StringComparison.Ordinal) &&
+               settingsSource.Contains("await Task.Delay(delayMs, batchCts.Token);", StringComparison.Ordinal) &&
+               settingsSource.Contains("await _main.Test.DisconnectLabelPrinterAsync();", StringComparison.Ordinal) &&
+               settingsSource.Contains("ShowLabelPreviewWindow(request);", StringComparison.Ordinal) &&
                !settingsSource[settingsSource.IndexOf("private async void BatchPrintLabel_Click", StringComparison.Ordinal)..
                     settingsSource.IndexOf("private LabelPrintRequest BuildSettingsLabelRequest", StringComparison.Ordinal)]
-                   .Contains("NotifySettingsSavedAsync", StringComparison.Ordinal),
-            "TEM TO SQDZ batch LOT is sequential and does not reload or mutate the Production test state");
+                   .Contains("ProductionConfigService.Save", StringComparison.Ordinal),
+            "Manual label printing uses an explicit LOT range without changing Production counters or inline preview");
 
         Assert(System.Text.RegularExpressions.Regex.Matches(
                    testViewModelSource,

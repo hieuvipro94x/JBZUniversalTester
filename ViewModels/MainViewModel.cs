@@ -175,9 +175,9 @@ public sealed class MainViewModel : ObservableObject
         else if (Test.IsBoardStartupUnavailable)
             Status = "CHƯA KẾT NỐI BO - CHỈ XEM MÃ HÀNG, KHÔNG THỂ TEST";
         else if (Model is not null)
-            Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName} - BO ĐÃ KẾT NỐI";
+            Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName}";
         else
-            Status = "BO ĐÃ KẾT NỐI - CHƯA CÓ MÃ HÀNG";
+            Status = "CHƯA CHỌN MÃ HÀNG";
     }
 
     private async Task ObservePrinterStartupAsync(Task printerConnectionTask)

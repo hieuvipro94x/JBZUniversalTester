@@ -1,81 +1,144 @@
 <Window x:Class="JBZUniversalTester.Views.TopologyLearningWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Quét IO / Học cấu hình" Width="1120" Height="720"
-        MinWidth="900" MinHeight="600" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        Background="#F3F5F8" FontFamily="Segoe UI"
+        Title="Quét IO / Học cấu hình" Width="1180" Height="760"
+        MinWidth="960" MinHeight="630" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F3F6FB" FontFamily="Segoe UI"
         Loaded="Window_Loaded" Closed="Window_Closed">
     <Window.Resources>
         <Style TargetType="Button">
-            <Setter Property="Height" Value="38"/><Setter Property="Margin" Value="4,0"/>
-            <Setter Property="Padding" Value="12,4"/><Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Margin" Value="4,0"/>
+            <Setter Property="Padding" Value="14,4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#1E293B"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
         </Style>
         <Style x:Key="PanelStyle" TargetType="Border">
-            <Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#D7DDE7"/>
-            <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="6"/>
-            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#DCE4EE"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="Padding" Value="16"/>
+        </Style>
+        <Style x:Key="MetricLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#64748B"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="FontSize" Value="14"/>
         </Style>
         <Style TargetType="DataGrid">
-            <Setter Property="AutoGenerateColumns" Value="False"/><Setter Property="IsReadOnly" Value="True"/>
-            <Setter Property="CanUserAddRows" Value="False"/><Setter Property="EnableRowVirtualization" Value="True"/>
-            <Setter Property="EnableColumnVirtualization" Value="True"/><Setter Property="HeadersVisibility" Value="Column"/>
-            <Setter Property="GridLinesVisibility" Value="Horizontal"/><Setter Property="AlternatingRowBackground" Value="#F8FAFC"/>
-            <Setter Property="RowHeight" Value="34"/><Setter Property="ColumnHeaderHeight" Value="36"/>
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="EnableRowVirtualization" Value="True"/>
+            <Setter Property="EnableColumnVirtualization" Value="True"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="AlternatingRowBackground" Value="#F8FAFC"/>
+            <Setter Property="RowHeight" Value="36"/>
+            <Setter Property="ColumnHeaderHeight" Value="38"/>
             <Setter Property="FontSize" Value="14"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="#EFF4FA"/>
+            <Setter Property="Foreground" Value="#475569"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="9,5"/>
+            <Setter Property="BorderBrush" Value="#E2E8F0"/>
         </Style>
     </Window.Resources>
 
-    <Grid Margin="16">
+    <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Grid>
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock Text="QUÉT IO / HỌC CẤU HÌNH" FontSize="25" FontWeight="Bold" Foreground="#213A78"/>
-                <TextBlock Text="CHUẨN ĐOÁN IO"
-                           Margin="0,4,0,0" FontSize="13.5" Foreground="#8A3B00"/>
-            </StackPanel>
-        </Grid>
+        <Border Background="#172554" CornerRadius="10" Padding="20,15">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="CHẨN ĐOÁN CARD / IO" FontSize="12" FontWeight="Bold" Foreground="#BFDBFE"/>
+                    <TextBlock Text="Quét IO và học cấu hình" Margin="0,3,0,0"
+                               FontSize="24" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="Quan sát kết nối trực tiếp, chụp khi ổn định rồi lưu file cấu hình chẩn đoán."
+                               Margin="0,5,0,0" FontSize="13" Foreground="#DBEAFE" TextWrapping="Wrap"/>
+                </StackPanel>
+                <Border Grid.Column="1" Background="#334A83" CornerRadius="15" Padding="12,5"
+                        VerticalAlignment="Top" Margin="16,2,0,0">
+                    <TextBlock Text="CHUẨN ĐOÁN IO" FontSize="11" FontWeight="Bold" Foreground="White"/>
+                </Border>
+            </Grid>
+        </Border>
 
-        <Grid Grid.Row="1" Margin="0,12,0,10">
+        <Grid Grid.Row="1" Margin="0,12,0,12">
             <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition/><ColumnDefinition/></Grid.ColumnDefinitions>
             <Border Style="{StaticResource PanelStyle}" Margin="0,0,6,0"><StackPanel>
-                <TextBlock Text="IO ĐANG TÁC ĐỘNG" Foreground="#5B6472"/>
-                <TextBlock x:Name="ActiveIoCountText" Text="0" FontSize="25" FontWeight="Bold" Foreground="#213A78"/>
+                <TextBlock Text="IO ĐANG TÁC ĐỘNG" Style="{StaticResource MetricLabelStyle}"/>
+                <TextBlock x:Name="ActiveIoCountText" Text="0" Margin="0,4,0,0"
+                           FontSize="28" FontWeight="Bold" Foreground="#1D4ED8"/>
+                <TextBlock Text="Tín hiệu được phát hiện trực tiếp" FontSize="11" Foreground="#94A3B8"/>
             </StackPanel></Border>
             <Border Grid.Column="1" Style="{StaticResource PanelStyle}" Margin="6,0"><StackPanel>
-                <TextBlock Text="KẸT / CHƯA THÁO" Foreground="#5B6472"/>
-                <TextBlock x:Name="StuckIoCountText" Text="0" FontSize="25" FontWeight="Bold" Foreground="#C62828"/>
+                <TextBlock Text="KẸT / CHƯA THÁO" Style="{StaticResource MetricLabelStyle}"/>
+                <TextBlock x:Name="StuckIoCountText" Text="0" Margin="0,4,0,0"
+                           FontSize="28" FontWeight="Bold" Foreground="#B91C1C"/>
+                <TextBlock Text="Kiểm tra đầu nối còn tiếp xúc" FontSize="11" Foreground="#94A3B8"/>
             </StackPanel></Border>
             <Border Grid.Column="2" Style="{StaticResource PanelStyle}" Margin="6,0,0,0"><StackPanel>
-                <TextBlock Text="MẠNG CONTINUITY" Foreground="#5B6472"/>
-                <TextBlock x:Name="NetworkCountText" Text="0" FontSize="25" FontWeight="Bold" Foreground="#0F766E"/>
+                <TextBlock Text="MẠNG CONTINUITY" Style="{StaticResource MetricLabelStyle}"/>
+                <TextBlock x:Name="NetworkCountText" Text="0" Margin="0,4,0,0"
+                           FontSize="28" FontWeight="Bold" Foreground="#0F766E"/>
+                <TextBlock Text="Các nhóm chân đang liên thông" FontSize="11" Foreground="#94A3B8"/>
             </StackPanel></Border>
         </Grid>
 
-        <Grid Grid.Row="2" Margin="0,0,0,10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/><ColumnDefinition Width="210"/><ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="75"/><ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Text="Mã lưu (không bắt buộc)" VerticalAlignment="Center" FontWeight="SemiBold"/>
-            <TextBox x:Name="ProductCodeTextBox" Grid.Column="1" Margin="8,0,16,0" Height="30"/>
-            <TextBlock Grid.Column="2" Text="Frame ổn định" VerticalAlignment="Center" FontWeight="SemiBold"/>
-            <TextBox x:Name="StableFrameCountTextBox" Grid.Column="3" Margin="8,0,0,0" Height="30" Text="20"/>
-            <TextBlock Grid.Column="4" Margin="16,0,0,0" VerticalAlignment="Center"
-                       Text="IO còn nối hoặc tác động sẽ được báo ngay, không chờ thời gian." Foreground="#5B6472"/>
-        </Grid>
+        <Border Grid.Row="2" Style="{StaticResource PanelStyle}" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/><ColumnDefinition Width="210"/>
+                    <ColumnDefinition Width="130"/><ColumnDefinition Width="92"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Margin="0,0,20,0">
+                    <TextBlock Text="1  THIẾT LẬP LẦN CHỤP" FontSize="14" FontWeight="Bold" Foreground="#172554"/>
+                    <TextBlock Text="Theo dõi IO trực tiếp bên dưới. Khi kết nối đã đúng, bấm CHỤP ỔN ĐỊNH."
+                               Margin="0,5,0,0" Foreground="#64748B" FontSize="12" TextWrapping="Wrap"/>
+                    <TextBlock Text="File lưu là .jbzscan.json để chẩn đoán; không thay thế model THT."
+                               Margin="0,3,0,0" Foreground="#64748B" FontSize="12" TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="0,0,12,0">
+                    <TextBlock Text="MÃ CẤU HÌNH KHI LƯU" Style="{StaticResource MetricLabelStyle}"/>
+                    <TextBox x:Name="ProductCodeTextBox" Margin="0,6,0,0" ToolTip="Bắt buộc khi lưu file chẩn đoán."/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Margin="0,0,12,0">
+                    <TextBlock Text="FRAME ỔN ĐỊNH" Style="{StaticResource MetricLabelStyle}"/>
+                    <TextBlock Text="(2–500)" FontSize="11" Foreground="#94A3B8"/>
+                </StackPanel>
+                <TextBox x:Name="StableFrameCountTextBox" Grid.Column="3" Text="20"
+                         VerticalAlignment="Bottom" TextAlignment="Center"
+                         ToolTip="Số frame giống nhau liên tiếp cần có trước khi cho phép lưu."/>
+            </Grid>
+        </Border>
 
         <Grid Grid.Row="3">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="1.1*"/></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="0.9*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="1.1*"/></Grid.ColumnDefinitions>
             <Border Style="{StaticResource PanelStyle}"><Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <StackPanel Margin="0,0,0,8">
-                    <TextBlock Text="CHẨN ĐOÁN IO TRỰC TIẾP" FontSize="16" FontWeight="Bold" Foreground="#213A78"/>
-                    <TextBlock Text="Dò chân và báo ngay IO đang kẹt hoặc chưa tháo." Foreground="#5B6472"/>
+                <StackPanel Margin="0,0,0,12">
+                    <TextBlock Text="2  IO ĐANG TÁC ĐỘNG" FontSize="15" FontWeight="Bold" Foreground="#172554"/>
+                    <TextBlock Text="Báo trực tiếp chân còn tiếp xúc, kẹt hoặc chưa tháo."
+                               Margin="0,4,0,0" Foreground="#64748B" FontSize="12" TextWrapping="Wrap"/>
                 </StackPanel>
                 <DataGrid x:Name="ActiveIoGrid" Grid.Row="1" ItemsSource="{Binding ActiveIoRows}">
                     <DataGrid.Columns>
@@ -91,9 +154,10 @@
             </Grid></Border>
             <Border Grid.Column="2" Style="{StaticResource PanelStyle}"><Grid>
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-                <StackPanel Margin="0,0,0,8">
-                    <TextBlock Text="CÁC CHÂN ĐANG NỐI VỚI NHAU" FontSize="16" FontWeight="Bold" Foreground="#0F766E"/>
-                    <TextBlock Text="Quan sát toàn bộ card; không cần chọn THT." Foreground="#5B6472"/>
+                <StackPanel Margin="0,0,0,12">
+                    <TextBlock Text="3  CÁC CHÂN ĐANG NỐI" FontSize="15" FontWeight="Bold" Foreground="#0F766E"/>
+                    <TextBlock Text="Mỗi mạng hiển thị các IO liên thông trên toàn bộ card, không cần chọn THT."
+                               Margin="0,4,0,0" Foreground="#64748B" FontSize="12" TextWrapping="Wrap"/>
                 </StackPanel>
                 <DataGrid x:Name="TopologyGrid" Grid.Row="1" ItemsSource="{Binding Rows}">
                     <DataGrid.Columns>
@@ -105,16 +169,24 @@
             </Grid></Border>
         </Grid>
 
-        <Grid Grid.Row="4" Margin="0,12,0,0">
-            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="145"/><ColumnDefinition Width="145"/><ColumnDefinition Width="105"/></Grid.ColumnDefinitions>
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock x:Name="LearningStatusText" FontSize="14" FontWeight="Bold" Foreground="#213A78"/>
-                <ProgressBar x:Name="LearningProgress" Height="8" Margin="0,5,14,0" Minimum="0" Maximum="1"/>
-            </StackPanel>
-            <Button x:Name="DiagnoseButton" Grid.Column="1" Content="CHỤP ỔN ĐỊNH" Click="Diagnose_Click"/>
-            <Button x:Name="SaveButton" Grid.Column="2" Content="LƯU CẤU HÌNH" Click="Save_Click" IsEnabled="False"
-                    Background="#213A78" Foreground="White"/>
-            <Button Grid.Column="3" Content="ĐÓNG" Click="Close_Click" Background="#FFF0F0" Foreground="#A61B1B"/>
-        </Grid>
+        <Border Grid.Row="4" Style="{StaticResource PanelStyle}" Margin="0,12,0,0" Padding="12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/><ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="154"/><ColumnDefinition Width="96"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                    <TextBlock x:Name="LearningStatusText" FontSize="13" FontWeight="SemiBold"
+                               Foreground="#172554" TextWrapping="Wrap"/>
+                    <ProgressBar x:Name="LearningProgress" Height="7" Margin="0,7,0,0"
+                                 Minimum="0" Maximum="1" Foreground="#2563EB" Background="#E2E8F0"/>
+                </StackPanel>
+                <Button x:Name="DiagnoseButton" Grid.Column="1" Content="CHỤP ỔN ĐỊNH" Click="Diagnose_Click"
+                        Background="#EFF6FF" Foreground="#1D4ED8" BorderBrush="#93C5FD"/>
+                <Button x:Name="SaveButton" Grid.Column="2" Content="LƯU CẤU HÌNH" Click="Save_Click"
+                        IsEnabled="False" Background="#1D4ED8" Foreground="White" BorderBrush="#1D4ED8"/>
+                <Button Grid.Column="3" Content="ĐÓNG" Click="Close_Click"/>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
