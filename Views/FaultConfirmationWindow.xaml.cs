@@ -61,64 +61,77 @@ public partial class FaultConfirmationWindow : Window
 
         text.Inlines.Clear();
         FaultDetail fault = item.Fault;
-        int[] expected = [fault.ExpectedSourceIo ?? 0, fault.ExpectedTargetIo ?? 0];
-        int unexpectedIo = new[] { fault.ActualSourceIo ?? 0, fault.ActualTargetIo ?? 0 }
-            .FirstOrDefault(io => io > 0 && !expected.Contains(io));
-        if (fault.Type != ProductFaultType.WrongWiring || unexpectedIo == 0)
+        if (fault.Type != ProductFaultType.WrongWiring)
         {
             text.Inlines.Add(new Run(item.Summary));
             return;
         }
 
-        bool unexpectedIsSource = fault.ActualSourceIo == unexpectedIo;
+        int[] expected = [fault.ExpectedSourceIo ?? 0, fault.ExpectedTargetIo ?? 0];
+        int unexpectedIo = new[] { fault.ActualSourceIo ?? 0, fault.ActualTargetIo ?? 0 }
+            .FirstOrDefault(io => io > 0 && !expected.Contains(io));
+        PinRecord? sourceRecord = _model?.Pins.FirstOrDefault(pin =>
+            pin.IoNumber == fault.ExpectedSourceIo &&
+            (string.IsNullOrWhiteSpace(fault.ConnectorFrom) ||
+             string.Equals(pin.Connector, fault.ConnectorFrom, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrWhiteSpace(fault.PinFrom) || pin.PinNumber == fault.PinFrom));
+        sourceRecord ??= _model?.Pins.FirstOrDefault(pin => pin.IoNumber == fault.ExpectedSourceIo);
+
+        bool unexpectedIsSource = unexpectedIo > 0 && fault.ActualSourceIo == unexpectedIo;
         string actualConnector = unexpectedIsSource ? fault.ActualConnectorFrom : fault.ActualConnectorTo;
-        string actualPin = unexpectedIsSource ? fault.ActualPinFrom : fault.ActualPinTo;
+        string actualPin = unexpectedIo == 0
+            ? string.Empty
+            : unexpectedIsSource ? fault.ActualPinFrom : fault.ActualPinTo;
         PinRecord? actualRecord = _model?.Pins.FirstOrDefault(pin =>
-            pin.IoNumber == unexpectedIo &&
+            unexpectedIo > 0 && pin.IoNumber == unexpectedIo &&
             (string.IsNullOrWhiteSpace(actualConnector) ||
              string.Equals(pin.Connector, actualConnector, StringComparison.OrdinalIgnoreCase)) &&
             (string.IsNullOrWhiteSpace(actualPin) || pin.PinNumber == actualPin));
-        actualRecord ??= _model?.Pins.FirstOrDefault(pin => pin.IoNumber == unexpectedIo);
-        actualConnector = string.IsNullOrWhiteSpace(actualConnector)
-            ? actualRecord?.Connector ?? string.Empty
-            : actualConnector.Trim();
+        actualRecord ??= _model?.Pins.FirstOrDefault(pin => unexpectedIo > 0 && pin.IoNumber == unexpectedIo);
         actualPin = string.IsNullOrWhiteSpace(actualPin)
             ? actualRecord?.PinNumber ?? string.Empty
             : actualPin.Trim();
 
-        string sourceConnector = fault.ConnectorFrom.Trim();
-        string sourceColor = fault.WireColor.Trim();
+        string sourceWire = sourceRecord?.WireName?.Trim() is { Length: > 0 } wireName
+            ? wireName
+            : fault.WireName.Trim();
+        string sourceColor = sourceRecord?.Color?.Trim() is { Length: > 0 } wireColor
+            ? wireColor
+            : fault.WireColor.Trim();
+        string sourcePin = sourceRecord?.PinNumber?.Trim() is { Length: > 0 } pinNumber
+            ? pinNumber
+            : fault.PinFrom.Trim();
+        string actualWire = actualRecord?.WireName?.Trim() ?? string.Empty;
         string actualColor = actualRecord?.Color?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(sourceConnector) ||
-            string.IsNullOrWhiteSpace(sourceColor) ||
-            string.IsNullOrWhiteSpace(actualConnector))
+        AddWire(text, sourceWire, sourceColor, sourcePin);
+
+        if (!string.IsNullOrWhiteSpace(actualWire) &&
+            !string.Equals(sourceWire, actualWire, StringComparison.OrdinalIgnoreCase))
         {
-            text.Inlines.Add(new Run(item.Summary));
+            text.Inlines.Add(new Run(" cắm nhầm với "));
+            AddWire(text, actualWire, actualColor, actualPin);
             return;
         }
 
-        text.Inlines.Add(new Run(sourceConnector) { Foreground = Brushes.Red });
-        text.Inlines.Add(new Run(" màu "));
-        AddColorCode(text, sourceColor);
-
-        bool wrongHole = !string.IsNullOrWhiteSpace(actualPin) &&
-            (string.Equals(actualConnector, sourceConnector, StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(actualConnector, fault.ConnectorTo, StringComparison.OrdinalIgnoreCase));
-        if (wrongHole)
-        {
+        if (!string.IsNullOrWhiteSpace(actualPin))
             text.Inlines.Add(new Run($" cắm nhầm lỗ chân {actualPin}"));
-            return;
-        }
+        else
+            text.Inlines.Add(new Run(" cắm nhầm vị trí chưa xác định"));
+    }
 
-        text.Inlines.Add(new Run(" cắm nhầm với "));
-        text.Inlines.Add(new Run(actualConnector) { Foreground = Brushes.Red });
-        if (!string.IsNullOrWhiteSpace(actualColor))
+    private static void AddWire(TextBlock text, string wireName, string color, string housingPosition)
+    {
+        text.Inlines.Add(new Run(string.IsNullOrWhiteSpace(wireName) ? "Mã dây chưa xác định" : wireName)
+        {
+            Foreground = Brushes.Red
+        });
+        if (!string.IsNullOrWhiteSpace(color))
         {
             text.Inlines.Add(new Run(" màu "));
-            AddColorCode(text, actualColor);
+            AddColorCode(text, color);
         }
-        if (!string.IsNullOrWhiteSpace(actualPin))
-            text.Inlines.Add(new Run($" (chân {actualPin})"));
+        if (!string.IsNullOrWhiteSpace(housingPosition))
+            text.Inlines.Add(new Run($" vị trí Housing: {housingPosition}"));
     }
 
     private static void AddColorCode(TextBlock text, string code)
