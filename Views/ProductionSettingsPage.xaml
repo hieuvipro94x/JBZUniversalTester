@@ -240,10 +240,10 @@
                                             <CheckBox Grid.Column="1" Content="KIỂM TRA MẪU ĐẦU CA" IsChecked="{Binding MasterEnabled, Mode=TwoWay}" ToolTip="Theo mã hàng đang chọn. Bật: mỗi ngày từ 07:00 và khi đổi mã hàng phải kiểm tra mẫu đạt + những mẫu NG đã chọn trước sản xuất. Tắt: không yêu cầu Master."/>
                                             <TextBlock Grid.Row="1" Text="Mẫu cần kiểm tra" Style="{StaticResource FieldLabelStyle}"/>
                                             <UniformGrid Columns="2" Rows="2" Grid.Row="1" Grid.Column="1" Margin="0,2,0,4">
-                                                <CheckBox Content="Mẫu đạt (bắt buộc)" IsChecked="True" IsEnabled="False" Height="26"/>
-                                                <CheckBox Content="Mẫu sai dây" IsChecked="{Binding MasterWrongWiringRequired, Mode=TwoWay}" IsEnabled="{Binding MasterEnabled}" Height="26"/>
-                                                <CheckBox Content="Mẫu chập mạch" IsChecked="{Binding MasterShortCircuitRequired, Mode=TwoWay}" IsEnabled="{Binding MasterEnabled}" Height="26"/>
-                                                <CheckBox Content="Tuột tuýt / đứt dây" IsChecked="{Binding MasterOpenCircuitRequired, Mode=TwoWay}" IsEnabled="{Binding MasterEnabled}" Height="26"/>
+                                                <CheckBox Content="Mẫu đạt (bắt buộc)" ToolTip="Mẫu đạt luôn bắt buộc khi bật kiểm tra Master, không thể bỏ chọn." IsChecked="True" IsEnabled="False" Height="26"/>
+                                                <CheckBox Content="Mẫu sai dây" IsChecked="{Binding MasterWrongWiringRequired, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Height="26"/>
+                                                <CheckBox Content="Mẫu chập mạch" IsChecked="{Binding MasterShortCircuitRequired, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Height="26"/>
+                                                <CheckBox Content="Tuột tuýt / đứt dây" IsChecked="{Binding MasterOpenCircuitRequired, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Height="26"/>
                                             </UniformGrid>
                                         </Grid>
                                         <Grid>
