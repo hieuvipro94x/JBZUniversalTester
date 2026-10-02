@@ -5,6 +5,7 @@ title JBZUniversalTester - Build + Smart Version + GitHub
 
 set "ROOT=%~dp0"
 set "PS_SCRIPT=%ROOT%Scripts\Publish-OneFile.ps1"
+set "SIGN_VERIFY_SCRIPT=%ROOT%Scripts\Verify-JBZSignature.ps1"
 set "VERSION_RESOLVER=%ROOT%Scripts\Resolve-BuildVersion.ps1"
 set "VERSION_FILE=%ROOT%Version.props"
 set "PROJECT_NAME=JBZUniversalTester"
@@ -40,6 +41,12 @@ if not exist "%ROOT%JBZUniversalTester.csproj" (
 if not exist "%PS_SCRIPT%" (
     echo [LỖI] Không tìm thấy:
     echo %PS_SCRIPT%
+    goto :FAIL
+)
+
+if not exist "%SIGN_VERIFY_SCRIPT%" (
+    echo [LỖI] Không tìm thấy script xác minh chữ ký:
+    echo %SIGN_VERIFY_SCRIPT%
     goto :FAIL
 )
 
@@ -259,9 +266,13 @@ if not exist "%EXPECTED_EXE%" (
 
 del /Q "%VERSION_BACKUP%" >nul 2>&1
 
-echo.
-echo BUILD THÀNH CÔNG: V%NEW_VERSION%
-echo EXE: %EXPECTED_EXE%
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%SIGN_VERIFY_SCRIPT%" ^
+  -ExePath "%EXPECTED_EXE%"
+if errorlevel 1 (
+    echo [LỖI] Chữ ký EXE cuối cùng không hợp lệ. BUILD thất bại.
+    goto :FAIL
+)
 echo.
 
 rem ============================================================
@@ -344,6 +355,16 @@ if errorlevel 1 (
     goto :FAIL
 )
 
+goto :SUCCESS
+
+:SUCCESS
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%SIGN_VERIFY_SCRIPT%" ^
+  -ExePath "%EXPECTED_EXE%"
+if errorlevel 1 (
+    echo [LỖI] Xác minh chữ ký cuối cùng thất bại.
+    goto :FAIL
+)
 echo.
 echo ============================================================
 echo HOÀN TẤT THÀNH CÔNG
@@ -351,9 +372,6 @@ echo Version : V%NEW_VERSION%
 echo GitHub  : %TARGET_REPO_URL%
 echo ============================================================
 git status -sb
-goto :SUCCESS
-
-:SUCCESS
 set "FINAL_EXIT=0"
 goto :DONE
 

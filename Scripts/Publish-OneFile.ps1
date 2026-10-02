@@ -195,14 +195,28 @@ try {
         Write-Host "Runtime configuration JSON should be created by the app." -ForegroundColor Yellow
     }
 
+    Write-Step "Signing and verifying the final EXE"
+    $signingScript = Join-Path $PSScriptRoot "Sign-JBZExecutable.ps1"
+    if (-not (Test-Path -LiteralPath $signingScript)) {
+        throw "Signing script was not found: $signingScript"
+    }
+    $signingResult = & $signingScript -ExePath $exePath -PublishDirectory $publishDir
+    if ($signingResult.Status -ne "Valid") {
+        throw "Signing did not return a valid Authenticode signature."
+    }
+
     $exeInfo = Get-Item -LiteralPath $exePath
     $sizeMb = [Math]::Round($exeInfo.Length / 1MB, 2)
 
     Write-Host ""
     Write-Host "============================================================" -ForegroundColor Green
-    Write-Host "PUBLISH SUCCESS" -ForegroundColor Green
+    Write-Host "PUBLISH AND CODE SIGNING SUCCESS" -ForegroundColor Green
     Write-Host ("File : " + $exePath) -ForegroundColor Green
     Write-Host ("Size : " + $sizeMb + " MB") -ForegroundColor Green
+    Write-Host ("Publisher : " + $signingResult.Publisher) -ForegroundColor Green
+    Write-Host ("Thumbprint: " + $signingResult.Thumbprint) -ForegroundColor Green
+    Write-Host ("Certificate: " + $signingResult.CertificatePath) -ForegroundColor Green
+    Write-Host ("Installer  : " + $signingResult.InstallerPath) -ForegroundColor Green
     Write-Host ("Log  : " + $logPath) -ForegroundColor Green
     Write-Host "============================================================" -ForegroundColor Green
 
