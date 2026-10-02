@@ -3814,6 +3814,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         frame.EndMarkerCode is null &&
         !frame.TerminatorKnown;
 
+    private bool IsWaterProofRetestConnectionPresentation =>
+        CurrentProductionPhase == ProductionPhase.WaterProof &&
+        (WaterProofRetestConnectorState)Volatile.Read(ref _waterProofRetestConnectorState) is
+            WaterProofRetestConnectorState.AwaitingConnectorRemoval or
+            WaterProofRetestConnectorState.AwaitingConnectorReconnect or
+            WaterProofRetestConnectorState.Running;
+
     private bool TryHandleContinuityPreviewFrame(ScanFrame frame)
     {
         if (!IsContinuityPreviewFrame(frame))
@@ -3826,7 +3833,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             Volatile.Read(ref _probeSessionActive) != 0 ||
             !MasterApproved ||
             IsIoMappingMode ||
-            CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval))
+            (CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval) &&
+             !IsWaterProofRetestConnectionPresentation))
         {
             return true;
         }
@@ -3912,7 +3920,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 Volatile.Read(ref _probeSessionActive) == 0 &&
                 !IsIoMappingMode &&
                 _presentationCycleStarted &&
-                CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval)
+                (CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval ||
+                 IsWaterProofRetestConnectionPresentation))
             {
                 // RefreshFaults only synchronizes presentation rows. It does not
                 // evaluate TestEngine state or trigger result/relay side effects.
@@ -9254,7 +9263,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         InvokeUi(() =>
         {
             SelectedOperationTabIndex = 0;
-            SynchronizeFaultRows(Array.Empty<FaultRow>());
+            if (IsWaterProofRetestConnectionPresentation)
+                RefreshFaults();
+            else
+                SynchronizeFaultRows(Array.Empty<FaultRow>());
         });
 
     private static Window? ResolveOperatorDialogOwner()
@@ -12130,7 +12142,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // ProductEvidence remains debounced and authoritative for
             // PASS/FAIL/relay/ProductRemoved.
             bool hasRealtimePresentationActivity =
-                CurrentProductionPhase == ProductionPhase.Continuity
+                (CurrentProductionPhase == ProductionPhase.Continuity || IsWaterProofRetestConnectionPresentation)
                     ? _engine.HasRealtimePresentationProductActivity
                     : hasProductEvidence;
             bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
@@ -12158,11 +12170,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             if (CurrentProductionPhase == ProductionPhase.WaterProof &&
+                !IsWaterProofRetestConnectionPresentation &&
                 !_waitForProductRelease &&
                 !_waitForFaultProductRemoval)
             {
-                // Trong khi Leak đang chạy/chờ lắp lại RET, vùng dưới phải
-                // trống. Kết quả Leak chỉ hiển thị ở thẻ TEST LEAK phía trên.
+                // The initial Leak run keeps this table empty.
+                // Connector retest uses the live installation rows below.
                 desiredRows = Array.Empty<FaultRow>();
             }
             else if (_waitForProductRelease &&
