@@ -7159,7 +7159,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (_board.IsConnected)
             {
-                if (!_productionSettings.WiringFaultConfirmationEnabled)
+                if (_productionSettings.WiringFaultConfirmationEnabled)
                     await StopScanIntentionallyAsync("WiringFaultConfirmation");
                 await _board.AllRelaysOffAsync();
             }
@@ -7221,7 +7221,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        if (_productionSettings.WiringFaultConfirmationEnabled)
+        if (!_productionSettings.WiringFaultConfirmationEnabled)
         {
             try
             {
@@ -10056,7 +10056,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         .Select(CreateResistanceFaultDetail)
                         .ToArray();
 
-                    if (_productionSettings.WiringFaultConfirmationEnabled)
+                    if (!_productionSettings.WiringFaultConfirmationEnabled)
                     {
                         try
                         {
@@ -10334,7 +10334,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             $"ContinuityPassed={_engine.ContinuityPassed} " +
             $"Resistance={Resistance.Count}/{ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count}");
 
-        if (_productionSettings.WiringFaultConfirmationEnabled)
+        if (!_productionSettings.WiringFaultConfirmationEnabled)
         {
             try
             {
@@ -12030,7 +12030,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 confirmedWiringFault &&
                 (_cycleActive || _sound.IsWiringFaultAlarmActive));
         }
-        else if (_productionSettings.WiringFaultConfirmationEnabled)
+        else if (!_productionSettings.WiringFaultConfirmationEnabled)
         {
             // A committed wiring FAIL keeps one continuous alarm until the
             // product has been fully removed, even while one pair releases.

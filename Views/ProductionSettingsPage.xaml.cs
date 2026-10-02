@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.IO.Ports;
 using System.Text.RegularExpressions;
 using System.Text;
@@ -55,7 +55,6 @@ public partial class ProductionSettingsPage : UserControl
         _main = main;
         _vm = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
-        ShowSettingsSection("IO");
         SinglePrintLotTextBox.Text = _vm.Settings.LotNo.ToString(CultureInfo.InvariantCulture);
         DataContext = _vm;
         InitializeComboBoxItems();
@@ -72,8 +71,6 @@ public partial class ProductionSettingsPage : UserControl
             System.Windows.Threading.DispatcherPriority.ContextIdle);
         if (IsReleased)
             return;
-
-        UpdatePanelWidths(ActualWidth, ActualHeight);
 
         await RefreshPortsAsync();
         if (IsReleased)
@@ -98,117 +95,6 @@ public partial class ProductionSettingsPage : UserControl
     private bool IsReleased => Volatile.Read(ref _released) != 0;
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
-
-    private void SettingsSection_Checked(object sender, RoutedEventArgs e)
-    {
-        if (sender is RadioButton { Tag: string section })
-            ShowSettingsSection(section);
-    }
-
-    private void ShowSettingsSection(string section)
-    {
-        // Checked có thể chạy trong InitializeComponent trước khi các panel được tạo.
-        if (IoSettingsPanel is null || RelayLeakMainPanel is null ||
-            LabelSettingsPanel is null || ResistanceSettingsPanel is null)
-            return;
-
-        IoSettingsPanel.Visibility = section == "IO" ? Visibility.Visible : Visibility.Collapsed;
-        RelayLeakMainPanel.Visibility = section == "RELAY" ? Visibility.Visible : Visibility.Collapsed;
-        LabelSettingsPanel.Visibility = section == "LABEL" ? Visibility.Visible : Visibility.Collapsed;
-        ResistanceSettingsPanel.Visibility = section == "RESISTANCE" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsSectionTitleText.Text = section switch
-        {
-            "RELAY" => "RELAY VÀ MÁY LEAK",
-            "LABEL" => "CÀI ĐẶT VÀ IN TEM",
-            "RESISTANCE" => "CÀI ĐẶT ĐIỆN TRỞ",
-            _ => "I/O VÀ PRODUCTION"
-        };
-        SettingsScrollViewer?.ScrollToTop();
-    }
-
-    private void Page_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        // Dùng chính kích thước thật của UserControl. Không lấy ViewportWidth ở đây:
-        // trong lúc WPF đang layout, ViewportWidth có thể vẫn là giá trị của frame trước
-        // và làm toàn bộ 4 panel bị giữ hẹp ở bên trái.
-        UpdatePanelWidths(e.NewSize.Width, e.NewSize.Height);
-    }
-
-    private void SettingsScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
-    {
-        if (Math.Abs(e.ViewportWidthChange) <= 0.1 && Math.Abs(e.ViewportHeightChange) <= 0.1)
-            return;
-
-        // Sau khi scrollbar xuất hiện/biến mất, tính lại theo kích thước thật của trang
-        // để 4 vùng tiếp tục dùng hết chiều ngang khả dụng.
-        double pageWidth = ActualWidth;
-        double pageHeight = ActualHeight;
-        if (!double.IsFinite(pageWidth) || pageWidth <= 0)
-            pageWidth = SettingsScrollViewer?.ActualWidth ?? e.ViewportWidth;
-        if (!double.IsFinite(pageHeight) || pageHeight <= 0)
-            pageHeight = SettingsScrollViewer?.ActualHeight ?? e.ViewportHeight;
-
-        UpdatePanelWidths(pageWidth, pageHeight);
-    }
-
-    private void UpdatePanelWidths(double pageWidth, double pageHeight)
-    {
-        // Mỗi nhóm cài đặt hiển thị riêng. Giữ chiều rộng tối thiểu để bảng
-        // điện trở và các trường COM không bị cắt khi cửa sổ hẹp.
-        if (UnifiedSettingsGrid is null ||
-            SettingsPanelsHost is null ||
-            SettingsScrollViewer is null)
-        {
-            return;
-        }
-
-        const double minimumUsableContentWidth = 760d;
-        const double hostHorizontalMargin = 16d; // SettingsPanelsHost Margin="8,6,8,6"
-
-        if (!double.IsFinite(pageWidth) || pageWidth <= 0)
-            return;
-
-        double verticalScrollBarWidth =
-            SettingsScrollViewer.ComputedVerticalScrollBarVisibility == Visibility.Visible
-                ? SystemParameters.VerticalScrollBarWidth
-                : 0d;
-
-        double availableWidth = Math.Max(320d, pageWidth - hostHorizontalMargin - verticalScrollBarWidth);
-        double targetWidth = Math.Max(minimumUsableContentWidth, availableWidth);
-
-        SettingsScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-        SettingsScrollViewer.HorizontalScrollBarVisibility =
-            availableWidth + 0.5 < minimumUsableContentWidth
-                ? ScrollBarVisibility.Auto
-                : ScrollBarVisibility.Disabled;
-
-        // Width dựa trên toàn bộ UserControl, cho phép cuộn ngang chỉ khi cần.
-        if (!double.IsFinite(SettingsPanelsHost.Width) ||
-            Math.Abs(SettingsPanelsHost.Width - targetWidth) > 0.5)
-        {
-            SettingsPanelsHost.Width = targetWidth;
-        }
-        SettingsPanelsHost.MinWidth = 0;
-        SettingsPanelsHost.MaxWidth = double.PositiveInfinity;
-        SettingsPanelsHost.HorizontalAlignment = HorizontalAlignment.Left;
-
-        // Grid một cột chứa duy nhất nhóm đang chọn.
-        UnifiedSettingsGrid.Width = double.NaN;
-        UnifiedSettingsGrid.MinWidth = 0;
-        UnifiedSettingsGrid.MaxWidth = double.PositiveInfinity;
-        UnifiedSettingsGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
-
-        if (IoSettingsPanel is not null)
-            IoSettingsPanel.Width = double.NaN;
-        if (RelaySettingsPanel is not null)
-            RelaySettingsPanel.Width = double.NaN;
-        if (WaterProofSettingsPanel is not null)
-            WaterProofSettingsPanel.Width = double.NaN;
-        if (LabelSettingsPanel is not null)
-            LabelSettingsPanel.Width = double.NaN;
-        if (ResistanceSettingsPanel is not null)
-            ResistanceSettingsPanel.Width = double.NaN;
-    }
 
     private void LabelTemplateTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -561,7 +447,7 @@ public partial class ProductionSettingsPage : UserControl
         {
             Margin = new Thickness(14, 0, 14, 12),
             Text = "Preview dựng từ chính payload EPL/ZPL đã render và đúng tỷ lệ kích thước tem vật lý. " +
-                   "TEM_BE_QR được hiển thị dưới dạng QR Code (3 finder ở ba góc), không phải Data Matrix. " +
+                   "TEM_BE_QRCODE được hiển thị dưới dạng QR Code (3 finder ở ba góc), không phải Data Matrix. " +
                    "Font raster/module cuối cùng có thể chênh nhẹ vì do firmware máy in tạo; dùng ‘IN THỬ ĐÚNG BẢN NÀY’ để kiểm chứng vật lý.",
             TextWrapping = TextWrapping.Wrap,
             Foreground = Brushes.DimGray,
@@ -725,7 +611,7 @@ public partial class ProductionSettingsPage : UserControl
         string payload = request.Payload;
         string[] lines = payload.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 
-        // Built-in TEM_BE/TEM_BE_QR were authored against the full printer-head
+        // Built-in TEM_BE_SQDZ/TEM_BE_QRCODE were authored against the full printer-head
         // coordinate space. Their physical 60 mm label starts about 180 dots
         // from the head origin (the verified QR form even carries the legacy
         // X180..620 layout reference). Preview must translate that printer-head

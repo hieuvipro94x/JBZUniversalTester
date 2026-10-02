@@ -52,6 +52,66 @@ public partial class FaultConfirmationWindow : Window
             .Select((fault, index) => new FaultItem(fault, displays[index].Title, displays[index].Summary))
             .ToArray();
         FooterText.Text = footer ?? string.Empty;
+        Loaded += PositionBelowFaultRows;
+    }
+
+    private void PositionBelowFaultRows(object sender, RoutedEventArgs e)
+    {
+        if (Owner is null)
+            return;
+
+        Owner.UpdateLayout();
+        var source = PresentationSource.FromVisual(Owner);
+        if (source?.CompositionTarget is null)
+            return;
+
+        // PointToScreen returns physical pixels; Window positions use WPF units.
+        Matrix fromDevice = source.CompositionTarget.TransformFromDevice;
+        Point ownerTop = fromDevice.Transform(Owner.PointToScreen(new Point(0, 0)));
+        double bottom = ownerTop.Y + Owner.ActualHeight;
+        double desiredTop = ownerTop.Y + (Owner.ActualHeight - ActualHeight) / 2;
+        DataGrid? grid = FindFaultGrid(Owner);
+        if (grid is not null && grid.IsVisible)
+        {
+            Point gridTop = fromDevice.Transform(grid.PointToScreen(new Point(0, 0)));
+            desiredTop = gridTop.Y + grid.ColumnHeaderHeight;
+            foreach (object item in grid.Items)
+            {
+                if (item is not FaultRow row || row.ProductFaultType is not
+                    (ProductFaultType.WrongWiring or ProductFaultType.ShortCircuit))
+                    continue;
+                if (grid.ItemContainerGenerator.ContainerFromItem(item) is not DataGridRow container ||
+                    !container.IsVisible)
+                    continue;
+                Point rowTop = container.TranslatePoint(new Point(0, 0), grid);
+                if (rowTop.Y >= grid.ActualHeight || rowTop.Y + container.ActualHeight <= grid.ColumnHeaderHeight)
+                    continue;
+                desiredTop = Math.Max(desiredTop,
+                    gridTop.Y + Math.Min(grid.ActualHeight, rowTop.Y + container.ActualHeight));
+            }
+            desiredTop += 12;
+            double availableHeight = bottom - desiredTop - 12;
+            if (availableHeight >= MinHeight)
+                MaxHeight = Math.Min(MaxHeight, availableHeight);
+            UpdateLayout();
+        }
+
+        Left = ownerTop.X + Math.Max(0, (Owner.ActualWidth - ActualWidth) / 2);
+        Top = Math.Max(ownerTop.Y, Math.Min(desiredTop, bottom - ActualHeight - 12));
+    }
+
+    private static DataGrid? FindFaultGrid(DependencyObject parent)
+    {
+        for (int index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, index);
+            if (child is DataGrid { Name: "FaultGrid" } grid)
+                return grid;
+            DataGrid? found = FindFaultGrid(child);
+            if (found is not null)
+                return found;
+        }
+        return null;
     }
 
     private void FaultSummary_Loaded(object sender, RoutedEventArgs e)

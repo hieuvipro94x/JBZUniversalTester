@@ -27,7 +27,10 @@ public static class BuiltInLabelTemplateStore
         if (profile.Equals(LabelSettings.LargeTemplate, StringComparison.OrdinalIgnoreCase) ||
             profile.Equals(LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase) ||
             profile.Equals(LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase) ||
-            profile.Equals(LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase))
+            profile.Equals(LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase) ||
+            profile.Equals("TEM_TO", StringComparison.OrdinalIgnoreCase) ||
+            profile.Equals("TEM_BE", StringComparison.OrdinalIgnoreCase) ||
+            profile.Equals("TEM_BE_QR", StringComparison.OrdinalIgnoreCase))
         {
             reference = ReferenceFor(profile);
             return true;
@@ -46,7 +49,7 @@ public static class BuiltInLabelTemplateStore
         if (!TryReferenceForProfile(profile, out _))
             throw new InvalidDataException($"Unknown built-in label profile: {profile}");
 
-        string resourceName = $"JBZUniversalTester.Labels.{profile.ToUpperInvariant()}.txt";
+        string resourceName = $"JBZUniversalTester.Labels.{LabelProfileResolver.NormalizeTemplateType(profile)}.txt";
         Assembly assembly = typeof(BuiltInLabelTemplateStore).Assembly;
         using Stream stream = assembly.GetManifestResourceStream(resourceName)
             ?? throw new FileNotFoundException(

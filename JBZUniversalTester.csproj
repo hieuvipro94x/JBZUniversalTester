@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <Import Project="Version.props" />
 
@@ -74,6 +74,8 @@
   <!-- Icon -->
   <ItemGroup>
     <None Remove="Assets\mainlogo.gif" />
+    <None Remove="Assets\000_JPG_BACKJPG_1042.jpg" />
+    <Resource Include="Assets\000_JPG_BACKJPG_1042.jpg" />
     <None Remove="Assets\reset_probe_cycle.png" />
     <None Remove="logo.ico" />
     <Resource Include="Assets\mainlogo.gif">
@@ -97,17 +99,17 @@
 
   <!-- Built-in label templates stay inside the single EXE. -->
   <ItemGroup>
-    <EmbeddedResource Include="Labels\TEM_TO.txt">
-      <LogicalName>JBZUniversalTester.Labels.TEM_TO.txt</LogicalName>
+    <EmbeddedResource Include="Labels\TEM_TO_KETN.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_TO_KETN.txt</LogicalName>
     </EmbeddedResource>
     <EmbeddedResource Include="Labels\TEM_TO_SQDZ.txt">
       <LogicalName>JBZUniversalTester.Labels.TEM_TO_SQDZ.txt</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Labels\TEM_BE.txt">
-      <LogicalName>JBZUniversalTester.Labels.TEM_BE.txt</LogicalName>
+    <EmbeddedResource Include="Labels\TEM_BE_SQDZ.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_BE_SQDZ.txt</LogicalName>
     </EmbeddedResource>
-    <EmbeddedResource Include="Labels\TEM_BE_QR.txt">
-      <LogicalName>JBZUniversalTester.Labels.TEM_BE_QR.txt</LogicalName>
+    <EmbeddedResource Include="Labels\TEM_BE_QRCODE.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_BE_QRCODE.txt</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

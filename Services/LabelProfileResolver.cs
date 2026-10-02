@@ -108,11 +108,13 @@ public static class LabelProfileResolver
     public static string NormalizeTemplateType(string? value)
     {
         string normalized = value?.Trim() ?? string.Empty;
-        if (string.Equals(normalized, LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(normalized, LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "TEM_BE", StringComparison.OrdinalIgnoreCase))
             return LabelSettings.SmallTemplate;
         if (string.Equals(normalized, LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase))
             return LabelSettings.LargeSqdzTemplate;
-        if (string.Equals(normalized, LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(normalized, LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "TEM_BE_QR", StringComparison.OrdinalIgnoreCase))
             return LabelSettings.SmallQrTemplate;
         return LabelSettings.LargeTemplate;
     }

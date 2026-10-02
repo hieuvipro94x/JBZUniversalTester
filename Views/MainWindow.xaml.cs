@@ -389,15 +389,10 @@ public partial class MainWindow : Window
             _showSettingsSavedConfirmation = false;
         }
 
-        double availableWidth = SystemParameters.WorkArea.Width;
-        double availableHeight = SystemParameters.WorkArea.Height;
         _settingsWindow = new Window
         {
             Title = $"Cài đặt Production - {AppVersion.DisplayVersion}",
-            Width = Math.Min(500, availableWidth - 32),
-            Height = Math.Min(1080, availableHeight - 32),
-            MinWidth = Math.Min(800, availableWidth - 32),
-            MinHeight = Math.Min(500, availableHeight - 32),
+            WindowState = WindowState.Maximized,
             ResizeMode = ResizeMode.NoResize,
             WindowStyle = WindowStyle.None,
             WindowStartupLocation = WindowStartupLocation.CenterScreen,

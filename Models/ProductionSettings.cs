@@ -1,4 +1,4 @@
-﻿namespace JBZUniversalTester.Models;
+namespace JBZUniversalTester.Models;
 
 public sealed class ProductionSettings
 {
@@ -126,9 +126,9 @@ public sealed class ProductionSettings
     public bool EnableSystemLogs { get; set; }
 
     /// <summary>
-    /// Bật: lỗi vẫn được chốt FAIL và ghi History nhưng không mở cửa sổ xác nhận,
+    /// Tắt: lỗi vẫn được chốt FAIL và ghi History nhưng không mở cửa sổ xác nhận,
     /// không kích relay; bảng lỗi/âm báo hướng dẫn người vận hành tháo sản phẩm.
-    /// Tắt: giữ quy trình xác nhận lỗi truyền thống (popup rồi kích relay JIG).
+    /// Bật: hiện popup xác nhận lỗi, sau xác nhận mới kích relay JIG.
     /// </summary>
     public bool WiringFaultConfirmationEnabled { get; set; } = true;
 
@@ -360,10 +360,10 @@ public sealed class ResistanceChannelSetting
 
 public sealed class LabelSettings
 {
-    public const string LargeTemplate = "TEM_TO";
+    public const string LargeTemplate = "TEM_TO_KETN";
     public const string LargeSqdzTemplate = "TEM_TO_SQDZ";
-    public const string SmallTemplate = "TEM_BE";
-    public const string SmallQrTemplate = "TEM_BE_QR";
+    public const string SmallTemplate = "TEM_BE_SQDZ";
+    public const string SmallQrTemplate = "TEM_BE_QRCODE";
 
     /// <summary>
     /// Tên máy in được cài trong Windows.

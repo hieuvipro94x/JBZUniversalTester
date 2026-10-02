@@ -6,7 +6,7 @@
         MinHeight="260"
         MaxHeight="680"
         SizeToContent="Height"
-        WindowStartupLocation="CenterOwner"
+        WindowStartupLocation="Manual"
         ResizeMode="NoResize"
         Background="#F3F4F6"
         FontFamily="Arial"
