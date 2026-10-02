@@ -737,17 +737,19 @@
                         Background="{Binding StateBackground}"
                         BorderBrush="{StaticResource PiBorderBrush}"
                         BorderThickness="1">
-                    <TextBlock Text="{Binding ResultStatusText}"
-                               Margin="8,6"
-                               Foreground="{Binding StateForeground}"
-                               FontSize="32"
-                               FontWeight="Bold"
-                               HorizontalAlignment="Stretch"
-                               VerticalAlignment="Center"
-                               TextAlignment="Center"
-                               TextWrapping="Wrap"
-                               LineStackingStrategy="BlockLineHeight"
-                               LineHeight="38"/>
+                    <Viewbox Margin="8,6" Stretch="Uniform" StretchDirection="DownOnly">
+                        <TextBlock Text="{Binding ResultStatusText}"
+                                   Width="204"
+                                   Foreground="{Binding StateForeground}"
+                                   FontSize="32"
+                                   FontWeight="Bold"
+                                   HorizontalAlignment="Stretch"
+                                   VerticalAlignment="Center"
+                                   TextAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   LineHeight="38"/>
+                    </Viewbox>
                 </Border>
 
                 <Grid Grid.Column="2" VerticalAlignment="Top">

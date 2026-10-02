@@ -355,12 +355,21 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (_requiredMasterFaultSamples.Length == 0)
                 return "CHỌN MẪU NG CẦN KIỂM TRA TRONG CÀI ĐẶT";
-            string text = MasterSampleCatalog.StepText(_masterSelectedFaultSamples,
-                IsMasterBadPhase ? _masterSampleType : null,
-                MasterState is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster);
-            if (IsMasterBadPhase && _masterSampleType == MasterSampleType.OpenCircuit)
-                text += $"\nKẾT NỐI {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal} • ĐỨT {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
-            return text;
+            MasterSampleType? requestedSample = IsMasterBadPhase ? _masterSampleType : null;
+            // Preview the next selected sample after PASS. The execution state still
+            // waits for confirmed full removal before starting that sample.
+            if (MasterState is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster)
+            {
+                foreach (MasterSampleType sample in _requiredMasterFaultSamples)
+                {
+                    if (_validatedMasterFaultSamples.Contains(sample) ||
+                        (MasterState == MasterSequenceState.EjectingBadMaster && sample == _masterSampleType))
+                        continue;
+                    requestedSample = sample;
+                    break;
+                }
+            }
+            return $"KIỂM TRA MẪU {(requestedSample is null ? "ĐẠT" : MasterSampleCatalog.Name(requestedSample.Value))}";
         }
     }
     private DateOnly _masterValidationProductionDay;

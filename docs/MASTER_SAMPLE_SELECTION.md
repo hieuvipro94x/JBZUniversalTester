@@ -12,7 +12,7 @@ Khi bật Master, **Mẫu đạt luôn bắt buộc**. Chọn một hoặc nhi�
 3. Mẫu chập mạch (ít nhất một cầu chập).
 4. Mẫu tuột tuýt / đứt dây.
 
-Sau mỗi mẫu phải xác nhận tháo hoàn toàn bằng các frame Production hợp lệ trước khi chuyển sang mẫu tiếp theo. Production chỉ mở sau khi đủ mẫu đạt và tất cả mẫu NG đã chọn, rồi tháo mẫu cuối. Không có thanh bốn bước riêng. Ô trạng thái và vùng chờ trên TestView hiển thị tên mẫu cùng số bước, ví dụ KIỂM TRA MẪU ĐẠT 1/2 → KIỂM TRA MẪU CHẬP MẠCH 2/2. Khi chọn đủ ba loại NG thì hiển thị 1/4 đến 4/4. Khi đạt chờ tháo, ô trạng thái thêm OK - THÁO MẪU. Hoàn tất chuỗi chuyển về LẮP SẢN PHẨM. Bật Master mà không chọn mẫu NG sẽ bị chặn khi lưu.
+Sau mỗi mẫu phải xác nhận tháo hoàn toàn bằng các frame Production hợp lệ trước khi bắt đầu kiểm tra mẫu tiếp theo. Production chỉ mở sau khi đủ mẫu đạt và tất cả mẫu NG đã chọn, rồi tháo mẫu cuối. Không có thanh bốn bước riêng. Ô trạng thái và vùng chờ trên TestView chỉ hiển thị tên mẫu, ví dụ KIỂM TRA MẪU ĐẠT → KIỂM TRA MẪU CHẬP MẠCH. Khi mẫu đạt, ô trạng thái hiển thị ngay tên mẫu tiếp theo đã chọn; luồng kiểm tra vẫn chờ xác nhận tháo hết mẫu trước. Không thêm số bước, dòng OK - THÁO MẪU hoặc tỷ lệ kết nối vào lời nhắc mẫu. Mẫu cuối vẫn hiển thị tên mẫu cho đến khi tháo hoàn toàn, rồi chuyển về LẮP SẢN PHẨM. Bật Master mà không chọn mẫu NG sẽ bị chặn khi lưu.
 
 Mẫu tuột tuýt/đứt dây tự xác nhận khi số điểm đứt hiện tại đúng số điểm đã cấu hình, không cần nút xác nhận lắp mẫu. Điểm đứt được lấy từ snapshot Production hiện tại và đếm theo quan hệ nguồn–đích THT duy nhất; không cộng dồn qua các lần quét. Mẫu sai dây/chập mạch không được chấp nhận ở bước hở mạch. Mẫu phải còn ít nhất một kết nối đúng để phân biệt với không có sản phẩm.
 
