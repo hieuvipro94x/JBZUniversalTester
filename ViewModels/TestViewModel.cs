@@ -339,6 +339,35 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private bool _masterGoodVerified;
     private bool _masterBadVerified;
     private int _masterRequiredFaultCount = 2;
+    private MasterSampleType _masterSampleType;
+    private int _masterWrongWiringRequiredCount = 2;
+    private int _masterOpenRequiredCount = 1;
+    private int _masterOpenExpectedTotal;
+    public int MasterExpectedConnectionCount => _engine.GetMasterExpectedConnectionCount();
+    private readonly HashSet<MasterSampleType> _validatedMasterFaultSamples = [];
+    private MasterSampleSelection _masterSelectedFaultSamples = MasterSampleSelection.All;
+    private MasterSampleType[] _requiredMasterFaultSamples = MasterSampleCatalog.SelectedFaultSamples(MasterSampleSelection.All);
+    private int _masterRemovalClearFrames;
+    private long _masterRemovalLastFrameSequence = -1;
+    public string MasterSampleRequestText
+    {
+        get
+        {
+            if (_requiredMasterFaultSamples.Length == 0)
+                return "CHỌN MẪU NG CẦN KIỂM TRA TRONG CÀI ĐẶT";
+            string text = MasterSampleCatalog.StepText(_masterSelectedFaultSamples,
+                IsMasterBadPhase ? _masterSampleType : null,
+                MasterState is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster);
+            if (IsMasterBadPhase && _masterSampleType == MasterSampleType.OpenCircuit)
+                text += $"\nKẾT NỐI {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal} • ĐỨT {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
+            return text;
+        }
+    }
+    private DateOnly _masterValidationProductionDay;
+    private DateOnly? _masterApprovedProductionDay;
+    private string _masterValidationSessionId = string.Empty;
+    private bool _dailyMasterAwaitingRemoval;
+    private string SelectedMasterStatus => $"KIỂM TRA MASTER {MasterSampleCatalog.Name(_masterSampleType)}";
     private readonly HashSet<MasterFaultKey> _masterDetectedFaultKeys = [];
     // V12.10.1: cùng key dùng để dựng snapshot FaultGrid MasterBad. DataGrid chỉ
     // hiển thị một dòng cho mỗi fault unique, không lặp theo số frame scan.
@@ -477,7 +506,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         : IsDiscardFaultConfirmationPresentation
             ? "ĐƯA HÀNG VÀO THÙNG HÀNG LỖI"
             : IsWaitingProductPresentation
-                ? IsWaitingMasterSample ? "LẮP MẪU MASTER" : "LẮP SẢN PHẨM"
+                ? IsWaitingMasterSample ? MasterSampleRequestText : "LẮP SẢN PHẨM"
                 : string.Empty;
 
     public bool IsCenterResultVisible =>
@@ -549,7 +578,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     }
 
     public string ResultStatusText =>
-        ProductionPresentationService.GetResultStatusText(this);
+        IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
+        !_dailyMasterAwaitingRemoval && !IsProductRemovalPending
+            ? MasterSampleRequestText + (MasterStatus.Contains("FAIL", StringComparison.OrdinalIgnoreCase)
+                ? "\nKHÔNG ĐẠT - KIỂM TRA / THÁO MẪU" : string.Empty)
+            : ProductionPresentationService.GetResultStatusText(this);
 
     /// <summary>
     /// Màu trạng thái lớn giống máy production: PASS phải xanh lá; lỗi đỏ;
@@ -958,6 +991,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (Set(ref _masterSequenceState, value))
             {
+                if (value is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster)
+                {
+                    _masterRemovalClearFrames = 0;
+                    _masterRemovalLastFrameSequence = -1;
+                }
+                Raise(nameof(MasterSampleRequestText));
                 Raise(nameof(IsMasterSequenceActive));
                 Raise(nameof(IsMasterBadPhase));
                 Raise(nameof(ProductionEnabled));
@@ -3085,6 +3124,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .Select(row => (RowKey(row), row.Status))
             .ToArray();
         long generation = request.Generation;
+        RefreshDailyMasterRequirement();
         if (!MasterApproved)
         {
             // Khi người vận hành đã rời TestView giữa chu trình Master, frame
@@ -3730,6 +3770,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         SelectedOperationTabIndex = 0;
         ClearInlineProbeContactsState(clearLastSeen: true);
         InvokeUi(ClearInlineProbeDisplay);
+        RefreshDailyMasterRequirementCore(productRemovalConfirmed: true);
         RefreshFaults();
         RaiseActiveFault();
         }
@@ -7307,9 +7348,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return $"IO {io} / {connector}-PIN{pinNumber}";
     }
 
-    private IReadOnlyList<FaultDetail> CaptureFaultDetails()
+    private IReadOnlyList<FaultDetail> CaptureFaultDetails(bool includeMasterDisplay = true, bool masterEvidence = false)
     {
-        var details = _engine.WiringFaults
+        IEnumerable<WiringFaultPair> wiringFaults = masterEvidence ? _engine.GetMasterWiringFaults() : _engine.WiringFaults;
+        var details = wiringFaults
             .Select(pair =>
             {
                 var detail = new FaultDetail
@@ -7353,7 +7395,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             })
             .ToList();
 
-        if (!MasterApproved && IsMasterBadPhase)
+        if (includeMasterDisplay && !MasterApproved && IsMasterBadPhase)
         {
             // Master BAD giữ semantics evidence riêng, không phải product FAIL.
             details.AddRange(_engine.BuildRows()
@@ -7499,6 +7541,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ResetMasterGateForModel()
     {
+        _masterSelectedFaultSamples = _model is null ? _productionSettings.MasterSelectedFaultSamples
+            : ProductionConfigService.GetMasterSelectedFaultSamples(_productionSettings, _model);
+        _requiredMasterFaultSamples = MasterSampleCatalog.SelectedFaultSamples(_masterSelectedFaultSamples);
+        _validatedMasterFaultSamples.Clear();
+        _masterValidationProductionDay = MasterSampleCatalog.ProductionDay(DateTime.Now);
+        _masterApprovedProductionDay = null;
+        _masterValidationSessionId = Guid.NewGuid().ToString("N");
+        _dailyMasterAwaitingRemoval = false;
+        _masterSampleType = MasterSampleType.WrongWiring;
         MasterApproved = false;
         _masterGoodVerified = false;
         _masterBadVerified = false;
@@ -7508,7 +7559,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         MasterFaults.Clear();
         _masterRequiredFaultCount = _model is null
             ? Math.Clamp(_productionSettings.MasterFaultRequiredCount, 0, 99)
-            : ProductionConfigService.GetMasterFaultRequiredCount(_productionSettings, _model);
+            : ProductionConfigService.GetMasterSampleRequiredCount(_productionSettings, _model);
+        _masterWrongWiringRequiredCount = _masterRequiredFaultCount;
+        _masterOpenRequiredCount = _model is null ? _productionSettings.MasterOpenFaultRequiredCount
+            : ProductionConfigService.GetMasterOpenFaultRequiredCount(_productionSettings, _model);
+        _masterOpenExpectedTotal = _engine.GetMasterExpectedConnectionCount();
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         Interlocked.Exchange(ref _masterWaterProofSequenceActive, 0);
@@ -7536,6 +7591,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void RaiseMasterState()
     {
+        Raise(nameof(MasterSampleRequestText));
+        Raise(nameof(ResultStatusText));
+        RaiseCenterPresentation();
         Raise(nameof(MasterRequiredFaultCount));
         Raise(nameof(MasterDetectedFaultCount));
         Raise(nameof(WrongCountText));
@@ -7544,6 +7602,37 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Raise(nameof(IsMasterSequenceActive));
         Raise(nameof(ProductionEnabled));
         RaiseActiveFault();
+    }
+
+    public void RefreshDailyMasterRequirement() => RefreshDailyMasterRequirementCore(false);
+
+    private void RefreshDailyMasterRequirementCore(bool productRemovalConfirmed)
+    {
+        if (_model is null || !MasterApproved || IsDeviceFault || IsPersistenceFault ||
+            CurrentRuntimeMode != RuntimeMode.Production ||
+            IsManualModeActive || IsProbeOwningProductionPresentation() ||
+            _masterRequiredFaultCount <= 0 ||
+            _masterApprovedProductionDay == MasterSampleCatalog.ProductionDay(DateTime.Now))
+            return;
+
+        // Finish an in-flight cycle. Never treat one contact disappearing as full removal.
+        if (!productRemovalConfirmed &&
+            (!_engine.LastFrameValid || _productDetectedThisCycle ||
+             IsProductRemovalPending || _waitForProductRelease || _waitForFaultProductRemoval ||
+             Volatile.Read(ref _postContinuityStarted) != 0 ||
+             Volatile.Read(ref _wiringFaultHandlingStarted) != 0))
+            return;
+
+        _cycleActive = false;
+        bool productPresent = !productRemovalConfirmed && _engine.HasProductActivity;
+        ResetMasterGateForModel();
+        _dailyMasterAwaitingRemoval = productPresent;
+        if (productPresent)
+        {
+            State = "THÁO SẢN PHẨM - CHỜ KIỂM TRA MASTER ĐẦU CA";
+            MasterStatus = State;
+        }
+        AddLog("ĐẦU CA 07:00: yêu cầu kiểm tra MASTER ĐẠT và mẫu NG đã chọn trước sản xuất.");
     }
 
     private async Task StartAutomaticMasterSequenceAsync()
@@ -7577,6 +7666,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _masterGoodVerified = false;
         _masterBadVerified = false;
         _masterFaultCollectionLocked = false;
+        _validatedMasterFaultSamples.Clear();
+        _masterSampleType = MasterSampleType.WrongWiring;
+        _masterRequiredFaultCount = _masterWrongWiringRequiredCount;
         _masterDetectedFaultKeys.Clear();
         _masterDetectedFaultDetails.Clear();
         MasterFaults.Clear();
@@ -7607,6 +7699,19 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         if (IsDeviceFault || !IsRuntimeContext(RuntimeMode.Production, generation) || MasterApproved)
             return;
+        if (_requiredMasterFaultSamples.Length == 0)
+            return;
+
+        if (_dailyMasterAwaitingRemoval)
+        {
+            if (!_engine.IsConfirmedProductRemoved)
+                return;
+            _dailyMasterAwaitingRemoval = false;
+            ResetEngineWithoutChangedReentry();
+            State = "LẮP MẪU MASTER ĐẠT ĐẦU CA";
+            MasterStatus = "KIỂM TRA MASTER PASS";
+            return;
+        }
 
         RefreshFaults();
 
@@ -7621,6 +7726,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             case MasterSequenceState.WaitingGoodMaster:
                 if (_engine.HasProductActivity)
                 {
+                    _masterValidationProductionDay = MasterSampleCatalog.ProductionDay(DateTime.Now);
                     BeginMasterHistoryCycle(HistoryInspectionType.MasterGood);
                     MasterState = MasterSequenceState.TestingGoodMaster;
                     State = "KIỂM TRA MASTER PASS";
@@ -7630,8 +7736,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.TestingGoodMaster:
-                if (_engine.IsProductReleased)
+                if (_engine.IsConfirmedProductRemoved)
                 {
+                    RecordMasterHistory(HistoryInspectionType.MasterGood, passed: false,
+                        CaptureFaultDetails(includeMasterDisplay: false));
                     MarkMasterRemoved();
                     Interlocked.Exchange(ref _masterPostStarted, 0);
                     MasterState = MasterSequenceState.WaitingGoodMaster;
@@ -7671,7 +7779,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.EjectingGoodMaster:
-                if (_engine.IsProductReleased)
+                if (IsMasterSampleRemovalConfirmed())
                 {
                     MarkMasterRemoved();
                     TransitionToBadMaster();
@@ -7685,7 +7793,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     _presentationCycleStarted = true;
                     RaiseCenterPresentation();
                     MasterState = MasterSequenceState.TestingBadMaster;
-                    State = "KIỂM TRA MẪU MASTER LỖI";
+                    State = SelectedMasterStatus;
                     MasterStatus = State;
                     Interlocked.Exchange(
                         ref _masterBadCollectNotBeforeUtcTicks,
@@ -7696,17 +7804,26 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.TestingBadMaster:
-                if (_engine.IsProductReleased)
+                if (_engine.IsConfirmedProductRemoved)
                 {
-                    // Không xóa HashSet 1/N: cùng mẫu có thể mất contact tạm thời. Gate chỉ mở ở N/N.
+                    RecordMasterHistory(HistoryInspectionType.MasterBad, passed: false,
+                        _masterDetectedFaultDetails.Count > 0
+                            ? _masterDetectedFaultDetails.Values.ToArray()
+                            : CaptureFaultDetails(includeMasterDisplay: false));
+                    MarkMasterRemoved();
+                    // Full removal ends this sample; never combine faults from different installations.
+                    _masterDetectedFaultKeys.Clear();
+                    _masterDetectedFaultDetails.Clear();
+                    MasterFaults.Clear();
                     Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
                     MasterState = MasterSequenceState.WaitingBadMaster;
                     ResetEngineWithoutChangedReentry();
                     ResetProductPresentationCycle();
                     RefreshFaults();
                     State = "LẮP SẢN PHẨM";
-                    MasterStatus = "KIỂM TRA MẪU MASTER LỖI";
+                    MasterStatus = SelectedMasterStatus;
                     AddLog($"MASTER BAD released khi mới {MasterDetectedFaultCount}/{MasterRequiredFaultCount}; không mở Production.");
+                    RaiseMasterState();
                     break;
                 }
 
@@ -7714,10 +7831,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.EjectingBadMaster:
-                if (_engine.IsProductReleased)
+                if (IsMasterSampleRemovalConfirmed())
                 {
                     MarkMasterRemoved();
-                    CompleteMasterValidation();
+                    _validatedMasterFaultSamples.Add(_masterSampleType);
+                    if (_validatedMasterFaultSamples.Count < _requiredMasterFaultSamples.Length)
+                        TransitionToBadMaster();
+                    else
+                        CompleteMasterValidation();
                 }
                 break;
         }
@@ -7739,7 +7860,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void CollectCurrentMasterFaults(long generation)
     {
-        if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+        if (IsDeviceFault || IsPersistenceFault || IsProbeOwningProductionPresentation() ||
+            !_engine.LastFrameValid || !IsRuntimeContext(RuntimeMode.Production, generation) ||
             MasterApproved ||
             MasterState != MasterSequenceState.TestingBadMaster ||
             _masterFaultCollectionLocked)
@@ -7753,15 +7875,52 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         CaptureMasterTestStartedAt();
 
-        FaultDetail[] candidates = CaptureFaultDetails()
-            .Where(fault => fault.Type is
-                ProductFaultType.OpenCircuit or
-                ProductFaultType.WrongWiring or
-                ProductFaultType.ShortCircuit)
+        // Use engine classification, never the explanatory Wrong/Short/Open display rows.
+        IEnumerable<FaultDetail> evidence = _masterSampleType == MasterSampleType.OpenCircuit
+            ? _engine.GetOpenMasterFaults().Select(EnrichFaultDetail)
+            : CaptureFaultDetails(includeMasterDisplay: false, masterEvidence: true);
+        FaultDetail[] candidates = evidence
+            .Where(fault => fault.Type == MasterSampleCatalog.FaultType(_masterSampleType))
             .OrderBy(fault => FaultTypeCatalog.Priority(fault.Type))
             .ThenBy(fault => fault.ExpectedSourceIo ?? fault.ActualSourceIo ?? 0)
             .ThenBy(fault => fault.ExpectedTargetIo ?? fault.ActualTargetIo ?? 0)
             .ToArray();
+
+        if (_masterSampleType == MasterSampleType.OpenCircuit)
+        {
+            // Open evidence must describe this one live snapshot, never accumulated missing wires.
+            _masterDetectedFaultKeys.Clear();
+            _masterDetectedFaultDetails.Clear();
+            foreach (FaultDetail fault in candidates)
+            {
+                MasterFaultKey key = MasterFaultKey.From(fault);
+                _masterDetectedFaultKeys.Add(key);
+                _masterDetectedFaultDetails[key] = fault;
+            }
+            RebuildMasterFaultDisplayRows();
+            SynchronizeFaultRows(BuildMasterFaultGridRows());
+            RaiseMasterState();
+            if (MasterDetectedFaultCount != MasterRequiredFaultCount)
+            {
+                MasterStatus = $"MẪU ĐỨT DÂY: CÒN {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal}; " +
+                    $"YÊU CẦU {_masterOpenExpectedTotal - MasterRequiredFaultCount}/{_masterOpenExpectedTotal} (ĐỨT {MasterRequiredFaultCount} ĐIỂM)";
+                State = MasterStatus;
+                return;
+            }
+            _masterFaultCollectionLocked = true;
+            _masterBadVerified = true;
+            _ = CompleteBadMasterAsync(generation);
+            return;
+        }
+
+        if (candidates.Length == 0)
+        {
+            MasterStatus = _engine.HasWiringFault
+                ? $"CHƯA ĐÚNG MẪU MASTER {MasterSampleCatalog.Name(_masterSampleType)}"
+                : $"CHƯA PHÁT HIỆN LỖI MASTER {MasterSampleCatalog.Name(_masterSampleType)}";
+            State = MasterStatus;
+            return;
+        }
 
         foreach (FaultDetail fault in candidates)
         {
@@ -7790,7 +7949,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             _masterDetectedFaultDetails[key] = fault;
             RebuildMasterFaultDisplayRows();
             SynchronizeFaultRows(BuildMasterFaultGridRows());
-            MasterStatus = "KIỂM TRA MẪU MASTER LỖI";
+            MasterStatus = SelectedMasterStatus;
             State = MasterStatus;
             AddLog(
                 $"MASTER BAD FAULT {number}/{MasterRequiredFaultCount} " +
@@ -8267,10 +8426,31 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
+    private bool IsMasterSampleRemovalConfirmed()
+    {
+        if (!_engine.LastFrameValid || _engine.LastFrameSequence == _masterRemovalLastFrameSequence)
+            return false;
+        _masterRemovalLastFrameSequence = _engine.LastFrameSequence;
+        if (_engine.HasProductActivity || !_engine.IsProductReleased)
+        {
+            _masterRemovalClearFrames = 0;
+            return false;
+        }
+        // Distinct authoritative production frames; partial contact loss never advances the sample.
+        return ++_masterRemovalClearFrames >= 2;
+    }
+
     private void TransitionToBadMaster()
     {
         if (!_masterGoodVerified || MasterApproved)
             return;
+        _masterSampleType = _requiredMasterFaultSamples.First(type => !_validatedMasterFaultSamples.Contains(type));
+        _masterRequiredFaultCount = _masterSampleType switch
+        {
+            MasterSampleType.WrongWiring => _masterWrongWiringRequiredCount,
+            MasterSampleType.OpenCircuit => _masterOpenRequiredCount,
+            _ => 1
+        };
 
         // Đổi state trước khi reset để tuyệt đối không thể tái nhập
         // EjectingGoodMaster -> TransitionToBadMaster -> Reset -> Changed -> ...
@@ -8282,13 +8462,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _masterFaultCollectionLocked = false;
         _masterBadVerified = false;
         Interlocked.Exchange(ref _masterEjectStarted, 0);
+        Interlocked.Exchange(ref _masterPostStarted, 0);
+        Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
 
         ResetProductPresentationCycle();
         RefreshFaults();
         State = "LẮP SẢN PHẨM";
-        MasterStatus = "KIỂM TRA MẪU MASTER LỖI";
-        AddLog("MASTER GOOD đã tháo khỏi JIG. Chuyển sang MASTER BAD tự động.");
+        MasterStatus = SelectedMasterStatus;
+        AddLog($"MASTER đã tháo hoàn toàn. Yêu cầu mẫu {MasterSampleCatalog.Name(_masterSampleType)}; {MasterRequiredFaultCount} điểm lỗi.");
         RaiseMasterState();
     }
 
@@ -8477,6 +8659,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             CycleId = cycleId,
             PrintStatus = LabelPrintStatus.NotRequested.ToString()
         };
+        history.InspectionTrace += " | " + MasterSampleCatalog.AuditTrace(
+            inspectionType == HistoryInspectionType.MasterGood, _masterSampleType,
+            MasterRequiredFaultCount, MasterDetectedFaultCount, passed,
+            _masterValidationProductionDay, _masterValidationSessionId);
+        history.InspectionTrace += " | MẪU YÊU CẦU: ĐẠT → " +
+            string.Join(" → ", _requiredMasterFaultSamples.Select(MasterSampleCatalog.Name));
+        if (inspectionType == HistoryInspectionType.MasterBad && _masterSampleType == MasterSampleType.OpenCircuit)
+            history.InspectionTrace += $" | KẾT NỐI {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal}";
 
         TestHistoryStore store;
         try
@@ -8631,10 +8821,21 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void CompleteMasterValidation()
     {
-        if (!_masterGoodVerified || !_masterBadVerified || MasterDetectedFaultCount < MasterRequiredFaultCount)
+        if (IsPersistenceFault || IsDeviceFault || _masterRecordedHistoryStore is null)
+            return;
+        if (_masterValidationProductionDay != MasterSampleCatalog.ProductionDay(DateTime.Now))
+        {
+            _cycleActive = false;
+            ResetMasterGateForModel();
+            AddLog("MASTER kết thúc sau mốc 07:00 của ngày mới; yêu cầu kiểm tra lại mẫu đầu ca.");
+            return;
+        }
+        if (!_masterGoodVerified || !_masterBadVerified || MasterDetectedFaultCount < MasterRequiredFaultCount ||
+            _requiredMasterFaultSamples.Length == 0 || !_requiredMasterFaultSamples.All(_validatedMasterFaultSamples.Contains))
             return;
 
         MasterApproved = true;
+        _masterApprovedProductionDay = _masterValidationProductionDay;
         MasterState = MasterSequenceState.Completed;
         _masterFaultCollectionLocked = true;
         _cycleActive = true;
@@ -8652,7 +8853,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _engine.SetFrameProcessingEnabled(true);
         RefreshFaults();
 
-        State = "CHỜ LẮP SẢN PHẨM";
+        ResetProductPresentationCycle();
+        State = "LẮP SẢN PHẨM";
         MasterStatus = "MASTER HOÀN TẤT • PRODUCTION ENABLED";
         AddLog("MASTER VALIDATION COMPLETED - MASTER GATE PASS, ProductionEnabled=true.");
         RaiseMasterState();
@@ -10461,8 +10663,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         int maxIo = _model?.MaxIo ?? 0;
         if (_model is not null)
         {
-            int configuredMasterFaults = ProductionConfigService.GetMasterFaultRequiredCount(_productionSettings, _model);
-            if (configuredMasterFaults != _masterRequiredFaultCount)
+            int configuredMasterFaults = ProductionConfigService.GetMasterSampleRequiredCount(_productionSettings, _model);
+            if (configuredMasterFaults != _masterWrongWiringRequiredCount || ProductionConfigService.GetMasterOpenFaultRequiredCount(_productionSettings, _model) != _masterOpenRequiredCount || ProductionConfigService.GetMasterSelectedFaultSamples(_productionSettings, _model) != _masterSelectedFaultSamples)
                 ResetMasterGateForModel();
         }
         _board.ConfigureActiveScanRange(maxIo);
@@ -10478,8 +10680,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         if (_model is not null)
         {
-            int configuredMasterFaults = ProductionConfigService.GetMasterFaultRequiredCount(_productionSettings, _model);
-            if (configuredMasterFaults != _masterRequiredFaultCount && !IsManualModeActive)
+            int configuredMasterFaults = ProductionConfigService.GetMasterSampleRequiredCount(_productionSettings, _model);
+            if ((configuredMasterFaults != _masterWrongWiringRequiredCount || ProductionConfigService.GetMasterOpenFaultRequiredCount(_productionSettings, _model) != _masterOpenRequiredCount || ProductionConfigService.GetMasterSelectedFaultSamples(_productionSettings, _model) != _masterSelectedFaultSamples) && !IsManualModeActive)
             {
                 ResetMasterGateForModel();
                 AddLog($"Cấu hình Số lỗi Master thay đổi -> reset Master Gate về 0/{configuredMasterFaults}.");
@@ -10547,10 +10749,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             if (_model is not null)
             {
-                int configuredMasterFaults = ProductionConfigService.GetMasterFaultRequiredCount(
+                int configuredMasterFaults = ProductionConfigService.GetMasterSampleRequiredCount(
                     _productionSettings,
                     _model);
-                if (configuredMasterFaults != _masterRequiredFaultCount)
+                if (configuredMasterFaults != _masterWrongWiringRequiredCount || ProductionConfigService.GetMasterOpenFaultRequiredCount(_productionSettings, _model) != _masterOpenRequiredCount || ProductionConfigService.GetMasterSelectedFaultSamples(_productionSettings, _model) != _masterSelectedFaultSamples)
                 {
                     ResetMasterGateForModel();
                     AddLog($"Cấu hình Số lỗi Master thay đổi -> reset Master Gate về 0/{configuredMasterFaults}.");

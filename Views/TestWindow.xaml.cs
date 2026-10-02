@@ -108,7 +108,12 @@ public partial class TestWindow : Window
 
     private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("HH:mm:ss");
 
-    private void ClockTimer_Tick(object? sender, EventArgs e) => UpdateClock();
+    private void ClockTimer_Tick(object? sender, EventArgs e)
+    {
+        UpdateClock();
+        if (DataContext is TestViewModel viewModel)
+            viewModel.RefreshDailyMasterRequirement();
+    }
 
     private void TestWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {

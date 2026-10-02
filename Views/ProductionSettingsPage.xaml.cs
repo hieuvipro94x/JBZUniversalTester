@@ -1438,6 +1438,8 @@ public partial class ProductionSettingsPage : UserControl
     {
         _vm.Settings,
         _vm.MasterFaultRequiredCount,
+        _vm.MasterSelectedFaultSamples,
+        _vm.MasterOpenFaultRequiredCount,
         ResistanceChannels = _vm.ResistanceChannels.Select(editor => editor.ToSetting()).ToArray(),
         _vm.WaterProof
     });
@@ -1511,6 +1513,20 @@ public partial class ProductionSettingsPage : UserControl
         if (_vm.MasterFaultRequiredCount is < 0 or > 99)
         {
             error = "Số lỗi Master phải từ 0 đến 99. 0 = bỏ kiểm tra Master.";
+            return false;
+        }
+
+        if (_vm.MasterEnabled && _vm.MasterSelectedFaultSamples == MasterSampleSelection.None)
+        {
+            error = "Hãy chọn ít nhất một mẫu NG cần kiểm tra: sai dây, chập mạch hoặc tuột tuýt/đứt dây.";
+            return false;
+        }
+
+        if (_vm.MasterEnabled && _vm.MasterOpenCircuitRequired && _vm.MasterExpectedConnectionCount > 0 &&
+            _vm.MasterOpenFaultRequiredCount >= _vm.MasterExpectedConnectionCount)
+        {
+            error = $"Mẫu đứt dây phải còn ít nhất một kết nối đúng. Model có {_vm.MasterExpectedConnectionCount} kết nối; " +
+                $"số điểm đứt dây phải từ 1 đến {_vm.MasterExpectedConnectionCount - 1}.";
             return false;
         }
 

@@ -297,6 +297,88 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    public IReadOnlyList<WiringFaultPair> GetMasterWiringFaults()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_lastFrameValid || _model is not ProductModel model)
+                return [];
+            return _wiringFaults.Select(fault =>
+            {
+                bool sourceKnown = _modelIo.Contains(fault.SourceIo);
+                bool targetKnown = _modelIo.Contains(fault.TargetIo);
+                if (!sourceKnown || !targetKnown)
+                    return fault;
+
+                // A bridge with both original networks intact is a short sample.
+                // Missing an original relationship indicates a miswired sample.
+                // This interpretation is Master-only; production classification is unchanged.
+                bool missingExpected = model.Nets.Any(net => IsEligibleProductionNet(net) &&
+                    (net.IoNumbers.Contains(fault.SourceIo) || net.IoNumbers.Contains(fault.TargetIo)) &&
+                    !IsWireNetConnected(net));
+                if (model.Clip is not null)
+                    missingExpected |= model.Clip.Branches.Any(branch =>
+                        IsEligibleClipBranch(model.Clip, branch) &&
+                        (model.Clip.CommonIo == fault.SourceIo || model.Clip.CommonIo == fault.TargetIo ||
+                         branch.TargetIo == fault.SourceIo || branch.TargetIo == fault.TargetIo) &&
+                        !IsClipBranchConnected(model.Clip, branch, _currentConnections));
+                return fault with
+                {
+                    FaultType = missingExpected ? ProductFaultType.WrongWiring : ProductFaultType.ShortCircuit,
+                    ExpectedSourceIo = missingExpected ? fault.ExpectedSourceIo : null,
+                    ExpectedTargetIo = missingExpected ? fault.ExpectedTargetIo : null
+                };
+            }).ToArray();
+        }
+    }
+
+    // Master-only evidence from the authoritative complete production snapshot.
+    // The Master workflow automatically accepts the configured exact live missing-connection count.
+    public IReadOnlyList<FaultDetail> GetOpenMasterFaults()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_lastFrameValid || _model is not ProductModel model ||
+                !HasProductActivityUnsafe(model) || _wiringFaults.Count > 0 || _candidateWiringFaults.Count > 0)
+                return [];
+            var details = new List<FaultDetail>();
+            foreach (WireNet net in model.Nets)
+            {
+                if (!IsEligibleProductionNet(net)) continue;
+                foreach (int target in net.ExpectedActiveIo.Where(io => io > 0 && io != net.SourceIo))
+                    if (!_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent) ||
+                        !_actualComponentByIo.TryGetValue(target, out int targetComponent) || sourceComponent != targetComponent)
+                        details.Add(new FaultDetail { Type = ProductFaultType.OpenCircuit,
+                            ExpectedSourceIo = net.SourceIo, ExpectedTargetIo = target,
+                            RelatedIos = [net.SourceIo, target], Message = "ĐỨT DÂY / TUỘT TUÝT" });
+            }
+            if (model.Clip is not null)
+                foreach (ClipBranch branch in OrderedClipBranches(model.Clip))
+                    if (IsEligibleClipBranch(model.Clip, branch) &&
+                        !IsClipBranchConnected(model.Clip, branch, _currentConnections))
+                        details.Add(new FaultDetail { Type = ProductFaultType.OpenCircuit,
+                            ExpectedSourceIo = model.Clip.CommonIo, ExpectedTargetIo = branch.TargetIo,
+                            RelatedIos = [model.Clip.CommonIo, branch.TargetIo], Message = "ĐỨT DÂY / TUỘT TUÝT" });
+            return details.GroupBy(MasterFaultKey.From).Select(group => group.First()).ToArray();
+        }
+    }
+
+    public int GetMasterExpectedConnectionCount()
+    {
+        lock (_gate)
+        {
+            if (_model is not ProductModel model) return 0;
+            var pairs = new HashSet<(int, int)>();
+            foreach (WireNet net in model.Nets.Where(IsEligibleProductionNet))
+                foreach (int target in net.ExpectedActiveIo.Where(io => io > 0 && io != net.SourceIo))
+                    pairs.Add((Math.Min(net.SourceIo, target), Math.Max(net.SourceIo, target)));
+            if (model.Clip is not null)
+                foreach (ClipBranch branch in model.Clip.Branches.Where(branch => IsEligibleClipBranch(model.Clip, branch)))
+                    pairs.Add((Math.Min(model.Clip.CommonIo, branch.TargetIo), Math.Max(model.Clip.CommonIo, branch.TargetIo)));
+            return pairs.Count;
+        }
+    }
+
     public bool HasConfirmedOpenCircuit
     {
         get { lock (_gate) return _confirmedOpenKeys.Count > 0; }

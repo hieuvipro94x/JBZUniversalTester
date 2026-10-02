@@ -128,6 +128,9 @@ public static class ProductionConfigService
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",
             $"[MasterFaultRequiredCount]{settings.MasterFaultRequiredCount}",
+            $"[MasterSelectedFaultSamples]{(int)settings.MasterSelectedFaultSamples}",
+            $"[MasterOpenFaultRequiredCount]{settings.MasterOpenFaultRequiredCount}",
+            $"[MasterSampleType]{(int)settings.MasterSampleType}",
             $"[WaterproofSerialPort]{settings.WaterproofSerialPort}",
             $"[WaterProofPortName]{settings.WaterProofMachine.PortName}",
             $"[WaterProofBaudRate]{settings.WaterProofMachine.BaudRate}",
@@ -191,6 +194,13 @@ public static class ProductionConfigService
             $"[LabelExternalHelperArgument]{settings.Label.ExternalHelperArgument}",
             $"[LabelExternalPrintFile]{settings.Label.ExternalPrintFile}"
         };
+
+        foreach ((string modelKey, MasterSampleType sampleType) in settings.MasterSampleTypesByModel)
+            lines.Add($"[MasterSample.{Uri.EscapeDataString(modelKey)}]{(int)sampleType}");
+        foreach ((string modelKey, MasterSampleSelection selected) in settings.MasterSelectedFaultSamplesByModel)
+            lines.Add($"[MasterSelected.{Uri.EscapeDataString(modelKey)}]{(int)selected}");
+        foreach ((string modelKey, int count) in settings.MasterOpenFaultCountsByModel)
+            lines.Add($"[MasterOpenFault.{Uri.EscapeDataString(modelKey)}]{count}");
 
         foreach ((string modelKey, int requiredCount) in settings.MasterFaultCountsByModel
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
@@ -351,6 +361,51 @@ public static class ProductionConfigService
         return settings.MasterFaultRequiredCount;
     }
 
+    public static MasterSampleType GetMasterSampleTypeForPath(ProductionSettings settings, string? path) =>
+        settings.MasterSampleTypesByModel.TryGetValue(GetMasterModelKeyFromPath(path), out var type)
+            ? type : settings.MasterSampleType;
+
+    public static MasterSampleType GetMasterSampleType(ProductionSettings settings, ProductModel model) =>
+        settings.MasterSampleTypesByModel.TryGetValue(GetMasterModelKey(model), out var type)
+            ? type : GetMasterSampleTypeForPath(settings, model.SourcePath);
+
+    public static int GetMasterSampleRequiredCount(ProductionSettings settings, ProductModel model)
+    {
+        // All three NG samples are required. This setting is the wrong-wiring point count;
+        // short/open samples each require one fault and 0 still disables the whole sequence.
+        return GetMasterFaultRequiredCount(settings, model);
+    }
+
+    public static MasterSampleSelection GetMasterSelectedFaultSamplesForPath(ProductionSettings settings, string? path) =>
+        settings.MasterSelectedFaultSamplesByModel.TryGetValue(GetMasterModelKeyFromPath(path), out var selected)
+            ? selected : settings.MasterSelectedFaultSamples;
+
+    public static MasterSampleSelection GetMasterSelectedFaultSamples(ProductionSettings settings, ProductModel model) =>
+        settings.MasterSelectedFaultSamplesByModel.TryGetValue(GetMasterModelKey(model), out var selected)
+            ? selected : GetMasterSelectedFaultSamplesForPath(settings, model.SourcePath);
+
+    public static void SetMasterSelectedFaultSamplesForPath(ProductionSettings settings, string? path, MasterSampleSelection selected)
+    {
+        string key = GetMasterModelKeyFromPath(path);
+        if (key == "DEFAULT") settings.MasterSelectedFaultSamples = selected & MasterSampleSelection.All;
+        else settings.MasterSelectedFaultSamplesByModel[key] = selected & MasterSampleSelection.All;
+    }
+
+    public static int GetMasterOpenFaultRequiredCountForPath(ProductionSettings settings, string? path) =>
+        settings.MasterOpenFaultCountsByModel.TryGetValue(GetMasterModelKeyFromPath(path), out int count)
+            ? Math.Clamp(count, 1, 99) : Math.Clamp(settings.MasterOpenFaultRequiredCount, 1, 99);
+
+    public static int GetMasterOpenFaultRequiredCount(ProductionSettings settings, ProductModel model) =>
+        settings.MasterOpenFaultCountsByModel.TryGetValue(GetMasterModelKey(model), out int count)
+            ? Math.Clamp(count, 1, 99) : GetMasterOpenFaultRequiredCountForPath(settings, model.SourcePath);
+
+    public static void SetMasterOpenFaultRequiredCountForPath(ProductionSettings settings, string? path, int count)
+    {
+        string key = GetMasterModelKeyFromPath(path);
+        if (key == "DEFAULT") settings.MasterOpenFaultRequiredCount = Math.Clamp(count, 1, 99);
+        else settings.MasterOpenFaultCountsByModel[key] = Math.Clamp(count, 1, 99);
+    }
+
     public static int GetMasterFaultRequiredCountForPath(ProductionSettings settings, string? path)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -481,6 +536,22 @@ public static class ProductionConfigService
         settings.UsbDelay = IAny(map, settings.UsbDelay, "UsbDelay", "USB 지연");
         settings.StartCardNumber = I(map, "StartCardNumber", settings.StartCardNumber);
         settings.MasterFaultRequiredCount = I(map, "MasterFaultRequiredCount", settings.MasterFaultRequiredCount);
+        settings.MasterSelectedFaultSamples = (MasterSampleSelection)I(map, "MasterSelectedFaultSamples", (int)settings.MasterSelectedFaultSamples);
+        foreach ((string key, string value) in map)
+            if (key.StartsWith("MasterSelected.", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out int mask))
+                settings.MasterSelectedFaultSamplesByModel[Uri.UnescapeDataString(key["MasterSelected.".Length..])] = (MasterSampleSelection)mask;
+        settings.MasterOpenFaultRequiredCount = I(map, "MasterOpenFaultRequiredCount", settings.MasterOpenFaultRequiredCount);
+        foreach ((string key, string value) in map)
+            if (key.StartsWith("MasterOpenFault.", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out int count))
+                settings.MasterOpenFaultCountsByModel[Uri.UnescapeDataString(key["MasterOpenFault.".Length..])] = count;
+        settings.MasterSampleType = (MasterSampleType)I(map, "MasterSampleType", (int)settings.MasterSampleType);
+        foreach ((string key, string value) in map)
+        {
+            const string prefix = "MasterSample.";
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(value, out int type) && Enum.IsDefined(typeof(MasterSampleType), type))
+                settings.MasterSampleTypesByModel[Uri.UnescapeDataString(key[prefix.Length..])] = (MasterSampleType)type;
+        }
         settings.WaterproofSerialPort = I(map, "WaterproofSerialPort", settings.WaterproofSerialPort);
         settings.WaterProofMachine.PortName = S(map, "WaterProofPortName", settings.WaterProofMachine.PortName);
         settings.WaterProofMachine.BaudRate = I(map, "WaterProofBaudRate", settings.WaterProofMachine.BaudRate);
@@ -695,6 +766,23 @@ public static class ProductionConfigService
         settings.WaterProofProfilesByModel ??= new Dictionary<string, WaterProofModelSettings>(StringComparer.OrdinalIgnoreCase);
         settings.ResistanceProfilesByModel ??= new Dictionary<string, ResistanceChannelSetting[]>(StringComparer.OrdinalIgnoreCase);
         settings.MasterFaultCountsByModel ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        settings.MasterSelectedFaultSamples &= MasterSampleSelection.All;
+        settings.MasterSelectedFaultSamplesByModel = new Dictionary<string, MasterSampleSelection>(settings.MasterSelectedFaultSamplesByModel ?? new(), StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settings.MasterSelectedFaultSamplesByModel.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key)) settings.MasterSelectedFaultSamplesByModel.Remove(key);
+            else settings.MasterSelectedFaultSamplesByModel[key] &= MasterSampleSelection.All;
+        settings.MasterOpenFaultRequiredCount = Math.Clamp(settings.MasterOpenFaultRequiredCount, 1, 99);
+        settings.MasterOpenFaultCountsByModel = new Dictionary<string, int>(settings.MasterOpenFaultCountsByModel ?? new(), StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settings.MasterOpenFaultCountsByModel.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key)) settings.MasterOpenFaultCountsByModel.Remove(key);
+            else settings.MasterOpenFaultCountsByModel[key] = Math.Clamp(settings.MasterOpenFaultCountsByModel[key], 1, 99);
+        settings.MasterSampleTypesByModel = new Dictionary<string, MasterSampleType>(
+            settings.MasterSampleTypesByModel ?? new(), StringComparer.OrdinalIgnoreCase);
+        if (!Enum.IsDefined(settings.MasterSampleType))
+            settings.MasterSampleType = MasterSampleType.WrongWiring;
+        foreach (string key in settings.MasterSampleTypesByModel.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key) || !Enum.IsDefined(settings.MasterSampleTypesByModel[key]))
+                settings.MasterSampleTypesByModel.Remove(key);
         settings.LotSettingsByProduct ??= new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase);
         if (settings.MasterFaultCountsByModel.Comparer != StringComparer.OrdinalIgnoreCase)
         {

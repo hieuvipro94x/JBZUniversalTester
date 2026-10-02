@@ -10,6 +10,47 @@ namespace JBZUniversalTester.ViewModels;
 public sealed class ProductionSettingsViewModel : ObservableObject
 {
     private int _masterFaultRequiredCount;
+    private MasterSampleSelection _masterSelectedFaultSamples = MasterSampleSelection.All;
+    public MasterSampleSelection MasterSelectedFaultSamples => _masterSelectedFaultSamples;
+    public bool MasterWrongWiringRequired
+    {
+        get => (_masterSelectedFaultSamples & MasterSampleSelection.WrongWiring) != 0;
+        set => SetMasterSampleRequired(MasterSampleSelection.WrongWiring, value);
+    }
+    public bool MasterShortCircuitRequired
+    {
+        get => (_masterSelectedFaultSamples & MasterSampleSelection.ShortCircuit) != 0;
+        set => SetMasterSampleRequired(MasterSampleSelection.ShortCircuit, value);
+    }
+    public bool MasterOpenCircuitRequired
+    {
+        get => (_masterSelectedFaultSamples & MasterSampleSelection.OpenCircuit) != 0;
+        set => SetMasterSampleRequired(MasterSampleSelection.OpenCircuit, value);
+    }
+    public bool CanEditMasterWrongCount => MasterEnabled && MasterWrongWiringRequired;
+    public bool CanEditMasterOpenCount => MasterEnabled && MasterOpenCircuitRequired;
+    private void SetMasterSampleRequired(MasterSampleSelection flag, bool required)
+    {
+        _masterSelectedFaultSamples = required ? _masterSelectedFaultSamples | flag : _masterSelectedFaultSamples & ~flag;
+        Raise(nameof(MasterSelectedFaultSamples));
+        Raise(nameof(MasterWrongWiringRequired));
+        Raise(nameof(MasterShortCircuitRequired));
+        Raise(nameof(MasterOpenCircuitRequired));
+        Raise(nameof(CanEditMasterWrongCount));
+        Raise(nameof(CanEditMasterOpenCount));
+    }
+    private int _masterOpenFaultRequiredCount = 1;
+    public int MasterExpectedConnectionCount => _test?.MasterExpectedConnectionCount ?? 0;
+    public int MasterOpenFaultRequiredCount
+    {
+        get => _masterOpenFaultRequiredCount;
+        set => Set(ref _masterOpenFaultRequiredCount, Math.Clamp(value, 1, 99));
+    }
+    public bool MasterEnabled
+    {
+        get => MasterFaultRequiredCount > 0;
+        set => MasterFaultRequiredCount = value ? Math.Max(1, MasterFaultRequiredCount) : 0;
+    }
     private readonly TestViewModel? _test;
     private readonly string _modelPath;
     private readonly string _lotProductKey;
@@ -67,7 +108,15 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public int MasterFaultRequiredCount
     {
         get => _masterFaultRequiredCount;
-        set => Set(ref _masterFaultRequiredCount, Math.Clamp(value, 0, 99));
+        set
+        {
+            if (Set(ref _masterFaultRequiredCount, Math.Clamp(value, 0, 99)))
+            {
+                Raise(nameof(MasterEnabled));
+                Raise(nameof(CanEditMasterWrongCount));
+                Raise(nameof(CanEditMasterOpenCount));
+            }
+        }
     }
 
     public bool IsManualPanelVisible => true;
@@ -160,6 +209,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         WaterProofConnectorOptions = LoadWaterProofConnectorOptions(test, _modelPath);
         _masterFaultRequiredCount = ProductionConfigService.GetMasterFaultRequiredCountForPath(
             Settings, _modelPath);
+        _masterSelectedFaultSamples = ProductionConfigService.GetMasterSelectedFaultSamplesForPath(Settings, _modelPath);
+        _masterOpenFaultRequiredCount = ProductionConfigService.GetMasterOpenFaultRequiredCountForPath(Settings, _modelPath);
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
             async () => await RunManualRelayCommandAsync(1, true),
@@ -587,6 +638,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         Settings.ManualModeEnabled = false;
         ProductionConfigService.SetMasterFaultRequiredCountForPath(
             Settings, _modelPath, MasterFaultRequiredCount);
+        ProductionConfigService.SetMasterSelectedFaultSamplesForPath(Settings, _modelPath, MasterSelectedFaultSamples);
+        ProductionConfigService.SetMasterOpenFaultRequiredCountForPath(Settings, _modelPath, MasterOpenFaultRequiredCount);
         ProductionConfigService.SetWaterProofProfileForPath(
             Settings, _modelPath, WaterProof);
         ProductionConfigService.SetProductLot(

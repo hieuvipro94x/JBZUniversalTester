@@ -49,6 +49,14 @@ public sealed class ProductionSettings
     /// fallback/default; cấu hình theo từng model nằm trong MasterFaultCountsByModel.
     /// </summary>
     public int MasterFaultRequiredCount { get; set; } = 2;
+    public MasterSampleSelection MasterSelectedFaultSamples { get; set; } = MasterSampleSelection.All;
+    public Dictionary<string, MasterSampleSelection> MasterSelectedFaultSamplesByModel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public int MasterOpenFaultRequiredCount { get; set; } = 1;
+    public Dictionary<string, int> MasterOpenFaultCountsByModel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public MasterSampleType MasterSampleType { get; set; } = MasterSampleType.WrongWiring;
+    public Dictionary<string, MasterSampleType> MasterSampleTypesByModel { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Cấu hình Số lỗi Master theo mã hàng/model. Key ưu tiên PartNumber; nếu THT
