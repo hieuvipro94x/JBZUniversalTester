@@ -16,7 +16,7 @@ Sau mỗi mẫu phải xác nhận tháo hoàn toàn bằng các frame Productio
 
 Mẫu tuột tuýt/đứt dây tự xác nhận khi số điểm đứt hiện tại đúng số điểm đã cấu hình, không cần nút xác nhận lắp mẫu. Điểm đứt được lấy từ snapshot Production hiện tại và đếm theo quan hệ nguồn–đích THT duy nhất; không cộng dồn qua các lần quét. Mẫu sai dây/chập mạch không được chấp nhận ở bước hở mạch. Mẫu phải còn ít nhất một kết nối đúng để phân biệt với không có sản phẩm.
 
-Trong luồng Master, một cầu nối giữa các mạng THT có kết nối gốc vẫn nguyên vẹn được xác nhận là chập mạch; nếu quan hệ gốc bị thiếu thì là sai dây. Phân loại lỗi và xử lý Production hiện tại được giữ nguyên. Các dòng giải thích trên UI không dùng thay cho evidence điện. Master không cộng LOT/PASS/FAIL sản xuất và không dùng MARKING; giữ nhánh relay Master hiện có.
+Trong luồng Master, một cầu nối giữa các mạng THT có kết nối gốc vẫn nguyên vẹn được xác nhận là chập mạch; nếu quan hệ gốc bị thiếu thì là sai dây. Phân loại lỗi và xử lý Production hiện tại được giữ nguyên. Các dòng giải thích trên UI không dùng thay cho evidence điện. Master không cộng LOT/PASS/FAIL sản xuất và không dùng MARKING. Mọi mẫu Master hoàn thành (đạt, sai dây, chập mạch, tuột tuýt/đứt dây) đều pulse relay JIG theo kiểu đấu máy sau khi commit kết quả thành công, kể cả khi tùy chọn mở JIG production đang tắt. Relay trở về OFF sau pulse. Không mở JIG nếu mẫu chưa đạt yêu cầu hoặc có lỗi lưu dữ liệu; sau khi tháo hết mẫu cuối mới mở production.
 
 ## Đầu ca
 

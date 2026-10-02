@@ -174,7 +174,7 @@ public sealed class ProductionSettings
     /// <summary>Thời gian Relay 2 - MARKING giữ ON trước khi cưỡng bức OFF.</summary>
     public int Relay2MarkingPulseMs { get; set; } = 120;
 
-    /// <summary>Bật/tắt Relay 1 JIG trong chuỗi PASS/FAIL/Master.</summary>
+    /// <summary>Bật/tắt relay JIG trong chuỗi production PASS/FAIL. Master hoàn thành luôn mở JIG.</summary>
     public bool JigEjectRelayEnabled { get; set; } = true;
 
     /// <summary>Bật/tắt Relay 2 MARKING trong chuỗi PASS. FAIL/Master không bao giờ dùng MARKING.</summary>

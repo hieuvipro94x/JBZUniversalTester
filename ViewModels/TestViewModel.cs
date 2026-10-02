@@ -8257,7 +8257,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             State = "HOÀN THÀNH MẪU MASTER ĐẠT";
             MasterStatus = State;
             AddLog("MASTER GOOD PASS");
-            AddLog("MASTER GOOD EJECT - Relay 1 JIG; không MARKING, không cộng sản lượng.");
+            AddLog("MASTER GOOD EJECT - relay JIG theo kiểu đấu máy; không MARKING, không cộng sản lượng.");
 
             // CompletePass đã STOP/RESET transport. Reset nội bộ không được phát callback
             // EjectingGoodMaster giả; chỉ frame scan thật sau restart mới xác nhận RELEASE.
@@ -8525,7 +8525,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             await _engine.EjectMasterSampleAsync(ct);
             MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: false);
-            AddLog("MASTER BAD EJECT - Relay 1 JIG tự động; không tăng FAIL/LOT.");
+            AddLog($"MASTER BAD EJECT - mẫu {MasterSampleCatalog.Name(_masterSampleType)}, relay JIG theo kiểu đấu máy; không tăng FAIL/LOT.");
 
             // Chờ frame thật xác nhận MASTER BAD đã rời jig; Reset không được
             // tự phát Changed và hoàn tất Master Gate ngay trong cùng call stack.

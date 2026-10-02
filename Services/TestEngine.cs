@@ -3197,11 +3197,14 @@ public sealed class TestEngine : IDisposable
         : _production.Relay1JigPulseMs;
 
     /// <summary>
-    /// V12.9.5: eject riêng cho Master Sample. Chỉ Relay 1 JIG được pulse;
-    /// tuyệt đối không MARKING và không dùng behavior Product FAIL.
+    /// Mọi Master hoàn thành đều mở JIG theo kiểu đấu máy, kể cả khi
+    /// production tắt JIG. Không MARKING và không dùng behavior Product FAIL.
     /// </summary>
     public Task EjectMasterSampleAsync(CancellationToken ct = default)
-        => PulseJigRelayAsync(ct);
+    {
+        int relay = ConfiguredJigRelay;
+        return PulseRelaySafeAsync(relay, PulseDurationForRelay(relay), $"R{relay} JIG MASTER", ct);
+    }
 
     private async Task PulseRelaySafeAsync(int relay, int durationMs, string relayName, CancellationToken ct)
     {
@@ -3775,7 +3778,7 @@ public sealed class TestEngine : IDisposable
         if (!markingEnabled)
         {
             onPassStarted?.Invoke();
-            await PulseJigRelayAsync(ct);
+            await EjectMasterSampleAsync(ct);
         }
         else
         {
