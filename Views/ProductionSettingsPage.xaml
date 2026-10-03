@@ -234,7 +234,7 @@
                       CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged">
             <Grid x:Name="SettingsPanelsHost" MinWidth="540">
                 <Grid x:Name="UnifiedSettingsGrid" Margin="4" HorizontalAlignment="Stretch"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-                                <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Top">
+                                <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Stretch">
                                     <StackPanel>
                                         <TextBlock Text="I/O / PRODUCTION" Style="{StaticResource SectionTitleStyle}"/>
                                         <Grid Margin="0,0,0,4">
@@ -357,7 +357,7 @@
                                         </StackPanel>
                                     </StackPanel>
                                 </Border>
-                                <Border x:Name="RelayLeakMainPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Top"><StackPanel x:Name="RelayLeakSettingsColumn" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="0">
+                                <Border x:Name="RelayLeakMainPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Stretch"><StackPanel x:Name="RelayLeakSettingsColumn" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="0">
                                     <Border x:Name="RelaySettingsPanel" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="0,0,0,4" Padding="0" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" CornerRadius="0">
                                         <StackPanel>
                                             <TextBlock Text="RELAY / BẢO TRÌ" Style="{StaticResource SectionTitleStyle}"/>
