@@ -2,7 +2,7 @@
 
 Trong ProductionSettingsPage, bật **KIỂM TRA MẪU ĐẦU CA** theo mã hàng/model và nhập hai giá trị độc lập:
 
-- **Số điểm sai dây**: số cạnh sai dây duy nhất cần phát hiện, ví dụ 2 hoặc 4. Hai hướng của cùng cạnh IO chỉ tính một điểm.
+- **Số điểm sai dây**: số cạnh sai dây duy nhất đang xuất hiện đồng thời, ví dụ 2 hoặc 4. Hai hướng của cùng cạnh IO chỉ tính một điểm. Lỗi mất ở frame hiện tại được bỏ khỏi bộ đếm/bảng; không cộng dồn lỗi đã biến mất.
 - **Số điểm đứt dây**: số quan hệ dây hở yêu cầu chính xác, mặc định 1. Ví dụ model 5 dây, yêu cầu đứt 1: chỉ mẫu 4/5 kết nối đúng được chấp nhận; 5/5 và 3/5 không đạt bài kiểm tra này.
 
 Khi bật Master, **Mẫu đạt luôn bắt buộc**. Chọn một hoặc nhiều mẫu NG trong cài đặt theo mã hàng: Sai dây, Chập mạch, Tuột tuýt/đứt dây. Phần mềm giữ thứ tự sau và bỏ qua những mẫu NG không chọn:
@@ -19,6 +19,13 @@ Mẫu tuột tuýt/đứt dây tự xác nhận khi số điểm đứt hiện t
 Trong luồng Master, một cầu nối giữa các mạng THT có kết nối gốc vẫn nguyên vẹn được xác nhận là chập mạch; nếu quan hệ gốc bị thiếu thì là sai dây. Phân loại lỗi và xử lý Production hiện tại được giữ nguyên. Các dòng giải thích trên UI không dùng thay cho evidence điện. Master không cộng LOT/PASS/FAIL sản xuất và không dùng MARKING. Mọi mẫu Master hoàn thành (đạt, sai dây, chập mạch, tuột tuýt/đứt dây) đều pulse relay JIG theo kiểu đấu máy sau khi commit kết quả thành công, kể cả khi tùy chọn mở JIG production đang tắt. Relay trở về OFF sau pulse. Không mở JIG nếu mẫu chưa đạt yêu cầu hoặc có lỗi lưu dữ liệu; sau khi tháo hết mẫu cuối mới mở production.
 
 ## Đầu ca
+
+### Kiểm tra relay và Leak từ V2026.09.155
+
+- Khóa chuyển bước trong toàn bộ thao tác mở JIG, đưa relay về OFF và khởi động lại scan. Sau đó mới đếm hai frame hoàn chỉnh khác nhau xác nhận tháo; còn chân active hoặc kết nối ngoài model thì giữ bước hiện tại.
+- Mẫu đạt chạy Leak nếu mã hàng bật Leak. Các mẫu NG sai dây/chập/tuột tuýt chỉ kiểm tra lỗi điện D2XX, không yêu cầu PASS Leak hoặc dây RET thông ở các mẫu NG.
+- Ô trạng thái hiển thị KHÔNG ĐẠT khi Master có lỗi thực thi/kiểm tra, và hiển thị thao tác Leak khi mẫu đạt chạy Leak hoặc yêu cầu tháo/lắp connector. Di chuột vào ô trạng thái để xem thông báo chi tiết.
+- Kiểm tra bo và relay không thay thế chạy đủ chuỗi mẫu thật; làm theo `MASTER_VALIDATION_V2026.09.155.md` và giữ log máy sản xuất.
 
 Ngày sản xuất bắt đầu lúc **07:00 giờ máy**. Mã hàng bật Master phải kiểm tra lại mẫu đạt và những mẫu NG đã chọn khi sang ngày sản xuất mới, đổi mã hàng hoặc mở lại phần mềm. Mốc 08:00 không bỏ qua Master chưa hoàn tất. Chu kỳ sản phẩm đang chạy được hoàn tất và xác nhận tháo trước khi chuyển sang Master. Mã hàng tắt Master bỏ qua cả chuỗi; giá trị số điểm sai dây bằng 0 vẫn tương đương tắt Master.
 

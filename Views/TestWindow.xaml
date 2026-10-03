@@ -733,6 +733,7 @@
 
                 <Border x:Name="ResultStatusHost" Grid.Column="0"
                         Height="150"
+                        ToolTip="{Binding MasterStatus}"
                         VerticalAlignment="Top"
                         Background="{Binding StateBackground}"
                         BorderBrush="{StaticResource PiBorderBrush}"

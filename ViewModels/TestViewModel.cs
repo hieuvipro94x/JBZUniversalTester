@@ -384,6 +384,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private bool _masterFaultCollectionLocked;
     private int _masterPostStarted;
     private int _masterEjectStarted;
+    private int _masterEjectInProgress;
     private int _masterWaterProofSequenceActive;
     private int _legacyGoodMasterRecorded;
     private int _legacyBadMasterRecorded;
@@ -586,12 +587,32 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return _pendingProductionProbePreview is not null;
     }
 
-    public string ResultStatusText =>
-        IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
-        !_dailyMasterAwaitingRemoval && !IsProductRemovalPending
-            ? MasterSampleRequestText + (MasterStatus.Contains("FAIL", StringComparison.OrdinalIgnoreCase)
-                ? "\nKHÔNG ĐẠT - KIỂM TRA / THÁO MẪU" : string.Empty)
-            : ProductionPresentationService.GetResultStatusText(this);
+    public string ResultStatusText
+    {
+        get
+        {
+            if (!IsMasterSequenceActive || IsDeviceFault || IsPersistenceFault ||
+                _dailyMasterAwaitingRemoval || IsProductRemovalPending)
+                return ProductionPresentationService.GetResultStatusText(this);
+
+            if (State.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
+                MasterStatus.StartsWith("LỖI", StringComparison.OrdinalIgnoreCase) ||
+                MasterStatus.Contains(" - LỖI", StringComparison.OrdinalIgnoreCase) ||
+                MasterStatus.Contains("KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
+                MasterStatus.Contains("KHÔNG HỢP LỆ", StringComparison.OrdinalIgnoreCase))
+                return MasterSampleRequestText + "\nKHÔNG ĐẠT";
+
+            if (MasterStatus.Contains("LEAK", StringComparison.OrdinalIgnoreCase))
+            {
+                string leakAction = MasterStatus.Contains("THÁO CONNECTOR", StringComparison.OrdinalIgnoreCase)
+                    ? "THÁO CONNECTOR LEAK"
+                    : MasterStatus.Contains("LẮP LẠI CONNECTOR", StringComparison.OrdinalIgnoreCase)
+                        ? "LẮP LẠI CONNECTOR LEAK" : "ĐANG TEST LEAK";
+                return MasterSampleRequestText + "\n" + leakAction;
+            }
+            return MasterSampleRequestText;
+        }
+    }
 
     /// <summary>
     /// Màu trạng thái lớn giống máy production: PASS phải xanh lá; lỗi đỏ;
@@ -7715,7 +7736,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ProcessMasterEngineChangedOnUi(long generation)
     {
-        if (IsDeviceFault || !IsRuntimeContext(RuntimeMode.Production, generation) || MasterApproved)
+        if (IsDeviceFault || IsPersistenceFault ||
+            !IsRuntimeContext(RuntimeMode.Production, generation) || MasterApproved)
+            return;
+        if (Volatile.Read(ref _masterEjectInProgress) != 0)
             return;
         if (_requiredMasterFaultSamples.Length == 0)
             return;
@@ -7754,7 +7778,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.TestingGoodMaster:
-                if (_engine.IsConfirmedProductRemoved)
+                if (_engine.IsConfirmedProductRemoved && _engine.IsFaultConnectionReleased)
                 {
                     RecordMasterHistory(HistoryInspectionType.MasterGood, passed: false,
                         CaptureFaultDetails(includeMasterDisplay: false));
@@ -7822,7 +7846,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.TestingBadMaster:
-                if (_engine.IsConfirmedProductRemoved)
+                if (_engine.IsConfirmedProductRemoved && _engine.IsFaultConnectionReleased)
                 {
                     RecordMasterHistory(HistoryInspectionType.MasterBad, passed: false,
                         _masterDetectedFaultDetails.Count > 0
@@ -7904,20 +7928,27 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .ThenBy(fault => fault.ExpectedTargetIo ?? fault.ActualTargetIo ?? 0)
             .ToArray();
 
+        // All NG counts describe one live complete frame. Never retain an error
+        // that disappeared and combine it with another error from a later frame.
+        HashSet<MasterFaultKey> previousKeys = new(_masterDetectedFaultKeys);
+        _masterDetectedFaultKeys.Clear();
+        _masterDetectedFaultDetails.Clear();
+        foreach (FaultDetail fault in candidates)
+        {
+            MasterFaultKey key = MasterFaultKey.From(fault);
+            _masterDetectedFaultKeys.Add(key);
+            if (!_masterDetectedFaultDetails.TryGetValue(key, out FaultDetail? existing) ||
+                ShouldReplaceMasterFaultDetail(existing, fault))
+                _masterDetectedFaultDetails[key] = fault;
+        }
+        RebuildMasterFaultDisplayRows();
+        SynchronizeFaultRows(BuildMasterFaultGridRows());
+        if (!previousKeys.SetEquals(_masterDetectedFaultKeys))
+            AddLog($"MASTER LIVE FAULTS type={MasterSampleCatalog.Name(_masterSampleType)} detected={MasterDetectedFaultCount}/{MasterRequiredFaultCount} removed={previousKeys.Except(_masterDetectedFaultKeys).Count()}");
+        RaiseMasterState();
+
         if (_masterSampleType == MasterSampleType.OpenCircuit)
         {
-            // Open evidence must describe this one live snapshot, never accumulated missing wires.
-            _masterDetectedFaultKeys.Clear();
-            _masterDetectedFaultDetails.Clear();
-            foreach (FaultDetail fault in candidates)
-            {
-                MasterFaultKey key = MasterFaultKey.From(fault);
-                _masterDetectedFaultKeys.Add(key);
-                _masterDetectedFaultDetails[key] = fault;
-            }
-            RebuildMasterFaultDisplayRows();
-            SynchronizeFaultRows(BuildMasterFaultGridRows());
-            RaiseMasterState();
             if (MasterDetectedFaultCount != MasterRequiredFaultCount)
             {
                 MasterStatus = $"MẪU ĐỨT DÂY: CÒN {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal}; " +
@@ -7940,47 +7971,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        foreach (FaultDetail fault in candidates)
+        MasterStatus = SelectedMasterStatus;
+        State = MasterStatus;
+        if (MasterDetectedFaultCount >= MasterRequiredFaultCount)
         {
-            if (_masterFaultCollectionLocked)
-                break;
-
-            MasterFaultKey key = MasterFaultKey.From(fault);
-            if (!_masterDetectedFaultKeys.Add(key))
-            {
-                // V12.10.2: cùng cạnh điện có thể được engine mô tả trước là
-                // Short rồi frame sau có đủ Expected* để mô tả WrongWiring rõ hơn.
-                // Không tăng bộ đếm, chỉ nâng chất lượng dòng đang hiển thị.
-                if (_masterDetectedFaultDetails.TryGetValue(key, out FaultDetail? existing) &&
-                    existing is not null &&
-                    ShouldReplaceMasterFaultDetail(existing, fault))
-                {
-                    _masterDetectedFaultDetails[key] = fault;
-                    RebuildMasterFaultDisplayRows();
-                    SynchronizeFaultRows(BuildMasterFaultGridRows());
-                }
-
-                continue;
-            }
-
-            int number = _masterDetectedFaultKeys.Count;
-            _masterDetectedFaultDetails[key] = fault;
-            RebuildMasterFaultDisplayRows();
-            SynchronizeFaultRows(BuildMasterFaultGridRows());
-            MasterStatus = SelectedMasterStatus;
-            State = MasterStatus;
-            AddLog(
-                $"MASTER BAD FAULT {number}/{MasterRequiredFaultCount} " +
-                $"{FaultTypeCatalog.Code(fault.Type)} | {fault.Summary}");
-            RaiseMasterState();
-
-            if (number >= MasterRequiredFaultCount)
-            {
-                _masterFaultCollectionLocked = true;
-                _masterBadVerified = true;
-                _ = CompleteBadMasterAsync(generation);
-                break;
-            }
+            _masterFaultCollectionLocked = true;
+            _masterBadVerified = true;
+            _ = CompleteBadMasterAsync(generation);
         }
     }
 
@@ -8122,7 +8119,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task CompleteGoodMasterAsync(long generation)
     {
-        if (_model is null ||
+        if (_model is not ProductModel masterModel ||
             !IsRuntimeContext(RuntimeMode.Production, generation) ||
             MasterState != MasterSequenceState.TestingGoodMaster)
         {
@@ -8131,6 +8128,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         CancellationToken ct = CurrentCycleToken();
+        bool ownsEject = false;
         try
         {
             Resistance.Clear();
@@ -8138,11 +8136,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             bool resistancePassed = true;
             DateTime? masterPassAt = null;
 
-            if (IsResistanceEnabledForModel(_model))
+            if (IsResistanceEnabledForModel(masterModel))
             {
                 await EnsureKeysightConnectedAsync();
                 _scanSupervisor.Suspend("Resistance");
                 List<ResistanceResult> results = await _engine.MeasureResistanceAsync(ct);
+                if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster))
+                    return;
                 foreach (ResistanceResult result in results)
                 {
                     Resistance.Add(result);
@@ -8167,7 +8167,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
-            ProductModel masterModel = _model;
             if (!await RunMasterWaterProofUntilPassAsync(
                     masterModel,
                     generation,
@@ -8179,6 +8178,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             await WaitForProbeRelayInterlockAsync(ct);
+            if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster))
+                return;
             if (!_engine.ContinuityPassed || _engine.HasWiringFault)
             {
                 State = "MASTER PASS - FAIL";
@@ -8214,12 +8215,19 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 passed: true,
                 [],
                 masterPassAt);
+            // Hold this validated sample while persistence and relay work finish;
+            // an early removal frame must not reset its state/evidence mid-commit.
+            if (Interlocked.CompareExchange(ref _masterEjectInProgress, 1, 0) != 0)
+                throw new InvalidOperationException("Một lần mở JIG Master khác đang chạy.");
+            ownsEject = true;
             await _masterPersistenceTask;
             if (IsPersistenceFault)
             {
                 AddLog("MASTER GOOD: SQLite chưa commit; KHÔNG pulse JIG.");
                 return;
             }
+            if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster))
+                return;
 
             // CompletePassAsync dừng D2XX scan trước RESET/relay. Báo trước cho
             // ScanSupervisor để watchdog không coi lần dừng có chủ ý này là
@@ -8237,6 +8245,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 },
                 markingEnabled: false,
                 ct: ct);
+
+            if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster))
+                return;
 
             if (!ok)
             {
@@ -8276,6 +8287,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         finally
         {
+            if (ownsEject)
+                Interlocked.Exchange(ref _masterEjectInProgress, 0);
             // Giữ latch cho tới khi MASTER GOOD được tháo/nhả. Nếu resistance hoặc
             // continuity không đạt, không được tự đo/lặp PASS liên tục theo từng frame.
             // Nhánh IsProductReleased ở state TestingGoodMaster sẽ reset latch về 0.
@@ -8296,15 +8309,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         CancellationToken ct = CurrentCycleToken();
         try
         {
-            if (!await RunMasterWaterProofUntilPassAsync(
-                    masterModel,
-                    generation,
-                    MasterSequenceState.TestingBadMaster,
-                    "MASTER BAD",
-                    ct))
-            {
-                return;
-            }
+            ct.ThrowIfCancellationRequested();
+            AddLog($"MASTER NG ELECTRICAL ONLY - mẫu {MasterSampleCatalog.Name(_masterSampleType)}; Leak được kiểm tra ở mẫu đạt.");
 
             if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
                 !ReferenceEquals(_model, masterModel) ||
@@ -8324,9 +8330,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex)
         {
-            MasterStatus = "LỖI KIỂM TRA LEAK MASTER BAD - KHÔNG MỞ PRODUCTION";
+            MasterStatus = "LỖI KIỂM TRA MẪU NG - KHÔNG MỞ PRODUCTION";
             State = MasterStatus;
-            AddLog($"MASTER BAD LEAK ERROR: {ex}");
+            AddLog($"MASTER BAD ERROR: {ex}");
         }
         finally
         {
@@ -8446,10 +8452,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private bool IsMasterSampleRemovalConfirmed()
     {
-        if (!_engine.LastFrameValid || _engine.LastFrameSequence == _masterRemovalLastFrameSequence)
+        if (Volatile.Read(ref _masterEjectInProgress) != 0 ||
+            !_engine.LastFrameValid || _engine.LastFrameSequence == _masterRemovalLastFrameSequence)
             return false;
         _masterRemovalLastFrameSequence = _engine.LastFrameSequence;
-        if (_engine.HasProductActivity || !_engine.IsProductReleased)
+        if (!_engine.IsFaultConnectionReleased)
         {
             _masterRemovalClearFrames = 0;
             return false;
@@ -8494,7 +8501,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task EjectValidatedBadMasterAsync(long generation)
     {
-        if (_model is null ||
+        if (_model is not ProductModel masterModel ||
             !IsRuntimeContext(RuntimeMode.Production, generation) ||
             MasterDetectedFaultCount < MasterRequiredFaultCount ||
             Interlocked.CompareExchange(ref _masterEjectStarted, 1, 0) != 0)
@@ -8503,16 +8510,24 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         CancellationToken ct = CurrentCycleToken();
+        bool ownsEject = false;
         try
         {
             // MASTER BAD N/N phải được commit trước khi mở JIG. Nếu SQLite lỗi,
             // giữ mẫu tại jig để không mất traceability.
+            if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingBadMaster))
+                return;
+            if (Interlocked.CompareExchange(ref _masterEjectInProgress, 1, 0) != 0)
+                throw new InvalidOperationException("Một lần mở JIG Master khác đang chạy.");
+            ownsEject = true;
             await _masterPersistenceTask;
             if (IsPersistenceFault)
             {
                 AddLog("MASTER BAD: SQLite chưa commit; KHÔNG pulse JIG.");
                 return;
             }
+            if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingBadMaster))
+                return;
 
             _masterFaultCollectionLocked = true;
             MasterState = MasterSequenceState.EjectingBadMaster;
@@ -8523,6 +8538,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             // MASTER BAD fault là EXPECTED evidence: chỉ eject JIG sau N/N, không dùng Product FAIL behavior.
             await _engine.EjectMasterSampleAsync(ct);
+            if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.EjectingBadMaster))
+                return;
+            AddLog($"MASTER JIG SAFE-OFF - mẫu {MasterSampleCatalog.Name(_masterSampleType)}; chờ 2 frame tháo hoàn toàn.");
             MarkMasterRemovalStarted();
             TryAppendLegacyMasterHistory(goodMaster: false);
             AddLog($"MASTER BAD EJECT - mẫu {MasterSampleCatalog.Name(_masterSampleType)}, relay JIG theo kiểu đấu máy; không tăng FAIL/LOT.");
@@ -8545,6 +8563,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         finally
         {
+            if (ownsEject)
+                Interlocked.Exchange(ref _masterEjectInProgress, 0);
             RaiseMasterState();
         }
     }
@@ -8839,7 +8859,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void CompleteMasterValidation()
     {
-        if (IsPersistenceFault || IsDeviceFault || _masterRecordedHistoryStore is null)
+        if (Volatile.Read(ref _masterEjectInProgress) != 0 ||
+            IsPersistenceFault || IsDeviceFault || _masterRecordedHistoryStore is null)
             return;
         if (_masterValidationProductionDay != MasterSampleCatalog.ProductionDay(DateTime.Now))
         {
