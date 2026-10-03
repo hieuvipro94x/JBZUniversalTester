@@ -349,6 +349,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private MasterSampleType[] _requiredMasterFaultSamples = MasterSampleCatalog.SelectedFaultSamples(MasterSampleSelection.All);
     private int _masterRemovalClearFrames;
     private long _masterRemovalLastFrameSequence = -1;
+    private long _masterRemovalLastScanGeneration = -1;
+    private int _masterRemovalConfirmed;
     public string MasterSampleRequestText
     {
         get
@@ -1023,8 +1025,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 if (value is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster)
                 {
-                    _masterRemovalClearFrames = 0;
-                    _masterRemovalLastFrameSequence = -1;
+                    ResetMasterSampleRemovalObservation();
                 }
                 Raise(nameof(MasterSampleRequestText));
                 Raise(nameof(IsMasterSequenceActive));
@@ -4396,6 +4397,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         ObserveLiveWiringFaultsDuringRemoval(generation);
                     ObserveFaultProductRemovalFrame(frame, generation);
                     ObservePassProductRemovalFrame(frame, generation);
+                    ObserveMasterSampleRemovalFrame(frame, generation);
                 }
 
                 // Confirmed WRONG/SHORT is a production safety decision, not a
@@ -7580,6 +7582,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ResetMasterGateForModel()
     {
+        ResetMasterSampleRemovalObservation();
         _masterSelectedFaultSamples = _model is null ? _productionSettings.MasterSelectedFaultSamples
             : ProductionConfigService.GetMasterSelectedFaultSamples(_productionSettings, _model);
         _requiredMasterFaultSamples = MasterSampleCatalog.SelectedFaultSamples(_masterSelectedFaultSamples);
@@ -8450,20 +8453,74 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
-    private bool IsMasterSampleRemovalConfirmed()
+    private void ResetMasterSampleRemovalObservation()
     {
-        if (Volatile.Read(ref _masterEjectInProgress) != 0 ||
-            !_engine.LastFrameValid || _engine.LastFrameSequence == _masterRemovalLastFrameSequence)
-            return false;
-        _masterRemovalLastFrameSequence = _engine.LastFrameSequence;
+        Interlocked.Exchange(ref _masterRemovalClearFrames, 0);
+        Interlocked.Exchange(ref _masterRemovalLastFrameSequence, -1);
+        Interlocked.Exchange(ref _masterRemovalLastScanGeneration, -1);
+        Interlocked.Exchange(ref _masterRemovalConfirmed, 0);
+    }
+
+    private void ObserveMasterSampleRemovalFrame(ScanFrame frame, long generation)
+    {
+        MasterSequenceState removalState = MasterState;
+        if (IsDeviceFault || IsPersistenceFault || MasterApproved ||
+            !IsRuntimeContext(RuntimeMode.Production, generation) ||
+            Volatile.Read(ref _removalMonitoringFromMain) != 0 ||
+            Volatile.Read(ref _masterEjectInProgress) != 0 ||
+            Volatile.Read(ref _masterRemovalConfirmed) != 0 ||
+            removalState is not (MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster) ||
+            _model is not ProductModel masterModel ||
+            frame.Mode != BoardScanMode.Production || !frame.Complete ||
+            frame.UnknownBytes != 0 || !frame.TerminatorKnown || !_engine.LastFrameValid)
+        {
+            return;
+        }
+
+        // Count accepted frames on the serialized board worker. Identical empty
+        // frames need not raise Changed, and Dispatcher coalescing must not lose
+        // the second clear frame after the Master JIG has returned to OFF.
+        ProductionElectricalSnapshot electrical = _engine.GetProductionElectricalSnapshot();
+        if (electrical.FrameSequence != frame.Sequence ||
+            electrical.ScanGeneration != frame.ScanGeneration)
+            return;
+
+        if (frame.ScanGeneration != Volatile.Read(ref _masterRemovalLastScanGeneration))
+        {
+            Interlocked.Exchange(ref _masterRemovalClearFrames, 0);
+            Interlocked.Exchange(ref _masterRemovalLastFrameSequence, -1);
+            Interlocked.Exchange(ref _masterRemovalLastScanGeneration, frame.ScanGeneration);
+        }
+        if (frame.Sequence <= Volatile.Read(ref _masterRemovalLastFrameSequence))
+            return;
+        Interlocked.Exchange(ref _masterRemovalLastFrameSequence, frame.Sequence);
+
         if (!_engine.IsFaultConnectionReleased)
         {
-            _masterRemovalClearFrames = 0;
-            return false;
+            Interlocked.Exchange(ref _masterRemovalClearFrames, 0);
+            return;
         }
-        // Distinct authoritative production frames; partial contact loss never advances the sample.
-        return ++_masterRemovalClearFrames >= 2;
+
+        int clearFrames = Interlocked.Increment(ref _masterRemovalClearFrames);
+        if (clearFrames < ProductReleaseConfirmationFrames ||
+            Interlocked.CompareExchange(ref _masterRemovalConfirmed, 1, 0) != 0)
+            return;
+
+        string masterCycleId = _masterHistoryCycleId;
+        AsyncFileLogService.Current.Performance(
+            $"MASTER_REMOVAL_CONFIRMED state={removalState} seq={frame.Sequence} " +
+            $"generation={frame.ScanGeneration} source=FRAME_STREAM");
+        InvokeUi(() =>
+        {
+            if (IsMasterWaterProofContext(masterModel, generation, removalState) &&
+                string.Equals(_masterHistoryCycleId, masterCycleId, StringComparison.Ordinal))
+                ProcessMasterEngineChangedOnUi(generation);
+        });
     }
+
+    private bool IsMasterSampleRemovalConfirmed() =>
+        Volatile.Read(ref _masterEjectInProgress) == 0 &&
+        Volatile.Read(ref _masterRemovalConfirmed) != 0;
 
     private void TransitionToBadMaster()
     {
@@ -8480,6 +8537,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // Đổi state trước khi reset để tuyệt đối không thể tái nhập
         // EjectingGoodMaster -> TransitionToBadMaster -> Reset -> Changed -> ...
         MasterState = MasterSequenceState.WaitingBadMaster;
+        AdvanceProductionUiCycleEpoch();
         ResetEngineWithoutChangedReentry();
         _masterDetectedFaultKeys.Clear();
         _masterDetectedFaultDetails.Clear();
@@ -8888,6 +8946,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         _sound.SetWiringFaultAlarm(false);
+        // Reject queued presentation snapshots from the last Master sample so
+        // they cannot overwrite the new production installation screen.
+        AdvanceProductionUiCycleEpoch();
         ResetEngineWithoutChangedReentry();
         _engine.SetFrameProcessingEnabled(true);
         RefreshFaults();
