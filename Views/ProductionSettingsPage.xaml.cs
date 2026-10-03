@@ -22,6 +22,9 @@ namespace JBZUniversalTester.Views;
 /// </summary>
 public partial class ProductionSettingsPage : UserControl
 {
+    // Keep the original 540-DIP column width readable without scaling text.
+    private const double MinimumSettingsColumnWidth = 540;
+    private int _settingsColumnCount;
     private readonly MainViewModel? _main;
     private readonly ProductionSettingsViewModel _vm;
     private string _savedSettingsSnapshot;
@@ -62,6 +65,36 @@ public partial class ProductionSettingsPage : UserControl
         SyncCompatibilityFields();
         _savedSettingsSnapshot = CaptureEditableSettingsSnapshot();
         Loaded += ProductionSettingsPage_Loaded;
+    }
+
+    private void SettingsScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, sender) ||
+            e.ViewportWidthChange == 0 || e.ViewportWidth <= 0 || UnifiedSettingsGrid is null)
+            return;
+
+        int columns = Math.Clamp((int)(e.ViewportWidth / MinimumSettingsColumnWidth), 1, 3);
+        if (columns == _settingsColumnCount)
+            return;
+
+        _settingsColumnCount = columns;
+        UnifiedSettingsGrid.ColumnDefinitions.Clear();
+        for (int column = 0; column < columns; column++)
+            UnifiedSettingsGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        UnifiedSettingsGrid.RowDefinitions.Clear();
+        for (int row = 0; row < (columns == 1 ? 4 : 2); row++)
+            UnifiedSettingsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        Border[] panels = [IoSettingsPanel, RelayLeakMainPanel, LabelSettingsPanel, ResistanceSettingsPanel];
+        for (int index = 0; index < panels.Length; index++)
+        {
+            int column = columns == 3 ? Math.Min(index, 2) : index % columns;
+            int row = columns == 3 ? (index == 3 ? 1 : 0) : index / columns;
+            Grid.SetColumn(panels[index], column);
+            Grid.SetRow(panels[index], row);
+            Grid.SetRowSpan(panels[index], columns == 3 && index < 2 ? 2 : 1);
+        }
     }
 
     private async void ProductionSettingsPage_Loaded(object sender, RoutedEventArgs e)

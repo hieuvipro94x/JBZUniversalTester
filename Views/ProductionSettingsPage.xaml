@@ -76,7 +76,8 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <Grid Background="Transparent">
+                        <!-- Only the square accepts mouse input; labels and empty space do not. -->
+                        <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="18"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <Border x:Name="CheckBorder" Width="18" Height="18" VerticalAlignment="Center" Background="White" BorderBrush="{StaticResource TextMuted}" BorderThickness="1.5" CornerRadius="2">
                                 <Grid>
@@ -84,7 +85,7 @@
                                     <Rectangle x:Name="MixedMark" Width="10" Height="3" Fill="{StaticResource BrandBlue}" Visibility="Collapsed"/>
                                 </Grid>
                             </Border>
-                            <ContentPresenter Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                            <ContentPresenter Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" IsHitTestVisible="False"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True"><Setter TargetName="CheckMark" Property="Visibility" Value="Visible"/></Trigger>
@@ -227,9 +228,12 @@
                            Visibility="Collapsed"/>
             </Grid>
         </Border>
-        <Viewbox Grid.Row="1" Stretch="Uniform" StretchDirection="Both" Margin="12,4" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <Grid x:Name="SettingsPanelsHost" Width="1620">
-                <Grid x:Name="UnifiedSettingsGrid" Margin="4" HorizontalAlignment="Stretch"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="1" Margin="12,4"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                      HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top"
+                      CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged">
+            <Grid x:Name="SettingsPanelsHost" MinWidth="540">
+                <Grid x:Name="UnifiedSettingsGrid" Margin="4" HorizontalAlignment="Stretch"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Top">
                                     <StackPanel>
                                         <TextBlock Text="I/O / PRODUCTION" Style="{StaticResource SectionTitleStyle}"/>
@@ -649,49 +653,40 @@
                                                         </Style>
                                                     </TextBlock.Style>
                                                 </TextBlock>
-                                                <DataGrid Grid.Row="3" Margin="0,4,0,0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Height="76" ItemsSource="{Binding ManualResistanceResults}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" CanUserDeleteRows="False" HeadersVisibility="Column" RowHeaderWidth="0" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#D8DEE9" AlternatingRowBackground="#F4F7FC" RowHeight="30" ColumnHeaderHeight="29" FontSize="14" FontWeight="SemiBold" SelectionMode="Single" EnableRowVirtualization="True" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                                                    <DataGrid.Columns>
-                                                    <DataGridTextColumn Header="R" Binding="{Binding Name}" Width="30"/>
-                                                    <DataGridTextColumn Header="KÊNH" Binding="{Binding ChannelText}" Width="42"/>
-                                                    <DataGridTextColumn Header="GIÁ TRỊ ĐO" Binding="{Binding Display}" Width="*" MinWidth="96"/>
-                                                    <DataGridTextColumn Header="MIN" Binding="{Binding MinDisplayText}" Width="52"/>
-                                                    <DataGridTextColumn Header="MAX" Binding="{Binding MaxDisplayText}" Width="52"/>
-                                                    <DataGridTextColumn Header="MẪU" Binding="{Binding SampleCount}" Width="44"/>
-                                                    <DataGridTextColumn Header="ms" Binding="{Binding StabilizationTimeMs}" Width="56"/>
-                                                    <DataGridTemplateColumn Header="KẾT QUẢ" Width="76">
-                                                            <DataGridTemplateColumn.CellTemplate>
-                                                                <DataTemplate>
-                                                                    <Border x:Name="ResultBadge" Margin="5,2" Padding="5,1" CornerRadius="3" Background="#E7EBF3">
-                                                                        <TextBlock x:Name="ResultTextBlock" Text="{Binding ResultText}" HorizontalAlignment="Center" FontWeight="Bold" Foreground="{StaticResource TextMuted}"/>
-                                                                    </Border>
-                                                                    <DataTemplate.Triggers>
-                                                                        <DataTrigger Binding="{Binding ResultText}" Value="PASS">
-                                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource PassGreen}"/>
-                                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
-                                                                        </DataTrigger>
-                                                                        <DataTrigger Binding="{Binding ResultText}" Value="FAIL">
-                                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource FailRed}"/>
-                                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
-                                                                        </DataTrigger>
-                                                                        <DataTrigger Binding="{Binding ResultText}" Value="UNSTABLE">
-                                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource PendingAmber}"/>
-                                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
-                                                                        </DataTrigger>
-                                                                        <DataTrigger Binding="{Binding ResultText}" Value="ĐANG ĐO">
-                                                                            <Setter TargetName="ResultBadge" Property="Background" Value="{StaticResource PendingAmber}"/>
-                                                                            <Setter TargetName="ResultTextBlock" Property="Foreground" Value="White"/>
-                                                                        </DataTrigger>
-                                                                    </DataTemplate.Triggers>
-                                                                </DataTemplate>
-                                                            </DataGridTemplateColumn.CellTemplate>
-                                                        </DataGridTemplateColumn>
-                                                    </DataGrid.Columns>
-                                                </DataGrid>
+                                                <ItemsControl x:Name="ManualResistanceResultLines" Grid.Row="3" Margin="0,4,0,0" ItemsSource="{Binding ManualResistanceResults}">
+                                                    <ItemsControl.Style>
+                                                        <Style TargetType="ItemsControl">
+                                                            <Style.Triggers>
+                                                                <Trigger Property="HasItems" Value="False"><Setter Property="Visibility" Value="Collapsed"/></Trigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </ItemsControl.Style>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Margin="0,2" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding ResultText}" Value="PASS"><Setter Property="Foreground" Value="{StaticResource PassGreen}"/></DataTrigger>
+                                                                            <DataTrigger Binding="{Binding ResultText}" Value="FAIL"><Setter Property="Foreground" Value="{StaticResource FailRed}"/></DataTrigger>
+                                                                            <DataTrigger Binding="{Binding ResultText}" Value="LỖI"><Setter Property="Foreground" Value="{StaticResource FailRed}"/></DataTrigger>
+                                                                            <DataTrigger Binding="{Binding ResultText}" Value="UNSTABLE"><Setter Property="Foreground" Value="{StaticResource PendingAmber}"/></DataTrigger>
+                                                                            <DataTrigger Binding="{Binding ResultText}" Value="ĐANG ĐO"><Setter Property="Foreground" Value="{StaticResource PendingAmber}"/></DataTrigger>
+                                                                            <DataTrigger Binding="{Binding ResultText}" Value="CHỜ ĐO"><Setter Property="Foreground" Value="{StaticResource PendingAmber}"/></DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                                <Run Text="{Binding ChannelText, Mode=OneWay}"/><Run Text=": "/><Run Text="{Binding Display, Mode=OneWay}"/><Run Text=" — "/><Run Text="{Binding ResultText, Mode=OneWay}"/>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
                                             </Grid>
                                         </Border>
                                     </Grid>
                                 </Border>
-                </Grid></Grid></Viewbox>
+                </Grid></Grid></ScrollViewer>
         <Border Grid.Row="2" Background="Transparent" BorderThickness="0">
             <Grid Margin="16,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
