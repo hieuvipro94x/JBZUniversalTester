@@ -3551,7 +3551,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             AsyncFileLogService.Current.Performance(
                 $"AUTO_RESISTANCE_TRIGGER continuity_complete={_engine.ContinuityPassed} " +
                 $"resistance_enabled={IsResistanceEnabledForModel(_model)} scan_running={_board.IsScanning}");
-            _ = RunAutomaticPostContinuityAsync();
+            _ = StartAutomaticPostContinuityAfterPresentationAsync(
+                generation, Volatile.Read(ref _productionUiCycleEpoch));
         }
     }
 
@@ -10322,6 +10323,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             AsyncFileLogService.Current.Performance($"PRODUCT_PRESENT {message}");
         }
         return transition == ProductPresenceStabilityTransition.Confirmed;
+    }
+
+    private async Task StartAutomaticPostContinuityAfterPresentationAsync(long generation, long cycleEpoch)
+    {
+        // Let the current binding/presentation update finish before starting
+        // persistence, label preparation and the PASS sequence on the UI thread.
+        await System.Windows.Threading.Dispatcher.Yield(
+            System.Windows.Threading.DispatcherPriority.Background);
+        if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+            cycleEpoch != Volatile.Read(ref _productionUiCycleEpoch))
+            return;
+        await RunAutomaticPostContinuityAsync();
     }
 
     private async Task RunAutomaticPostContinuityAsync()

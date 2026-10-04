@@ -7,7 +7,7 @@ internal enum ProductPresenceStabilityTransition { None, Started, Cancelled, Con
 /// <summary>Completion-only debounce; realtime presentation remains independent.</summary>
 internal sealed class ProductPresenceStabilityGate
 {
-    internal const int ConfirmationMilliseconds = 590;
+    internal const int ConfirmationFrames = 4;
     private readonly object _gate = new();
     private long _runtimeGeneration = -1;
     private long _cycleEpoch = -1;
@@ -90,7 +90,7 @@ internal sealed class ProductPresenceStabilityGate
 
             frames = ++_frames;
             elapsedMilliseconds = Stopwatch.GetElapsedTime(_startedAt, timestamp).TotalMilliseconds;
-            if (frames >= 2 && elapsedMilliseconds >= ConfirmationMilliseconds)
+            if (frames >= ConfirmationFrames)
             {
                 _confirmed = true;
                 return ProductPresenceStabilityTransition.Confirmed;

@@ -50,6 +50,8 @@ public sealed class AppSoundService : IDisposable
     private int _startupPlaybackActive;
     private int _productStartPlaybackActive;
     private int _testOkPlaybackActive;
+    private int _clickPlaybackQueued;
+    private int _soundGeneration;
 
     public static AppSoundService Current => LazyInstance.Value;
 
@@ -165,12 +167,36 @@ public sealed class AppSoundService : IDisposable
             Volatile.Read(ref _productStartPlaybackActive) != 0 ||
             Volatile.Read(ref _testOkPlaybackActive) != 0)
             return;
-        lock (_gate)
+        if (Interlocked.CompareExchange(ref _clickPlaybackQueued, 1, 0) != 0)
+            return;
+        int generation = Volatile.Read(ref _soundGeneration);
+
+        // Native PlaySound can take time on the first click/audio-device setup.
+        // Never make the WPF button handler wait for the Windows audio driver.
+        _ = Task.Run(() =>
         {
-            if (_disposed || _wiringFaultAlarmActive)
-                return;
-            SafePlay(_clickPlayer);
-        }
+            try
+            {
+                lock (_gate)
+                {
+                    if (_disposed || generation != Volatile.Read(ref _soundGeneration) ||
+                        _wiringFaultAlarmActive ||
+                        Volatile.Read(ref _startupPlaybackActive) != 0 ||
+                        Volatile.Read(ref _productStartPlaybackActive) != 0 ||
+                        Volatile.Read(ref _testOkPlaybackActive) != 0)
+                        return;
+                    long startedAt = Stopwatch.GetTimestamp();
+                    SafePlay(_clickPlayer);
+                    double elapsedMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+                    if (elapsedMs > 16)
+                        AsyncFileLogService.Current.Performance($"CLICK_SOUND native_ms={elapsedMs:0.###} thread=worker");
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _clickPlaybackQueued, 0);
+            }
+        });
     }
 
     /// <summary>Phát COMPUTER.wav một lần khi chu kỳ nhận kết nối sản phẩm đầu tiên.</summary>
@@ -417,6 +443,7 @@ public sealed class AppSoundService : IDisposable
 
     public void StopAll()
     {
+        Interlocked.Increment(ref _soundGeneration);
         lock (_gate)
         {
             if (_disposed)
