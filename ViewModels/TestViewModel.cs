@@ -528,6 +528,35 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public bool IsCenterPassPresentation => IsFinalPassPresentation;
 
+    private long _passStatusLedRequest;
+    private long _passStatusLedActiveRequest;
+    private long _passStatusLedRuntimeGeneration;
+
+    // The three PASS lamps are held only while the committed PASS workflow runs,
+    // independently of the product-removal interlock or sticky result label.
+    public bool IsPassStatusLedHeld =>
+        !IsDeviceFault &&
+        Volatile.Read(ref _passStatusLedActiveRequest) != 0 &&
+        Volatile.Read(ref _passStatusLedRuntimeGeneration) == Volatile.Read(ref _runtimeGeneration);
+
+    private long BeginPassStatusLedPresentation(long generation)
+    {
+        if (generation != Volatile.Read(ref _runtimeGeneration))
+            return 0;
+        long request = Interlocked.Increment(ref _passStatusLedRequest);
+        Volatile.Write(ref _passStatusLedRuntimeGeneration, generation);
+        Interlocked.Exchange(ref _passStatusLedActiveRequest, request);
+        Raise(nameof(IsPassStatusLedHeld));
+        return request;
+    }
+
+    private void EndPassStatusLedPresentation(long request)
+    {
+        if (request != 0 &&
+            Interlocked.CompareExchange(ref _passStatusLedActiveRequest, 0, request) == request)
+            Raise(nameof(IsPassStatusLedHeld));
+    }
+
     // Sau khi FAIL đã xác nhận và model có _DISCARD, vùng chữ lớn giữa màn hình
     // dành riêng cho hướng dẫn đưa hàng NG qua cảm biến. Ô trạng thái nhỏ vẫn
     // hiển thị CHỜ XÁC NHẬN THÙNG LỖI qua ResultStatusText.
@@ -564,6 +593,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void RaiseCenterPresentation()
     {
+        Raise(nameof(IsPassStatusLedHeld));
         Raise(nameof(CenterResultText));
         Raise(nameof(IsCenterResultVisible));
         Raise(nameof(IsCenterPassPresentation));
@@ -10241,6 +10271,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (ct.IsCancellationRequested)
             return;
 
+        long passLedRequest = 0;
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -10481,6 +10512,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             // Từ đây PASS đã durable. UI/âm thanh và relay chỉ được chạy sau commit.
+            passLedRequest = BeginPassStatusLedPresentation(generation);
             TriggerPassUi();
             long passRelaySequenceStartedTimestamp = Stopwatch.GetTimestamp();
             await PauseProductionScanForFinalPassAsync(ct);
@@ -10583,6 +10615,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         catch (Exception ex)
         {
             EnterDeviceFault(ex, "RunAutomaticPostContinuity");
+        }
+        finally
+        {
+            EndPassStatusLedPresentation(passLedRequest);
         }
     }
 

@@ -28,19 +28,18 @@ public partial class TestWindow : Window
     private NotifyCollectionChangedEventHandler? _faultsChangedHandler;
     private readonly CancellationTokenSource _viewLifetimeCts = new();
     private int _scrollDispatchQueued;
-    private CancellationTokenSource? _greenBlinkCts;
-    private Task _greenBlinkTask = Task.CompletedTask;
+    private readonly object _statusFrameGate = new();
+    private readonly StatusLedFrameTracker _statusFrameTracker = new();
 
     public event EventHandler? ReturningToMain;
-    private int _greenBlinkRequestGeneration;
     private int _statusLedHandlersAttached;
     private int _statusPulseDispatchQueued;
     private int _statusStateDispatchQueued;
     private int _yellowPulsePending;
     private int _whitePulsePending;
-    private bool _lastLedBoardConnected;
-    private string _lastLedState = string.Empty;
-    private string _lastLedResultStatus = string.Empty;
+    private int _greenPulsePending;
+    private bool _passLedsHeld;
+    private bool _wiringFaultLedsHeld;
     private WaterProofTestWindow? _waterProofWindow;
 
     private static readonly Brush YellowLedOffBrush = CreateFrozenBrush(0x6B, 0x62, 0x40);
@@ -73,19 +72,19 @@ public partial class TestWindow : Window
 
         _yellowPulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(180)
+            Interval = TimeSpan.FromMilliseconds(200)
         };
         _yellowPulseTimer.Tick += YellowPulseTimer_Tick;
 
         _whitePulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(90)
+            Interval = TimeSpan.FromMilliseconds(100)
         };
         _whitePulseTimer.Tick += WhitePulseTimer_Tick;
 
         _greenPulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(90)
+            Interval = TimeSpan.FromMilliseconds(50)
         };
         _greenPulseTimer.Tick += GreenPulseTimer_Tick;
 
@@ -210,13 +209,8 @@ public partial class TestWindow : Window
         viewModel.PropertyChanged += ViewModel_StatusPropertyChanged;
         viewModel.WaterProofWindowOpenRequested += ViewModel_WaterProofWindowOpenRequested;
         viewModel.WaterProofWindowCloseRequested += ViewModel_WaterProofWindowCloseRequested;
-        _lastLedBoardConnected = viewModel.IsBoardConnected;
-        _lastLedState = viewModel.State ?? string.Empty;
-        _lastLedResultStatus = viewModel.ResultStatusText;
         ResetActivityLeds();
-        bool hardwareReady = viewModel.IsBoardConnected && !viewModel.IsDeviceFault;
-        SetGreenLed(hardwareReady);
-        SetRedLed(hardwareReady && IsConfirmedFailLedState(viewModel, viewModel.ResultStatusText));
+        ApplyStatusLedState(viewModel);
     }
 
     private void ViewModel_WaterProofWindowOpenRequested(object? sender, WaterProofTestViewModel viewModel)
@@ -303,9 +297,18 @@ public partial class TestWindow : Window
             viewModel.IsDeviceFault)
             return;
 
-        Interlocked.Exchange(ref _whitePulsePending, 1);
-        if (frame.Mode == BoardScanMode.Production && frame.Complete && frame.UnknownBytes == 0)
-            Interlocked.Exchange(ref _yellowPulsePending, 1);
+        if (!StatusLedFrameTracker.IsCompleteScan(frame))
+            return;
+
+        lock (_statusFrameGate)
+        {
+            bool contactChanged = _statusFrameTracker.Observe(frame);
+            if (contactChanged)
+                Interlocked.Exchange(ref _whitePulsePending, 1);
+            Interlocked.Exchange(ref _greenPulsePending, 1);
+            if (contactChanged && frame.Mode == BoardScanMode.Production)
+                Interlocked.Exchange(ref _yellowPulsePending, 1);
+        }
 
         if (Interlocked.Exchange(ref _statusPulseDispatchQueued, 1) != 0)
             return;
@@ -315,15 +318,18 @@ public partial class TestWindow : Window
             Interlocked.Exchange(ref _statusPulseDispatchQueued, 0);
             if (Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
                 DataContext is not TestViewModel currentViewModel ||
+                !ReferenceEquals(currentViewModel, viewModel) ||
                 !currentViewModel.IsBoardConnected ||
                 currentViewModel.IsDeviceFault)
                 return;
 
+            ApplyStatusLedState(currentViewModel);
             if (Interlocked.Exchange(ref _whitePulsePending, 0) != 0)
                 PulseWhiteLed();
             if (Interlocked.Exchange(ref _yellowPulsePending, 0) != 0)
                 PulseYellowLed();
-            PulseGreenLed();
+            if (Interlocked.Exchange(ref _greenPulsePending, 0) != 0)
+                PulseGreenLed();
         }, DispatcherPriority.Background);
     }
 
@@ -332,7 +338,9 @@ public partial class TestWindow : Window
         if (e.PropertyName is not (nameof(TestViewModel.IsBoardConnected) or
                                    nameof(TestViewModel.IsDeviceFault) or
                                    nameof(TestViewModel.State) or
-                                   nameof(TestViewModel.ResultStatusText)) ||
+                                   nameof(TestViewModel.ResultStatusText) or
+                                   nameof(TestViewModel.WiringFaultCount) or
+                                   nameof(TestViewModel.IsPassStatusLedHeld)) ||
             sender is not TestViewModel viewModel)
         {
             return;
@@ -361,133 +369,98 @@ public partial class TestWindow : Window
         if (Volatile.Read(ref _statusLedHandlersAttached) == 0 || DataContext != viewModel)
             return;
 
-        string state = viewModel.State ?? string.Empty;
-        string resultStatus = viewModel.ResultStatusText;
-        bool boardConnected = viewModel.IsBoardConnected;
-        if (!boardConnected || viewModel.IsDeviceFault)
+        if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault)
         {
-            CancelGreenPassBlink(false);
-            SetRedLed(false);
             ResetActivityLeds();
-            _lastLedBoardConnected = boardConnected;
-            _lastLedState = state;
-            _lastLedResultStatus = resultStatus;
+            SetRedLed(false);
             return;
         }
 
-        if (boardConnected == _lastLedBoardConnected &&
-            state.Equals(_lastLedState, StringComparison.Ordinal) &&
-            resultStatus.Equals(_lastLedResultStatus, StringComparison.Ordinal))
+        bool passWasHeld = _passLedsHeld;
+        bool previouslyHeld = _passLedsHeld || _wiringFaultLedsHeld;
+        _passLedsHeld = viewModel.IsPassStatusLedHeld;
+        // Missing connections are installation instructions, not wrong/short
+        // wiring. Never turn red on merely because installation is incomplete.
+        _wiringFaultLedsHeld = !_passLedsHeld && viewModel.WiringFaultCount > 0;
+        SetRedLed(_wiringFaultLedsHeld);
+
+        if (_passLedsHeld || _wiringFaultLedsHeld || previouslyHeld)
         {
-            return;
+            _greenPulseTimer.Stop();
+            _yellowPulseTimer.Stop();
+            SetGreenLed(_passLedsHeld || _wiringFaultLedsHeld);
+            YellowStatusLed.Fill = _passLedsHeld ? YellowLedOnBrush : YellowLedOffBrush;
         }
-
-        bool boardConnectionChanged = boardConnected != _lastLedBoardConnected;
-        bool isNewCycle = state.Equals("CHỜ LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
-                          state.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase);
-
-        if (isNewCycle)
+        if (_passLedsHeld || passWasHeld)
         {
-            CancelGreenPassBlink(boardConnected);
-            SetRedLed(false);
-            ResetActivityLeds();
+            _whitePulseTimer.Stop();
+            WhiteStatusLed.Fill = _passLedsHeld ? WhiteLedOnBrush : WhiteLedOffBrush;
+            // Discard contact pulses queued during PASS. Normal activity resumes
+            // from the next scan; a sticky PASS label does not hold these lamps.
+            Interlocked.Exchange(ref _whitePulsePending, 0);
+            Interlocked.Exchange(ref _yellowPulsePending, 0);
         }
-        else if (!boardConnected)
-        {
-            CancelGreenPassBlink(false);
-        }
-        else if (boardConnectionChanged || _greenBlinkTask.IsCompleted)
-        {
-            SetGreenLed(true);
-        }
-
-        if (IsConfirmedFailLedState(viewModel, resultStatus))
-            SetRedLed(true);
-
-        if (resultStatus == "PASS" && _lastLedResultStatus != "PASS")
-            _ = RestartGreenPassBlinkAsync(viewModel);
-
-        _lastLedBoardConnected = boardConnected;
-        _lastLedState = state;
-        _lastLedResultStatus = resultStatus;
-    }
-
-    private static bool IsConfirmedFailLedState(TestViewModel viewModel, string resultStatus)
-    {
-        // LED đỏ chỉ phản ánh NG sản phẩm đã đi vào state lỗi hiện hữu.
-        // Không dùng nó cho lỗi thiết bị hoặc cho chuỗi MASTER.
-        if (viewModel.IsDeviceFault || viewModel.IsMasterSequenceActive)
-            return false;
-
-        if (resultStatus.Equals("FAIL", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        string state = viewModel.State ?? string.Empty;
-        return state.Contains("CHẬP", StringComparison.OrdinalIgnoreCase) ||
-               state.Contains("SAI KẾT NỐI", StringComparison.OrdinalIgnoreCase) ||
-               state.Contains("ĐẤU SAI", StringComparison.OrdinalIgnoreCase) ||
-               state.Contains("ĐIỆN TRỞ KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
-               state.Contains("KÍN NƯỚC KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase);
     }
 
     private void PulseYellowLed()
     {
-        // Không restart timer theo từng frame liên tục, nếu không LED sẽ bị giữ
-        // sáng đặc khi scan nhanh. Frame mới chỉ tạo pulse sau khi pulse trước đã tắt.
-        if (_yellowPulseTimer.IsEnabled)
+        if (_passLedsHeld || _wiringFaultLedsHeld)
             return;
-
+        // Original CLed::Pulse restarts the timeout on every new activity.
+        _yellowPulseTimer.Stop();
         YellowStatusLed.Fill = YellowLedOnBrush;
         _yellowPulseTimer.Start();
     }
 
     private void PulseWhiteLed()
     {
-        // Giống Yellow: coalesce luồng frame dày thành các xung nhìn thấy được,
-        // không tạo timer/task mới và không tác động timing giao tiếp.
-        if (_whitePulseTimer.IsEnabled)
+        if (_passLedsHeld)
             return;
-
+        _whitePulseTimer.Stop();
         WhiteStatusLed.Fill = WhiteLedOnBrush;
         _whitePulseTimer.Start();
     }
 
     private void PulseGreenLed()
     {
-        // Green is the board/RX heartbeat. Coalesce dense frames into one short
-        // visible OFF pulse; never allocate a task or restart the timer per frame.
-        if (_greenPulseTimer.IsEnabled || !_greenBlinkTask.IsCompleted)
+        if (_passLedsHeld || _wiringFaultLedsHeld)
             return;
-
-        GreenStatusLed.Fill = GreenLedOffBrush;
+        _greenPulseTimer.Stop();
+        SetGreenLed(true);
         _greenPulseTimer.Start();
     }
 
     private void YellowPulseTimer_Tick(object? sender, EventArgs e)
     {
         _yellowPulseTimer.Stop();
-        YellowStatusLed.Fill = YellowLedOffBrush;
+        YellowStatusLed.Fill = _passLedsHeld ? YellowLedOnBrush : YellowLedOffBrush;
     }
 
     private void WhitePulseTimer_Tick(object? sender, EventArgs e)
     {
         _whitePulseTimer.Stop();
-        WhiteStatusLed.Fill = WhiteLedOffBrush;
+        WhiteStatusLed.Fill = _passLedsHeld ? WhiteLedOnBrush : WhiteLedOffBrush;
     }
 
     private void GreenPulseTimer_Tick(object? sender, EventArgs e)
     {
         _greenPulseTimer.Stop();
-        bool boardReady = DataContext is TestViewModel viewModel &&
-                          viewModel.IsBoardConnected &&
-                          !viewModel.IsDeviceFault;
-        SetGreenLed(boardReady);
+        SetGreenLed(_passLedsHeld || _wiringFaultLedsHeld);
     }
 
     private void ResetActivityLeds()
     {
-        Interlocked.Exchange(ref _yellowPulsePending, 0);
-        Interlocked.Exchange(ref _whitePulsePending, 0);
+        _passLedsHeld = false;
+        _wiringFaultLedsHeld = false;
+        lock (_statusFrameGate)
+        {
+            _statusFrameTracker.Reset();
+            Interlocked.Exchange(ref _yellowPulsePending, 0);
+            Interlocked.Exchange(ref _whitePulsePending, 0);
+            Interlocked.Exchange(ref _greenPulsePending, 0);
+        }
+        _greenPulseTimer.Stop();
+        SetGreenLed(false);
         _yellowPulseTimer.Stop();
         _whitePulseTimer.Stop();
         YellowStatusLed.Fill = YellowLedOffBrush;
@@ -499,96 +472,6 @@ public partial class TestWindow : Window
 
     private void SetRedLed(bool isOn) =>
         RedStatusLed.Fill = isOn ? RedLedOnBrush : RedLedOffBrush;
-
-    private async Task RestartGreenPassBlinkAsync(TestViewModel viewModel)
-    {
-        int request = Interlocked.Increment(ref _greenBlinkRequestGeneration);
-
-        // Tách CTS cũ khỏi field trước khi Cancel để field không giữ tham chiếu
-        // tới CancellationTokenSource đã Dispose khi blink cũ kết thúc.
-        CancellationTokenSource? previousCts = Interlocked.Exchange(ref _greenBlinkCts, null);
-        if (previousCts is not null)
-        {
-            try { previousCts.Cancel(); }
-            catch (ObjectDisposedException) { }
-        }
-
-        Task previousBlink = _greenBlinkTask;
-        try
-        {
-            await previousBlink;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-
-        if (request != Volatile.Read(ref _greenBlinkRequestGeneration) ||
-            Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
-            DataContext != viewModel ||
-            !viewModel.IsBoardConnected ||
-            viewModel.IsDeviceFault)
-        {
-            return;
-        }
-
-        var cts = new CancellationTokenSource();
-        Interlocked.Exchange(ref _greenBlinkCts, cts);
-        Task blinkTask = RunGreenPassBlinkAsync(viewModel, cts.Token);
-        _greenBlinkTask = blinkTask;
-
-        try
-        {
-            await blinkTask;
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        finally
-        {
-            Interlocked.CompareExchange(ref _greenBlinkCts, null, cts);
-
-            if (request == Volatile.Read(ref _greenBlinkRequestGeneration) &&
-                Volatile.Read(ref _statusLedHandlersAttached) != 0 &&
-                DataContext == viewModel &&
-                !viewModel.IsDeviceFault)
-            {
-                SetGreenLed(viewModel.IsBoardConnected);
-            }
-
-            cts.Dispose();
-        }
-    }
-
-    private async Task RunGreenPassBlinkAsync(TestViewModel viewModel, CancellationToken token)
-    {
-        for (int blink = 0; blink < 3; blink++)
-        {
-            token.ThrowIfCancellationRequested();
-            if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault)
-                return;
-
-            SetGreenLed(false);
-            await Task.Delay(TimeSpan.FromMilliseconds(120), token);
-            if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault)
-                return;
-
-            SetGreenLed(true);
-            await Task.Delay(TimeSpan.FromMilliseconds(120), token);
-        }
-    }
-
-    private void CancelGreenPassBlink(bool restoreConnectedState)
-    {
-        Interlocked.Increment(ref _greenBlinkRequestGeneration);
-        _greenPulseTimer.Stop();
-        CancellationTokenSource? cts = Interlocked.Exchange(ref _greenBlinkCts, null);
-        if (cts is not null)
-        {
-            try { cts.Cancel(); }
-            catch (ObjectDisposedException) { }
-        }
-        SetGreenLed(restoreConnectedState);
-    }
 
     private void ScheduleScrollToFirstFault(TestViewModel viewModel)
     {
@@ -835,7 +718,7 @@ public partial class TestWindow : Window
         _greenPulseTimer.Tick -= GreenPulseTimer_Tick;
         Interlocked.Exchange(ref _scrollDispatchQueued, 0);
         Interlocked.Exchange(ref _statusLedHandlersAttached, 0);
-        CancelGreenPassBlink(false);
+        ResetActivityLeds();
         if (DataContext is TestViewModel vm)
         {
             vm.BoardFrameActivity -= ViewModel_BoardFrameActivity;
