@@ -217,15 +217,6 @@
             <Grid Margin="8,3">
 
                 <TextBlock Text="CÀI ĐẶT PRODUCTION" FontSize="21" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                <TextBlock x:Name="SettingsSavedStatusText"
-                           Text="Đã lưu cài đặt"
-                           FontSize="14"
-                           FontWeight="SemiBold"
-                           Foreground="#16803A"
-                           HorizontalAlignment="Right"
-                           VerticalAlignment="Center"
-                           Margin="0,0,8,0"
-                           Visibility="Collapsed"/>
             </Grid>
         </Border>
         <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="1" Margin="12,4"
@@ -690,6 +681,14 @@
         <Border Grid.Row="2" Background="Transparent" BorderThickness="0">
             <Grid Margin="16,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <TextBlock x:Name="SettingsSavedStatusText"
+                               Text="Đã lưu cài đặt"
+                               FontSize="18"
+                               FontWeight="Bold"
+                               Foreground="#16803A"
+                               VerticalAlignment="Center"
+                               Margin="0,0,16,0"
+                               Visibility="Collapsed"/>
                     <Button Width="150" Margin="0,0,8,0" Height="38" Content="LƯU CÀI ĐẶT" FontWeight="Bold" Click="Save_Click" Style="{StaticResource SettingsActionButtonStyle}"/>
                     <Button Width="150" Height="38" Content="TRỞ VỀ" FontWeight="Bold" Click="Cancel_Click" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
                 </StackPanel>

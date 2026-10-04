@@ -22,7 +22,6 @@ public partial class MainWindow : Window
     private bool _settingsCloseRequested;
     private bool _settingsPageCloseInProgress;
     private HistoryPage? _historyPage;
-    private bool _showSettingsSavedConfirmation;
     private bool _shutdownStarted;
     private bool _shutdownComplete;
     private bool _startupStarted;
@@ -383,12 +382,6 @@ public partial class MainWindow : Window
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
 
-        if (_showSettingsSavedConfirmation)
-        {
-            _settingsPage.ShowSavedConfirmation();
-            _showSettingsSavedConfirmation = false;
-        }
-
         _settingsWindow = new Window
         {
             Title = $"Cài đặt Production - {AppVersion.DisplayVersion}",
@@ -445,8 +438,6 @@ public partial class MainWindow : Window
         {
             BoardCapacity previousCapacity = _viewModel.CurrentBoardCapacity;
             await _viewModel.ReloadProductionSettingsAsync();
-            _showSettingsSavedConfirmation = sender is ProductionSettingsPage settingsPage &&
-                                             settingsPage.LastSaveChanged;
 
             BoardCapacity currentCapacity = _viewModel.CurrentBoardCapacity;
             bool capacityChanged =
@@ -459,10 +450,8 @@ public partial class MainWindow : Window
                     $"{currentCapacity.ScanCardCount}. CÓ THỂ CHỌN MÃ HÀNG NGAY.";
             }
 
-            // SETTINGS_SAVE_SILENT_2026-09-05:
-            // Lưu và đồng bộ runtime thành công thì đóng trang Cài đặt luôn.
-            // Không hiện popup "Đã lưu/đã đồng bộ với BO".
-            // Popup lỗi bên dưới vẫn giữ nguyên nếu đồng bộ thật sự thất bại.
+            // The settings page confirms success after runtime settings apply.
+            // Navigation remains owned by its Back/close action.
         }
         catch (Exception ex)
         {

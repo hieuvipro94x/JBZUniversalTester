@@ -1240,7 +1240,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 if (!EnsureManualBoardReady("thử Relay 1", requireD2xxRelay: true))
                     return;
 
-                int relay1Ms = _productionSettings.Relay1JigPulseMs;
+                int relay1Ms = Math.Clamp(_productionSettings.Relay1JigPulseMs, 50, 5_000);
                 AddLog($"THỬ RELAY 1 vật lý: pulse 1 lần ({relay1Ms} ms)");
                 await _engine.PulsePhysicalRelayAsync(1);
                 AddLog("Relay 1 OFF - đã cưỡng bức về trạng thái chờ.");
@@ -1252,7 +1252,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 if (!EnsureManualBoardReady("thử Relay 2", requireD2xxRelay: true))
                     return;
 
-                int relay2Ms = _productionSettings.Relay2MarkingPulseMs;
+                int relay2Ms = Math.Clamp(_productionSettings.Relay2MarkingPulseMs, 50, 5_000);
                 AddLog($"THỬ RELAY 2 vật lý: pulse 1 lần ({relay2Ms} ms)");
                 await _engine.PulsePhysicalRelayAsync(2);
                 AddLog("Relay 2 OFF - đã cưỡng bức về trạng thái chờ.");

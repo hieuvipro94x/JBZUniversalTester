@@ -36,6 +36,7 @@ public partial class ProductionSettingsPage : UserControl
     private CancellationTokenSource? _batchPrintCts;
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
+    private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
 
     public event Func<object?, EventArgs, Task>? SettingsSaved;
     public event EventHandler? RequestClose;
@@ -117,6 +118,12 @@ public partial class ProductionSettingsPage : UserControl
             return;
 
         _batchPrintCts?.Cancel();
+        if (_savedConfirmationTimer is not null)
+        {
+            _savedConfirmationTimer.Stop();
+            _savedConfirmationTimer.Tick -= SavedConfirmationTimer_Tick;
+            _savedConfirmationTimer = null;
+        }
         Interlocked.Increment(ref _portRefreshGeneration);
         Interlocked.Increment(ref _printerConnectionGeneration);
         Loaded -= ProductionSettingsPage_Loaded;
@@ -1468,7 +1475,29 @@ public partial class ProductionSettingsPage : UserControl
 
     public void ShowSavedConfirmation()
     {
+        if (IsReleased)
+            return;
+
+        if (_savedConfirmationTimer is null)
+        {
+            _savedConfirmationTimer = new System.Windows.Threading.DispatcherTimer(
+                System.Windows.Threading.DispatcherPriority.Background, Dispatcher)
+            {
+                Interval = TimeSpan.FromSeconds(2)
+            };
+            _savedConfirmationTimer.Tick += SavedConfirmationTimer_Tick;
+        }
+
+        _savedConfirmationTimer.Stop();
         SettingsSavedStatusText.Visibility = Visibility.Visible;
+        _savedConfirmationTimer.Start();
+    }
+
+    private void SavedConfirmationTimer_Tick(object? sender, EventArgs e)
+    {
+        _savedConfirmationTimer?.Stop();
+        if (!IsReleased)
+            SettingsSavedStatusText.Visibility = Visibility.Collapsed;
     }
 
     private string CaptureEditableSettingsSnapshot() => JsonSerializer.Serialize(new
@@ -1738,13 +1767,17 @@ public partial class ProductionSettingsPage : UserControl
     {
         if (Volatile.Read(ref _batchPrintInProgress) != 0)
         {
-            ShowMessage("Đang in hàng loạt. Vui lòng chờ in xong trước khi lưu và trở về.",
+            ShowMessage("Đang in hàng loạt. Vui lòng chờ in xong trước khi lưu.",
                 "IN HÀNG LOẠT", MessageBoxImage.Warning);
             return;
         }
 
+        _savedConfirmationTimer?.Stop();
+        SettingsSavedStatusText.Visibility = Visibility.Collapsed;
         if (await PersistSettingsAsync())
-            RequestClose?.Invoke(this, EventArgs.Empty);
+        {
+            ShowSavedConfirmation();
+        }
     }
 
     private async void Cancel_Click(object sender, RoutedEventArgs e)
