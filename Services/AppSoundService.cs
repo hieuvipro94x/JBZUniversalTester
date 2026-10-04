@@ -133,16 +133,22 @@ public sealed class AppSoundService : IDisposable
             return;
         }
 
-        // SoundPlayer dùng chung thiết bị PlaySound của Windows. Một Stop() từ
-        // luồng reset Probe lúc nạp model có thể cắt START.wav. PlaySync trên
-        // worker đánh dấu một khoảng bảo vệ, không khóa Dispatcher/UI.
-        _ = Task.Run(() =>
+        // PlaySync giữ kênh PlaySound native, khiến StopAll khi vào Manual
+        // chặn UI đến hết START.wav. Phát async nhưng vẫn bảo vệ hết độ dài WAV.
+        double durationMs = GetWaveDurationMs(_startupStream);
+        lock (_gate)
         {
+            if (_disposed)
+                return;
             Interlocked.Exchange(ref _startupPlaybackActive, 1);
+            AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_BEGIN");
+            SafePlay(player);
+        }
+        _ = Task.Run(async () =>
+        {
             try
             {
-                AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_BEGIN");
-                SafePlaySync(player);
+                await Task.Delay(TimeSpan.FromMilliseconds(durationMs)).ConfigureAwait(false);
                 AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_END");
             }
             finally
@@ -429,6 +435,7 @@ public sealed class AppSoundService : IDisposable
             SafeStop(_wiringFaultPlayer);
             SafeStop(_discardContactPlayer);
             SafeStop(_leakFailPlayer);
+            Interlocked.Exchange(ref _startupPlaybackActive, 0);
         }
     }
 
@@ -438,6 +445,44 @@ public sealed class AppSoundService : IDisposable
         {
             PlayClick();
         }
+    }
+
+    private static double GetWaveDurationMs(MemoryStream? stream)
+    {
+        if (stream is null)
+            return 0;
+
+        using var buffer = new MemoryStream(stream.ToArray(), writable: false);
+        using var reader = new BinaryReader(buffer);
+        if (buffer.Length < 12 || reader.ReadUInt32() != 0x46464952)
+            throw new InvalidDataException("START.wav has no RIFF header.");
+        reader.ReadUInt32();
+        if (reader.ReadUInt32() != 0x45564157)
+            throw new InvalidDataException("START.wav has no WAVE header.");
+
+        uint bytesPerSecond = 0;
+        uint dataBytes = 0;
+        while (buffer.Position + 8 <= buffer.Length)
+        {
+            uint chunk = reader.ReadUInt32();
+            uint length = reader.ReadUInt32();
+            long next = buffer.Position + length + (length & 1);
+            if (buffer.Position + length > buffer.Length)
+                throw new InvalidDataException("START.wav contains a truncated chunk.");
+            if (chunk == 0x20746D66 && length >= 16) // fmt
+            {
+                reader.ReadUInt16();
+                reader.ReadUInt16();
+                reader.ReadUInt32();
+                bytesPerSecond = reader.ReadUInt32();
+            }
+            else if (chunk == 0x61746164) // data
+                dataBytes = length;
+            buffer.Position = next;
+        }
+        if (bytesPerSecond == 0 || dataBytes == 0)
+            throw new InvalidDataException("START.wav has no valid format/data chunks.");
+        return dataBytes * 1000.0 / bytesPerSecond;
     }
 
     private void EnsureInitialized()

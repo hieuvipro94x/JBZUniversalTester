@@ -514,7 +514,7 @@
                                                 <RowDefinition Height="30"/>
                                             </Grid.RowDefinitions>
                                             <TextBlock Text="Cổng in" Style="{StaticResource FieldLabelStyle}"/>
-                                            <ComboBox x:Name="PrinterComComboBox" Grid.Column="1" Height="26" Margin="0,2,6,2" DisplayMemberPath="Display" SelectedValuePath="PortName" SelectedValue="{Binding Settings.Label.PrinterCom, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionChanged="PrinterComComboBox_SelectionChanged"/>
+                                            <ComboBox x:Name="PrinterComComboBox" Grid.Column="1" Height="26" Margin="0,2,6,2" DisplayMemberPath="Display" SelectedValuePath="PortName" SelectedValue="{Binding Settings.Label.PrinterCom, Mode=TwoWay, UpdateSourceTrigger=Explicit}" SelectionChanged="PrinterComComboBox_SelectionChanged"/>
                                             <Button Grid.Column="2" Height="26" Margin="0,2,0,2" Content="QUÉT" FontSize="14" Padding="1,0" Style="{StaticResource SettingsInfoButtonStyle}" Click="RefreshPrinterPorts_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                             <TextBlock Grid.Row="1" Text="Loại tem" Style="{StaticResource FieldLabelStyle}"/>
                                             <ComboBox x:Name="LabelTemplateTypeComboBox" Height="26" Grid.Row="1" Grid.Column="1" Margin="0,2,6,2" SelectedValuePath="Tag" SelectedValue="{Binding Settings.Label.TemplateType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionChanged="LabelTemplateTypeComboBox_SelectionChanged">

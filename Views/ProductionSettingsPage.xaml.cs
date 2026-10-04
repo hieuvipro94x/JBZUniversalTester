@@ -219,7 +219,8 @@ public partial class ProductionSettingsPage : UserControl
 
     private async void PrinterComComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (!_printerPortSelectionInitialized || _suppressPrinterPortSelection || IsReleased)
+        if (!_printerPortSelectionInitialized || _suppressPrinterPortSelection || IsReleased ||
+            PrinterComComboBox.SelectedItem is null)
             return;
 
         int generation = Interlocked.Increment(ref _printerConnectionGeneration);
@@ -1345,18 +1346,16 @@ public partial class ProductionSettingsPage : UserControl
                 .Select(x => new ComPortOption(x, x))
                 .ToList();
 
-            if (!string.IsNullOrWhiteSpace(savedPort) &&
-                options.All(x => !string.Equals(x.PortName, savedPort, StringComparison.OrdinalIgnoreCase)))
-            {
-                options.Insert(0, new ComPortOption(savedPort, savedPort));
-            }
-
-            options.Insert(0, new ComPortOption(string.Empty, "Không dùng COM / dùng Windows printer"));
             _suppressPrinterPortSelection = true;
             try
             {
                 PrinterComComboBox.ItemsSource = options;
                 PrinterComComboBox.SelectedValue = savedPort;
+                // A missing port must not silently erase the saved configuration.
+                _vm.Settings.Label.PrinterCom = savedPort;
+                PrinterComComboBox.ToolTip = ports.Length == 0
+                    ? "Không tìm thấy cổng COM. Hãy kết nối máy in rồi bấm QUÉT."
+                    : "Chọn cổng COM của máy in tem.";
             }
             finally
             {
@@ -1375,8 +1374,11 @@ public partial class ProductionSettingsPage : UserControl
             _suppressPrinterPortSelection = true;
             try
             {
-                PrinterComComboBox.ItemsSource = new[] { new ComPortOption(string.Empty, "Không dùng COM") };
-                PrinterComComboBox.SelectedIndex = 0;
+                string savedPort = _vm.Settings.Label.PrinterCom ?? string.Empty;
+                PrinterComComboBox.ItemsSource = Array.Empty<ComPortOption>();
+                _vm.Settings.Label.PrinterCom = savedPort;
+                PrinterComComboBox.ToolTip = "Chưa quét được cổng COM. Hãy bấm QUÉT để thử lại.";
+                PrinterComComboBox.SelectedIndex = -1;
             }
             finally
             {
@@ -1415,6 +1417,8 @@ public partial class ProductionSettingsPage : UserControl
                 textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
                 break;
             case ComboBox comboBox:
+                if (comboBox.Name == nameof(PrinterComComboBox) && comboBox.SelectedItem is null)
+                    break;
                 comboBox.GetBindingExpression(Selector.SelectedValueProperty)?.UpdateSource();
                 comboBox.GetBindingExpression(Selector.SelectedItemProperty)?.UpdateSource();
                 comboBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
@@ -1769,7 +1773,10 @@ public partial class ProductionSettingsPage : UserControl
                     CaptureEditableSettingsSnapshot(),
                     StringComparison.Ordinal))
             {
-                if (!ConfirmSaveBeforeLeaving() || !await PersistSettingsAsync())
+                bool? saveChanges = ConfirmSaveBeforeLeaving();
+                if (saveChanges is null)
+                    return;
+                if (saveChanges == true && !await PersistSettingsAsync())
                     return;
             }
         }
@@ -1784,45 +1791,63 @@ public partial class ProductionSettingsPage : UserControl
         RequestClose?.Invoke(this, EventArgs.Empty);
     }
 
-    private bool ConfirmSaveBeforeLeaving()
+    private bool? ConfirmSaveBeforeLeaving()
     {
+        bool? saveChanges = null;
         var dialog = new Window
         {
-            Title = "THAY ĐỔI CHƯA LƯU",
+            Title = "Lưu thay đổi cài đặt?",
             Owner = HostWindow,
-            Width = 430,
-            Height = 175,
+            Width = 480,
+            SizeToContent = SizeToContent.Height,
+            Background = Brushes.White,
             ResizeMode = ResizeMode.NoResize,
             ShowInTaskbar = false,
             WindowStartupLocation = HostWindow is null
                 ? WindowStartupLocation.CenterScreen
                 : WindowStartupLocation.CenterOwner
         };
-        var layout = new Grid { Margin = new Thickness(18) };
-        layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        var layout = new Grid { Margin = new Thickness(24) };
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.Children.Add(new TextBlock
         {
-            Text = "Cài đặt đã thay đổi nhưng chưa được lưu.\nLưu trước khi trở về Trang chính?",
-            TextWrapping = TextWrapping.Wrap,
-            VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 14
+            Text = "Bạn có muốn lưu thay đổi?",
+            FontSize = 22,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(Color.FromRgb(17, 24, 39)),
+            TextWrapping = TextWrapping.Wrap
         });
+        var description = new TextBlock
+        {
+            Text = "Cài đặt có thay đổi chưa được lưu.\nChọn Lưu để áp dụng, Không lưu để bỏ thay đổi,\nhoặc Quay lại để tiếp tục chỉnh sửa.",
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 12, 0, 22),
+            FontSize = 16,
+            Foreground = new SolidColorBrush(Color.FromRgb(75, 85, 99))
+        };
+        Grid.SetRow(description, 1);
+        layout.Children.Add(description);
         var buttons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right
         };
-        var saveButton = new Button { Content = "LƯU", MinWidth = 90, Margin = new Thickness(4) };
-        var cancelButton = new Button { Content = "HỦY", MinWidth = 90, Margin = new Thickness(4), IsCancel = true };
-        saveButton.Click += (_, _) => dialog.DialogResult = true;
+        var saveButton = new Button { Content = "LƯU", MinWidth = 126, Height = 42, Margin = new Thickness(4), IsDefault = true, Style = (Style)FindResource("SettingsActionButtonStyle") };
+        var discardButton = new Button { Content = "KHÔNG LƯU", MinWidth = 126, Height = 42, Margin = new Thickness(4), Style = (Style)FindResource("SettingsWarningButtonStyle") };
+        var cancelButton = new Button { Content = "QUAY LẠI", MinWidth = 126, Height = 42, Margin = new Thickness(4), IsCancel = true, Style = (Style)FindResource("SettingsInfoButtonStyle") };
+        saveButton.Click += (_, _) => { saveChanges = true; dialog.DialogResult = true; };
+        discardButton.Click += (_, _) => { saveChanges = false; dialog.DialogResult = true; };
         cancelButton.Click += (_, _) => dialog.DialogResult = false;
         buttons.Children.Add(saveButton);
+        buttons.Children.Add(discardButton);
         buttons.Children.Add(cancelButton);
-        Grid.SetRow(buttons, 1);
+        Grid.SetRow(buttons, 2);
         layout.Children.Add(buttons);
         dialog.Content = layout;
-        return dialog.ShowDialog() == true;
+        dialog.ShowDialog();
+        return saveChanges;
     }
 
     private void ShowMessage(string message, string title, MessageBoxImage image)

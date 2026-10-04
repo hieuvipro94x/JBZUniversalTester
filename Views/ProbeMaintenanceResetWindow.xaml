@@ -85,8 +85,7 @@
             <PasswordBox x:Name="AdminPasswordBox" Height="40" Margin="0,6,0,0"
                          FontSize="16" Padding="9,4" BorderBrush="#CBD5E1"
                          KeyDown="AdminPasswordBox_KeyDown"/>
-            <TextBlock Text="Mật khẩu do quản trị viên phụ trách bảo trì cung cấp."
-                       Margin="0,6,0,0" Foreground="#64748B" FontSize="12"/>
+           
         </StackPanel>
 
         <Grid Grid.Row="5" Margin="0,18,0,0">
@@ -97,7 +96,7 @@
             </Grid.ColumnDefinitions>
             <Button Grid.Column="1" Margin="0,0,8,0" Content="HỦY" IsCancel="True"
                     Style="{StaticResource DialogButtonStyle}" Background="#E2E8F0" Foreground="#334155"/>
-            <Button Grid.Column="2" Content="XÁC NHẬN THAY PIN" IsDefault="True"
+            <Button Grid.Column="2" Content="XÁC NHẬN" IsDefault="True"
                     Style="{StaticResource DialogButtonStyle}" Background="#B45309"
                     Foreground="White" Click="Confirm_Click"/>
         </Grid>

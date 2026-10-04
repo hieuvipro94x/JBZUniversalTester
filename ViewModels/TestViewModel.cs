@@ -1353,12 +1353,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             throw new ArgumentOutOfRangeException(nameof(relay));
         if (!EnsureManualBoardReady($"manual Relay {relay}", requireD2xxRelay: true))
             return Volatile.Read(ref _manualActiveRelay);
-        if (!IsManualModeActive)
-            await EnterManualModeAsync();
-
         long started = Stopwatch.GetTimestamp();
         AsyncFileLogService.Current.Performance(
             $"MANUAL_RELAY_LATENCY relay={relay} action={(turnOn ? "ON" : "OFF")} event=button_click");
+
+        if (!IsManualModeActive)
+            await EnterManualModeAsync();
 
         int activeRelay;
         await _manualRelayGate.WaitAsync();
