@@ -280,6 +280,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private string _lastIoMappingSignature = string.Empty;
     // V12.10.3: TestEngine.Reset() phát Changed đồng bộ. Trong Master state machine,
     // reset nội bộ không được phép tái nhập OnEngineChanged trước khi state hoàn tất.
+    private readonly ProductPresenceStabilityGate _productPresenceStability = new();
     private int _suppressEngineChanged;
     // Gate liên luồng: mỗi chu kỳ chỉ một caller được chốt side effects.
     private int _resultRecordedThisCycle;
@@ -2367,6 +2368,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
                 if (!_board.IsConnected)
                 {
+                    _productPresenceStability.Reset();
                     if (_scanSupervisor.TryBeginDisconnectedRecovery(out ScanHealthSnapshot disconnected))
                     {
                         AsyncFileLogService.Current.Performance(
@@ -2725,6 +2727,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private long SwitchRuntimeMode(RuntimeMode mode)
     {
+        _productPresenceStability.Reset();
         Volatile.Write(ref _runtimeMode, (int)mode);
         return Interlocked.Increment(ref _runtimeGeneration);
     }
@@ -2796,8 +2799,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             SetProductionRuntimeState(lifecycleState.Value);
     }
 
-    private long AdvanceProductionUiCycleEpoch() =>
-        Interlocked.Increment(ref _productionUiCycleEpoch);
+    private long AdvanceProductionUiCycleEpoch()
+    {
+        _productPresenceStability.Reset();
+        return Interlocked.Increment(ref _productionUiCycleEpoch);
+    }
 
     private void SetProductionRuntimeState(
         ProductionRuntimeState state,
@@ -2928,6 +2934,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ResetEngineWithoutChangedReentry()
     {
+        _productPresenceStability.Reset();
         Interlocked.Increment(ref _suppressEngineChanged);
         try
         {
@@ -3538,6 +3545,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             !_engine.HasWiringFault &&
             _engine.ReadyToEvaluateProductFaults &&
             electrical.ProductEvidence &&
+            IsProductPresenceStableForCompletion &&
             Interlocked.CompareExchange(ref _postContinuityStarted, 1, 0) == 0)
         {
             AsyncFileLogService.Current.Performance(
@@ -4406,6 +4414,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 // has never been changed by the preview path.
                 bool continuityPreviewCleared = false;
                 bool engineChanged = false;
+                if (preserveProductionFaultsForProbe)
+                    _productPresenceStability.Reset();
                 // Product presence comes only from model-aware connectivity in
                 // the complete engine snapshot. Raw/self-edge activity cannot
                 // move the operator UI into the Testing state.
@@ -4415,7 +4425,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 {
                     _engine.ClearProbeEvidenceExclusions();
                     continuityPreviewCleared = _engine.ClearContinuityPreview();
+                    if (MasterApproved)
+                        _productPresenceStability.PrepareFrameContext(
+                            generation, Volatile.Read(ref _productionUiCycleEpoch), frame.ScanGeneration);
                     engineChanged = _engine.ProcessFrame(frame, false);
+                    bool presenceConfirmedNow = ObserveProductPresenceForCompletion(frame, generation, processStarted);
+                    if (presenceConfirmedNow)
+                        OnEngineChanged(_engine, EventArgs.Empty);
 
                     // ProductRemoved after a committed FAIL must be driven by the
                     // authoritative frame stream itself, not by whether TestEngine
@@ -10260,10 +10276,64 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
+    private bool IsProductPresenceStableForCompletion
+    {
+        get
+        {
+            if (!MasterApproved)
+                return true;
+            if (!_board.IsConnected)
+            {
+                _productPresenceStability.Reset();
+                return false;
+            }
+            return _productPresenceStability.IsConfirmed(
+                Volatile.Read(ref _runtimeGeneration), Volatile.Read(ref _productionUiCycleEpoch));
+        }
+    }
+
+    private bool ObserveProductPresenceForCompletion(ScanFrame frame, long generation, long timestamp)
+    {
+        if (!MasterApproved || !IsRuntimeContext(RuntimeMode.Production, generation) ||
+            CurrentProductionPhase != ProductionPhase.Continuity || !_cycleActive)
+            return false;
+        if (!frame.Complete || frame.UnknownBytes != 0 || !frame.TerminatorKnown)
+        {
+            _productPresenceStability.Reset();
+            return false;
+        }
+
+        ProductionElectricalSnapshot electrical = _engine.GetProductionElectricalSnapshot();
+        if (electrical.FrameSequence != frame.Sequence || electrical.ScanGeneration != frame.ScanGeneration)
+            return false;
+
+        ProductPresenceStabilityTransition transition = _productPresenceStability.Observe(
+            electrical.ProductEvidence && electrical.RealtimeEvaluationEnabled,
+            timestamp, generation, Volatile.Read(ref _productionUiCycleEpoch),
+            frame.ScanGeneration, frame.Sequence, out double elapsedMs, out int frames);
+        if (transition != ProductPresenceStabilityTransition.None)
+        {
+            string message = transition switch
+            {
+                ProductPresenceStabilityTransition.Started => "candidate started",
+                ProductPresenceStabilityTransition.Cancelled => $"candidate cancelled: signal lost after {elapsedMs:0} ms",
+                _ => $"stable confirmed: {elapsedMs:0} ms, {frames} consecutive frames"
+            };
+            AsyncFileLogService.Current.Performance($"PRODUCT_PRESENT {message}");
+        }
+        return transition == ProductPresenceStabilityTransition.Confirmed;
+    }
+
     private async Task RunAutomaticPostContinuityAsync()
     {
         if (IsDeviceFault || !_cycleActive || _model is null)
             return;
+
+        if (!IsProductPresenceStableForCompletion)
+        {
+            Interlocked.Exchange(ref _postContinuityStarted, 0);
+            return;
+        }
 
         ProductModel cycleModel = _model;
         long generation = Volatile.Read(ref _runtimeGeneration);
