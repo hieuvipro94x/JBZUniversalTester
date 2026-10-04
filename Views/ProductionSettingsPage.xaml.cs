@@ -1455,6 +1455,33 @@ public partial class ProductionSettingsPage : UserControl
         return false;
     }
 
+    private static void RefreshSavedEditorValues(DependencyObject parent)
+    {
+        // Settings normalization can change plain DTO properties without a
+        // PropertyChanged notification. Reflect saved values back into editors
+        // so the next UpdateSource cannot restore their pre-save text.
+        switch (parent)
+        {
+            case TextBox textBox:
+                textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateTarget();
+                break;
+            case ComboBox comboBox:
+                if (comboBox.Name == nameof(PrinterComComboBox) && comboBox.SelectedItem is null)
+                    break;
+                comboBox.GetBindingExpression(Selector.SelectedValueProperty)?.UpdateTarget();
+                comboBox.GetBindingExpression(Selector.SelectedItemProperty)?.UpdateTarget();
+                comboBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateTarget();
+                break;
+            case ToggleButton toggleButton:
+                toggleButton.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateTarget();
+                break;
+        }
+
+        int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int index = 0; index < childCount; index++)
+            RefreshSavedEditorValues(System.Windows.Media.VisualTreeHelper.GetChild(parent, index));
+    }
+
     private void SyncCompatibilityFields()
     {
         BoardCapacity capacity = BoardCapacity.FromSettings(_vm.Settings);
@@ -1539,8 +1566,10 @@ public partial class ProductionSettingsPage : UserControl
                 return true;
 
             _vm.Save();
+            RefreshSavedEditorValues(this);
+            string savedSnapshot = CaptureEditableSettingsSnapshot();
             await NotifySettingsSavedAsync();
-            _savedSettingsSnapshot = CaptureEditableSettingsSnapshot();
+            _savedSettingsSnapshot = savedSnapshot;
             return true;
         }
         catch (Exception ex)
