@@ -261,9 +261,12 @@ public partial class TestWindow : Window
         // LẮP SẢN PHẨM / ĐANG KIỂM TRA / PASS.
         Point screenAnchor = ResultStatusHost.PointToScreen(
             new Point(0, ResultStatusHost.ActualHeight));
+        Point screenRight = ResultStatusHost.PointToScreen(
+            new Point(ResultStatusHost.ActualWidth, ResultStatusHost.ActualHeight));
         var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice
             ?? System.Windows.Media.Matrix.Identity;
         Point anchor = transform.Transform(screenAnchor);
+        Point right = transform.Transform(screenRight);
 
         System.Windows.Forms.Screen screen = System.Windows.Forms.Screen.FromPoint(
             new System.Drawing.Point((int)screenAnchor.X, (int)screenAnchor.Y));
@@ -274,7 +277,7 @@ public partial class TestWindow : Window
 
         const double gap = 4;
         double requestedLeft =
-            anchor.X + (ResultStatusHost.ActualWidth - _waterProofWindow.Width) / 2;
+            (anchor.X + right.X - _waterProofWindow.Width) / 2;
         double requestedTop = anchor.Y + gap;
         double maxLeft = Math.Max(workTopLeft.X, workBottomRight.X - _waterProofWindow.Width);
         double maxTop = Math.Max(workTopLeft.Y, workBottomRight.Y - _waterProofWindow.Height);
