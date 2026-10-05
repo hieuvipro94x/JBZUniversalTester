@@ -215,7 +215,7 @@ public static class ProductionConfigService
             string encodedKey = Uri.EscapeDataString(productKey);
             lines.Add(
                 $"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate};" +
-                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)}");
+                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId}");
         }
 
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
@@ -324,6 +324,7 @@ public static class ProductionConfigService
             // Giá trị nhập là LOT đã hoàn thành gần nhất. Không cộng lại tiến độ
             // cũ khi lưu các cài đặt độc lập như số card mở rộng.
             lot.StartLotNo = normalizedStart;
+            lot.HistoryBatchId = Guid.NewGuid().ToString("N");
             lot.LotNo = normalizedStart;
             lot.BulkPrintLotNo = normalizedStart;
             lot.LotNoDate = normalizedDate;
@@ -554,6 +555,7 @@ public static class ProductionConfigService
             settings.LotSettingsByProduct[productKey] = new ProductLotSettings
             {
                 LotNo = Math.Max(0, lotNo),
+                HistoryBatchId = parts.Length > 4 ? parts[4] : string.Empty,
                 LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty,
                 StartLotNo = parts.Length > 2 &&
                              long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long startLotNo)

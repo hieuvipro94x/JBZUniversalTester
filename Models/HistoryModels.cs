@@ -60,6 +60,7 @@ public sealed class TestHistoryRecord
     public int ReprintCount { get; set; }
     public string PrintMessage { get; set; } = string.Empty;
     public long? HistoryOrdinal { get; set; }
+    public string ProductionBatchKey { get; set; } = string.Empty;
 
     public TestHistoryRecord ClonePersistenceSnapshot() => (TestHistoryRecord)MemberwiseClone();
 
@@ -278,13 +279,13 @@ public sealed record HistoryPartOption(string Keyword, string Display)
 
 public static class HistoryPresentation
 {
-    public static void AssignProductPassOrdinals(
+    public static void AssignProductOrdinals(
         IEnumerable<TestHistoryRecord> records,
         IDictionary<string, long> passCountsByProduct)
     {
         foreach (TestHistoryRecord record in records)
         {
-            if (!record.IsProductionRecord || !record.Passed)
+            if (!record.IsProductionRecord)
             {
                 record.HistoryOrdinal = null;
                 continue;
@@ -295,8 +296,12 @@ public static class HistoryPresentation
                 : !string.IsNullOrWhiteSpace(record.ModelFile)
                     ? "FILE:" + record.ModelFile.Trim().ToUpperInvariant()
                     : "MODEL:" + (record.ModelName ?? string.Empty).Trim().ToUpperInvariant();
+            productKey += "|" + (string.IsNullOrWhiteSpace(record.ProductionBatchKey)
+                ? "LEGACY"
+                : record.ProductionBatchKey);
             passCountsByProduct.TryGetValue(productKey, out long passCount);
-            record.HistoryOrdinal = ++passCount;
+            record.HistoryOrdinal ??= ++passCount;
+            passCount = Math.Max(passCount, record.HistoryOrdinal.Value);
             passCountsByProduct[productKey] = passCount;
         }
     }

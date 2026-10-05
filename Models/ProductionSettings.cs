@@ -335,6 +335,7 @@ public sealed class ProductionSettings
 
 public sealed class ProductLotSettings
 {
+    public string HistoryBatchId { get; set; } = string.Empty;
     /// <summary>
     /// LOTNO bắt đầu do operator đặt một lần cho mã hàng. -1 chỉ xuất hiện khi
     /// đọc cấu hình cũ chưa có field này và sẽ được migrate từ LotNo hiện tại.

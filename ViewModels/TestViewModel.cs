@@ -1100,7 +1100,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private bool IsWaitingMasterSample =>
         IsMasterSequenceActive &&
         MasterState is (MasterSequenceState.WaitingGoodMaster or MasterSequenceState.WaitingBadMaster) &&
-        !_engine.HasProductActivity;
+        !_engine.HasRealtimePresentationProductActivity;
     public bool IsMasterBadPhase => MasterState is
         MasterSequenceState.WaitingBadMaster or
         MasterSequenceState.TestingBadMaster or
@@ -3904,10 +3904,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (!_board.IsScanning ||
             !IsRuntimeMode(RuntimeMode.Production) ||
             Volatile.Read(ref _probeSessionActive) != 0 ||
-            !MasterApproved ||
+            (!MasterApproved && !IsMasterInstallationPresentation) ||
             IsIoMappingMode ||
             (CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval) &&
-             !IsWaterProofRetestConnectionPresentation))
+             !IsWaterProofRetestConnectionPresentation && !IsMasterInstallationPresentation))
         {
             return true;
         }
@@ -3931,7 +3931,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         long generation = Volatile.Read(ref _runtimeGeneration);
         bool realtimeProductActivity = _engine.HasRealtimePresentationProductActivity;
-        if (CurrentProductionPhase == ProductionPhase.Continuity &&
+        if ((CurrentProductionPhase == ProductionPhase.Continuity || IsMasterInstallationPresentation) &&
             !IsProbeOwningProductionPresentation() &&
             _presentationCycleStarted != realtimeProductActivity)
         {
@@ -3943,7 +3943,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
                     cycleEpoch != Volatile.Read(ref _productionUiCycleEpoch) ||
-                    CurrentProductionPhase != ProductionPhase.Continuity ||
+                    (CurrentProductionPhase != ProductionPhase.Continuity && !IsMasterInstallationPresentation) ||
                     IsProbeOwningProductionPresentation() ||
                     IsProductRemovalPending ||
                     _engine.HasRealtimePresentationProductActivity != realtimeProductActivity)
@@ -3953,9 +3953,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
                 _presentationCycleStarted = realtimeProductActivity;
                 RaiseCenterPresentation();
-                State = realtimeProductActivity
-                    ? "ĐANG KIỂM TRA"
-                    : "LẮP SẢN PHẨM";
+                if (MasterApproved)
+                    State = realtimeProductActivity
+                        ? "ĐANG KIỂM TRA"
+                        : "LẮP SẢN PHẨM";
             });
         }
         QueueContinuityPreviewUi(generation);
@@ -3992,9 +3993,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                  sequence >= _engine.LastFrameSequence) &&
                 Volatile.Read(ref _probeSessionActive) == 0 &&
                 !IsIoMappingMode &&
-                _presentationCycleStarted &&
+                (_presentationCycleStarted || IsMasterInstallationPresentation) &&
                 (CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval ||
-                 IsWaterProofRetestConnectionPresentation))
+                 IsWaterProofRetestConnectionPresentation || IsMasterInstallationPresentation))
             {
                 // RefreshFaults only synchronizes presentation rows. It does not
                 // evaluate TestEngine state or trigger result/relay side effects.
@@ -11666,6 +11667,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             HtdrvName = ProgramIdentityService.BuildHtdrvName(),
             LotText = _productionSettings.Lot,
             InspectionTrace = BuildProductInspectionTrace(finished),
+            ProductionBatchKey = _lotSequence.HistoryBatchKey,
             OpenCount = openCount,
             WrongCount = wrongOnly,
             ShortCount = shortOnly,
@@ -12321,6 +12323,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void RefreshFaults() => RefreshFaultsFromSnapshot(rowsSnapshot: null);
 
+    private bool IsMasterInstallationPresentation =>
+        IsMasterSequenceActive && !_dailyMasterAwaitingRemoval &&
+        Volatile.Read(ref _masterWaterProofSequenceActive) == 0 &&
+        MasterState is MasterSequenceState.WaitingGoodMaster or MasterSequenceState.TestingGoodMaster or
+            MasterSequenceState.WaitingBadMaster or MasterSequenceState.TestingBadMaster;
+
     private void RefreshFaultsFromSnapshot(TestEnginePresentationSnapshot? rowsSnapshot)
     {
         long refreshStarted = Stopwatch.GetTimestamp();
@@ -12343,10 +12351,21 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         else if (!MasterApproved && IsMasterBadPhase)
         {
+            if (IsMasterInstallationPresentation)
+            {
+                bool started = _engine.HasRealtimePresentationProductActivity || _masterDetectedFaultDetails.Count > 0;
+                if (_presentationCycleStarted != started)
+                {
+                    _presentationCycleStarted = started;
+                    RaiseCenterPresentation();
+                }
+            }
             // Master lỗi dùng cùng bảng lỗi sản xuất, nhưng trước khi có mẫu
             // thật trên JIG bảng phải hoàn toàn trống.
             desiredRows = _presentationCycleStarted
-                ? BuildMasterFaultGridRows()
+                ? _masterDetectedFaultDetails.Count > 0
+                    ? BuildMasterFaultGridRows()
+                    : rowsSnapshot?.Rows ?? _engine.BuildRows()
                 : Array.Empty<FaultRow>();
         }
         else
@@ -12359,7 +12378,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // ProductEvidence remains debounced and authoritative for
             // PASS/FAIL/relay/ProductRemoved.
             bool hasRealtimePresentationActivity =
-                (CurrentProductionPhase == ProductionPhase.Continuity || IsWaterProofRetestConnectionPresentation)
+                (CurrentProductionPhase == ProductionPhase.Continuity || IsWaterProofRetestConnectionPresentation ||
+                 IsMasterInstallationPresentation)
                     ? _engine.HasRealtimePresentationProductActivity
                     : hasProductEvidence;
             bool probeOwnsPresentation = IsProbeOwningProductionPresentation();
@@ -12375,7 +12395,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 _presentationCycleStarted = true;
                 RaiseCenterPresentation();
             }
-            else if (CurrentProductionPhase == ProductionPhase.Continuity &&
+            else if ((CurrentProductionPhase == ProductionPhase.Continuity || IsMasterInstallationPresentation) &&
                      !hasRealtimePresentationActivity &&
                      !confirmedWiringFaultPresentation &&
                      !probeOwnsPresentation &&

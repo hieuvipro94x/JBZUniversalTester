@@ -58,7 +58,7 @@ public static class HistoryExportService
         var passOrdinalsByProduct = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (TestHistoryRecord record in records)
         {
-            HistoryPresentation.AssignProductPassOrdinals([record], passOrdinalsByProduct);
+            HistoryPresentation.AssignProductOrdinals([record], passOrdinalsByProduct);
             writer.WriteLine(string.Join(',', Columns.Select(column =>
                 EscapeCsv(ToCsvValue(column, record)))));
             count++;
@@ -144,7 +144,7 @@ public static class HistoryExportService
         var passOrdinalsByProduct = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (TestHistoryRecord record in records)
         {
-            HistoryPresentation.AssignProductPassOrdinals([record], passOrdinalsByProduct);
+            HistoryPresentation.AssignProductOrdinals([record], passOrdinalsByProduct);
             AppendDataRow(sb, count + 2, record);
             writer.Write(sb);
             sb.Clear();

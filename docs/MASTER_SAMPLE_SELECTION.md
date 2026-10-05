@@ -31,6 +31,8 @@ Ngày sản xuất bắt đầu lúc **07:00 giờ máy**. Khi bật Master, m�
 
 ## Cấu hình và lịch sử
 
+Mẫu đạt và mẫu lỗi đều cập nhật bảng lắp dây ngay từ SOURCE đầu tiên có kết nối hợp lệ, giống màn hình sản xuất; không chờ connector thứ hai. Preview chỉ phục vụ hiển thị. Xác nhận mẫu, ghi kết quả, relay và xác nhận tháo vẫn dựa trên frame Production hoàn chỉnh; trước khi phát hiện lỗi Master, bảng hiển thị các dây chưa kết nối, sau đó hiển thị lỗi của mẫu.
+
 Số điểm sai dây dùng `MasterFaultRequiredCount`; số điểm đứt dây dùng `MasterOpenFaultRequiredCount`. Lựa chọn mẫu NG dùng `MasterSelectedFaultSamples`. Ba giá trị này dùng chung cho toàn bộ mã hàng. Các khóa theo mã hàng cũ `MasterFault.<model-key>`, `MasterOpenFault.<model-key>` và `MasterSelected.<model-key>` vẫn được giữ để đọc/ghi tương thích nhưng không quyết định yêu cầu Master. Tắt ở một trang cài đặt sẽ tắt cho tất cả mã hàng; bật lại sẽ yêu cầu kiểm tra mẫu cho mỗi mã hàng. Kết quả hoàn tất mẫu vẫn thuộc mã hàng đang kiểm tra, không dùng kết quả của mã hàng này để mở sản xuất mã hàng khác.
 
 Sau khi đủ mẫu và xác nhận tháo mẫu cuối, runtime chuyển về `WaitingForProduct`, presentation về `Waiting` và hai vùng trạng thái hiển thị LẮP SẢN PHẨM.

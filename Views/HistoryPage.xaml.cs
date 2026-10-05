@@ -117,7 +117,7 @@ public partial class HistoryPage : UserControl
 
             _summary = summaryTask.Result;
             IReadOnlyList<TestHistoryRecord> rows = pageTask.Result;
-            HistoryPresentation.AssignProductPassOrdinals(rows, _passOrdinalsByProduct);
+            HistoryPresentation.AssignProductOrdinals(rows, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in rows)
                 _records.Add(row);
 
@@ -172,7 +172,7 @@ public partial class HistoryPage : UserControl
             IReadOnlyList<TestHistoryRecord> page = await Task.Run(() => GetStore().SearchSummary(pageCriteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
-            HistoryPresentation.AssignProductPassOrdinals(page, _passOrdinalsByProduct);
+            HistoryPresentation.AssignProductOrdinals(page, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in page)
                 _records.Add(row);
             SummaryText.Text = $"Đang hiển thị {_records.Count:N0} / {_summary.Total:N0} bản ghi";

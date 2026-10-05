@@ -74,6 +74,19 @@ public sealed class LotSequenceService
         }
     }
 
+    public string HistoryBatchKey
+    {
+        get
+        {
+            lock (_gate)
+            {
+                EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
+                ProductLotSettings lot = ActiveLotLocked();
+                return $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}";
+            }
+        }
+    }
+
     public long ReserveForCycle(string cycleId)
     {
         if (string.IsNullOrWhiteSpace(cycleId))

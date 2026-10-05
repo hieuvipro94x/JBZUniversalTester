@@ -13,7 +13,7 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class TestHistoryStore
 {
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
     private const int LegacyMigrationBatchSize = 500;
     private static readonly object SchemaGate = new();
     private readonly string _path;
@@ -60,6 +60,20 @@ public sealed class TestHistoryStore
                 "Không mở bằng phiên bản cũ để tránh làm hỏng dữ liệu.");
         }
         CreateMigrationBackupIfRequired(connection);
+        var preservedCounts = new Dictionary<string, long>();
+        if (versionBeforeWrite < CurrentSchemaVersion)
+        {
+            foreach (string tableName in new[] { "Tests", "TestFaults", "ResistanceMeasurements", "WaterProofMeasurements" })
+            {
+                using SqliteCommand count = connection.CreateCommand();
+                count.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name=$Table;";
+                count.Parameters.AddWithValue("$Table", tableName);
+                if (count.ExecuteScalar() is null)
+                    continue;
+                count.CommandText = $"SELECT COUNT(*) FROM {tableName};";
+                preservedCounts[tableName] = Convert.ToInt64(count.ExecuteScalar(), CultureInfo.InvariantCulture);
+            }
+        }
         if (versionBeforeWrite < CurrentSchemaVersion)
             VerifyIntegrity(connection);
         using (SqliteCommand pragma = connection.CreateCommand())
@@ -90,7 +104,17 @@ public sealed class TestHistoryStore
         if (existingVersion < CurrentSchemaVersion)
             ReplaceRedundantIndexes(connection, transaction);
         WriteSchemaInfo(connection, transaction, report);
+        foreach ((string tableName, long beforeCount) in preservedCounts)
+        {
+            using SqliteCommand count = connection.CreateCommand();
+            count.Transaction = transaction;
+            count.CommandText = $"SELECT COUNT(*) FROM {tableName};";
+            if (Convert.ToInt64(count.ExecuteScalar(), CultureInfo.InvariantCulture) < beforeCount)
+                throw new InvalidDataException($"Migration would reduce {tableName} history rows.");
+        }
         transaction.Commit();
+        if (versionBeforeWrite < CurrentSchemaVersion)
+            VerifyIntegrity(connection);
         return report;
     }
 
@@ -137,14 +161,14 @@ public sealed class TestHistoryStore
             return;
 
         string backupPath = _path + $".pre-schema-v{CurrentSchemaVersion}.backup";
-        if (File.Exists(backupPath))
-            return;
-
-        using var destination = new SqliteConnection($"Data Source={backupPath}");
+        string timestampedBackupPath = _path + $".pre-schema-v{CurrentSchemaVersion}.{DateTime.Now:yyyyMMdd_HHmmss_fffffff}.backup";
+        using var destination = new SqliteConnection($"Data Source={timestampedBackupPath}");
         destination.Open();
         source.BackupDatabase(destination);
+        if (!File.Exists(backupPath))
+            File.Copy(timestampedBackupPath, backupPath, overwrite: false);
         AsyncFileLogService.Current.Application(
-            $"DATABASE_MIGRATION_BACKUP schema={version}->{CurrentSchemaVersion} path={backupPath}");
+            $"DATABASE_MIGRATION_BACKUP schema={version}->{CurrentSchemaVersion} path={timestampedBackupPath}");
     }
 
     private static void CreateSchema(SqliteConnection connection, SqliteTransaction transaction)
@@ -264,6 +288,7 @@ public sealed class TestHistoryStore
                 ModelId INTEGER NOT NULL,
                 ConfigId INTEGER NOT NULL,
                 InspectionType TEXT NOT NULL DEFAULT 'PRODUCT',
+                ProductionBatchKey TEXT NOT NULL DEFAULT '',
                 Lot INTEGER NOT NULL DEFAULT 0,
                 ProductionCounter INTEGER NOT NULL DEFAULT 0,
                 StartedAt TEXT NOT NULL,
@@ -436,7 +461,8 @@ public sealed class TestHistoryStore
             ("WaterProofCompletedAt", "TEXT NULL"),
             ("ResultAt", "TEXT NULL"),
             ("RemovalStartedAt", "TEXT NULL"),
-            ("RemovedAt", "TEXT NULL")
+            ("RemovedAt", "TEXT NULL"),
+            ("ProductionBatchKey", "TEXT NOT NULL DEFAULT ''")
         ];
 
         var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -468,6 +494,9 @@ public sealed class TestHistoryStore
         command.Transaction = transaction;
         command.CommandText = """
             CREATE INDEX IF NOT EXISTS IX_Models_PartId ON Models(PartId);
+            CREATE INDEX IF NOT EXISTS IX_Tests_ProductBatch_HistoryAt_Id
+                ON Tests(PartId,ProductionBatchKey,COALESCE(TestStartedAt,StartedAt),Id)
+                WHERE InspectionType='PRODUCT';
             CREATE INDEX IF NOT EXISTS IX_Models_FileHash ON Models(FileHash);
             CREATE INDEX IF NOT EXISTS IX_Models_FilePath ON Models(FilePath);
             CREATE INDEX IF NOT EXISTS IX_PartModels_ModelId_PartId ON PartModels(ModelId, PartId);
@@ -1234,14 +1263,14 @@ public sealed class TestHistoryStore
              OperatorCompany,ProductionLine,AppVersion,HtdrvName,LotText,InspectionTrace,
              OpenCount,WrongCount,ShortCount,FaultType,FaultSummary,FaultDetailsJson,
              LabelProfile,LabelTemplateType,LabelPayload,PrintStatus,PrintTimestamp,
-             Printer,LabelCopies,ReprintCount,PrintMessage,CreatedAt)
+             Printer,LabelCopies,ReprintCount,PrintMessage,CreatedAt,ProductionBatchKey)
             VALUES
             ($Legacy,$Cycle,$Run,$Part,$Model,$Config,$Inspection,$Lot,$Counter,$Started,
              $Install,$TestStarted,$ResultAt,$RemovalStarted,$Removed,$Finished,$Passed,
              $Result,$ResultCode,$Barcode,$LabelSerial,$Resistance,'',$DeviceName,$DeviceNumber,
              $Company,$Line,$App,$Htdrv,$LotText,$Trace,$Open,$Wrong,$Short,$FaultType,
              $FaultSummary,$FaultJson,$LabelProfile,$Template,$Payload,$PrintStatus,$PrintAt,
-             $Printer,$Copies,$Reprints,$PrintMessage,$CreatedAt);
+             $Printer,$Copies,$Reprints,$PrintMessage,$CreatedAt,$ProductionBatch);
             SELECT last_insert_rowid();
             """;
         AddNullable(command, "$Legacy", legacyHistoryId);
@@ -1274,6 +1303,7 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$Htdrv", h.HtdrvName);
         command.Parameters.AddWithValue("$LotText", h.LotText);
         command.Parameters.AddWithValue("$Trace", h.InspectionTrace);
+        command.Parameters.AddWithValue("$ProductionBatch", h.ProductionBatchKey);
         command.Parameters.AddWithValue("$Open", h.OpenCount);
         command.Parameters.AddWithValue("$Wrong", h.WrongCount);
         command.Parameters.AddWithValue("$Short", h.ShortCount);
@@ -2056,10 +2086,16 @@ public sealed class TestHistoryStore
                 t.CycleId,t.LabelSerial,t.Barcode,t.LabelProfile,t.PrintStatus,t.PrintTimestamp,
                 t.Printer,t.LabelCopies,t.ReprintCount,t.PrintMessage,t.LabelTemplateType,{labelPayloadColumn},
                 t.InstallStartedAt,t.TestStartedAt,t.ResultAt,t.RemovalStartedAt,t.RemovedAt,
-                t.InspectionType,t.LotText,t.InspectionTrace
+                t.InspectionType,t.LotText,t.InspectionTrace,t.ProductionBatchKey,ordinal.HistoryOrdinal
             FROM Tests t
             JOIN Parts p ON p.Id=t.PartId
             JOIN Models m ON m.Id=t.ModelId
+            LEFT JOIN (
+                SELECT Id,ROW_NUMBER() OVER (
+                    PARTITION BY PartId,ProductionBatchKey
+                    ORDER BY COALESCE(TestStartedAt,StartedAt),Id) AS HistoryOrdinal
+                FROM Tests WHERE InspectionType='PRODUCT'
+            ) ordinal ON ordinal.Id=t.Id
             LEFT JOIN TestFaults f ON f.Id=(
                 SELECT firstFault.Id FROM TestFaults firstFault
                 WHERE firstFault.TestId=t.Id
@@ -2275,7 +2311,9 @@ public sealed class TestHistoryStore
         ReprintCount=reader.GetInt32(43), PrintMessage=reader.GetString(44), LabelTemplateType=reader.GetString(45),
         LabelPayload=reader.GetString(46), InstallStartedAt=GetNullableDate(reader,47), TestStartedAt=GetNullableDate(reader,48),
         ResultAt=GetNullableDate(reader,49), RemovalStartedAt=GetNullableDate(reader,50), RemovedAt=GetNullableDate(reader,51),
-        InspectionType=reader.GetString(52), LotText=reader.GetString(53), InspectionTrace=reader.GetString(54)
+        InspectionType=reader.GetString(52), LotText=reader.GetString(53), InspectionTrace=reader.GetString(54),
+        ProductionBatchKey=reader.FieldCount > 55 ? reader.GetString(55) : string.Empty,
+        HistoryOrdinal=reader.FieldCount > 56 && !reader.IsDBNull(56) ? reader.GetInt64(56) : null
     };
 
     private static int? GetNullableInt(SqliteDataReader reader, int ordinal) =>

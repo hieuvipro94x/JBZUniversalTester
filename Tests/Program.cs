@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -83,6 +83,8 @@ internal static partial class Program
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
             ("Shared Master settings and completion return to installation", TestGlobalMasterConfigurationAndCompletion),
             ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
+            ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
+            ("History PASS/FAIL ordinals restart for each product LOT batch", TestHistoryLotBatchOrdinals),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
@@ -4154,6 +4156,7 @@ internal static partial class Program
                     DROP INDEX IF EXISTS IX_Tests_ModelId_ResultAt_Id;
                     DROP INDEX IF EXISTS IX_Tests_HistoryAt_Id;
                     DROP INDEX IF EXISTS IX_Tests_Part_Inspection_HistoryAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_ProductBatch_HistoryAt_Id;
                     DROP INDEX IF EXISTS IX_TestFaults_TestId_FaultOrder_Id;
                     DROP INDEX IF EXISTS IX_ResistanceMeasurements_TestId;
                     DROP INDEX IF EXISTS IX_WaterProofMeasurements_TestId;
@@ -7688,11 +7691,11 @@ internal static partial class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(failed.HistoryOrdinal is null && failed.ExportLotText.Length == 0 &&
-                   customerText.Contains(",,불량,,", StringComparison.Ordinal) &&
+            Assert(failed.HistoryOrdinal == 1 && failed.ExportLotText.Length == 0 &&
+                   customerText.Contains(",,불량,1,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
-                "History CSV/UI FAIL uses concise Korean fault detail with blank LOT and sequence");
+                "History CSV/UI FAIL uses concise Korean fault detail with blank LOT and a test ordinal");
 
             var masterBad = new TestHistoryRecord
             {
@@ -8019,8 +8022,8 @@ internal static partial class Program
                     BeforeHistoryAt: ordinalCursor.EffectiveTestStartedAt,
                     BeforeId: ordinalCursor.Id));
             var pagePassOrdinals = new Dictionary<string, long>(StringComparer.Ordinal);
-            HistoryPresentation.AssignProductPassOrdinals(ordinalPage1, pagePassOrdinals);
-            HistoryPresentation.AssignProductPassOrdinals(ordinalPage2, pagePassOrdinals);
+            HistoryPresentation.AssignProductOrdinals(ordinalPage1, pagePassOrdinals);
+            HistoryPresentation.AssignProductOrdinals(ordinalPage2, pagePassOrdinals);
             Assert(ordinalPage1.Concat(ordinalPage2).Select(row => row.Id).SequenceEqual(legacyRows.Select(row => row.Id)) &&
                    ordinalPage1.Select(row => row.HistoryOrdinal).SequenceEqual(new long?[] { 1, 1, 2 }) &&
                    ordinalPage2.Select(row => row.HistoryOrdinal).SequenceEqual(new long?[] { 1, 2, 3 }),
@@ -8063,7 +8066,7 @@ internal static partial class Program
                 IReadOnlyList<TestHistoryRecord> batch = scaleStore.SearchSummary(
                     scaleCriteria with { BeforeHistoryAt = scaleCursorAt, BeforeId = scaleCursorId });
                 Assert(batch.Count > 0, "A 450-row History result always has a continuation batch");
-                HistoryPresentation.AssignProductPassOrdinals(batch, scalePassOrdinals);
+                HistoryPresentation.AssignProductOrdinals(batch, scalePassOrdinals);
                 loadedScaleRows.AddRange(batch);
                 TestHistoryRecord last = batch[^1];
                 scaleCursorAt = last.EffectiveTestStartedAt;
@@ -8074,10 +8077,10 @@ internal static partial class Program
                    loadedScaleRows[0].ExportLotText.Length == 0 && loadedScaleRows[1].ExportLotText == "0" &&
                    loadedScaleRows[2].ExportLotText == "2000" && loadedScaleRows[6].ExportLotText.Length == 0 &&
                    loadedScaleRows[8].ExportLotText == "2002" &&
-                   loadedScaleRows[0].HistoryOrdinal is null && loadedScaleRows[1].HistoryOrdinal == 1 &&
-                   loadedScaleRows[2].HistoryOrdinal == 1 && loadedScaleRows[8].HistoryOrdinal == 3 &&
-                   loadedScaleRows[^1].HistoryOrdinal == 150,
-                "History leaves FAIL sequence blank and counts PASS independently for each product across pages");
+                   loadedScaleRows[0].HistoryOrdinal == 1 && loadedScaleRows[1].HistoryOrdinal == 1 &&
+                   loadedScaleRows[2].HistoryOrdinal == 2 && loadedScaleRows[8].HistoryOrdinal == 5 &&
+                   loadedScaleRows[^1].HistoryOrdinal == 225,
+                "History counts PASS and FAIL independently for each product across pages");
             IReadOnlyList<TestHistoryRecord> scaleExport = scaleStore.SearchForExport(scaleCriteria);
             string scaleCsv = Path.Combine(root, "history-450.csv");
             string scaleXlsx = Path.Combine(root, "history-450.xlsx");
@@ -8086,9 +8089,9 @@ internal static partial class Program
                    scaleExport[0].ExportLotText.Length == 0 && scaleExport[1].ExportLotText == "0" &&
                    scaleExport[2].ExportLotText == "2000" && scaleExport[6].ExportLotText.Length == 0 &&
                    scaleExport[8].ExportLotText == "2002" &&
-                   scaleExport[0].HistoryOrdinal is null && scaleExport[1].HistoryOrdinal == 1 &&
-                   scaleExport[2].HistoryOrdinal == 1 && scaleExport[^1].HistoryOrdinal == 150,
-                "CSV/XLSX keep blank FAIL sequence and independent PASS sequence per product");
+                   scaleExport[0].HistoryOrdinal == 1 && scaleExport[1].HistoryOrdinal == 1 &&
+                   scaleExport[2].HistoryOrdinal == 2 && scaleExport[^1].HistoryOrdinal == 225,
+                "CSV/XLSX keep blank FAIL LOT and count every production test per product");
 
             var filterStore = new TestHistoryStore(Path.Combine(root, "history-filter-boundaries.db"));
             void AddFilterRow(DateTime at, string part, bool passed, string inspectionType, string cycleId) =>

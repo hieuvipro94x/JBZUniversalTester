@@ -7,6 +7,35 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestMasterFirstConnectionPresentation()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        foreach (MasterSequenceState waiting in new[]
+                 { MasterSequenceState.WaitingGoodMaster, MasterSequenceState.WaitingBadMaster })
+        {
+            TestViewModel vm = CreateTestViewModel(
+                new ProductionSettings { MasterFaultRequiredCount = 1 }, out FakeBoard board);
+            LoadReadyModel(vm, Model(("FIRST", new[] { 1, 2 }), ("SECOND", new[] { 3, 4 })));
+            vm.StartProductionTestAsync().GetAwaiter().GetResult();
+            typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(vm, waiting);
+            var engine = (TestEngine)typeof(TestViewModel).GetField("_engine", flags)!.GetValue(vm)!;
+            Assert(vm.Faults.Count == 0, "Empty Master table has no installation rows");
+            MethodInfo handle = typeof(TestViewModel).GetMethod("TryHandleContinuityPreviewFrame", flags)!;
+            Assert((bool)handle.Invoke(vm, [ContinuityPreviewFrame(100, 1, new[] { 2 })])!,
+                "Master consumes first SOURCE preview");
+            Assert(engine.HasRealtimePresentationProductActivity && !engine.HasProductActivity,
+                "First Master preview changes presentation without authoritative product presence");
+            Assert(vm.Faults.Any(row => row.WireName == "SECOND") &&
+                   !vm.Faults.Any(row => row.WireName == "FIRST"),
+                "First connection updates Master installation rows without a second connector or C0");
+            Assert(!vm.MasterApproved && vm.MasterState == waiting && !engine.ContinuityPassed,
+                "Preview cannot validate a sample or advance Master lifecycle");
+            handle.Invoke(vm, [ContinuityPreviewFrame(100, 1, Array.Empty<int>())]);
+            Assert(!engine.HasRealtimePresentationProductActivity && vm.Faults.Count == 0,
+                "Removing the first preview connection clears realtime activity");
+        }
+    }
+
     private static void TestMasterWaitingReturnToMain()
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
