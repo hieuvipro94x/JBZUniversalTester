@@ -363,6 +363,17 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    public bool CanConfirmOpenMasterSample(int requiredMissingConnections)
+    {
+        lock (_gate)
+        {
+            return requiredMissingConnections > 0 && !_disposed && _lastFrameValid &&
+                _hasExpectedSourceCoverage && !_contactUnstable &&
+                GetMasterExpectedConnectionCount() > requiredMissingConnections &&
+                GetOpenMasterFaults().Count == requiredMissingConnections;
+        }
+    }
+
     public int GetMasterExpectedConnectionCount()
     {
         lock (_gate)

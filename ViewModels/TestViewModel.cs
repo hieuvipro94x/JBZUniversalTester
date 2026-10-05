@@ -8001,17 +8001,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 _masterDetectedFaultDetails[key] = fault;
         }
         RebuildMasterFaultDisplayRows();
-        SynchronizeFaultRows(BuildMasterFaultGridRows());
+        RefreshFaults();
         if (!previousKeys.SetEquals(_masterDetectedFaultKeys))
             AddLog($"MASTER LIVE FAULTS type={MasterSampleCatalog.Name(_masterSampleType)} detected={MasterDetectedFaultCount}/{MasterRequiredFaultCount} removed={previousKeys.Except(_masterDetectedFaultKeys).Count()}");
         RaiseMasterState();
 
         if (_masterSampleType == MasterSampleType.OpenCircuit)
         {
-            if (MasterDetectedFaultCount != MasterRequiredFaultCount)
+            if (MasterDetectedFaultCount != MasterRequiredFaultCount ||
+                !_engine.CanConfirmOpenMasterSample(MasterRequiredFaultCount))
             {
-                MasterStatus = $"MẪU ĐỨT DÂY: CÒN {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal}; " +
-                    $"YÊU CẦU {_masterOpenExpectedTotal - MasterRequiredFaultCount}/{_masterOpenExpectedTotal} (ĐỨT {MasterRequiredFaultCount} ĐIỂM)";
+                MasterStatus = $"MẪU TUỘT TUÝT: ĐÃ NỐI {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal}; " +
+                    $"LẮP ĐỦ CÁC DÂY CÒN LẠI, CHỈ THIẾU {MasterRequiredFaultCount} KẾT NỐI";
                 State = MasterStatus;
                 return;
             }
@@ -8347,7 +8348,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         finally
         {
             if (ownsEject)
-                Interlocked.Exchange(ref _masterEjectInProgress, 0);
+                FinishMasterEjectSequence(generation);
             // Giữ latch cho tới khi MASTER GOOD được tháo/nhả. Nếu resistance hoặc
             // continuity không đạt, không được tự đo/lặp PASS liên tục theo từng frame.
             // Nhánh IsProductReleased ở state TestingGoodMaster sẽ reset latch về 0.
@@ -8578,6 +8579,16 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Volatile.Read(ref _masterEjectInProgress) == 0 &&
         Volatile.Read(ref _masterRemovalConfirmed) != 0;
 
+    private void FinishMasterEjectSequence(long generation)
+    {
+        Interlocked.Exchange(ref _masterEjectInProgress, 0);
+        // A confirmed removal may arrive while START_SCAN verification still
+        // holds the eject owner. Revisit its latch even if later empty frames
+        // no longer produce an engine Changed event.
+        if (Volatile.Read(ref _masterRemovalConfirmed) != 0)
+            InvokeUi(() => ProcessMasterEngineChangedOnUi(generation));
+    }
+
     private void TransitionToBadMaster()
     {
         if (!_masterGoodVerified || MasterApproved)
@@ -8685,7 +8696,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         finally
         {
             if (ownsEject)
-                Interlocked.Exchange(ref _masterEjectInProgress, 0);
+                FinishMasterEjectSequence(generation);
             RaiseMasterState();
         }
     }
@@ -12370,7 +12381,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         else if (!MasterApproved && IsMasterBadPhase)
         {
-            if (IsMasterInstallationPresentation)
+            bool liveMasterWires = MasterState is MasterSequenceState.WaitingBadMaster or MasterSequenceState.TestingBadMaster;
+            if (liveMasterWires)
             {
                 bool started = _engine.HasRealtimePresentationProductActivity || _masterDetectedFaultDetails.Count > 0;
                 if (_presentationCycleStarted != started)
@@ -12382,7 +12394,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Master lỗi dùng cùng bảng lỗi sản xuất, nhưng trước khi có mẫu
             // thật trên JIG bảng phải hoàn toàn trống.
             desiredRows = _presentationCycleStarted
-                ? _masterDetectedFaultDetails.Count > 0
+                ? !liveMasterWires && _masterDetectedFaultDetails.Count > 0
                     ? BuildMasterFaultGridRows()
                     : rowsSnapshot?.Rows ?? _engine.BuildRows()
                 : Array.Empty<FaultRow>();

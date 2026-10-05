@@ -393,7 +393,6 @@ public partial class MainWindow : Window
         };
         _settingsWindow.Closing += SettingsWindow_Closing;
         _settingsWindow.Show();
-        Hide();
         LogMemory("MEM AFTER_SETTINGS_OPEN");
     }
 
@@ -552,7 +551,15 @@ public partial class MainWindow : Window
         {
             _settingsWindow = null;
             settingsWindow.Closing -= SettingsWindow_Closing;
-            settingsWindow.Content = null;
+            if (!_shutdownStarted)
+            {
+                WindowState = WindowState.Maximized;
+                if (!IsVisible)
+                    Show();
+                UpdateProductRemovalGate();
+                Activate();
+                Focus();
+            }
             _closingSettingsWindow = true;
             try
             {
@@ -561,12 +568,6 @@ public partial class MainWindow : Window
             finally
             {
                 _closingSettingsWindow = false;
-            }
-
-            if (!_shutdownStarted)
-            {
-                Show();
-                Activate();
             }
         }
 
