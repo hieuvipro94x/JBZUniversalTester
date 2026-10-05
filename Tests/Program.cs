@@ -87,6 +87,7 @@ internal static partial class Program
             ("History PASS/FAIL ordinals restart for each product LOT batch", TestHistoryLotBatchOrdinals),
             ("Master History hides session identifiers without changing audit data", TestMasterHistorySessionPresentation),
             ("Master transitions only through explicitly selected NG samples", TestMasterSelectedSamplesOnly),
+            ("Committed PASS rejects stale installation rows until actual removal", TestCommittedPassRejectsInstallationRows),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),

@@ -3133,7 +3133,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         // PASS đang được giữ nguyên: tuyệt đối không dựng RET/removal rows.
         // Điều này tránh hiện RET1/RETxx ngay cả khi scan vừa restart sau relay.
-        if (IsPassResultHeldDuringRemoval)
+        if (IsFinalPassPresentation)
         {
             ProductionElectricalSnapshot electrical = _engine.GetProductionElectricalSnapshot();
             return new TestEnginePresentationSnapshot(
@@ -10560,6 +10560,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 passUiTriggered = true;
                 passUiTimestamp = Stopwatch.GetTimestamp();
                 State = "PASS";
+                SynchronizeFaultRows(Array.Empty<FaultRow>());
                 AsyncFileLogService.Current.Performance(
                     $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
                 _sound.SetWiringFaultAlarm(false);
@@ -12535,6 +12536,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void SynchronizeFaultRows(IReadOnlyList<FaultRow> desiredRows)
     {
+        // A queued pre-PASS snapshot or Probe release must not restore installation
+        // rows during the committed PASS/relay/removal-baseline presentation.
+        // Explicit Probe contacts remain visible; real removal rows resume once
+        // PASS changes to the product-removal presentation.
+        if (IsFinalPassPresentation)
+            desiredRows = desiredRows.Where(row => row.Kind == FaultKind.Probe).ToArray();
         UpdateCachedFaultCounts(desiredRows);
         try
         {
