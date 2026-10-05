@@ -3420,10 +3420,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             phase == ProductionPhase.WaterProof &&
             Volatile.Read(ref _preContinuityWaterProofPassed) == 0)
         {
-            // D2XX is intentionally stopped while the Leak COM run is active. Once
-            // production scan resumes for connector retest, confirmed WRONG/SHORT
-            // must still drive TESTPOINT even though this cycle remains in the
-            // WaterProof phase. Do not enter the normal FAIL popup/history/relay
+            // D2XX keeps updating continuity independently of Leak COM. Confirmed
+            // WRONG/SHORT after the Leak run must still drive TESTPOINT even
+            // though this cycle remains in the WaterProof phase.
+            // Do not enter the normal FAIL popup/history/relay
             // lifecycle: Leak FAIL only permits connector removal and retest.
             bool leakRetestWiringFault =
                 Volatile.Read(ref _waterProofRunning) == 0 &&
@@ -3906,7 +3906,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             Volatile.Read(ref _probeSessionActive) != 0 ||
             (!MasterApproved && !IsMasterInstallationPresentation) ||
             IsIoMappingMode ||
-            (CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval) &&
+            (CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaterProof or ProductionPhase.WaitingProductRemoval) &&
              !IsWaterProofRetestConnectionPresentation && !IsMasterInstallationPresentation))
         {
             return true;
@@ -3994,7 +3994,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 Volatile.Read(ref _probeSessionActive) == 0 &&
                 !IsIoMappingMode &&
                 (_presentationCycleStarted || IsMasterInstallationPresentation) &&
-                (CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaitingProductRemoval ||
+                (CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaterProof or ProductionPhase.WaitingProductRemoval ||
                  IsWaterProofRetestConnectionPresentation || IsMasterInstallationPresentation))
             {
                 // RefreshFaults only synchronizes presentation rows. It does not
@@ -8458,7 +8458,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 MasterStatus = State;
                 AddLog($"[{masterLabel}-LEAK] START attempt={attempt}; bắt buộc PASS trước khi xác nhận MASTER.");
 
-                await PauseProductionScanForWaterProofAsync(ct);
+                await EnsureProductionScanForWaterProofAsync(ct);
                 bool passed = await RunAutomaticWaterProofAsync(
                     masterModel,
                     generation,
@@ -9421,10 +9421,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         InvokeUi(() =>
         {
             SelectedOperationTabIndex = 0;
-            if (IsWaterProofRetestConnectionPresentation)
-                RefreshFaults();
-            else
-                SynchronizeFaultRows(Array.Empty<FaultRow>());
+            RefreshFaults();
         });
 
     private static Window? ResolveOperatorDialogOwner()
@@ -9464,12 +9461,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         SelectedOperationTabIndex = 0;
     }
 
-    private async Task PauseProductionScanForWaterProofAsync(CancellationToken ct)
+    private async Task EnsureProductionScanForWaterProofAsync(CancellationToken ct)
     {
-        if (_board.IsConnected && _board.IsScanning)
-            await StopScanIntentionallyAsync("WaterProof", ct);
+        ct.ThrowIfCancellationRequested();
+        if (_board.IsConnected && !_board.IsScanning)
+            await StartProductionScanAndVerifyFrameAsync(ct, "WATERPROOF_INDEPENDENT_SCAN");
 
-        AddLog("[WATERPROOF] D2XX scan đã dừng trong công đoạn Leak; giữ snapshot continuity hiện tại.");
+        AddLog("[WATERPROOF] Leak COM chạy riêng; D2XX tiếp tục quét và cập nhật bảng dây.");
     }
 
     private async Task PauseProductionScanForFinalPassAsync(CancellationToken ct)
@@ -9744,7 +9742,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 $"[WATERPROOF-RETEST] START attempt={retestAttempt} parentCycle={_activeCycleId}; " +
                 "không tăng LOT/sản lượng và không chạy relay.");
 
-            await PauseProductionScanForWaterProofAsync(ct);
+            await EnsureProductionScanForWaterProofAsync(ct);
             DateTime retestStartedAt = DateTime.Now;
             WaterProofRunResult run = await _waterProof.RunTestAsync(
                 _productionSettings.WaterProofMachine,
@@ -10062,7 +10060,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
-            await PauseProductionScanForWaterProofAsync(ct);
+            await EnsureProductionScanForWaterProofAsync(ct);
             DateTime startedAt = DateTime.Now;
             await RunAutomaticWaterProofAsync(
                 cycleModel, generation, ct, runProfile: runProfile);
@@ -12399,7 +12397,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // ProductEvidence remains debounced and authoritative for
             // PASS/FAIL/relay/ProductRemoved.
             bool hasRealtimePresentationActivity =
-                (CurrentProductionPhase == ProductionPhase.Continuity || IsWaterProofRetestConnectionPresentation ||
+                (CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaterProof || IsWaterProofRetestConnectionPresentation ||
                  IsMasterInstallationPresentation)
                     ? _engine.HasRealtimePresentationProductActivity
                     : hasProductEvidence;
@@ -12416,7 +12414,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 _presentationCycleStarted = true;
                 RaiseCenterPresentation();
             }
-            else if ((CurrentProductionPhase == ProductionPhase.Continuity || IsMasterInstallationPresentation) &&
+            else if ((CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaterProof || IsMasterInstallationPresentation) &&
                      !hasRealtimePresentationActivity &&
                      !confirmedWiringFaultPresentation &&
                      !probeOwnsPresentation &&
@@ -12427,16 +12425,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 RaiseCenterPresentation();
             }
 
-            if (CurrentProductionPhase == ProductionPhase.WaterProof &&
-                !IsWaterProofRetestConnectionPresentation &&
-                !_waitForProductRelease &&
-                !_waitForFaultProductRemoval)
-            {
-                // The initial Leak run keeps this table empty.
-                // Connector retest uses the live installation rows below.
-                desiredRows = Array.Empty<FaultRow>();
-            }
-            else if (_waitForProductRelease &&
+            if (_waitForProductRelease &&
                      Volatile.Read(ref _passRemovalStarted) == 0 &&
                      !_waterProofEquipmentErrorAwaitingRemoval)
             {

@@ -89,6 +89,7 @@ internal static partial class Program
             ("Master transitions only through explicitly selected NG samples", TestMasterSelectedSamplesOnly),
             ("Committed PASS rejects stale installation rows until actual removal", TestCommittedPassRejectsInstallationRows),
             ("Leak connector without RET uses only expected IO edges to another connector", TestLeakWithoutRetTrigger),
+            ("Leak keeps continuity rows live and retries only the failed connector", TestLeakIndependentContinuityPresentation),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
@@ -3489,15 +3490,15 @@ internal static partial class Program
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard pauseBoard);
         MethodInfo pauseD2xx = typeof(TestViewModel).GetMethod(
-            "PauseProductionScanForWaterProofAsync",
+            "EnsureProductionScanForWaterProofAsync",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Leak D2XX pause method not found");
         ((Task)(pauseD2xx.Invoke(pauseVm, [CancellationToken.None])
             ?? throw new InvalidOperationException("Leak D2XX pause task not returned")))
             .GetAwaiter()
             .GetResult();
-        Assert(!pauseBoard.IsScanning && pauseBoard.Commands.Contains("STOP"),
-            "Leak stage pauses D2XX scan so pressure activity cannot invalidate continuity PASS");
+        Assert(pauseBoard.IsScanning && !pauseBoard.Commands.Contains("STOP"),
+            "Leak COM keeps D2XX production scanning independently");
 
         TestViewModel finalPassPauseVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -3573,7 +3574,7 @@ internal static partial class Program
             ?? throw new InvalidOperationException("Fault-grid refresh method not found");
         refreshLeakFaults.Invoke(retestArmVm, null);
         Assert(retestArmVm.Faults.Count == 0,
-            "The lower continuity table stays empty while Leak is running or awaiting RET reconnection");
+            "An empty table fixture stays empty when no product connection exists during Leak retry");
         typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(retestArmVm, new WaterProofModelSettings { Enabled = false });
         armLeakRetest.Invoke(retestArmVm, null);

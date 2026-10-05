@@ -7,3 +7,5 @@
 - A no-RET connector with no expected connection to another connector is a configuration error. No new channel mapping or topology is inferred.
 - Leak-only retest waits until all qualifying edges of the no-RET connector are absent before accepting a reconnect. RET connectors retain their existing removal rule. Full product removal remains independently required before re-arming production.
 - Channels execute individually through the existing Leak COM lifecycle; a passed channel is not repeated in the same cycle.
+- Leak COM runs independently while D2XX keeps scanning. The continuity table remains live during initial Leak and retries; opening Leak does not clear its rows.
+- A failed channel waits for removal and refitting of its configured connector only. Other connectors can remain fitted, and passed channels are retained. Final production PASS still requires all configured Leak channels and full continuity to pass.
