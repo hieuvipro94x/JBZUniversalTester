@@ -81,6 +81,7 @@ internal static partial class Program
             ("Leak coalescing preserves PRESS baseline and rejects stale progress", LeakLifecycleTests.CoalescedProgress),
             ("D2XX suspended reader waits without polling and wakes on resume", LeakLifecycleTests.SuspendedReader),
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
+            ("Shared Master settings and completion return to installation", TestGlobalMasterConfigurationAndCompletion),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),

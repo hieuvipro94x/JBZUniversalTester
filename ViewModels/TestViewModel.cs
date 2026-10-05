@@ -9000,6 +9000,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _engine.SetFrameProcessingEnabled(true);
         RefreshFaults();
 
+        SetProductionRuntimeState(ProductionRuntimeState.WaitingForProduct,
+            reason: "MASTER_COMPLETED");
+        SetProductionPresentationMode(ProductionPresentationMode.Waiting,
+            frameSequence: 0, reason: "MASTER_COMPLETED");
         ResetProductPresentationCycle();
         State = "LẮP SẢN PHẨM";
         MasterStatus = "MASTER HOÀN TẤT • PRODUCTION ENABLED";

@@ -46,7 +46,7 @@ public sealed class ProductionSettings
 
     /// <summary>
     /// Số điểm lỗi dây duy nhất phải phát hiện trên MASTER NG. Giá trị này là
-    /// fallback/default; cấu hình theo từng model nằm trong MasterFaultCountsByModel.
+    /// dùng chung cho tất cả mã hàng; 0 tắt kiểm tra Master trên toàn ứng dụng.
     /// </summary>
     public int MasterFaultRequiredCount { get; set; } = 2;
     public MasterSampleSelection MasterSelectedFaultSamples { get; set; } = MasterSampleSelection.All;
@@ -59,8 +59,8 @@ public sealed class ProductionSettings
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Cấu hình Số lỗi Master theo mã hàng/model. Key ưu tiên PartNumber; nếu THT
-    /// chưa có PartNumber thì dùng tên model/tên file.
+    /// Cấu hình cũ theo mã hàng, giữ để đọc/ghi tương thích. Không còn quyết định
+    /// yêu cầu Master; runtime dùng cấu hình chung MasterFaultRequiredCount.
     /// </summary>
     public Dictionary<string, int> MasterFaultCountsByModel { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);

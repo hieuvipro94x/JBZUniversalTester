@@ -1,11 +1,11 @@
 # Lựa chọn mẫu Master đầu ca
 
-Trong ProductionSettingsPage, bật **KIỂM TRA MẪU ĐẦU CA** theo mã hàng/model và nhập hai giá trị độc lập:
+Trong ProductionSettingsPage, bật **KIỂM TRA MẪU ĐẦU CA** dùng chung cho tất cả mã hàng và nhập hai giá trị độc lập:
 
 - **Số điểm sai dây**: số cạnh sai dây duy nhất đang xuất hiện đồng thời, ví dụ 2 hoặc 4. Hai hướng của cùng cạnh IO chỉ tính một điểm. Lỗi mất ở frame hiện tại được bỏ khỏi bộ đếm/bảng; không cộng dồn lỗi đã biến mất.
 - **Số điểm đứt dây**: số quan hệ dây hở yêu cầu chính xác, mặc định 1. Ví dụ model 5 dây, yêu cầu đứt 1: chỉ mẫu 4/5 kết nối đúng được chấp nhận; 5/5 và 3/5 không đạt bài kiểm tra này.
 
-Khi bật Master, **Mẫu đạt luôn bắt buộc**. Chọn một hoặc nhiều mẫu NG trong cài đặt theo mã hàng: Sai dây, Chập mạch, Tuột tuýt/đứt dây. Phần mềm giữ thứ tự sau và bỏ qua những mẫu NG không chọn:
+Khi bật Master, **Mẫu đạt luôn bắt buộc**. Chọn một hoặc nhiều mẫu NG trong cài đặt chung: Sai dây, Chập mạch, Tuột tuýt/đứt dây. Phần mềm giữ thứ tự sau và bỏ qua những mẫu NG không chọn:
 
 1. Mẫu đạt.
 2. Mẫu sai dây.
@@ -27,10 +27,12 @@ Trong luồng Master, một cầu nối giữa các mạng THT có kết nối g
 - Ô trạng thái hiển thị KHÔNG ĐẠT khi Master có lỗi thực thi/kiểm tra, và hiển thị thao tác Leak khi mẫu đạt chạy Leak hoặc yêu cầu tháo/lắp connector. Di chuột vào ô trạng thái để xem thông báo chi tiết.
 - Kiểm tra bo và relay không thay thế chạy đủ chuỗi mẫu thật; làm theo `MASTER_VALIDATION_V2026.09.155.md` và giữ log máy sản xuất.
 
-Ngày sản xuất bắt đầu lúc **07:00 giờ máy**. Mã hàng bật Master phải kiểm tra lại mẫu đạt và những mẫu NG đã chọn khi sang ngày sản xuất mới, đổi mã hàng hoặc mở lại phần mềm. Mốc 08:00 không bỏ qua Master chưa hoàn tất. Chu kỳ sản phẩm đang chạy được hoàn tất và xác nhận tháo trước khi chuyển sang Master. Mã hàng tắt Master bỏ qua cả chuỗi; giá trị số điểm sai dây bằng 0 vẫn tương đương tắt Master.
+Ngày sản xuất bắt đầu lúc **07:00 giờ máy**. Khi bật Master, mọi mã hàng phải kiểm tra lại mẫu đạt và những mẫu NG đã chọn khi sang ngày sản xuất mới, đổi mã hàng hoặc mở lại phần mềm. Mốc 08:00 không bỏ qua Master chưa hoàn tất. Chu kỳ sản phẩm đang chạy được hoàn tất và xác nhận tháo trước khi chuyển sang Master. Khi tắt Master, mọi mã hàng bỏ qua cả chuỗi; giá trị số điểm sai dây bằng 0 vẫn tương đương tắt Master.
 
 ## Cấu hình và lịch sử
 
-Số điểm sai dây dùng `MasterFaultRequiredCount` / `MasterFault.<model-key>`; số điểm đứt dây dùng `MasterOpenFaultRequiredCount` / `MasterOpenFault.<model-key>`. Lựa chọn mẫu NG dùng MasterSelectedFaultSamples / MasterSelected.<model-key>. Cấu hình cũ chưa có khóa này mặc định chọn đủ ba loại NG. Các khóa lựa chọn một loại Master cũ được giữ tương thích khi đọc/ghi CFG nhưng không quyết định chuỗi hiện tại.
+Số điểm sai dây dùng `MasterFaultRequiredCount`; số điểm đứt dây dùng `MasterOpenFaultRequiredCount`. Lựa chọn mẫu NG dùng `MasterSelectedFaultSamples`. Ba giá trị này dùng chung cho toàn bộ mã hàng. Các khóa theo mã hàng cũ `MasterFault.<model-key>`, `MasterOpenFault.<model-key>` và `MasterSelected.<model-key>` vẫn được giữ để đọc/ghi tương thích nhưng không quyết định yêu cầu Master. Tắt ở một trang cài đặt sẽ tắt cho tất cả mã hàng; bật lại sẽ yêu cầu kiểm tra mẫu cho mỗi mã hàng. Kết quả hoàn tất mẫu vẫn thuộc mã hàng đang kiểm tra, không dùng kết quả của mã hàng này để mở sản xuất mã hàng khác.
+
+Sau khi đủ mẫu và xác nhận tháo mẫu cuối, runtime chuyển về `WaitingForProduct`, presentation về `Waiting` và hai vùng trạng thái hiển thị LẮP SẢN PHẨM.
 
 Mỗi mẫu có CycleId và bản ghi lịch sử riêng. Mẫu đạt dùng `MASTER_GOOD`, ba mẫu NG dùng `MASTER_BAD`; `InspectionTrace` ghi ngày sản xuất, mã phiên chung cho cả chuỗi, loại mẫu, số điểm phát hiện/yêu cầu, tỷ lệ kết nối mẫu đứt và kết quả xác nhận. Tháo mẫu chưa đạt cũng ghi lần kiểm tra không đạt. Kết quả được commit SQLite trước khi mở JIG; lỗi lưu dữ liệu không mở Production. Không thay đổi schema, không sửa hoặc xóa lịch sử cũ.

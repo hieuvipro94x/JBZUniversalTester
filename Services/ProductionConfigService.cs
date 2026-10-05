@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -346,86 +346,50 @@ public static class ProductionConfigService
         ArgumentNullException.ThrowIfNull(model);
         Normalize(settings);
 
-        string primaryKey = GetMasterModelKey(model);
-        if (settings.MasterFaultCountsByModel.TryGetValue(primaryKey, out int count))
-            return Math.Clamp(count, 0, 99);
-
-        string pathKey = GetMasterModelKeyFromPath(model.SourcePath);
-        if (settings.MasterFaultCountsByModel.TryGetValue(pathKey, out count))
-            return Math.Clamp(count, 0, 99);
-
-        if (!string.IsNullOrWhiteSpace(model.ModelName) &&
-            settings.MasterFaultCountsByModel.TryGetValue(model.ModelName.Trim(), out count))
-            return Math.Clamp(count, 0, 99);
-
         return settings.MasterFaultRequiredCount;
     }
 
+    // Path/model overloads remain compatible with old callers and configuration
+    // files; Master requirements now come from the shared application settings.
     public static MasterSampleType GetMasterSampleTypeForPath(ProductionSettings settings, string? path) =>
-        settings.MasterSampleTypesByModel.TryGetValue(GetMasterModelKeyFromPath(path), out var type)
-            ? type : settings.MasterSampleType;
+        settings.MasterSampleType;
 
     public static MasterSampleType GetMasterSampleType(ProductionSettings settings, ProductModel model) =>
-        settings.MasterSampleTypesByModel.TryGetValue(GetMasterModelKey(model), out var type)
-            ? type : GetMasterSampleTypeForPath(settings, model.SourcePath);
+        settings.MasterSampleType;
 
-    public static int GetMasterSampleRequiredCount(ProductionSettings settings, ProductModel model)
-    {
-        // All three NG samples are required. This setting is the wrong-wiring point count;
-        // short/open samples each require one fault and 0 still disables the whole sequence.
-        return GetMasterFaultRequiredCount(settings, model);
-    }
+    public static int GetMasterSampleRequiredCount(ProductionSettings settings, ProductModel model) =>
+        GetMasterFaultRequiredCount(settings, model);
 
     public static MasterSampleSelection GetMasterSelectedFaultSamplesForPath(ProductionSettings settings, string? path) =>
-        settings.MasterSelectedFaultSamplesByModel.TryGetValue(GetMasterModelKeyFromPath(path), out var selected)
-            ? selected : settings.MasterSelectedFaultSamples;
+        settings.MasterSelectedFaultSamples & MasterSampleSelection.All;
 
     public static MasterSampleSelection GetMasterSelectedFaultSamples(ProductionSettings settings, ProductModel model) =>
-        settings.MasterSelectedFaultSamplesByModel.TryGetValue(GetMasterModelKey(model), out var selected)
-            ? selected : GetMasterSelectedFaultSamplesForPath(settings, model.SourcePath);
+        GetMasterSelectedFaultSamplesForPath(settings, model.SourcePath);
 
-    public static void SetMasterSelectedFaultSamplesForPath(ProductionSettings settings, string? path, MasterSampleSelection selected)
-    {
-        string key = GetMasterModelKeyFromPath(path);
-        if (key == "DEFAULT") settings.MasterSelectedFaultSamples = selected & MasterSampleSelection.All;
-        else settings.MasterSelectedFaultSamplesByModel[key] = selected & MasterSampleSelection.All;
-    }
+    public static void SetMasterSelectedFaultSamplesForPath(ProductionSettings settings, string? path, MasterSampleSelection selected) =>
+        settings.MasterSelectedFaultSamples = selected & MasterSampleSelection.All;
 
     public static int GetMasterOpenFaultRequiredCountForPath(ProductionSettings settings, string? path) =>
-        settings.MasterOpenFaultCountsByModel.TryGetValue(GetMasterModelKeyFromPath(path), out int count)
-            ? Math.Clamp(count, 1, 99) : Math.Clamp(settings.MasterOpenFaultRequiredCount, 1, 99);
+        Math.Clamp(settings.MasterOpenFaultRequiredCount, 1, 99);
 
     public static int GetMasterOpenFaultRequiredCount(ProductionSettings settings, ProductModel model) =>
-        settings.MasterOpenFaultCountsByModel.TryGetValue(GetMasterModelKey(model), out int count)
-            ? Math.Clamp(count, 1, 99) : GetMasterOpenFaultRequiredCountForPath(settings, model.SourcePath);
+        GetMasterOpenFaultRequiredCountForPath(settings, model.SourcePath);
 
-    public static void SetMasterOpenFaultRequiredCountForPath(ProductionSettings settings, string? path, int count)
-    {
-        string key = GetMasterModelKeyFromPath(path);
-        if (key == "DEFAULT") settings.MasterOpenFaultRequiredCount = Math.Clamp(count, 1, 99);
-        else settings.MasterOpenFaultCountsByModel[key] = Math.Clamp(count, 1, 99);
-    }
+    public static void SetMasterOpenFaultRequiredCountForPath(ProductionSettings settings, string? path, int count) =>
+        settings.MasterOpenFaultRequiredCount = Math.Clamp(count, 1, 99);
 
     public static int GetMasterFaultRequiredCountForPath(ProductionSettings settings, string? path)
     {
         ArgumentNullException.ThrowIfNull(settings);
         Normalize(settings);
-        string key = GetMasterModelKeyFromPath(path);
-        return settings.MasterFaultCountsByModel.TryGetValue(key, out int count)
-            ? Math.Clamp(count, 0, 99)
-            : settings.MasterFaultRequiredCount;
+        return settings.MasterFaultRequiredCount;
     }
 
     public static void SetMasterFaultRequiredCountForPath(ProductionSettings settings, string? path, int count)
     {
         ArgumentNullException.ThrowIfNull(settings);
         Normalize(settings);
-        int normalized = Math.Clamp(count, 0, 99);
-        string key = GetMasterModelKeyFromPath(path);
-        if (string.Equals(key, "DEFAULT", StringComparison.OrdinalIgnoreCase))
-            settings.MasterFaultRequiredCount = normalized;
-        else
-            settings.MasterFaultCountsByModel[key] = normalized;
+        settings.MasterFaultRequiredCount = Math.Clamp(count, 0, 99);
     }
 
     public static WaterProofModelSettings GetWaterProofProfileForPath(
