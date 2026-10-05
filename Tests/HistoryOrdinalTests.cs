@@ -8,6 +8,75 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestMasterHistorySessionPresentation()
+    {
+        string session = "22e8a1fa11fd4b5aa5cd032d576117fa";
+        foreach (string inspection in new[] { HistoryInspectionType.MasterGood, HistoryInspectionType.MasterBad })
+        {
+            string raw = "09:10:00 회로검사:PASS | Ngày sản xuất 2026-10-05 | Phiên " + session +
+                         " | Mẫu ĐẠT | Xác nhận PASS";
+            var row = new TestHistoryRecord { InspectionType = inspection, InspectionTrace = raw, Passed = true };
+            Assert(!row.ExportTestLogText.Contains(session) && !row.ExportTestLogText.Contains("Phiên ") &&
+                   row.ExportTestLogText.Contains("생산일 2026-10-05") &&
+                   row.ExportTestLogText.Contains("정상 마스터 | 확인 PASS") && row.InspectionTrace == raw,
+                "Master display/export omits technical session IDs without rewriting stored audit trace");
+            row.InspectionType = HistoryInspectionType.Product;
+            Assert(row.ExportTestLogText.Contains(session), "Production trace formatting is unchanged");
+        }
+        var legacy = new TestHistoryRecord
+        {
+            InspectionType = HistoryInspectionType.MasterBad,
+            InspectionTrace = "Phiên không xác định | Mẫu NG"
+        };
+        Assert(legacy.ExportTestLogText.Contains(legacy.InspectionTrace),
+            "Unrecognized legacy text is preserved rather than removed as a session ID");
+        foreach (MasterSampleType type in MasterSampleCatalog.RequiredFaultSamples)
+        foreach (bool passed in new[] { true, false })
+        {
+            string trace = MasterSampleCatalog.AuditTrace(false, type, 4, 3, passed,
+                new DateOnly(2026, 10, 5), session) +
+                " | MẪU YÊU CẦU: ĐẠT → SAI DÂY → CHẬP MẠCH → TUỘT TUÝT / ĐỨT DÂY | KẾT NỐI 3/4";
+            string korean = KoreanHistoryFormatter.FormatMasterTrace(trace);
+            Assert(korean.Contains("불량 마스터") && korean.Contains("검출 수 3/4") &&
+                   korean.Contains(passed ? "확인 합격" : "확인 불합격") &&
+                   korean.Contains("필수 샘플: 정상 → 오배선 → 단락 → 핀 빠짐 / 단선") &&
+                   korean.Contains("연결 3/4") && !korean.Contains(session) &&
+                   !korean.Any(character => character is >= '\u00c0' and <= '\u024f' or >= '\u1e00' and <= '\u1eff'),
+                "Every NG sample and validation result exports Korean audit labels and intact ratios");
+        }
+        string root = Path.Combine(Path.GetTempPath(), "JBZ-master-korean-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            TestHistoryRecord[] rows = new[] { HistoryInspectionType.MasterGood, HistoryInspectionType.MasterBad }
+                .Select(inspection => new TestHistoryRecord
+                {
+                    Started = new DateTime(2026, 10, 5, 9, 0, 0),
+                    Finished = new DateTime(2026, 10, 5, 9, 0, 1),
+                    InspectionType = inspection, Passed = true,
+                    InspectionTrace = MasterSampleCatalog.AuditTrace(inspection == HistoryInspectionType.MasterGood,
+                        MasterSampleType.WrongWiring, 1, 1, true, new DateOnly(2026, 10, 5), session)
+                }).ToArray();
+            string csv = Path.Combine(root, "master.csv");
+            string xlsx = Path.Combine(root, "master.xlsx");
+            HistoryExportService.ExportCsv(csv, rows);
+            HistoryExportService.ExportXlsx(xlsx, rows);
+            string csvText = File.ReadAllText(csv, System.Text.Encoding.GetEncoding(949));
+            using var zip = System.IO.Compression.ZipFile.OpenRead(xlsx);
+            using var reader = new StreamReader(zip.GetEntry("xl/worksheets/sheet1.xml")!.Open());
+            string xml = reader.ReadToEnd();
+            foreach (string exported in new[] { csvText, xml })
+                Assert(exported.Contains("정상 마스터") && exported.Contains("불량 마스터") &&
+                       exported.Contains("확인 합격") && !exported.Contains(session) &&
+                       !exported.Contains("Mẫu") && !exported.Contains("ĐẠT") && !exported.Contains("Phiên"),
+                    "Actual CSV and XLSX Master exports contain Korean labels without Vietnamese or session IDs");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static void TestHistoryLotBatchOrdinals()
     {
         string root = Path.Combine(Path.GetTempPath(), "JBZ-ordinal-" + Guid.NewGuid().ToString("N"));

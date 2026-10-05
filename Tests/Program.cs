@@ -85,6 +85,7 @@ internal static partial class Program
             ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
             ("History PASS/FAIL ordinals restart for each product LOT batch", TestHistoryLotBatchOrdinals),
+            ("Master History hides session identifiers without changing audit data", TestMasterHistorySessionPresentation),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),

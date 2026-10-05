@@ -127,6 +127,8 @@ public sealed class TestHistoryRecord
                 .Append(" 검사시작 ");
 
             string trace = InspectionTrace?.Trim() ?? string.Empty;
+            if (IsMasterRecord && trace.Length > 0)
+                trace = KoreanHistoryFormatter.FormatMasterTrace(trace);
             if (trace.Length == 0)
             {
                 bool continuityPassed = Passed ||

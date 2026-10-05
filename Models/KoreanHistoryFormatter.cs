@@ -10,6 +10,36 @@ public static class KoreanHistoryFormatter
 {
     private const int MaximumExportedFaults = 3;
 
+    public static string FormatMasterTrace(string trace)
+    {
+        string visible = string.Join(" | ", trace.Split('|')
+            .Select(part => part.Trim())
+            .Where(part => !(part.StartsWith("Phiên ", StringComparison.Ordinal) &&
+                             Guid.TryParse(part[6..].Trim(), out _))));
+        // Translate the known persisted Master audit fields without changing the DB.
+        (string Source, string Korean)[] fields =
+        [
+            ("MASTER ĐẦU CA", "작업 시작 전 마스터 검사"),
+            ("Ngày sản xuất", "생산일"),
+            ("MẪU YÊU CẦU:", "필수 샘플:"),
+            ("Mẫu NG -", "불량 마스터 -"),
+            ("Mẫu ĐẠT", "정상 마스터"),
+            ("Số điểm", "검출 수"),
+            ("Xác nhận KHÔNG ĐẠT", "확인 불합격"),
+            ("Xác nhận ĐẠT", "확인 합격"),
+            ("Xác nhận", "확인"),
+            ("TUỘT TUÝT / ĐỨT DÂY", "핀 빠짐 / 단선"),
+            ("SAI DÂY", "오배선"),
+            ("CHẬP MẠCH", "단락"),
+            ("KẾT NỐI", "연결"),
+            ("KHÔNG ĐẠT", "불합격"),
+            ("ĐẠT", "정상")
+        ];
+        foreach ((string source, string korean) in fields)
+            visible = visible.Replace(source, korean, StringComparison.Ordinal);
+        return visible;
+    }
+
     public static string FormatFaults(TestHistoryRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
