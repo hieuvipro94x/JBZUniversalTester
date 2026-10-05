@@ -1329,9 +1329,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public bool HasProductOnTestTable =>
         IsProductRemovalPending ||
-        _productDetectedThisCycle ||
         _engine.HasProductActivity ||
-        MasterState is MasterSequenceState.TestingGoodMaster or MasterSequenceState.TestingBadMaster;
+        _engine.GetProductEvidenceSnapshot().ValidProductEvidence ||
+        // Ejection resets the engine snapshot before the sample is removed.
+        // Keep its physical-presence latch until real scan frames confirm removal.
+        ((MasterState is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster) &&
+         Volatile.Read(ref _masterRemovalConfirmed) == 0);
 
     private void SetProductRemovalPending(bool pending)
     {

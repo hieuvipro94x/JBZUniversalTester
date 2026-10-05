@@ -7,6 +7,66 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestMasterWaitingReturnToMain()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        ProductModel model = Model(("PAIR", new[] { 1, 2 }));
+        foreach (MasterSequenceState waiting in new[]
+                 { MasterSequenceState.WaitingGoodMaster, MasterSequenceState.WaitingBadMaster })
+        {
+            TestViewModel vm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
+            LoadReadyModel(vm, model);
+            typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(vm, waiting);
+            // A previous production cycle must not masquerade as a new Master sample.
+            typeof(TestViewModel).GetField("_productDetectedThisCycle", flags)!.SetValue(vm, true);
+            Assert(!vm.HasProductOnTestTable && vm.StopViewAsync().GetAwaiter().GetResult(),
+                "Waiting for an uninstalled Master sample allows Back despite stale cycle ownership");
+            Assert(!vm.MasterApproved, "Leaving the empty Master screen does not approve samples");
+        }
+
+        TestViewModel active = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
+        LoadReadyModel(active, model);
+        var engine = (TestEngine)typeof(TestViewModel).GetField("_engine", flags)!.GetValue(active)!;
+        engine.SetFrameProcessingEnabled(true);
+        engine.ProcessFrame(FrameSeq(100, (1, new[] { 2 })), false);
+        engine.ProcessFrame(FrameSeq(101, (1, new[] { 2 })), false);
+        typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(active,
+            MasterSequenceState.TestingGoodMaster);
+        Assert(active.HasProductOnTestTable && !active.StopViewAsync().GetAwaiter().GetResult(),
+            "Physically connected Master blocks Back");
+        engine.ProcessFrame(FrameSeq(102), false);
+        Assert(active.HasProductOnTestTable,
+            "One empty frame does not discard confirmed Master presence");
+        engine.ProcessFrame(FrameSeq(103), false);
+        Assert(!active.HasProductOnTestTable && active.StopViewAsync().GetAwaiter().GetResult(),
+            "Confirmed removal allows Back even before the coalesced Master UI transition");
+        Assert(!active.MasterApproved, "Removal/Back cannot complete the Master gate");
+
+        foreach (MasterSequenceState ejecting in new[]
+                 { MasterSequenceState.EjectingGoodMaster, MasterSequenceState.EjectingBadMaster })
+        {
+            typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(active, ejecting);
+            Assert(active.HasProductOnTestTable && !active.StopViewAsync().GetAwaiter().GetResult(),
+                "Unconfirmed physical removal remains interlocked after engine reset");
+            typeof(TestViewModel).GetField("_masterRemovalConfirmed", flags)!.SetValue(active, 1);
+            Assert(!active.HasProductOnTestTable && active.StopViewAsync().GetAwaiter().GetResult(),
+                "Confirmed empty table permits Back during the deferred ejection UI state");
+            typeof(TestViewModel).GetField("_masterRemovalConfirmed", flags)!.SetValue(active, 0);
+        }
+        typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(active,
+            MasterSequenceState.WaitingGoodMaster);
+        typeof(TestViewModel).GetField("_masterEjectInProgress", flags)!.SetValue(active, 1);
+        Assert(!active.HasProductOnTestTable && active.StopViewAsync().GetAwaiter().GetResult(),
+            "Master relay work alone cannot report a product on an empty table");
+        typeof(TestViewModel).GetField("_masterEjectInProgress", flags)!.SetValue(active, 0);
+        typeof(TestViewModel).GetField("_masterWaterProofSequenceActive", flags)!.SetValue(active, 1);
+        Assert(!active.HasProductOnTestTable && active.StopViewAsync().GetAwaiter().GetResult(),
+            "Master Leak work alone cannot report a product on an empty table");
+        typeof(TestViewModel).GetField("_masterWaterProofSequenceActive", flags)!.SetValue(active, 0);
+        typeof(TestViewModel).GetField("_productRemovalPending", flags)!.SetValue(active, 1);
+        Assert(active.HasProductOnTestTable, "An explicit ProductRemoved interlock is preserved");
+    }
+
     private static void TestGlobalMasterConfigurationAndCompletion()
     {
         ProductModel first = Model(("PAIR", new[] { 1, 2 }));

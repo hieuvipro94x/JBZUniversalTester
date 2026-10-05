@@ -35,4 +35,6 @@ Số điểm sai dây dùng `MasterFaultRequiredCount`; số điểm đứt dây
 
 Sau khi đủ mẫu và xác nhận tháo mẫu cuối, runtime chuyển về `WaitingForProduct`, presentation về `Waiting` và hai vùng trạng thái hiển thị LẮP SẢN PHẨM.
 
+Khi bàn test trống, nút TRỞ VỀ được phép hoạt động ở mọi bước; việc trở về không xác nhận hoàn tất Master. Chỉ chặn khi còn bằng chứng kết nối sản phẩm hoặc chưa xác nhận tháo hoàn toàn bằng frame thật. Trạng thái kiểm tra, relay hoặc Leak đang chạy không tự được coi là có sản phẩm; trở về hủy luồng hiện tại và giữ scan nền.
+
 Mỗi mẫu có CycleId và bản ghi lịch sử riêng. Mẫu đạt dùng `MASTER_GOOD`, ba mẫu NG dùng `MASTER_BAD`; `InspectionTrace` ghi ngày sản xuất, mã phiên chung cho cả chuỗi, loại mẫu, số điểm phát hiện/yêu cầu, tỷ lệ kết nối mẫu đứt và kết quả xác nhận. Tháo mẫu chưa đạt cũng ghi lần kiểm tra không đạt. Kết quả được commit SQLite trước khi mở JIG; lỗi lưu dữ liệu không mở Production. Không thay đổi schema, không sửa hoặc xóa lịch sử cũ.

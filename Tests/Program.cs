@@ -82,6 +82,7 @@ internal static partial class Program
             ("D2XX suspended reader waits without polling and wakes on resume", LeakLifecycleTests.SuspendedReader),
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
             ("Shared Master settings and completion return to installation", TestGlobalMasterConfigurationAndCompletion),
+            ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
