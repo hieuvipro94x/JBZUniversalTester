@@ -7750,6 +7750,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         _productionSettings.AutoMasterSequence = true;
+        _masterSelectedFaultSamples = ProductionConfigService.GetMasterSelectedFaultSamples(_productionSettings, _model);
+        _requiredMasterFaultSamples = MasterSampleCatalog.SelectedFaultSamples(_masterSelectedFaultSamples);
+        AddLog($"MASTER SELECTED SAMPLES mask={(int)_masterSelectedFaultSamples}: ĐẠT → " +
+            string.Join(" → ", _requiredMasterFaultSamples.Select(MasterSampleCatalog.Name)));
         _cycleActive = false;
         _productDetectedThisCycle = false;
         Interlocked.Exchange(ref _productStartSoundPlayed, 0);
@@ -7960,7 +7964,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             !_engine.LastFrameValid || !IsRuntimeContext(RuntimeMode.Production, generation) ||
             MasterApproved ||
             MasterState != MasterSequenceState.TestingBadMaster ||
-            _masterFaultCollectionLocked)
+            _masterFaultCollectionLocked ||
+            !_requiredMasterFaultSamples.Contains(_masterSampleType))
         {
             return;
         }
@@ -8577,7 +8582,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         if (!_masterGoodVerified || MasterApproved)
             return;
-        _masterSampleType = _requiredMasterFaultSamples.First(type => !_validatedMasterFaultSamples.Contains(type));
+        MasterSampleType[] remaining = _requiredMasterFaultSamples
+            .Where(type => !_validatedMasterFaultSamples.Contains(type)).ToArray();
+        if (remaining.Length == 0)
+        {
+            CompleteMasterValidation();
+            return;
+        }
+        _masterSampleType = remaining[0];
         _masterRequiredFaultCount = _masterSampleType switch
         {
             MasterSampleType.WrongWiring => _masterWrongWiringRequiredCount,

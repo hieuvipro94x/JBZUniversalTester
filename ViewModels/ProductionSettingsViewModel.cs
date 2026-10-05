@@ -32,6 +32,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private void SetMasterSampleRequired(MasterSampleSelection flag, bool required)
     {
         _masterSelectedFaultSamples = required ? _masterSelectedFaultSamples | flag : _masterSelectedFaultSamples & ~flag;
+        Settings.MasterSelectedFaultSamples = _masterSelectedFaultSamples & MasterSampleSelection.All;
         Raise(nameof(MasterSelectedFaultSamples));
         Raise(nameof(MasterWrongWiringRequired));
         Raise(nameof(MasterShortCircuitRequired));

@@ -7,6 +7,31 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestMasterSelectedSamplesOnly()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        foreach (MasterSampleSelection selection in new[] { MasterSampleSelection.WrongWiring,
+                     MasterSampleSelection.ShortCircuit, MasterSampleSelection.OpenCircuit,
+                     MasterSampleSelection.WrongWiring | MasterSampleSelection.OpenCircuit })
+        {
+            var settings = new ProductionSettings { MasterFaultRequiredCount = 1, MasterSelectedFaultSamples = selection };
+            TestViewModel vm = CreateTestViewModel(settings);
+            LoadReadyModel(vm, Model(("PAIR", new[] { 1, 2 })));
+            typeof(TestViewModel).GetField("_masterGoodVerified", flags)!.SetValue(vm, true);
+            var validated = (HashSet<MasterSampleType>)typeof(TestViewModel).GetField("_validatedMasterFaultSamples", flags)!.GetValue(vm)!;
+            MethodInfo transition = typeof(TestViewModel).GetMethod("TransitionToBadMaster", flags)!;
+            foreach (MasterSampleType expected in MasterSampleCatalog.SelectedFaultSamples(selection))
+            {
+                transition.Invoke(vm, null);
+                Assert((MasterSampleType)typeof(TestViewModel).GetField("_masterSampleType", flags)!.GetValue(vm)! == expected,
+                    "Master transitions only to the next explicitly selected sample");
+                Assert(vm.MasterSampleRequestText.Contains(MasterSampleCatalog.Name(expected)),
+                    "Operator prompt follows the selected sample");
+                validated.Add(expected);
+            }
+        }
+    }
+
     private static void TestMasterFirstConnectionPresentation()
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
