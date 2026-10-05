@@ -88,6 +88,7 @@ internal static partial class Program
             ("Master History hides session identifiers without changing audit data", TestMasterHistorySessionPresentation),
             ("Master transitions only through explicitly selected NG samples", TestMasterSelectedSamplesOnly),
             ("Committed PASS rejects stale installation rows until actual removal", TestCommittedPassRejectsInstallationRows),
+            ("Leak connector without RET uses only expected IO edges to another connector", TestLeakWithoutRetTrigger),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
@@ -3590,9 +3591,9 @@ internal static partial class Program
             leakGateStart,
             StringComparison.Ordinal);
         string leakGateSource = testViewModelSource[leakGateStart..leakGateEnd];
-        Assert(leakGateSource.Contains("HasConnectedRetWire", StringComparison.Ordinal) &&
+        Assert(leakGateSource.Contains("HasWaterProofConnectorTrigger", StringComparison.Ordinal) &&
                !leakGateSource.Contains("HasConnectorActivity", StringComparison.Ordinal),
-            "Production Leak gate requires a correctly connected RET-number wire, not arbitrary connector activity");
+            "Production Leak gate requires its topology-based trigger, not arbitrary connector activity");
         int retestMethodStart = testViewModelSource.IndexOf(
             "private async Task RunWaterProofRetestOnlyAsync",
             StringComparison.Ordinal);

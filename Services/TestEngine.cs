@@ -2922,6 +2922,68 @@ public sealed class TestEngine : IDisposable
         }
     }
 
+    public bool TryGetLeakConnectorTriggerState(
+        string? connectorId,
+        out bool connected,
+        out bool disconnected)
+    {
+        connected = disconnected = false;
+        if (string.IsNullOrWhiteSpace(connectorId))
+            return false;
+
+        lock (_gate)
+        {
+            if (_model is null)
+                return false;
+
+            string selected = connectorId.Trim();
+            if (!_model.Connectors.Any(connector => string.Equals(
+                    connector.ConnectorId, selected, StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            bool HasRetTopology(string id) => _model.Nets.Any(net =>
+                IsEligibleProductionNet(net) && IsRetWireName(net.Name) &&
+                net.Pins.Any(pin => string.Equals(pin.Connector, id, StringComparison.OrdinalIgnoreCase)));
+
+            if (HasRetTopology(selected))
+            {
+                connected = HasConnectedRetWire(selected);
+                disconnected = IsRetWireDisconnected(selected);
+                return true;
+            }
+
+            // Without RET, only a declared THT edge to another connector can
+            // prove installation. Arbitrary activity cannot.
+            var anchors = _model.Connectors.Select(connector => connector.ConnectorId)
+                .Where(id => !string.Equals(id, selected, StringComparison.OrdinalIgnoreCase))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            bool found = false;
+            bool suppressedConnection = false;
+            foreach (WireNet net in _model.Nets.Where(IsEligibleProductionNet))
+            {
+                foreach (PinRecord pin in net.Pins.Where(pin => string.Equals(
+                             pin.Connector, selected, StringComparison.OrdinalIgnoreCase)))
+                {
+                    foreach (PinRecord peer in net.Pins.Where(pin => anchors.Contains(pin.Connector)))
+                    {
+                        if (pin.IoNumber <= 0 || peer.IoNumber <= 0 || pin.IoNumber == peer.IoNumber ||
+                            _model.IgnoredIo.Contains(pin.IoNumber) || _model.IgnoredIo.Contains(peer.IoNumber))
+                            continue;
+
+                        found = true;
+                        bool edgePresent = HasElectricalEdge(_currentConnections, pin.IoNumber, peer.IoNumber);
+                        bool productEdge = IsProductConnectivityEdgeUnsafe(_model, pin.IoNumber, peer.IoNumber);
+                        connected |= productEdge && edgePresent;
+                        suppressedConnection |= !productEdge && edgePresent;
+                    }
+                }
+            }
+
+            disconnected = found && !connected && !suppressedConnection;
+            return found;
+        }
+    }
+
     private static bool IsRetWireName(string? wireName)
     {
         if (string.IsNullOrWhiteSpace(wireName))

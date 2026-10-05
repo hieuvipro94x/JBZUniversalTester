@@ -8484,7 +8484,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 await StartProductionScanAndVerifyFrameAsync(ct, $"{masterLabel.Replace(' ', '_')}_LEAK_RETRY");
 
                 while (IsMasterWaterProofContext(masterModel, generation, expectedState) &&
-                       !connectorIds.All(_engine.IsRetWireDisconnected))
+                       !connectorIds.All(IsWaterProofConnectorTriggerDisconnected))
                 {
                     await Task.Delay(50, ct);
                 }
@@ -8495,7 +8495,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 State = $"{masterLabel} - LẮP LẠI CONNECTOR LEAK {string.Join(", ", connectorIds)}";
                 MasterStatus = State;
                 while (IsMasterWaterProofContext(masterModel, generation, expectedState) &&
-                       !connectorIds.All(_engine.HasConnectedRetWire))
+                       !connectorIds.All(HasWaterProofConnectorTrigger))
                 {
                     await Task.Delay(50, ct);
                 }
@@ -9524,6 +9524,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
+    private bool HasWaterProofConnectorTrigger(string connectorId) =>
+        _engine.TryGetLeakConnectorTriggerState(connectorId,
+            out bool connected, out _) && connected;
+
+    private bool IsWaterProofConnectorTriggerDisconnected(string connectorId) =>
+        _engine.TryGetLeakConnectorTriggerState(connectorId,
+            out _, out bool disconnected) && disconnected;
+
     private bool TryValidateWaterProofConnectorGate(
         ProductModel model,
         out string error,
@@ -9549,9 +9557,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return false;
             }
 
-            if (!_engine.HasConnectedRetWire(connectorId))
+            if (!HasWaterProofConnectorTrigger(connectorId))
             {
-                error = $"LẮP ĐÚNG CẶP DÂY RET QUA CONNECTOR {connectorId} (VÍ DỤ RET1 ↔ RET1).";
+                error = $"CONNECTOR {connectorId}: LẮP ĐÚNG DÂY RET/RT; NẾU KHÔNG CÓ RET, CẦN MỘT CẶP IO ĐÚNG THT NỐI SANG CONNECTOR KHÁC.";
                 return false;
             }
         }
@@ -9576,11 +9584,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         await InvokeUiAsync(() => MessageBox.Show(
             ResolveOperatorDialogOwner(),
-            "Mã hàng đang bật TEST LEAK nhưng file THT không có cặp dây RET/RT hợp lệ " +
-            "qua connector đã chọn.\n\n" +
+            "Connector TEST LEAK cần dây RET/RT, hoặc một cặp IO trong THT " +
+            "nối sang một connector khác.\n\n" +
             error + "\n\n" +
             "Hãy tháo sản phẩm, vào CÀI ĐẶT và tắt TEST LEAK hoặc cấu hình lại " +
-            "file THT/connector RET. Ứng dụng vẫn tiếp tục hoạt động, không cần đóng/mở lại.",
+            "connector/THT. Ứng dụng vẫn tiếp tục hoạt động, không cần đóng/mở lại.",
             "CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ",
             MessageBoxButton.OK,
             MessageBoxImage.Warning));
@@ -9645,7 +9653,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ref _waterProofRetestConnectorState);
         if (current == WaterProofRetestConnectorState.AwaitingConnectorRemoval)
         {
-            bool allDisconnected = connectorIds.All(_engine.IsRetWireDisconnected);
+            bool allDisconnected = connectorIds.All(IsWaterProofConnectorTriggerDisconnected);
             if (!allDisconnected)
                 return;
 
@@ -9657,14 +9665,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 State = "ĐANG KIỂM TRA...";
                 AddLog(
-                    $"[WATERPROOF-RETEST] Đã xác nhận mất cặp RET/RT tại connector {string.Join(", ", connectorIds)}; " +
+                    $"[WATERPROOF-RETEST] Đã xác nhận mất kết nối kích Leak tại connector {string.Join(", ", connectorIds)}; " +
                     "các connector khác giữ nguyên, chờ lắp lại connector Leak.");
             }
             return;
         }
 
         bool configuredLeakConnectorsReconnected =
-            connectorIds.All(_engine.HasConnectedRetWire);
+            connectorIds.All(HasWaterProofConnectorTrigger);
         if (current != WaterProofRetestConnectorState.AwaitingConnectorReconnect ||
             !configuredLeakConnectorsReconnected)
         {
@@ -10001,13 +10009,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 if (connectorId.Length > 0 &&
                     cycleModel.Connectors.Any(connector => string.Equals(
                         connector.ConnectorId, connectorId, StringComparison.OrdinalIgnoreCase)) &&
-                    (_engine.HasConnectedRetWire(connectorId) ||
-                     _engine.IsRetWireDisconnected(connectorId)))
+                    _engine.TryGetLeakConnectorTriggerState(connectorId,
+                        out _, out _))
                 {
                     continue;
                 }
 
-                string error = $"CH{channel}: connector '{connectorId}' không có cặp RET/RT hợp lệ trong THT.";
+                string error = $"CH{channel}: connector '{connectorId}' không có RET/RT hoặc cặp IO nối sang connector khác trong THT.";
                 _ = HandleWaterProofConfigurationErrorAsync(cycleModel, error);
                 return true;
             }
@@ -10025,7 +10033,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         State = "ĐANG KIỂM TRA...";
         CaptureProductTestStartedAt();
         AddLog($"[WATERPROOF] Connector {string.Join(", ", ConfiguredWaterProofConnectorIds(readyProfile))} " +
-               "đã thông RET/RT; bắt đầu Leak trước khi toàn bộ thông mạch hoàn tất.");
+               "đã có kết nối kích Leak hợp lệ; bắt đầu Leak trước khi toàn bộ thông mạch hoàn tất.");
         _ = RunEarlyWaterProofAsync(cycleModel, generation, readyProfile);
         return true;
     }
@@ -10036,7 +10044,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return Enumerable.Range(1, 3).FirstOrDefault(channel =>
             _waterProofProfile.IsChannelEnabled(channel) &&
             (passedMask & (1 << (channel - 1))) == 0 &&
-            _engine.HasConnectedRetWire(_waterProofProfile.ConnectorForChannel(channel)));
+            HasWaterProofConnectorTrigger(_waterProofProfile.ConnectorForChannel(channel)));
     }
 
     private async Task RunEarlyWaterProofAsync(
