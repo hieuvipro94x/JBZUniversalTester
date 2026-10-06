@@ -617,6 +617,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     public void Save()
     {
+        if (Settings.LanBackupEnabled)
+            _ = LanDatabaseBackupService.ValidateDestination(Settings.LanBackupServerIp, Settings.LanBackupShareName);
         Settings.ExpansionCardCount = Math.Clamp(
             Settings.ExpansionCardCount,
             1,

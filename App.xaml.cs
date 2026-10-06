@@ -12,6 +12,10 @@ public partial class App : Application
 {
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
+    private LanDatabaseBackupService? _lanBackup;
+    public string LanBackupStatus => _lanBackup?.Status ?? "Chưa khởi động sao lưu LAN.";
+    public string StationMachineCode => string.IsNullOrEmpty(_lanBackup?.MachineCode)
+        ? "Đang khởi tạo mã máy..." : _lanBackup.MachineCode;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -22,7 +26,7 @@ public partial class App : Application
         if (!_ownsSingleInstanceMutex)
         {
             MessageBox.Show(
-                "JBZ Universal Tester đang chạy. Không thể mở thêm phiên thứ hai vì bo và dữ liệu sản xuất chỉ được phép có một chủ sở hữu.",
+                "Phần mềm đang chạy!.",
                 "JBZ Universal Tester",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -46,6 +50,9 @@ public partial class App : Application
         MainWindow = mainWindow;
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         mainWindow.Show();
+        _lanBackup = new LanDatabaseBackupService(RuntimePaths.DatabaseFile);
+        ProductionConfigService.Saved += _lanBackup.Configure;
+        _lanBackup.Start(productionSettings);
 
         // Defer audio I/O until MainWindow has rendered.
         _ = Dispatcher.BeginInvoke(
@@ -131,6 +138,11 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_lanBackup is not null)
+        {
+            ProductionConfigService.Saved -= _lanBackup.Configure;
+            _lanBackup.Dispose();
+        }
         AsyncFileLogService.Current.Application($"SHUTDOWN exitCode={e.ApplicationExitCode}");
         AppSoundService.Current.Dispose();
 

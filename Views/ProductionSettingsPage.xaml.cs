@@ -37,6 +37,10 @@ public partial class ProductionSettingsPage : UserControl
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
     private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
+    private readonly System.Windows.Threading.DispatcherTimer _lanBackupStatusTimer = new()
+    {
+        Interval = TimeSpan.FromSeconds(1)
+    };
 
     public event Func<object?, EventArgs, Task>? SettingsSaved;
     public event EventHandler? RequestClose;
@@ -66,7 +70,24 @@ public partial class ProductionSettingsPage : UserControl
         SyncCompatibilityFields();
         _savedSettingsSnapshot = CaptureEditableSettingsSnapshot();
         Loaded += ProductionSettingsPage_Loaded;
+        _lanBackupStatusTimer.Tick += LanBackupStatusTimer_Tick;
+        Loaded += LanBackupStatus_Loaded;
+        Unloaded += LanBackupStatus_Unloaded;
     }
+
+    private void LanBackupStatusTimer_Tick(object? sender, EventArgs e)
+    {
+        LanBackupStatusText.Text = (Application.Current as App)?.LanBackupStatus ?? "Sao lưu LAN chưa khởi động.";
+        StationMachineCodeText.Text = (Application.Current as App)?.StationMachineCode ?? "Chưa khởi tạo mã máy.";
+    }
+
+    private void LanBackupStatus_Loaded(object sender, RoutedEventArgs e)
+    {
+        LanBackupStatusTimer_Tick(this, EventArgs.Empty);
+        _lanBackupStatusTimer.Start();
+    }
+
+    private void LanBackupStatus_Unloaded(object sender, RoutedEventArgs e) => _lanBackupStatusTimer.Stop();
 
     private void SettingsScrollViewer_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
@@ -118,6 +139,10 @@ public partial class ProductionSettingsPage : UserControl
             return;
 
         _batchPrintCts?.Cancel();
+        _lanBackupStatusTimer.Stop();
+        _lanBackupStatusTimer.Tick -= LanBackupStatusTimer_Tick;
+        Loaded -= LanBackupStatus_Loaded;
+        Unloaded -= LanBackupStatus_Unloaded;
         if (_savedConfirmationTimer is not null)
         {
             _savedConfirmationTimer.Stop();

@@ -8,6 +8,7 @@ namespace JBZUniversalTester.Services;
 
 public static class ProductionConfigService
 {
+    public static event Action<ProductionSettings>? Saved;
     private static readonly string[] LegacyTimingKeys =
     [
         nameof(ProductionSettings.IoScanIntervalMs),
@@ -110,6 +111,7 @@ public static class ProductionConfigService
         Normalize(settings);
 
         SaveLegacyCfg(settings, ConfigPath);
+        Saved?.Invoke(settings);
     }
 
     /// <summary>
@@ -149,6 +151,9 @@ public static class ProductionConfigService
             $"[MinimumErrorLogValue]{settings.MinimumErrorLogValue}",
             $"[AutoSaveErrors]{Bool(settings.AutoSaveErrors)}",
             $"[EnableSystemLogs]{Bool(settings.EnableSystemLogs)}",
+            $"[LanBackupEnabled]{Bool(settings.LanBackupEnabled)}",
+            $"[LanBackupServerIp]{settings.LanBackupServerIp}",
+            $"[LanBackupShareName]{settings.LanBackupShareName}",
             $"[WiringFaultConfirmationEnabled]{Bool(settings.WiringFaultConfirmationEnabled)}",
             $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
@@ -582,6 +587,9 @@ public static class ProductionConfigService
         settings.MinimumErrorLogValue = I(map, "MinimumErrorLogValue", settings.MinimumErrorLogValue);
         settings.AutoSaveErrors = B(map, "AutoSaveErrors", settings.AutoSaveErrors);
         settings.EnableSystemLogs = B(map, "EnableSystemLogs", settings.EnableSystemLogs);
+        settings.LanBackupEnabled = B(map, "LanBackupEnabled", settings.LanBackupEnabled);
+        settings.LanBackupServerIp = S(map, "LanBackupServerIp", settings.LanBackupServerIp).Trim();
+        settings.LanBackupShareName = S(map, "LanBackupShareName", settings.LanBackupShareName).Trim();
         settings.WiringFaultConfirmationEnabled = B(
             map,
             "WiringFaultConfirmationEnabled",

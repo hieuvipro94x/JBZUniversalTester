@@ -167,8 +167,23 @@ public sealed class TestHistoryStore
         source.BackupDatabase(destination);
         if (!File.Exists(backupPath))
             File.Copy(timestampedBackupPath, backupPath, overwrite: false);
+        HideMigrationBackup(timestampedBackupPath);
+        HideMigrationBackup(backupPath);
         AsyncFileLogService.Current.Application(
             $"DATABASE_MIGRATION_BACKUP schema={version}->{CurrentSchemaVersion} path={timestampedBackupPath}");
+    }
+
+    private static void HideMigrationBackup(string path)
+    {
+        try
+        {
+            File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.Hidden);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            AsyncFileLogService.Current.Application(
+                $"DATABASE_MIGRATION_BACKUP_HIDE_FAILED path={path} error={ex.Message}");
+        }
     }
 
     private static void CreateSchema(SqliteConnection connection, SqliteTransaction transaction)

@@ -291,7 +291,7 @@
                                             <TextBlock Grid.Row="7" Text="Tên thiết bị" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.DeviceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <TextBlock Grid.Row="8" Text="Số thiết bị" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.DeviceNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBox x:Name="StationMachineCodeText" Grid.Row="8" Grid.Column="1" IsReadOnly="True" ToolTip="Mã máy tự tạo lần đầu chạy; giữ nguyên khi nâng phiên bản và dùng để phân biệt thư mục backup."/>
                                             <TextBlock Grid.Row="9" Text="Công ty" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding Settings.OperatorCompany, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <TextBlock Grid.Row="10" Text="Dây chuyền" Style="{StaticResource FieldLabelStyle}"/>
@@ -310,6 +310,15 @@
                                             <TextBox Grid.Row="16" Grid.Column="1" Text="{Binding Settings.LastThtPath, Mode=OneWay}" ToolTip="{Binding Settings.LastThtPath, Mode=OneWay}" IsReadOnly="True"/>
                                             <TextBlock Grid.Row="17" Grid.ColumnSpan="2" Text="Relay tay dùng trực tiếp • không cần bật hoặc lưu Manual Mode" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
                                         </Grid>
+                                        <StackPanel Margin="0,4,0,0">
+                                            <CheckBox Content="TỰ SAO LƯU DATABASE QUA LAN" IsChecked="{Binding Settings.LanBackupEnabled, Mode=TwoWay}"/>
+                                            <TextBlock Text="IP máy chủ" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBox Text="{Binding Settings.LanBackupServerIp, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Ví dụ: 192.168.10.150"/>
+                                            <TextBlock Text="Tên thư mục chia sẻ" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBox Text="{Binding Settings.LanBackupShareName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Ví dụ: JBZBackup. Máy chủ phải chia sẻ thư mục và cấp quyền ghi cho tài khoản Windows của máy này."/>
+                                            <TextBlock Text="Sao lưu nền mỗi tháng một lần. Đến hạn và kết nối được máy chủ: tự gửi backup. Mất mạng: bỏ qua. Mỗi máy có thư mục riêng." TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" Margin="0,4,0,8"/>
+                                            <TextBlock x:Name="LanBackupStatusText" TextWrapping="Wrap" FontWeight="Bold" Margin="0,0,0,8"/>
+                                        </StackPanel>
                                         <StackPanel Margin="0,4,0,0">
                                             <StackPanel.Style>
                                                 <Style TargetType="StackPanel">

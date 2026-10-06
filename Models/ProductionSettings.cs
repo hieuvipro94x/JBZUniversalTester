@@ -133,6 +133,10 @@ public sealed class ProductionSettings
     /// </summary>
     public bool EnableSystemLogs { get; set; }
 
+    public bool LanBackupEnabled { get; set; }
+    public string LanBackupServerIp { get; set; } = string.Empty;
+    public string LanBackupShareName { get; set; } = "JBZBackup";
+
     /// <summary>
     /// Tắt: lỗi vẫn được chốt FAIL và ghi History nhưng không mở cửa sổ xác nhận,
     /// không kích relay; bảng lỗi/âm báo hướng dẫn người vận hành tháo sản phẩm.

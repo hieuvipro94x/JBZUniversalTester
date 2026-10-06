@@ -59,6 +59,8 @@ internal static partial class Program
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("History exactly-once transaction crash recovery", TestHistoryTransactionAtomicity),
+            ("LAN backup skips offline, captures WAL and preserves the last valid snapshot", TestLanDatabaseBackup),
+            ("Automatic station identity persists independently of portable app versions", TestStationIdentity),
             ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
             ("SQLite schema v7 chronological History migration and query plans", TestDatabaseSchemaV5),
             ("History initialization waits for an active SQLite writer", TestHistoryInitializationWaitsForWriter),
