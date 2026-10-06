@@ -683,9 +683,9 @@
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                     <TextBlock x:Name="SettingsSavedStatusText"
                                Text="Đã lưu cài đặt"
-                               FontSize="18"
+                               FontSize="20"
                                FontWeight="Bold"
-                               Foreground="#16803A"
+                               Foreground="Yellow"
                                VerticalAlignment="Center"
                                Margin="0,0,16,0"
                                Visibility="Collapsed"/>
