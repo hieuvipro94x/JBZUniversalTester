@@ -161,15 +161,26 @@ public sealed class LotSequenceService
         }
     }
 
-    public bool TryReconcileCommittedLot(long committedLot, out string error)
+    public bool TryReconcileCommittedLot(
+        long committedLot, out string error, string? productionBatchKey = null,
+        bool restoreSelectedDate = false)
     {
         lock (_gate)
         {
             EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
             ProductLotSettings lot = ActiveLotLocked();
+            if (productionBatchKey is not null &&
+                !string.Equals(productionBatchKey,
+                    $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}", StringComparison.Ordinal))
+            {
+                // An asynchronous query from the previous date/reset cannot
+                // restore its LOT into the newly selected counter period.
+                error = string.Empty;
+                return true;
+            }
             long current = Math.Max(0, lot.LotNo);
             long authoritative = Math.Max(0, committedLot);
-            if (authoritative <= current)
+            if (authoritative == current || (!restoreSelectedDate && authoritative < current))
             {
                 error = string.Empty;
                 return true;
@@ -283,6 +294,8 @@ public sealed class LotSequenceService
             // Operator chỉ đặt LOTNO bắt đầu một lần cho từng mã hàng. Sang
             // ngày sản xuất mới quay về base đó, không được làm mất thành 0.
             lot.LotNo = Math.Max(0, lot.StartLotNo);
+            // Keep the configured batch identity so returning to a date can
+            // recover that date's committed production counters and LOT.
         }
         lot.LotNoDate = today;
         if (IsActiveProduct(productKey))

@@ -1512,7 +1512,9 @@ public sealed class TestHistoryStore
                  WHERE m.PartId=p.Id AND m.InspectionType='PRODUCT'
                    AND m.ResultAt >= $MonthStart AND m.ResultAt < $MonthEnd),
                 p.TotalTests,p.TotalPass,p.TotalFail,
-                COALESCE((SELECT Lot FROM Tests lt WHERE lt.PartId=p.Id AND lt.InspectionType='PRODUCT' ORDER BY lt.ResultAt DESC,lt.Id DESC LIMIT 1),0),
+                COALESCE((SELECT Lot FROM Tests lt WHERE lt.PartId=p.Id AND lt.InspectionType='PRODUCT' AND lt.Passed=1
+                    AND lt.ResultAt >= $DayStart AND lt.ResultAt < $DayEnd
+                    ORDER BY lt.ResultAt DESC,lt.Id DESC LIMIT 1),0),
                 COALESCE((SELECT Result FROM Tests rt WHERE rt.PartId=p.Id AND rt.InspectionType='PRODUCT' ORDER BY rt.ResultAt DESC,rt.Id DESC LIMIT 1),'')
             FROM Parts p
             WHERE p.Id=$PartId;

@@ -112,6 +112,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private Task _deviceFaultHardwareLockTask = Task.CompletedTask;
     private long _statisticsLoadGeneration;
     private Task _statisticsLoadTask = Task.CompletedTask;
+    private string _statisticsBatchKey = string.Empty;
     private readonly bool _requireStartupIoClear;
     private readonly object _historyStoreGate = new();
     private TestHistoryStore? _historyStore;
@@ -6836,6 +6837,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (!ioMappingMode)
         {
+            RefreshProductionCounterPeriod();
             // LOTNO phải được đối chiếu với SQLite của đúng mã hàng trước khi
             // cycle mới có thể reserve LOT. Điều này phục hồi an toàn các máy
             // từng chạy bản cũ đã commit PASS nhưng chưa cập nhật LOT config.
@@ -7699,7 +7701,27 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         RaiseActiveFault();
     }
 
-    public void RefreshDailyMasterRequirement() => RefreshDailyMasterRequirementCore(false);
+    public void RefreshDailyMasterRequirement()
+    {
+        RefreshProductionCounterPeriod();
+        RefreshDailyMasterRequirementCore(false);
+    }
+
+    private void RefreshProductionCounterPeriod()
+    {
+        ProductModel? model = _model;
+        if (model is null || _lifetimeCts.IsCancellationRequested)
+            return;
+        string batchKey = _lotSequence.HistoryBatchKey;
+        if (string.Equals(batchKey, _statisticsBatchKey, StringComparison.Ordinal))
+            return;
+
+        Total = Pass = Fail = 0;
+        DailyTestCount = 0;
+        UpdateDailyLotDisplay();
+        AddLog($"PRODUCTION COUNTER DATE CHANGED batch={batchKey}; đang nạp sản lượng và LOT của ngày được chọn.");
+        ScheduleStatisticsLoadForModel(model);
+    }
 
     private void RefreshDailyMasterRequirementCore(bool productRemovalConfirmed)
     {
@@ -11109,6 +11131,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void RefreshProductionUiSettings()
     {
         _lotSequence.RefreshActiveProduct();
+        RefreshProductionCounterPeriod();
         lock (_historyStoreGate)
             _historyStore = null;
         UpdateDailyLotDisplay();
@@ -11389,6 +11412,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void ScheduleStatisticsLoadForModel(ProductModel model)
     {
         long generation = Interlocked.Increment(ref _statisticsLoadGeneration);
+        _statisticsBatchKey = _lotSequence.HistoryBatchKey;
         StartupPerformanceTrace.Mark("T11 STATS_BACKGROUND");
 
         // Giữ reference task để exception luôn được observe trong method bên dưới.
@@ -11417,6 +11441,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             PartIdentitySnapshot part = PartIdentitySnapshot.Capture(model);
+            string batchKey = _lotSequence.HistoryBatchKey;
             Task<ProductionStatisticsSnapshot> statisticsTask =
                 ProductionPersistence.GetStatisticsAsync(part, DateTime.Now, _lifetimeCts.Token);
             Task<ProbeCounterSnapshot> probeTask = ProductionPersistence.GetProbeCounterAsync(
@@ -11445,25 +11470,30 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             if (generation != Volatile.Read(ref _statisticsLoadGeneration) ||
                 _lifetimeCts.IsCancellationRequested ||
-                !IsActiveStatisticsContext(model, part, generation))
+                !IsActiveStatisticsContext(model, part, generation) ||
+                !string.Equals(batchKey, _lotSequence.HistoryBatchKey, StringComparison.Ordinal))
             {
                 return;
             }
 
-            if (snapshot.Stats.DailyTotal > 0 &&
-                snapshot.Stats.LastLotNo > _lotSequence.NextLot)
+            long selectedDateLot = snapshot.Stats.DailyPass > 0
+                ? snapshot.Stats.LastLotNo
+                : _lotSequence.StartLot;
+            if (selectedDateLot != _lotSequence.NextLot)
             {
                 long previousLot = _lotSequence.NextLot;
                 if (!_lotSequence.TryReconcileCommittedLot(
-                        snapshot.Stats.LastLotNo,
-                        out string reconcileError))
+                        selectedDateLot,
+                        out string reconcileError,
+                        batchKey,
+                        restoreSelectedDate: true))
                 {
                     throw new InvalidOperationException(
                         $"Không thể đồng bộ LOTNO từ SQLite: {reconcileError}");
                 }
 
                 AddLog(
-                    $"LOTNO RECOVERED FROM SQLITE: {previousLot} -> {snapshot.Stats.LastLotNo}; " +
+                    $"LOTNO RECOVERED FROM SQLITE: {previousLot} -> {selectedDateLot}; " +
                     "giữ SQLite PASS history làm nguồn sự thật sau lỗi in/cấu hình cũ.");
             }
 
@@ -11482,7 +11512,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             await InvokeUiAsync(() =>
             {
-                if (!IsActiveStatisticsContext(model, part, generation))
+                if (!IsActiveStatisticsContext(model, part, generation) ||
+                    !string.Equals(batchKey, _lotSequence.HistoryBatchKey, StringComparison.Ordinal))
                 {
                     return;
                 }
@@ -11787,7 +11818,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     if (databaseResult.Statistics.DailyTotal > 0 &&
                         !_lotSequence.TryReconcileCommittedLot(
                             databaseResult.Statistics.LastLotNo,
-                            out string reconcileError))
+                            out string reconcileError,
+                            history.ProductionBatchKey))
                     {
                         throw new InvalidOperationException(
                             $"PASS đã tồn tại nhưng chưa thể đồng bộ LOTNO: {reconcileError}");
@@ -11819,6 +11851,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     return;
                 }
 
+                if (!string.Equals(history.ProductionBatchKey, _lotSequence.HistoryBatchKey, StringComparison.Ordinal))
+                {
+                    RefreshProductionCounterPeriod();
+                    return;
+                }
                 ApplyProductionStatistics(databaseResult.Statistics);
                 ApplyPartCounter(databaseResult.ProbeCounter);
             });

@@ -319,12 +319,14 @@ public static class ProductionConfigService
         ProductLotSettings lot = GetOrCreateProductLot(settings, productKey, migrateCurrentLot: false);
         long normalizedStart = Math.Max(0, startLotNo);
         string normalizedDate = (lotNoDate ?? string.Empty).Trim();
-        if (normalizedStart != lot.StartLotNo)
+        bool startChanged = normalizedStart != lot.StartLotNo;
+        if (startChanged || !string.Equals(normalizedDate, lot.LotNoDate, StringComparison.Ordinal))
         {
             // Giá trị nhập là LOT đã hoàn thành gần nhất. Không cộng lại tiến độ
             // cũ khi lưu các cài đặt độc lập như số card mở rộng.
             lot.StartLotNo = normalizedStart;
-            lot.HistoryBatchId = Guid.NewGuid().ToString("N");
+            if (startChanged)
+                lot.HistoryBatchId = Guid.NewGuid().ToString("N");
             lot.LotNo = normalizedStart;
             lot.BulkPrintLotNo = normalizedStart;
             lot.LotNoDate = normalizedDate;

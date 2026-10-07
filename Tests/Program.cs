@@ -33,6 +33,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
@@ -7616,18 +7617,18 @@ internal static partial class Program
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
             Assert(csvText.StartsWith(
-                    "일 자,시 간,파 일,품 명,품 번,차 종,Lot,결 과,순 번,검 사 기 록,바코드,200 %,수입검사,프로그램\n",
+                    "일 자,시 간,파 일,품 명,품 번,차 종,Lot,결 과,검 사 기 록,바코드,200 %,수입검사,프로그램\n",
                     StringComparison.Ordinal),
-                "History CSV preserves the exact original 14-column Korean header");
+                "History CSV has 13 Korean columns without the ordinal header");
             Assert(csvText.Contains(
-                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,2001,합격,1",
+                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,2001,합격,",
                     StringComparison.Ordinal) &&
                    csvText.Contains("장착 14:07:03~14:07:05(2.000초) 14:07:05 검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
                    csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
                    csvText.Contains(",NI375C10002608092001,,,JBZUniversalTester V15.2.0", StringComparison.Ordinal) &&
                    !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV keeps three test phases, saved product LOT, display ordinal and barcode without raw EPL payload");
+                "Sample history CSV keeps three test phases, saved product LOT and barcode without raw EPL payload");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -7638,13 +7639,14 @@ internal static partial class Program
                    sheet.Contains("<c r=\"B2\" s=\"4\"><v>", StringComparison.Ordinal),
                 "XLSX date and time use separate native numeric cells");
             Assert(sheet.Contains("<c r=\"G2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">2001</t>", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"I2\"><v>1</v></c>", StringComparison.Ordinal),
-                "XLSX LOT uses saved product LOT while sequence uses the display ordinal");
+                   sheet.Contains("<c r=\"I2\" t=\"inlineStr\" s=\"3\">", StringComparison.Ordinal) &&
+                   !sheet.Contains("순 번", StringComparison.Ordinal),
+                "XLSX preserves LOT and places test history immediately after the result without an ordinal column");
             Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"J2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
                    !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
-                   sheet.Contains("autoFilter ref=\"A1:N2\"", StringComparison.Ordinal),
-                "XLSX preserves Korean headers, barcode value and 14-column filter");
+                   sheet.Contains("autoFilter ref=\"A1:M2\"", StringComparison.Ordinal),
+                "XLSX preserves Korean headers, barcode value and 13-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
                    styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
@@ -7655,16 +7657,18 @@ internal static partial class Program
             string[] sampleHeaders =
             [
                 "Ngày", "Thời gian", "File", "Tên sản phẩm", "Mã hàng", "Loại xe", "LOT",
-                "Kết quả", "Số thứ tự", "Lịch sử kiểm tra", "Mã vạch", "200 %",
+                "Kết quả", "Lịch sử kiểm tra", "Mã vạch", "200 %",
                 "Kiểm tra đầu vào", "Chương trình"
             ];
             int previousHeader = -1;
             foreach (string header in sampleHeaders)
             {
                 int headerIndex = historyXaml.IndexOf($"Header=\"{header}\"", previousHeader + 1, StringComparison.Ordinal);
-                Assert(headerIndex > previousHeader, $"History UI Vietnamese 14-column order: {header}");
+                Assert(headerIndex > previousHeader, $"History UI Vietnamese 13-column order: {header}");
                 previousHeader = headerIndex;
             }
+            Assert(!historyXaml.Contains("Header=\"Số thứ tự\"", StringComparison.Ordinal),
+                "History UI omits the ordinal column requested by operators");
             Assert(historyXaml.Contains("CanUserResizeColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("<Setter Property=\"HorizontalContentAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
                    historyXaml.Contains("<Setter Property=\"HorizontalAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
@@ -7708,10 +7712,11 @@ internal static partial class Program
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
             Assert(failed.HistoryOrdinal == 1 && failed.ExportLotText.Length == 0 &&
-                   customerText.Contains(",,불량,1,", StringComparison.Ordinal) &&
+                   customerText.Contains(",,불량,", StringComparison.Ordinal) &&
+                   !customerText.Contains(",,불량,1,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
-                "History CSV/UI FAIL uses concise Korean fault detail with blank LOT and a test ordinal");
+                "History CSV FAIL uses concise Korean fault detail with blank LOT and no ordinal column");
 
             var masterBad = new TestHistoryRecord
             {

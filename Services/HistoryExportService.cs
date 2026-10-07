@@ -24,7 +24,7 @@ public static class HistoryExportService
         Func<TestHistoryRecord, object?> GetValue,
         bool Wrap = false);
 
-    // Mẫu ALL gốc có đúng 14 cột. CSV, XLSX và HistoryPage phải giữ cùng
+    // CSV, XLSX và HistoryPage có 13 cột sau khi bỏ số thứ tự, giữ cùng
     // thứ tự này; chi tiết các công đoạn chỉ nằm trong cột 검 사 기 록.
     private static readonly HistoryColumn[] Columns =
     [
@@ -36,7 +36,6 @@ public static class HistoryExportService
         new("차 종", 18, HistoryCellType.Text, r => r.VehicleType),
         new("Lot", 16, HistoryCellType.Text, r => r.ExportLotText),
         new("결 과", 10, HistoryCellType.Text, r => r.ExportResultText),
-        new("순 번", 11, HistoryCellType.Number, r => r.HistoryOrdinal),
         new("검 사 기 록", 80, HistoryCellType.Text, r => r.ExportTestLogText, true),
         new("바코드", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
         new("200 %", 10, HistoryCellType.Text, r => r.ExportPercentText),
