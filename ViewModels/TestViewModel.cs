@@ -7872,6 +7872,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     MarkMasterRemoved();
                     Interlocked.Exchange(ref _masterPostStarted, 0);
                     MasterState = MasterSequenceState.WaitingGoodMaster;
+                    SelectedOperationTabIndex = 0;
                     ResetEngineWithoutChangedReentry();
                     ResetProductPresentationCycle();
                     RefreshFaults();
@@ -8217,6 +8218,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         CancellationToken ct = CurrentCycleToken();
+        string masterCycleId = _masterHistoryCycleId;
         bool ownsEject = false;
         try
         {
@@ -8227,16 +8229,23 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             if (IsResistanceEnabledForModel(masterModel))
             {
+                PrepareResistanceRows(masterModel);
+                SelectedOperationTabIndex = 1;
+                State = "KIỂM TRA ĐIỆN TRỞ";
                 await EnsureKeysightConnectedAsync();
                 _scanSupervisor.Suspend("Resistance");
-                List<ResistanceResult> results = await _engine.MeasureResistanceAsync(ct);
-                if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster))
+                List<ResistanceResult> results = await _engine.MeasureResistanceAsync(
+                    result => InvokeUi(() =>
+                    {
+                        if (IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster) &&
+                            string.Equals(_masterHistoryCycleId, masterCycleId, StringComparison.Ordinal))
+                            UpdateResistanceRows([result]);
+                    }),
+                    ct);
+                if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster) ||
+                    !string.Equals(_masterHistoryCycleId, masterCycleId, StringComparison.Ordinal))
                     return;
-                foreach (ResistanceResult result in results)
-                {
-                    Resistance.Add(result);
-                    ResistanceDisplayRows.Add(result);
-                }
+                UpdateResistanceRows(results);
                 resistancePassed = Resistance.Count == ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count && Resistance.All(item => item.Passed);
             }
 
@@ -8381,7 +8390,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Giữ latch cho tới khi MASTER GOOD được tháo/nhả. Nếu resistance hoặc
             // continuity không đạt, không được tự đo/lặp PASS liên tục theo từng frame.
             // Nhánh IsProductReleased ở state TestingGoodMaster sẽ reset latch về 0.
-            SelectedOperationTabIndex = 0;
+            if (!IsResistanceEnabledForModel(masterModel) ||
+                !IsRuntimeContext(RuntimeMode.Production, generation) ||
+                !ReferenceEquals(_model, masterModel) ||
+                MasterState is not (MasterSequenceState.TestingGoodMaster or MasterSequenceState.EjectingGoodMaster))
+                SelectedOperationTabIndex = 0;
             RaiseMasterState();
         }
     }
@@ -8622,6 +8635,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         if (!_masterGoodVerified || MasterApproved)
             return;
+        SelectedOperationTabIndex = 0;
         MasterSampleType[] remaining = _requiredMasterFaultSamples
             .Where(type => !_validatedMasterFaultSamples.Contains(type)).ToArray();
         if (remaining.Length == 0)
@@ -8732,6 +8746,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void BeginMasterHistoryCycle(string inspectionType)
     {
+        SelectedOperationTabIndex = 0;
         DateTime now = DateTime.Now;
         _masterInstallStartedAt = now;
         _masterTestStartedAt = null;

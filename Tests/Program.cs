@@ -86,6 +86,7 @@ internal static partial class Program
             ("Shared Master settings and completion return to installation", TestGlobalMasterConfigurationAndCompletion),
             ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
+            ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
             ("All NG Masters keep wire rows and open Master requires an exact complete pattern", TestAllMasterWireRowsAndOpenPattern),
             ("Master completion replays removal confirmed while JIG was busy", TestMasterRemovalDuringEjectCompletion),
@@ -10100,10 +10101,12 @@ internal static partial class Program
         public int MeasureCallCount { get; private set; }
         public bool ThrowOnMeasure { get; set; }
         public Queue<double> Measurements { get; } = new();
+        public Action? BeforeMeasure { get; set; }
 
         public override double MeasureResistance(string command = ":MEASURE:RES?")
         {
             MeasureCallCount++;
+            BeforeMeasure?.Invoke();
             if (ThrowOnMeasure)
                 throw new InvalidOperationException("Simulated Keysight failure");
             return Measurements.Count > 0 ? Measurements.Dequeue() : measurement;

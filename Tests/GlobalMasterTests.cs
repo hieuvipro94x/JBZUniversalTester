@@ -7,6 +7,70 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestMasterLiveResistancePresentation()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var settings = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 1,
+            ResistanceChannels =
+            [
+                new() { Enabled = true, Name = "R1", Channel = 1, MinOhm = 0.5, MaxOhm = 2 },
+                new() { Enabled = true, Name = "R2", Channel = 2, MinOhm = 0.5, MaxOhm = 2 }
+            ]
+        };
+        var app = new AppSettings();
+        app.Test.ResistanceMinimumSettleMs = 0;
+        app.Test.ResistanceSampleIntervalMs = 0;
+        app.Test.ResistanceStableSampleCount = 2;
+        app.Test.ResistanceStabilityTimeoutMs = 100;
+        var board = new FakeBoard();
+        var visa = new FakeKeysightVisaService(connected: true, measurement: 1);
+        using var engine = new TestEngine(board, visa, app, settings);
+        var vm = new TestViewModel(new MainViewModel(), engine, board, visa,
+            new WaterProofSerialService(), app, settings,
+            new LegacyPhtHistoryService(enabled: false), requireStartupIoClear: false);
+        ProductModel model = Model(("PAIR", new[] { 1, 2 }));
+        typeof(TestViewModel).GetField("_model", flags)!.SetValue(vm, model);
+        engine.SetModel(model);
+        using var cycle = new CancellationTokenSource();
+        typeof(TestViewModel).GetField("_cycleCts", flags)!.SetValue(vm, cycle);
+        Type runtimeModeType = typeof(TestViewModel).GetNestedType("RuntimeMode", BindingFlags.NonPublic)!;
+        typeof(TestViewModel).GetField("_runtimeMode", flags)!.SetValue(vm,
+            Convert.ToInt32(Enum.Parse(runtimeModeType, "Production")));
+        typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(vm, MasterSequenceState.TestingGoodMaster);
+        long generation = (long)typeof(TestViewModel).GetField("_runtimeGeneration", flags)!.GetValue(vm)!;
+        bool sawFirstMeasuring = false;
+        bool sawFirstPass = false;
+        visa.BeforeMeasure = () =>
+        {
+            Assert(vm.SelectedOperationTabIndex == 1 && vm.ResistanceDisplayRows.Count == 2,
+                "Master selects the resistance table with all configured channels before reading");
+            if (board.ResistanceSteps.Count == 1)
+            {
+                sawFirstMeasuring = true;
+                Assert(vm.ResistanceDisplayRows[0].ResultText == "ĐANG ĐO",
+                    "Master row shows active measurement before its result is available");
+            }
+            else
+            {
+                sawFirstPass = true;
+                Assert(vm.ResistanceDisplayRows[0].ResultText == "PASS" &&
+                       vm.ResistanceDisplayRows[1].ResultText == "ĐANG ĐO",
+                    "First Master channel becomes PASS while the next channel is still measuring");
+                // End this UI-only fixture before History persistence or relay execution.
+                cycle.Cancel();
+                throw new OperationCanceledException(cycle.Token);
+            }
+        };
+        ((Task)typeof(TestViewModel).GetMethod("CompleteGoodMasterAsync", flags)!
+            .Invoke(vm, [generation])!).GetAwaiter().GetResult();
+        Assert(sawFirstMeasuring && sawFirstPass && vm.SelectedOperationTabIndex == 1,
+            "Master keeps the measured results visible while the sample remains installed");
+        Assert(!vm.MasterApproved && !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+            "Showing resistance progress cannot approve Master or trigger a relay");
+    }
+
     private static void TestMasterSelectedSamplesOnly()
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
