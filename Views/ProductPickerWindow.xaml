@@ -90,7 +90,7 @@
         <Border Grid.Row="2" Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7" Padding="1">
             <DataGrid x:Name="ProductGrid" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="False" CanUserSortColumns="False"
-                      SelectionMode="Single" SelectionUnit="FullRow" RowHeight="38" ColumnHeaderHeight="32"
+                      SelectionMode="Single" SelectionUnit="FullRow" MinRowHeight="38" ColumnHeaderHeight="32"
                       EnableRowVirtualization="True" EnableColumnVirtualization="True" HeadersVisibility="Column"
                       GridLinesVisibility="None" BorderThickness="0" Background="White"
                       HorizontalScrollBarVisibility="Disabled"
@@ -121,15 +121,18 @@
                     </Style>
                 </DataGrid.CellStyle>
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="MÃ HÀNG" Binding="{Binding Name}" Width="2*">
+                    <DataGridTextColumn Header="MÃ HÀNG" Binding="{Binding Name}" Width="3*">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource PickerCellText}">
                                 <Setter Property="FontWeight" Value="SemiBold"/>
                                 <Setter Property="FontSize" Value="15"/>
+                                <Setter Property="Margin" Value="12,6"/>
+                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                <Setter Property="TextTrimming" Value="None"/>
                             </Style>
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
-                    <DataGridTextColumn Header="THƯ MỤC" Binding="{Binding Folder}" Width="3*"
+                    <DataGridTextColumn Header="THƯ MỤC" Binding="{Binding Folder}" Width="2*"
                                         ElementStyle="{StaticResource PickerCellText}"/>
                 </DataGrid.Columns>
                 <DataGrid.RowStyle>
