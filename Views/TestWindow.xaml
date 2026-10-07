@@ -459,6 +459,15 @@
             </Style.Triggers>
         </Style>
 
+        <Style x:Key="FinalLeakOperationGridStyle" TargetType="DataGrid" BasedOn="{StaticResource PiFaultGridStyle}">
+            <Setter Property="Visibility" Value="Collapsed"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SelectedOperationTabIndex}" Value="2">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="IndustrialGridCellStyle" TargetType="DataGridCell">
             <Setter Property="Background" Value="{Binding RowBackgroundBrush}"/>
             <Setter Property="Foreground" Value="{Binding RowForegroundBrush}"/>
@@ -909,6 +918,19 @@
                     <DataGridTextColumn Header="GI&#193; TR&#7882;" Binding="{Binding Display}" Width="2.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="MAX" Binding="{Binding MaxDisplayText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="K&#7870;T QU&#7842;" Binding="{Binding ResultText}" Width="1.5*" CellStyle="{StaticResource PassFailResultCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <DataGrid ItemsSource="{Binding FinalWaterProofRows}"
+                      Style="{StaticResource FinalLeakOperationGridStyle}" RowHeight="36"
+                      HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="KÊNH / CONNECTOR" Binding="{Binding ChannelText}" Width="2*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="ÁP SUẤT HÚT" Binding="{Binding FirstPressureText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="ÁP SUẤT GIỮ" Binding="{Binding SecondPressureText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="ĐỘ RÒ" Binding="{Binding LeakText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="GIỚI HẠN RÒ" Binding="{Binding LeakLimitText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="KẾT QUẢ" Binding="{Binding ResultText}" Width="1.5*" CellStyle="{StaticResource PassFailResultCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>
 

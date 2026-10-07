@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -438,6 +438,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public ObservableCollection<ResistanceResult> Resistance { get; } = new();
     public ObservableCollection<ResistanceResult> ResistanceDisplayRows { get; } = new();
     public ObservableCollection<WaterProofChannelResult> WaterProofChannels { get; } = new();
+    public ObservableCollection<WaterProofChannelResult> FinalWaterProofRows { get; } = new();
     public bool IsWaterProofCardVisible => _model is not null && _waterProofProfile.Enabled;
     public string WaterProofStageText => _waterProofStageText;
     public string WaterProofOverallResult => _waterProofOverallResult;
@@ -524,7 +525,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 : string.Empty;
 
     public bool IsCenterResultVisible =>
-        IsFinalPassPresentation ||
+        (IsFinalPassPresentation && SelectedOperationTabIndex != 2) ||
         IsDiscardFaultConfirmationPresentation ||
         IsWaitingProductPresentation;
 
@@ -1130,7 +1131,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public int SelectedOperationTabIndex
     {
         get => _selectedOperationTabIndex;
-        set => Set(ref _selectedOperationTabIndex, value);
+        set
+        {
+            if (Set(ref _selectedOperationTabIndex, value))
+            {
+                if (value != 2) FinalWaterProofRows.Clear();
+                RaiseCenterPresentation();
+            }
+        }
     }
 
     public AsyncRelayCommand ConnectKeysightCommand { get; }
@@ -1710,6 +1718,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void EnterDeviceFault(Exception exception, string source, int desiredRowsCount = -1)
     {
         ArgumentNullException.ThrowIfNull(exception);
+        if (exception is KeysightEquipmentException && _board.IsConnected)
+        {
+            _ = HandleKeysightEquipmentErrorAsync(exception);
+            return;
+        }
 
         bool firstTransition = Interlocked.Exchange(ref _deviceFault, 1) == 0;
         if (firstTransition)
@@ -1771,6 +1784,34 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         _deviceFaultHardwareLockTask = SafeLockHardwareForDeviceFaultAsync();
         ShowDeviceFaultDialogOnce();
+    }
+
+    private async Task HandleKeysightEquipmentErrorAsync(Exception exception)
+    {
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        ProductModel? model = _model;
+        AsyncFileLogService.Current.Error($"KEYSIGHT EQUIPMENT ERROR - APP PRESERVED: {exception}");
+        ArmWaterProofEquipmentErrorRemovalWait();
+        State = "LỖI KEYSIGHT - CHỜ THÁO SẢN PHẨM";
+        _visa.Dispose();
+        try
+        {
+            await _board.AllRelaysOffAsync();
+            await StartProductionScanAndVerifyFrameAsync(CurrentCycleToken(), "KEYSIGHT_DEVICE_ERROR");
+        }
+        catch (Exception boardException)
+        {
+            EnterDeviceFault(boardException, "KeysightRecovery.D2XX");
+            return;
+        }
+        if (generation != Volatile.Read(ref _runtimeGeneration) || !ReferenceEquals(model, _model))
+            return;
+        if (Application.Current is not null)
+            await InvokeUiAsync(() => MessageBox.Show(
+                ResolveOperatorDialogOwner(),
+                "Không kết nối hoặc đọc được đồng hồ Keysight. Kiểm tra nguồn, USB và VISA. " +
+                "Tháo sản phẩm rồi lắp lại để thử lại.\n" + exception.GetBaseException().Message,
+                "LỖI ĐỒNG HỒ KEYSIGHT", MessageBoxButton.OK, MessageBoxImage.Error));
     }
 
     private void EnterBoardStartupUnavailable(Exception exception, string source)
@@ -3445,6 +3486,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             var retestState = (WaterProofRetestConnectorState)Volatile.Read(
                 ref _waterProofRetestConnectorState);
+            if (Volatile.Read(ref _waterProofRunning) == 0 &&
+                retestState is WaterProofRetestConnectorState.AwaitingConnectorRemoval or
+                    WaterProofRetestConnectorState.AwaitingConnectorReconnect)
+                State = WaterProofConnectorWaitingState();
             if (retestState is WaterProofRetestConnectorState.AwaitingConnectorReconnect or
                 WaterProofRetestConnectorState.Running)
             {
@@ -6419,8 +6464,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         State = "ĐANG CHUẨN BỊ ĐO ĐIỆN TRỞ";
         AddLog("[AUTO-R] Keysight connecting");
-        var idn = await Task.Run(() =>
-            _visa.ConnectAutomatic(_settings.Keysight.Resource));
+        string idn;
+        try
+        {
+            idn = await Task.Run(() => _visa.ConnectAutomatic(_settings.Keysight.Resource));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new KeysightEquipmentException("Không kết nối được đồng hồ Keysight.", ex);
+        }
         AddLog($"[AUTO-R] Keysight connected: {idn}");
         AddLog($"Đã tự kết nối Keysight: {idn}");
     }
@@ -9150,6 +9202,35 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
+    private void ShowFinalWaterProofResults()
+    {
+        if (!IsWaterProofEnabledForCurrentModel() ||
+            Volatile.Read(ref _preContinuityWaterProofPassed) == 0 ||
+            !_cycleContinuityCompletedAt.HasValue)
+            return;
+        WaterProofChannelMeasurement[] measurements = _lastWaterProofMeasurements
+            .Where(item => item.Enabled && _waterProofProfile.IsChannelEnabled(item.Channel))
+            .OrderBy(item => item.Channel).ToArray();
+        if (measurements.Length != _waterProofProfile.EnabledChannelCount || measurements.Any(item => !item.Passed))
+            return;
+
+        FinalWaterProofRows.Clear();
+        foreach (WaterProofChannelMeasurement measurement in measurements)
+            FinalWaterProofRows.Add(new WaterProofChannelResult
+            {
+                Channel = measurement.Channel,
+                Connector = _waterProofProfile.ConnectorForChannel(measurement.Channel),
+                Enabled = true,
+                FirstResultPressure = measurement.FirstPressure,
+                SecondResultPressure = measurement.SecondPressure,
+                Leak = measurement.Leak,
+                LeakLimit = _waterProofProfile.LeakLimit,
+                IsMeasured = true,
+                Passed = true
+            });
+        SelectedOperationTabIndex = 2;
+    }
+
     private bool IsResistanceEnabledForModel(ProductModel? model) =>
         model is not null && ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count > 0;
 
@@ -9659,6 +9740,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .ToArray();
     }
 
+    private string WaterProofConnectorWaitingState()
+    {
+        if (_model is null)
+            return "LẮP SẢN PHẨM";
+        var leakConnectors = ConfiguredWaterProofConnectorIds(_waterProofProfile)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        bool otherConnectorInstalled = _model.Connectors.Any(connector =>
+            !leakConnectors.Contains(connector.ConnectorId) &&
+            _engine.IsConnectorConnected(connector.ConnectorId));
+        return otherConnectorInstalled ? "ĐANG KIỂM TRA..." : "LẮP SẢN PHẨM";
+    }
+
     private void ArmWaterProofRetestConnectorCycle()
     {
         string[] connectorIds = ConfiguredWaterProofConnectorIds(_waterProofCurrentRunProfile);
@@ -9679,6 +9772,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Interlocked.Exchange(
             ref _waterProofRetestConnectorState,
             (int)WaterProofRetestConnectorState.AwaitingConnectorRemoval);
+        State = WaterProofConnectorWaitingState();
         AddLog(
             $"[WATERPROOF-RETEST] Đã ARM; tháo rồi lắp lại connector " +
             $"{string.Join(", ", connectorIds)} để chỉ chạy lại Leak trên cùng sản phẩm.");
@@ -9716,7 +9810,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     (int)WaterProofRetestConnectorState.AwaitingConnectorRemoval) ==
                 (int)WaterProofRetestConnectorState.AwaitingConnectorRemoval)
             {
-                State = "ĐANG KIỂM TRA...";
+                State = WaterProofConnectorWaitingState();
                 AddLog(
                     $"[WATERPROOF-RETEST] Đã xác nhận mất kết nối kích Leak tại connector {string.Join(", ", connectorIds)}; " +
                     "các connector khác giữ nguyên, chờ lắp lại connector Leak.");
@@ -9842,7 +9936,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 _waterProofCurrentRunProfile = WaterProofProfileForChannels(channel =>
                     run.Channels.Any(item => item.Channel == channel && item.Enabled && !item.Passed));
-                State = "ĐANG KIỂM TRA...";
+                State = WaterProofConnectorWaitingState();
                 armAnotherRetry = true;
                 restartProductionScan = true;
                 AddLog(
@@ -9856,11 +9950,21 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex)
         {
+            if (!_board.IsConnected)
+            {
+                EnterDeviceFault(ex, "WaterProofRetest.BoardDisconnected");
+                return;
+            }
             SetWaterProofStage(WaterProofStage.Error, "LỖI LEAK RETEST", "ERROR");
-            State = "ĐANG KIỂM TRA...";
+            State = WaterProofConnectorWaitingState();
             armAnotherRetry = true;
             restartProductionScan = true;
             AddLog($"[WATERPROOF-RETEST] ERROR: {ex.Message}");
+            if (Application.Current is not null)
+                await InvokeUiAsync(() => MessageBox.Show(
+                    ResolveOperatorDialogOwner(),
+                    "Lỗi máy Leak. Kiểm tra nguồn và cổng COM, tháo/lắp lại connector để thử lại.\n" + ex.Message,
+                    "LỖI MÁY LEAK", MessageBoxButton.OK, MessageBoxImage.Error));
             try
             {
                 await _waterProof.DisconnectAsync();
@@ -9893,7 +9997,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 }
                 catch (Exception scanEx)
                 {
-                    AddLog($"[WATERPROOF-RETEST] Không thể restart D2XX chờ tháo/lắp: {scanEx.Message}");
+                    EnterDeviceFault(scanEx, "WaterProofRetest.RestartD2XX");
                 }
             }
         }
@@ -10157,7 +10261,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                        "chỉ chờ tháo/lắp lại connector tương ứng.");
             }
 
-            State = "ĐANG KIỂM TRA...";
+            State = run.Passed ? "ĐANG KIỂM TRA..." : WaterProofConnectorWaitingState();
             restartScan = true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -10326,7 +10430,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 }
                 catch (Exception scanEx)
                 {
-                    AddLog($"[WATERPROOF] Không thể restart D2XX sau lỗi Leak: {scanEx.Message}");
+                    EnterDeviceFault(scanEx, "WaterProofRecovery.RestartD2XX");
                 }
                 return false;
             }
@@ -10622,6 +10726,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 passUiTimestamp = Stopwatch.GetTimestamp();
                 State = "PASS";
                 SynchronizeFaultRows(Array.Empty<FaultRow>());
+                if (waterProofCompleted) ShowFinalWaterProofResults();
                 AsyncFileLogService.Current.Performance(
                     $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
                 _sound.SetWiringFaultAlarm(false);

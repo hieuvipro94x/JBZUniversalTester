@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -74,6 +74,9 @@ internal static partial class Program
             ("Standard product picker filter", TestProductPickerFilter),
             ("Recursive ITEM product catalog and partial filename search", TestRecursiveProductCatalogSearch),
             ("1000-file picker typing coalesces filtering and prevents stale selection", TestProductPickerDebouncedSearch),
+            ("Leak waiting respects installed non-Leak connectors", TestLeakWaitingWithNonLeakConnector),
+            ("Keysight equipment faults preserve the app and await removal", TestRecoverableKeysightEquipmentFault),
+            ("Final Leak table shows suction/hold/leak only after both PASS and clears on cycle exit", TestFinalLeakResultTable),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
             ("Authoritative production state and stale UI snapshot gate", TestAuthoritativeProductionState),
@@ -2714,7 +2717,7 @@ internal static partial class Program
         using (var failureEngine = new TestEngine(failureBoard, failingVisa, fastApp, duplicateChannelPlan))
         {
             failureEngine.SetModel(new ProductModel { ModelName = "R-FAIL" });
-            AssertThrows<InvalidOperationException>(
+            AssertThrows<KeysightEquipmentException>(
                 () => failureEngine.MeasureResistanceAsync().GetAwaiter().GetResult(),
                 "Keysight failure must propagate to the production lifecycle");
             Assert(failureBoard.ReleaseResistanceRouteCount == 1,
@@ -3103,9 +3106,10 @@ internal static partial class Program
         int resultStyleUses = xaml.Split(
             "CellStyle=\"{StaticResource PassFailResultCellStyle}\"",
             StringSplitOptions.None).Length - 1;
-        Assert(resultStyleUses == 1 &&
+        Assert(resultStyleUses == 2 &&
+               xaml.Contains("ItemsSource=\"{Binding FinalWaterProofRows}\"", StringComparison.Ordinal) &&
                !xaml.Contains("WaterProofResultCellStyle", StringComparison.Ordinal),
-            "Only the resistance/final result table remains; the removed Leak detail grid has no result column");
+            "Resistance and final Leak tables share PASS/FAIL styling; final Leak results have their own rows");
         Assert(xaml.Contains("<Viewbox Grid.Row=\"0\"", StringComparison.Ordinal) &&
                xaml.Contains("StretchDirection=\"DownOnly\"", StringComparison.Ordinal),
             "The fixed Htdrv header surface scales down at narrow resolutions without scaling up above design size");
@@ -3576,6 +3580,8 @@ internal static partial class Program
         armLeakRetest.Invoke(retestArmVm, null);
         Assert((int)(leakRetestState.GetValue(retestArmVm) ?? 0) == 1,
             "A pre-continuity Leak FAIL arms connector remove/reinsert retest");
+        Assert(retestArmVm.State == "LẮP SẢN PHẨM" && retestArmVm.ResultStatusText == "LẮP SẢN PHẨM",
+            "Leak FAIL waits for connector reinstallation instead of showing testing");
 
         retestArmVm.Faults.Add(new FaultRow
         {

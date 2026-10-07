@@ -712,7 +712,7 @@ public partial class TestWindow : Window
     {
         MessageBox.Show(
             this,
-            "Vui lòng tháo sản phẩm ra khỏi bàn test !!",
+            "VUI LÒNG THÁO SẢN PHẨM!!",
             "CHƯA THÁO SẢN PHẨM",
             MessageBoxButton.OK,
             MessageBoxImage.Warning);

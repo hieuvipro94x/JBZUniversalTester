@@ -3569,7 +3569,7 @@ public sealed class TestEngine : IDisposable
             return [];
 
         if (!_visa.IsConnected)
-            throw new InvalidOperationException("Chưa kết nối Keysight 34461A");
+            throw new KeysightEquipmentException("Chưa kết nối Keysight 34461A", new System.IO.IOException("Phiên VISA chưa kết nối."));
 
         // Real production trace:
         // STOP_SCAN -> RESET_CLEAR -> R1 route -> measure -> R2 route -> measure
@@ -3650,9 +3650,16 @@ public sealed class TestEngine : IDisposable
         while (!stable && stopwatch.ElapsedMilliseconds < timeoutMs)
         {
             ct.ThrowIfCancellationRequested();
-            double sample = await Task.Run(
-                () => _visa.MeasureResistance(_settings.Keysight.Command),
-                ct);
+            double sample;
+            try
+            {
+                sample = await Task.Run(
+                    () => _visa.MeasureResistance(_settings.Keysight.Command), ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new KeysightEquipmentException("Không đọc được kết quả đo Keysight.", ex);
+            }
             sampleCount++;
             bool open = !double.IsFinite(sample) ||
                         Math.Abs(sample) >= _settings.Test.ResistanceOpenThreshold;
