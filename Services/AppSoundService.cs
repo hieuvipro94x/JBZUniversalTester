@@ -24,6 +24,7 @@ public sealed class AppSoundService : IDisposable
     private SoundPlayer? _clickPlayer;
     private SoundPlayer? _productStartPlayer;
     private SoundPlayer? _testOkPlayer;
+    private SoundPlayer? _stageOkPlayer;
     private SoundPlayer? _startupPlayer;
     private SoundPlayer? _testPointContactPlayer;
     private SoundPlayer? _wiringFaultPlayer;
@@ -34,6 +35,7 @@ public sealed class AppSoundService : IDisposable
     private MemoryStream? _clickStream;
     private MemoryStream? _productStartStream;
     private MemoryStream? _testOkStream;
+    private MemoryStream? _stageOkStream;
     private MemoryStream? _startupStream;
     private MemoryStream? _testPointContactStream;
     private MemoryStream? _wiringFaultStream;
@@ -96,6 +98,7 @@ public sealed class AppSoundService : IDisposable
                 _clickPlayer = CreatePlayer("CLICK.wav", out _clickStream);
                 _productStartPlayer = CreatePlayer("COMPUTER.wav", out _productStartStream);
                 _testOkPlayer = CreatePlayer("DINGDONG.wav", out _testOkStream);
+                _stageOkPlayer = CreatePlayer("STAGEOK.wav", out _stageOkStream);
                 _startupPlayer = CreatePlayer("START.wav", out _startupStream);
                 _testPointContactPlayer = CreatePlayer("TESTPOINT.wav", out _testPointContactStream);
                 _wiringFaultPlayer = CreatePlayer("TESTPOINT.wav", out _wiringFaultStream);
@@ -244,6 +247,11 @@ public sealed class AppSoundService : IDisposable
 
     public void PlayTestOk()
     {
+        PlayTestOk(resistancePassed: false);
+    }
+
+    public void PlayTestOk(bool resistancePassed)
+    {
         EnsureInitialized();
 
         // DINGDONG phải tiếp tục phát xuyên suốt các cập nhật UI
@@ -254,6 +262,8 @@ public sealed class AppSoundService : IDisposable
             return;
 
         SoundPlayer? player;
+        SoundPlayer? stagePlayer;
+        int generation;
         lock (_gate)
         {
             if (_disposed)
@@ -270,6 +280,8 @@ public sealed class AppSoundService : IDisposable
             SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
             player = _testOkPlayer;
+            stagePlayer = resistancePassed ? _stageOkPlayer : null;
+            generation = Volatile.Read(ref _soundGeneration);
         }
 
         if (player is null)
@@ -283,6 +295,21 @@ public sealed class AppSoundService : IDisposable
         {
             try
             {
+                if (generation != Volatile.Read(ref _soundGeneration))
+                    return;
+                if (resistancePassed)
+                {
+                    if (stagePlayer is null)
+                        AsyncFileLogService.Current.Error("RESISTANCE_PASS_SOUND resource STAGEOK.wav is unavailable");
+                    else
+                    {
+                        AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_BEGIN");
+                        SafePlaySync(stagePlayer);
+                        AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_END");
+                    }
+                }
+                if (generation != Volatile.Read(ref _soundGeneration))
+                    return;
                 AsyncFileLogService.Current.Application("PASS_SOUND PLAY_BEGIN");
                 SafePlaySync(player);
                 AsyncFileLogService.Current.Application("PASS_SOUND PLAY_END");
@@ -457,6 +484,7 @@ public sealed class AppSoundService : IDisposable
             SafeStop(_clickPlayer);
             SafeStop(_productStartPlayer);
             SafeStop(_testOkPlayer);
+            SafeStop(_stageOkPlayer);
             SafeStop(_startupPlayer);
             SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
@@ -660,6 +688,7 @@ public sealed class AppSoundService : IDisposable
             _clickPlayer?.Dispose();
             _productStartPlayer?.Dispose();
             _testOkPlayer?.Dispose();
+            _stageOkPlayer?.Dispose();
             _startupPlayer?.Dispose();
             _testPointContactPlayer?.Dispose();
             _wiringFaultPlayer?.Dispose();
@@ -669,6 +698,7 @@ public sealed class AppSoundService : IDisposable
             _clickStream?.Dispose();
             _productStartStream?.Dispose();
             _testOkStream?.Dispose();
+            _stageOkStream?.Dispose();
             _startupStream?.Dispose();
             _testPointContactStream?.Dispose();
             _wiringFaultStream?.Dispose();

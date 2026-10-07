@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -1882,6 +1882,14 @@ internal static partial class Program
             "Production settings exposes a system-log master switch that preserves History");
 
         string soundSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
+        using (Stream stageSound = typeof(AppSoundService).Assembly.GetManifestResourceStream(
+                   "JBZUniversalTester.Assets.Sounds.STAGEOK.wav")
+               ?? throw new InvalidOperationException("STAGEOK.wav must be embedded for resistance PASS"))
+        {
+            using var stagePlayer = new System.Media.SoundPlayer(stageSound);
+            stagePlayer.Load();
+            Assert(stagePlayer.IsLoadCompleted, "Packaged resistance PASS sound is a playable WAV");
+        }
         Assert(appSource.Contains("AppSoundService.Current.PlayStartup();", StringComparison.Ordinal) &&
                appSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
                soundSource.Contains("SafePlaySync(player)", StringComparison.Ordinal) &&
@@ -9658,6 +9666,7 @@ internal static partial class Program
             board.Publish(FrameSeq(3, (4, new[] { 9 })));
 
             Assert(vm.IsIoMappingMode &&
+                   AppSoundService.Current.IsTestPointContactSoundActive &&
                    vm.Faults.Count == 2 &&
                    vm.Faults.All(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 9) &&
                    vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
@@ -9691,7 +9700,7 @@ internal static partial class Program
                 "Blank THT Probe presentation overrides rows without changing LiveTopology product presence");
 
             board.Publish(FrameSeq(5));
-            Assert(!AppSoundService.Current.IsTestPointContactSoundActive &&
+            Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
                    vm.Faults.Count == 2 &&
                    vm.Faults.All(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 9) &&
                    vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
@@ -9735,6 +9744,18 @@ internal static partial class Program
             Assert(vm.Faults.Count == 2 &&
                    vm.Faults.All(row => row.ActualSourceIo == 1 && row.ActualTargetIo == 3),
                 "An older LiveTopology snapshot cannot overwrite the latest rendered frame");
+
+            board.Publish(FrameSeq(101));
+            Assert(!AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 0 && vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 &&
+                   !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                "Empty THT stops contact sound when every connection is removed without production or relay effects");
+
+            board.Publish(FrameSeq(102, (60, new[] { 64 })));
+            Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 2 && vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Empty THT contact sound also covers connections outside the previous IO pairs");
+            board.Publish(FrameSeq(103));
 
             ProductModel noEligibleNetModel = new()
             {

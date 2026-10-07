@@ -280,10 +280,10 @@
                                             <ComboBox x:Name="StartCardComboBox" Grid.Row="1" Grid.Column="1" SelectedItem="{Binding Settings.StartCardNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionChanged="CardIoComboBox_SelectionChanged" ToolTip="Card vật lý chứa logical IO1; các card phía trước không tham gia test"/>
                                             <TextBlock Grid.Row="2" Text="Tổng I/O" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBlock x:Name="TotalIoCapacityText" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center" FontWeight="Bold" ToolTip="Tự tính: số card mở rộng × 64 IO" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Row="3" Text="Xác nhận IO1" Style="{StaticResource FieldLabelStyle}"/>
-                                            <ComboBox x:Name="IoConfirm1ComboBox" Grid.Row="3" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirm1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                            <TextBlock Grid.Row="4" Text="Xác nhận IOn" Style="{StaticResource FieldLabelStyle}"/>
-                                            <ComboBox x:Name="IoConfirmNComboBox" Grid.Row="4" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirmN, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBlock Grid.Row="3" Text="Quét xác nhận lần đầu" Style="{StaticResource FieldLabelStyle}"/>
+                                            <ComboBox x:Name="IoConfirm1ComboBox" Grid.Row="3" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirm1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Số lần quét đầy đủ liên tiếp có cùng trạng thái để xác nhận lần đầu. 0 hoặc 1: nhận ngay sau một lần quét. Số lớn hơn: chờ nhiều lần quét giống nhau hơn."/>
+                                            <TextBlock Grid.Row="4" Text="Quét xác nhận tiếp theo" Style="{StaticResource FieldLabelStyle}"/>
+                                            <ComboBox x:Name="IoConfirmNComboBox" Grid.Row="4" Grid.Column="1" SelectedItem="{Binding Settings.IoConfirmN, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Sau lần xác nhận đầu tiên, số lần quét đầy đủ liên tiếp có cùng trạng thái để xác nhận trạng thái mới. 0 hoặc 1: nhận ngay sau một lần quét. Số lớn hơn: chờ nhiều lần quét giống nhau hơn."/>
                                             <TextBlock Grid.Row="5" Text="Độ trễ USB" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.UsbDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <TextBlock Grid.Row="6" Text="LOTNO bắt đầu" Style="{StaticResource FieldLabelStyle}"/>

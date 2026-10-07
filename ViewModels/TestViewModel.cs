@@ -5073,6 +5073,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (!physicalTopologyNow)
             {
                 LiveTopologySnapshot restore = _lastLiveTopologySnapshot;
+                _sound.SetTestPointContactSound(restore.Pairs.Count > 0);
                 InvokeUi(() =>
                 {
                     if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
@@ -5114,6 +5115,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 $"rendered_seq={previousTopology.FrameSequence} generation={topology.ScanGeneration}");
             return;
         }
+        _sound.SetTestPointContactSound(topology.Pairs.Count > 0);
         if (string.Equals(topology.Signature, _lastIoMappingSignature, StringComparison.Ordinal))
             return;
 
@@ -8301,7 +8303,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 {
                     State = "HOÀN THÀNH MẪU MASTER ĐẠT";
                     MasterStatus = State;
-                    _sound.PlayTestOk();
+                    _sound.PlayTestOk(resistancePassed: IsResistanceEnabledForModel(masterModel));
                 },
                 markingEnabled: false,
                 ct: ct);
@@ -10581,7 +10583,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 AsyncFileLogService.Current.Performance(
                     $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
                 _sound.SetWiringFaultAlarm(false);
-                _sound.PlayTestOk();
+                _sound.PlayTestOk(resistancePassed: IsResistanceEnabledForModel(cycleModel));
                 AddLog("PASS - continuity/điện trở/kín nước theo cấu hình đã đạt; chuẩn bị chuỗi relay MARKING/JIG.");
             }
 
