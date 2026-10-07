@@ -514,7 +514,7 @@
                                                 <ComboBoxItem Content="TEM_BE_SQDZ" Tag="TEM_BE_SQDZ"/>
                                                 <ComboBoxItem Content="TEM_BE_QRCODE" Tag="TEM_BE_QRCODE"/>
                                             </ComboBox>
-                                            <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Content="BẬT IN NHÃN" VerticalAlignment="Center" IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
+                                            <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Content="BẬT IN TEM" VerticalAlignment="Center" IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
                                         </Grid>
                                         <Grid x:Name="LabelPrintActionsPanel" Grid.Row="2" Margin="0,6,0,0">
                                             <Grid.RowDefinitions>
