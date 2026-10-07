@@ -33,6 +33,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("History combines installation/test timing and retains removal timing", TestHistoryCombinedTiming),
             ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
@@ -7596,6 +7597,7 @@ internal static partial class Program
                    found[0].InspectionType == HistoryInspectionType.Product &&
                    found[0].InstallDurationSeconds == 2 &&
                    found[0].TestDurationSeconds == 3 &&
+                   found[0].InstallAndTestDurationSeconds == 5 &&
                    found[0].RemovalDurationSeconds == 2 &&
                    found[0].RemovalStartedAt == removalStarted &&
                    found[0].RemovedAt == removedAt &&
@@ -7623,7 +7625,8 @@ internal static partial class Program
             Assert(csvText.Contains(
                     "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,2001,합격,",
                     StringComparison.Ordinal) &&
-                   csvText.Contains("장착 14:07:03~14:07:05(2.000초) 14:07:05 검사시작", StringComparison.Ordinal) &&
+                   csvText.Contains("장착/검사 14:07:03~14:07:08(5.000초)", StringComparison.Ordinal) &&
+                   !csvText.Contains("검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
                    csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
                    csvText.Contains(",NI375C10002608092001,,,JBZUniversalTester V15.2.0", StringComparison.Ordinal) &&

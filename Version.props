@@ -15,15 +15,15 @@
       VersionFileTag  12_10_2 -> next release
   -->
   <PropertyGroup>
-    <VersionPrefix>2026.09.201</VersionPrefix>
-    <Version>2026.09.201</Version>
-    <AssemblyVersion>2026.09.201.0</AssemblyVersion>
-    <FileVersion>2026.09.201.0</FileVersion>
-    <InformationalVersion>2026.09.201</InformationalVersion>
+    <VersionPrefix>2026.09.202</VersionPrefix>
+    <Version>2026.09.202</Version>
+    <AssemblyVersion>2026.09.202.0</AssemblyVersion>
+    <FileVersion>2026.09.202.0</FileVersion>
+    <InformationalVersion>2026.09.202</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <VersionFileTag>2026_09_201</VersionFileTag>
+    <VersionFileTag>2026_09_202</VersionFileTag>
     <Product>JBZUniversalTester</Product>
-    <AssemblyTitle>JBZUniversalTester V2026.09.201</AssemblyTitle>
+    <AssemblyTitle>JBZUniversalTester V2026.09.202</AssemblyTitle>
     <Description>JBZ Universal Tester - Production Harness Tester</Description>
     <Company>JBZ</Company>
     <Copyright>Copyright JBZ 2026</Copyright>

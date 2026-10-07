@@ -103,6 +103,7 @@ public sealed class TestHistoryRecord
     public DateTime EffectiveResultAt => ResultAt ?? Finished;
     public double? InstallDurationSeconds => DurationSeconds(EffectiveInstallStartedAt, TestStartedAt);
     public double? TestDurationSeconds => DurationSeconds(TestStartedAt, EffectiveResultAt);
+    public double? InstallAndTestDurationSeconds => DurationSeconds(EffectiveInstallStartedAt, EffectiveResultAt);
     public double? RemovalDurationSeconds => DurationSeconds(RemovalStartedAt, RemovedAt);
     public string InstallDurationText => FormatDuration(InstallDurationSeconds);
     public string TestDurationText => FormatDuration(TestDurationSeconds);
@@ -112,19 +113,16 @@ public sealed class TestHistoryRecord
         get
         {
             var text = new System.Text.StringBuilder();
-            if (InstallDurationSeconds is double installSeconds)
+            if (InstallAndTestDurationSeconds is double installAndTestSeconds)
             {
-                text.Append("장착 ")
+                text.Append("장착/검사 ")
                     .Append(EffectiveInstallStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
                     .Append('~')
-                    .Append(EffectiveTestStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append(EffectiveResultAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
                     .Append('(')
-                    .Append(installSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append(installAndTestSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
                     .Append("초) ");
             }
-
-            text.Append(EffectiveTestStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
-                .Append(" 검사시작 ");
 
             string trace = InspectionTrace?.Trim() ?? string.Empty;
             if (IsMasterRecord && trace.Length > 0)
