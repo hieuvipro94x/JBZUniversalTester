@@ -50,6 +50,12 @@ internal static partial class Program
                 "Master consumes first SOURCE preview");
             Assert(engine.HasRealtimePresentationProductActivity && !engine.HasProductActivity,
                 "First Master preview changes presentation without authoritative product presence");
+            Assert(!vm.IsCenterResultVisible && vm.CenterResultText == string.Empty,
+                "First product connection hides the installation overlay before presence debounce completes");
+            typeof(TestViewModel).GetField("_presentationCycleStarted", flags)!.SetValue(vm, false);
+            Assert(!vm.IsCenterResultVisible,
+                "Realtime product evidence hides a stale waiting overlay even before its UI latch catches up");
+            typeof(TestViewModel).GetField("_presentationCycleStarted", flags)!.SetValue(vm, true);
             Assert(vm.Faults.Any(row => row.WireName == "SECOND") &&
                    !vm.Faults.Any(row => row.WireName == "FIRST"),
                 "First connection updates Master installation rows without a second connector or C0");
@@ -209,6 +215,15 @@ internal static partial class Program
                    vm.CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
                    vm.ResultStatusText == "LẮP SẢN PHẨM" && vm.CenterResultText == "LẮP SẢN PHẨM",
                 "Completed Master clears testing state and returns both result areas to product installation");
+            vm.State = "ĐANG KIỂM TRA...";
+            Assert(vm.ResultStatusText == "LẮP SẢN PHẨM" && vm.CenterResultText == "LẮP SẢN PHẨM" &&
+                   vm.StateBackground == "#FFF3A0" && vm.StateForeground == "#222222",
+                "A delayed generic testing message cannot replace the confirmed idle state after Master completion");
+            SetField("_presentationCycleStarted", true);
+            Assert(vm.ResultStatusText == "ĐANG KIỂM TRA" && vm.StateBackground == "#1976D2",
+                "A new product installation after Master still shows active testing");
+            SetField("_presentationCycleStarted", false);
+            vm.State = "LẮP SẢN PHẨM";
         }
         finally
         {

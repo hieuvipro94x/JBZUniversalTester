@@ -22,6 +22,8 @@ public partial class TestWindow : Window
     private bool _closeInProgress;
     private readonly bool _autoStartProduction;
     private readonly DispatcherTimer _clockTimer;
+    private readonly DispatcherTimer _testingDotsTimer;
+    private int _testingDotsStep;
     private readonly DispatcherTimer _yellowPulseTimer;
     private readonly DispatcherTimer _whitePulseTimer;
     private readonly DispatcherTimer _greenPulseTimer;
@@ -70,6 +72,12 @@ public partial class TestWindow : Window
         };
         _clockTimer.Tick += ClockTimer_Tick;
 
+        _testingDotsTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(400)
+        };
+        _testingDotsTimer.Tick += TestingDotsTimer_Tick;
+
         _yellowPulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
             Interval = TimeSpan.FromMilliseconds(200)
@@ -112,6 +120,38 @@ public partial class TestWindow : Window
         UpdateClock();
         if (DataContext is TestViewModel viewModel)
             viewModel.RefreshDailyMasterRequirement();
+    }
+
+    private void UpdateTestingDots(TestViewModel viewModel)
+    {
+        if (viewModel.ResultStatusText == "ĐANG KIỂM TRA")
+        {
+            if (!_testingDotsTimer.IsEnabled)
+            {
+                _testingDotsStep = 0;
+                TestingStatusDots.Text = string.Empty;
+                _testingDotsTimer.Start();
+            }
+        }
+        else
+        {
+            _testingDotsTimer.Stop();
+            _testingDotsStep = 0;
+            TestingStatusDots.Text = string.Empty;
+        }
+    }
+
+    private void TestingDotsTimer_Tick(object? sender, EventArgs e)
+    {
+        if (DataContext is not TestViewModel viewModel || viewModel.ResultStatusText != "ĐANG KIỂM TRA")
+        {
+            _testingDotsTimer.Stop();
+            TestingStatusDots.Text = string.Empty;
+            return;
+        }
+
+        _testingDotsStep = (_testingDotsStep + 1) % 4;
+        TestingStatusDots.Text = new string('.', _testingDotsStep);
     }
 
     private void TestWindow_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -368,6 +408,8 @@ public partial class TestWindow : Window
     {
         if (Volatile.Read(ref _statusLedHandlersAttached) == 0 || DataContext != viewModel)
             return;
+
+        UpdateTestingDots(viewModel);
 
         if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault)
         {
@@ -709,6 +751,8 @@ public partial class TestWindow : Window
         CancelPendingAutoStart();
         ContentRendered -= TestWindow_ContentRendered;
         _clockTimer.Stop();
+        _testingDotsTimer.Stop();
+        _testingDotsTimer.Tick -= TestingDotsTimer_Tick;
         _clockTimer.Tick -= ClockTimer_Tick;
         _yellowPulseTimer.Stop();
         _yellowPulseTimer.Tick -= YellowPulseTimer_Tick;

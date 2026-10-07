@@ -64,6 +64,27 @@ internal static class ProductionPresentationService
         if (state.IsWaitingMasterSample)
             return "LẮP MẪU MASTER";
 
+        if (state.IsWaitingOrContinuityPhase &&
+            (state.PresentationCycleStarted || state.HasProductActivity) &&
+            value.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ĐANG KIỂM TRA";
+        }
+
+        // After Master completes, a delayed generic testing message must not
+        // outrank the confirmed waiting state. Keep actual new-product activity
+        // and explicit equipment/measurement states on their existing paths.
+        if (state.MasterApproved &&
+            !state.IsManualModeActive &&
+            !state.PresentationCycleStarted &&
+            state.IsWaitingOrContinuityPhase &&
+            !state.HasProductActivity &&
+            (value.Equals("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase) ||
+             value.Equals("ĐANG KIỂM TRA...", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "LẮP SẢN PHẨM";
+        }
+
         // Đồng bộ model là thông báo nền, không phải một pha kiểm tra sản phẩm.
         // Nếu chưa có hoạt động sản phẩm thì ô trạng thái vẫn phải mời lắp hàng.
         if (value.StartsWith("ĐÃ ĐỒNG BỘ MÃ HÀNG", StringComparison.OrdinalIgnoreCase) &&
@@ -107,6 +128,9 @@ internal static class ProductionPresentationService
 
         if (resultStatus.Equals("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
             return "#1976D2";
+
+        if (resultStatus.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
+            return "#FFF3A0";
 
         if (state.IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
             return "#FFF3A0";

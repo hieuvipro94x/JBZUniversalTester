@@ -739,8 +739,7 @@
                         BorderBrush="{StaticResource PiBorderBrush}"
                         BorderThickness="1">
                     <Viewbox Margin="8,6" Stretch="Uniform" StretchDirection="DownOnly">
-                        <TextBlock Text="{Binding ResultStatusText}"
-                                   Width="204"
+                        <TextBlock Width="204"
                                    Foreground="{Binding StateForeground}"
                                    FontSize="32"
                                    FontWeight="Bold"
@@ -749,7 +748,7 @@
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    LineStackingStrategy="BlockLineHeight"
-                                   LineHeight="38"/>
+                                   LineHeight="38"><Run Text="{Binding ResultStatusText, Mode=OneWay}"/><Run x:Name="TestingStatusDots"/></TextBlock>
                     </Viewbox>
                 </Border>
 

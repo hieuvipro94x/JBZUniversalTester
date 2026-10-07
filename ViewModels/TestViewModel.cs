@@ -584,6 +584,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private bool IsWaitingProductPresentation =>
         !IsDeviceFault &&
+        !_presentationCycleStarted &&
+        !_engine.HasRealtimePresentationProductActivity &&
         ((CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
           CurrentProductionPresentationMode == ProductionPresentationMode.Waiting) ||
          (CurrentProductionPhase == ProductionPhase.Continuity &&
@@ -595,6 +597,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void RaiseCenterPresentation()
     {
+        Raise(nameof(ResultStatusText));
+        Raise(nameof(StateBackground));
+        Raise(nameof(StateForeground));
         Raise(nameof(IsPassStatusLedHeld));
         Raise(nameof(CenterResultText));
         Raise(nameof(IsCenterResultVisible));
@@ -671,7 +676,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     bool IProductionPresentationState.PresentationCycleStarted =>
         _presentationCycleStarted;
     bool IProductionPresentationState.HasProductActivity =>
-        _engine.HasProductActivity;
+        _engine.HasRealtimePresentationProductActivity;
     bool IProductionPresentationState.IsWaitingMasterSample => IsWaitingMasterSample;
 
     public string Lot
