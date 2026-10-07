@@ -73,6 +73,7 @@ internal static partial class Program
             ("PASS label snapshot/idempotency/traceability", TestLabelPrintingSafety),
             ("Standard product picker filter", TestProductPickerFilter),
             ("Recursive ITEM product catalog and partial filename search", TestRecursiveProductCatalogSearch),
+            ("1000-file picker typing coalesces filtering and prevents stale selection", TestProductPickerDebouncedSearch),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
             ("Authoritative production state and stale UI snapshot gate", TestAuthoritativeProductionState),

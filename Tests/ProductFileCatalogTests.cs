@@ -1,9 +1,97 @@
 using JBZUniversalTester.Services;
+using JBZUniversalTester.Views;
+using System.Collections.Specialized;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestProductPickerDebouncedSearch()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZ-PickerTyping-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            for (int i = 0; i < 1000; i++)
+                File.WriteAllText(Path.Combine(root, $"WH{i:000000}.tht"), string.Empty);
+            Exception? failure = null;
+            var thread = new Thread(() =>
+            {
+                ProductPickerWindow? window = null;
+                var frame = new DispatcherFrame();
+                var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(20) };
+                int ticks = 0, stage = 0, resets = 0;
+                try
+                {
+                    window = new ProductPickerWindow(root)
+                    { Left = -20000, Top = -20000, ShowActivated = false };
+                    var grid = (DataGrid)window.FindName("ProductGrid");
+                    var search = (TextBox)window.FindName("SearchBox");
+                    var select = (Button)window.FindName("SelectButton");
+                    var refresh = (Button)window.FindName("RefreshButton");
+                    timer.Tick += (_, _) =>
+                    {
+                        try
+                        {
+                            Assert(++ticks < 300, "Picker search fixture finishes without hanging");
+                            if (stage == 0 && grid.Items.Count == 1000 && refresh.IsEnabled)
+                            {
+                                ((INotifyCollectionChanged)grid.Items).CollectionChanged += (_, e) =>
+                                { if (e.Action == NotifyCollectionChangedAction.Reset) resets++; };
+                                search.Text = "2";
+                                search.Text = "28";
+                                search.Text = "285";
+                                Assert(resets == 0 && grid.Items.Count == 1000 && !select.IsEnabled,
+                                    "Rapid typing does not rebuild the table per key or permit a stale selection");
+                                stage = 1;
+                            }
+                            else if (stage == 1 && grid.Items.Count == 1 && select.IsEnabled)
+                            {
+                                Assert(resets == 1 && ((ProductFileEntry)grid.Items[0]).Name == "WH000285",
+                                    "Only the final typed query is applied once and finds the correct suffix");
+                                search.Text = string.Empty;
+                                search.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice,
+                                    PresentationSource.FromVisual(window), 0, Key.Down)
+                                { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+                                Assert(grid.Items.Count == 1000 && resets == 2 && select.IsEnabled,
+                                    "Keyboard navigation flushes a pending search and retains all 1000 files");
+                                search.Text = "DOES-NOT-EXIST";
+                                stage = 2;
+                            }
+                            else if (stage == 2 && grid.Items.Count == 0)
+                            {
+                                Assert(resets == 3 && !select.IsEnabled,
+                                    "No-match query clears selection after a single update");
+                                timer.Stop();
+                                frame.Continue = false;
+                            }
+                        }
+                        catch (Exception ex)
+                        { failure = ex; timer.Stop(); frame.Continue = false; }
+                    };
+                    window.Show();
+                    timer.Start();
+                    Dispatcher.PushFrame(frame);
+                }
+                catch (Exception ex) { failure = ex; }
+                finally { timer.Stop(); window?.Close(); }
+            }) { IsBackground = true };
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+            Assert(thread.Join(TimeSpan.FromSeconds(15)), "Picker UI regression thread completes");
+            if (failure is not null)
+                throw new InvalidOperationException("Debounced picker UI regression failed.", failure);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true); // This generated fixture only.
+        }
+    }
+
     private static void TestRecursiveProductCatalogSearch()
     {
         string root = Path.Combine(Path.GetTempPath(), "JBZ-ITEM-" + Guid.NewGuid().ToString("N"));
