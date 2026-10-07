@@ -748,7 +748,23 @@
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    LineStackingStrategy="BlockLineHeight"
-                                   LineHeight="38"><Run Text="{Binding ResultStatusText, Mode=OneWay}"/><Run x:Name="TestingStatusDots"/></TextBlock>
+                                   LineHeight="38"><Run Text="{Binding ResultStatusText, Mode=OneWay}"/><InlineUIContainer BaselineAlignment="Baseline"><TextBlock x:Name="TestingStatusDots"
+                                        Width="36"
+                                        FontSize="32"
+                                        FontWeight="Bold"
+                                        TextAlignment="Left"
+                                        TextWrapping="NoWrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ResultStatusText}" Value="ĐANG KIỂM TRA">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock></InlineUIContainer></TextBlock>
                     </Viewbox>
                 </Border>
 
