@@ -72,6 +72,7 @@ internal static partial class Program
             ("THT label renderer and LOT lifecycle", TestThtLabelAndLotLifecycle),
             ("PASS label snapshot/idempotency/traceability", TestLabelPrintingSafety),
             ("Standard product picker filter", TestProductPickerFilter),
+            ("Recursive ITEM product catalog and partial filename search", TestRecursiveProductCatalogSearch),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
             ("Authoritative production state and stale UI snapshot gate", TestAuthoritativeProductionState),

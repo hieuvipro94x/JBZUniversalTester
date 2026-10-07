@@ -1,0 +1,171 @@
+<Window x:Class="JBZUniversalTester.Views.ProductPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Chọn mã hàng" Width="850" Height="770" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F3F6FA" Foreground="#172B40" FontFamily="Segoe UI" FontSize="14">
+    <Window.Resources>
+        <Style x:Key="PickerButton" TargetType="Button">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="14,0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="#34485D"/>
+            <Setter Property="BorderBrush" Value="#D6DFE8"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#EAF2F8"/></Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="#176B87"/></Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PickerPrimaryButton" TargetType="Button" BasedOn="{StaticResource PickerButton}">
+            <Setter Property="Background" Value="#176B87"/>
+            <Setter Property="BorderBrush" Value="#176B87"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#125970"/></Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PickerCellText" TargetType="TextBlock">
+            <Setter Property="Margin" Value="12,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="20,16,20,18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,14">
+            <TextBlock Text="Chọn mã hàng" FontSize="23" FontWeight="SemiBold"/>
+            <TextBlock x:Name="RootText" Margin="0,4,0,0" FontSize="12" Foreground="#64748B"
+                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+        </StackPanel>
+        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+            <Border Background="White" BorderBrush="#BFCFDD" BorderThickness="1" CornerRadius="7" Padding="12,8">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Path Data="M 10,1 A 9,9 0 1 1 9.99,1 M 16,17 L 23,24" Stroke="#617B91" StrokeThickness="1.8"
+                          Width="18" Height="18" Stretch="Uniform" VerticalAlignment="Center"/>
+                    <TextBox x:Name="SearchBox" Grid.Column="1" BorderThickness="0" Background="White"
+                             Foreground="Black" CaretBrush="Black"
+                             FontSize="18" Padding="2,0" VerticalContentAlignment="Center"
+                             TextChanged="SearchBox_TextChanged" PreviewKeyDown="SearchBox_PreviewKeyDown"/>
+                    <TextBlock Grid.Column="1" Text="Nhập tên hoặc một phần mã hàng..." Foreground="Black"
+                               FontSize="16" Margin="4,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+            </Border>
+            <TextBlock Text="Ví dụ: 285 hoặc WH322 · Tìm ở đầu, giữa hoặc cuối tên" FontSize="12"
+                       Foreground="#64748B" Margin="2,6,0,0"/>
+        </StackPanel>
+        <Border Grid.Row="2" Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7" Padding="1">
+            <DataGrid x:Name="ProductGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                      CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="False" CanUserSortColumns="False"
+                      SelectionMode="Single" SelectionUnit="FullRow" RowHeight="38" ColumnHeaderHeight="32"
+                      EnableRowVirtualization="True" EnableColumnVirtualization="True" HeadersVisibility="Column"
+                      GridLinesVisibility="None" BorderThickness="0" Background="White"
+                      HorizontalScrollBarVisibility="Disabled"
+                      SelectionChanged="ProductGrid_SelectionChanged" MouseDoubleClick="ProductGrid_MouseDoubleClick"
+                      PreviewKeyDown="ProductGrid_PreviewKeyDown">
+                <DataGrid.ColumnHeaderStyle>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="Background" Value="#EDF2F7"/>
+                        <Setter Property="Foreground" Value="#62758A"/>
+                        <Setter Property="FontSize" Value="11"/>
+                        <Setter Property="FontWeight" Value="SemiBold"/>
+                        <Setter Property="Padding" Value="12,0"/>
+                        <Setter Property="BorderThickness" Value="0"/>
+                    </Style>
+                </DataGrid.ColumnHeaderStyle>
+                <DataGrid.CellStyle>
+                    <Style TargetType="DataGridCell">
+                        <Setter Property="Padding" Value="12,0"/>
+                        <Setter Property="BorderThickness" Value="0"/>
+                        <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                        <Style.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Foreground" Value="#145570"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.CellStyle>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="MÃ HÀNG" Binding="{Binding Name}" Width="2*">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource PickerCellText}">
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                <Setter Property="FontSize" Value="15"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Header="THƯ MỤC" Binding="{Binding Folder}" Width="3*"
+                                        ElementStyle="{StaticResource PickerCellText}"/>
+                </DataGrid.Columns>
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Setter Property="Background" Value="White"/>
+                        <Setter Property="ToolTip" Value="{Binding FullPath}"/>
+                        <Setter Property="BorderThickness" Value="3,0,0,0"/>
+                        <Setter Property="BorderBrush" Value="Transparent"/>
+                        <Style.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#F0F6FA"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="#E5F2F8"/>
+                                <Setter Property="BorderBrush" Value="#176B87"/>
+                                <Setter Property="Foreground" Value="#145570"/>
+                            </Trigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
+            </DataGrid>
+        </Border>
+        <Grid Grid.Row="3" Margin="2,9,2,12">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="StatusText" FontSize="12" Foreground="#64748B" TextWrapping="Wrap"/>
+            <TextBlock Grid.Column="1" Text="Enter để chọn · Esc để hủy" FontSize="11" Foreground="#8A9AAA" Margin="12,0,0,0"/>
+        </Grid>
+        <Grid Grid.Row="4">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Chọn file khác..." Style="{StaticResource PickerButton}" Click="BrowseFile_Click"/>
+                <Button x:Name="RefreshButton" Content="Làm mới" Style="{StaticResource PickerButton}" Margin="8,0,0,0" Click="Refresh_Click"/>
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="Hủy" IsCancel="True" Style="{StaticResource PickerButton}" MinWidth="68"/>
+                <Button x:Name="SelectButton" Content="Chọn mã hàng" IsEnabled="False" MinWidth="140"
+                        Style="{StaticResource PickerPrimaryButton}" Margin="8,0,0,0" Click="Select_Click"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

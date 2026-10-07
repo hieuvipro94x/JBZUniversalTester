@@ -77,21 +77,32 @@ public sealed class HomeViewModel : ObservableObject
             .OfType<Window>()
             .FirstOrDefault(window => window.IsActive)
             ?? Application.Current?.MainWindow;
-        WinForms.DialogResult accepted;
-        if (owner is not null)
+        var picker = new ProductPickerWindow(dialog.InitialDirectory);
+        if (owner is not null) picker.Owner = owner;
+        string selectedFilePath;
+        if (picker.ShowDialog() == true && picker.SelectedFilePath is string catalogPath)
         {
-            using var resizeLock = new FixedPositionOpenFileDialogGuard(owner, resizeLockOnly: true);
-            accepted = dialog.ShowDialog(new NativeDialogOwner(owner));
+            selectedFilePath = catalogPath;
         }
         else
         {
-            accepted = dialog.ShowDialog();
+            if (!picker.BrowseFileRequested) return;
+            WinForms.DialogResult accepted;
+            if (owner is not null)
+            {
+                using var resizeLock = new FixedPositionOpenFileDialogGuard(owner, resizeLockOnly: true);
+                accepted = dialog.ShowDialog(new NativeDialogOwner(owner));
+            }
+            else
+            {
+                accepted = dialog.ShowDialog();
+            }
+
+            if (accepted != WinForms.DialogResult.OK)
+                return;
+
+            selectedFilePath = dialog.FileName;
         }
-
-        if (accepted != WinForms.DialogResult.OK)
-            return;
-
-        string selectedFilePath = dialog.FileName;
         if (!IsSupportedProductFile(selectedFilePath))
         {
             MessageBox.Show(
