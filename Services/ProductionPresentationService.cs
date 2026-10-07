@@ -127,10 +127,11 @@ internal static class ProductionPresentationService
         string resultStatus = GetResultStatusText(state);
 
         if (resultStatus.Equals("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
-            return "#1976D2";
+            return "#85CFE1";
 
-        if (resultStatus.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
-            return "#FFF3A0";
+        if (resultStatus.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
+            resultStatus.Equals("LẮP MẪU MASTER", StringComparison.OrdinalIgnoreCase))
+            return "#F5E731";
 
         if (state.IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
             return "#FFF3A0";
@@ -173,7 +174,7 @@ internal static class ProductionPresentationService
         }
 
         if (value.Contains("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
-            return "#1976D2";
+            return "#85CFE1";
 
         if (value.Contains("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase))
@@ -185,8 +186,9 @@ internal static class ProductionPresentationService
     }
 
     public static string GetStateForeground(string stateBackground) =>
+        stateBackground.Equals("#F5E731", StringComparison.OrdinalIgnoreCase) ||
         stateBackground.Equals("#FFF3A0", StringComparison.OrdinalIgnoreCase) ||
-        stateBackground.Equals("#1976D2", StringComparison.OrdinalIgnoreCase)
+        stateBackground.Equals("#85CFE1", StringComparison.OrdinalIgnoreCase)
             ? "#222222"
             : "#FFFFFF";
 }
