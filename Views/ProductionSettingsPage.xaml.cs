@@ -1139,6 +1139,10 @@ public partial class ProductionSettingsPage : UserControl
     private static long MinimumBatchPrintLot(string templateType) =>
         LabelProfileResolver.NormalizeTemplateType(templateType) == LabelSettings.SmallQrTemplate ? 1 : 0;
 
+    private static bool IsValidBatchPrintRange(long firstLot, long lastLot, string templateType) =>
+        firstLot >= MinimumBatchPrintLot(templateType) && lastLot >= firstLot &&
+        lastLot - firstLot < int.MaxValue;
+
     private async void TestPrintLabel_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -1203,10 +1207,10 @@ public partial class ProductionSettingsPage : UserControl
                     BatchPrintEndLotTextBox.Text,
                     NumberStyles.Integer,
                     CultureInfo.InvariantCulture,
-                    out long lastLot) || lastLot < firstLot || lastLot - firstLot >= 100)
+                    out long lastLot) || !IsValidBatchPrintRange(firstLot, lastLot, _vm.Settings.Label.TemplateType))
             {
                 ShowMessage(
-                    $"Nhập LOT bắt đầu và kết thúc hợp lệ (từ {MinimumBatchPrintLot(_vm.Settings.Label.TemplateType)} trở lên, tối đa 100 tem).",
+                    $"Nhập LOT bắt đầu và kết thúc hợp lệ (từ {MinimumBatchPrintLot(_vm.Settings.Label.TemplateType)} trở lên, LOT kết thúc không nhỏ hơn LOT bắt đầu).",
                     "IN HÀNG LOẠT",
                     MessageBoxImage.Warning);
                 return;
