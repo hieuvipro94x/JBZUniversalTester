@@ -223,7 +223,7 @@
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                       HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top"
                       CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged">
-            <Grid x:Name="SettingsPanelsHost" MinWidth="540">
+            <Grid x:Name="SettingsPanelsHost" MinWidth="540" Width="{Binding ViewportWidth, ElementName=SettingsScrollViewer}">
                 <Grid x:Name="UnifiedSettingsGrid" Margin="4" HorizontalAlignment="Stretch"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Stretch">
                                     <StackPanel>
@@ -532,8 +532,20 @@
                                                     <ColumnDefinition Width="80"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="Mã hàng cần in" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
-                                                <TextBox x:Name="LabelPrintModelTextBox" Grid.Column="1" IsReadOnly="True" Height="26" Margin="0,2,6,2" VerticalContentAlignment="Center" Background="White" Foreground="Black" ToolTip="Mã hàng dùng cho xem trước, in thử và in hàng loạt."/>
-                                                <Button x:Name="LabelPrintModelButton" Grid.Column="2" Content="CHỌN" Height="26" Style="{StaticResource SettingsInfoButtonStyle}" Click="SelectLabelPrintModel_Click"/>
+                                                <ComboBox x:Name="LabelPrintModelComboBox" Grid.Column="1" Height="26" Margin="0,2,6,2" Background="White" Foreground="Black" IsTextSearchEnabled="True" TextSearch.TextPath="Name" MaxDropDownHeight="320" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" SelectionChanged="LabelPrintModelComboBox_SelectionChanged">
+                                                    <ComboBox.ItemsPanel>
+                                                        <ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate>
+                                                    </ComboBox.ItemsPanel>
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <StackPanel ToolTip="{Binding FullPath}">
+                                                                <TextBlock Text="{Binding Name}" Foreground="Black"/>
+                                                                <TextBlock Text="{Binding Folder}" Foreground="Gray" FontSize="11"/>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                                <Button x:Name="LabelPrintModelButton" Grid.Column="2" Content="QUÉT" Height="26" Style="{StaticResource SettingsInfoButtonStyle}" Click="RefreshLabelPrintModels_Click"/>
                                             </Grid>
                                             <UniformGrid Grid.Row="1" Columns="3">
                                                 <Button Content="CHỈNH TEM" Height="26" Margin="1,2,1,2" Padding="2,0" FontSize="13" Style="{StaticResource SettingsInfoButtonStyle}" Click="EditLabelTemplate_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>

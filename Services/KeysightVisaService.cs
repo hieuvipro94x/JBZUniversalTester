@@ -8,7 +8,6 @@ namespace JBZUniversalTester.Services;
 public class KeysightVisaService : IDisposable
 {
     const int VI_SUCCESS = 0;
-    const uint VI_TMO_INFINITE = 0xFFFFFFFF;
     const uint VI_ATTR_TMO_VALUE = 0x3FFF001A;
 
     readonly object _sync = new();

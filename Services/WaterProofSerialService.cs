@@ -1009,22 +1009,6 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         RaiseLog($"LEAK_SESSION state={state.ToString().ToUpperInvariant()} run={runNumber}");
     }
 
-    private async Task WaitForPendingCloseBestEffortAsync()
-    {
-        try
-        {
-            await WaitForPendingCloseAsync(CancellationToken.None)
-                .ConfigureAwait(false);
-        }
-        catch (TimeoutException ex)
-        {
-            // A valid RESULT must not be discarded only because a broken USB/COM
-            // driver is slow to return from Close(). The next run will check again
-            // before opening a new session.
-            RaiseLog($"[WP] CLOSE STILL PENDING AFTER RESULT: {ex.Message}");
-        }
-    }
-
     private void CloseAndDispose(SerialPort port)
     {
         // Wait for the sole reader/writer to leave its native call. A hung driver

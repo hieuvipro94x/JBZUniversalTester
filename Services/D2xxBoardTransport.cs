@@ -29,7 +29,6 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
 {
     const uint FT_OK = 0;
     const uint FT_OPEN_BY_SERIAL_NUMBER = 1;
-    const uint FT_OPEN_BY_DESCRIPTION = 2;
     const uint TargetFtdiId = 0x04036001; // VID 0403 / PID 6001
     const string TargetDescription = "FT245R USB FIFO";
     const uint FT_PURGE_RX = 1;

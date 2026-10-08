@@ -8,16 +8,6 @@ namespace JBZUniversalTester.Services;
 
 public static class ProductionConfigService
 {
-    private static readonly string[] LegacyTimingKeys =
-    [
-        nameof(ProductionSettings.IoScanIntervalMs),
-        nameof(ProductionSettings.ShortCircuitConfirmMs),
-        nameof(ProductionSettings.WrongConnectionConfirmMs),
-        nameof(ProductionSettings.ProductSettleTimeMs),
-        nameof(ProductionSettings.JigContactUnstableWindowMs),
-        nameof(ProductionSettings.ShortConfirmMs)
-    ];
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,

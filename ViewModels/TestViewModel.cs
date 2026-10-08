@@ -5747,35 +5747,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return "UNKNOWN";
     }
 
-    private bool HasInstalledProductEvidenceForProbe()
-    {
-        // Htdrv chỉ nhận TestPoint khi bộ dây/bo test thật đang hiện diện.
-        // Một tiếp xúc cơ thể người trên IO trống có thể tạo fan-in nhiễu, nhưng
-        // không thể làm thông một network kỳ vọng của model. Dùng snapshot đã
-        // xác nhận từ TestEngine làm gate; preview vẫn nhanh từ frame kế tiếp.
-        if (_model is null || IsIoMappingMode)
-            return false;
-
-        PassGateDiagnostics gate = _engine.GetPassGateDiagnostics();
-        return gate.ExpectedNetCount > 0 &&
-               gate.PassedNetCount > 0 &&
-               gate.LastFrameValid;
-    }
-
-    private bool IsMappedProbeIo(int io)
-    {
-        ProductModel? model = _model;
-        if (model is null || io <= 0)
-            return false;
-
-        if (model.Pins.Any(pin => pin.IoNumber == io))
-            return true;
-
-        return model.Clip is not null &&
-               (model.Clip.CommonIo == io ||
-                model.Clip.Branches.Any(branch => branch.TargetIo == io));
-    }
-
     private bool TryDetectInlineProbeContacts(ScanFrame frame, out int[] ios)
     {
         ios = Array.Empty<int>();
@@ -6306,11 +6277,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         SynchronizeFaultRows(rows);
         RaiseTestStatistics();
-    }
-
-    private void RemoveInlineProbeFaultRows()
-    {
-        SynchronizeFaultRows(Faults.Where(row => row.Kind != FaultKind.Probe).ToArray());
     }
 
     private void RebuildActiveCards()
@@ -10132,14 +10098,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return $"[{name}: {F(channel.FirstPressure)}→{F(channel.SecondPressure)} " +
                        $"Δ{F(channel.Leak)}≤{F(_waterProofProfile.LeakLimit)}:{(channel.Passed ? "PASS" : "FAIL")}]";
             }));
-    }
-
-    private string WaterProofRetryInstruction()
-    {
-        string connectors = string.Join(", ", ConfiguredWaterProofConnectorIds(_waterProofCurrentRunProfile));
-        return connectors.Length == 0
-            ? "LEAK FAIL - THÁO/LẮP LẠI CONNECTOR LEAK"
-            : $"LEAK FAIL - THÁO RỒI LẮP LẠI CONNECTOR {connectors}";
     }
 
     private bool TryBeginWaterProofOnConnector(long generation)

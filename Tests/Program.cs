@@ -74,6 +74,8 @@ internal static partial class Program
             ("Standard product picker filter", TestProductPickerFilter),
             ("Recursive ITEM product catalog and partial filename search", TestRecursiveProductCatalogSearch),
             ("1000-file picker typing coalesces filtering and prevents stale selection", TestProductPickerDebouncedSearch),
+            ("Smooth navigation retains the rendered main window behind child screens", TestSmoothOwnedWindowNavigation),
+            ("Long Leak errors wrap without widening Production Settings", TestSettingsLongLeakErrorLayout),
             ("Small QR manual batches start at 0001 with the selected print model", TestSmallQrManualPrintStart),
             ("Leak waiting respects installed non-Leak connectors", TestLeakWaitingWithNonLeakConnector),
             ("Keysight equipment faults preserve the app and await removal", TestRecoverableKeysightEquipmentFault),

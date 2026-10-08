@@ -35,6 +35,7 @@ public partial class ProductionSettingsPage : UserControl
     private int _batchPrintInProgress;
     private CancellationTokenSource? _batchPrintCts;
     private string? _labelPrintModelPath;
+    private int _labelModelLoadGeneration;
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
     private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
@@ -62,7 +63,13 @@ public partial class ProductionSettingsPage : UserControl
         InitializeComponent();
         SinglePrintLotTextBox.Text = _vm.Settings.LotNo.ToString(CultureInfo.InvariantCulture);
         _labelPrintModelPath = _vm.Settings.LastThtPath;
-        LabelPrintModelTextBox.Text = System.IO.Path.GetFileNameWithoutExtension(_labelPrintModelPath ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(_labelPrintModelPath))
+        {
+            var current = new ProductFileEntry(System.IO.Path.GetFileNameWithoutExtension(_labelPrintModelPath),
+                System.IO.Path.GetDirectoryName(_labelPrintModelPath) ?? string.Empty, _labelPrintModelPath);
+            LabelPrintModelComboBox.ItemsSource = new[] { current };
+            LabelPrintModelComboBox.SelectedItem = current;
+        }
         BatchPrintStartLotTextBox.Text = "1";
         BatchPrintEndLotTextBox.Text = "1";
         DataContext = _vm;
@@ -111,7 +118,7 @@ public partial class ProductionSettingsPage : UserControl
         if (IsReleased)
             return;
 
-        await RefreshPortsAsync();
+        await Task.WhenAll(RefreshPortsAsync(), LoadLabelPrintModelsAsync());
         if (IsReleased)
             return;
         _printerPortSelectionInitialized = true;
@@ -131,6 +138,7 @@ public partial class ProductionSettingsPage : UserControl
         }
         Interlocked.Increment(ref _portRefreshGeneration);
         Interlocked.Increment(ref _printerConnectionGeneration);
+        Interlocked.Increment(ref _labelModelLoadGeneration);
         Loaded -= ProductionSettingsPage_Loaded;
         DataContext = null;
         SettingsSaved = null;
@@ -1098,39 +1106,55 @@ public partial class ProductionSettingsPage : UserControl
             ? parsed
             : 0d;
 
-    private async void SelectLabelPrintModel_Click(object sender, RoutedEventArgs e)
+    private async void RefreshLabelPrintModels_Click(object sender, RoutedEventArgs e) =>
+        await LoadLabelPrintModelsAsync();
+
+    private async Task LoadLabelPrintModelsAsync()
     {
-        if (Volatile.Read(ref _batchPrintInProgress) != 0)
-            return;
+        if (Volatile.Read(ref _batchPrintInProgress) != 0 || IsReleased) return;
+        int generation = Interlocked.Increment(ref _labelModelLoadGeneration);
+        LabelPrintModelButton.IsEnabled = false;
         try
         {
+            string? currentDirectory = System.IO.Path.GetDirectoryName(_labelPrintModelPath ?? string.Empty);
             string root = Directory.Exists(@"C:\Item") ? @"C:\Item" :
-                System.IO.Path.GetDirectoryName(_labelPrintModelPath ?? _vm.Settings.LastThtPath ?? string.Empty) ?? AppContext.BaseDirectory;
-            var picker = new ProductPickerWindow(root) { Owner = Window.GetWindow(this) };
-            string? path = picker.ShowDialog() == true ? picker.SelectedFilePath : null;
-            if (picker.BrowseFileRequested)
-            {
-                var dialog = new Microsoft.Win32.OpenFileDialog
-                {
-                    Filter = "Mã hàng THT (*.tht)|*.tht", InitialDirectory = root,
-                    CheckFileExists = true, Multiselect = false
-                };
-                if (dialog.ShowDialog(Window.GetWindow(this)) == true)
-                    path = dialog.FileName;
-            }
-            if (string.IsNullOrWhiteSpace(path)) return;
-            ProductModel model = await Task.Run(() => new ThtModelParser().Load(path));
-            if (IsReleased || Volatile.Read(ref _batchPrintInProgress) != 0) return;
-            _labelPrintModelPath = path;
-            LabelPrintModelTextBox.Text = string.IsNullOrWhiteSpace(model.PartNumber)
-                ? System.IO.Path.GetFileNameWithoutExtension(path) : model.PartNumber;
-            LabelPrintModelTextBox.ToolTip = path;
+                !string.IsNullOrWhiteSpace(currentDirectory) && Directory.Exists(currentDirectory)
+                    ? currentDirectory : AppContext.BaseDirectory;
+            ProductFileCatalogResult catalog = await Task.Run(() => ProductFileCatalog.Read(root));
+            if (IsReleased || generation != Volatile.Read(ref _labelModelLoadGeneration) ||
+                Volatile.Read(ref _batchPrintInProgress) != 0) return;
+            foreach (string error in catalog.Errors)
+                AsyncFileLogService.Current.Error($"LABEL PRODUCT CATALOG: {error}");
+            var files = catalog.Files.ToList();
+            if (!string.IsNullOrWhiteSpace(_labelPrintModelPath) && File.Exists(_labelPrintModelPath) &&
+                !files.Any(file => string.Equals(file.FullPath, _labelPrintModelPath, StringComparison.OrdinalIgnoreCase)))
+                files.Add(new ProductFileEntry(System.IO.Path.GetFileNameWithoutExtension(_labelPrintModelPath),
+                    System.IO.Path.GetDirectoryName(_labelPrintModelPath) ?? string.Empty, _labelPrintModelPath));
+            var selected = files.FirstOrDefault(file => string.Equals(
+                file.FullPath, _labelPrintModelPath, StringComparison.OrdinalIgnoreCase));
+            LabelPrintModelComboBox.ItemsSource = files.OrderBy(file => file.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(file => file.FullPath, StringComparer.OrdinalIgnoreCase).ToArray();
+            LabelPrintModelComboBox.SelectedItem = selected;
         }
         catch (Exception ex)
         {
-            AsyncFileLogService.Current.Error($"Select label print model failed: {ex}");
-            ShowMessage("Không đọc được mã hàng: " + ex.Message, "CHỌN MÃ HÀNG IN", MessageBoxImage.Warning);
+            AsyncFileLogService.Current.Error($"Load label print model list failed: {ex}");
+            if (!IsReleased)
+                ShowMessage("Không đọc được danh sách mã hàng: " + ex.Message, "MÃ HÀNG IN TEM", MessageBoxImage.Warning);
         }
+        finally
+        {
+            if (!IsReleased && generation == Volatile.Read(ref _labelModelLoadGeneration))
+                LabelPrintModelButton.IsEnabled = Volatile.Read(ref _batchPrintInProgress) == 0;
+        }
+    }
+
+    private void LabelPrintModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (Volatile.Read(ref _batchPrintInProgress) != 0 ||
+            LabelPrintModelComboBox.SelectedItem is not ProductFileEntry file) return;
+        _labelPrintModelPath = file.FullPath;
+        LabelPrintModelComboBox.ToolTip = file.FullPath;
     }
 
     private string ResolveLabelPrintModelPath() =>
@@ -1243,6 +1267,7 @@ public partial class ProductionSettingsPage : UserControl
             LabelPrintTransportResult? lastResult = null;
             batchCts = new CancellationTokenSource();
             _batchPrintCts = batchCts;
+            LabelPrintModelComboBox.IsEnabled = false;
             LabelPrintModelButton.IsEnabled = false;
             BatchPrintLabelButton.IsEnabled = false;
             BatchStopPrintButton.IsEnabled = true;
@@ -1312,6 +1337,8 @@ public partial class ProductionSettingsPage : UserControl
 
             _batchPrintCts = null;
             batchCts?.Dispose();
+            if (LabelPrintModelComboBox is not null)
+                LabelPrintModelComboBox.IsEnabled = true;
             if (LabelPrintModelButton is not null)
                 LabelPrintModelButton.IsEnabled = true;
             if (BatchPrintLabelButton is not null)
@@ -1377,13 +1404,6 @@ public partial class ProductionSettingsPage : UserControl
         if (!File.Exists(path))
             throw new FileNotFoundException("Không tìm thấy file template label.", path);
         return path;
-    }
-
-    private static string SafeFileName(string value)
-    {
-        HashSet<char> invalid = System.IO.Path.GetInvalidFileNameChars().ToHashSet();
-        string safe = new((value ?? string.Empty).Where(character => !invalid.Contains(character)).ToArray());
-        return string.IsNullOrWhiteSpace(safe) ? "UNRESOLVED" : safe;
     }
 
     private async Task RefreshPortsAsync()
