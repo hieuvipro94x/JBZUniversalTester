@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='UTF-8'?>
+﻿<?xml version='1.0' encoding='UTF-8'?>
 <UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"  x:Class="JBZUniversalTester.Views.ProductionSettingsPage" Background="#F4F6F9" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" FontSize="16">
     <UserControl.Resources>
         <ImageBrush x:Key="PageBackground" ImageSource="/JBZUniversalTester;component/Assets/000_JPG_BACKJPG_1042.jpg" Stretch="UniformToFill" AlignmentX="Center" AlignmentY="Center"/>
@@ -523,13 +523,24 @@
                                                 <RowDefinition Height="Auto"/>
                                                 <RowDefinition Height="Auto"/>
                                                 <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
                                             </Grid.RowDefinitions>
-                                            <UniformGrid Columns="3">
+                                            <Grid Grid.Row="0" Margin="0,6,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="150"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="80"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="Mã hàng cần in" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
+                                                <TextBox x:Name="LabelPrintModelTextBox" Grid.Column="1" IsReadOnly="True" Height="26" Margin="0,2,6,2" VerticalContentAlignment="Center" Background="White" Foreground="Black" ToolTip="Mã hàng dùng cho xem trước, in thử và in hàng loạt."/>
+                                                <Button x:Name="LabelPrintModelButton" Grid.Column="2" Content="CHỌN" Height="26" Style="{StaticResource SettingsInfoButtonStyle}" Click="SelectLabelPrintModel_Click"/>
+                                            </Grid>
+                                            <UniformGrid Grid.Row="1" Columns="3">
                                                 <Button Content="CHỈNH TEM" Height="26" Margin="1,2,1,2" Padding="2,0" FontSize="13" Style="{StaticResource SettingsInfoButtonStyle}" Click="EditLabelTemplate_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                                 <Button Content="XEM TRƯỚC" Height="26" Margin="1,2,1,2" Padding="2,0" FontSize="13" Style="{StaticResource SettingsInfoButtonStyle}" Click="PreviewLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                                 <Button Content="IN THỬ" Height="26" Margin="1,2,1,2" Padding="2,0" FontSize="13" Style="{StaticResource SettingsWarningButtonStyle}" Click="TestPrintLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                             </UniformGrid>
-                                            <Grid Grid.Row="1" Margin="0,4,0,0">
+                                            <Grid Grid.Row="2" Margin="0,4,0,0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="150"/>
                                                     <ColumnDefinition Width="*"/>
@@ -538,7 +549,7 @@
                                                 <TextBlock Text="LOT in thử" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
                                                 <TextBox x:Name="SinglePrintLotTextBox" Grid.Column="1" Margin="0,2,6,2" Height="26" TextAlignment="Center" VerticalContentAlignment="Center" ToolTip="LOTNO dùng riêng khi xem trước hoặc in thử; không đổi LOT Production."/>
                                             </Grid>
-                                            <Grid Grid.Row="2" Margin="0,4,0,0">
+                                            <Grid Grid.Row="3" Margin="0,4,0,0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="150"/>
                                                     <ColumnDefinition Width="*"/>
@@ -551,11 +562,11 @@
                                                 <TextBlock Grid.Column="2" Text="→" TextAlignment="Center" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
                                                 <TextBox x:Name="BatchPrintEndLotTextBox" Grid.Column="3" Margin="0,2,6,2" Height="26" TextAlignment="Center" VerticalContentAlignment="Center" ToolTip="LOTNO cuối cùng cần in (tính cả LOT này)."/>
                                             </Grid>
-                                            <UniformGrid Grid.Row="3" Columns="2" Margin="0,4,0,0">
+                                            <UniformGrid Grid.Row="4" Columns="2" Margin="0,4,0,0">
                                                 <Button x:Name="BatchPrintLabelButton" Content="IN HÀNG LOẠT" Height="26" Margin="0,2,3,2" Padding="3,0" FontSize="13" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchPrintLabel_Click"/>
                                                 <Button x:Name="BatchStopPrintButton" Content="DỪNG IN" Height="26" Margin="3,2,0,2" Padding="3,0" FontSize="13" IsEnabled="False" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchStopPrint_Click"/>
                                             </UniformGrid>
-                                            <Grid Grid.Row="4" Margin="0,4,0,0">
+                                            <Grid Grid.Row="5" Margin="0,4,0,0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="150"/>
                                                     <ColumnDefinition Width="*"/>

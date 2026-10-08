@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Ports;
 using System.Text.RegularExpressions;
 using System.Text;
@@ -34,6 +34,7 @@ public partial class ProductionSettingsPage : UserControl
     private int _saveInProgress;
     private int _batchPrintInProgress;
     private CancellationTokenSource? _batchPrintCts;
+    private string? _labelPrintModelPath;
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
     private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
@@ -60,6 +61,10 @@ public partial class ProductionSettingsPage : UserControl
         _vm = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         SinglePrintLotTextBox.Text = _vm.Settings.LotNo.ToString(CultureInfo.InvariantCulture);
+        _labelPrintModelPath = _vm.Settings.LastThtPath;
+        LabelPrintModelTextBox.Text = System.IO.Path.GetFileNameWithoutExtension(_labelPrintModelPath ?? string.Empty);
+        BatchPrintStartLotTextBox.Text = "1";
+        BatchPrintEndLotTextBox.Text = "1";
         DataContext = _vm;
         InitializeComboBoxItems();
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
@@ -1093,6 +1098,47 @@ public partial class ProductionSettingsPage : UserControl
             ? parsed
             : 0d;
 
+    private async void SelectLabelPrintModel_Click(object sender, RoutedEventArgs e)
+    {
+        if (Volatile.Read(ref _batchPrintInProgress) != 0)
+            return;
+        try
+        {
+            string root = Directory.Exists(@"C:\Item") ? @"C:\Item" :
+                System.IO.Path.GetDirectoryName(_labelPrintModelPath ?? _vm.Settings.LastThtPath ?? string.Empty) ?? AppContext.BaseDirectory;
+            var picker = new ProductPickerWindow(root) { Owner = Window.GetWindow(this) };
+            string? path = picker.ShowDialog() == true ? picker.SelectedFilePath : null;
+            if (picker.BrowseFileRequested)
+            {
+                var dialog = new Microsoft.Win32.OpenFileDialog
+                {
+                    Filter = "Mã hàng THT (*.tht)|*.tht", InitialDirectory = root,
+                    CheckFileExists = true, Multiselect = false
+                };
+                if (dialog.ShowDialog(Window.GetWindow(this)) == true)
+                    path = dialog.FileName;
+            }
+            if (string.IsNullOrWhiteSpace(path)) return;
+            ProductModel model = await Task.Run(() => new ThtModelParser().Load(path));
+            if (IsReleased || Volatile.Read(ref _batchPrintInProgress) != 0) return;
+            _labelPrintModelPath = path;
+            LabelPrintModelTextBox.Text = string.IsNullOrWhiteSpace(model.PartNumber)
+                ? System.IO.Path.GetFileNameWithoutExtension(path) : model.PartNumber;
+            LabelPrintModelTextBox.ToolTip = path;
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Select label print model failed: {ex}");
+            ShowMessage("Không đọc được mã hàng: " + ex.Message, "CHỌN MÃ HÀNG IN", MessageBoxImage.Warning);
+        }
+    }
+
+    private string ResolveLabelPrintModelPath() =>
+        _labelPrintModelPath?.Trim() ?? _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
+
+    private static long MinimumBatchPrintLot(string templateType) =>
+        LabelProfileResolver.NormalizeTemplateType(templateType) == LabelSettings.SmallQrTemplate ? 1 : 0;
+
     private async void TestPrintLabel_Click(object sender, RoutedEventArgs e)
     {
         try
@@ -1152,7 +1198,7 @@ public partial class ProductionSettingsPage : UserControl
                     BatchPrintStartLotTextBox.Text,
                     NumberStyles.Integer,
                     CultureInfo.InvariantCulture,
-                    out long firstLot) || firstLot < 0 ||
+                    out long firstLot) || firstLot < MinimumBatchPrintLot(_vm.Settings.Label.TemplateType) ||
                 !long.TryParse(
                     BatchPrintEndLotTextBox.Text,
                     NumberStyles.Integer,
@@ -1160,7 +1206,7 @@ public partial class ProductionSettingsPage : UserControl
                     out long lastLot) || lastLot < firstLot || lastLot - firstLot >= 100)
             {
                 ShowMessage(
-                    "Nhập LOT bắt đầu và kết thúc hợp lệ (từ 0 trở lên, tối đa 100 tem).",
+                    $"Nhập LOT bắt đầu và kết thúc hợp lệ (từ {MinimumBatchPrintLot(_vm.Settings.Label.TemplateType)} trở lên, tối đa 100 tem).",
                     "IN HÀNG LOẠT",
                     MessageBoxImage.Warning);
                 return;
@@ -1183,7 +1229,7 @@ public partial class ProductionSettingsPage : UserControl
                 throw new InvalidOperationException("Trang Cài đặt chưa được nối với chương trình chính.");
 
             CommitPendingEditorValues();
-            string thtPath = _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
+            string thtPath = ResolveLabelPrintModelPath();
             if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
                 throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
 
@@ -1193,6 +1239,7 @@ public partial class ProductionSettingsPage : UserControl
             LabelPrintTransportResult? lastResult = null;
             batchCts = new CancellationTokenSource();
             _batchPrintCts = batchCts;
+            LabelPrintModelButton.IsEnabled = false;
             BatchPrintLabelButton.IsEnabled = false;
             BatchStopPrintButton.IsEnabled = true;
 
@@ -1261,6 +1308,8 @@ public partial class ProductionSettingsPage : UserControl
 
             _batchPrintCts = null;
             batchCts?.Dispose();
+            if (LabelPrintModelButton is not null)
+                LabelPrintModelButton.IsEnabled = true;
             if (BatchPrintLabelButton is not null)
                 BatchPrintLabelButton.IsEnabled = true;
             if (BatchStopPrintButton is not null)
@@ -1289,7 +1338,7 @@ public partial class ProductionSettingsPage : UserControl
         ProductModel? loadedModel = null)
     {
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
-        string thtPath = _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
+        string thtPath = ResolveLabelPrintModelPath();
         if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
             throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
 

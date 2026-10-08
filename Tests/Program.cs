@@ -74,6 +74,7 @@ internal static partial class Program
             ("Standard product picker filter", TestProductPickerFilter),
             ("Recursive ITEM product catalog and partial filename search", TestRecursiveProductCatalogSearch),
             ("1000-file picker typing coalesces filtering and prevents stale selection", TestProductPickerDebouncedSearch),
+            ("Small QR manual batches start at 0001 with the selected print model", TestSmallQrManualPrintStart),
             ("Leak waiting respects installed non-Leak connectors", TestLeakWaitingWithNonLeakConnector),
             ("Keysight equipment faults preserve the app and await removal", TestRecoverableKeysightEquipmentFault),
             ("Final Leak table shows suction/hold/leak only after both PASS and clears on cycle exit", TestFinalLeakResultTable),
@@ -1810,7 +1811,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 16 &&
+        Assert(settingsButtons.Length == 17 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
