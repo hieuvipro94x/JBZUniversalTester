@@ -37,6 +37,7 @@ internal static partial class Program
             ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
+            ("Disconnected D2XX operator actions never enter fatal device fault", TestDisconnectedBoardOperatorActions),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
@@ -491,6 +492,56 @@ internal static partial class Program
                !board.Commands.Contains("START", StringComparer.Ordinal) &&
                viewModel.State == "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST",
             "No-board startup keeps model UI available without scan, Production ARM, or DeviceFault");
+    }
+
+    private static void TestDisconnectedBoardOperatorActions()
+    {
+        foreach (bool initializeOffline in new[] { false, true })
+        {
+            TestViewModel viewModel = CreateTestViewModel(
+                new ProductionSettings { MasterFaultRequiredCount = 0 }, out FakeBoard board);
+            board.SetConnectionStateForTest(false);
+            board.ThrowOnConnect = true;
+            if (initializeOffline)
+                viewModel.InitializeHardwareAsync().GetAwaiter().GetResult();
+            board.Commands.Clear();
+
+            Action[] actions =
+            [
+                () => viewModel.ReportBoardUnavailableForOperatorAction("OpenTopologyLearning"),
+                () => viewModel.StartProductionTestAsync().GetAwaiter().GetResult(),
+                () => viewModel.StartProbeScanAsync().GetAwaiter().GetResult(),
+                () => viewModel.StartTopologyLearningAsync().GetAwaiter().GetResult(),
+                () => viewModel.Relay1Command.Execute(null),
+                () => viewModel.Relay2Command.Execute(null),
+                () => viewModel.RelaysOffCommand.Execute(null),
+                () => viewModel.SetManualRelayAsync(1, true).GetAwaiter().GetResult(),
+                () => viewModel.ResetManualOutputsAsync().GetAwaiter().GetResult(),
+                () => Assert(viewModel.MeasureManualResistanceAsync([new ResistanceStep("R1", 1, 0, 100)])
+                    .GetAwaiter().GetResult().Count == 0, "Offline manual resistance cannot run a measurement"),
+                () => viewModel.MeasureCommand.Execute(null),
+                () => viewModel.CompleteCommand.Execute(null),
+                () => viewModel.RequireApplicationRestartAfterBoardSettingsChange()
+            ];
+            foreach (Action action in actions)
+            {
+                action();
+                Assert(!viewModel.IsDeviceFault && viewModel.DeviceFaultTransitionCount == 0 &&
+                       viewModel.DeviceFaultDialogCount == 0 && !viewModel.IsManualModeActive &&
+                       (int)typeof(TestViewModel).GetField("_probeSessionActive", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewModel)! == 0 &&
+                       viewModel.State == "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST" &&
+                       viewModel.BoardConnectionMessage.Contains("Chưa kết nối bo mạch D2XX", StringComparison.Ordinal) &&
+                       board.Commands.Count == 0,
+                    "An unavailable D2XX action reports the connection warning without shutdown, scan, relay, or mode changes");
+            }
+        }
+
+        TestViewModel runningFault = CreateTestViewModel(new ProductionSettings());
+        typeof(TestViewModel).GetMethod("ReportDeviceFaultForTest", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(runningFault, [new IOException("D2XX failure during scan"), -1]);
+        Assert(runningFault.IsDeviceFault && runningFault.DeviceFaultTransitionCount == 1 &&
+               runningFault.DeviceFaultDialogCount == 1,
+            "A real scan/device fault still enters the existing hardware safety path");
     }
 
     private static void TestScanWatchdogRecovery()

@@ -178,7 +178,7 @@ public partial class MainWindow : Window
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
         if (_viewModel.Test.IsDeviceFault ||
-            (!_viewModel.Test.IsBoardConnected && !_viewModel.Test.IsBoardStartupUnavailable))
+            (!_viewModel.Test.IsBoardConnected && !allowViewWhenInsufficient))
         {
             _viewModel.Test.ReportBoardUnavailableForOperatorAction("OpenTestWindow");
             return;

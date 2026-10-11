@@ -1291,9 +1291,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         if (!_board.IsConnected)
         {
-            EnterDeviceFault(
-                new InvalidOperationException($"Không thể {action}: bo kiểm tra không còn kết nối."),
-                $"Manual:{action}");
+            ReportBoardUnavailableForOperatorAction($"Manual:{action}");
             return false;
         }
 
@@ -6394,22 +6392,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public void ReportBoardUnavailableForOperatorAction(string source)
     {
-        if (IsBoardStartupUnavailable)
-        {
-            State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
-            AddLog($"Bỏ qua thao tác phần cứng [{source}]: bo không kết nối từ lúc khởi động.");
-            return;
-        }
-
+        const string message = "Chưa kết nối bo mạch D2XX. Hãy kiểm tra nguồn và cáp USB của bo trước khi thực hiện chức năng này.";
         if (!IsDeviceFault)
-        {
-            EnterDeviceFault(
-                new InvalidOperationException("Bo kiểm tra chưa kết nối hoặc đã mất kết nối."),
-                source);
-            return;
-        }
-
-        ShowDeviceFaultDialogOnce();
+            State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+        BoardConnectionMessage = message;
+        AddLog($"Bỏ qua thao tác phần cứng [{source}]: chưa kết nối bo D2XX.");
+        // An unavailable operator action is not a fatal hardware session error.
+        // Keep device faults raised by the running scan/monitor on their safety path.
+        if (Application.Current?.Dispatcher is not null)
+            InvokeUi(() => MessageBox.Show(
+                ResolveOperatorDialogOwner(), message, "CHƯA KẾT NỐI BO D2XX",
+                MessageBoxButton.OK, MessageBoxImage.Warning));
     }
 
     public void ReportStartupBoardTimeout() =>
@@ -6615,6 +6608,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task StartProbeScanAsync()
     {
+        if (!_board.IsConnected || IsDeviceFault)
+        {
+            ReportBoardUnavailableForOperatorAction("ProbeScan.NoBoard");
+            return;
+        }
         PrepareProbeUiMode();
         try
         {
@@ -6659,7 +6657,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public async Task StartTopologyLearningAsync()
     {
         if (IsDeviceFault || !_board.IsConnected)
-            throw new InvalidOperationException("Bo chưa kết nối hoặc đang lỗi.");
+        {
+            ReportBoardUnavailableForOperatorAction("TopologyLearning.NoBoard");
+            return;
+        }
         if (CurrentRuntimeMode != RuntimeMode.Background ||
             _cycleActive || _waitForProductRelease || _waitForFaultProductRemoval ||
             Volatile.Read(ref _resultRecordedThisCycle) != 0)
@@ -6767,10 +6768,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // Chế độ giao diện khi bo không có từ lúc khởi động: không đi qua bất kỳ
         // preflight/ARM/scan/relay nào. TestWindow vẫn hiển thị model đã chọn và
         // bốn LED giữ tắt vì không có BoardFrameActivity.
-        if (IsBoardStartupUnavailable && !_board.IsConnected)
+        if (!_board.IsConnected)
         {
-            State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
-            AddLog("Không ARM Production: bo không kết nối từ lúc khởi động.");
+            ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
             return;
         }
 
@@ -6883,15 +6883,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (!_board.IsConnected)
         {
-            if (IsBoardStartupUnavailable)
-            {
-                State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
-                AddLog("Không ARM Production: bo không kết nối từ lúc khởi động.");
-            }
-            else
-            {
-                ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
-            }
+            ReportBoardUnavailableForOperatorAction("StartProduction.NoBoard");
             return;
         }
 
@@ -9102,6 +9094,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task MeasureResistanceAsync()
     {
+        if (!EnsureManualBoardReady("đo điện trở"))
+            return;
         // Không cho đo thủ công trước khi continuity PASS.
         // Command được giữ lại chỉ để tương thích với XAML/phiên bản cũ.
         if (!_cycleActive || !_engine.ContinuityPassed)
@@ -9116,6 +9110,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task CompleteTestAsync()
     {
+        if (!EnsureManualBoardReady("hoàn tất kiểm tra"))
+            return;
         // PASS/relay cũng được tự động hóa để không thể xác nhận PASS trước điện trở.
         if (!_cycleActive || !_engine.ContinuityPassed)
         {
@@ -11019,6 +11015,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public void RequireApplicationRestartAfterBoardSettingsChange()
     {
+        if (!_board.IsConnected)
+        {
+            ReportBoardUnavailableForOperatorAction("BoardSettingsChanged.NoBoard");
+            return;
+        }
         EnterDeviceFault(
             new InvalidOperationException(
                 "Loại bo đã thay đổi trong Cài đặt. Cần thoát và mở lại ứng dụng để áp dụng bằng lifecycle mới."),
