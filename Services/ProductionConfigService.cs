@@ -140,6 +140,8 @@ public static class ProductionConfigService
             $"[AutoSaveErrors]{Bool(settings.AutoSaveErrors)}",
             $"[EnableSystemLogs]{Bool(settings.EnableSystemLogs)}",
             $"[WiringFaultConfirmationEnabled]{Bool(settings.WiringFaultConfirmationEnabled)}",
+            $"[MissingConnectionConfirmationEnabled]{Bool(settings.MissingConnectionConfirmationEnabled)}",
+            $"[MissingConnectionConfirmationSeconds]{settings.MissingConnectionConfirmationSeconds}",
             $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
             $"[Relay2MarkingPulseMs]{settings.Relay2MarkingPulseMs}",
@@ -580,6 +582,8 @@ public static class ProductionConfigService
             settings.WiringFaultConfirmationEnabled);
 
         settings.IoScanIntervalMs = I(map, "IoScanIntervalMs", settings.IoScanIntervalMs);
+        settings.MissingConnectionConfirmationEnabled = B(map, "MissingConnectionConfirmationEnabled", settings.MissingConnectionConfirmationEnabled);
+        settings.MissingConnectionConfirmationSeconds = I(map, "MissingConnectionConfirmationSeconds", settings.MissingConnectionConfirmationSeconds);
         settings.OpenCircuitConfirmMs = I(map, "OpenCircuitConfirmMs", settings.OpenCircuitConfirmMs);
         settings.ShortConfirmMs = I(map, "ShortConfirmMs", settings.ShortConfirmMs);
         settings.ShortCircuitConfirmMs = I(map, "ShortCircuitConfirmMs", settings.ShortCircuitConfirmMs);
@@ -715,6 +719,7 @@ public static class ProductionConfigService
 
     private static void Normalize(ProductionSettings settings)
     {
+        settings.MissingConnectionConfirmationSeconds = Math.Clamp(settings.MissingConnectionConfirmationSeconds, 1, 120);
         if (!Enum.IsDefined(typeof(BoardMode), settings.BoardMode))
             settings.BoardMode = BoardMode.Auto;
 

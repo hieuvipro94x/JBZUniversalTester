@@ -37,6 +37,7 @@ internal static partial class Program
             ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
+            ("Optional missing-pair confirmation waits 5/10 seconds and resets safely", TestMissingConnectionConfirmationTimeout),
             ("Disconnected D2XX operator actions never enter fatal device fault", TestDisconnectedBoardOperatorActions),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),

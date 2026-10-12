@@ -191,6 +191,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _postContinuityStarted;
     private int _fullCycleResetInProgress;
     private int _wiringFaultHandlingStarted;
+    private readonly MissingConnectionConfirmationGate _missingConnectionConfirmation = new();
     // Only the FAIL lifecycle is latched. These rows/details track the pairs
     // currently confirmed in each complete production frame.
     private FaultRow[] _latchedWiringFaultRows = [];
@@ -609,6 +610,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ResetProductPresentationCycle()
     {
+        _missingConnectionConfirmation.Reset();
         _presentationCycleStarted = false;
         RaiseCenterPresentation();
     }
@@ -3513,6 +3515,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             CaptureProductTestStartedAt();
         }
 
+        ObserveMissingConnectionTimeout(generation);
+        if (Volatile.Read(ref _wiringFaultHandlingStarted) != 0) return;
         if (TryBeginConfirmedWiringFaultHandling(generation))
             return;
         else if (_engine.HasWiringFault)
@@ -4626,9 +4630,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ProductModel model,
         Window? owner = null)
     {
+        bool missingConnection = faults.Any(fault => fault.Type == ProductFaultType.OpenCircuit) &&
+            _productionSettings.MissingConnectionConfirmationEnabled;
         var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
             faults,
-            model.HasDiscardInterlock
+            missingConnection
+                ? "Vui lòng kiểm tra lại sản phẩm xem có đứt dây / tuột tuýt không. Bấm XÁC NHẬN để xử lý hàng lỗi, mở JIG và tháo sản phẩm." +
+                  (model.HasDiscardInterlock ? " Đưa hàng lỗi qua cảm biến thùng NG 1 lần." : "")
+                : model.HasDiscardInterlock
                 ? "Bấm XÁC NHẬN để mở JIG. Sau đó đưa hàng lỗi qua cảm biến thùng NG 1 lần."
                 : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
             model: model);
@@ -7248,10 +7257,38 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return true;
     }
 
+    public void CheckMissingConnectionTimeout() => ObserveMissingConnectionTimeout(Volatile.Read(ref _runtimeGeneration));
+
+    private void ObserveMissingConnectionTimeout(long generation)
+    {
+        ScanHealthSnapshot health = _scanSupervisor.HealthSnapshot;
+        bool eligible = IsProductionFaultContext(generation) && _cycleActive && MasterApproved &&
+            !IsMasterSequenceActive && !IsManualModeActive && !IsIoMappingMode &&
+            CurrentProductionPhase == ProductionPhase.Continuity &&
+            !IsProductRemovalPending && _board.IsConnected && _board.IsScanning &&
+            health.State == ScanHealthState.Monitoring &&
+            health.CompleteFrameAgeMilliseconds < ScanSupervisor.ResolveProductionStallTimeoutMs(_board.Capacity) &&
+            _engine.LastFrameValid && !_engine.HasWiringFault && !_engine.HasContactInstability &&
+            !_engine.ContinuityPassed;
+        IReadOnlyList<FaultDetail> confirmed = _missingConnectionConfirmation.Observe(
+            eligible ? _engine.GetMissingConnectionFaults() : [],
+            _productionSettings.MissingConnectionConfirmationEnabled,
+            _productionSettings.MissingConnectionConfirmationSeconds, eligible);
+        if (confirmed.Count == 0 ||
+            Interlocked.CompareExchange(ref _wiringFaultHandlingStarted, 1, 0) != 0) return;
+        AddLog($"[OPEN-CONFIRM] Missing pairs={confirmed.Count}; timeout={_productionSettings.MissingConnectionConfirmationSeconds}s");
+        var pairs = confirmed.Select(fault => new WiringFaultPair(
+            fault.ExpectedSourceIo!.Value, fault.ExpectedTargetIo!.Value,
+            "ĐỨT DÂY / TUỘT TUÝT", ProductFaultType.OpenCircuit,
+            fault.ExpectedSourceIo, fault.ExpectedTargetIo)).ToArray();
+        _ = HandleWiringFaultAsync(generation, pairs, _engine.BuildRows().ToArray(), confirmed);
+    }
+
     private async Task HandleWiringFaultAsync(
         long generation,
         WiringFaultPair[] confirmedPairs,
-        FaultRow[] confirmedRows)
+        FaultRow[] confirmedRows,
+        IReadOnlyList<FaultDetail>? missingConnectionFaults = null)
     {
         // Callback production cũ có thể đã được schedule ngay trước khi mở
         // TestPin. Probe mode tuyệt đối không được hiện popup chập/đấu sai.
@@ -7275,8 +7312,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .OrderBy(pair => pair.SourceIo)
             .ThenBy(pair => pair.TargetIo)
             .ToArray();
-        FaultDetail[] dialogFaults = wiringPairs
-            .Select(BuildWiringFaultDetail)
+        bool requiresConfirmation = missingConnectionFaults is not null || _productionSettings.WiringFaultConfirmationEnabled;
+        FaultDetail[] dialogFaults = (missingConnectionFaults is null
+            ? wiringPairs.Select(BuildWiringFaultDetail)
+            : missingConnectionFaults.Select(EnrichFaultDetail))
             .GroupBy(fault => new
             {
                 fault.Type,
@@ -7291,10 +7330,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         _cycleActive = false;
         SetProductionPhase(ProductionPhase.WaitingFaultConfirmation);
-        _latchedWiringFaultRows = confirmedRows
-            .Where(row => row.ProductFaultType != ProductFaultType.None &&
-                          row.ActualSourceIo.HasValue && row.ActualTargetIo.HasValue)
-            .ToArray();
+        _latchedWiringFaultRows = missingConnectionFaults is null
+            ? confirmedRows.Where(row => row.ProductFaultType != ProductFaultType.None &&
+                row.ActualSourceIo.HasValue && row.ActualTargetIo.HasValue).ToArray()
+            : dialogFaults.Select(fault => new FaultRow
+            {
+                Kind = FaultKind.Open, ProductFaultType = ProductFaultType.OpenCircuit,
+                Io = fault.ExpectedSourceIo ?? 0, ExpectedSourceIo = fault.ExpectedSourceIo,
+                ExpectedTargetIo = fault.ExpectedTargetIo, RelatedIos = fault.RelatedIos,
+                WireName = fault.WireName, FaultType = "ĐỨT DÂY / TUỘT TUÝT",
+                Status = "ĐỨT DÂY / TUỘT TUÝT"
+            }).ToArray();
         _latchedWiringFaultDetails = dialogFaults;
         State = FaultDisplayFormatter.OperatorInstruction(primaryType);
         SelectedOperationTabIndex = 0;
@@ -7311,7 +7357,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (_board.IsConnected)
             {
-                if (_productionSettings.WiringFaultConfirmationEnabled)
+                if (requiresConfirmation)
                     await StopScanIntentionallyAsync("WiringFaultConfirmation");
                 await _board.AllRelaysOffAsync();
             }
@@ -7373,7 +7419,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        if (!_productionSettings.WiringFaultConfirmationEnabled)
+        if (!requiresConfirmation)
         {
             try
             {

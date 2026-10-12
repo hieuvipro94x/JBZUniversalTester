@@ -1672,6 +1672,11 @@ public partial class ProductionSettingsPage : UserControl
 
     private bool ValidateSettings(out string error)
     {
+        if (_vm.Settings.MissingConnectionConfirmationSeconds is < 1 or > 120)
+        {
+            error = "Thời gian xác nhận đứt dây / tuột tuýt phải từ 1 đến 120 giây.";
+            return false;
+        }
         if (_vm.Settings.LotNo < 0)
         {
             error = "LOTNO phải là số nguyên từ 0 trở lên.";

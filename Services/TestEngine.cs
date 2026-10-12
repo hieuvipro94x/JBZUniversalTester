@@ -332,7 +332,9 @@ public sealed class TestEngine : IDisposable
         }
     }
 
-    // Master-only evidence from the authoritative complete production snapshot.
+    public IReadOnlyList<FaultDetail> GetMissingConnectionFaults() => GetOpenMasterFaults();
+
+    // Master evidence from the authoritative complete production snapshot.
     // The Master workflow automatically accepts the configured exact live missing-connection count.
     public IReadOnlyList<FaultDetail> GetOpenMasterFaults()
     {

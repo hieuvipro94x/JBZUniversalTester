@@ -139,6 +139,8 @@ public sealed class ProductionSettings
     /// Bật: hiện popup xác nhận lỗi, sau xác nhận mới kích relay JIG.
     /// </summary>
     public bool WiringFaultConfirmationEnabled { get; set; } = true;
+    public bool MissingConnectionConfirmationEnabled { get; set; }
+    public int MissingConnectionConfirmationSeconds { get; set; } = 5;
 
     // ============================================================
     // THỜI GIAN

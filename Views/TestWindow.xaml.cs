@@ -117,6 +117,7 @@ public partial class TestWindow : Window
 
     private void ClockTimer_Tick(object? sender, EventArgs e)
     {
+        (DataContext as TestViewModel)?.CheckMissingConnectionTimeout();
         UpdateClock();
         if (DataContext is TestViewModel viewModel)
             viewModel.RefreshDailyMasterRequirement();
