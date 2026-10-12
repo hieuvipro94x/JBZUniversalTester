@@ -1878,7 +1878,7 @@ public partial class ProductionSettingsPage : UserControl
         SettingsSavedStatusText.Visibility = Visibility.Collapsed;
         if (await PersistSettingsAsync())
         {
-            ShowSavedConfirmation();
+            RequestClose?.Invoke(this, EventArgs.Empty);
         }
     }
 

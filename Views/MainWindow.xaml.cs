@@ -449,8 +449,8 @@ public partial class MainWindow : Window
                     $"{currentCapacity.ScanCardCount}. CÓ THỂ CHỌN MÃ HÀNG NGAY.";
             }
 
-            // The settings page confirms success after runtime settings apply.
-            // Navigation remains owned by its Back/close action.
+            // The page requests navigation only after settings are saved and applied.
+            // Save and Back both use the existing safe settings-close path.
         }
         catch (Exception ex)
         {
