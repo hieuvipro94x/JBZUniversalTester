@@ -1579,6 +1579,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentNullException.ThrowIfNull(profile);
+        // Manual run is explicit and independent of automatic production enablement.
+        // Clone first: never re-enable the saved/runtime automatic profile.
+        profile = profile.Clone();
+        profile.Enabled = true;
         if (profile.EnabledChannelCount == 0)
             throw new InvalidOperationException("Chưa bật kênh Leak nào để test.");
         if (!IsManualModeActive && !CanEnterManualMode)

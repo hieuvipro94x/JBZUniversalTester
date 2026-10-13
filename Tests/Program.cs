@@ -39,6 +39,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("ModelCreator leak layout import preserves machine parameters", TestModelLeakLayout),
             ("History combines installation/test timing and retains removal timing", TestHistoryCombinedTiming),
             ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),

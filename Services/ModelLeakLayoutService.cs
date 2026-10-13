@@ -10,7 +10,7 @@ public static class ModelLeakLayoutService
     public sealed record Channel(int ChannelNumber, string Connector);
     public sealed record Layout(int Version, List<Channel> Channels, string ModelSha256 = "");
 
-    public static WaterProofModelSettings Apply(string? modelPath, WaterProofModelSettings profile)
+    public static WaterProofModelSettings Apply(string? modelPath, WaterProofModelSettings profile, bool preserveSavedSettings = false)
     {
         var result = profile.Clone();
         if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath + ".leak.json")) return result;
@@ -51,6 +51,17 @@ public static class ModelLeakLayoutService
                 case 2: result.Channel2Enabled = true; result.Channel2Connector = channel.Connector; break;
                 case 3: result.Channel3Enabled = true; result.Channel3Connector = channel.Connector; break;
             }
+        }
+        if (preserveSavedSettings)
+        {
+            // Sidecar provides defaults; operator choices remain authoritative after Save.
+            result.Enabled = profile.Enabled;
+            if (!string.IsNullOrWhiteSpace(profile.Channel1Connector)) result.Channel1Connector = profile.Channel1Connector;
+            if (!string.IsNullOrWhiteSpace(profile.Channel2Connector)) result.Channel2Connector = profile.Channel2Connector;
+            if (!string.IsNullOrWhiteSpace(profile.Channel3Connector)) result.Channel3Connector = profile.Channel3Connector;
+            result.Channel1Enabled = profile.Channel1Enabled && !string.IsNullOrWhiteSpace(result.Channel1Connector);
+            result.Channel2Enabled = profile.Channel2Enabled && !string.IsNullOrWhiteSpace(result.Channel2Connector);
+            result.Channel3Enabled = profile.Channel3Enabled && !string.IsNullOrWhiteSpace(result.Channel3Connector);
         }
         return result;
     }

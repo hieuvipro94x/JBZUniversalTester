@@ -394,10 +394,9 @@ public static class ProductionConfigService
         ArgumentNullException.ThrowIfNull(settings);
         Normalize(settings);
         string key = GetMasterModelKeyFromPath(path);
-        var profileForModel = settings.WaterProofProfilesByModel.TryGetValue(key, out WaterProofModelSettings? profile)
-            ? profile.Clone()
-            : new WaterProofModelSettings();
-        return ModelLeakLayoutService.Apply(path, profileForModel);
+        bool hasSavedProfile = settings.WaterProofProfilesByModel.TryGetValue(key, out WaterProofModelSettings? profile);
+        var profileForModel = hasSavedProfile ? profile!.Clone() : new WaterProofModelSettings();
+        return ModelLeakLayoutService.Apply(path, profileForModel, preserveSavedSettings: hasSavedProfile);
     }
 
     public static void SetWaterProofProfileForPath(
