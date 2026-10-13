@@ -9348,9 +9348,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         });
     }
 
-    private void LoadWaterProofProfileForCurrentModel()
+    private void LoadWaterProofProfileForCurrentModel(WaterProofModelSettings? preparedProfile = null)
     {
-        _waterProofProfile = ProductionConfigService.GetWaterProofProfileForPath(
+        _waterProofProfile = preparedProfile ?? ProductionConfigService.GetWaterProofProfileForPath(
             _productionSettings,
             CurrentModelPath ?? _model?.SourcePath);
         Interlocked.Exchange(
@@ -11287,6 +11287,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (IsProductRemovalPending)
             throw new InvalidOperationException("THÁO SẢN PHẨM");
 
+        // Reject an invalid external assignment before replacing the current runtime model.
+        var preparedLeakProfile = ProductionConfigService.GetWaterProofProfileForPath(
+            _productionSettings, ResolveOptionalModelPath(model.SourcePath));
+
         // Đổi mã hàng phải hủy sạch chu trình cũ trước khi thay _model; nếu
         // không một task PASS/FAIL cũ hoàn thành muộn có thể cộng sản lượng
         // nhầm sang mã hàng vừa chọn.
@@ -11401,7 +11405,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ProductionConfigService.GetResistanceProfileForPath(
                 _productionSettings,
                 CurrentModelPath ?? model.SourcePath);
-        LoadWaterProofProfileForCurrentModel();
+        LoadWaterProofProfileForCurrentModel(preparedLeakProfile);
 
         // Đồng bộ model lên MainWindow ngay cả khi model được tự nạp lúc startup.
         // Đồng thời lưu ngay lựa chọn model; không chờ tới lúc bắt đầu test.

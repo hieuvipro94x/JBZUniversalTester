@@ -625,15 +625,13 @@
                             Command="{Binding RetryLabelCommand}"
                             Style="{StaticResource LabelRetryButtonStyle}"
                             Height="30"
-                            FontSize="9.5"
-                            ToolTip="Ch&#7881; th&#7917; l&#7841;i l&#7847;n in &#273;&#7847;u &#273;&#227; th&#7845;t b&#7841;i; th&#224;nh c&#244;ng s&#7869; ho&#224;n t&#7845;t giao d&#7883;ch LOT."/>
+                            FontSize="9.5"/>
                     <Button Grid.Column="2"
                             Content="IN TH&#202;M B&#7842;N SAO"
                             Command="{Binding ReprintLabelCommand}"
                             Style="{StaticResource LabelReprintButtonStyle}"
                             Height="30"
-                            FontSize="9.5"
-                            ToolTip="In th&#234;m b&#7843;n sao c&#7911;a tem &#273;&#227; in th&#224;nh c&#244;ng; kh&#244;ng t&#259;ng LOT v&#224; c&#243; ghi l&#7883;ch s&#7917; reprint."/>
+                            FontSize="9.5"/>
                 </Grid>
                 <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
@@ -683,7 +681,6 @@
                              StretchDirection="DownOnly">
                         <TextBlock x:Name="ModelTitleText"
                                    Text="{Binding ModelName, Mode=OneWay}"
-                                   ToolTip="{Binding ModelName, Mode=OneWay}"
                                    Foreground="{StaticResource PiIndustrialTextBrush}"
                                    FontSize="31"
                                    FontWeight="SemiBold"
@@ -720,16 +717,16 @@
                         <RowDefinition Height="42"/>
                     </Grid.RowDefinitions>
                     <TextBlock Text="M&#227; s&#7843;n ph&#7849;m" Style="{StaticResource PiLabelStyle}"/>
-                    <TextBox Grid.Column="1" Text="{Binding PartNumber, Mode=OneWay}" ToolTip="{Binding PartNumber, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
+                    <TextBox Grid.Column="1" Text="{Binding PartNumber, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
                     <TextBlock Grid.Column="2" Text="Lo&#7841;i xe" Style="{StaticResource ProductRightLabelStyle}"/>
-                    <TextBox Grid.Column="3" Margin="0,0,2,0" Text="{Binding VehicleType, Mode=OneWay}" ToolTip="{Binding VehicleType, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
+                    <TextBox Grid.Column="3" Margin="0,0,2,0" Text="{Binding VehicleType, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
 
                     <TextBlock Grid.Row="1"
                                Text="T&#234;n s&#7843;n ph&#7849;m"
                                Style="{StaticResource PiLabelStyle}"/>
-                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ProductName, Mode=OneWay}" ToolTip="{Binding ProductName, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ProductName, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
                     <TextBlock Grid.Row="1" Grid.Column="2" Text="M&#227; kh&#225;ch h&#224;ng" Style="{StaticResource ProductRightLabelStyle}"/>
-                    <TextBox Grid.Row="1" Grid.Column="3" Margin="0,0,2,0" Text="{Binding CustomerCode, Mode=OneWay}" ToolTip="{Binding CustomerCode, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
+                    <TextBox Grid.Row="1" Grid.Column="3" Margin="0,0,2,0" Text="{Binding CustomerCode, Mode=OneWay}" Style="{StaticResource PiFieldStyle}"/>
                 </Grid>
             </Grid>
 
@@ -742,7 +739,6 @@
 
                 <Border x:Name="ResultStatusHost" Grid.Column="0"
                         Height="150"
-                        ToolTip="{Binding MasterStatus}"
                         VerticalAlignment="Top"
                         Background="{Binding StateBackground}"
                         BorderBrush="{StaticResource PiBorderBrush}"
@@ -872,8 +868,7 @@
                                 HorizontalAlignment="Left"
                                 Background="Transparent"
                                 BorderThickness="0"
-                                Cursor="Hand"
-                                ToolTip="RESET CHU KỲ THAY PIN">
+                                Cursor="Hand">
                                 <Image Source="pack://application:,,,/JBZUniversalTester;component/Assets/reset_probe_cycle.png"
                                    Width="22"
                                    Height="22"

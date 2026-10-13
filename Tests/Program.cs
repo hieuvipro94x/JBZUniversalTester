@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-modelcreator-leak", var leakPath])
+        {
+            TestModelLeakLayout();
+            TestModelCreatorLeakFile(leakPath);
+            return 0;
+        }
         int benchmarkIndex = Array.FindIndex(
             args,
             value => value.Equals("--database-benchmark", StringComparison.OrdinalIgnoreCase));
@@ -33,6 +39,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("ModelCreator leak layout import preserves machine parameters", TestModelLeakLayout),
             ("History combines installation/test timing and retains removal timing", TestHistoryCombinedTiming),
             ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
             ("Board capacity/address boundaries", TestBoardCapacity),
