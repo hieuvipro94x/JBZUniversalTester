@@ -3705,6 +3705,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 "LẮP SẢN PHẨM",
             _ => State
         };
+        if (runtimeState == ProductionRuntimeState.WaitingForProduct && !hasCompletedConnection)
+        {
+            // These bindings also depend on activity/presentation flags. Raw State
+            // can already be LAP while its last published projection was TESTING.
+            RaiseCenterPresentation();
+        }
     }
 
     private void CaptureProductTestStartedAt()
@@ -3903,6 +3909,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         InvokeUi(ClearInlineProbeDisplay);
         RefreshDailyMasterRequirementCore(productRemovalConfirmed: true);
         RefreshFaults();
+        State = ReadyStateForCurrentModel();
+        RaiseCenterPresentation();
         RaiseActiveFault();
         }
         finally

@@ -87,7 +87,11 @@
             <TextBlock Text="Ví dụ: 285 hoặc WH322 · Tìm ở đầu, giữa hoặc cuối tên" FontSize="12"
                        Foreground="#64748B" Margin="2,6,0,0"/>
         </StackPanel>
-        <Border Grid.Row="2" Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7" Padding="1">
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="240"/>
+            </Grid.ColumnDefinitions>
+        <Border Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7" Padding="1">
             <DataGrid x:Name="ProductGrid" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="False" CanUserSortColumns="False"
                       SelectionMode="Single" SelectionUnit="FullRow" MinRowHeight="38" ColumnHeaderHeight="32"
@@ -153,6 +157,40 @@
                 </DataGrid.RowStyle>
             </DataGrid>
         </Border>
+            <Border Grid.Column="2" Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <StackPanel Margin="12,12,12,10">
+                        <TextBlock Text="MÃ ĐÃ TEST GẦN ĐÂY" FontSize="13" FontWeight="SemiBold" Foreground="#176B87"/>
+                        <TextBlock Text="10 mã gần nhất · Mới nhất trước" FontSize="11" Foreground="#64748B" Margin="0,4,0,0"/>
+                    </StackPanel>
+                    <ListBox x:Name="RecentProductsList" Grid.Row="1" BorderThickness="0" Background="White"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True"
+                             SelectionChanged="RecentProducts_SelectionChanged"
+                             MouseDoubleClick="RecentProducts_MouseDoubleClick" PreviewKeyDown="ProductGrid_PreviewKeyDown">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="10,8"/>
+                                <Setter Property="ToolTip" Value="{Binding File.FullPath}"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding File.Folder}" FontSize="11" Foreground="#64748B" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                    <TextBlock Text="{Binding TestedAtText}" FontSize="11" Foreground="#64748B" Margin="0,3,0,0"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock x:Name="RecentEmptyText" Grid.Row="1" Text="Chưa có mã hàng đã test trong thư mục này."
+                               Margin="12" Foreground="#64748B" FontSize="12" TextWrapping="Wrap" IsHitTestVisible="False"/>
+                </Grid>
+            </Border>
+        </Grid>
         <Grid Grid.Row="3" Margin="2,9,2,12">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <TextBlock x:Name="StatusText" FontSize="12" Foreground="#64748B" TextWrapping="Wrap"/>

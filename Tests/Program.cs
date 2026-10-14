@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -20,6 +20,16 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-recent-products"])
+        {
+            TestRecentTestedProducts();
+            return 0;
+        }
+        if (args is ["--test-removal-status"])
+        {
+            TestRemovalStatusNotifications();
+            return 0;
+        }
         if (args is ["--test-modelcreator-leak", var leakPath])
         {
             TestModelLeakLayout();
@@ -81,6 +91,7 @@ internal static partial class Program
             ("ALL6 label data order", TestLabel),
             ("THT label renderer and LOT lifecycle", TestThtLabelAndLotLifecycle),
             ("PASS label snapshot/idempotency/traceability", TestLabelPrintingSafety),
+            ("Recent tested products are distinct, chronological and read-only", TestRecentTestedProducts),
             ("Standard product picker filter", TestProductPickerFilter),
             ("Recursive ITEM product catalog and partial filename search", TestRecursiveProductCatalogSearch),
             ("1000-file picker typing coalesces filtering and prevents stale selection", TestProductPickerDebouncedSearch),
@@ -117,6 +128,7 @@ internal static partial class Program
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
+            ("Removal refreshes bound status even when raw State is unchanged", TestRemovalStatusNotifications),
             ("Incomplete product full release resets normal and CLIP cycle", TestIncompleteProductFullReleaseResetsClipCycle),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),
             ("Original PHT20 PASS/ERR history compatibility", TestLegacyPhtHistory),

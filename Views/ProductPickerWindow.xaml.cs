@@ -65,6 +65,7 @@ public partial class ProductPickerWindow : Window
             _files.Filter = item => item is ProductFileEntry file && ProductFileCatalog.Matches(file, _appliedSearch);
             ProductGrid.ItemsSource = _files;
             UpdateSearchResults();
+            await LoadRecentProductsAsync(result.Files, ct);
         }
         catch (OperationCanceledException) when (_closed) { }
         catch (Exception ex)
@@ -75,6 +76,29 @@ public partial class ProductPickerWindow : Window
         finally
         {
             if (!_closed) RefreshButton.IsEnabled = true;
+        }
+    }
+
+    private async Task LoadRecentProductsAsync(IReadOnlyList<ProductFileEntry> catalog, CancellationToken ct)
+    {
+        try
+        {
+            var recent = await Task.Run(() => RecentTestedProductService.Read(RuntimePaths.DatabaseFile, catalog, ct), ct);
+            if (_closed) return;
+            RecentProductsList.ItemsSource = recent;
+            RecentEmptyText.Text = "Chưa có mã hàng đã test trong thư mục này.";
+            RecentEmptyText.Visibility = recent.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+        catch (OperationCanceledException) when (_closed) { }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"PRODUCT_PICKER_RECENT: {ex}");
+            if (!_closed)
+            {
+                RecentProductsList.ItemsSource = null;
+                RecentEmptyText.Text = "Chưa đọc được lịch sử test. Bấm Làm mới để thử lại.";
+                RecentEmptyText.Visibility = Visibility.Visible;
+            }
         }
     }
 
@@ -90,7 +114,7 @@ public partial class ProductPickerWindow : Window
             _files.Refresh();
         }
         _searchPending = false;
-        UpdateSearchResults();
+        if (RecentProductsList.SelectedItem is null) UpdateSearchResults();
         AsyncFileLogService.Current.Performance(
             $"PRODUCT_PICKER_FILTER total={_fileCount} matches={ProductGrid.Items.Count} ms={watch.Elapsed.TotalMilliseconds:0.###}");
     }
@@ -108,6 +132,7 @@ public partial class ProductPickerWindow : Window
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_files is null || _closed) return;
+        RecentProductsList.SelectedItem = null;
         _searchPending = true;
         SelectButton.IsEnabled = false;
         _searchTimer.Stop();
@@ -120,11 +145,35 @@ public partial class ProductPickerWindow : Window
         BrowseFileRequested = true;
         DialogResult = false;
     }
-    private void ProductGrid_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
-        SelectButton.IsEnabled = !_searchPending && ProductGrid.SelectedItem is ProductFileEntry;
+    private void UpdateSelectionState() => SelectButton.IsEnabled =
+        RecentProductsList.SelectedItem is RecentTestedProduct ||
+        (!_searchPending && ProductGrid.SelectedItem is ProductFileEntry);
+    private void ProductGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ProductGrid.SelectedItem is ProductFileEntry) RecentProductsList.SelectedItem = null;
+        UpdateSelectionState();
+    }
+    private void RecentProducts_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RecentProductsList.SelectedItem is RecentTestedProduct) ProductGrid.SelectedItem = null;
+        UpdateSelectionState();
+    }
+    private void RecentProducts_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        DependencyObject? element = e.OriginalSource as DependencyObject;
+        while (element is not null && element is not ListBoxItem)
+            element = element is Visual ? VisualTreeHelper.GetParent(element) : null;
+        if (element is ListBoxItem) SelectProduct();
+    }
     private void Select_Click(object sender, RoutedEventArgs e) => SelectProduct();
     private void SelectProduct()
     {
+        if (RecentProductsList.SelectedItem is RecentTestedProduct recent)
+        {
+            SelectedFilePath = recent.File.FullPath;
+            DialogResult = true;
+            return;
+        }
         if (_searchPending) FilterFiles();
         if (ProductGrid.SelectedItem is not ProductFileEntry file) return;
         SelectedFilePath = file.FullPath;
