@@ -313,6 +313,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private string _labelStatusText = "TEM: CHỜ LẮP SẢN PHẨM";
     private int _cachedOpenCount;
     private int _cachedWrongCount;
+    private int _displayedLiveTopologyPairCount;
     private int _cachedShortCount;
     private FaultDetail? _visiblePrimaryFaultSnapshot;
     private bool _visiblePrimaryFaultSnapshotValid;
@@ -5217,6 +5218,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void SetLiveTopologyProductState(LiveTopologySnapshot topology, string reason)
     {
+        _displayedLiveTopologyPairCount = topology.Pairs.Count;
         bool present = topology.Pairs.Count > 0;
         SetProductionRuntimeState(
             present
@@ -13027,6 +13029,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     break;
             }
         }
+
+        // Blank-model connections are a display count only, never engine faults.
+        if (IsIoMappingMode && rows.Any(row => row.IsLiveTopologyPresentation))
+            wrong = _displayedLiveTopologyPairCount;
 
         bool openChanged = _cachedOpenCount != open;
         bool wrongChanged = _cachedWrongCount != wrong;

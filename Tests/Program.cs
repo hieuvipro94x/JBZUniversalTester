@@ -9754,6 +9754,8 @@ internal static partial class Program
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 &&
                    !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
                 "Blank THT observation never commits production or activates a relay");
+            Assert(vm.WrongCount == 1 && vm.WrongCountText == "1" && vm.OpenCount == 0 && vm.ShortCount == 0,
+                "Blank-model live IO connections count once in the wrong-wiring display");
 
             board.Publish(FrameSeq(
                 4,
@@ -9778,6 +9780,7 @@ internal static partial class Program
                    vm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
                 "Blank THT Probe presentation overrides rows without changing LiveTopology product presence");
+            Assert(vm.WrongCount == 0, "Probe rows do not inflate the blank-model connection count");
 
             board.Publish(FrameSeq(5));
             Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
@@ -9788,6 +9791,7 @@ internal static partial class Program
                    vm.CurrentProductionPresentationMode == ProductionPresentationMode.LiveTopology &&
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
                 "Blank THT Probe RELEASE restores the exact prior LiveTopology snapshot");
+            Assert(vm.WrongCount == 1, "Probe release restores the displayed connection count");
 
             board.Publish(FrameSeq(6, (1, new[] { 3 }), (3, new[] { 1 }), (2, new[] { 4 }), (4, new[] { 2 })));
             Assert(vm.Faults.Count == 4 &&
@@ -9798,11 +9802,13 @@ internal static partial class Program
                        ((int?)2, (int?)4)]) &&
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
                 "Empty THT renders exactly two canonical live pairs without PASS/FAIL");
+            Assert(vm.WrongCount == 2, "Two reciprocal connection pairs count as two, not four endpoint rows");
 
             board.Publish(FrameSeq(7, (4, new[] { 2 })));
             Assert(vm.Faults.Count == 2 &&
                    vm.Faults.All(row => row.ActualSourceIo == 2 && row.ActualTargetIo == 4),
                 "Empty THT removal removes IO1<->IO3 immediately and retains IO2<->IO4");
+            Assert(vm.WrongCount == 1, "Removing one pair immediately reduces the display count");
 
             board.Publish(FrameSeq(8, (1, new[] { 3 }), (2, new[] { 4 })));
             board.Publish(FrameSeq(
