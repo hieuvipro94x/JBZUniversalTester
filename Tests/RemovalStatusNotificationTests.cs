@@ -30,6 +30,29 @@ internal static partial class Program
             "A complete clean scan clears the MainWindow list and unlocks selection");
         Assert(vm.Total == total && vm.Pass == pass && vm.Fail == fail && board.Commands.Count == commands,
             "MainWindow removal monitoring never records results or commands relays");
+
+        var lastModel = Model(("LAST-TESTED", new[] { 1, 18 }));
+        lastModel.PartNumber = "LAST-TESTED-PART";
+        lastModel.Pins.AddRange([
+            new PinRecord("CN-A", "WIRE-05", 5, "2"),
+            new PinRecord("CN-B", "WIRE-09", 9, "7"),
+            new PinRecord("CN-C", "WIRE-DUPLICATE", 5, "3")]);
+        vm.SetModel(lastModel);
+        board.Publish(FrameSeq(15, (5, new[] { 9 })));
+        FaultRow remaining = vm.MainRemovalRows.Single();
+        Assert(remaining.ActualSourceIo == 5 && remaining.ActualTargetIo == 9 &&
+               remaining.WireNameDisplay.Contains("WIRE-05") && remaining.WireNameDisplay.Contains("WIRE-09") &&
+               remaining.WireNameDisplay.Contains("WIRE-DUPLICATE") &&
+               remaining.IoCnPnText.Contains("IO5-CN-A-2") && remaining.IoCnPnText.Contains("IO9-CN-B-7") &&
+               remaining.IoCnPnText.Contains("IO5-CN-C-3"),
+            "MainWindow maps both ends and duplicate pin mappings from the remembered model without losing wire names");
+        board.Publish(FrameSeq(16, (10, new[] { 11 })));
+        Assert(vm.MainRemovalRows.Single().WireNameDisplay == "-" &&
+               vm.MainRemovalRows.Single().IoCnPnText == "IO10\nIO11",
+            "Unknown IO remains visible without borrowing wire information from another connection");
+        board.Publish(FrameSeq(17));
+        Assert(vm.MainRemovalRows.Count == 0 && !vm.IsProductRemovalPending,
+            "Complete removal clears enriched wire rows with the selection interlock");
     }
 
     private static void TestOrphanedProbeCandidateRestoresCenter()

@@ -340,6 +340,11 @@
                         <TextBlock Text="Tháo các kết nối bên dưới khỏi bàn test để tiếp tục."
                                    Margin="0,8,0,0" FontSize="21" Foreground="#374151"
                                    TextWrapping="Wrap" TextAlignment="Center"/>
+                        <TextBlock Text="{Binding Test.PartNumber, StringFormat=Mã hàng: {0}}"
+                                   Margin="0,10,0,0" FontSize="24" FontWeight="Bold"
+                                   Foreground="#1E3278" TextWrapping="Wrap" TextAlignment="Center"/>
+                        <TextBlock Text="{Binding Test.ModelName}" FontSize="18" Foreground="#374151"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
                     </StackPanel>
                 </Border>
                 <Grid Grid.Row="1" Margin="0,20,0,12">
@@ -355,12 +360,12 @@
                                    FontSize="21" FontWeight="SemiBold" Foreground="#334155"/>
                     </Border>
                 </Grid>
-                <DataGrid Grid.Row="2" ItemsSource="{Binding Test.MainRemovalContacts}"
+                <DataGrid Grid.Row="2" ItemsSource="{Binding Test.MainRemovalRows}"
                           AutoGenerateColumns="False" IsReadOnly="True"
                           CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
                           CanUserReorderColumns="False" CanUserResizeRows="False"
                           CanUserResizeColumns="False" HeadersVisibility="Column"
-                          RowHeaderWidth="0" FontSize="36" FontWeight="SemiBold" RowHeight="72"
+                          RowHeaderWidth="0" FontSize="24" FontWeight="SemiBold" MinRowHeight="88"
                           Background="White" RowBackground="White" AlternatingRowBackground="White"
                           Foreground="#B45309" GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="#E2E8F0" BorderBrush="#CBD5E1"
@@ -380,23 +385,27 @@
                         <Style x:Key="RemovalIoText" TargetType="TextBlock">
                             <Setter Property="HorizontalAlignment" Value="Center"/>
                             <Setter Property="VerticalAlignment" Value="Center"/>
+                            <Setter Property="TextAlignment" Value="Center"/>
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                            <Setter Property="Margin" Value="8,10"/>
                         </Style>
                     </DataGrid.Resources>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="CHÂN IO" Width="*"
+                        <DataGridTextColumn Header="CHÂN IO" Width="1.4*"
                                             ElementStyle="{StaticResource RemovalIoText}"
-                                            Binding="{Binding FirstIo, Mode=OneWay, StringFormat=IO{0}}"/>
-                        <DataGridTemplateColumn Width="100">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="↔" FontSize="34" Foreground="#94A3B8"
-                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                        <DataGridTextColumn Header="ĐANG KẾT NỐI VỚI" Width="*"
+                                            Binding="{Binding IoText, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="CONNECTOR" Width="*"
                                             ElementStyle="{StaticResource RemovalIoText}"
-                                            Binding="{Binding SecondIo, Mode=OneWay, StringFormat=IO{0}}"/>
+                                            Binding="{Binding Connector, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="CHÂN PIN" Width="0.7*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding Pin, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="MÃ DÂY" Width="1.5*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding WireNameDisplay, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="IO-CN-PIN" Width="1.5*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding IoCnPnText, Mode=OneWay}"/>
                     </DataGrid.Columns>
                 </DataGrid>
                 <Grid Grid.Row="3" Margin="0,16,0,0">

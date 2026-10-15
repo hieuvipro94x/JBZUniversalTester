@@ -1344,6 +1344,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public IReadOnlyList<StartupIoContactPair> MainRemovalContacts { get; private set; } =
         Array.Empty<StartupIoContactPair>();
+    public IReadOnlyList<FaultRow> MainRemovalRows { get; private set; } = Array.Empty<FaultRow>();
+    private ProductModel? _mainRemovalRowsModel;
     private long _mainRemovalContactsRevision;
 
     private void UpdateMainRemovalContacts(IReadOnlyList<StartupIoContactPair> pairs, long generation)
@@ -1353,13 +1355,46 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (generation != Volatile.Read(ref _runtimeGeneration) ||
                 revision != Volatile.Read(ref _mainRemovalContactsRevision) ||
-                MainRemovalContacts.SequenceEqual(pairs))
+                (ReferenceEquals(_mainRemovalRowsModel, _model) && MainRemovalContacts.SequenceEqual(pairs)))
                 return;
 
             MainRemovalContacts = pairs;
+            MainRemovalRows = BuildRemovalContactRows(pairs);
+            _mainRemovalRowsModel = _model;
             Raise(nameof(MainRemovalContacts));
+            Raise(nameof(MainRemovalRows));
         });
     }
+
+    private IReadOnlyList<FaultRow> BuildRemovalContactRows(IReadOnlyList<StartupIoContactPair> pairs) =>
+        pairs.Select(pair =>
+        {
+            PinRecord[] pins = FindPinsByIo(pair.FirstIo).Concat(FindPinsByIo(pair.SecondIo)).ToArray();
+            static string JoinValues(IEnumerable<string> values) =>
+                string.Join(" / ", values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct());
+            return new FaultRow
+            {
+                Kind = FaultKind.Info,
+                FaultType = "CHỜ THÁO SẢN PHẨM",
+                Io = pair.FirstIo,
+                IoTextOverride = $"IO{pair.FirstIo} ↔ IO{pair.SecondIo}",
+                ActualSourceIo = pair.FirstIo,
+                ActualTargetIo = pair.SecondIo,
+                RelatedIos = [pair.FirstIo, pair.SecondIo],
+                Connector = JoinValues(pins.Select(pin => pin.Connector)),
+                Pin = JoinValues(pins.Select(pin => pin.PinNumber)),
+                WireName = JoinValues(pins.Select(pin => pin.WireName)),
+                Color = JoinValues(pins.Select(pin => pin.Color)),
+                Section = JoinValues(pins.Select(pin => pin.Section)),
+                IoCnPnOverride = string.Join("\n", new[] { pair.FirstIo, pair.SecondIo }.Select(io =>
+                {
+                    PinRecord[] endpointPins = FindPinsByIo(io).ToArray();
+                    return endpointPins.Length == 0 ? $"IO{io}" :
+                        string.Join("\n", endpointPins.Select(pin => $"IO{io}-{pin.Connector}-{pin.PinNumber}"));
+                })),
+                Status = "CHỜ THÁO SẢN PHẨM"
+            };
+        }).ToArray();
 
     public bool HasProductOnTestTable =>
         IsProductRemovalPending ||
@@ -11426,6 +11461,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         LifetimeTestCount = 0;
         ProbeCycleCount = 0;
         _pinsByIoLookup = _model.Pins.ToLookup(pin => pin.IoNumber);
+        UpdateMainRemovalContacts(MainRemovalContacts, Volatile.Read(ref _runtimeGeneration));
 
         // Clear previous model presentation synchronously. Engine model commit
         // will rebuild its immutable topology, but waiting mode must stay visually
