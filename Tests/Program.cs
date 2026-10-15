@@ -30,6 +30,11 @@ internal static partial class Program
             TestRecentTestedProducts();
             return 0;
         }
+        if (args is ["--test-orphaned-probe"])
+        {
+            TestOrphanedProbeCandidateRestoresCenter();
+            return 0;
+        }
         if (args is ["--test-removal-status"])
         {
             TestRemovalStatusNotifications();
@@ -138,6 +143,7 @@ internal static partial class Program
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
+            ("Candidate-only Probe releases center after discard or complete empty frame", TestOrphanedProbeCandidateRestoresCenter),
             ("Removal refreshes bound status even when raw State is unchanged", TestRemovalStatusNotifications),
             ("Incomplete product full release resets normal and CLIP cycle", TestIncompleteProductFullReleaseResetsClipCycle),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),

@@ -3906,6 +3906,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ResetWaterProofDisplay();
         SelectedOperationTabIndex = 0;
         ClearInlineProbeContactsState(clearLastSeen: true);
+        // Preview can own Candidate without ever entering the debounced tracker
+        // (for example a frame intercepted by _DISCARD). Confirmed removal must
+        // release that presentation too and invalidate queued preview callbacks.
+        lock (_probePreviewGate)
+            _pendingProductionProbePreview = null;
+        Interlocked.Increment(ref _productionProbePreviewUiRevision);
+        SetProbePresentationState(ProbePresentationState.Released, [], 0);
         InvokeUi(ClearInlineProbeDisplay);
         RefreshDailyMasterRequirementCore(productRemovalConfirmed: true);
         RefreshFaults();
@@ -4442,6 +4449,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     probeChanged = discardContactClosed
                         ? false
                         : UpdateInlineProbeContacts(Array.Empty<int>());
+                    // A preview may have been rejected by the authoritative
+                    // complete frame before the tracker acquired any contacts.
+                    // Update(empty) then returns false although Candidate still
+                    // hides the waiting center. Release only that orphaned UI,
+                    // leaving electrical faults and product-removal gates intact.
+                    if (!discardContactClosed && frame.Complete && !_probeStateTracker.HasTrackedContacts &&
+                        CurrentProbePresentationState is ProbePresentationState.Candidate or ProbePresentationState.Touch)
+                    {
+                        lock (_probePreviewGate)
+                            probeChanged |= _pendingProductionProbePreview is null;
+                    }
                     // Trace Htdrv: sau khi nhấc đầu dò, dây chập còn lại xuất hiện
                     // ngay thành cạnh low-fan-in (hit=1). Không được để debounce
                     // RELEASE nuốt các frame điện thật đầu tiên của thao tác ngắn.

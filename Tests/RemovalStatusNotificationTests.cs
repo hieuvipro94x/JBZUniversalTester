@@ -6,6 +6,37 @@ using JBZUniversalTester.ViewModels;
 namespace JBZUniversalTester.SelfTests;
 internal static partial class Program
 {
+    private static void TestOrphanedProbeCandidateRestoresCenter()
+    {
+        foreach (bool useDiscard in new[] { true, false })
+        {
+            var production = new ProductionSettings { MasterFaultRequiredCount=0, ExpansionCardCount=2,
+                ProductSettleTimeMs=10_000, IoConfirm1=1, IoConfirmN=1 };
+            var vm = CreateTestViewModel(production, out FakeBoard board);
+            var model = Model(("PAIR",new[] {1,2}));
+            if(useDiscard) model.DiscardContactIo=[97,98];
+            vm.SetModel(model);
+            vm.StartProductionTestAsync().GetAwaiter().GetResult();
+            int beforeTotal=vm.Total, beforeFail=vm.Fail, beforePass=vm.Pass, beforeCommands=board.Commands.Count;
+            board.PublishProbePreview(new ProductionProbePreview(DateTime.Now,[97],12,12,Sequence:10,ScanGeneration:1));
+            Assert(vm.CurrentProbePresentationState==ProbePresentationState.Candidate && !vm.IsCenterResultVisible,
+                "Early preview hides waiting center until its complete frame is reconciled");
+            if(useDiscard)
+            {
+                board.Publish(FrameSeq(10,(97,new[] {98})) with {ScanGeneration=1});
+                Assert(!vm.IsCenterResultVisible,"Discard contact interlock does not prematurely show installation");
+            }
+            board.Publish(FrameSeq(11) with {ScanGeneration=1});
+            board.Publish(FrameSeq(12) with {ScanGeneration=1});
+            Assert(vm.CurrentProbePresentationState is ProbePresentationState.Released or ProbePresentationState.Inactive &&
+                   vm.IsCenterResultVisible && vm.CenterResultText=="LẮP SẢN PHẨM",
+                $"Candidate-only preview releases center after {(useDiscard ? "discard close/release" : "a newer complete empty frame")}; " +
+                $"probe={vm.CurrentProbePresentationState}, center={vm.IsCenterResultVisible}, text={vm.CenterResultText}");
+            Assert(vm.Total==beforeTotal && vm.Fail==beforeFail && vm.Pass==beforePass && board.Commands.Count==beforeCommands,
+                "Preview cleanup never creates production results or hardware relay commands");
+        }
+    }
+
     private static void TestRemovalStatusNotifications()
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
