@@ -6626,8 +6626,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public Task<LabelPrintTransportResult> PrintSettingsLabelAsync(
         LabelPrintRequest request,
-        CancellationToken ct = default) =>
-        _labelPrintService.PrintPassLabelAsync(request, ct);
+        CancellationToken ct = default, bool explicitBcwReprint = false) =>
+        _labelPrintService.PrintPassLabelAsync(request, ct, explicitReprint: explicitBcwReprint);
 
     public async Task StartProbeScanAsync()
     {
@@ -12109,7 +12109,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             identity = EplLabelService.BuildIdentity(
                 request.Data,
                 includeAlcLotSuffix: templateType == LabelSettings.LargeTemplate);
-            if (templateType == LabelSettings.SmallTemplate ||
+            if (templateType == LabelSettings.BcwTemplate || templateType == LabelSettings.SmallTemplate ||
                 templateType == LabelSettings.SmallQrTemplate)
             {
                 identity = identity with { BarcodeValue = request.Data.Barcode };
@@ -12339,7 +12339,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private async Task PrintPassLabelSafeAsync(
         LabelPrintRequest request,
         TestHistoryStore historyStore,
-        long historyId)
+        long historyId, bool explicitBcwReprint = false)
     {
         try
         {
@@ -12354,7 +12354,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // downstream độc lập: một tem lỗi không được giữ reservation cũ
             // rồi khóa toàn bộ LOT/tem của các sản phẩm PASS tiếp theo.
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
-                request, _lifetimeCts.Token);
+                request, _lifetimeCts.Token,
+                explicitReprint: explicitBcwReprint,
+                beforeBcwSend: effective => ProductionPersistence.SaveBcwLabelSnapshotAsync(historyId, request.CycleId, effective, _lifetimeCts.Token));
+            request = result.EffectiveRequest ?? request;
 
             LabelPrintStatus status = result.Printed
                 ? LabelPrintStatus.Printed
@@ -12412,7 +12415,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (context is null)
             return;
 
-        await PrintPassLabelSafeAsync(context.Request, context.HistoryStore, context.HistoryId);
+        await PrintPassLabelSafeAsync(context.Request, context.HistoryStore, context.HistoryId, explicitBcwReprint: true);
     }
 
     private async Task ReprintLastSuccessfulLabelAsync()
@@ -12427,7 +12430,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         try
         {
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
-                context.Request, _lifetimeCts.Token);
+                context.Request, _lifetimeCts.Token, explicitReprint: true);
             if (!result.Printed)
             {
                 InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}");

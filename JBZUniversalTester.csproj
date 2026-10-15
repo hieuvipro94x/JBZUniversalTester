@@ -108,6 +108,7 @@
     <EmbeddedResource Include="Labels\TEM_BE_SQDZ.txt">
       <LogicalName>JBZUniversalTester.Labels.TEM_BE_SQDZ.txt</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Labels\BCW.txt"><LogicalName>JBZUniversalTester.Labels.BCW.txt</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="Labels\TEM_BE_QRCODE.txt">
       <LogicalName>JBZUniversalTester.Labels.TEM_BE_QRCODE.txt</LogicalName>
     </EmbeddedResource>

@@ -166,6 +166,8 @@ public static class ProductionConfigService
             $"[AutoPrintLabelOnPass]{Bool(settings.AutoPrintLabelOnPass)}",
             $"[HistoryDirectory]{settings.HistoryDirectory}",
 
+            $"[BcwVehicleCode]{settings.Label.BcwVehicleCode}",
+            $"[BcwPosition]{settings.Label.BcwPosition}",
             $"[LabelPrinterName]{settings.Label.PrinterName}",
             $"[LabelPrinterCom]{settings.Label.PrinterCom}",
             $"[LabelWidthMm]{settings.Label.WidthMm}",
@@ -627,6 +629,8 @@ public static class ProductionConfigService
         settings.AutoPrintLabelOnPass = B(map, "AutoPrintLabelOnPass", settings.AutoPrintLabelOnPass);
         settings.HistoryDirectory = S(map, "HistoryDirectory", settings.HistoryDirectory);
 
+        settings.Label.BcwVehicleCode = S(map, "BcwVehicleCode", settings.Label.BcwVehicleCode);
+        settings.Label.BcwPosition = S(map, "BcwPosition", settings.Label.BcwPosition);
         settings.Label.PrinterName = S(map, "LabelPrinterName", settings.Label.PrinterName);
         settings.Label.PrinterCom = S(map, "LabelPrinterCom", settings.Label.PrinterCom);
         settings.Label.WidthMm = I(map, "LabelWidthMm", settings.Label.WidthMm);

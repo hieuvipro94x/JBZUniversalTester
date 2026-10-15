@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-bcw"])
+        {
+            TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwHistorySnapshotPreservesRows(); TestBcwThtAutomaticPassLabel();
+            return 0;
+        }
         if (args is ["--test-recent-products"])
         {
             TestRecentTestedProducts();
@@ -49,6 +54,10 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("BCW reads the active THT and uses the automatic PASS print pipeline", TestBcwThtAutomaticPassLabel),
+            ("BCW Julian date, original EPL positions and safe template", TestBcwJulianAndPayload),
+            ("BCW persistent sequence, failed send, concurrency and reprint", TestBcwPersistentSerialAndTransport),
+            ("BCW history snapshot preserves production LOT and rows", TestBcwHistorySnapshotPreservesRows),
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("ModelCreator leak layout import preserves machine parameters", TestModelLeakLayout),
             ("History combines installation/test timing and retains removal timing", TestHistoryCombinedTiming),

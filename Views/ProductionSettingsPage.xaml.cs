@@ -36,6 +36,7 @@ public partial class ProductionSettingsPage : UserControl
     private CancellationTokenSource? _batchPrintCts;
     private string? _labelPrintModelPath;
     private int _labelModelLoadGeneration;
+    private int _bcwSummaryGeneration;
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
     private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
@@ -155,6 +156,7 @@ public partial class ProductionSettingsPage : UserControl
             (LabelTemplateTypeComboBox.SelectedValue as string) ??
             _vm.Settings.Label.TemplateType;
         ApplyLabelTemplatePhysicalSize(templateType);
+        UpdateBcwPanel();
     }
 
     private void ApplyLabelTemplatePhysicalSize(string? templateType)
@@ -164,6 +166,7 @@ public partial class ProductionSettingsPage : UserControl
         {
             LabelSettings.SmallTemplate => (60, 25),
             LabelSettings.SmallQrTemplate => (60, 15),
+            LabelSettings.BcwTemplate => (60, 15),
             _ => (90, 15)
         };
 
@@ -281,6 +284,12 @@ public partial class ProductionSettingsPage : UserControl
 
     private void EditLabelTemplate_Click(object sender, RoutedEventArgs e)
     {
+        if (_vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate)
+        {
+            ShowMessage("BCW dùng mẫu EPL trực tiếp đã kiểm tra theo BCW.txt. Xem lệnh trong XEM TRƯỚC; không sửa mẫu chung của loại tem khác.",
+                "MẪU BCW", MessageBoxImage.Information);
+            return;
+        }
         try
         {
             string configured = _vm.Settings.Label.TemplatePath?.Trim() ?? string.Empty;
@@ -500,7 +509,8 @@ public partial class ProductionSettingsPage : UserControl
         var note = new TextBlock
         {
             Margin = new Thickness(14, 0, 14, 12),
-            Text = "Preview dựng từ chính payload EPL/ZPL đã render và đúng tỷ lệ kích thước tem vật lý. " +
+            Text = (request.Profile.Id == LabelSettings.BcwTemplate ? "BCW: QR preview is schematic. Date/serial are assigned at send time; reprints keep the saved QR. " : "") +
+                   "Preview dựng từ chính payload EPL/ZPL đã render và đúng tỷ lệ kích thước tem vật lý. " +
                    "TEM_BE_QRCODE được hiển thị dưới dạng QR Code (3 finder ở ba góc), không phải Data Matrix. " +
                    "Font raster/module cuối cùng có thể chênh nhẹ vì do firmware máy in tạo; dùng ‘IN THỬ ĐÚNG BẢN NÀY’ để kiểm chứng vật lý.",
             TextWrapping = TextWrapping.Wrap,
@@ -547,7 +557,7 @@ public partial class ProductionSettingsPage : UserControl
 
         var printButton = new Button
         {
-            Content = "IN THỬ ĐÚNG BẢN NÀY",
+            Content = request.Profile.Id == LabelSettings.BcwTemplate ? "IN BCW (CẤP SERIAL)" : "IN THỬ ĐÚNG BẢN NÀY",
             MinWidth = 190,
             Height = 34,
             Margin = new Thickness(8, 0, 8, 0),
@@ -574,7 +584,8 @@ public partial class ProductionSettingsPage : UserControl
                 MessageBox.Show(
                     previewWindow,
                     result.Printed
-                        ? "Đã in đúng snapshot đang xem. Không tăng LOT hoặc sản lượng."
+                    ? result.EffectiveRequest is { } bcw ? $"Đã gửi BCW: {bcw.Data.Barcode}. Serial BCW được ghi nhận; LOT/sản lượng không đổi."
+                        : "Đã in đúng snapshot đang xem. Không tăng LOT hoặc sản lượng."
                         : "Chưa in được tem. Hãy kiểm tra cổng COM/cáp máy in.",
                     "IN THỬ TEM",
                     MessageBoxButton.OK,
@@ -1155,10 +1166,73 @@ public partial class ProductionSettingsPage : UserControl
             LabelPrintModelComboBox.SelectedItem is not ProductFileEntry file) return;
         _labelPrintModelPath = file.FullPath;
         LabelPrintModelComboBox.ToolTip = file.FullPath;
+        UpdateBcwPanel();
     }
 
     private string ResolveLabelPrintModelPath() =>
         _labelPrintModelPath?.Trim() ?? _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
+
+    private void UpdateBcwPanel()
+    {
+        if (BcwSettingsPanel is null) return;
+        bool bcw = _vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate;
+        BcwSettingsPanel.Visibility = bcw ? Visibility.Visible : Visibility.Collapsed;
+        SingleLotPanel.Visibility = BatchLotPanel.Visibility = bcw ? Visibility.Collapsed : Visibility.Visible;
+        if (bcw) _ = UpdateBcwInfoAsync();
+    }
+
+    private void BcwInput_Changed(object sender, TextChangedEventArgs e) =>
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.DataBind, new Action(UpdateBcwPanel));
+    private void BcwPosition_Changed(object sender, SelectionChangedEventArgs e) =>
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.DataBind, new Action(UpdateBcwPanel));
+
+    private async Task UpdateBcwInfoAsync()
+    {
+        int generation = ++_bcwSummaryGeneration;
+        string path = ResolveLabelPrintModelPath();
+        var settings = new LabelSettings { BcwVehicleCode = _vm.Settings.Label.BcwVehicleCode, BcwPosition = _vm.Settings.Label.BcwPosition };
+        try
+        {
+            string summary = await Task.Run(() =>
+            {
+                ProductModel model = new ThtModelParser().Load(path);
+                DateTime now = DateTime.Now;
+                string vehicle = BcwLabelService.Vehicle(model, settings), position = BcwLabelService.Position(model, settings);
+                long serial = new BcwSerialStore().Peek(now, vehicle, position);
+                string qr = BcwLabelService.Qr(now, vehicle, position, serial);
+                return $"Part: {model.PartNumber} | {now:yyyy-MM-dd} | Julian: {now:yy}{now.DayOfYear:D3}\nSerial: {serial:D5} | QR: {qr}";
+            });
+            if (!IsReleased && generation == _bcwSummaryGeneration) BcwInfoText.Text = summary;
+        }
+        catch (Exception ex)
+        {
+            if (!IsReleased && generation == _bcwSummaryGeneration) BcwInfoText.Text = ex.Message;
+        }
+    }
+
+    private async void BcwReprint_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_main is null) return;
+            var store = new BcwSerialStore();
+            var saved = store.Latest(pendingOnly: true) ?? store.Latest();
+            if (saved is null) throw new InvalidOperationException("Chưa có tem BCW đã lưu.");
+            if (MessageBox.Show(HostWindow, $"BCW: {saved.Data.PartNumber}\nQR: {saved.Data.Barcode}\nGửi lại đúng tem này? Hãy kiểm tra tem tại máy in trước để tránh in trùng.",
+                "IN LẠI BCW", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+            var settings = _vm.Settings.Label;
+            var request = saved with { PrinterCom = settings.PrinterCom, PrinterName = settings.PrinterName,
+                RawDestination = settings.RawDestination, BaudRate = settings.BaudRate, WriteTimeoutMs = settings.WriteTimeoutMs };
+            var result = await _main.Test.PrintSettingsLabelAsync(request, explicitBcwReprint: true);
+            ShowMessage(result.Message, "IN LẠI BCW", result.Printed ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            await UpdateBcwInfoAsync();
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"BCW reprint: {ex}");
+            ShowMessage(ex.Message, "IN LẠI BCW", MessageBoxImage.Warning);
+        }
+    }
 
     private static long MinimumBatchPrintLot(string templateType) =>
         LabelProfileResolver.NormalizeTemplateType(templateType) == LabelSettings.SmallQrTemplate ? 1 : 0;
@@ -1183,15 +1257,18 @@ public partial class ProductionSettingsPage : UserControl
             LabelPrintTransportResult result = await _main.Test.PrintSettingsLabelAsync(request);
             ShowMessage(
                 result.Printed
-                    ? $"Đã gửi tem LOTNO {request.Data.LotNo}. Không tăng LOT Production hoặc sản lượng."
+                    ? result.EffectiveRequest is { } bcw ? $"Đã gửi BCW: {bcw.Data.Barcode}. Không tăng LOT Production hoặc sản lượng."
+                        : $"Đã gửi tem LOTNO {request.Data.LotNo}. Không tăng LOT Production hoặc sản lượng."
                     : "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
                 result.Printed ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            if (request.Profile.Id == LabelSettings.BcwTemplate) await UpdateBcwInfoAsync();
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Test label print failed: {ex}");
             ShowMessage(
+                _vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate ? ex.Message :
                 "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
                 MessageBoxImage.Warning);
@@ -1200,6 +1277,7 @@ public partial class ProductionSettingsPage : UserControl
 
     private long? TryReadSinglePrintLot()
     {
+        if (_vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate) return 1;
         if (!long.TryParse(SinglePrintLotTextBox.Text, NumberStyles.Integer,
                 CultureInfo.InvariantCulture, out long lot) || lot < 0)
         {
@@ -1222,19 +1300,23 @@ public partial class ProductionSettingsPage : UserControl
         int printed = 0;
         try
         {
+            bool bcwBatch = _vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate;
+            string startInput = bcwBatch ? "1" : BatchPrintStartLotTextBox.Text;
+            string endInput = bcwBatch ? BcwQuantityTextBox.Text : BatchPrintEndLotTextBox.Text;
             if (!long.TryParse(
-                    BatchPrintStartLotTextBox.Text,
+                    startInput,
                     NumberStyles.Integer,
                     CultureInfo.InvariantCulture,
                     out long firstLot) || firstLot < MinimumBatchPrintLot(_vm.Settings.Label.TemplateType) ||
                 !long.TryParse(
-                    BatchPrintEndLotTextBox.Text,
+                    endInput,
                     NumberStyles.Integer,
                     CultureInfo.InvariantCulture,
                     out long lastLot) || !IsValidBatchPrintRange(firstLot, lastLot, _vm.Settings.Label.TemplateType))
             {
                 ShowMessage(
-                    $"Nhập LOT bắt đầu và kết thúc hợp lệ (từ {MinimumBatchPrintLot(_vm.Settings.Label.TemplateType)} trở lên, LOT kết thúc không nhỏ hơn LOT bắt đầu).",
+                    bcwBatch ? "Nhập số lượng tem BCW là số nguyên từ 1 trở lên." :
+                        $"Nhập LOT bắt đầu và kết thúc hợp lệ (từ {MinimumBatchPrintLot(_vm.Settings.Label.TemplateType)} trở lên, LOT kết thúc không nhỏ hơn LOT bắt đầu).",
                     "IN HÀNG LOẠT",
                     MessageBoxImage.Warning);
                 return;
@@ -1300,7 +1382,8 @@ public partial class ProductionSettingsPage : UserControl
                 bool allPrinted = printed == quantity;
                 ShowMessage(
                     allPrinted
-                        ? $"Đã gửi {quantity} tem, LOTNO từ {firstLot} đến {lastLot}. LOT Production, Tổng/PASS/FAIL và lịch sử test không thay đổi."
+                        ? bcwBatch ? $"Đã gửi {quantity} tem BCW. QR cuối: {lastResult?.EffectiveRequest?.Data.Barcode}. LOT Production và sản lượng không đổi."
+                            : $"Đã gửi {quantity} tem, LOTNO từ {firstLot} đến {lastLot}. LOT Production, Tổng/PASS/FAIL và lịch sử test không thay đổi."
                         : $"Đã gửi {printed}/{quantity} tem. LOTNO cuối đã gửi: {(completedLot?.ToString(CultureInfo.InvariantCulture) ?? "chưa có")}. " +
                           (lastResult?.Message ?? "Hãy kiểm tra kết nối và cổng máy in."),
                     "IN HÀNG LOẠT",
@@ -1316,6 +1399,7 @@ public partial class ProductionSettingsPage : UserControl
         {
             AsyncFileLogService.Current.Error($"Batch label print failed: {ex}");
             ShowMessage(
+                _vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate ? ex.Message :
                 "Chưa in hàng loạt được. Hãy kiểm tra kết nối và cổng máy in.",
                 "IN HÀNG LOẠT",
                 MessageBoxImage.Warning);
@@ -1387,9 +1471,15 @@ public partial class ProductionSettingsPage : UserControl
             ModelName = model.ModelName,
             ModelFile = model.SourcePath,
             CycleId = purpose + "-" + Math.Max(0, lotNo ?? _vm.Settings.LotNo) + "-" +
-                      now.ToString("yyyyMMddHHmmssfff")
+                      now.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N")
         };
-        return LabelPrintRequest.Capture(history, model, _vm.Settings.Label);
+        LabelPrintRequest request = LabelPrintRequest.Capture(history, model, _vm.Settings.Label);
+        if (request.Profile.Id == LabelSettings.BcwTemplate)
+        {
+            long sequence = new BcwSerialStore().Peek(now, request.Data.BcwVehicleCode, request.Data.BcwPosition);
+            request = BcwLabelService.Bind(request, now, sequence);
+        }
+        return request;
     }
 
     private string ResolveConfiguredLabelTemplatePath()

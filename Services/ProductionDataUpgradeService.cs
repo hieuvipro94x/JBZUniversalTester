@@ -1,6 +1,7 @@
 using System.IO;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.Services;
 
@@ -15,6 +16,7 @@ public static class ProductionDataUpgradeService
     [
         "JBZUniversalTester.cfg",
         Path.Combine("Data", "JBZUniversalTester.db"),
+        Path.Combine("Data", "BCW-labels.db"),
         "PartCnt.txt"
     ];
 
@@ -29,6 +31,13 @@ public static class ProductionDataUpgradeService
         return MigrateMissingProductionData(
             targetDirectory,
             FindPreviousVersionDirectories(targetDirectory));
+    }
+
+    public static void MigrateBcwForCurrentVersion()
+    {
+        string directory = Path.GetFullPath(AppContext.BaseDirectory);
+        MigrateMissingProductionData(directory, FindPreviousVersionDirectories(directory),
+            [Path.Combine("Data", "BCW-labels.db")]);
     }
 
     public static IReadOnlyList<string> MigrateFastConfigurationForCurrentVersion()
@@ -131,7 +140,18 @@ public static class ProductionDataUpgradeService
         string temporaryPath = targetPath + ".migration-" + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.Copy(sourcePath, temporaryPath, overwrite: false);
+            if (Path.GetFileName(sourcePath).Equals("BCW-labels.db", StringComparison.OrdinalIgnoreCase))
+            {
+                using var source = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = sourcePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+                using var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = temporaryPath, Pooling = false }.ToString());
+                source.Open(); destination.Open(); source.BackupDatabase(destination);
+                using var integrity = destination.CreateCommand(); integrity.CommandText = "PRAGMA integrity_check;";
+                if (!string.Equals(integrity.ExecuteScalar() as string, "ok", StringComparison.Ordinal))
+                    throw new InvalidDataException("BCW label journal upgrade integrity check failed.");
+            }
+            else File.Copy(sourcePath, temporaryPath, overwrite: false);
             File.Move(temporaryPath, targetPath, overwrite: false);
         }
         finally

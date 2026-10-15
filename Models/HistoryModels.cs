@@ -319,7 +319,10 @@ public sealed record LabelPrintData(
     string CustomerCode = "",
     string CycleId = "",
     string Barcode = "",
-    string BarcodePrint = "");
+    string BarcodePrint = "",
+    string BcwVehicleCode = "",
+    string BcwPosition = "",
+    long BcwSerial = 0);
 
 public enum LabelPrintStatus
 {
@@ -366,6 +369,20 @@ public sealed record LabelPrintRequest(
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(settings);
+
+        if (JBZUniversalTester.Services.LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) == LabelSettings.BcwTemplate)
+        {
+            var bcwData = new LabelPrintData(model.ProductName, model.PartNumber, model.Eco, model.Nco, model.Alc,
+                history.LotNo, history.Finished, model.VehicleType, model.CustomerCode, history.CycleId,
+                BcwVehicleCode: JBZUniversalTester.Services.BcwLabelService.Vehicle(model, settings),
+                BcwPosition: JBZUniversalTester.Services.BcwLabelService.Position(model, settings));
+            var bcw = new LabelPrintRequest(history.CycleId, bcwData, string.Empty,
+                JBZUniversalTester.Services.LabelProfileResolver.Resolve(model, settings), model.ModelName, model.SourcePath,
+                settings.PrinterName, settings.PrinterCom, 60, 15, "JBZBCW", settings.BaudRate,
+                settings.WriteTimeoutMs, 1, settings.RawDestination, string.Empty, string.Empty, string.Empty);
+            // Preview identity only. The printer gate assigns the persistent BCW serial at actual send time.
+            return JBZUniversalTester.Services.BcwLabelService.Bind(bcw, history.Finished, 1);
+        }
 
         var data = new LabelPrintData(
             model.ProductName,
@@ -499,6 +516,17 @@ public sealed record LabelPrintRequest(
         if (string.IsNullOrWhiteSpace(history.LabelPayload))
             throw new InvalidOperationException("Persisted label payload is empty.");
 
+        if (history.LabelTemplateType == LabelSettings.BcwTemplate)
+        {
+            // Restore by cycle from the immutable stored request below, never from current BCW settings.
+            var store = new JBZUniversalTester.Services.BcwSerialStore();
+            var snapshot = store.Find(history.CycleId);
+            if (snapshot is null) return JBZUniversalTester.Services.BcwLabelService.RestoreUnsent(history, currentSettings);
+            return snapshot with { PrinterCom = currentSettings.PrinterCom, PrinterName = currentSettings.PrinterName,
+                RawDestination = currentSettings.RawDestination, BaudRate = currentSettings.BaudRate,
+                WriteTimeoutMs = currentSettings.WriteTimeoutMs };
+        }
+
         LabelSettings identitySettings = new()
         {
             TemplateType = history.LabelTemplateType,
@@ -535,6 +563,9 @@ public sealed record LabelPrintRequest(
 
 public sealed record LabelIdentity(string SerialText, string BarcodeValue);
 
-public sealed record LabelPrintTransportResult(bool Printed, string Message);
+public sealed record LabelPrintTransportResult(bool Printed, string Message)
+{
+    public LabelPrintRequest? EffectiveRequest { get; init; }
+}
 
 public sealed record LabelPrinterConnectionResult(bool Connected, string Message);

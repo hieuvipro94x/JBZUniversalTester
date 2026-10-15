@@ -2294,6 +2294,22 @@ public sealed class TestHistoryStore
         command.ExecuteNonQuery();
     }
 
+    public void SaveBcwLabelSnapshot(long historyId, string cycleId, LabelPrintRequest request)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE Tests SET LabelSerial=$Qr,LabelProfile='JBZBCW',LabelTemplateType='BCW',LabelPayload=$Payload
+            WHERE Id=$Id AND CycleId=$Cycle AND LabelTemplateType='BCW';
+            """;
+        command.Parameters.AddWithValue("$Qr", request.Data.Barcode);
+        command.Parameters.AddWithValue("$Payload", request.Payload);
+        command.Parameters.AddWithValue("$Id", historyId);
+        command.Parameters.AddWithValue("$Cycle", cycleId);
+        if (command.ExecuteNonQuery() != 1)
+            throw new InvalidOperationException("BCW: chưa lưu được snapshot vào lịch sử; không gửi máy in.");
+    }
+
     private static TestHistoryRecord ReadRecord(SqliteDataReader reader) => new()
     {
         Id=reader.GetInt64(0), Started=ParseDate(reader.GetString(1)), Finished=ParseDate(reader.GetString(2)),

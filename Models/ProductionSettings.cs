@@ -375,6 +375,9 @@ public sealed class LabelSettings
     public const string LargeSqdzTemplate = "TEM_TO_SQDZ";
     public const string SmallTemplate = "TEM_BE_SQDZ";
     public const string SmallQrTemplate = "TEM_BE_QRCODE";
+    public const string BcwTemplate = "BCW";
+    public string BcwVehicleCode { get; set; } = string.Empty;
+    public string BcwPosition { get; set; } = "LH";
 
     /// <summary>
     /// Tên máy in được cài trong Windows.

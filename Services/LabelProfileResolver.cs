@@ -18,7 +18,7 @@ public static class LabelProfileResolver
 
         // TEM_TO_SQDZ is an explicit operator-selected built-in format. It must
         // not silently fall back to an older EPL payload embedded in the THT.
-        if (templateType == LabelSettings.LargeSqdzTemplate)
+        if (templateType is LabelSettings.LargeSqdzTemplate or LabelSettings.BcwTemplate)
         {
             return new LabelProfile(
                 templateType,
@@ -108,6 +108,7 @@ public static class LabelProfileResolver
     public static string NormalizeTemplateType(string? value)
     {
         string normalized = value?.Trim() ?? string.Empty;
+        if (normalized.Equals(LabelSettings.BcwTemplate, StringComparison.OrdinalIgnoreCase)) return LabelSettings.BcwTemplate;
         if (string.Equals(normalized, LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(normalized, "TEM_BE", StringComparison.OrdinalIgnoreCase))
             return LabelSettings.SmallTemplate;

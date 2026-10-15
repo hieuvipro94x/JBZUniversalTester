@@ -13,6 +13,13 @@ public sealed class LabelPrintService : IAsyncDisposable
     private SerialPort? _printerPort;
     private string _connectedPort = string.Empty;
     private int _connectedBaudRate;
+    private readonly BcwSerialStore _bcwSerials;
+    private readonly Func<DateTime> _localClock;
+    public LabelPrintService(BcwSerialStore? bcwSerials = null, Func<DateTime>? localClock = null)
+    {
+        _bcwSerials = bcwSerials ?? new BcwSerialStore();
+        _localClock = localClock ?? (() => DateTime.Now);
+    }
 
     public bool IsConnected => _printerPort?.IsOpen == true;
 
@@ -70,13 +77,37 @@ public sealed class LabelPrintService : IAsyncDisposable
 
     public async Task<LabelPrintTransportResult> PrintPassLabelAsync(
         LabelPrintRequest request,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool explicitReprint = false,
+        Func<LabelPrintRequest, Task>? beforeBcwSend = null)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         await _printGate.WaitAsync(ct);
         try
         {
+            if (request.Profile.Id == LabelSettings.BcwTemplate)
+            {
+                ct.ThrowIfCancellationRequested();
+                var prepared = _bcwSerials.Prepare(request, _localClock(), explicitReprint);
+                request = prepared.Request;
+                if (prepared.AlreadySent)
+                    return new LabelPrintTransportResult(true, "BCW đã gửi trước đó; chặn gửi trùng tự động.") { EffectiveRequest = request };
+                try
+                {
+                    if (beforeBcwSend is not null) await beforeBcwSend(request);
+                    _bcwSerials.Outcome(request.CycleId, "Sending", "Physical print ACK unavailable");
+                    LabelPrintTransportResult result = await PrintSerializedAsync(request, ct);
+                    result = result with { Message = result.Message + $" BCW QR={request.Data.Barcode}; physical print ACK unavailable." };
+                    _bcwSerials.Outcome(request.CycleId, result.Printed ? "Sent" : "Failed", result.Message);
+                    return result with { EffectiveRequest = request };
+                }
+                catch (Exception ex)
+                {
+                    _bcwSerials.Outcome(request.CycleId, "Failed", ex.Message + "; physical print uncertain");
+                    throw;
+                }
+            }
             return await PrintSerializedAsync(request, ct);
         }
         finally

@@ -24,7 +24,8 @@ public static class BuiltInLabelTemplateStore
     public static bool TryReferenceForProfile(string? profileId, out string reference)
     {
         string profile = profileId?.Trim() ?? string.Empty;
-        if (profile.Equals(LabelSettings.LargeTemplate, StringComparison.OrdinalIgnoreCase) ||
+        if (profile.Equals(LabelSettings.BcwTemplate, StringComparison.OrdinalIgnoreCase) ||
+            profile.Equals(LabelSettings.LargeTemplate, StringComparison.OrdinalIgnoreCase) ||
             profile.Equals(LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase) ||
             profile.Equals(LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase) ||
             profile.Equals(LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase) ||
@@ -67,6 +68,7 @@ public static class BuiltInLabelTemplateStore
         ArgumentNullException.ThrowIfNull(settings);
         string encoded = LabelProfileResolver.NormalizeTemplateType(templateType) switch
         {
+            LabelSettings.BcwTemplate => string.Empty,
             LabelSettings.LargeSqdzTemplate => settings.LargeSqdzTemplateOverrideBase64,
             LabelSettings.SmallTemplate => settings.SmallTemplateOverrideBase64,
             LabelSettings.SmallQrTemplate => settings.SmallQrTemplateOverrideBase64,
