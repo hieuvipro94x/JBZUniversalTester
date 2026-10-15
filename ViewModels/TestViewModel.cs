@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -1366,36 +1366,39 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         });
     }
 
-    private IReadOnlyList<FaultRow> BuildRemovalContactRows(IReadOnlyList<StartupIoContactPair> pairs) =>
-        pairs.Select(pair =>
+    private IReadOnlyList<FaultRow> BuildRemovalContactRows(IReadOnlyList<StartupIoContactPair> pairs)
+    {
+        var rows = new List<FaultRow>();
+        foreach (StartupIoContactPair pair in pairs)
         {
-            PinRecord[] pins = FindPinsByIo(pair.FirstIo).Concat(FindPinsByIo(pair.SecondIo)).ToArray();
-            static string JoinValues(IEnumerable<string> values) =>
-                string.Join(" / ", values.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct());
-            return new FaultRow
+            bool firstRowOfPair = true;
+            foreach (int io in new[] { pair.FirstIo, pair.SecondIo })
             {
-                Kind = FaultKind.Info,
-                FaultType = "CHỜ THÁO SẢN PHẨM",
-                Io = pair.FirstIo,
-                IoTextOverride = $"IO{pair.FirstIo} ↔ IO{pair.SecondIo}",
-                ActualSourceIo = pair.FirstIo,
-                ActualTargetIo = pair.SecondIo,
-                RelatedIos = [pair.FirstIo, pair.SecondIo],
-                Connector = JoinValues(pins.Select(pin => pin.Connector)),
-                Pin = JoinValues(pins.Select(pin => pin.PinNumber)),
-                WireName = JoinValues(pins.Select(pin => pin.WireName)),
-                Color = JoinValues(pins.Select(pin => pin.Color)),
-                Section = JoinValues(pins.Select(pin => pin.Section)),
-                IoCnPnOverride = string.Join("\n", new[] { pair.FirstIo, pair.SecondIo }.Select(io =>
+                PinRecord?[] pins = FindPinsByIo(io).Cast<PinRecord?>().DefaultIfEmpty().ToArray();
+                foreach (PinRecord? pin in pins)
                 {
-                    PinRecord[] endpointPins = FindPinsByIo(io).ToArray();
-                    return endpointPins.Length == 0 ? $"IO{io}" :
-                        string.Join("\n", endpointPins.Select(pin => $"IO{io}-{pin.Connector}-{pin.PinNumber}"));
-                })),
-                Status = "CHỜ THÁO SẢN PHẨM"
-            };
-        }).ToArray();
-
+                    rows.Add(new FaultRow
+                    {
+                        Kind = FaultKind.Info,
+                        Io = io,
+                        IoTextOverride = $"IO{io}",
+                        ActualSourceIo = pair.FirstIo,
+                        ActualTargetIo = pair.SecondIo,
+                        RelatedIos = [pair.FirstIo, pair.SecondIo],
+                        Connector = pin?.Connector ?? string.Empty,
+                        Pin = pin?.PinNumber ?? string.Empty,
+                        WireName = pin?.WireName ?? string.Empty,
+                        Color = pin?.Color ?? string.Empty,
+                        Section = pin?.Section ?? string.Empty,
+                        IoCnPnOverride = pin is null ? $"IO{io}" : $"IO{io}-{pin.Connector}-{pin.PinNumber}",
+                        IsNetworkStart = firstRowOfPair && rows.Count > 0
+                    });
+                    firstRowOfPair = false;
+                }
+            }
+        }
+        return rows;
+    }
     public bool HasProductOnTestTable =>
         IsProductRemovalPending ||
         _engine.HasProductActivity ||

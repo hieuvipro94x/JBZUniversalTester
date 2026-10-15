@@ -15,6 +15,10 @@ internal static partial class Program
         Assert(vm.IsProductRemovalPending && vm.MainRemovalContacts.SequenceEqual(new[]
             { new StartupIoContactPair(1, 18), new StartupIoContactPair(5, 9) }),
             "MainWindow lists sorted unique connected pairs without requiring a selected model");
+        Assert(vm.MainRemovalRows.Select(row => row.Io).SequenceEqual(new[] { 1, 18, 5, 9 }) &&
+               vm.MainRemovalRows.Select(row => row.IsNetworkStart).SequenceEqual(new[] { false, false, true, false }) &&
+               vm.MainRemovalRows.All(row => row.IoText == $"IO{row.Io}"),
+            "Each pair is a separate group of individual IO rows with a separator only between pairs");
         AssertThrows<InvalidOperationException>(() => vm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
             "MainWindow contact list cannot bypass the model selection interlock");
         board.Publish(FrameSeq(11) with { Complete = false });
@@ -39,16 +43,17 @@ internal static partial class Program
             new PinRecord("CN-C", "WIRE-DUPLICATE", 5, "3")]);
         vm.SetModel(lastModel);
         board.Publish(FrameSeq(15, (5, new[] { 9 })));
-        FaultRow remaining = vm.MainRemovalRows.Single();
-        Assert(remaining.ActualSourceIo == 5 && remaining.ActualTargetIo == 9 &&
-               remaining.WireNameDisplay.Contains("WIRE-05") && remaining.WireNameDisplay.Contains("WIRE-09") &&
-               remaining.WireNameDisplay.Contains("WIRE-DUPLICATE") &&
-               remaining.IoCnPnText.Contains("IO5-CN-A-2") && remaining.IoCnPnText.Contains("IO9-CN-B-7") &&
-               remaining.IoCnPnText.Contains("IO5-CN-C-3"),
-            "MainWindow maps both ends and duplicate pin mappings from the remembered model without losing wire names");
+        Assert(vm.MainRemovalRows.Select(row => (row.Io, row.Connector, row.Pin, row.WireNameDisplay, row.IoCnPnText))
+            .SequenceEqual(new[]
+            {
+                (5, "CN-A", "2", "WIRE-05", "IO5-CN-A-2"),
+                (5, "CN-C", "3", "WIRE-DUPLICATE", "IO5-CN-C-3"),
+                (9, "CN-B", "7", "WIRE-09", "IO9-CN-B-7")
+            }),
+            "Each endpoint and duplicate mapping keeps its own connector, pin and wire on its own row");
         board.Publish(FrameSeq(16, (10, new[] { 11 })));
-        Assert(vm.MainRemovalRows.Single().WireNameDisplay == "-" &&
-               vm.MainRemovalRows.Single().IoCnPnText == "IO10\nIO11",
+        Assert(vm.MainRemovalRows.Count == 2 && vm.MainRemovalRows.All(row => row.WireNameDisplay == "-") &&
+               vm.MainRemovalRows.Select(row => row.IoCnPnText).SequenceEqual(new[] { "IO10", "IO11" }),
             "Unknown IO remains visible without borrowing wire information from another connection");
         board.Publish(FrameSeq(17));
         Assert(vm.MainRemovalRows.Count == 0 && !vm.IsProductRemovalPending,

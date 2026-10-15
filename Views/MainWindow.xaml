@@ -365,11 +365,22 @@
                           CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
                           CanUserReorderColumns="False" CanUserResizeRows="False"
                           CanUserResizeColumns="False" HeadersVisibility="Column"
-                          RowHeaderWidth="0" FontSize="24" FontWeight="SemiBold" MinRowHeight="88"
+                          RowHeaderWidth="0" FontSize="26" FontWeight="SemiBold" MinRowHeight="64"
                           Background="White" RowBackground="White" AlternatingRowBackground="White"
                           Foreground="#B45309" GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="#E2E8F0" BorderBrush="#CBD5E1"
                           EnableRowVirtualization="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Setter Property="BorderThickness" Value="0"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsNetworkStart}" Value="True">
+                                    <Setter Property="BorderBrush" Value="#91B6D0"/>
+                                    <Setter Property="BorderThickness" Value="0,10,0,0"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
                     <DataGrid.ColumnHeaderStyle>
                         <Style TargetType="DataGridColumnHeader">
                             <Setter Property="Background" Value="#1E3278"/>
