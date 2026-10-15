@@ -6,6 +6,32 @@ using JBZUniversalTester.ViewModels;
 namespace JBZUniversalTester.SelfTests;
 internal static partial class Program
 {
+    private static void TestMainRemovalContacts()
+    {
+        var vm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 }, out FakeBoard board);
+        // Startup without a remembered model must still show actual electrical pairs.
+        int total = vm.Total, pass = vm.Pass, fail = vm.Fail, commands = board.Commands.Count;
+        board.Publish(FrameSeq(10, (18, new[] { 1 }), (1, new[] { 18 }), (5, new[] { 9 })));
+        Assert(vm.IsProductRemovalPending && vm.MainRemovalContacts.SequenceEqual(new[]
+            { new StartupIoContactPair(1, 18), new StartupIoContactPair(5, 9) }),
+            "MainWindow lists sorted unique connected pairs without requiring a selected model");
+        AssertThrows<InvalidOperationException>(() => vm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
+            "MainWindow contact list cannot bypass the model selection interlock");
+        board.Publish(FrameSeq(11) with { Complete = false });
+        board.Publish(FrameSeq(12) with { UnknownBytes = 1 });
+        Assert(vm.IsProductRemovalPending && vm.MainRemovalContacts.Count == 2,
+            "Incomplete or corrupt scans cannot clear the remaining IO list or unlock selection");
+        board.Publish(FrameSeq(13, (5, new[] { 9 })));
+        Assert(vm.IsProductRemovalPending && vm.MainRemovalContacts.SequenceEqual(new[]
+            { new StartupIoContactPair(5, 9) }),
+            "Partial removal updates the list while keeping selection locked");
+        board.Publish(FrameSeq(14));
+        Assert(!vm.IsProductRemovalPending && vm.MainRemovalContacts.Count == 0,
+            "A complete clean scan clears the MainWindow list and unlocks selection");
+        Assert(vm.Total == total && vm.Pass == pass && vm.Fail == fail && board.Commands.Count == commands,
+            "MainWindow removal monitoring never records results or commands relays");
+    }
+
     private static void TestOrphanedProbeCandidateRestoresCenter()
     {
         foreach (bool useDiscard in new[] { true, false })

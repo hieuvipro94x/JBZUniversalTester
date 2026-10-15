@@ -35,6 +35,12 @@ internal static partial class Program
             TestOrphanedProbeCandidateRestoresCenter();
             return 0;
         }
+        if (args is ["--test-main-removal"])
+        {
+            TestMainRemovalContacts();
+            TestStartupIoInterlock();
+            return 0;
+        }
         if (args is ["--test-removal-status"])
         {
             TestRemovalStatusNotifications();
@@ -79,6 +85,7 @@ internal static partial class Program
             ("Production probe preview arrives before frame terminator", TestProductionProbePreview),
             ("10-card complete-frame stress", TestTenCardCompleteFrameStress),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),
+            ("MainWindow remaining IO list follows the model selection interlock", TestMainRemovalContacts),
             ("Topology learning uses one direct-contact signal", TestTopologyLearningDirectContact),
             ("THT discard contact interlock and frame isolation", TestDiscardContactInterlock),
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
@@ -2310,6 +2317,7 @@ internal static partial class Program
         board.Publish(FrameSeq(102, (1, new[] { 18 }), (18, new[] { 1 })));
         Assert(vm.ResultStatusText == "THÁO SẢN PHẨM" &&
                vm.IsProductRemovalPending &&
+               vm.MainRemovalContacts.SequenceEqual(new[] { new StartupIoContactPair(1, 18) }) &&
                vm.Faults.Count == 1 &&
                vm.Faults[0].Kind == FaultKind.Info &&
                vm.Faults[0].ProductFaultType == ProductFaultType.None &&
@@ -2326,6 +2334,7 @@ internal static partial class Program
 
         board.Publish(FrameSeq(103));
         Assert(!vm.IsProductRemovalPending &&
+               vm.MainRemovalContacts.Count == 0 &&
                vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "LẮP SẢN PHẨM",
             "A complete clean frame clears the startup interlock and arms Production");
     }

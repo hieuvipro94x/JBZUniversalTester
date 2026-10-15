@@ -1342,6 +1342,25 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public bool IsProductRemovalPending =>
         Volatile.Read(ref _productRemovalPending) != 0;
 
+    public IReadOnlyList<StartupIoContactPair> MainRemovalContacts { get; private set; } =
+        Array.Empty<StartupIoContactPair>();
+    private long _mainRemovalContactsRevision;
+
+    private void UpdateMainRemovalContacts(IReadOnlyList<StartupIoContactPair> pairs, long generation)
+    {
+        long revision = Interlocked.Increment(ref _mainRemovalContactsRevision);
+        InvokeUi(() =>
+        {
+            if (generation != Volatile.Read(ref _runtimeGeneration) ||
+                revision != Volatile.Read(ref _mainRemovalContactsRevision) ||
+                MainRemovalContacts.SequenceEqual(pairs))
+                return;
+
+            MainRemovalContacts = pairs;
+            Raise(nameof(MainRemovalContacts));
+        });
+    }
+
     public bool HasProductOnTestTable =>
         IsProductRemovalPending ||
         _engine.HasProductActivity ||
@@ -1353,6 +1372,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void SetProductRemovalPending(bool pending)
     {
+        if (!pending)
+            UpdateMainRemovalContacts(Array.Empty<StartupIoContactPair>(), Volatile.Read(ref _runtimeGeneration));
+
         if (pending && Volatile.Read(ref _resultRecordedThisCycle) != 0)
             MarkProductRemovalStarted();
 
@@ -5274,6 +5296,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             frame,
             _model,
             _board.Capacity);
+        UpdateMainRemovalContacts(pairs, generation);
         if (pairs.Count > 0)
         {
             SetProductRemovalPending(true);
@@ -5389,6 +5412,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
+        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(
+            frame,
+            _model,
+            _board.Capacity);
+        UpdateMainRemovalContacts(pairs, generation);
+
         // Khi người vận hành rời màn hình kiểm tra trong lúc đang chờ tháo,
         // luồng Background vẫn phải tiêu thụ frame để xác nhận ProductRemoved.
         // Không đưa frame này vào chu trình PASS/FAIL và không cần bấm START.
@@ -5414,10 +5443,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        IReadOnlyList<StartupIoContactPair> pairs = StartupIoInterlock.FindConnectedPairs(
-            frame,
-            _model,
-            _board.Capacity);
         if (pairs.Count > 0)
         {
             Interlocked.Exchange(ref _startupIoInterlockState, 0);

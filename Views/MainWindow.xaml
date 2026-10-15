@@ -322,9 +322,10 @@
                 Grid.Row="1"
                 Panel.ZIndex="10"
                 Visibility="Collapsed"
-                IsHitTestVisible="False"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
+                Width="760"
+                MaxWidth="900"
                 Padding="36,22"
                 Background="#FFF2A8"
                 BorderBrush="#C89000"
@@ -340,7 +341,26 @@
                            Margin="0,8,0,0"
                            FontSize="15"
                            Foreground="#5C4200"
+                           TextWrapping="Wrap"
                            TextAlignment="Center"/>
+                <TextBlock Text="CÁC CHÂN IO CHƯA THÁO HẾT"
+                           Margin="0,18,0,8" FontSize="16" FontWeight="Bold"
+                           Foreground="#8A3B00"/>
+                <DataGrid ItemsSource="{Binding Test.MainRemovalContacts}"
+                          AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserAddRows="False" CanUserDeleteRows="False"
+                          CanUserReorderColumns="False" HeadersVisibility="Column"
+                          RowHeaderWidth="0" MinHeight="90" MaxHeight="300"
+                          FontSize="19" RowHeight="36" Background="White"
+                          Foreground="#1E293B" GridLinesVisibility="Horizontal"
+                          EnableRowVirtualization="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="CHÂN IO" Width="*"
+                                            Binding="{Binding FirstIo, Mode=OneWay, StringFormat=IO{0}}"/>
+                        <DataGridTextColumn Header="ĐANG KẾT NỐI VỚI" Width="*"
+                                            Binding="{Binding SecondIo, Mode=OneWay, StringFormat=IO{0}}"/>
+                    </DataGrid.Columns>
+                </DataGrid>
             </StackPanel>
         </Border>
     
