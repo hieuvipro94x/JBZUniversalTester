@@ -284,14 +284,13 @@ public partial class ProductionSettingsPage : UserControl
 
     private void EditLabelTemplate_Click(object sender, RoutedEventArgs e)
     {
-        if (_vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate)
-        {
-            ShowMessage("BCW dùng mẫu EPL trực tiếp đã kiểm tra theo BCW.txt. Xem lệnh trong XEM TRƯỚC; không sửa mẫu chung của loại tem khác.",
-                "MẪU BCW", MessageBoxImage.Information);
-            return;
-        }
         try
         {
+            if (_vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate)
+            {
+                EditBuiltInLabelTemplate();
+                return;
+            }
             string configured = _vm.Settings.Label.TemplatePath?.Trim() ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(configured))
             {
@@ -334,7 +333,9 @@ public partial class ProductionSettingsPage : UserControl
 
         var note = new TextBlock
         {
-            Text = "Nội dung sửa sẽ được lưu cùng Cài đặt. Dùng KHÔI PHỤC MẶC ĐỊNH để bỏ bản tùy chỉnh.",
+            Text = "Nội dung sửa sẽ được lưu cùng Cài đặt. Dùng KHÔI PHỤC MẶC ĐỊNH để bỏ bản tùy chỉnh." +
+                (templateType == LabelSettings.BcwTemplate ?
+                    "\nBCW: chỉnh vị trí, font và kích thước bằng EPL. Giữ {PART_NUMBER}, {BCW_POSITION}, {BCW_QR}; không dùng lệnh lưu/xóa form." : ""),
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 8)
         };
@@ -372,6 +373,15 @@ public partial class ProductionSettingsPage : UserControl
             {
                 MessageBox.Show(editor, "Mẫu tem không được để trống.", "CHỈNH TEM", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
+            }
+            if (templateType == LabelSettings.BcwTemplate)
+            {
+                try { BcwLabelService.ValidateTemplate(textBox.Text); }
+                catch (InvalidDataException ex)
+                {
+                    MessageBox.Show(editor, ex.Message, "CHỈNH TEM BCW", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
             }
             editor.DialogResult = true;
         };

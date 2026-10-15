@@ -22,7 +22,7 @@ internal static partial class Program
     {
         if (args is ["--test-bcw"])
         {
-            TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwHistorySnapshotPreservesRows(); TestBcwThtAutomaticPassLabel();
+            TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwHistorySnapshotPreservesRows(); TestBcwThtAutomaticPassLabel(); TestBcwEditableTemplate();
             return 0;
         }
         if (args is ["--test-recent-products"])
@@ -54,6 +54,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),
             ("BCW reads the active THT and uses the automatic PASS print pipeline", TestBcwThtAutomaticPassLabel),
             ("BCW Julian date, original EPL positions and safe template", TestBcwJulianAndPayload),
             ("BCW persistent sequence, failed send, concurrency and reprint", TestBcwPersistentSerialAndTransport),

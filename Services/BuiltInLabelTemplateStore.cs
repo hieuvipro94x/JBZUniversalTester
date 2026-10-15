@@ -68,7 +68,7 @@ public static class BuiltInLabelTemplateStore
         ArgumentNullException.ThrowIfNull(settings);
         string encoded = LabelProfileResolver.NormalizeTemplateType(templateType) switch
         {
-            LabelSettings.BcwTemplate => string.Empty,
+            LabelSettings.BcwTemplate => settings.BcwTemplateOverrideBase64,
             LabelSettings.LargeSqdzTemplate => settings.LargeSqdzTemplateOverrideBase64,
             LabelSettings.SmallTemplate => settings.SmallTemplateOverrideBase64,
             LabelSettings.SmallQrTemplate => settings.SmallQrTemplateOverrideBase64,
@@ -91,9 +91,14 @@ public static class BuiltInLabelTemplateStore
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(template);
+        if (LabelProfileResolver.NormalizeTemplateType(templateType) == LabelSettings.BcwTemplate)
+            BcwLabelService.ValidateTemplate(template);
         string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(template));
         switch (LabelProfileResolver.NormalizeTemplateType(templateType))
         {
+            case LabelSettings.BcwTemplate:
+                settings.BcwTemplateOverrideBase64 = encoded;
+                break;
             case LabelSettings.LargeSqdzTemplate:
                 settings.LargeSqdzTemplateOverrideBase64 = encoded;
                 break;
@@ -114,6 +119,9 @@ public static class BuiltInLabelTemplateStore
         ArgumentNullException.ThrowIfNull(settings);
         switch (LabelProfileResolver.NormalizeTemplateType(templateType))
         {
+            case LabelSettings.BcwTemplate:
+                settings.BcwTemplateOverrideBase64 = string.Empty;
+                break;
             case LabelSettings.LargeSqdzTemplate:
                 settings.LargeSqdzTemplateOverrideBase64 = string.Empty;
                 break;

@@ -1,4 +1,4 @@
-# BCW — V2026.09.237
+# BCW — V2026.09.238
 
 Tích hợp trong UniversalTester WPF .NET 8 Windows x86. Mẫu nguồn đối chiếu: `C:\PHT20\BCW.txt`. Không tạo project mới và không thay thế hệ thống in tem hiện có.
 
@@ -56,7 +56,15 @@ Mọi dòng kết thúc CRLF; P1 có CRLF cuối. Giữ tọa độ, font, độ
 
 Template nguồn chỉ có Q120 và không khai báo chiều rộng. Preview đặt mặc định 60 × 15 mm cho BCW; chiều cao Q120 tương ứng khoảng 15 mm ở 203 dpi. Cần đối chiếu kích thước giấy và DPI thực tế, vì layout máy in được giữ nguyên tọa độ theo mẫu.
 
-PartNumber kiểm tra ASCII tối đa 15 ký tự theo biến V00 của mẫu gốc, không cho phép nháy hoặc xuống dòng làm hỏng lệnh EPL. Mẫu BCW không dùng chức năng chỉnh override của những loại tem khác.
+PartNumber kiểm tra ASCII tối đa 15 ký tự theo biến V00 của mẫu gốc, không cho phép nháy hoặc xuống dòng làm hỏng lệnh EPL.
+
+## Chỉnh mẫu BCW
+
+Chọn BCW → CHỈNH TEM để mở trình chỉnh EPL có sẵn. Có thể đổi tọa độ, font, độ phóng chữ, vị trí và kích thước module QR. Giữ `{PART_NUMBER}`, `{BCW_POSITION}` và `{BCW_QR}`; QR và dòng chữ dưới QR phải dùng cùng `{BCW_QR}`. Mỗi serial chỉ dùng một lệnh P1. Không chấp nhận lệnh xóa/lưu/đọc form FK/FS/FE/FR.
+
+Bấm ÁP DỤNG rồi LƯU CÀI ĐẶT. Mẫu riêng của BCW lưu trong `LabelTemplateBCWBase64`, không ghi đè mẫu TEM_TO/TEM_BE. KHÔI PHỤC MẶC ĐỊNH bỏ phần tùy chỉnh BCW. Xem trước, in thử, in hàng loạt và tem PASS production đều dùng bản BCW đang áp dụng khi chụp yêu cầu.
+
+Yêu cầu đã chụp giữ nguyên mẫu trước đó dù sau này sửa/khôi phục Cài đặt. Khi cấp serial lúc gửi, chỉ điền lại ngày/QR/serial vào đúng mẫu đã chụp. In lại tiếp tục dùng nguyên payload đã lưu, không chuyển sang bố cục mới. Khôi phục tem chưa gửi cũng đọc được QR ở tọa độ đã chỉnh, không còn cố định b245,16.
 
 ## Lưu serial và lỗi in
 
@@ -86,7 +94,7 @@ Thêm:
 - `docs/BCW_LABEL.md`: báo cáo và hướng dẫn này.
 
 Sửa:
-- `JBZUniversalTester.csproj`, `Version.props`: resource và V237.
+- `JBZUniversalTester.csproj`, `Version.props`: resource và V238.
 - `Models/ProductionSettings.cs`, `Models/HistoryModels.cs`: cấu hình và snapshot BCW.
 - `Services/BuiltInLabelTemplateStore.cs`, `LabelProfileResolver.cs`, `LabelTemplateProvider.cs`: nhận dạng/chọn mẫu BCW, giữ hành vi mẫu cũ.
 - `Services/LabelPrintService.cs`: nhánh BCW trong khóa gửi hiện có.
@@ -101,7 +109,7 @@ Sửa:
 
 Build Release: thành công, 0 warning, 0 error.
 
-Kiểm thử BCW đạt: vector Julian/năm nhuận/ngày cuối năm/RH/LH, QR và chữ giống nhau, validation, không FK/FS, CFG round-trip, gửi thất bại không tăng serial, restart, retry/reprint cùng QR, ngày mới, gửi đồng thời, kế thừa phiên bản và SQLite integrity. Có kiểm thử bổ sung bằng file THT fixture qua parser thật, hàm chụp tem PASS production, gửi RAW giả lập và xác minh QR trong History; xác minh model/config đổi sau capture không đổi tem cũ. Bộ đầy đủ V237 đạt **84/88**; 4 lỗi cũ đã ghi nhận trong các kiểm thử learned topology, resistance selectors/layout, TestView status guards và fault debounce/jig. Cả 4 nhóm kiểm thử BCW và các kiểm thử tem cũ đều đạt.
+Kiểm thử BCW đạt: vector Julian/năm nhuận/ngày cuối năm/RH/LH, QR và chữ giống nhau, validation, không FK/FS, CFG round-trip, gửi thất bại không tăng serial, restart, retry/reprint cùng QR, ngày mới, gửi đồng thời, kế thừa phiên bản và SQLite integrity. Có kiểm thử bổ sung bằng file THT fixture qua parser thật, hàm chụp tem PASS production, gửi RAW giả lập và xác minh QR trong History; xác minh model/config đổi sau capture không đổi tem cũ. Bộ đầy đủ V238 đạt **85/89**; 4 lỗi cũ đã ghi nhận trong các kiểm thử learned topology, resistance selectors/layout, TestView status guards và fault debounce/jig. Cả 5 nhóm kiểm thử BCW và các kiểm thử tem cũ đều đạt.
 
 Không chỉnh dữ liệu sản xuất thật khi phát triển. Integrity trên DB fixture History và nhật ký BCW đều `ok`, số dòng History giữ nguyên qua cập nhật snapshot.
 

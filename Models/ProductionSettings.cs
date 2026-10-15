@@ -413,6 +413,7 @@ public sealed class LabelSettings
     public string LargeSqdzTemplateOverrideBase64 { get; set; } = string.Empty;
     public string SmallTemplateOverrideBase64 { get; set; } = string.Empty;
     public string SmallQrTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string BcwTemplateOverrideBase64 { get; set; } = string.Empty;
 
     public string EncodingName { get; set; } = "us-ascii";
 

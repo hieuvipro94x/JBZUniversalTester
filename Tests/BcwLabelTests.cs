@@ -8,6 +8,68 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestBcwEditableTemplate()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZ-BCW-Edit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string original = BuiltInLabelTemplateStore.Load(BuiltInLabelTemplateStore.ReferenceFor("BCW"));
+            string edited = original.Replace("b245,16", "b220,20", StringComparison.Ordinal)
+                .Replace("A110,5,0,3,2,2", "A95,8,0,3,1,2", StringComparison.Ordinal);
+            var settings = new LabelSettings { TemplateType="BCW", BcwVehicleCode="09", BcwPosition="LH",
+                RawDestination=Path.Combine(root,"printer.epl") };
+            BuiltInLabelTemplateStore.SaveOverride(settings,LabelSettings.LargeTemplate,"OLD-TEMPLATE-UNCHANGED");
+            BuiltInLabelTemplateStore.SaveOverride(settings,"BCW",edited);
+            Assert(BuiltInLabelTemplateStore.LoadOverride(settings,LabelSettings.LargeTemplate)=="OLD-TEMPLATE-UNCHANGED",
+                "Editing BCW stores its own override without replacing other label templates");
+            string cfg = Path.Combine(root,"settings.cfg");
+            ProductionConfigService.SaveLegacyCfg(new ProductionSettings { Label=settings },cfg);
+            var load=typeof(ProductionConfigService).GetMethod("LoadEnglishCfg",BindingFlags.Static|BindingFlags.NonPublic)!;
+            var restored=(ProductionSettings)load.Invoke(null,[cfg])!;
+            Assert(BuiltInLabelTemplateStore.LoadOverride(restored.Label,"BCW")==edited,
+                "Edited BCW template survives CFG save and reload");
+            var history=new TestHistoryRecord { CycleId="edited-bcw",Finished=new DateTime(2026,10,14),LotNo=2001 };
+            var model=new ProductModel { PartNumber="OE366-33050",ProductName="BCW EDITED" };
+            var request=LabelPrintRequest.Capture(history,model,restored.Label);
+            Assert(request.Payload.Contains("b220,20,Q,h5,",StringComparison.Ordinal) &&
+                   request.Payload.Contains("A95,8,0,3,1,2,",StringComparison.Ordinal),
+                "BCW capture and preview use edited QR position and font dimensions");
+            BuiltInLabelTemplateStore.ClearOverride(restored.Label,"BCW");
+            Assert(BuiltInLabelTemplateStore.LoadOverride(restored.Label,"BCW")==string.Empty,
+                "BCW default reset clears only its dedicated override");
+            var defaultRequest=LabelPrintRequest.Capture(history,model,restored.Label);
+            Assert(defaultRequest.Payload.Contains("b245,16",StringComparison.Ordinal),"New captures use default BCW again after reset");
+            var printer=new LabelPrintService(new BcwSerialStore(Path.Combine(root,"bcw.db")),()=>history.Finished);
+            try
+            {
+                var sent=printer.PrintPassLabelAsync(request).GetAwaiter().GetResult();
+                Assert(sent.Printed && File.ReadAllText(settings.RawDestination).Contains("b220,20",StringComparison.Ordinal),
+                    "Print uses the captured edited template even after live settings are reset");
+                var retry=printer.PrintPassLabelAsync(request,explicitReprint:true).GetAwaiter().GetResult();
+                Assert(retry.EffectiveRequest!.Payload==sent.EffectiveRequest!.Payload,
+                    "Reprint preserves exact edited payload and original serial");
+            }
+            finally { printer.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+            history.LabelPayload=request.Payload;
+            history.PartNumber=model.PartNumber;
+            var recovered=BcwLabelService.RestoreUnsent(history,settings);
+            var bound=BcwLabelService.Bind(recovered,history.Finished,5);
+            Assert(bound.Payload.Contains("b220,20",StringComparison.Ordinal) &&
+                   bound.Data.Barcode=="2628709L00005","Unsent snapshot recovery retains edited coordinates without hard-coded original positions");
+            foreach(string bad in new[] { edited.Insert(edited.IndexOf('\n')+1,"FK\"*\"\n"),
+                edited.Replace("P1","P2",StringComparison.Ordinal), edited.Replace("{BCW_QR}","STATIC",StringComparison.Ordinal),
+                edited.Replace("{PART_NUMBER}","{UNKNOWN}",StringComparison.Ordinal) })
+            {
+                bool rejected=false;
+                try { BuiltInLabelTemplateStore.SaveOverride(settings,"BCW",bad); }
+                catch(InvalidDataException) { rejected=true; }
+                Assert(rejected,"BCW editor rejects flash deletion, duplicate-copy commands or inconsistent dynamic QR fields");
+            }
+        }
+        finally { Directory.Delete(root,recursive:true); }
+    }
+
     private static void TestBcwThtAutomaticPassLabel()
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
