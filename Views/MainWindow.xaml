@@ -319,49 +319,98 @@
         </Grid>
 
         <Border x:Name="ProductRemovalNotice"
-                Grid.Row="1"
+                Grid.Row="0"
+                Grid.RowSpan="3"
                 Panel.ZIndex="10"
                 Visibility="Collapsed"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Width="760"
-                MaxWidth="900"
-                Padding="36,22"
-                Background="#FFF2A8"
-                BorderBrush="#C89000"
-                BorderThickness="2"
-                CornerRadius="6">
-            <StackPanel>
-                <TextBlock Text="VUI LÒNG THÁO SẢN PHẨM"
-                           FontSize="30"
-                           FontWeight="Bold"
-                           Foreground="#8A3B00"
-                           TextAlignment="Center"/>
-                <TextBlock Text="Chọn mã hàng đang bị khóa. Bạn vẫn có thể mở màn hình kiểm tra để theo dõi; thông báo sẽ tự mất khi sản phẩm đã được tháo hoàn toàn."
-                           Margin="0,8,0,0"
-                           FontSize="15"
-                           Foreground="#5C4200"
-                           TextWrapping="Wrap"
-                           TextAlignment="Center"/>
-                <TextBlock Text="CÁC CHÂN IO CHƯA THÁO HẾT"
-                           Margin="0,18,0,8" FontSize="16" FontWeight="Bold"
-                           Foreground="#8A3B00"/>
-                <DataGrid ItemsSource="{Binding Test.MainRemovalContacts}"
+                Padding="24"
+                Background="#F1F5F9">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border Background="#F5E731" CornerRadius="10" Padding="24,20">
+                    <StackPanel>
+                        <TextBlock Text="VUI LÒNG THÁO SẢN PHẨM!!"
+                                   FontSize="38" FontWeight="Bold" Foreground="#222222"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                        <TextBlock Text="Tháo các kết nối bên dưới khỏi bàn test để tiếp tục."
+                                   Margin="0,8,0,0" FontSize="21" Foreground="#374151"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+                <Grid Grid.Row="1" Margin="0,20,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="CÁC CHÂN IO CÒN KẾT NỐI"
+                               FontSize="23" FontWeight="Bold" Foreground="#1E3278"
+                               VerticalAlignment="Center"/>
+                    <Border Grid.Column="1" Background="#E2E8F0" CornerRadius="6" Padding="16,8">
+                        <TextBlock Text="{Binding Test.MainRemovalContacts.Count, StringFormat=Còn {0} cặp kết nối}"
+                                   FontSize="21" FontWeight="SemiBold" Foreground="#334155"/>
+                    </Border>
+                </Grid>
+                <DataGrid Grid.Row="2" ItemsSource="{Binding Test.MainRemovalContacts}"
                           AutoGenerateColumns="False" IsReadOnly="True"
-                          CanUserAddRows="False" CanUserDeleteRows="False"
-                          CanUserReorderColumns="False" HeadersVisibility="Column"
-                          RowHeaderWidth="0" MinHeight="90" MaxHeight="300"
-                          FontSize="19" RowHeight="36" Background="White"
-                          Foreground="#1E293B" GridLinesVisibility="Horizontal"
+                          CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                          CanUserReorderColumns="False" CanUserResizeRows="False"
+                          CanUserResizeColumns="False" HeadersVisibility="Column"
+                          RowHeaderWidth="0" FontSize="36" FontWeight="SemiBold" RowHeight="72"
+                          Background="White" RowBackground="White" AlternatingRowBackground="White"
+                          Foreground="#B45309" GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="#E2E8F0" BorderBrush="#CBD5E1"
                           EnableRowVirtualization="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <DataGrid.ColumnHeaderStyle>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background" Value="#1E3278"/>
+                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="FontSize" Value="22"/>
+                            <Setter Property="FontWeight" Value="Bold"/>
+                            <Setter Property="Height" Value="54"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                            <Setter Property="BorderThickness" Value="0"/>
+                        </Style>
+                    </DataGrid.ColumnHeaderStyle>
+                    <DataGrid.Resources>
+                        <Style x:Key="RemovalIoText" TargetType="TextBlock">
+                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                            <Setter Property="VerticalAlignment" Value="Center"/>
+                        </Style>
+                    </DataGrid.Resources>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="CHÂN IO" Width="*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
                                             Binding="{Binding FirstIo, Mode=OneWay, StringFormat=IO{0}}"/>
+                        <DataGridTemplateColumn Width="100">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="↔" FontSize="34" Foreground="#94A3B8"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                         <DataGridTextColumn Header="ĐANG KẾT NỐI VỚI" Width="*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
                                             Binding="{Binding SecondIo, Mode=OneWay, StringFormat=IO{0}}"/>
                     </DataGrid.Columns>
                 </DataGrid>
-            </StackPanel>
+                <Grid Grid.Row="3" Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Chọn mã hàng đang khóa · Tháo hết sẽ tự trở về màn hình chính"
+                               FontSize="20" Foreground="#475569" TextWrapping="Wrap"
+                               VerticalAlignment="Center" Margin="0,0,20,0"/>
+                    <Button Grid.Column="1" Content="KẾT THÚC" Width="160"
+                            Command="{Binding ExitCommand}" Style="{StaticResource ExitButtonStyle}"/>
+                </Grid>
+            </Grid>
         </Border>
     
 

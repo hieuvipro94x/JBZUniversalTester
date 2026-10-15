@@ -177,6 +177,14 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
+        // Also guard deferred opens (for example the model-loaded callback).
+        // The physical removal gate must be clear before entering TestView.
+        if (_viewModel.Test.IsProductRemovalPending)
+        {
+            UpdateProductRemovalGate();
+            return;
+        }
+
         if (_viewModel.Test.IsDeviceFault ||
             (!_viewModel.Test.IsBoardConnected && !allowViewWhenInsufficient))
         {
@@ -325,7 +333,7 @@ public partial class MainWindow : Window
             _viewModel.Test.IsBoardStartupUnavailable &&
             !_viewModel.Test.IsDeviceFault;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
-        StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null;
+        StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null && !blocked;
         SelectModelButton.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;
         LearnTopologyButton.IsEnabled = hardwareReady;
     }

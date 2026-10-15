@@ -1759,12 +1759,12 @@ internal static partial class Program
         Assert(mainWindowSource.Contains("bool hardwareReady =", StringComparison.Ordinal) &&
                mainWindowSource.Contains("bool offlineUiAvailable =", StringComparison.Ordinal) &&
                mainWindowSource.Contains(
-                   "StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null;",
+                   "StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null && !blocked;",
                    StringComparison.Ordinal) &&
                mainWindowSource.Contains(
                    "SelectModelButton.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;",
                    StringComparison.Ordinal),
-            "Main allows model selection and TestView entry offline while hardware-only actions remain locked");
+            "Main allows offline UI entry only after product removal; hardware-only actions remain locked");
 
         string mainViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
