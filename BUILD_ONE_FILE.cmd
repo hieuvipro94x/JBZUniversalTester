@@ -7,6 +7,7 @@ set "ROOT=%~dp0"
 set "PS_SCRIPT=%ROOT%Scripts\Publish-OneFile.ps1"
 set "SIGN_VERIFY_SCRIPT=%ROOT%Scripts\Verify-JBZSignature.ps1"
 set "VERSION_RESOLVER=%ROOT%Scripts\Resolve-BuildVersion.ps1"
+set "DAILY_BRANCH_SCRIPT=%ROOT%Scripts\Set-DailyBuildBranch.ps1"
 set "VERSION_FILE=%ROOT%Version.props"
 set "PROJECT_NAME=JBZUniversalTester"
 set "PROJECT_FILE_NAME=JBZUniversalTester.csproj"
@@ -59,6 +60,12 @@ if not exist "%VERSION_FILE%" (
 if not exist "%VERSION_RESOLVER%" (
     echo [LỖI] Không tìm thấy:
     echo %VERSION_RESOLVER%
+    goto :FAIL
+)
+
+if not exist "%DAILY_BRANCH_SCRIPT%" (
+    echo [LOI] Khong tim thay script dat ten nhanh theo ngay:
+    echo %DAILY_BRANCH_SCRIPT%
     goto :FAIL
 )
 
@@ -136,6 +143,27 @@ if errorlevel 1 (
     echo [LỖI GIT] Không fetch được repository đích. Dừng build để tránh trùng version.
     goto :FAIL
 )
+
+rem Doi ten nhanh hien tai theo ngay local, giu nguyen commit va thay doi dang lam.
+set "DAILY_BRANCH_RESULT=%TEMP%\JBZ_DailyBranch_%RANDOM%_%RANDOM%.txt"
+set "DAILY_BRANCH_ERROR=%TEMP%\JBZ_DailyBranchError_%RANDOM%_%RANDOM%.txt"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%DAILY_BRANCH_SCRIPT%" -RepositoryPath "%ROOT%." -Remote "%BUILD_REMOTE%" ^
+  1>"%DAILY_BRANCH_RESULT%" 2>"%DAILY_BRANCH_ERROR%"
+if errorlevel 1 (
+    echo [LOI GIT] Khong the dat ten nhanh build theo ngay.
+    if exist "%DAILY_BRANCH_ERROR%" type "%DAILY_BRANCH_ERROR%"
+    del /Q "%DAILY_BRANCH_RESULT%" "%DAILY_BRANCH_ERROR%" >nul 2>&1
+    goto :FAIL
+)
+set "CURRENT_BRANCH="
+for /f "usebackq delims=" %%B in ("%DAILY_BRANCH_RESULT%") do set "CURRENT_BRANCH=%%B"
+del /Q "%DAILY_BRANCH_RESULT%" "%DAILY_BRANCH_ERROR%" >nul 2>&1
+if not defined CURRENT_BRANCH (
+    echo [LOI GIT] Script khong tra ve ten nhanh build.
+    goto :FAIL
+)
+echo [GIT] Nhanh build theo ngay: %CURRENT_BRANCH%
 
 set "REMOTE_BEFORE_BUILD=NONE"
 git show-ref --verify --quiet "refs/remotes/%BUILD_REMOTE%/%CURRENT_BRANCH%"
@@ -349,7 +377,7 @@ if errorlevel 2 (
     goto :CANCEL
 )
 
-git -c core.longpaths=true push "%BUILD_REMOTE%" HEAD:"%CURRENT_BRANCH%"
+git -c core.longpaths=true push -u "%BUILD_REMOTE%" HEAD:"%CURRENT_BRANCH%"
 if errorlevel 1 (
     echo [LỖI GIT] PUSH thất bại.
     goto :FAIL
