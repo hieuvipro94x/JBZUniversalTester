@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-master-history"])
+        {
+            TestDetailedMasterHistory();
+            TestMasterHistorySessionPresentation();
+            return 0;
+        }
         if (args is ["--test-master-resistance"])
         {
             TestMasterResistanceRemovalTransition();
@@ -155,6 +161,7 @@ internal static partial class Program
             ("Master completion replays removal confirmed while JIG was busy", TestMasterRemovalDuringEjectCompletion),
             ("History PASS/FAIL ordinals restart for each product LOT batch", TestHistoryLotBatchOrdinals),
             ("Master History hides session identifiers without changing audit data", TestMasterHistorySessionPresentation),
+            ("All Master samples persist detailed installation, confirmation and removal history", TestDetailedMasterHistory),
             ("Master transitions only through explicitly selected NG samples", TestMasterSelectedSamplesOnly),
             ("Committed PASS rejects stale installation rows until actual removal", TestCommittedPassRejectsInstallationRows),
             ("Leak connector without RET uses only expected IO edges to another connector", TestLeakWithoutRetTrigger),

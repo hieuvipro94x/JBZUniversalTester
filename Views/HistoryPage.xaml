@@ -385,8 +385,8 @@
                               SelectedIndex="0">
                         <ComboBoxItem Content="TẤT CẢ" Tag=""/>
                         <ComboBoxItem Content="PRODUCTION" Tag="PRODUCT"/>
-                        <ComboBoxItem Content="MASTER ĐẠT" Tag="MASTER_GOOD"/>
-                        <ComboBoxItem Content="MASTER LỖI" Tag="MASTER_BAD"/>
+                        <ComboBoxItem Content="정상 마스터" Tag="MASTER_GOOD"/>
+                        <ComboBoxItem Content="불량 마스터" Tag="MASTER_BAD"/>
                         <ComboBoxItem Content="LEAK RETEST" Tag="LEAK_RETEST"/>
                     </ComboBox>
                 </StackPanel>
@@ -412,7 +412,7 @@
                       ScrollViewer.VerticalScrollBarVisibility="Auto"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      RowHeight="28"
+                      RowHeight="NaN"
                       ColumnHeaderHeight="36"
                       FontSize="11"
                       Background="White"
@@ -433,7 +433,12 @@
                         <Setter Property="BorderBrush" Value="#E1E6EB"/>
                         <Setter Property="BorderThickness" Value="0,0,0,1"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
+                        <Setter Property="Height" Value="28"/>
                         <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsMasterRecord}" Value="True">
+                                <Setter Property="Height" Value="NaN"/>
+                                <Setter Property="MinHeight" Value="28"/>
+                            </DataTrigger>
                             <DataTrigger Binding="{Binding Passed}" Value="True">
                                 <Setter Property="ToolTip" Value="Kết quả PASS"/>
                             </DataTrigger>
@@ -447,23 +452,42 @@
                     <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="90" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="120" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="240" CellStyle="{StaticResource HistoryCenterCellStyle}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
+                                <Setter Property="TextWrapping" Value="Wrap"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
                     <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Kết quả" Binding="{Binding HistoryResultText}" Width="120" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding ExportTestLogText}"
-                                           ToolTip="{Binding ExportTestLogText}"
-                                           TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap"
+                                <TextBlock Text="{Binding HistoryTestLogText}"
+                                           ToolTip="{Binding HistoryTestLogText}"
                                            HorizontalAlignment="Stretch"
-                                           VerticalAlignment="Center"
-                                           TextAlignment="Center"
-                                           Margin="0"/>
+                                           VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="TextWrapping" Value="NoWrap"/>
+                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                            <Setter Property="TextAlignment" Value="Center"/>
+                                            <Setter Property="Margin" Value="0"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsMasterRecord}" Value="True">
+                                                    <Setter Property="TextWrapping" Value="Wrap"/>
+                                                    <Setter Property="TextTrimming" Value="None"/>
+                                                    <Setter Property="TextAlignment" Value="Left"/>
+                                                    <Setter Property="Margin" Value="8,6"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>

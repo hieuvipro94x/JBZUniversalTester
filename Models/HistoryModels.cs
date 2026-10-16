@@ -81,7 +81,15 @@ public sealed class TestHistoryRecord
         : string.Empty;
     public bool IsProductionRecord => HistoryInspectionType.IsProduct(InspectionType);
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
-    public string InspectionTypeText => HistoryInspectionType.KoreanName(InspectionType);
+    public string InspectionTypeText => IsMasterRecord
+        ? MasterHistoryPresentation.InspectionName(this)
+        : HistoryInspectionType.KoreanName(InspectionType);
+    public string HistoryResultText => IsMasterRecord
+        ? Passed ? "확인 합격" : "확인 불합격"
+        : ExportResultText;
+    public string HistoryTestLogText => IsMasterRecord
+        ? MasterHistoryPresentation.BuildLog(this)
+        : ExportTestLogText;
     public string ExportProgressText => Passed ? "1/1" : "0/1";
     public string ExportResultText => Passed ? "합격" : "불량";
     public long? ExportAcceptedLotNo => IsProductionRecord && Passed && LotNo > 0 ? LotNo : null;
@@ -136,6 +144,8 @@ public sealed class TestHistoryRecord
                     FaultType?.Contains("KÍN NƯỚC", StringComparison.OrdinalIgnoreCase) == true;
                 trace = $"{EffectiveResultAt:HH:mm:ss} 회로검사:{(continuityPassed ? "PASS" : "FAIL")}";
             }
+            if (IsMasterRecord)
+                text.Append(MasterHistoryPresentation.ExportTiming(this));
             text.Append(trace);
 
             if (!Passed || InspectionType == HistoryInspectionType.MasterBad)
