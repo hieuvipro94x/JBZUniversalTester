@@ -22,7 +22,7 @@ public static class HistoryExportService
         double Width,
         HistoryCellType Type,
         Func<TestHistoryRecord, object?> GetValue,
-        bool Wrap = false);
+        bool DetailText = false);
 
     // CSV, XLSX và HistoryPage có 13 cột sau khi bỏ số thứ tự, giữ cùng
     // thứ tự này; chi tiết các công đoạn chỉ nằm trong cột 검 사 기 록.
@@ -36,7 +36,7 @@ public static class HistoryExportService
         new("차 종", 18, HistoryCellType.Text, r => r.VehicleType),
         new("Lot", 16, HistoryCellType.Text, r => r.ExportLotText),
         new("결 과", 10, HistoryCellType.Text, r => r.ExportResultText),
-        new("검 사 기 록", 80, HistoryCellType.Text, r => r.ExportTestLogText, true),
+        new("검 사 기 록", 80, HistoryCellType.Text, r => r.ExportTestLogSingleLineText, true),
         new("바코드", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
         new("200 %", 10, HistoryCellType.Text, r => r.ExportPercentText),
         new("수입검사", 14, HistoryCellType.Text, r => r.ExportIncomingInspectionText),
@@ -174,7 +174,7 @@ public static class HistoryExportService
 
     private static void AppendDataRow(StringBuilder sb, int rowNumber, TestHistoryRecord record)
     {
-        sb.Append($"<row r=\"{rowNumber}\" ht=\"30\" customHeight=\"1\">");
+        sb.Append($"<row r=\"{rowNumber}\" ht=\"20\" customHeight=\"1\">");
         for (int i = 0; i < Columns.Length; i++)
         {
             HistoryColumn column = Columns[i];
@@ -205,7 +205,7 @@ public static class HistoryExportService
             else
             {
                 string text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
-                string style = column.Wrap ? " s=\"3\"" : string.Empty;
+                string style = column.DetailText ? " s=\"3\"" : string.Empty;
                 sb.Append($"<c r=\"{cell}\" t=\"inlineStr\"{style}><is><t xml:space=\"preserve\">{Xml(text)}</t></is></c>");
             }
         }
@@ -285,7 +285,7 @@ public static class HistoryExportService
             <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
             <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFill="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
             <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="0"/></xf>
             <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
           </cellXfs>
           <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>

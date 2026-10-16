@@ -90,6 +90,10 @@ public sealed class TestHistoryRecord
     public string HistoryTestLogText => IsMasterRecord
         ? MasterHistoryPresentation.BuildLog(this)
         : ExportTestLogText;
+    public string HistoryTestLogSingleLineText => SingleLineLog(HistoryTestLogText);
+    public string ExportTestLogSingleLineText => SingleLineLog(ExportTestLogText);
+    private static string SingleLineLog(string text) => string.Join(" | ",
+        text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     public string ExportProgressText => Passed ? "1/1" : "0/1";
     public string ExportResultText => Passed ? "합격" : "불량";
     public long? ExportAcceptedLotNo => IsProductionRecord && Passed && LotNo > 0 ? LotNo : null;

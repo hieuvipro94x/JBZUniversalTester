@@ -7780,8 +7780,9 @@ internal static partial class Program
                 "XLSX preserves Korean headers, barcode value and 13-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
-                   styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
-                "XLSX date, time and wrapped test-log styles");
+                   styles.Contains("wrapText=\"0\"", StringComparison.Ordinal) &&
+                   !styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
+                "XLSX preserves native date/time types and keeps test logs on a single unwrapped row");
 
             string historyXaml = File.ReadAllText(
                 Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));

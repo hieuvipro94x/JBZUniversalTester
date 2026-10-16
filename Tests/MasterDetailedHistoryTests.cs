@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Text;
+using System.IO.Compression;
+using System.Xml.Linq;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
@@ -99,6 +101,12 @@ internal static partial class Program
                 Assert(!(row.InspectionTypeText + row.HistoryResultText + row.HistoryTestLogText)
                         .Any(character => character is >= '\u00c0' and <= '\u024f' or >= '\u1e00' and <= '\u1eff'),
                     "Master type, result, audit, fault and stage labels are Korean without leftover Vietnamese text");
+                string complete = row.HistoryTestLogText;
+                Assert(complete.Contains('\n') && !row.HistoryTestLogSingleLineText.Contains('\n') &&
+                       !row.HistoryTestLogSingleLineText.Contains('\r') &&
+                       complete.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                           .All(part => row.HistoryTestLogSingleLineText.Contains(part)),
+                    "A compact history row preserves every detail for its full multiline hover tooltip");
             }
             Assert(rows[1].HistoryTestLogText.Contains("저항: R1=") &&
                    rows.Skip(2).All(row => row.Resistance.Length == 0 && row.HistoryTestLogText.Contains("불량 상세:") &&
@@ -119,6 +127,25 @@ internal static partial class Program
             string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
             Assert(csvText.Contains("오배선") && csvText.Contains("단락") && csvText.Contains("핀 빠짐 / 단선") &&
                    csvText.Contains("확인시각") && File.Exists(xlsx), "CSV/XLSX retain all Master sample types and detailed timing");
+            Assert(File.ReadAllLines(csv, Encoding.GetEncoding(949)).Length == rows.Count + 1,
+                "CSV keeps one physical line per history record");
+            using (ZipArchive archive = ZipFile.OpenRead(xlsx))
+            {
+                using var sheetStream = archive.GetEntry("xl/worksheets/sheet1.xml")!.Open();
+                using var styleStream = archive.GetEntry("xl/styles.xml")!.Open();
+                var sheet = XDocument.Load(sheetStream);
+                var styles = XDocument.Load(styleStream);
+                XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+                XElement[] exportedRows = sheet.Descendants(ns + "row").Skip(1).ToArray();
+                string[] logs = exportedRows.Select(row => row.Elements(ns + "c")
+                    .Single(cell => ((string?)cell.Attribute("r"))!.StartsWith("I", StringComparison.Ordinal))
+                    .Descendants(ns + "t").Single().Value).ToArray();
+                Assert(exportedRows.All(row => (string?)row.Attribute("ht") == "20" &&
+                           (string?)row.Attribute("customHeight") == "1") &&
+                       logs.SequenceEqual(rows.Select(row => row.ExportTestLogSingleLineText)) &&
+                       !styles.Descendants(ns + "alignment").Any(alignment => (string?)alignment.Attribute("wrapText") == "1"),
+                    "Excel rows have equal single-line heights and no wrapping while the complete log stays in every editable cell");
+            }
             using var connection = new SqliteConnection($"Data Source={db}");
             connection.Open();
             using var command = connection.CreateCommand();

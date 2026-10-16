@@ -412,7 +412,7 @@
                       ScrollViewer.VerticalScrollBarVisibility="Auto"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      RowHeight="NaN"
+                      RowHeight="28"
                       ColumnHeaderHeight="36"
                       FontSize="11"
                       Background="White"
@@ -434,17 +434,24 @@
                         <Setter Property="BorderThickness" Value="0,0,0,1"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
                         <Setter Property="Height" Value="28"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding IsMasterRecord}" Value="True">
-                                <Setter Property="Height" Value="NaN"/>
-                                <Setter Property="MinHeight" Value="28"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding Passed}" Value="True">
-                                <Setter Property="ToolTip" Value="Kết quả PASS"/>
-                            </DataTrigger>
-                        </Style.Triggers>
+                        <Setter Property="ToolTip" Value="{Binding HistoryTestLogText}"/>
+                        <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
                     </Style>
                 </DataGrid.RowStyle>
+                <DataGrid.Resources>
+                    <Style TargetType="ToolTip">
+                        <Setter Property="MaxWidth" Value="1100"/>
+                        <Setter Property="ContentTemplate">
+                            <Setter.Value>
+                                <DataTemplate>
+                                    <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto">
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" MaxWidth="1050"/>
+                                    </ScrollViewer>
+                                </DataTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </DataGrid.Resources>
 
                 <DataGrid.Columns>
                     <!-- Ngày/Thời gian = thời điểm BẮT ĐẦU TEST (EffectiveTestStartedAt).
@@ -455,7 +462,8 @@
                     <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="240" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
-                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                <Setter Property="TextWrapping" Value="NoWrap"/>
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
                             </Style>
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
@@ -467,27 +475,13 @@
                     <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding HistoryTestLogText}"
+                                <TextBlock Text="{Binding HistoryTestLogSingleLineText}"
                                            ToolTip="{Binding HistoryTestLogText}"
+                                           ToolTipService.ShowDuration="60000"
                                            HorizontalAlignment="Stretch"
-                                           VerticalAlignment="Center">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="TextWrapping" Value="NoWrap"/>
-                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
-                                            <Setter Property="TextAlignment" Value="Center"/>
-                                            <Setter Property="Margin" Value="0"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsMasterRecord}" Value="True">
-                                                    <Setter Property="TextWrapping" Value="Wrap"/>
-                                                    <Setter Property="TextTrimming" Value="None"/>
-                                                    <Setter Property="TextAlignment" Value="Left"/>
-                                                    <Setter Property="Margin" Value="8,6"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
+                                           VerticalAlignment="Center"
+                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                           TextAlignment="Left" Margin="6,0"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
