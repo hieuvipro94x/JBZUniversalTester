@@ -87,7 +87,7 @@ public sealed class AppSoundService : IDisposable
     /// Nạp tài nguyên âm thanh và đăng ký tiếng click cho toàn bộ Button WPF.
     /// Nên gọi một lần trong App.OnStartup().
     /// </summary>
-    public void Initialize()
+    public void PreloadResources()
     {
         lock (_gate)
         {
@@ -109,6 +109,11 @@ public sealed class AppSoundService : IDisposable
             }
         }
 
+    }
+
+    public void Initialize()
+    {
+        PreloadResources();
         if (Interlocked.Exchange(ref _globalButtonHandlerRegistered, 1) == 0)
         {
             EventManager.RegisterClassHandler(

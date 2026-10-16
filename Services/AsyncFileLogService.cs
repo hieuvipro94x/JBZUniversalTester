@@ -25,7 +25,7 @@ public enum AppLogLevel
 /// Writer log không block luồng scan/UI. Mọi dòng được đưa vào Channel và
 /// một reader duy nhất append ra file theo ngày.
 /// </summary>
-public sealed class AsyncFileLogService : IDisposable
+public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
 {
     private const int MaxWriteBatch = 256;
     private static readonly TimeSpan BatchWindow = TimeSpan.FromMilliseconds(25);
@@ -179,6 +179,10 @@ public sealed class AsyncFileLogService : IDisposable
             Debug.WriteLine($"AsyncFileLogService writer stopped: {ex}");
         }
     }
+
+    // Native/file completion may take up to the existing drain timeout. The
+    // normal application shutdown awaits this worker while WPF keeps rendering.
+    public ValueTask DisposeAsync() => new(Task.Run(Dispose));
 
     public void Dispose()
     {

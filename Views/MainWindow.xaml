@@ -279,7 +279,7 @@
                 <ColumnDefinition Width="1.00*"/>
                 <ColumnDefinition Width="1.05*"/>
                 <ColumnDefinition Width="1.10*"/>
-                <ColumnDefinition Width="0.75*"/>
+                <ColumnDefinition Width="1.10*"/>
             </Grid.ColumnDefinitions>
 
             <Button x:Name="StartTestButton"
@@ -315,7 +315,7 @@
             <Button Grid.Column="5"
                     Command="{Binding ExitCommand}"
                     Style="{StaticResource ExitButtonStyle}"
-                    Content="KẾT THÚC"/>
+                    Content="THOÁT ỨNG DỤNG"/>
         </Grid>
 
         <Border x:Name="ProductRemovalNotice"
@@ -427,7 +427,7 @@
                     <TextBlock Text="Chọn mã hàng đang khóa · Tháo hết sẽ tự trở về màn hình chính"
                                FontSize="20" Foreground="#475569" TextWrapping="Wrap"
                                VerticalAlignment="Center" Margin="0,0,20,0"/>
-                    <Button Grid.Column="1" Content="KẾT THÚC" Width="160"
+                    <Button Grid.Column="1" Content="THOÁT ỨNG DỤNG" Width="210"
                             Command="{Binding ExitCommand}" Style="{StaticResource ExitButtonStyle}"/>
                 </Grid>
             </Grid>

@@ -15,10 +15,13 @@ public sealed class LabelPrintService : IAsyncDisposable
     private int _connectedBaudRate;
     private readonly BcwSerialStore _bcwSerials;
     private readonly Func<DateTime> _localClock;
-    public LabelPrintService(BcwSerialStore? bcwSerials = null, Func<DateTime>? localClock = null)
+    private readonly Action<SerialPort> _closePort;
+    public LabelPrintService(BcwSerialStore? bcwSerials = null, Func<DateTime>? localClock = null,
+        Action<SerialPort>? closePort = null)
     {
         _bcwSerials = bcwSerials ?? new BcwSerialStore();
         _localClock = localClock ?? (() => DateTime.Now);
+        _closePort = closePort ?? CloseAndDisposePort;
     }
 
     public bool IsConnected => _printerPort?.IsOpen == true;
@@ -31,6 +34,8 @@ public sealed class LabelPrintService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
         string portName = settings.PrinterCom?.Trim() ?? string.Empty;
+        int baudRate = settings.BaudRate, writeTimeoutMs = settings.WriteTimeoutMs;
+        string encodingName = settings.EncodingName;
         if (string.IsNullOrWhiteSpace(portName))
             return new LabelPrinterConnectionResult(false, "Chưa chọn cổng COM máy in.");
 
@@ -39,17 +44,17 @@ public sealed class LabelPrintService : IAsyncDisposable
         {
             await EnsureComConnectedAsync(
                 portName,
-                settings.BaudRate,
-                settings.WriteTimeoutMs,
-                settings.EncodingName,
+                baudRate,
+                writeTimeoutMs,
+                encodingName,
                 ct);
             return new LabelPrinterConnectionResult(
                 true,
-                $"ĐÃ KẾT NỐI {portName} - {settings.BaudRate} baud");
+                $"ĐÃ KẾT NỐI {portName} - {baudRate} baud");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            ClosePrinterPort();
+            await ClosePrinterPortAsync();
             AsyncFileLogService.Current.Error(
                 $"Label printer connection failed on {portName}: {ex}");
             return new LabelPrinterConnectionResult(
@@ -67,7 +72,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         await _printGate.WaitAsync(ct);
         try
         {
-            ClosePrinterPort();
+            await ClosePrinterPortAsync();
         }
         finally
         {
@@ -186,7 +191,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             _connectedBaudRate == baudRate)
             return;
 
-        ClosePrinterPort();
+        await ClosePrinterPortAsync();
         Encoding encoding = ResolveEncoding(encodingName);
         var port = new SerialPort(
             portName,
@@ -214,7 +219,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         }
         catch
         {
-            port.Dispose();
+            await Task.Run(port.Dispose);
             throw;
         }
     }
@@ -236,22 +241,46 @@ public sealed class LabelPrintService : IAsyncDisposable
         }
         catch
         {
-            ClosePrinterPort();
+            await ClosePrinterPortAsync();
             throw;
         }
     }
 
-    private void ClosePrinterPort()
+    private async Task ClosePrinterPortAsync()
     {
         SerialPort? port = _printerPort;
+        string oldPortName = _connectedPort;
+        int oldBaudRate = _connectedBaudRate;
         _printerPort = null;
         _connectedPort = string.Empty;
         _connectedBaudRate = 0;
         if (port is null)
             return;
 
-        try { port.Close(); } catch { }
-        port.Dispose();
+        // Driver Close/Dispose can block for seconds. The caller retains the
+        // print gate until cleanup finishes, so no new session can overlap it.
+        try { await Task.Run(() => _closePort(port)).ConfigureAwait(false); }
+        catch
+        {
+            // Keep ownership if the driver failed to dispose. The next attempt
+            // must retry this cleanup before it can open any replacement port.
+            _printerPort = port;
+            _connectedPort = oldPortName;
+            _connectedBaudRate = oldBaudRate;
+            throw;
+        }
+    }
+
+    private static void CloseAndDisposePort(SerialPort port)
+    {
+        try { port.Close(); }
+        catch (Exception ex) { AsyncFileLogService.Current.Error($"Label COM close failed: {ex.Message}"); }
+        try { port.Dispose(); }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Label COM dispose failed: {ex.Message}");
+            throw;
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -259,7 +288,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         await _printGate.WaitAsync();
         try
         {
-            ClosePrinterPort();
+            await ClosePrinterPortAsync();
         }
         finally
         {

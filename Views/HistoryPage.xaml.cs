@@ -24,6 +24,7 @@ public partial class HistoryPage : UserControl
     private HistorySearchCriteria? _activeCriteria;
     private HistorySummary _summary = new(0, 0, 0, 0, 0, 0);
     private bool _loadingPage;
+    private bool _released;
 
     public event EventHandler? RequestClose;
 
@@ -44,6 +45,7 @@ public partial class HistoryPage : UserControl
         try
         {
             IReadOnlyList<HistoryPartOption> parts = await Task.Run(() => GetStore().GetHistoryPartOptions());
+            if (_released) return;
             PartComboBox.ItemsSource = parts;
             PartComboBox.SelectedIndex = 0;
         }
@@ -51,11 +53,12 @@ public partial class HistoryPage : UserControl
         {
             AsyncFileLogService.Current.Error($"History part list failed: {ex}");
         }
-        Reload();
+        if (!_released) Reload();
     }
 
     public void ReleasePageResources()
     {
+        _released = true;
         Loaded -= HistoryPage_Loaded;
         Interlocked.Increment(ref _reloadGeneration);
         _records.Clear();
@@ -101,6 +104,7 @@ public partial class HistoryPage : UserControl
 
     private async void Reload()
     {
+        if (_released) return;
         int generation = Interlocked.Increment(ref _reloadGeneration);
         try
         {
@@ -142,18 +146,19 @@ public partial class HistoryPage : UserControl
         }
         catch (Exception ex)
         {
+            AsyncFileLogService.Current.Error($"History search failed: {ex}");
+            if (_released || generation != Volatile.Read(ref _reloadGeneration)) return;
             TotalCountText.Text = "0";
             PassCountText.Text = "0";
             FailCountText.Text = "0";
             SummaryText.Text = "Không thể đọc dữ liệu lịch sử.";
-            AsyncFileLogService.Current.Error($"History search failed: {ex}");
             ShowMessage("Chưa đọc được lịch sử kiểm tra. Vui lòng thử lại.", "CHƯA ĐỌC ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
         }
     }
 
     private async void LoadMore_Click(object sender, RoutedEventArgs e)
     {
-        if (_loadingPage || _activeCriteria is null || _records.Count == 0 || _records.Count >= _summary.Total)
+        if (_released || _loadingPage || _activeCriteria is null || _records.Count == 0 || _records.Count >= _summary.Total)
             return;
 
         _loadingPage = true;
@@ -177,10 +182,18 @@ public partial class HistoryPage : UserControl
                 _records.Add(row);
             SummaryText.Text = $"Đang hiển thị {_records.Count:N0} / {_summary.Total:N0} bản ghi";
         }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"History next page failed: {ex}");
+            if (!_released && generation == Volatile.Read(ref _reloadGeneration))
+                ShowMessage("Chưa đọc được trang lịch sử tiếp theo. Vui lòng thử lại.",
+                    "CHƯA ĐỌC ĐƯỢC LỊCH SỬ", MessageBoxImage.Warning);
+        }
         finally
         {
             _loadingPage = false;
-            LoadMoreButton.IsEnabled = _records.Count < _summary.Total;
+            if (!_released && generation == Volatile.Read(ref _reloadGeneration))
+                LoadMoreButton.IsEnabled = _records.Count < _summary.Total;
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using JBZUniversalTester.Core;
 using JBZUniversalTester.Models;
@@ -53,6 +54,12 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         set => MasterFaultRequiredCount = value ? Math.Max(1, MasterFaultRequiredCount) : 0;
     }
     private readonly TestViewModel? _test;
+    private readonly Action<ProductionSettings> _saveSettings;
+    private CancellationTokenSource? _manualOperationCts;
+    private Task _manualOperationCompletion = Task.CompletedTask;
+    private bool _manualOperationRunning;
+    private bool _manualControlsClosing;
+    public bool IsManualOperationRunning => _manualOperationRunning;
     private readonly string _modelPath;
     private readonly string _lotProductKey;
     private bool _manualRuntimeActive;
@@ -179,9 +186,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public AsyncRelayCommand ManualMeasureResistanceCommand { get; }
     public AsyncRelayCommand ManualWaterProofTestCommand { get; }
 
-    public ProductionSettingsViewModel(TestViewModel? test = null)
+    public ProductionSettingsViewModel(TestViewModel? test = null, Action<ProductionSettings>? saveSettings = null)
     {
         _test = test;
+        _saveSettings = saveSettings ?? ProductionConfigService.Save;
         Settings = ProductionConfigService.Load();
         _modelPath = test?.CurrentModelPath ?? Settings.LastThtPath;
         _lotProductKey = ProductionConfigService.GetLotProductKey(
@@ -214,25 +222,25 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         _masterOpenFaultRequiredCount = ProductionConfigService.GetMasterOpenFaultRequiredCountForPath(Settings, _modelPath);
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
-            async () => await RunManualRelayCommandAsync(1, true),
+            () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, true)),
             CanUseManualControls);
         ManualRelay1OffCommand = new AsyncRelayCommand(
-            async () => await RunManualRelayCommandAsync(1, false),
+            () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, false)),
             CanUseManualControls);
         ManualRelay2OnCommand = new AsyncRelayCommand(
-            async () => await RunManualRelayCommandAsync(2, true),
+            () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, true)),
             CanUseManualControls);
         ManualRelay2OffCommand = new AsyncRelayCommand(
-            async () => await RunManualRelayCommandAsync(2, false),
+            () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, false)),
             CanUseManualControls);
         ManualResetCommand = new AsyncRelayCommand(
-            RunManualResetAsync,
+            () => RunManualOperationAsync(_ => RunManualResetAsync()),
             CanUseManualControls);
         ManualMeasureResistanceCommand = new AsyncRelayCommand(
-            RunManualResistanceAsync,
+            () => RunManualOperationAsync(RunManualResistanceAsync),
             CanUseManualResistance);
         ManualWaterProofTestCommand = new AsyncRelayCommand(
-            RunManualWaterProofAsync,
+            () => RunManualOperationAsync(RunManualWaterProofAsync),
             CanUseManualWaterProof);
     }
 
@@ -277,6 +285,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
 
     private bool CanUseManualControls() =>
+        !_manualOperationRunning && !_manualControlsClosing &&
         _test is not null &&
         !_test.IsDeviceFault &&
         !_manualResistanceRunning &&
@@ -287,7 +296,43 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private bool CanUseManualWaterProof() => CanUseManualControls();
 
-    private async Task RunManualWaterProofAsync()
+    private async Task RunManualOperationAsync(Func<CancellationToken, Task> operation)
+    {
+        if (_manualOperationRunning || _manualControlsClosing)
+            throw new InvalidOperationException("Đang xử lý thao tác tay hoặc đang đóng Cài đặt.");
+        _manualOperationRunning = true;
+        using var cancellation = new CancellationTokenSource();
+        _manualOperationCts = cancellation;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _manualOperationCompletion = completion.Task;
+        Raise(nameof(IsManualOperationRunning));
+        RefreshManualCommands();
+        try { await operation(cancellation.Token); }
+        finally
+        {
+            _manualOperationCts = null;
+            _manualOperationRunning = false;
+            completion.TrySetResult();
+            Raise(nameof(IsManualOperationRunning));
+            RefreshManualCommands();
+        }
+    }
+
+    public async Task StopManualOperationsAsync(bool closing = false)
+    {
+        RequestStopManualOperations(closing);
+        await _manualOperationCompletion;
+        RefreshManualCommands();
+    }
+
+    public void RequestStopManualOperations(bool closing = false)
+    {
+        if (closing) _manualControlsClosing = true;
+        _manualOperationCts?.Cancel();
+        RefreshManualCommands();
+    }
+
+    private async Task RunManualWaterProofAsync(CancellationToken cancellationToken)
     {
         if (_test is null)
             return;
@@ -329,13 +374,22 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             WaterProofRunResult result = await _test.TestManualWaterProofAsync(
                 machine,
                 profile,
-                progress => UpdateManualWaterProofProgress(portName, progress));
+                progress =>
+                {
+                    if (!cancellationToken.IsCancellationRequested && !_manualControlsClosing)
+                        UpdateManualWaterProofProgress(portName, progress);
+                },
+                cancellationToken);
             ApplyManualWaterProofResult(result);
             string channels = string.Join(" • ", result.Channels
                 .Where(channel => channel.Enabled)
                 .Select(channel => $"CH{channel.Channel} {(channel.Passed ? "PASS" : "FAIL")} Δ{channel.Leak:0.###}"));
             ManualWaterProofStatus =
                 $"TEST {(result.Passed ? "PASS" : "FAIL")} • {channels}";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            ManualWaterProofStatus = "ĐÃ DỪNG TEST LEAK";
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -496,7 +550,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
     }
 
-    private async Task RunManualResistanceAsync()
+    private async Task RunManualResistanceAsync(CancellationToken cancellationToken)
     {
         if (_test is null)
             return;
@@ -540,13 +594,22 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             IReadOnlyList<ResistanceResult> results =
                 await _test.MeasureManualResistanceAsync(
                     steps,
-                    UpdateManualResistanceResult);
+                    update =>
+                    {
+                        if (!cancellationToken.IsCancellationRequested && !_manualControlsClosing)
+                            UpdateManualResistanceResult(update);
+                    },
+                    cancellationToken);
             foreach (ResistanceResult result in results)
                 UpdateManualResistanceResult(result);
 
             int passed = results.Count(result => result.Passed);
             ManualResistanceStatus =
                 $"HOÀN THÀNH {results.Count} KÊNH • PASS {passed} • FAIL {results.Count - passed}";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            ManualResistanceStatus = "ĐÃ DỪNG ĐO ĐIỆN TRỞ";
         }
         catch (Exception ex)
         {
@@ -615,7 +678,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
     }
 
-    public void Save()
+    private void PrepareSettingsForSave()
     {
         Settings.ExpansionCardCount = Math.Clamp(
             Settings.ExpansionCardCount,
@@ -648,7 +711,23 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             _lotProductKey,
             Settings.LotNo,
             DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
-        ProductionConfigService.Save(Settings);
+    }
+
+    public void Save()
+    {
+        PrepareSettingsForSave();
+        _saveSettings(Settings);
+    }
+
+    public async Task SaveAsync()
+    {
+        PrepareSettingsForSave();
+        // Freeze the editor DTO before the disk worker normalizes/writes it.
+        // No WPF binding or shared runtime settings are accessed by that worker.
+        ProductionSettings snapshot = JsonSerializer.Deserialize<ProductionSettings>(
+            JsonSerializer.SerializeToUtf8Bytes(Settings))!;
+        await Task.Run(() => _saveSettings(snapshot));
+        ProductionConfigService.CopyInto(Settings, snapshot);
     }
 
     private void RefreshManualCommands()

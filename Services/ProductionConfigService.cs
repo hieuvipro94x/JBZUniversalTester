@@ -8,6 +8,7 @@ namespace JBZUniversalTester.Services;
 
 public static class ProductionConfigService
 {
+    private static readonly object AtomicWriteGate = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -85,7 +86,23 @@ public static class ProductionConfigService
     {
         ArgumentNullException.ThrowIfNull(target);
         ProductionSettings source = Load();
+        CopyInto(target, source);
+    }
 
+    public static ProductionSettings LoadSavedSettings(string? path = null)
+    {
+        string file = path ?? ConfigPath;
+        if (!File.Exists(file))
+            throw new FileNotFoundException("Không tìm thấy file cấu hình vừa lưu; giữ nguyên cấu hình đang chạy.", file);
+        ProductionSettings settings = LoadEnglishCfgCore(file, requireSavedFields: true);
+        Normalize(settings);
+        return settings;
+    }
+
+    public static void CopyInto(ProductionSettings target, ProductionSettings source)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(source);
         foreach (var property in typeof(ProductionSettings).GetProperties())
         {
             if (property.CanRead && property.CanWrite)
@@ -472,13 +489,18 @@ public static class ProductionConfigService
         }
     }
 
-    private static ProductionSettings LoadEnglishCfg(string path)
+    private static ProductionSettings LoadEnglishCfg(string path) => LoadEnglishCfgCore(path, requireSavedFields: false);
+
+    private static ProductionSettings LoadEnglishCfgCore(string path, bool requireSavedFields)
     {
         var settings = new ProductionSettings();
         var map = ReadCfgLines(path)
             .Select(ParseCfgLine)
             .Where(x => x.Key.Length > 0)
             .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        if (requireSavedFields && (!map.ContainsKey("ExpansionCardCount") ||
+            !map.ContainsKey("StartCardNumber") || !map.ContainsKey("IoConfirm1") || !map.ContainsKey("IoConfirmN")))
+            throw new InvalidDataException("File cấu hình vừa lưu chưa đầy đủ; giữ nguyên cấu hình đang chạy.");
 
         // Migration từ CFG gốc Htdrv: đọc cả key tiếng Hàn đã thấy trong file cũ,
         // sau lần Save tiếp theo toàn bộ file sẽ được ghi lại bằng key tiếng Anh.
@@ -981,6 +1003,14 @@ public static class ProductionConfigService
     }
 
     private static void AtomicWrite(string path, string text)
+    {
+        // Settings workers and production LOT persistence may reach this file
+        // together. Keep the temporary file owned by one writer through replace.
+        lock (AtomicWriteGate)
+            AtomicWriteCore(path, text);
+    }
+
+    private static void AtomicWriteCore(string path, string text)
     {
         string tmp = path + ".tmp";
         try

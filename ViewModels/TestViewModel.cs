@@ -1568,6 +1568,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(steps);
+        ct.ThrowIfCancellationRequested();
         if (steps.Count == 0)
             throw new InvalidOperationException("Chưa có kênh điện trở hợp lệ để đo.");
         if (IsDeviceFault)
@@ -1577,9 +1578,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (!IsManualModeActive)
             await EnterManualModeAsync();
 
-        await _manualRelayGate.WaitAsync(ct);
+        bool manualGateTaken = false;
         try
         {
+            await _manualRelayGate.WaitAsync(ct);
+            manualGateTaken = true;
+            ct.ThrowIfCancellationRequested();
             State = "ĐO ĐIỆN TRỞ BẰNG TAY";
             AddLog(
                 "[MANUAL-R] Bắt đầu đo " +
@@ -1587,6 +1591,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             try
             {
                 await EnsureKeysightConnectedAsync();
+                ct.ThrowIfCancellationRequested();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -1630,7 +1635,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         finally
         {
-            _manualRelayGate.Release();
+            if (manualGateTaken) _manualRelayGate.Release();
             if (IsManualModeActive)
                 await ExitManualModeAsync();
         }
@@ -1644,6 +1649,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentNullException.ThrowIfNull(profile);
+        ct.ThrowIfCancellationRequested();
+        if (!string.IsNullOrWhiteSpace(LabelPrinterConnectedPort) &&
+            string.Equals(machine.PortName?.Trim(), LabelPrinterConnectedPort, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"{machine.PortName} đang được máy in tem sử dụng. Hãy chọn cổng COM riêng cho máy Leak.");
         // Manual run is explicit and independent of automatic production enablement.
         // Clone first: never re-enable the saved/runtime automatic profile.
         profile = profile.Clone();
@@ -1862,7 +1871,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         AsyncFileLogService.Current.Error($"KEYSIGHT EQUIPMENT ERROR - APP PRESERVED: {exception}");
         ArmWaterProofEquipmentErrorRemovalWait();
         State = "LỖI KEYSIGHT - CHỜ THÁO SẢN PHẨM";
-        _visa.Dispose();
+        await Task.Run(_visa.Dispose);
         try
         {
             await _board.AllRelaysOffAsync();
@@ -2623,6 +2632,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// </summary>
     public async Task<ProductModel?> LoadSelectedModelFromPathAsync(string path)
     {
+        if (Volatile.Read(ref _shutdownStarted) != 0) return null;
         ValidateModelPath(path, out string fullPath);
 
         int generation = Interlocked.Increment(ref _modelLoadGeneration);
@@ -2666,9 +2676,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 model = candidates[0];
             }
 
-            ModelFileIdentityService.Capture(model, fullPath);
             preparedEngineModel = await Task.Run(() =>
             {
+                ModelFileIdentityService.Capture(model, fullPath);
                 long engineStarted = Stopwatch.GetTimestamp();
                 TestEngine.PreparedModelState prepared = _engine.PrepareModel(model);
                 AsyncFileLogService.Current.Performance(
@@ -2717,6 +2727,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// <summary>Nhận model đã parse sẵn bởi caller nội bộ.</summary>
     public async Task<ProductModel?> LoadPreparedModelAsync(ProductModel model)
     {
+        if (Volatile.Read(ref _shutdownStarted) != 0) return null;
         if (model is null) throw new ArgumentNullException(nameof(model));
         int generation = Interlocked.Increment(ref _modelLoadGeneration);
         TestEngine.PreparedModelState prepared = await Task.Run(() =>
@@ -6570,6 +6581,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         SwitchRuntimeMode(RuntimeMode.ShuttingDown);
         _scanSupervisor.Suspend("Shutdown");
+        Interlocked.Increment(ref _modelLoadGeneration);
         Interlocked.Increment(ref _statisticsLoadGeneration);
 
         // Stop accepting new transport callbacks before cancelling the frame
@@ -6623,7 +6635,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         try
         {
-            _visa.Dispose();
+            await Task.Run(_visa.Dispose);
         }
         catch
         {
@@ -6669,9 +6681,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         LabelSettings settings,
         CancellationToken ct = default)
     {
-        LabelPrinterConnectionResult result = await _labelPrintService.ConnectAsync(settings, ct);
+        string leakPort = _waterProof.ConnectedPort;
+        LabelPrinterConnectionResult result = !string.IsNullOrWhiteSpace(leakPort) &&
+            string.Equals(settings.PrinterCom?.Trim(), leakPort, StringComparison.OrdinalIgnoreCase)
+            ? new LabelPrinterConnectionResult(false, "Cổng COM này đang được máy Leak sử dụng. Hãy chọn cổng riêng cho máy in.")
+            : await _labelPrintService.ConnectAsync(settings, ct);
+        ct.ThrowIfCancellationRequested();
         InvokeUi(() =>
         {
+            if (ct.IsCancellationRequested) return;
             LabelStatusText = $"TEM: {result.Message}";
             Raise(nameof(IsLabelPrinterConnected));
             Raise(nameof(LabelPrinterConnectedPort));

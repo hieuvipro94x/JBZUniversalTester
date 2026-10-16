@@ -20,6 +20,20 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-app-responsiveness"])
+        {
+            TestApplicationAsyncLogShutdown();
+            TestProductPickerDebouncedSearch();
+            return 0;
+        }
+        if (args is ["--test-settings-lifecycle"])
+        {
+            TestSettingsAsyncSave();
+            TestSettingsManualStop();
+            TestSettingsPrinterClose();
+            TestSettingsLongLeakErrorLayout();
+            return 0;
+        }
         if (args is ["--test-master-history"])
         {
             TestDetailedMasterHistory();
@@ -88,6 +102,10 @@ internal static partial class Program
             ("BCW persistent sequence, failed send, concurrency and reprint", TestBcwPersistentSerialAndTransport),
             ("BCW history snapshot preserves production LOT and rows", TestBcwHistorySnapshotPreservesRows),
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
+            ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
+            ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
+            ("Settings manual cancellation serializes cleanup and restores scanning", TestSettingsManualStop),
+            ("Printer driver close stays off Dispatcher and preserves exclusive ownership", TestSettingsPrinterClose),
             ("ModelCreator leak layout import preserves machine parameters", TestModelLeakLayout),
             ("History combines installation/test timing and retains removal timing", TestHistoryCombinedTiming),
             ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
@@ -9220,16 +9238,17 @@ internal static partial class Program
         ProductionSettings production,
         out FakeBoard board,
         bool requireStartupIoClear = false,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        KeysightVisaService? visa = null)
     {
         board = new FakeBoard();
         var app = new AppSettings();
-        var engine = new TestEngine(board, new KeysightVisaService(), app, production, timeProvider);
+        var engine = new TestEngine(board, visa ?? new KeysightVisaService(), app, production, timeProvider);
         TestViewModel viewModel = new(
             new MainViewModel(),
             engine,
             board,
-            new KeysightVisaService(),
+            visa ?? new KeysightVisaService(),
             new WaterProofSerialService(),
             app,
             production,

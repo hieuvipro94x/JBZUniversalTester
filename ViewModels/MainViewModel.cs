@@ -81,10 +81,12 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand ShowTestCommand { get; }
     public RelayCommand ExitCommand { get; }
 
-    public MainViewModel()
+    public MainViewModel() : this(AppSettings.Load(), ProductionConfigService.Load()) { }
+
+    public MainViewModel(AppSettings settings, ProductionSettings productionSettings)
     {
-        _settings = AppSettings.Load();
-        _productionSettings = ProductionConfigService.Load();
+        _settings = settings;
+        _productionSettings = productionSettings;
         _board = new UnifiedBoardTransport(
             _settings.Board.FtdiSerial,
             _productionSettings
@@ -226,7 +228,7 @@ public sealed class MainViewModel : ObservableObject
 
             try
             {
-                _visa.Dispose();
+                await Task.Run(_visa.Dispose);
             }
             catch
             {
@@ -270,7 +272,7 @@ public sealed class MainViewModel : ObservableObject
 
         if (full.EndsWith(".jbzproduct.json", StringComparison.OrdinalIgnoreCase))
         {
-            bundle = ProductBundle.Load(full);
+            bundle = await Task.Run(() => ProductBundle.Load(full));
             if (string.IsNullOrWhiteSpace(bundle.D2xxThtPath) || !File.Exists(bundle.D2xxThtPath))
                 throw new InvalidDataException($"Bundle {bundle.PartNumber} chưa có file .tht cho JBZ D2XX.");
             model = await Test.LoadSelectedModelFromPathAsync(bundle.D2xxThtPath);
@@ -316,7 +318,7 @@ public sealed class MainViewModel : ObservableObject
     /// V12.9: dùng sau khi Save trang Cài đặt. Ngoài reload file còn stop/restart
     /// scan để capacity mới thực sự đi xuống transport/decoder/TestView.
     /// </summary>
-    public Task ReloadProductionSettingsAsync()
+    public async Task ReloadProductionSettingsAsync()
     {
         ProductionSettings old = new()
         {
@@ -327,7 +329,11 @@ public sealed class MainViewModel : ObservableObject
             UseTestPointer = _productionSettings.UseTestPointer
         };
 
-        ProductionConfigService.ReloadInto(_productionSettings);
+        long settingsStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        ProductionSettings loaded = await Task.Run(() => ProductionConfigService.LoadSavedSettings());
+        ProductionConfigService.CopyInto(_productionSettings, loaded);
+        AsyncFileLogService.Current.Performance(
+            $"SETTINGS_PERF phase=RELOAD_FILE elapsed_ms={System.Diagnostics.Stopwatch.GetElapsedTime(settingsStarted).TotalMilliseconds:0.###}");
         AsyncFileLogService.Current.Configure(_productionSettings.EnableSystemLogs);
         bool boardSelectionChanged = old.BoardMode != _productionSettings.BoardMode;
         bool scanHardwareChanged =
@@ -353,7 +359,6 @@ public sealed class MainViewModel : ObservableObject
         _ = ObserveSettingsApplyAsync(
             hardwareApplyTask,
             Test.AutoConnectLabelPrinterAsync());
-        return Task.CompletedTask;
     }
 
     private static async Task ObserveSettingsApplyAsync(

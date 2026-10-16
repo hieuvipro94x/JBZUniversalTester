@@ -28,14 +28,16 @@ public partial class MainWindow : Window
     private long _internalPageGeneration;
     private UiStallWatchdog? _uiStallWatchdog;
 
-    public MainWindow()
+    public MainWindow() : this(new MainViewModel()) { }
+
+    public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
         StartupPerformanceTrace.Mark("T1 MainWindow constructed");
         Title = $"UniversalTester {AppVersion.DisplayVersion} - JBZ Production";
         AppVersionText.Text = $"JBZ Universal : {AppVersion.DisplayVersion}";
 
-        _viewModel = new MainViewModel();
+        _viewModel = viewModel;
         _viewModel.ExplicitModelLoaded += ViewModel_ExplicitModelLoaded;
         _viewModel.Test.PropertyChanged += TestViewModel_PropertyChanged;
         DataContext = _viewModel;
@@ -177,6 +179,8 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
+        if (_shutdownStarted || _settingsWindow is not null || _settingsPageCloseInProgress)
+            return;
         // Also guard deferred opens (for example the model-loaded callback).
         // The physical removal gate must be clear before entering TestView.
         if (_viewModel.Test.IsProductRemovalPending)
@@ -386,6 +390,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        long settingsRenderStarted = Stopwatch.GetTimestamp();
         _settingsPage = new ProductionSettingsPage(_viewModel, settingsViewModel);
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
@@ -401,6 +406,9 @@ public partial class MainWindow : Window
         };
         _settingsWindow.Closing += SettingsWindow_Closing;
         _settingsWindow.Show();
+        MainActionBar.IsEnabled = false;
+        AsyncFileLogService.Current.Performance(
+            $"SETTINGS_PERF phase=OPEN_VIEW elapsed_ms={Stopwatch.GetElapsedTime(settingsRenderStarted).TotalMilliseconds:0.###}");
         LogMemory("MEM AFTER_SETTINGS_OPEN");
     }
 
@@ -548,7 +556,10 @@ public partial class MainWindow : Window
             {
                 settingsPage.RequestClose -= InternalPage_RequestClose;
                 settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
+                long releaseStarted = Stopwatch.GetTimestamp();
                 settingsPage.ReleasePageResources();
+                AsyncFileLogService.Current.Performance(
+                    $"SETTINGS_PERF phase=RELEASE_BINDINGS elapsed_ms={Stopwatch.GetElapsedTime(releaseStarted).TotalMilliseconds:0.###}");
                 _settingsPage = null;
                 LogMemory("MEM SETTINGS_CLOSE");
             }
@@ -572,6 +583,7 @@ public partial class MainWindow : Window
             try
             {
                 settingsWindow.Close();
+                MainActionBar.IsEnabled = !_shutdownStarted;
             }
             finally
             {
@@ -592,12 +604,23 @@ public partial class MainWindow : Window
 
     private static void LogMemory(string marker)
     {
-        using Process process = Process.GetCurrentProcess();
-        AsyncFileLogService.Current.Performance(
-            $"{marker} private_mb={process.PrivateMemorySize64 / 1048576d:0.###} " +
-            $"working_set_mb={process.WorkingSet64 / 1048576d:0.###} " +
-            $"gc_heap_mb={GC.GetTotalMemory(false) / 1048576d:0.###} " +
-            $"handles={process.HandleCount} threads={process.Threads.Count}");
+        if (!AsyncFileLogService.Current.FileLoggingEnabled) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                using Process process = Process.GetCurrentProcess();
+                AsyncFileLogService.Current.Performance(
+                    $"{marker} private_mb={process.PrivateMemorySize64 / 1048576d:0.###} " +
+                    $"working_set_mb={process.WorkingSet64 / 1048576d:0.###} " +
+                    $"gc_heap_mb={GC.GetTotalMemory(false) / 1048576d:0.###} " +
+                    $"handles={process.HandleCount} threads={process.Threads.Count}");
+            }
+            catch (Exception ex)
+            {
+                AsyncFileLogService.Current.Error($"Memory diagnostics failed: {ex.Message}");
+            }
+        });
     }
 
     private async void MainWindow_Closing(
@@ -614,6 +637,9 @@ public partial class MainWindow : Window
             return;
 
         _shutdownStarted = true;
+        MainActionBar.IsEnabled = false;
+        _viewModel.Status = "ĐANG THOÁT ỨNG DỤNG...";
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
 
         try
         {
@@ -633,6 +659,8 @@ public partial class MainWindow : Window
             _viewModel.ExplicitModelLoaded -= ViewModel_ExplicitModelLoaded;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
             await _viewModel.ShutdownAsync();
+            AsyncFileLogService.Current.Application("SHUTDOWN cleanup complete");
+            await AsyncFileLogService.Current.DisposeAsync();
         }
         finally
         {

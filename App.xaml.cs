@@ -13,7 +13,7 @@ public partial class App : Application
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         _singleInstanceMutex = new Mutex(
             initiallyOwned: true,
@@ -36,13 +36,30 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        StartupBootstrapService.EnsureFastConfiguration();
-        var productionSettings = ProductionConfigService.Load();
+        Models.ProductionSettings productionSettings;
+        AppSettings settings;
+        try
+        {
+            (settings, productionSettings) = await Task.Run(() =>
+            {
+                StartupBootstrapService.EnsureFastConfiguration();
+                AppSoundService.Current.PreloadResources();
+                return (AppSettings.Load(), ProductionConfigService.Load());
+            });
+        }
+        catch (Exception ex)
+        {
+            WriteCrashDiagnostics(ex, "Startup.Configuration");
+            MessageBox.Show("Không thể nạp cấu hình. Vui lòng kiểm tra dữ liệu và mở lại phần mềm.",
+                "KHÔNG THỂ KHỞI ĐỘNG", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+            return;
+        }
         AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
         AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
         StartupPerformanceTrace.Mark("T0 App.OnStartup READY");
 
-        var mainWindow = new MainWindow();
+        var mainWindow = new MainWindow(new MainViewModel(settings, productionSettings));
         MainWindow = mainWindow;
         ShutdownMode = ShutdownMode.OnMainWindowClose;
         mainWindow.Show();

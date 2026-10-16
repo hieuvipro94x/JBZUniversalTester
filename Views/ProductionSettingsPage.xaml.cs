@@ -32,6 +32,10 @@ public partial class ProductionSettingsPage : UserControl
     private int _portRefreshGeneration;
     private int _printerConnectionGeneration;
     private int _saveInProgress;
+    private TaskCompletionSource? _saveCompletion;
+    private Task? _manualCleanupTask;
+    private readonly CancellationTokenSource _pageLifetime = new();
+    private CancellationTokenSource? _printerSelectionCts;
     private int _batchPrintInProgress;
     private CancellationTokenSource? _batchPrintCts;
     private string? _labelPrintModelPath;
@@ -131,6 +135,11 @@ public partial class ProductionSettingsPage : UserControl
             return;
 
         _batchPrintCts?.Cancel();
+        _pageLifetime.Cancel();
+        _printerSelectionCts?.Cancel();
+        _printerSelectionCts?.Dispose();
+        _pageLifetime.Dispose();
+        _vm.RequestStopManualOperations(closing: true);
         if (_savedConfirmationTimer is not null)
         {
             _savedConfirmationTimer.Stop();
@@ -247,6 +256,10 @@ public partial class ProductionSettingsPage : UserControl
             return;
 
         int generation = Interlocked.Increment(ref _printerConnectionGeneration);
+        _printerSelectionCts?.Cancel();
+        _printerSelectionCts?.Dispose();
+        _printerSelectionCts = CancellationTokenSource.CreateLinkedTokenSource(_pageLifetime.Token);
+        CancellationToken selectionToken = _printerSelectionCts.Token;
         try
         {
             PrinterComComboBox
@@ -262,12 +275,12 @@ public partial class ProductionSettingsPage : UserControl
 
             if (string.IsNullOrWhiteSpace(portName))
             {
-                await _main.Test.DisconnectLabelPrinterAsync();
+                await _main.Test.DisconnectLabelPrinterAsync(selectionToken);
                 return;
             }
 
             LabelPrinterConnectionResult result =
-                await _main.Test.ConnectLabelPrinterAsync(_vm.Settings.Label);
+                await _main.Test.ConnectLabelPrinterAsync(_vm.Settings.Label, selectionToken);
             if (!result.Connected &&
                 !IsReleased &&
                 generation == Volatile.Read(ref _printerConnectionGeneration))
@@ -275,6 +288,10 @@ public partial class ProductionSettingsPage : UserControl
                 AsyncFileLogService.Current.Error(
                     $"Automatic label printer selection failed on {portName}: {result.Message}");
             }
+        }
+        catch (OperationCanceledException) when (selectionToken.IsCancellationRequested)
+        {
+            // A newer selection or closing the page superseded this connection.
         }
         catch (Exception ex)
         {
@@ -1712,8 +1729,11 @@ public partial class ProductionSettingsPage : UserControl
 
     private async Task<bool> PersistSettingsAsync()
     {
+        if (IsReleased) return false;
         if (Interlocked.CompareExchange(ref _saveInProgress, 1, 0) != 0)
             return false;
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _saveCompletion = completion;
 
         try
         {
@@ -1738,8 +1758,21 @@ public partial class ProductionSettingsPage : UserControl
             if (!LastSaveChanged)
                 return true;
 
-            _vm.Save();
-            RefreshSavedEditorValues(this);
+            IsEnabled = false;
+            SettingsSavedStatusText.Text = "ĐANG LƯU CÀI ĐẶT...";
+            SettingsSavedStatusText.Visibility = Visibility.Visible;
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
+            long saveStarted = Stopwatch.GetTimestamp();
+            await ReleaseManualOutputsAsync(closing: false);
+            if (IsReleased) return false;
+            _printerSelectionCts?.Cancel();
+            await _vm.SaveAsync();
+            AsyncFileLogService.Current.Performance(
+                $"SETTINGS_PERF phase=SAVE_FILE elapsed_ms={Stopwatch.GetElapsedTime(saveStarted).TotalMilliseconds:0.###}");
+            if (IsReleased) return false;
+            _suppressPrinterPortSelection = true;
+            try { RefreshSavedEditorValues(this); }
+            finally { _suppressPrinterPortSelection = false; }
             string savedSnapshot = CaptureEditableSettingsSnapshot();
             await NotifySettingsSavedAsync();
             _savedSettingsSnapshot = savedSnapshot;
@@ -1749,7 +1782,7 @@ public partial class ProductionSettingsPage : UserControl
         {
             AsyncFileLogService.Current.Error($"Save production settings failed: {ex}");
             ShowMessage(
-                "Chưa lưu được Cài đặt. Dữ liệu đang nhập vẫn được giữ nguyên.",
+                "Chưa hoàn tất lưu/áp dụng Cài đặt. Dữ liệu đang nhập vẫn được giữ nguyên.",
                 "CHƯA LƯU ĐƯỢC",
                 MessageBoxImage.Error);
             return false;
@@ -1757,17 +1790,43 @@ public partial class ProductionSettingsPage : UserControl
         finally
         {
             Interlocked.Exchange(ref _saveInProgress, 0);
+            completion.TrySetResult();
+            if (!IsReleased)
+            {
+                IsEnabled = true;
+                SettingsSavedStatusText.Visibility = Visibility.Collapsed;
+            }
         }
     }
 
     public void SetManualRuntimeActive(bool active) =>
         _vm.SetManualRuntimeActive(active);
 
-    public async Task ReleaseManualOutputsAsync()
+    public async Task ReleaseManualOutputsAsync(bool closing = true)
     {
+        if (closing)
+        {
+            IsEnabled = false;
+            _vm.RequestStopManualOperations(closing: true);
+            // Shutdown must not terminate an in-flight durable config write.
+            if (_saveCompletion is { } save) await save.Task;
+        }
+        Task cleanup = _manualCleanupTask is { IsCompleted: false } pending
+            ? pending
+            : _manualCleanupTask = ReleaseManualOutputsCoreAsync(closing);
+        await cleanup;
+    }
+
+    private async Task ReleaseManualOutputsCoreAsync(bool closing)
+    {
+        long started = Stopwatch.GetTimestamp();
+        if (closing) IsEnabled = false;
+        await _vm.StopManualOperationsAsync(closing);
         if (_main?.Test.IsManualModeActive == true)
             await _main.Test.ResetManualOutputsAsync();
         _vm.SetManualRuntimeActive(false);
+        AsyncFileLogService.Current.Performance(
+            $"SETTINGS_PERF phase=MANUAL_CLEANUP closing={closing} elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
     }
 
     private bool ValidateSettings(out string error)
