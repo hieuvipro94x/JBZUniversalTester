@@ -94,7 +94,8 @@
         <Border Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7" Padding="1">
             <DataGrid x:Name="ProductGrid" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="False" CanUserSortColumns="False"
-                      SelectionMode="Single" SelectionUnit="FullRow" MinRowHeight="38" ColumnHeaderHeight="32"
+                      SelectionMode="Single" SelectionUnit="FullRow" RowHeight="NaN" MinRowHeight="38" ColumnHeaderHeight="32"
+                      CanUserResizeRows="False"
                       EnableRowVirtualization="True" EnableColumnVirtualization="True" HeadersVisibility="Column"
                       GridLinesVisibility="None" BorderThickness="0" Background="White"
                       HorizontalScrollBarVisibility="Disabled"
@@ -125,7 +126,7 @@
                     </Style>
                 </DataGrid.CellStyle>
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="MÃ HÀNG" Binding="{Binding Name}" Width="3*">
+                    <DataGridTextColumn Header="MÃ HÀNG" Binding="{Binding Name}" Width="4*" MinWidth="240">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource PickerCellText}">
                                 <Setter Property="FontWeight" Value="SemiBold"/>
@@ -136,7 +137,7 @@
                             </Style>
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
-                    <DataGridTextColumn Header="THƯ MỤC" Binding="{Binding Folder}" Width="2*"
+                    <DataGridTextColumn Header="THƯ MỤC" Binding="{Binding Folder}" Width="*" MinWidth="90"
                                         ElementStyle="{StaticResource PickerCellText}"/>
                 </DataGrid.Columns>
                 <DataGrid.RowStyle>

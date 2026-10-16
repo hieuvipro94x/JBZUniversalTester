@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-picker"])
+        {
+            TestProductPickerDebouncedSearch();
+            return 0;
+        }
         if (args is ["--test-bcw"])
         {
             TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwHistorySnapshotPreservesRows(); TestBcwThtAutomaticPassLabel(); TestBcwEditableTemplate();

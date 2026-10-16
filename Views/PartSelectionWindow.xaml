@@ -11,12 +11,18 @@
         </Grid.RowDefinitions>
         <TextBlock Text="File này chứa nhiều Part. Chọn đúng mã hàng cần kiểm tra:"
                    FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
-        <ListBox x:Name="PartList" Grid.Row="1" MouseDoubleClick="PartList_MouseDoubleClick">
+        <ListBox x:Name="PartList" Grid.Row="1" MouseDoubleClick="PartList_MouseDoubleClick"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                </Style>
+            </ListBox.ItemContainerStyle>
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <StackPanel Margin="6">
-                        <TextBlock Text="{Binding PartNumber}" FontSize="17" FontWeight="Bold"/>
-                        <TextBlock Text="{Binding Description}" FontSize="14"/>
+                        <TextBlock Text="{Binding PartNumber}" FontSize="17" FontWeight="Bold" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding Description}" FontSize="14" TextWrapping="Wrap"/>
                     </StackPanel>
                 </DataTemplate>
             </ListBox.ItemTemplate>

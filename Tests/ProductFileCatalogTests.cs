@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using System.Windows.Media;
 
 namespace JBZUniversalTester.SelfTests;
 
@@ -66,6 +67,7 @@ internal static partial class Program
                             {
                                 Assert(resets == 3 && !select.IsEnabled,
                                     "No-match query clears selection after a single update");
+                                VerifyPickerLongNameLayout(window, grid);
                                 timer.Stop();
                                 frame.Continue = false;
                             }
@@ -90,6 +92,39 @@ internal static partial class Program
         {
             Directory.Delete(root, recursive: true); // This generated fixture only.
         }
+    }
+
+    private static void VerifyPickerLongNameLayout(ProductPickerWindow window, DataGrid grid)
+    {
+        // Reproduce App.xaml's implicit fixed row height, absent from the self-test host.
+        grid.Style = new Style(typeof(DataGrid))
+        {
+            Setters = { new Setter(DataGrid.RowHeightProperty, 38d) }
+        };
+        string name = "DL3_LAM_" + new string('X', 110) + " WH322444";
+        var entry = new ProductFileEntry(name, "MX5/HALMP", Path.Combine(Path.GetTempPath(), name + ".tht"));
+        grid.ItemsSource = new[] { entry };
+        grid.ScrollIntoView(entry);
+        window.UpdateLayout();
+        var row = (DataGridRow)grid.ItemContainerGenerator.ContainerFromIndex(0);
+        static TextBlock? FindNameText(DependencyObject parent, string text)
+        {
+            if (parent is TextBlock block && block.Text == text) return block;
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+                if (FindNameText(VisualTreeHelper.GetChild(parent, i), text) is { } found) return found;
+            return null;
+        }
+        TextBlock label = FindNameText(row, name) ?? throw new InvalidOperationException("Picker name label missing");
+        Assert(row.ActualHeight > 38 && row.ActualHeight >= label.DesiredSize.Height - 1,
+            $"Long product names grow their row despite the app's fixed-height grid style: row={row.ActualHeight}, text={label.DesiredSize.Height}");
+        var content = (FrameworkElement)window.Content;
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight,
+            96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(content);
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+        using var output = File.Create(Path.Combine(Path.GetTempPath(), "jbz-picker-long-name.png"));
+        encoder.Save(output);
     }
 
     private static void TestRecursiveProductCatalogSearch()
