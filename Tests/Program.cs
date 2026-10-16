@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-master-resistance"])
+        {
+            TestMasterResistanceRemovalTransition();
+            TestMasterLiveResistancePresentation();
+            return 0;
+        }
         if (args is ["--test-picker"])
         {
             TestProductPickerDebouncedSearch();
@@ -143,6 +149,7 @@ internal static partial class Program
             ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
+            ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
             ("All NG Masters keep wire rows and open Master requires an exact complete pattern", TestAllMasterWireRowsAndOpenPattern),
             ("Master completion replays removal confirmed while JIG was busy", TestMasterRemovalDuringEjectCompletion),

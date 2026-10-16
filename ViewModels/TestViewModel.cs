@@ -362,19 +362,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (_requiredMasterFaultSamples.Length == 0)
                 return "CHỌN MẪU NG CẦN KIỂM TRA TRONG CÀI ĐẶT";
             MasterSampleType? requestedSample = IsMasterBadPhase ? _masterSampleType : null;
-            // Preview the next selected sample after PASS. The execution state still
-            // waits for confirmed full removal before starting that sample.
-            if (MasterState is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster)
-            {
-                foreach (MasterSampleType sample in _requiredMasterFaultSamples)
-                {
-                    if (_validatedMasterFaultSamples.Contains(sample) ||
-                        (MasterState == MasterSequenceState.EjectingBadMaster && sample == _masterSampleType))
-                        continue;
-                    requestedSample = sample;
-                    break;
-                }
-            }
+            // Keep the prompt and measurement table on the same physical sample.
+            // The next sample is requested only after confirmed full removal.
+            if (MasterState == MasterSequenceState.EjectingGoodMaster)
+                return "MẪU ĐẠT ĐÃ PASS\nVUI LÒNG THÁO SẢN PHẨM!!";
+            if (MasterState == MasterSequenceState.EjectingBadMaster)
+                return $"MẪU {MasterSampleCatalog.Name(_masterSampleType)} ĐÃ XÁC NHẬN\nVUI LÒNG THÁO SẢN PHẨM!!";
             return $"KIỂM TRA MẪU {(requestedSample is null ? "ĐẠT" : MasterSampleCatalog.Name(requestedSample.Value))}";
         }
     }
@@ -1064,6 +1057,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (Set(ref _masterSequenceState, value))
             {
+                if (value is MasterSequenceState.WaitingGoodMaster or MasterSequenceState.WaitingBadMaster or
+                    MasterSequenceState.TestingBadMaster or MasterSequenceState.Completed)
+                {
+                    Resistance.Clear();
+                    ResistanceDisplayRows.Clear();
+                    SelectedOperationTabIndex = 0;
+                }
                 if (value is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster)
                 {
                     ResetMasterSampleRemovalObservation();
@@ -1136,6 +1136,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         get => _selectedOperationTabIndex;
         set
         {
+            // NG samples validate wiring only. Never reopen the previous good
+            // sample's resistance table through a delayed presentation update.
+            if (value == 1 && IsMasterSequenceActive && IsMasterBadPhase)
+                value = 0;
             if (Set(ref _selectedOperationTabIndex, value))
             {
                 if (value != 2) FinalWaterProofRows.Clear();

@@ -7,6 +7,51 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestMasterResistanceRemovalTransition()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        var vm = CreateTestViewModel(new ProductionSettings
+        {
+            MasterFaultRequiredCount = 1,
+            MasterSelectedFaultSamples = MasterSampleSelection.WrongWiring,
+            ResistanceChannels = [new() { Enabled = true, Name = "R1", Channel = 1, MinOhm = 0.5, MaxOhm = 2 }]
+        }, out FakeBoard board);
+        var model = Model(("PAIR-A", new[] { 1, 2 }), ("PAIR-B", new[] { 3, 4 }));
+        model.PartNumber = "MASTER-RESISTANCE-" + Guid.NewGuid().ToString("N");
+        LoadReadyModel(vm, model);
+        void SetField(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
+        SetField("_runtimeMode", 1);
+        SetField("_masterSequenceState", MasterSequenceState.EjectingGoodMaster);
+        SetField("_masterGoodVerified", true);
+        var engine = (TestEngine)typeof(TestViewModel).GetField("_engine", flags)!.GetValue(vm)!;
+        engine.SetFrameProcessingEnabled(true);
+        var result = new ResistanceResult { Name = "R1", Channel = 1, ValueOhm = 1, Passed = true };
+        vm.Resistance.Add(result);
+        vm.ResistanceDisplayRows.Add(result);
+        vm.SelectedOperationTabIndex = 1;
+        int total = vm.Total, pass = vm.Pass, fail = vm.Fail;
+        Assert(vm.ResultStatusText.Contains("ĐẠT") && !vm.ResultStatusText.Contains("SAI DÂY"),
+            "Good Master resistance PASS cannot request the wrong-wire sample before full removal");
+        board.Publish(FrameSeq(100, (1, new[] { 2 }), (3, new[] { 4 })));
+        board.Publish(FrameSeq(101, (3, new[] { 4 })));
+        Assert(vm.MasterState == MasterSequenceState.EjectingGoodMaster && vm.SelectedOperationTabIndex == 1,
+            "Partial removal keeps the good sample and its measured results until all connections release");
+        board.Publish(FrameSeq(102));
+        Assert(vm.MasterState == MasterSequenceState.EjectingGoodMaster,
+            "One empty scan cannot advance to the next sample");
+        board.Publish(FrameSeq(103));
+        Assert(vm.MasterState == MasterSequenceState.WaitingBadMaster && vm.ResultStatusText.Contains("SAI DÂY") &&
+               vm.SelectedOperationTabIndex == 0 && vm.Resistance.Count == 0 && vm.ResistanceDisplayRows.Count == 0,
+            "Confirmed full removal clears resistance results and opens the wrong-wire sample's electrical table");
+        vm.SelectedOperationTabIndex = 1;
+        Assert(vm.SelectedOperationTabIndex == 0,
+            "A delayed resistance-table selection cannot cover the NG sample's electrical table");
+        Assert(!vm.MasterApproved && vm.Total == total && vm.Pass == pass && vm.Fail == fail &&
+               !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+            $"Changing Master presentation cannot approve production, increment counters or pulse a relay: " +
+            $"approved={vm.MasterApproved}, counters={total}/{pass}/{fail}->{vm.Total}/{vm.Pass}/{vm.Fail}, commands={string.Join(',', board.Commands)}");
+    }
+
     private static void TestMasterLiveResistancePresentation()
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
