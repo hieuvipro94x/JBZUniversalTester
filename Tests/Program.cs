@@ -35,6 +35,8 @@ internal static partial class Program
         if (args is ["--test-app-responsiveness"])
         {
             TestApplicationAsyncLogShutdown();
+            TestD2xxNativeIoResponsiveness();
+            TestBcwJournalResponsiveness();
             TestProductPickerDebouncedSearch();
             return 0;
         }
@@ -116,6 +118,8 @@ internal static partial class Program
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
             ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
+            ("D2XX native calls keep UI responsive and retain ownership through cancellation", TestD2xxNativeIoResponsiveness),
+            ("BCW journal contention keeps UI responsive and persists send outcome", TestBcwJournalResponsiveness),
             ("Settings manual cancellation serializes cleanup and restores scanning", TestSettingsManualStop),
             ("Printer driver close stays off Dispatcher and preserves exclusive ownership", TestSettingsPrinterClose),
             ("ModelCreator leak layout import preserves machine parameters", TestModelLeakLayout),

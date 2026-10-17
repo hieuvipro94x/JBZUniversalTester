@@ -481,16 +481,19 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
                 _activeScanConfiguration = string.Empty;
                 await StopPermanentReaderAsync();
 
-                if (handle != IntPtr.Zero)
+                await Task.Run(() =>
                 {
-                    try { FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX); } catch { }
-                    try
+                    if (handle != IntPtr.Zero)
                     {
-                        FT_Close(handle);
-                        Interlocked.Increment(ref _closeCount);
+                        try { FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX); } catch (Exception cleanupError) { SafeLog($"D2XX cleanup: {cleanupError.Message}"); }
+                        try
+                        {
+                            FT_Close(handle);
+                            Interlocked.Increment(ref _closeCount);
+                        }
+                        catch (Exception cleanupError) { SafeLog($"D2XX cleanup: {cleanupError.Message}"); }
                     }
-                    catch { }
-                }
+                });
 
                 throw;
             }
@@ -564,24 +567,27 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
                 await _ioLock.WaitAsync();
                 try
                 {
-                    handle = _handle;
-                    if (handle != IntPtr.Zero)
+                    await Task.Run(() =>
                     {
-                        try { FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX); } catch { }
-                        try
+                        handle = _handle;
+                        if (handle != IntPtr.Zero)
                         {
-                            uint closeStatus = FT_Close(handle);
-                            Interlocked.Increment(ref _closeCount);
-                            if (closeStatus != FT_OK)
-                                SafeLog($"FT_Close trả {closeStatus} ({GetStatusName(closeStatus)}).");
+                            try { FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX); } catch (Exception cleanupError) { SafeLog($"D2XX cleanup: {cleanupError.Message}"); }
+                            try
+                            {
+                                uint closeStatus = FT_Close(handle);
+                                Interlocked.Increment(ref _closeCount);
+                                if (closeStatus != FT_OK)
+                                    SafeLog($"FT_Close trả {closeStatus} ({GetStatusName(closeStatus)}).");
+                            }
+                            catch (Exception ex)
+                            {
+                                SafeLog($"FT_Close lỗi: {ex.Message}");
+                            }
                         }
-                        catch (Exception ex)
-                        {
-                            SafeLog($"FT_Close lỗi: {ex.Message}");
-                        }
-                    }
 
-                    _handle = IntPtr.Zero;
+                        _handle = IntPtr.Zero;
+                    });
                 }
                 finally
                 {
@@ -1582,131 +1588,101 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
         return true;
     }
 
-    async Task<long> WriteAsync(
-        byte[] data,
-        CancellationToken ct,
-        bool purgeBeforeWrite = false)
+    // Native driver calls can block even when the semaphore is immediately available.
+    // Hold ownership until the native call finishes, including after cancellation.
+    async Task<T> RunControlIoAsync<T>(Func<T> operation, CancellationToken ct)
     {
-        EnsureConnected();
-        long txTimestamp = 0;
-
         Interlocked.Increment(ref _controlWaiters);
         try
         {
-            await _ioLock.WaitAsync(ct);
+            await _ioLock.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                IntPtr handle = _handle;
-                if (handle == IntPtr.Zero)
-                    throw new InvalidOperationException("Bo JBZ đã đóng kết nối.");
-
-                if (purgeBeforeWrite)
-                    EnsureIo(FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
-
-                EnsureIo(
-                    FT_Write(handle, data, (uint)data.Length, out uint written),
-                    "FT_Write");
-
-                if (written != data.Length)
-                {
-                    Interlocked.Increment(ref _d2xxErrorCount);
-                    SafeDiagnostic(
-                        $"D2XX_IO_ERROR api=FT_WriteShort written={written} expected={data.Length} " +
-                        $"state={ConnectionState} scanning={IsScanning} handle_open={_handle != IntPtr.Zero}");
-                    throw new IOException(
-                        $"FT_Write thiếu byte: {written}/{data.Length}");
-                }
-
-                txTimestamp = Stopwatch.GetTimestamp();
-                if (data.AsSpan().SequenceEqual(CmdStopScan))
-                    Interlocked.Exchange(ref _lastStopScanTxTimestamp, txTimestamp);
-                else if (data.AsSpan().SequenceEqual(CmdResetClear))
-                    Interlocked.Exchange(ref _lastResetClearTxTimestamp, txTimestamp);
-                else if (data.Length == 4 && data[0] == 0x8C)
-                    Interlocked.Exchange(ref _lastStartScanTxTimestamp, txTimestamp);
+                return await Task.Run(operation, ct).ConfigureAwait(false);
             }
-            finally
-            {
-                _ioLock.Release();
-            }
+            finally { _ioLock.Release(); }
         }
-        finally
+        finally { Interlocked.Decrement(ref _controlWaiters); }
+    }
+
+    async Task<long> WriteAsync(byte[] data, CancellationToken ct, bool purgeBeforeWrite = false)
+    {
+        EnsureConnected();
+        long txTimestamp = await RunControlIoAsync(() =>
         {
-            Interlocked.Decrement(ref _controlWaiters);
-        }
+            long txTimestamp = 0;
+            IntPtr handle = _handle;
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException("Bo JBZ đã đóng kết nối.");
 
-        SafeLog(
-            $"TX {BitConverter.ToString(data).Replace("-", " ")}");
+            if (purgeBeforeWrite)
+                EnsureIo(FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
+
+            EnsureIo(
+                FT_Write(handle, data, (uint)data.Length, out uint written),
+                "FT_Write");
+
+            if (written != data.Length)
+            {
+                Interlocked.Increment(ref _d2xxErrorCount);
+                SafeDiagnostic(
+                    $"D2XX_IO_ERROR api=FT_WriteShort written={written} expected={data.Length} " +
+                    $"state={ConnectionState} scanning={IsScanning} handle_open={_handle != IntPtr.Zero}");
+                throw new IOException(
+                    $"FT_Write thiếu byte: {written}/{data.Length}");
+            }
+
+            txTimestamp = Stopwatch.GetTimestamp();
+            if (data.AsSpan().SequenceEqual(CmdStopScan))
+                Interlocked.Exchange(ref _lastStopScanTxTimestamp, txTimestamp);
+            else if (data.AsSpan().SequenceEqual(CmdResetClear))
+                Interlocked.Exchange(ref _lastResetClearTxTimestamp, txTimestamp);
+            else if (data.Length == 4 && data[0] == 0x8C)
+                Interlocked.Exchange(ref _lastStartScanTxTimestamp, txTimestamp);
+            return txTimestamp;
+        }, ct);
+        SafeLog($"TX {BitConverter.ToString(data).Replace("-", " ")}");
         PublishProtocolTrace("TX", data, txTimestamp);
         return txTimestamp;
     }
 
     async Task PurgeAsync(CancellationToken ct)
     {
-        if (!IsConnected)
-            return;
-
-        Interlocked.Increment(ref _controlWaiters);
-        try
+        if (!IsConnected) return;
+        await RunControlIoAsync(() =>
         {
-            await _ioLock.WaitAsync(ct);
-            try
-            {
-                IntPtr handle = _handle;
-                if (handle != IntPtr.Zero)
-                    EnsureIo(FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
-            }
-            finally
-            {
-                _ioLock.Release();
-            }
-        }
-        finally
-        {
-            Interlocked.Decrement(ref _controlWaiters);
-        }
+            IntPtr handle = _handle;
+            if (handle != IntPtr.Zero)
+                EnsureIo(FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
+            return true;
+        }, ct);
     }
 
     async Task<byte[]> ReadAvailableAsync(CancellationToken ct)
     {
-        if (!IsConnected)
-            return [];
-
-        Interlocked.Increment(ref _controlWaiters);
-        try
+        if (!IsConnected) return [];
+        return await RunControlIoAsync<byte[]>(() =>
         {
-            await _ioLock.WaitAsync(ct);
-            try
-            {
-                IntPtr handle = _handle;
-                if (handle == IntPtr.Zero)
-                    return [];
+            IntPtr handle = _handle;
+            if (handle == IntPtr.Zero)
+                return [];
 
-                EnsureIo(
-                    FT_GetQueueStatus(handle, out uint queued),
-                    "FT_GetQueueStatus");
+            EnsureIo(
+                FT_GetQueueStatus(handle, out uint queued),
+                "FT_GetQueueStatus");
 
-                if (queued == 0)
-                    return [];
+            if (queued == 0)
+                return [];
 
-                var buffer = new byte[Math.Min(queued, 4096)];
-                EnsureIo(
-                    FT_Read(handle, buffer, (uint)buffer.Length, out uint read),
-                    "FT_Read");
+            var buffer = new byte[Math.Min(queued, 4096)];
+            EnsureIo(
+                FT_Read(handle, buffer, (uint)buffer.Length, out uint read),
+                "FT_Read");
 
-                byte[] received = buffer[..(int)read];
-                PublishProtocolTrace("RX", received);
-                return received;
-            }
-            finally
-            {
-                _ioLock.Release();
-            }
-        }
-        finally
-        {
-            Interlocked.Decrement(ref _controlWaiters);
-        }
+            byte[] received = buffer[..(int)read];
+            PublishProtocolTrace("RX", received);
+            return received;
+        }, ct);
     }
 
     async Task<byte[]> ReadUntilHandshakeAsync(int timeoutMs, CancellationToken ct)

@@ -94,22 +94,22 @@ public sealed class LabelPrintService : IAsyncDisposable
             if (request.Profile.Id == LabelSettings.BcwTemplate)
             {
                 ct.ThrowIfCancellationRequested();
-                var prepared = _bcwSerials.Prepare(request, _localClock(), explicitReprint);
+                var prepared = await Task.Run(() => _bcwSerials.Prepare(request, _localClock(), explicitReprint), ct);
                 request = prepared.Request;
                 if (prepared.AlreadySent)
                     return new LabelPrintTransportResult(true, "BCW đã gửi trước đó; chặn gửi trùng tự động.") { EffectiveRequest = request };
                 try
                 {
                     if (beforeBcwSend is not null) await beforeBcwSend(request);
-                    _bcwSerials.Outcome(request.CycleId, "Sending", "Physical print ACK unavailable");
+                    await Task.Run(() => _bcwSerials.Outcome(request.CycleId, "Sending", "Physical print ACK unavailable"));
                     LabelPrintTransportResult result = await PrintSerializedAsync(request, ct);
                     result = result with { Message = result.Message + $" BCW QR={request.Data.Barcode}; physical print ACK unavailable." };
-                    _bcwSerials.Outcome(request.CycleId, result.Printed ? "Sent" : "Failed", result.Message);
+                    await Task.Run(() => _bcwSerials.Outcome(request.CycleId, result.Printed ? "Sent" : "Failed", result.Message));
                     return result with { EffectiveRequest = request };
                 }
                 catch (Exception ex)
                 {
-                    _bcwSerials.Outcome(request.CycleId, "Failed", ex.Message + "; physical print uncertain");
+                    await Task.Run(() => _bcwSerials.Outcome(request.CycleId, "Failed", ex.Message + "; physical print uncertain"));
                     throw;
                 }
             }

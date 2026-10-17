@@ -24,7 +24,7 @@ public partial class ProductionSettingsPage : UserControl
 {
     // Keep the original 540-DIP column width readable without scaling text.
     private const double MinimumSettingsColumnWidth = 540;
-    private int _settingsColumnCount;
+    private int _settingsColumnCount = 3; // Matches the initial XAML grid; avoid a redundant full relayout.
     private readonly MainViewModel? _main;
     private readonly ProductionSettingsViewModel _vm;
     private string _savedSettingsSnapshot;
@@ -299,13 +299,14 @@ public partial class ProductionSettingsPage : UserControl
         }
     }
 
-    private void EditLabelTemplate_Click(object sender, RoutedEventArgs e)
+    private async void EditLabelTemplate_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is Control button) button.IsEnabled = false;
         try
         {
             if (_vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate)
             {
-                EditBuiltInLabelTemplate();
+                await EditBuiltInLabelTemplateAsync();
                 return;
             }
             string configured = _vm.Settings.Label.TemplatePath?.Trim() ?? string.Empty;
@@ -316,21 +317,31 @@ public partial class ProductionSettingsPage : UserControl
                 return;
             }
 
-            EditBuiltInLabelTemplate();
+            await EditBuiltInLabelTemplateAsync();
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Open label template editor failed: {ex}");
+            if (IsReleased) return;
             ShowMessage("Chưa mở được mẫu tem. Vui lòng thử lại.", "CHỈNH TEM", MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (!IsReleased && sender is Control buttonToEnable) buttonToEnable.IsEnabled = true;
         }
     }
 
-    private void EditBuiltInLabelTemplate()
+    private async Task EditBuiltInLabelTemplateAsync()
     {
         string templateType = LabelProfileResolver.NormalizeTemplateType(_vm.Settings.Label.TemplateType);
         string reference = BuiltInLabelTemplateStore.ReferenceFor(templateType);
-        string defaultTemplate = BuiltInLabelTemplateStore.Load(reference);
-        string savedOverride = BuiltInLabelTemplateStore.LoadOverride(_vm.Settings.Label, templateType);
+        LabelSettings labelSettings = JsonSerializer.Deserialize<LabelSettings>(JsonSerializer.Serialize(_vm.Settings.Label))!;
+        var templates = await Task.Run(() => (
+            Default: BuiltInLabelTemplateStore.Load(reference),
+            Saved: BuiltInLabelTemplateStore.LoadOverride(labelSettings, templateType)), _pageLifetime.Token);
+        if (IsReleased) return;
+        string defaultTemplate = templates.Default;
+        string savedOverride = templates.Saved;
 
         var editor = new Window
         {
@@ -423,8 +434,9 @@ public partial class ProductionSettingsPage : UserControl
             MessageBoxImage.Information);
     }
 
-    private void PreviewLabel_Click(object sender, RoutedEventArgs e)
+    private async void PreviewLabel_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is Control button) button.IsEnabled = false;
         try
         {
             long? lotNo = TryReadSinglePrintLot();
@@ -433,16 +445,22 @@ public partial class ProductionSettingsPage : UserControl
 
             // Preview và Print cùng đi qua LabelPrintRequest.Capture(). Vì vậy dữ liệu,
             // template và payload ở đây chính là payload mà pipeline in thật sử dụng.
-            LabelPrintRequest request = BuildSettingsLabelRequest("PREVIEW", lotNo);
+            LabelPrintRequest request = await BuildSettingsLabelRequestAsync("PREVIEW", lotNo);
+            if (IsReleased) return;
             ShowLabelPreviewWindow(request);
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Label preview failed: {ex}");
+            if (IsReleased) return;
             ShowMessage(
                 "Chưa tạo được lệnh in tem. Vui lòng kiểm tra mẫu tem/THT.",
                 "XEM TRƯỚC TEM",
                 MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (!IsReleased && sender is Control buttonToEnable) buttonToEnable.IsEnabled = true;
         }
     }
 
@@ -1239,11 +1257,13 @@ public partial class ProductionSettingsPage : UserControl
 
     private async void BcwReprint_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is Control button) button.IsEnabled = false;
         try
         {
             if (_main is null) return;
             var store = new BcwSerialStore();
-            var saved = store.Latest(pendingOnly: true) ?? store.Latest();
+            var saved = await Task.Run(() => store.Latest(pendingOnly: true) ?? store.Latest(), _pageLifetime.Token);
+            if (IsReleased) return;
             if (saved is null) throw new InvalidOperationException("Chưa có tem BCW đã lưu.");
             if (MessageBox.Show(HostWindow, $"BCW: {saved.Data.PartNumber}\nQR: {saved.Data.Barcode}\nGửi lại đúng tem này? Hãy kiểm tra tem tại máy in trước để tránh in trùng.",
                 "IN LẠI BCW", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
@@ -1257,7 +1277,12 @@ public partial class ProductionSettingsPage : UserControl
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"BCW reprint: {ex}");
+            if (IsReleased) return;
             ShowMessage(ex.Message, "IN LẠI BCW", MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (!IsReleased && sender is Control buttonToEnable) buttonToEnable.IsEnabled = true;
         }
     }
 
@@ -1270,13 +1295,15 @@ public partial class ProductionSettingsPage : UserControl
 
     private async void TestPrintLabel_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is Control button) button.IsEnabled = false;
         try
         {
             long? lotNo = TryReadSinglePrintLot();
             if (lotNo is null)
                 return;
 
-            LabelPrintRequest request = BuildSettingsLabelRequest("TEST-PRINT", lotNo);
+            LabelPrintRequest request = await BuildSettingsLabelRequestAsync("TEST-PRINT", lotNo);
+            if (IsReleased) return;
 
             if (_main is null)
                 throw new InvalidOperationException("Trang Cài đặt chưa được nối với chương trình chính.");
@@ -1294,11 +1321,16 @@ public partial class ProductionSettingsPage : UserControl
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Test label print failed: {ex}");
+            if (IsReleased) return;
             ShowMessage(
                 _vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate ? ex.Message :
                 "Chưa in thử được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                 "IN THỬ TEM",
                 MessageBoxImage.Warning);
+        }
+        finally
+        {
+            if (!IsReleased && sender is Control buttonToEnable) buttonToEnable.IsEnabled = true;
         }
     }
 
@@ -1367,19 +1399,17 @@ public partial class ProductionSettingsPage : UserControl
 
             CommitPendingEditorValues();
             string thtPath = ResolveLabelPrintModelPath();
-            if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
-                throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
-
-            ProductModel model = new ThtModelParser().Load(thtPath);
             int quantity = checked((int)(lastLot - firstLot + 1L));
             long? completedLot = null;
             LabelPrintTransportResult? lastResult = null;
-            batchCts = new CancellationTokenSource();
+            batchCts = CancellationTokenSource.CreateLinkedTokenSource(_pageLifetime.Token);
             _batchPrintCts = batchCts;
             LabelPrintModelComboBox.IsEnabled = false;
             LabelPrintModelButton.IsEnabled = false;
             BatchPrintLabelButton.IsEnabled = false;
             BatchStopPrintButton.IsEnabled = true;
+            ProductModel model = await Task.Run(() => new ThtModelParser().Load(thtPath), batchCts.Token);
+            batchCts.Token.ThrowIfCancellationRequested();
 
             for (int index = 0; index < quantity; index++)
             {
@@ -1388,10 +1418,11 @@ public partial class ProductionSettingsPage : UserControl
                 batchCts.Token.ThrowIfCancellationRequested();
 
                 long lot = firstLot + index;
-                LabelPrintRequest request = BuildSettingsLabelRequest(
+                LabelPrintRequest request = await BuildSettingsLabelRequestAsync(
                     "BATCH-PRINT",
                     lot,
-                    model);
+                    model, batchCts.Token);
+                batchCts.Token.ThrowIfCancellationRequested();
                 lastResult = await _main.Test.PrintSettingsLabelAsync(request, batchCts.Token);
                 if (!lastResult.Printed)
                     break;
@@ -1474,13 +1505,27 @@ public partial class ProductionSettingsPage : UserControl
         _batchPrintCts?.Cancel();
     }
 
-    private LabelPrintRequest BuildSettingsLabelRequest(
-        string purpose,
-        long? lotNo = null,
-        ProductModel? loadedModel = null)
+    private Task<LabelPrintRequest> BuildSettingsLabelRequestAsync(
+        string purpose, long? lotNo = null, ProductModel? loadedModel = null,
+        CancellationToken? cancellationToken = null)
     {
+        // Snapshot editor values before leaving Dispatcher; workers never read live controls/settings.
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
         string thtPath = ResolveLabelPrintModelPath();
+        long lot = Math.Max(0, lotNo ?? _vm.Settings.LotNo);
+        LabelSettings labelSettings = JsonSerializer.Deserialize<LabelSettings>(
+            JsonSerializer.Serialize(_vm.Settings.Label))!;
+        CancellationToken token = cancellationToken ?? _pageLifetime.Token;
+        return Task.Run(() => BuildSettingsLabelRequest(purpose, lot, loadedModel, thtPath, labelSettings), token);
+    }
+
+    private LabelPrintRequest BuildSettingsLabelRequest(
+        string purpose,
+        long lotNo,
+        ProductModel? loadedModel,
+        string thtPath,
+        LabelSettings labelSettings)
+    {
         if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
             throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
 
@@ -1494,13 +1539,13 @@ public partial class ProductionSettingsPage : UserControl
             Eco = model.Eco,
             Nco = model.Nco,
             Alc = model.Alc,
-            LotNo = Math.Max(0, lotNo ?? _vm.Settings.LotNo),
+            LotNo = Math.Max(0, lotNo),
             ModelName = model.ModelName,
             ModelFile = model.SourcePath,
-            CycleId = purpose + "-" + Math.Max(0, lotNo ?? _vm.Settings.LotNo) + "-" +
+            CycleId = purpose + "-" + Math.Max(0, lotNo) + "-" +
                       now.ToString("yyyyMMddHHmmssfff") + "-" + Guid.NewGuid().ToString("N")
         };
-        LabelPrintRequest request = LabelPrintRequest.Capture(history, model, _vm.Settings.Label);
+        LabelPrintRequest request = LabelPrintRequest.Capture(history, model, labelSettings);
         if (request.Profile.Id == LabelSettings.BcwTemplate)
         {
             long sequence = new BcwSerialStore().Peek(now, request.Data.BcwVehicleCode, request.Data.BcwPosition);
