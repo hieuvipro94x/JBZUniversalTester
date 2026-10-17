@@ -419,7 +419,7 @@
                       BorderThickness="0"
                       SelectionMode="Extended"
                       SelectionUnit="FullRow"
-                      AlternatingRowBackground="#F8FAFC"
+                      AlternatingRowBackground="White"
                       RowBackground="White"
                       FrozenColumnCount="4"
                       CellStyle="{StaticResource HistoryCellStyle}"
