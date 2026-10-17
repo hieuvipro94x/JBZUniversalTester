@@ -20,6 +20,18 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-history-export"])
+        {
+            TestOriginalHistoryExportColumns();
+            TestHistory();
+            TestHistoryTransactionAtomicity();
+            TestLegacyDatabaseWithoutSchemaInfo();
+            TestDatabaseSchemaV5();
+            TestHistoryLotBatchOrdinals();
+            TestDetailedMasterHistory();
+            Console.WriteLine("PASS: History export columns, existing data, migration, pagination and transaction regression checks");
+            return 0;
+        }
         if (args is ["--test-app-responsiveness"])
         {
             TestApplicationAsyncLogShutdown();
@@ -137,6 +149,7 @@ internal static partial class Program
             ("Learned diagnostic topology normalization and persistence", TestLearnedTopology),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
+            ("Original History export columns preserve THT metadata and existing database", TestOriginalHistoryExportColumns),
             ("History exactly-once transaction crash recovery", TestHistoryTransactionAtomicity),
             ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
             ("SQLite schema v7 chronological History migration and query plans", TestDatabaseSchemaV5),
@@ -7761,23 +7774,23 @@ internal static partial class Program
             HistoryExportService.ExportCsv(csv, found);
             byte[] csvBytes = File.ReadAllBytes(csv);
             Assert(csvBytes.Length >= 3 && !(csvBytes[0] == 0xEF && csvBytes[1] == 0xBB && csvBytes[2] == 0xBF),
-                "ALL13 CSV uses CP949 without UTF-8 BOM");
+                "History CSV uses CP949 without UTF-8 BOM");
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
             Assert(csvText.StartsWith(
-                    "일 자,시 간,파 일,품 명,품 번,차 종,Lot,결 과,검 사 기 록,바코드,200 %,수입검사,프로그램\n",
+                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,진도,결과,합격,검사기록,바코드입력,바코드출력,측정,HtdrvName,내용,메모\n",
                     StringComparison.Ordinal),
-                "History CSV has 13 Korean columns without the ordinal header");
+                "History CSV has the original 18 Korean columns in order");
             Assert(csvText.Contains(
-                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,2001,합격,",
+                    "2026/08/09 14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,,NI375/C1000,,1/1,합격,2001,",
                     StringComparison.Ordinal) &&
                    csvText.Contains("장착/검사 14:07:03~14:07:08(5.000초)", StringComparison.Ordinal) &&
                    !csvText.Contains("검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
                    csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
-                   csvText.Contains(",NI375C10002608092001,,,JBZUniversalTester V15.2.0", StringComparison.Ordinal) &&
+                   csvText.Contains(",NI375C10002608092001,CH1=101.5 Ω(합격),JBZUniversalTester V15.2.0,", StringComparison.Ordinal) &&
                    !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV keeps three test phases, saved product LOT and barcode without raw EPL payload");
+                "Sample history CSV keeps test phases and barcode, with blank Lot and the saved LOT in the PASS count");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -7785,17 +7798,17 @@ internal static partial class Program
             string sheet = ReadEntry(archive, "xl/worksheets/sheet1.xml");
             string styles = ReadEntry(archive, "xl/styles.xml");
             Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"B2\" s=\"4\"><v>", StringComparison.Ordinal),
-                "XLSX date and time use separate native numeric cells");
-            Assert(sheet.Contains("<c r=\"G2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">2001</t>", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"I2\" t=\"inlineStr\" s=\"3\">", StringComparison.Ordinal) &&
+                   styles.Contains("formatCode=\"yyyy/mm/dd hh:mm:ss\"", StringComparison.Ordinal),
+                "XLSX uses one native numeric datetime cell for test-start time");
+            Assert(sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">2001</t>", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"L2\" t=\"inlineStr\" s=\"3\">", StringComparison.Ordinal) &&
                    !sheet.Contains("순 번", StringComparison.Ordinal),
-                "XLSX preserves LOT and places test history immediately after the result without an ordinal column");
+                "XLSX puts saved LOT in the PASS count immediately before the test log");
             Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"J2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"N2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
                    !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
-                   sheet.Contains("autoFilter ref=\"A1:M2\"", StringComparison.Ordinal),
-                "XLSX preserves Korean headers, barcode value and 13-column filter");
+                   sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
+                "XLSX preserves Korean headers, barcode value and the original 18-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
                    styles.Contains("wrapText=\"0\"", StringComparison.Ordinal) &&
@@ -7806,15 +7819,15 @@ internal static partial class Program
                 Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
             string[] sampleHeaders =
             [
-                "Ngày", "Thời gian", "File", "Tên sản phẩm", "Mã hàng", "Loại xe", "LOT",
-                "Kết quả", "Lịch sử kiểm tra", "Mã vạch", "200 %",
-                "Kiểm tra đầu vào", "Chương trình"
+                "Ngày", "Thời gian", "File", "Loại kiểm tra", "Tên sản phẩm", "Mã hàng", "Eco", "Nco", "Alc", "LOT",
+                "Tiến độ", "Kết quả", "Số đếm PASS", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
+                "Đo lường", "Chương trình", "Nội dung", "Ghi chú"
             ];
             int previousHeader = -1;
             foreach (string header in sampleHeaders)
             {
                 int headerIndex = historyXaml.IndexOf($"Header=\"{header}\"", previousHeader + 1, StringComparison.Ordinal);
-                Assert(headerIndex > previousHeader, $"History UI Vietnamese 13-column order: {header}");
+                Assert(headerIndex > previousHeader, $"History UI follows original columns and retains inspection type: {header}");
                 previousHeader = headerIndex;
             }
             Assert(!historyXaml.Contains("Header=\"Số thứ tự\"", StringComparison.Ordinal),
@@ -7862,8 +7875,8 @@ internal static partial class Program
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
             Assert(failed.HistoryOrdinal == 1 && failed.ExportLotText.Length == 0 &&
-                   customerText.Contains(",,불량,", StringComparison.Ordinal) &&
-                   !customerText.Contains(",,불량,1,", StringComparison.Ordinal) &&
+                   failed.ExportPassCountText.Length == 0 &&
+                   customerText.Contains(",,0/1,불량,,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
                 "History CSV FAIL uses concise Korean fault detail with blank LOT and no ordinal column");
@@ -8074,7 +8087,7 @@ internal static partial class Program
                 "Changing A.tht to B.tht snapshots B.tht only for the new cycle");
             string lotCsv = Path.Combine(root, "history-export-lot.csv");
             HistoryExportService.ExportCsv(lotCsv, allExportRows);
-            Assert(allExportRows.Select(row => row.ExportLotText).SequenceEqual(new[] { "7000", "7001", "2000" }) &&
+            Assert(allExportRows.Select(row => row.ExportPassCountText).SequenceEqual(new[] { "7000", "7001", "2000" }) &&
                    allExportRows.Select(row => row.HistoryOrdinal).SequenceEqual(new long?[] { 1, 2, 1 }),
                 "Full filtered CSV keeps LOT and counts PASS sequence independently per product");
 
@@ -8245,9 +8258,9 @@ internal static partial class Program
             }
             Assert(scaleSummary.Total == 450 && scaleSummary.ProductPass == 300 && scaleSummary.ProductFail == 150 &&
                    loadedScaleRows.Count == 450 && loadedScaleRows.Select(row => row.Id).Distinct().Count() == 450 &&
-                   loadedScaleRows[0].ExportLotText.Length == 0 && loadedScaleRows[1].ExportLotText == "0" &&
-                   loadedScaleRows[2].ExportLotText == "2000" && loadedScaleRows[6].ExportLotText.Length == 0 &&
-                   loadedScaleRows[8].ExportLotText == "2002" &&
+                   loadedScaleRows[0].ExportPassCountText.Length == 0 && loadedScaleRows[1].ExportPassCountText == "0" &&
+                   loadedScaleRows[2].ExportPassCountText == "2000" && loadedScaleRows[6].ExportPassCountText.Length == 0 &&
+                   loadedScaleRows[8].ExportPassCountText == "2002" &&
                    loadedScaleRows[0].HistoryOrdinal == 1 && loadedScaleRows[1].HistoryOrdinal == 1 &&
                    loadedScaleRows[2].HistoryOrdinal == 2 && loadedScaleRows[8].HistoryOrdinal == 5 &&
                    loadedScaleRows[^1].HistoryOrdinal == 225,
@@ -8257,9 +8270,9 @@ internal static partial class Program
             string scaleXlsx = Path.Combine(root, "history-450.xlsx");
             Assert(scaleExport.Count == 450 && HistoryExportService.ExportCsv(scaleCsv, scaleExport) == 450 &&
                    HistoryExportService.ExportXlsx(scaleXlsx, scaleExport) == 450 &&
-                   scaleExport[0].ExportLotText.Length == 0 && scaleExport[1].ExportLotText == "0" &&
-                   scaleExport[2].ExportLotText == "2000" && scaleExport[6].ExportLotText.Length == 0 &&
-                   scaleExport[8].ExportLotText == "2002" &&
+                   scaleExport[0].ExportPassCountText.Length == 0 && scaleExport[1].ExportPassCountText == "0" &&
+                   scaleExport[2].ExportPassCountText == "2000" && scaleExport[6].ExportPassCountText.Length == 0 &&
+                   scaleExport[8].ExportPassCountText == "2002" &&
                    scaleExport[0].HistoryOrdinal == 1 && scaleExport[1].HistoryOrdinal == 1 &&
                    scaleExport[2].HistoryOrdinal == 2 && scaleExport[^1].HistoryOrdinal == 225,
                 "CSV/XLSX keep blank FAIL LOT and count every production test per product");

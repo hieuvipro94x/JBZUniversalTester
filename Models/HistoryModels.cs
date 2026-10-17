@@ -76,7 +76,10 @@ public sealed class TestHistoryRecord
     // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
     public string BarcodeOutputText => BarcodeValue ?? string.Empty;
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
-    public string ExportLotText => IsProductionRecord && Passed
+    // The original export keeps Lot empty and puts the saved production LOT
+    // in the PASS-count column. Do not rewrite or renumber legacy Tests.Lot.
+    public string ExportLotText => string.Empty;
+    public string ExportPassCountText => IsProductionRecord && Passed
         ? Math.Max(0, LotNo).ToString(System.Globalization.CultureInfo.InvariantCulture)
         : string.Empty;
     public bool IsProductionRecord => HistoryInspectionType.IsProduct(InspectionType);

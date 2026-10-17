@@ -138,7 +138,7 @@ internal static partial class Program
                 XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
                 XElement[] exportedRows = sheet.Descendants(ns + "row").Skip(1).ToArray();
                 string[] logs = exportedRows.Select(row => row.Elements(ns + "c")
-                    .Single(cell => ((string?)cell.Attribute("r"))!.StartsWith("I", StringComparison.Ordinal))
+                    .Single(cell => ((string?)cell.Attribute("r"))!.StartsWith("L", StringComparison.Ordinal))
                     .Descendants(ns + "t").Single().Value).ToArray();
                 Assert(exportedRows.All(row => (string?)row.Attribute("ht") == "20" &&
                            (string?)row.Attribute("customHeight") == "1") &&

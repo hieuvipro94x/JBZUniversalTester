@@ -342,6 +342,7 @@
         <Style x:Key="HtdrvGridHeaderStyle"
                TargetType="DataGridColumnHeader"
                BasedOn="{StaticResource IndustrialGridHeaderStyle}">
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
             <Setter Property="FontSize" Value="{DynamicResource TestFaultGridHeaderFontSize}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>

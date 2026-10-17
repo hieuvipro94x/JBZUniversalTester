@@ -13,6 +13,7 @@ public static class HistoryExportService
     {
         Text,
         Number,
+        DateTime,
         Date,
         Time
     }
@@ -24,23 +25,28 @@ public static class HistoryExportService
         Func<TestHistoryRecord, object?> GetValue,
         bool DetailText = false);
 
-    // CSV, XLSX và HistoryPage có 13 cột sau khi bỏ số thứ tự, giữ cùng
-    // thứ tự này; chi tiết các công đoạn chỉ nằm trong cột 검 사 기 록.
+    // Original 18-column order. Date/filter/order semantics remain test-start;
+    // Lot is presentation-only blank, while 합격 shows the saved production LOT.
     private static readonly HistoryColumn[] Columns =
     [
-        new("일 자", 12, HistoryCellType.Date, r => r.EffectiveTestStartedAt),
-        new("시 간", 11, HistoryCellType.Time, r => r.EffectiveTestStartedAt),
-        new("파 일", 28, HistoryCellType.Text, r => r.ExportModelFileName),
-        new("품 명", 20, HistoryCellType.Text, r => r.PartName),
-        new("품 번", 20, HistoryCellType.Text, r => r.PartNumber),
-        new("차 종", 18, HistoryCellType.Text, r => r.VehicleType),
+        new("장착시간", 22, HistoryCellType.DateTime, r => r.EffectiveTestStartedAt),
+        new("파일", 28, HistoryCellType.Text, r => r.ExportModelFileName),
+        new("파트명", 20, HistoryCellType.Text, r => r.PartName),
+        new("파트번호", 20, HistoryCellType.Text, r => r.PartNumber),
+        new("Eco", 18, HistoryCellType.Text, r => r.Eco),
+        new("Nco", 18, HistoryCellType.Text, r => r.Nco),
+        new("Alc", 18, HistoryCellType.Text, r => r.Alc),
         new("Lot", 16, HistoryCellType.Text, r => r.ExportLotText),
-        new("결 과", 10, HistoryCellType.Text, r => r.ExportResultText),
-        new("검 사 기 록", 80, HistoryCellType.Text, r => r.ExportTestLogSingleLineText, true),
-        new("바코드", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
-        new("200 %", 10, HistoryCellType.Text, r => r.ExportPercentText),
-        new("수입검사", 14, HistoryCellType.Text, r => r.ExportIncomingInspectionText),
-        new("프로그램", 30, HistoryCellType.Text, r => r.HtdrvName)
+        new("진도", 10, HistoryCellType.Text, r => r.ExportProgressText),
+        new("결과", 10, HistoryCellType.Text, r => r.ExportResultText),
+        new("합격", 16, HistoryCellType.Text, r => r.ExportPassCountText),
+        new("검사기록", 80, HistoryCellType.Text, r => r.ExportTestLogSingleLineText, true),
+        new("바코드입력", 24, HistoryCellType.Text, r => r.ExportBarcodeInputText),
+        new("바코드출력", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
+        new("측정", 30, HistoryCellType.Text, r => r.ExportResistanceText),
+        new("HtdrvName", 30, HistoryCellType.Text, r => r.HtdrvName),
+        new("내용", 40, HistoryCellType.Text, r => r.ExportContentText),
+        new("메모", 24, HistoryCellType.Text, _ => string.Empty)
     ];
 
     public static int ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
@@ -93,6 +99,7 @@ public static class HistoryExportService
 
         return column.Type switch
         {
+            HistoryCellType.DateTime => ((DateTime)value).ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture),
             HistoryCellType.Date => ((DateTime)value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             HistoryCellType.Time => ((DateTime)value).ToString("HH:mm:ss", CultureInfo.InvariantCulture),
             HistoryCellType.Number => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
@@ -187,7 +194,12 @@ public static class HistoryExportService
                 continue;
             }
 
-            if (column.Type == HistoryCellType.Date)
+            if (column.Type == HistoryCellType.DateTime)
+            {
+                double serial = ((DateTime)value).ToOADate();
+                sb.Append($"<c r=\"{cell}\" s=\"2\"><v>{serial.ToString("0.###############", CultureInfo.InvariantCulture)}</v></c>");
+            }
+            else if (column.Type == HistoryCellType.Date)
             {
                 double serial = ((DateTime)value).Date.ToOADate();
                 sb.Append($"<c r=\"{cell}\" s=\"2\"><v>{serial.ToString("0.###############", CultureInfo.InvariantCulture)}</v></c>");
@@ -264,7 +276,7 @@ public static class HistoryExportService
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
           <numFmts count="2">
-            <numFmt numFmtId="164" formatCode="yyyy-mm-dd"/>
+            <numFmt numFmtId="164" formatCode="yyyy/mm/dd hh:mm:ss"/>
             <numFmt numFmtId="165" formatCode="hh:mm:ss"/>
           </numFmts>
           <fonts count="2">

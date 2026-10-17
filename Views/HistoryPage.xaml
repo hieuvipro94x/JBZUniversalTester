@@ -335,7 +335,7 @@
                 </StackPanel>
 
                 <StackPanel Grid.Column="4" VerticalAlignment="Top">
-                    <TextBlock Text="LOTNO" Style="{StaticResource FilterLabel}"/>
+                    <TextBlock Text="Số đếm PASS" Style="{StaticResource FilterLabel}"/>
                     <TextBox x:Name="LotTextBox" Style="{StaticResource FilterTextBox}"/>
                 </StackPanel>
 
@@ -469,9 +469,13 @@
                     </DataGridTextColumn>
                     <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Eco" Binding="{Binding Eco}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Nco" Binding="{Binding Nco}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Alc" Binding="{Binding Alc}" Width="140" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Tiến độ" Binding="{Binding ExportProgressText}" Width="85" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Kết quả" Binding="{Binding HistoryResultText}" Width="120" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Số đếm PASS" Binding="{Binding ExportPassCountText}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="1200" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
@@ -485,7 +489,8 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="Mã vạch" Width="260" CellStyle="{StaticResource HistoryCenterCellStyle}">
+                    <DataGridTextColumn Header="Mã vạch đầu vào" Binding="{Binding ExportBarcodeInputText}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTemplateColumn Header="Mã vạch đầu ra" Width="260" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding ExportBarcodeText}"
@@ -499,9 +504,10 @@
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="200 %" Binding="{Binding ExportPercentText}" Width="80" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Kiểm tra đầu vào" Binding="{Binding ExportIncomingInspectionText}" Width="130" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Đo lường" Binding="{Binding ExportResistanceText}" Width="240" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="220" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Nội dung" Binding="{Binding ExportContentText}" Width="300" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Ghi chú" Width="160" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>
