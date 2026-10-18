@@ -1742,7 +1742,7 @@ internal static partial class Program
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridCenterTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("ElementStyle=\"{StaticResource HtdrvGridStrongCenterTextStyle}\"", StringComparison.Ordinal) &&
-                xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireNameDisplay}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource PiCenterCellStyle}\" ElementStyle=\"{StaticResource OperatorWireNameTextStyle}\"", StringComparison.Ordinal) &&
+                xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireNameDisplay}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" CellStyle=\"{StaticResource WireNameCellStyle}\" ElementStyle=\"{StaticResource OperatorWireNameTextStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
                xaml.Contains("Header=\"M&#224;u\" Width=\"0.85*\" MinWidth=\"90\"", StringComparison.Ordinal) &&
