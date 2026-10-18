@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-wire-color-layout"])
+        {
+            TestWireColorCellFillsBounds();
+            return 0;
+        }
         if (args is ["--test-history-export"])
         {
             TestOriginalHistoryExportColumns();
