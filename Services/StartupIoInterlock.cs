@@ -21,7 +21,7 @@ public static class StartupIoInterlock
             return Array.Empty<StartupIoContactPair>();
 
         HashSet<int> probeIo = ProbeContactClassifier
-            .DetectMany(frame, model: null, maxContacts: 4, boardCapacity: capacity)
+            .DetectMany(frame, model, maxContacts: 4, boardCapacity: capacity)
             .Select(item => item.Io)
             .ToHashSet();
 

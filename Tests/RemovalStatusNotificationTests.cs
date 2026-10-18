@@ -58,6 +58,45 @@ internal static partial class Program
         board.Publish(FrameSeq(17));
         Assert(vm.MainRemovalRows.Count == 0 && !vm.IsProductRemovalPending,
             "Complete removal clears enriched wire rows with the selection interlock");
+
+        var common = new PinRecord("CLIP", "CLIP-COMMON", 40, "AO", PinType: "AO");
+        int[] branchIos = [12, 24, 37, 51, 62, 71, 85, 96];
+        ClipBranch[] branches = branchIos.Select((io, index) => new ClipBranch(
+            $"a{index + 1}", index + 1, io,
+            new PinRecord("CLIP", "", io, $"a{index + 1}", PinType: $"a{index + 1}"), null)).ToArray();
+        var clipModel = new ProductModel { ModelName = "CLIP-REMOVAL",
+            Pins = [common, .. branches.Take(7).Select(branch => branch.ClipPin)],
+            Clip = new ClipTopology(common, branches) };
+        vm.SetModel(clipModel);
+        int clipTotal = vm.Total, clipPass = vm.Pass, clipFail = vm.Fail, clipCommands = board.Commands.Count;
+        ScanFrame clipFrame = FrameSeq(18, branchIos.Select(io => (io, new[] { 40 })).ToArray());
+        Assert(StartupIoInterlock.FindConnectedPairs(clipFrame, clipModel, BoardCapacity.Create(2)).Count == 8,
+            "Expected multi-branch CLIP fan-in must remain product-removal evidence rather than being discarded as Probe");
+        board.Publish(clipFrame);
+        Assert(vm.IsProductRemovalPending && vm.MainRemovalContacts.Count == 8 && vm.MainRemovalRows.Count == 16 &&
+               vm.MainRemovalRows.Where(row => row.Io == 40).All(row => row.WireNameDisplay == "AO") &&
+               branches.All(branch => vm.MainRemovalRows.Any(row => row.Io == branch.TargetIo && row.WireNameDisplay == branch.Name)) &&
+               vm.MainRemovalRows.Select(row => row.IsNetworkStart).Count(start => start) == 7,
+            "MainWindow retains all CLIP pairs, actual configured IO, AO/aN names and pair separators, including topology-only pins");
+        AssertThrows<InvalidOperationException>(() => vm.SetModel(lastModel),
+            "Remaining CLIP locks selecting another product just like ordinary wiring");
+        board.Publish(FrameSeq(19, branchIos.Select(io => (io, new[] { 40 }))
+            .Concat(Enumerable.Range(100, 12).Select(io => (io, new[] { 127 }))).ToArray()));
+        Assert(vm.IsProductRemovalPending && vm.MainRemovalContacts.Count == 8,
+            "A simultaneous real Probe contact is excluded without hiding the remaining CLIP branches");
+        board.Publish(FrameSeq(20) with { Complete = false });
+        board.Publish(FrameSeq(21) with { UnknownBytes = 1 });
+        Assert(vm.MainRemovalContacts.Count == 8 && vm.IsProductRemovalPending,
+            "Incomplete/corrupt CLIP scans cannot clear removal evidence");
+        board.Publish(FrameSeq(22, (96, new[] { 40 })));
+        Assert(vm.IsProductRemovalPending && vm.MainRemovalContacts.Count == 1 &&
+               vm.MainRemovalRows.Any(row => row.Io == 96 && row.WireNameDisplay == "a8"),
+            "The final CLIP branch stays visible with its topology name until physically removed");
+        board.Publish(FrameSeq(23));
+        board.Publish(FrameSeq(24, Enumerable.Range(100, 12).Select(io => (io, new[] { 127 })).ToArray()));
+        Assert(!vm.IsProductRemovalPending && vm.MainRemovalRows.Count == 0 &&
+               vm.Total == clipTotal && vm.Pass == clipPass && vm.Fail == clipFail && board.Commands.Count == clipCommands,
+            "Full CLIP removal unlocks MainWindow; Probe-only input neither locks product selection nor records results or fires relays");
     }
 
     private static void TestOrphanedProbeCandidateRestoresCenter()

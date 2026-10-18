@@ -1378,9 +1378,20 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             bool firstRowOfPair = true;
             foreach (int io in new[] { pair.FirstIo, pair.SecondIo })
             {
-                PinRecord?[] pins = FindPinsByIo(io).Cast<PinRecord?>().DefaultIfEmpty().ToArray();
+                ClipTopology? clip = _model?.Clip;
+                ClipBranch? branch = clip?.Branches.FirstOrDefault(item => item.TargetIo == io);
+                PinRecord? clipPin = clip?.CommonIo == io ? clip.CommonPin : branch?.TargetPin ?? branch?.ClipPin;
+                PinRecord?[] pins = FindPinsByIo(io).Cast<PinRecord?>().DefaultIfEmpty(clipPin).ToArray();
                 foreach (PinRecord? pin in pins)
                 {
+                    string wireName = pin?.WireName ?? string.Empty;
+                    if (clipPin is not null && (string.IsNullOrWhiteSpace(wireName) ||
+                        wireName.StartsWith("CLIP-", StringComparison.OrdinalIgnoreCase) ||
+                        wireName.StartsWith("CLIP ", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        wireName = branch?.Name ?? new[] { clip!.CommonPin.PinType, clip.CommonPin.PinNumber, "A0" }
+                            .First(value => !string.IsNullOrWhiteSpace(value));
+                    }
                     rows.Add(new FaultRow
                     {
                         Kind = FaultKind.Info,
@@ -1391,7 +1402,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         RelatedIos = [pair.FirstIo, pair.SecondIo],
                         Connector = pin?.Connector ?? string.Empty,
                         Pin = pin?.PinNumber ?? string.Empty,
-                        WireName = pin?.WireName ?? string.Empty,
+                        WireName = wireName,
                         Color = pin?.Color ?? string.Empty,
                         Section = pin?.Section ?? string.Empty,
                         IoCnPnOverride = pin is null ? $"IO{io}" : $"IO{io}-{pin.Connector}-{pin.PinNumber}",
