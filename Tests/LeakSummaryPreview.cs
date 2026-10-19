@@ -12,6 +12,95 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void RenderStatusPalettePreview(string path)
+    {
+        OnSettingsDispatcher(() =>
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            var vm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
+            var model = Model(("PAIR", new[] { 1, 2 }));
+            vm.SetModel(model);
+            typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(vm, true);
+            var entries = new List<(string Title, string Text, string Background, string Foreground)>();
+            void Add(string title, string state, string? display = null)
+            {
+                vm.State = state;
+                entries.Add((title, display ?? vm.ResultStatusText, vm.StateBackground, vm.StateForeground));
+            }
+            Add("01 · CHỜ LẮP SẢN PHẨM", "LẮP SẢN PHẨM");
+            typeof(TestViewModel).GetField("_presentationCycleStarted", flags)!.SetValue(vm, true);
+            Add("02 · ĐANG KIỂM TRA", "ĐANG KIỂM TRA...");
+            Add("03 · KẾT QUẢ ĐẠT", "PASS");
+            Add("04 · KẾT QUẢ KHÔNG ĐẠT", "FAIL");
+            typeof(TestViewModel).GetField("_productRemovalPending", flags)!.SetValue(vm, 1);
+            Add("05 · CHỜ THÁO SẢN PHẨM", "THÁO SẢN PHẨM");
+            typeof(TestViewModel).GetField("_productRemovalPending", flags)!.SetValue(vm, 0);
+            Add("06 · TEST LEAK KHÔNG ĐẠT", "FAIL LEAK", "KIỂM TRA KÍN NƯỚC\nKHÔNG ĐẠT");
+            var master = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
+            master.SetModel(model);
+            typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(master, false);
+            foreach (var (title, text, type, state) in new[]
+            {
+                ("07 · MẪU ĐẠT", "KIỂM TRA MẪU ĐẠT", MasterSampleType.WrongWiring, MasterSequenceState.TestingGoodMaster),
+                ("08 · MẪU SAI DÂY", "KIỂM TRA MẪU\nSAI DÂY", MasterSampleType.WrongWiring, MasterSequenceState.TestingBadMaster),
+                ("09 · MẪU CHẬP MẠCH", "KIỂM TRA MẪU\nCHẬP MẠCH", MasterSampleType.ShortCircuit, MasterSequenceState.TestingBadMaster),
+                ("10 · MẪU TUỘT TUÝT / ĐỨT DÂY", "KIỂM TRA MẪU\nTUỘT TUÝT / ĐỨT DÂY", MasterSampleType.OpenCircuit, MasterSequenceState.TestingBadMaster)
+            })
+            {
+                typeof(TestViewModel).GetField("_masterSampleType", flags)!.SetValue(master, type);
+                typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(master, state);
+                master.State = text;
+                entries.Add((title, text, master.StateBackground, master.StateForeground));
+            }
+            Add("11 · ĐANG KẾT NỐI BO", "ĐANG KẾT NỐI BO");
+            Add("12 · LỖI THIẾT BỊ", "LỖI THIẾT BỊ", "LỖI THIẾT BỊ");
+            Brush BrushOf(string color) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+            var root = new System.Windows.Controls.DockPanel
+            {
+                Background = BrushOf("#F1F5F9"), Width = 1440, Height = 1120,
+                LastChildFill = true
+            };
+            var heading = new System.Windows.Controls.TextBlock
+            {
+                Text = "MÀU TRẠNG THÁI · V2026.09.268\nMàu lấy trực tiếp từ phần mềm · Mẫu chờ lắp và đang kiểm tra dùng chung nền vàng",
+                FontSize = 25, FontWeight = FontWeights.Bold, Margin = new Thickness(24, 20, 24, 18),
+                Foreground = BrushOf("#0F172A"), FontFamily = new FontFamily("Malgun Gothic")
+            };
+            System.Windows.Controls.DockPanel.SetDock(heading, System.Windows.Controls.Dock.Top);
+            root.Children.Add(heading);
+            var tiles = new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Rows = 4, Margin = new Thickness(14, 0, 14, 14) };
+            root.Children.Add(tiles);
+            foreach (var entry in entries)
+            {
+                var layout = new System.Windows.Controls.DockPanel { Margin = new Thickness(10), Background = Brushes.White };
+                var title = new System.Windows.Controls.TextBlock { Text = entry.Title, FontSize = 17, FontWeight = FontWeights.Bold,
+                    Padding = new Thickness(12, 10, 12, 8), Foreground = BrushOf("#334155") };
+                System.Windows.Controls.DockPanel.SetDock(title, System.Windows.Controls.Dock.Top);
+                layout.Children.Add(title);
+                var codes = new System.Windows.Controls.TextBlock { Text = $"Nền {entry.Background}  ·  Chữ {entry.Foreground}",
+                    FontSize = 16, Padding = new Thickness(12, 10, 12, 10), Foreground = BrushOf("#475569") };
+                System.Windows.Controls.DockPanel.SetDock(codes, System.Windows.Controls.Dock.Bottom);
+                layout.Children.Add(codes);
+                layout.Children.Add(new System.Windows.Controls.Border { Background = BrushOf(entry.Background), Margin = new Thickness(10, 0, 10, 0),
+                    Child = new System.Windows.Controls.TextBlock { Text = entry.Text, Foreground = BrushOf(entry.Foreground),
+                        FontSize = 25, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center,
+                        TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8) } });
+                tiles.Children.Add(layout);
+            }
+            root.Measure(new Size(1440, 1120));
+            root.Arrange(new Rect(0, 0, 1440, 1120));
+            root.UpdateLayout();
+            var bitmap = new RenderTargetBitmap(1440, 1120, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(root);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            using var file = File.Create(path);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            encoder.Save(file);
+            return Task.CompletedTask;
+        });
+    }
+
     private static void RenderLeakSummaryPreview(string path)
     {
         OnSettingsDispatcher(async () =>

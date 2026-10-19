@@ -158,7 +158,7 @@ internal static partial class Program
             "Changing a dependent activity flag alone leaves the previously published text stale");
         typeof(TestViewModel).GetMethod("ApplyAuthoritativeProductionState", flags)!
             .Invoke(vm, [engine.GetProductionElectricalSnapshot()]);
-        Assert(vm.State == "LẮP SẢN PHẨM" && rendered == "LẮP SẢN PHẨM" && vm.StateBackground == "#F5E731",
+        Assert(vm.State == "LẮP SẢN PHẨM" && rendered == "LẮP SẢN PHẨM" && vm.StateBackground == "#83CCEB",
             "An authoritative waiting snapshot refreshes the bound label/colors even when raw State does not change");
     }
 }

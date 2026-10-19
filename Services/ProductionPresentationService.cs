@@ -123,15 +123,20 @@ internal static class ProductionPresentationService
         if (state.IsDeviceFault)
             return "#C62828";
 
+        // Every Master sample uses the same yellow throughout its sample flow.
+        if (state.IsMasterSequenceActive)
+            return "#F5E731";
+
         string value = state.State ?? string.Empty;
         string resultStatus = GetResultStatusText(state);
 
         if (resultStatus.Equals("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
-            return "#85CFE1";
+            return "#C1F0C8";
 
-        if (resultStatus.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
-            resultStatus.Equals("LẮP MẪU MASTER", StringComparison.OrdinalIgnoreCase))
+        if (resultStatus.Equals("LẮP MẪU MASTER", StringComparison.OrdinalIgnoreCase))
             return "#F5E731";
+        if (resultStatus.Equals("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
+            return "#83CCEB";
 
         if (state.IsManualModeActive || value.Equals("MANUAL", StringComparison.OrdinalIgnoreCase))
             return "#FFF3A0";
@@ -145,17 +150,6 @@ internal static class ProductionPresentationService
 
         if (value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase))
             return "#C62828";
-
-        if (state.IsMasterSequenceActive)
-        {
-            if (value.Contains("LỖI THIẾT BỊ", StringComparison.OrdinalIgnoreCase) ||
-                value.Contains("FAIL", StringComparison.OrdinalIgnoreCase))
-            {
-                return "#C62828";
-            }
-
-            return "#FFF3A0";
-        }
 
         if (state.MasterApproved &&
             value.Contains("CHỜ LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase))
@@ -174,7 +168,7 @@ internal static class ProductionPresentationService
         }
 
         if (value.Contains("ĐANG KIỂM TRA", StringComparison.OrdinalIgnoreCase))
-            return "#85CFE1";
+            return "#C1F0C8";
 
         if (value.Contains("LẮP SẢN PHẨM", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("CHỜ", StringComparison.OrdinalIgnoreCase))
@@ -186,9 +180,11 @@ internal static class ProductionPresentationService
     }
 
     public static string GetStateForeground(string stateBackground) =>
-        stateBackground.Equals("#F5E731", StringComparison.OrdinalIgnoreCase) ||
+        stateBackground.Equals("#C1F0C8", StringComparison.OrdinalIgnoreCase)
+            ? "#C00000"
+            : stateBackground.Equals("#F5E731", StringComparison.OrdinalIgnoreCase) ||
         stateBackground.Equals("#FFF3A0", StringComparison.OrdinalIgnoreCase) ||
-        stateBackground.Equals("#85CFE1", StringComparison.OrdinalIgnoreCase)
+        stateBackground.Equals("#83CCEB", StringComparison.OrdinalIgnoreCase)
             ? "#222222"
             : "#FFFFFF";
 }

@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-status-colors", string palettePath])
+        {
+            RenderStatusPalettePreview(palettePath);
+            return 0;
+        }
         if (args is ["--preview-leak-ng", string previewPath])
         {
             RenderLeakSummaryPreview(previewPath);
@@ -1531,8 +1536,8 @@ internal static partial class Program
         Assert(disabledMasterVm.ProductionEnabled, "Master min 0 allows production");
         Assert(disabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM",
             $"Waiting-product result text is canonical (actual='{disabledMasterVm.ResultStatusText}', state='{disabledMasterVm.State}')");
-        Assert(disabledMasterVm.StateBackground == "#F5E731" && disabledMasterVm.StateForeground == "#222222",
-            "Ready status uses yellow/dark mapping");
+        Assert(disabledMasterVm.StateBackground == "#83CCEB" && disabledMasterVm.StateForeground == "#222222",
+            "Ready status uses the requested blue background");
 
         TestViewModel enabledMasterVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
         enabledMasterVm.LoadPreparedModelAsync(model1).GetAwaiter().GetResult();
@@ -1569,7 +1574,7 @@ internal static partial class Program
         masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
         Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster &&
                masterExitVm.ResultStatusText == "ĐANG KIỂM TRA" &&
-               masterExitVm.StateBackground == "#85CFE1" &&
+               masterExitVm.StateBackground == "#F5E731" &&
                masterPresentationChanges.Contains(nameof(TestViewModel.ResultStatusText)) &&
                masterPresentationChanges.Contains(nameof(TestViewModel.StateBackground)) &&
                masterPresentationChanges.Contains(nameof(TestViewModel.CenterResultText)),
@@ -1644,8 +1649,8 @@ internal static partial class Program
             "Committed PASS explicitly asks for product removal until ProductRemoved returns the UI to ready");
         statusVm.State = "ĐANG TEST LEAK";
         Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
-               statusVm.StateBackground == "#85CFE1" &&
-               statusVm.StateForeground == "#222222",
+               statusVm.StateBackground == "#C1F0C8" &&
+               statusVm.StateForeground == "#C00000",
             "Leak stage uses the canonical checking presentation before PASS");
         statusVm.State = "CHƯA ĐẠT";
         Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
@@ -1656,12 +1661,12 @@ internal static partial class Program
                statusVm.StateForeground == "#222222",
             "Removal interlock must not be presented as LẮP SẢN PHẨM");
         statusVm.State = "ĐANG KIỂM TRA...";
-        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#85CFE1" && statusVm.StateForeground == "#222222",
-            "Current testing status uses the canonical blue/dark in-progress mapping");
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#C1F0C8" && statusVm.StateForeground == "#C00000",
+            "Current testing status uses the requested green background and red text");
         statusVm.State = "ĐANG KẾT NỐI BO";
         Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
-               statusVm.StateBackground == "#85CFE1" &&
-               statusVm.StateForeground == "#222222",
+               statusVm.StateBackground == "#C1F0C8" &&
+               statusVm.StateForeground == "#C00000",
             "Board connection progress uses the canonical checking presentation");
         statusVm.State = "LỖI THIẾT BỊ";
         Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" &&

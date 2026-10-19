@@ -390,10 +390,10 @@ internal static partial class Program
                 "Completed Master clears testing state and returns both result areas to product installation");
             vm.State = "ĐANG KIỂM TRA...";
             Assert(vm.ResultStatusText == "LẮP SẢN PHẨM" && vm.CenterResultText == "LẮP SẢN PHẨM" &&
-                   vm.StateBackground == "#F5E731" && vm.StateForeground == "#222222",
+                   vm.StateBackground == "#83CCEB" && vm.StateForeground == "#222222",
                 "A delayed generic testing message cannot replace the confirmed idle state after Master completion");
             SetField("_presentationCycleStarted", true);
-            Assert(vm.ResultStatusText == "ĐANG KIỂM TRA" && vm.StateBackground == "#85CFE1",
+            Assert(vm.ResultStatusText == "ĐANG KIỂM TRA" && vm.StateBackground == "#C1F0C8" && vm.StateForeground == "#C00000",
                 "A new product installation after Master still shows active testing");
             SetField("_presentationCycleStarted", false);
             vm.State = "LẮP SẢN PHẨM";
