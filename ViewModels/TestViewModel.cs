@@ -8072,8 +8072,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 {
                     State = "MASTER PASS - FAIL";
                     MasterStatus = "MẪU MASTER PASS ĐANG CÓ LỖI DÂY - KIỂM TRA / THÁO MẪU";
-                    // Không alarm/eject theo logic Product FAIL. Good master chỉ được eject sau PASS thật.
-                    _sound.SetWiringFaultAlarm(false);
+                    // RefreshFaults drives TESTPOINT for a rejected good sample.
+                    // Good master only ejects after a real PASS, never via Product FAIL.
                     if (Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
                     {
                         CaptureMasterTestStartedAt();
@@ -12813,11 +12813,16 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         RaiseTestStatistics();
 
-        // Master GOOD/BAD dùng fault làm dữ liệu xác nhận, không phải Product FAIL.
-        // Không phát TESTPOINT, không popup/eject fault, không tăng thống kê.
+        // A good Master must warn about confirmed wrong/short wiring too.
+        // Fault samples still use faults only as validation data, without an alarm.
+        // Neither path enters Product FAIL, pulses relays or counts production.
         if (!MasterApproved)
         {
-            _sound.SetWiringFaultAlarm(false);
+            _sound.SetWiringFaultAlarm(
+                IsRuntimeMode(RuntimeMode.Production) && !IsDeviceFault && !IsPersistenceFault &&
+                !_dailyMasterAwaitingRemoval &&
+                MasterState is (MasterSequenceState.WaitingGoodMaster or MasterSequenceState.TestingGoodMaster) &&
+                ShouldKeepWiringFaultAlarm());
             return;
         }
 

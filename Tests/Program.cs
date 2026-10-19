@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-good-master-sound"])
+        {
+            TestGoodMasterWiringSound();
+            Console.WriteLine("PASS: Good Master wiring TESTPOINT and sound ownership");
+            return 0;
+        }
         if (args is ["--test-always-print-history"])
         {
             TestAlwaysPrintHistory();
@@ -209,6 +215,7 @@ internal static partial class Program
             ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
+            ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
