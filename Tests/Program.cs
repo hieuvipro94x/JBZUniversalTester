@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-master-rejected-removal"])
+        {
+            TestRejectedMasterResistanceRemoval();
+            return 0;
+        }
         if (args is ["--test-wire-color-layout"])
         {
             TestWireColorCellFillsBounds();
@@ -196,6 +201,7 @@ internal static partial class Program
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
+            ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
             ("All NG Masters keep wire rows and open Master requires an exact complete pattern", TestAllMasterWireRowsAndOpenPattern),
             ("Master completion replays removal confirmed while JIG was busy", TestMasterRemovalDuringEjectCompletion),

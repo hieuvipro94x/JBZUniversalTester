@@ -8404,6 +8404,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         CancellationToken ct = CurrentCycleToken();
         string masterCycleId = _masterHistoryCycleId;
         bool ownsEject = false;
+        bool resistanceMeasurementCompleted = false;
         try
         {
             Resistance.Clear();
@@ -8426,6 +8427,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                             UpdateResistanceRows([result]);
                     }),
                     ct);
+                resistanceMeasurementCompleted = true;
                 if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster) ||
                     !string.Equals(_masterHistoryCycleId, masterCycleId, StringComparison.Ordinal))
                     return;
@@ -8571,6 +8573,26 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (ownsEject)
                 FinishMasterEjectSequence(generation);
+            // Resistance routing stops scan. Rejected good samples never reach
+            // the PASS/eject restart, but still need real frames to detect removal.
+            if (resistanceMeasurementCompleted && !ownsEject && !ct.IsCancellationRequested &&
+                !IsDeviceFault && !IsPersistenceFault &&
+                IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster) &&
+                string.Equals(_masterHistoryCycleId, masterCycleId, StringComparison.Ordinal))
+            {
+                try
+                {
+                    await StartProductionScanAndVerifyFrameAsync(ct, "MASTER_GOOD_REJECTED_REMOVAL");
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    AddLog("MASTER GOOD removal scan cancelled with its sample lifecycle.");
+                }
+                catch (Exception ex)
+                {
+                    EnterDeviceFault(ex, "MasterGoodRemovalScan");
+                }
+            }
             // Giữ latch cho tới khi MASTER GOOD được tháo/nhả. Nếu resistance hoặc
             // continuity không đạt, không được tự đo/lặp PASS liên tục theo từng frame.
             // Nhánh IsProductReleased ở state TestingGoodMaster sẽ reset latch về 0.

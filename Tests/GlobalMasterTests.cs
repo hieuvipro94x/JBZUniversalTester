@@ -7,6 +7,69 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestRejectedMasterResistanceRemoval()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        foreach (bool resistancePass in new[] { false, true })
+        {
+            var settings = new ProductionSettings { MasterFaultRequiredCount = 1,
+                MasterSelectedFaultSamples = MasterSampleSelection.WrongWiring,
+                ResistanceChannels = [new() { Enabled = true, Name = "R1", Channel = 1, MinOhm = 0.5, MaxOhm = 2 }] };
+            var app = new AppSettings();
+            app.Test.ResistanceMinimumSettleMs = 0;
+            app.Test.ResistanceSampleIntervalMs = 0;
+            app.Test.ResistanceStableSampleCount = 2;
+            app.Test.ResistanceStabilityTimeoutMs = 100;
+            var board = new FakeBoard();
+            var visa = new FakeKeysightVisaService(connected: true, measurement: resistancePass ? 1 : 3);
+            using var engine = new TestEngine(board, visa, app, settings);
+            var vm = new TestViewModel(new MainViewModel(), engine, board, visa, new WaterProofSerialService(),
+                app, settings, new LegacyPhtHistoryService(enabled: false), requireStartupIoClear: false);
+            var model = Model(("A", new[] { 1, 2 }), ("B", new[] { 3, 4 }));
+            model.PartNumber = "MASTER-REJECTED-" + Guid.NewGuid().ToString("N");
+            void Set(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
+            Set("_model", model);
+            engine.SetModel(model);
+            Set("_runtimeMode", 1);
+            Set("_masterSequenceState", MasterSequenceState.TestingGoodMaster);
+            Set("_requiredMasterFaultSamples", new[] { MasterSampleType.WrongWiring });
+            Set("_masterPostStarted", 1);
+            using var cycle = new CancellationTokenSource();
+            Set("_cycleCts", cycle);
+            long generation = (long)typeof(TestViewModel).GetField("_runtimeGeneration", flags)!.GetValue(vm)!;
+            ScanFrame Frame(long seq, bool all, long scanGeneration = 2) => FrameSeq(seq, all
+                ? [(1, new[] { 2 }), (3, new[] { 4 })] : [(1, new[] { 2 })]) with
+                { SourceCount = 640, ExpectedIoCount = 640, ScanUnitCount = 10, ScanGeneration = scanGeneration };
+            board.Publish(Frame(100, true));
+            long measuringFrame = 101;
+            if (resistancePass) visa.BeforeMeasure = () => board.Publish(Frame(measuringFrame++, false));
+            board.StartScanCallback = transport => transport.Publish(Frame(300, !resistancePass, 3));
+            ((Task)typeof(TestViewModel).GetField("_statisticsLoadTask", flags)!.GetValue(vm)!).GetAwaiter().GetResult();
+            int total = vm.Total, pass = vm.Pass, fail = vm.Fail;
+            ((Task)typeof(TestViewModel).GetMethod("CompleteGoodMasterAsync", flags)!.Invoke(vm, [generation])!)
+                .GetAwaiter().GetResult();
+            Assert(board.IsScanning && board.Commands.Last() == "START" &&
+                   vm.MasterState == MasterSequenceState.TestingGoodMaster && vm.SelectedOperationTabIndex == 1 &&
+                   vm.ResistanceDisplayRows.Count == 1 && !vm.MasterApproved,
+                "Rejected Master must restart D2XX to watch removal, retaining measured results and keeping production locked");
+            board.Publish(Frame(301, false, 3));
+            Assert(vm.MasterState == MasterSequenceState.TestingGoodMaster && vm.ResistanceDisplayRows.Count == 1,
+                "Removing only one connection cannot reset the rejected sample");
+            board.Publish(FrameSeq(302) with { Complete = false });
+            board.Publish(FrameSeq(303) with { UnknownBytes = 1 });
+            Assert(vm.MasterState == MasterSequenceState.TestingGoodMaster, "Invalid removal frames cannot re-arm Master");
+            board.Publish(FrameSeq(304) with { ScanGeneration = 3 });
+            board.Publish(FrameSeq(305) with { ScanGeneration = 3 });
+            Assert(vm.MasterState == MasterSequenceState.WaitingGoodMaster && vm.Resistance.Count == 0 &&
+                   vm.ResistanceDisplayRows.Count == 0 && vm.SelectedOperationTabIndex == 0 && !vm.MasterApproved,
+                "Confirmed full removal clears the failed sample and returns to waiting for a good Master");
+            Assert(vm.Total == total && vm.Pass == pass && vm.Fail == fail &&
+                   !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                $"Rejected Master retry cannot pulse relays or count production: Rpass={resistancePass}, " +
+                $"{total}/{pass}/{fail}->{vm.Total}/{vm.Pass}/{vm.Fail}; commands={string.Join(',', board.Commands)}");
+        }
+    }
+
     private static void TestMasterResistanceRemovalTransition()
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
