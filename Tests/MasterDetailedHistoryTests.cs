@@ -13,6 +13,21 @@ internal static partial class Program
 {
     private static void TestDetailedMasterHistory()
     {
+        var displayExample = new TestHistoryRecord
+        {
+            InspectionType = HistoryInspectionType.MasterGood, Passed = true,
+            Started = new DateTime(2026, 10, 14, 10, 58, 39, 955),
+            InstallStartedAt = new DateTime(2026, 10, 14, 10, 58, 39, 955),
+            TestStartedAt = new DateTime(2026, 10, 14, 10, 58, 40, 256),
+            ResultAt = new DateTime(2026, 10, 14, 10, 58, 40, 258),
+            Finished = new DateTime(2026, 10, 14, 10, 58, 41)
+        };
+        Assert(displayExample.ExportTestLogText.Contains("장착시작 10:58:39 장착시간 0.301초") &&
+               displayExample.ExportTestLogText.Contains("검사시작 10:58:40 확인시각 10:58:40 확인시간 0.002초") &&
+               !System.Text.RegularExpressions.Regex.IsMatch(
+                   displayExample.HistoryTestLogText + displayExample.ExportTestLogText, @"\d{2}:\d{2}:\d{2}\.\d") &&
+               displayExample.InstallStartedAt.Value.Millisecond == 955,
+            "History and export show whole-second clock times while retaining exact timestamps and measured durations");
         string root = Path.Combine(Path.GetTempPath(), "JBZ-MasterDetail-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
@@ -98,6 +113,9 @@ internal static partial class Program
                        !row.HistoryTestLogText.Contains("Phiên ") && row.ExportLotText.Length == 0 &&
                        row.ExportTestLogText.Contains("확인시각") && row.ExportTestLogText.Contains("장착시간 2.500초"),
                     "Each stored sample displays its actual type and all stage timestamps and durations");
+                Assert(!System.Text.RegularExpressions.Regex.IsMatch(
+                    row.HistoryTestLogText + row.ExportTestLogText, @"\d{2}:\d{2}:\d{2}\.\d"),
+                    "Every Master type uses HH:mm:ss in its visible and exported stage timestamps");
                 Assert(!(row.InspectionTypeText + row.HistoryResultText + row.HistoryTestLogText)
                         .Any(character => character is >= '\u00c0' and <= '\u024f' or >= '\u1e00' and <= '\u1eff'),
                     "Master type, result, audit, fault and stage labels are Korean without leftover Vietnamese text");

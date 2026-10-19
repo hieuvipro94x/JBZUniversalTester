@@ -67,7 +67,7 @@ public static class MasterHistoryPresentation
         $"확인시간 {Seconds(record.TestDurationSeconds)} | ";
 
     private static string Time(DateTime? value) =>
-        value?.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture) ?? "—";
+        value?.ToString("HH:mm:ss", CultureInfo.InvariantCulture) ?? "—";
     private static string ExportTime(DateTime? value) => value.HasValue ? Time(value) : "미확인";
     private static string Seconds(double? value) =>
         value?.ToString("0.000", CultureInfo.InvariantCulture) + (value.HasValue ? "초" : "미확인");
