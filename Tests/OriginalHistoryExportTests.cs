@@ -108,7 +108,7 @@ internal static partial class Program
                        Cell(2, "E2") == model.Eco && Cell(2, "F2") == model.Nco && Cell(2, "G2") == model.Alc &&
                        Cell(2, "H2") == "" && Cell(2, "I2") == "1/1" && Cell(2, "K2") == "2001" &&
                        Cell(3, "H3") == "" && Cell(3, "I3") == "0/1" && Cell(3, "K3") == "" &&
-                       Cell(2, "N2") == "SAVED-BARCODE" && !Cell(2, "N2").Contains("RAW-PRINT") &&
+                       Cell(2, "N2") == "RAW-PRINT-PAYLOAD" &&
                        DateTime.FromOADate(double.Parse(rows[1].Elements(ns + "c").First().Element(ns + "v")!.Value,
                            CultureInfo.InvariantCulture)) == at,
                     "Actual XLSX cells retain THT fields, legacy test-start timestamp, PASS count and barcode semantics");

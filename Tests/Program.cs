@@ -20,6 +20,13 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-always-print-history"])
+        {
+            TestAlwaysPrintHistory();
+            TestCompactPrintConfig();
+            TestOriginalHistoryExportColumns();
+            return 0;
+        }
         if (args is ["--test-master-rejected-removal"])
         {
             TestRejectedMasterResistanceRemoval();
@@ -121,6 +128,8 @@ internal static partial class Program
         (string Name, Action Run)[] tests =
         [
             ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),
+            ("Every PASS retains its printer command offline with clean History", TestAlwaysPrintHistory),
+            ("Compact settings preserve required profiles and read legacy files", TestCompactPrintConfig),
             ("BCW reads the active THT and uses the automatic PASS print pipeline", TestBcwThtAutomaticPassLabel),
             ("BCW Julian date, original EPL positions and safe template", TestBcwJulianAndPayload),
             ("BCW persistent sequence, failed send, concurrency and reprint", TestBcwPersistentSerialAndTransport),
@@ -4974,8 +4983,9 @@ internal static partial class Program
             Assert(offsetStart.StartCardNumber == 3 && offsetStart.CardCount == 6 &&
                     cfg.Contains("[StartCardNumber]3", StringComparison.Ordinal) &&
                     cfg.Contains("[ExpansionCardCount]4", StringComparison.Ordinal) &&
-                    cfg.Contains("[CardCount]6", StringComparison.Ordinal),
-                "CFG persists Start Card, logical card count and firmware scan-through consistently");
+                    !cfg.Contains("[CardCount]", StringComparison.Ordinal) &&
+                    ProductionConfigService.LoadSavedSettings(cfgPath).CardCount == 6,
+                "Compact CFG persists Start Card and logical count, deriving firmware scan-through on reload");
             Assert(!cfg.Contains("[Version]", StringComparison.OrdinalIgnoreCase) &&
                    !cfg.Contains("[BoardMode]", StringComparison.OrdinalIgnoreCase) &&
                    !cfg.Contains("[UseTestPointer]", StringComparison.OrdinalIgnoreCase) &&
@@ -7803,9 +7813,8 @@ internal static partial class Program
                    !csvText.Contains("검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
                    csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
-                   csvText.Contains(",NI375C10002608092001,CH1=101.5 Ω(합격),JBZUniversalTester V15.2.0,", StringComparison.Ordinal) &&
-                   !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV keeps test phases and barcode, with blank Lot and the saved LOT in the PASS count");
+                   csvText.Contains("\"" + record.LabelPayload.Replace("\"", "\"\"") + "\"", StringComparison.Ordinal),
+                "Sample history CSV keeps test phases and the entire printer command, with saved LOT in the PASS count");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -7820,10 +7829,11 @@ internal static partial class Program
                    !sheet.Contains("순 번", StringComparison.Ordinal),
                 "XLSX puts saved LOT in the PASS count immediately before the test log");
             Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"N2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
-                   !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
+                   string.Concat(System.Xml.Linq.XDocument.Parse(sheet).Descendants()
+                       .Single(element => element.Name.LocalName == "c" && (string?)element.Attribute("r") == "N2")
+                       .Descendants().Where(element => element.Name.LocalName == "t").Select(element => element.Value)) == record.LabelPayload &&
                    sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
-                "XLSX preserves Korean headers, barcode value and the original 18-column filter");
+                "XLSX preserves Korean headers, exact printer command and original 18-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
                    styles.Contains("wrapText=\"0\"", StringComparison.Ordinal) &&
@@ -8979,8 +8989,8 @@ internal static partial class Program
         Assert((bool)(shouldAutoPrint.Invoke(null, [true, true]) ?? false),
             "Final PASS with auto-print enabled is eligible for one print transaction");
         Assert(!(bool)(shouldAutoPrint.Invoke(null, [false, true]) ?? true) &&
-               !(bool)(shouldAutoPrint.Invoke(null, [true, false]) ?? true),
-            "NG/FAIL and disabled auto-print never create an automatic print transaction");
+               (bool)(shouldAutoPrint.Invoke(null, [true, false]) ?? false),
+            "FAIL never prints; production PASS always captures a label regardless of the legacy toggle");
 
         MethodInfo hasLabelTransport = typeof(TestViewModel).GetMethod(
             "HasConfiguredLabelTransport",
@@ -9070,16 +9080,16 @@ internal static partial class Program
         LabelIdentity identity = EplLabelService.BuildIdentity(request.Data);
         history.LabelSerial = identity.SerialText;
         history.BarcodeValue = identity.BarcodeValue;
-        Assert(history.ExportBarcodeText.Length == 0,
-            "Auto-print disabled/not requested hides any prepared barcode from history export");
+        Assert(history.ExportBarcodeText == identity.BarcodeValue,
+            "A legacy PASS without payload retains its saved barcode without a printer-status gate");
         history.BarcodeValue = string.Empty;
         history.LabelProfile = request.FormatName;
         history.LabelTemplateType = settings.TemplateType;
         history.LabelPayload = request.Payload;
         history.Printer = request.Printer;
         history.LabelCopies = request.Copies;
-        Assert(history.ExportBarcodeText.Length == 0,
-            "PASS history keeps barcode blank before the printer confirms success");
+        Assert(history.ExportBarcodeText == request.Payload,
+            "PASS history exposes the immutable printer command before any transport confirmation");
 
         // UI/current model changes after PASS must not mutate the queued label.
         history.PartNumber = "PART-B";
@@ -9184,8 +9194,8 @@ internal static partial class Program
                 "Crash after PASS commit restores the exact cycle/LOT/payload while allowing repaired printer routing");
             TestHistoryRecord failedPrint = store.Search(new HistorySearchCriteria(
                 null, null, 31415, "PART-A", "PASS", 10)).Single();
-            Assert(failedPrint.BarcodeValue.Length == 0 && failedPrint.ExportBarcodeText.Length == 0,
-                "Failed or disabled printing never writes barcode into history");
+            Assert(failedPrint.BarcodeValue.Length == 0 && failedPrint.ExportBarcodeText == request.Payload,
+                "An offline printer cannot erase the captured command from PASS history");
             Assert(store.TryBeginFirstPrint(id, request.CycleId), "Explicit retry reuses the failed cycle/LOT transaction");
             Assert(!store.TryBeginFirstPrint(id, request.CycleId), "Concurrent retry callback is blocked while Pending");
             TestHistoryRecord ambiguous = store.GetLatestLabelForPart(

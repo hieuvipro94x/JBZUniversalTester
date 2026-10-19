@@ -526,7 +526,7 @@
                                                 <ComboBoxItem Content="TEM_BE_QRCODE" Tag="TEM_BE_QRCODE"/>
                                                 <ComboBoxItem Content="BCW" Tag="BCW"/>
                                             </ComboBox>
-                                            <CheckBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Content="BẬT IN TEM" VerticalAlignment="Center" IsChecked="{Binding Settings.AutoPrintLabelOnPass, Mode=TwoWay}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Text="TỰ ĐỘNG GỬI TEM KHI PASS" VerticalAlignment="Center" Foreground="#0F766E" FontWeight="SemiBold"/>
                                         </Grid>
                                         <Grid x:Name="LabelPrintActionsPanel" Grid.Row="2" Margin="0,6,0,0">
                                             <Grid.RowDefinitions>
@@ -544,7 +544,7 @@
                                                     <ColumnDefinition Width="*"/>
                                                     <ColumnDefinition Width="80"/>
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="Mã hàng cần in" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
+                                                <TextBlock Text="Mã hàng in thử" ToolTip="Chỉ dùng cho xem trước, in thử và in hàng loạt. In tự động lấy mã hàng đang test." VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
                                                 <ComboBox x:Name="LabelPrintModelComboBox" Grid.Column="1" Height="26" Margin="0,2,6,2" Background="White" Foreground="Black" IsTextSearchEnabled="True" TextSearch.TextPath="Name" MaxDropDownHeight="320" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" SelectionChanged="LabelPrintModelComboBox_SelectionChanged">
                                                     <ComboBox.ItemsPanel>
                                                         <ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate>

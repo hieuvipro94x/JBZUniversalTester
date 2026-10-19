@@ -237,7 +237,7 @@ public static class HistoryExportService
     }
 
     private static string Xml(string? value) =>
-        SecurityElement.Escape(value ?? string.Empty) ?? string.Empty;
+        (SecurityElement.Escape(value ?? string.Empty) ?? string.Empty).Replace("\r", "&#13;", StringComparison.Ordinal);
 
     private static string ContentTypesXml() => """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>

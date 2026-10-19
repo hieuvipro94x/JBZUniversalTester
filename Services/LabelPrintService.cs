@@ -80,11 +80,21 @@ public sealed class LabelPrintService : IAsyncDisposable
         }
     }
 
+    public async Task<LabelPrintRequest> CaptureProductionRequestAsync(LabelPrintRequest request, CancellationToken ct = default)
+    {
+        if (request.Profile.Id != LabelSettings.BcwTemplate) return request;
+        // SQLite owns reservation serialization. Never wait for a slow physical
+        // printer before capturing the next product's PASS history.
+        return (await Task.Run(() => _bcwSerials.Prepare(request, request.Data.TestedAt,
+            explicitReprint: false, productionCapture: true), ct)).Request;
+    }
+
     public async Task<LabelPrintTransportResult> PrintPassLabelAsync(
         LabelPrintRequest request,
         CancellationToken ct = default,
         bool explicitReprint = false,
-        Func<LabelPrintRequest, Task>? beforeBcwSend = null)
+        Func<LabelPrintRequest, Task>? beforeBcwSend = null,
+        bool productionSnapshot = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -94,7 +104,8 @@ public sealed class LabelPrintService : IAsyncDisposable
             if (request.Profile.Id == LabelSettings.BcwTemplate)
             {
                 ct.ThrowIfCancellationRequested();
-                var prepared = await Task.Run(() => _bcwSerials.Prepare(request, _localClock(), explicitReprint), ct);
+                var prepared = await Task.Run(() => _bcwSerials.Prepare(request, _localClock(), explicitReprint,
+                    productionCapture: productionSnapshot), ct);
                 request = prepared.Request;
                 if (prepared.AlreadySent)
                     return new LabelPrintTransportResult(true, "BCW đã gửi trước đó; chặn gửi trùng tự động.") { EffectiveRequest = request };
@@ -102,7 +113,7 @@ public sealed class LabelPrintService : IAsyncDisposable
                 {
                     if (beforeBcwSend is not null) await beforeBcwSend(request);
                     await Task.Run(() => _bcwSerials.Outcome(request.CycleId, "Sending", "Physical print ACK unavailable"));
-                    LabelPrintTransportResult result = await PrintSerializedAsync(request, ct);
+                    LabelPrintTransportResult result = await PrintSerializedAsync(request, ct, productionSnapshot);
                     result = result with { Message = result.Message + $" BCW QR={request.Data.Barcode}; physical print ACK unavailable." };
                     await Task.Run(() => _bcwSerials.Outcome(request.CycleId, result.Printed ? "Sent" : "Failed", result.Message));
                     return result with { EffectiveRequest = request };
@@ -113,7 +124,7 @@ public sealed class LabelPrintService : IAsyncDisposable
                     throw;
                 }
             }
-            return await PrintSerializedAsync(request, ct);
+            return await PrintSerializedAsync(request, ct, productionSnapshot);
         }
         finally
         {
@@ -123,8 +134,11 @@ public sealed class LabelPrintService : IAsyncDisposable
 
     private async Task<LabelPrintTransportResult> PrintSerializedAsync(
         LabelPrintRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool productionComOnly = false)
     {
+        if (productionComOnly && string.IsNullOrWhiteSpace(request.PrinterCom))
+            return new LabelPrintTransportResult(false, "Production payload saved; printer COM is not selected.");
         string transport = ResolveTransportName(request);
         AsyncFileLogService.Current.Application(
             $"[LABEL] Product={request.Data.PartNumber} Profile={request.Profile.Id} " +
@@ -133,7 +147,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         Encoding encoding = ResolveEncoding(request.Profile.EncodingName);
         byte[] payload = EncodeStrict(request.Payload, encoding);
 
-        if (request.Profile.Mode == LabelPrintMode.ExternalHelper)
+        if (!productionComOnly && request.Profile.Mode == LabelPrintMode.ExternalHelper)
             return await PrintWithExternalHelperAsync(request, payload, ct);
 
         if (!string.IsNullOrWhiteSpace(request.PrinterCom))

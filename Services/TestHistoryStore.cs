@@ -1980,12 +1980,12 @@ public sealed class TestHistoryStore
         SearchCore(criteria, exportAll: false, includeLabelPayload: false, applyLimit: false);
 
     public IReadOnlyList<TestHistoryRecord> SearchForExport(HistorySearchCriteria criteria) =>
-        SearchCore(criteria, exportAll: true, includeLabelPayload: false);
+        SearchCore(criteria, exportAll: true, includeLabelPayload: true);
 
     public IEnumerable<TestHistoryRecord> EnumerateForExport(HistorySearchCriteria criteria)
     {
         ArgumentNullException.ThrowIfNull(criteria);
-        return EnumerateCore(criteria, exportAll: true, includeLabelPayload: false);
+        return EnumerateCore(criteria, exportAll: true, includeLabelPayload: true);
     }
 
     public HistorySummary GetHistorySummary(HistorySearchCriteria criteria)

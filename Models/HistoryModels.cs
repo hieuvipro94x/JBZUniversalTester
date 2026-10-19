@@ -72,8 +72,8 @@ public sealed class TestHistoryRecord
     public string LabelTypeText => !string.IsNullOrWhiteSpace(LabelTemplateType)
         ? LabelTemplateType
         : LabelProfile;
-    // BarcodeValue chỉ được chốt sau khi sản phẩm PASS và máy in xác nhận thành công.
-    // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
+    // PASS keeps its original printer command even when no printer is connected.
+    // Older rows without a payload retain their saved barcode as a fallback.
     public string BarcodeOutputText => BarcodeValue ?? string.Empty;
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
     // The original export keeps Lot empty and puts the saved production LOT
@@ -106,11 +106,11 @@ public sealed class TestHistoryRecord
     public string ExportBarcodeInputText => string.Empty;
     public string ExportBarcodeText =>
         IsProductionRecord &&
-        Passed &&
-        string.Equals(PrintStatus, LabelPrintStatus.Printed.ToString(), StringComparison.OrdinalIgnoreCase)
-            ? BarcodeOutputText
+        Passed
+            ? !string.IsNullOrEmpty(LabelPayload) ? LabelPayload : BarcodeOutputText
             : string.Empty;
     public string ExportPercentText => string.Empty;
+    public string PrinterCommandSingleLineText => SingleLineLog(ExportBarcodeText);
     public string ExportIncomingInspectionText => string.Empty;
     public string ExportResistanceText => KoreanHistoryFormatter.FormatResistanceSummary(Resistance);
     public DateTime EffectiveInstallStartedAt => InstallStartedAt ?? Started;
@@ -194,8 +194,6 @@ public sealed class TestHistoryRecord
             }
             if (!string.IsNullOrWhiteSpace(LabelTypeText))
                 parts.Add($"[라벨]{LabelTypeText.Trim()}");
-            if (!string.IsNullOrWhiteSpace(PrintStatus))
-                parts.Add($"[인쇄]{KoreanPrintStatus(PrintStatus)}");
             if (!string.IsNullOrWhiteSpace(DeviceName))
                 parts.Add($"[검사기]{DeviceName.Trim()}");
             return string.Join(' ', parts);

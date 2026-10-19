@@ -100,8 +100,8 @@ internal static partial class Program
             Assert(request.Data.PartNumber == "OE366-33050" && request.Data.BcwVehicleCode == "09" && request.Data.BcwPosition == "LH",
                 "Automatic BCW uses THT values before machine defaults, independent of the manual-print picker");
             var gate = typeof(TestViewModel).GetMethod("ShouldAutoPrintLabel", BindingFlags.NonPublic|BindingFlags.Static)!;
-            Assert((bool)gate.Invoke(null,[true,true])! && !(bool)gate.Invoke(null,[false,true])! && !(bool)gate.Invoke(null,[true,false])!,
-                "Automatic BCW follows the existing PASS plus enabled-print gate; FAIL/disabled never auto-print");
+            Assert((bool)gate.Invoke(null,[true,true])! && !(bool)gate.Invoke(null,[false,true])! && (bool)gate.Invoke(null,[true,false])!,
+                "Every production PASS captures a BCW label even when an old config has automatic printing OFF; FAIL never prints");
             history.LabelPayload = request.Payload;
             var store = new TestHistoryStore(Path.Combine(root,"history.db"));
             long id = store.Add(history);

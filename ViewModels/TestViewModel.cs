@@ -117,7 +117,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private readonly object _historyStoreGate = new();
     private TestHistoryStore? _historyStore;
     private ProductionPersistenceService? _productionPersistence;
-    private readonly LabelPrintService _labelPrintService = new();
+    private readonly LabelPrintService _labelPrintService;
     private readonly AppSoundService _sound = AppSoundService.Current;
     private readonly DiscardContactInterlock _discardInterlock = new();
     private readonly ThtModelParser _modelParser = new();
@@ -1195,7 +1195,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         AppSettings settings,
         ProductionSettings productionSettings,
         LegacyPhtHistoryService? legacyHistory = null,
-        bool requireStartupIoClear = true)
+        bool requireStartupIoClear = true,
+        LabelPrintService? labelPrintService = null)
     {
         _main = main;
         _engine = engine;
@@ -1205,6 +1206,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _waterProof = waterProof;
         _settings = settings;
         _productionSettings = productionSettings;
+        _labelPrintService = labelPrintService ?? new LabelPrintService();
 
         // ALWAYS_PROBE_2026-09-05:
         // Test pointer không còn là tùy chọn vận hành. Que dò luôn hoạt động.
@@ -11940,14 +11942,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         bool autoPrintRequested = ShouldAutoPrintLabel(
             passed,
             _productionSettings.AutoPrintLabelOnPass);
-        bool shouldAutoPrint = autoPrintRequested &&
-                               HasConfiguredLabelTransport(_productionSettings.Label);
-        if (autoPrintRequested && !shouldAutoPrint)
-        {
-            AddLog(
-                "LABEL SKIPPED: AutoPrintLabelOnPass đang bật nhưng chưa cấu hình " +
-                "PrinterName/PrinterCom/RawDestination/ExternalHelperPath; kết quả PASS vẫn được lưu bình thường.");
-        }
+        bool shouldAutoPrint = autoPrintRequested;
         long completedLot = passed
             ? _lotSequence.ReserveForCycle(cycleId)
             : _lotSequence.NextLot;
@@ -12053,13 +12048,26 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     out LabelIdentity? identity,
                     out labelPreparationError))
             {
-                history.LabelSerial = identity!.SerialText;
-                history.LabelProfile = printRequest!.FormatName;
-                history.LabelTemplateType = LabelProfileResolver.NormalizeTemplateType(
-                    _productionSettings.Label.TemplateType);
-                history.LabelPayload = printRequest.Payload;
-                history.Printer = printRequest.Printer;
-                history.LabelCopies = printRequest.Copies;
+                history.LabelTemplateType = LabelProfileResolver.NormalizeTemplateType(_productionSettings.Label.TemplateType);
+                try
+                {
+                    printRequest = await _labelPrintService.CaptureProductionRequestAsync(printRequest!, cycleToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    labelPreparationError = ex.Message;
+                    printRequest = null;
+                    history.PrintStatus = LabelPrintStatus.Failed.ToString();
+                    AddLog($"LABEL SNAPSHOT FAILED: cycle {cycleId}; {ex.Message}; product result preserved.");
+                }
+                if (printRequest is not null)
+                {
+                    history.LabelSerial = printRequest.Profile.Id == LabelSettings.BcwTemplate ? printRequest.Data.Barcode : identity!.SerialText;
+                    history.LabelProfile = printRequest.FormatName;
+                    history.LabelPayload = printRequest.Payload;
+                    history.Printer = printRequest.Printer;
+                    history.LabelCopies = printRequest.Copies;
+                }
             }
             else
             {
@@ -12068,7 +12076,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 // production, đổi PASS thành EquipmentError hoặc làm mất ARM
                 // ProductRemoved. Vẫn lưu history với trạng thái in thất bại.
                 history.PrintStatus = LabelPrintStatus.Failed.ToString();
-                history.PrintMessage = $"Label preparation failed: {labelPreparationError}";
+                history.PrintMessage = string.Empty;
                 AddLog($"LABEL PREPARATION FAILED: cycle {cycleId}; {labelPreparationError}. Kết quả sản phẩm vẫn PASS.");
                 InvokeUi(() => LabelStatusText = $"LỖI CẤU HÌNH TEM - LOT {completedLot}: {labelPreparationError}");
             }
@@ -12263,8 +12271,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
-    private static bool ShouldAutoPrintLabel(bool passed, bool autoPrintEnabled) =>
-        passed && autoPrintEnabled;
+    private static bool ShouldAutoPrintLabel(bool passed, bool autoPrintEnabled) => passed;
 
     private static bool HasConfiguredLabelTransport(LabelSettings settings) =>
         !string.IsNullOrWhiteSpace(settings.PrinterName) ||
@@ -12493,7 +12500,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
                 request, _lifetimeCts.Token,
                 explicitReprint: explicitBcwReprint,
-                beforeBcwSend: effective => ProductionPersistence.SaveBcwLabelSnapshotAsync(historyId, request.CycleId, effective, _lifetimeCts.Token));
+                beforeBcwSend: effective => ProductionPersistence.SaveBcwLabelSnapshotAsync(historyId, request.CycleId, effective, _lifetimeCts.Token),
+                productionSnapshot: !explicitBcwReprint);
             request = result.EffectiveRequest ?? request;
 
             LabelPrintStatus status = result.Printed
@@ -12506,7 +12514,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 request.CycleId,
                 status,
                 printedAt,
-                result.Message,
+                string.Empty,
                 status == LabelPrintStatus.Printed ? request.Data.Barcode : null);
             AddLog($"LABEL {(result.Printed ? "SENT" : "FAILED")}: cycle {request.CycleId}; {result.Message}");
 
@@ -12519,15 +12527,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (!result.Printed)
             {
                 SetFailedLabelContext(new LabelPrintContext(request, historyStore, historyId), result.Message);
-                ShowLabelWarning(
-                    "Sản phẩm đã PASS nhưng chưa in được tem. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
             }
         }
         catch (OperationCanceledException)
         {
             const string message = "Giao dịch in bị hủy; trạng thái tem vật lý chưa thể xác định. Không tự retry.";
             await UpdateLabelPrintOutcomeSafeAsync(
-                historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
+                historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, string.Empty);
             AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
             SetUnknownLabelStatus(request, message);
         }
@@ -12535,11 +12541,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             string message = $"Printer/driver/transport error: {ex.Message}. Trạng thái tem vật lý chưa xác định; không tự retry.";
             await UpdateLabelPrintOutcomeSafeAsync(
-                historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, message);
+                historyStore, historyId, request.CycleId, LabelPrintStatus.Unknown, null, string.Empty);
             AddLog($"LABEL UNKNOWN: cycle {request.CycleId}; {message}");
             SetUnknownLabelStatus(request, message);
-            ShowLabelWarning(
-                "Sản phẩm vẫn PASS nhưng chưa xác định được trạng thái in tem. Không tự in lại để tránh trùng tem.");
         }
     }
 
@@ -12602,7 +12606,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         InvokeUi(() =>
         {
-            LabelStatusText = $"LỖI IN TEM - LOT {context.Request.Data.LotNo}";
+            LabelStatusText = $"TEM: ĐÃ LƯU DỮ LIỆU LOT {context.Request.Data.LotNo}";
             Raise(nameof(CanRetryLabel));
             RetryLabelCommand.RaiseCanExecuteChanged();
         });
@@ -12639,7 +12643,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         InvokeUi(() =>
         {
-            LabelStatusText = $"TEM CHƯA XÁC ĐỊNH - LOT {request.Data.LotNo}";
+            LabelStatusText = $"TEM: ĐÃ LƯU DỮ LIỆU LOT {request.Data.LotNo}";
             Raise(nameof(CanRetryLabel));
             RetryLabelCommand.RaiseCanExecuteChanged();
         });

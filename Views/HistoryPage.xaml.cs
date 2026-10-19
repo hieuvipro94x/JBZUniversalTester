@@ -114,7 +114,7 @@ public partial class HistoryPage : UserControl
             _passOrdinalsByProduct.Clear();
             Task<HistorySummary> summaryTask = Task.Run(() => GetStore().GetHistorySummary(criteria));
             Task<IReadOnlyList<TestHistoryRecord>> pageTask = Task.Run(() =>
-                GetStore().SearchSummary(criteria with { MaxRows = PageSize, Offset = 0 }));
+                GetStore().Search(criteria with { MaxRows = PageSize, Offset = 0 }));
             await Task.WhenAll(summaryTask, pageTask);
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
@@ -174,7 +174,7 @@ public partial class HistoryPage : UserControl
                 BeforeHistoryAt = cursor.EffectiveTestStartedAt,
                 BeforeId = cursor.Id
             };
-            IReadOnlyList<TestHistoryRecord> page = await Task.Run(() => GetStore().SearchSummary(pageCriteria));
+            IReadOnlyList<TestHistoryRecord> page = await Task.Run(() => GetStore().Search(pageCriteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
             HistoryPresentation.AssignProductOrdinals(page, _passOrdinalsByProduct);

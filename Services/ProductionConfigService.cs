@@ -120,15 +120,14 @@ public static class ProductionConfigService
     }
 
     /// <summary>
-    /// V12: UniversalTester.cfg dùng tên key tiếng Anh 100% và ghi ĐẦY ĐỦ
-    /// mọi trường trên màn Cài đặt. Tên method được giữ để code cũ vẫn gọi được.
+    /// Writes required runtime settings and nonempty label overrides. Legacy
+    /// readers/method names remain supported; obsolete aliases are read only.
     /// </summary>
     public static void SaveLegacyCfg(ProductionSettings settings, string path)
     {
         Normalize(settings);
         var lines = new List<string>
         {
-            $"[CardCount]{settings.CardCount}",
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
             $"[StartCardNumber]{settings.StartCardNumber}",
             $"[IoConfirm1]{settings.IoConfirm1}",
@@ -138,7 +137,6 @@ public static class ProductionConfigService
             $"[MasterSelectedFaultSamples]{(int)settings.MasterSelectedFaultSamples}",
             $"[MasterOpenFaultRequiredCount]{settings.MasterOpenFaultRequiredCount}",
             $"[MasterSampleType]{(int)settings.MasterSampleType}",
-            $"[WaterproofSerialPort]{settings.WaterproofSerialPort}",
             $"[WaterProofPortName]{settings.WaterProofMachine.PortName}",
             $"[WaterProofBaudRate]{settings.WaterProofMachine.BaudRate}",
             $"[WaterProofAutoConnect]{Bool(settings.WaterProofMachine.AutoConnect)}",
@@ -152,8 +150,6 @@ public static class ProductionConfigService
             $"[DeviceNumber]{settings.DeviceNumber}",
             $"[OperatorCompany]{settings.OperatorCompany}",
             $"[ProductionLine]{settings.ProductionLine}",
-            $"[TemperatureTolerance]{F(settings.TemperatureTolerance)}",
-            $"[MinimumErrorLogValue]{settings.MinimumErrorLogValue}",
             $"[AutoSaveErrors]{Bool(settings.AutoSaveErrors)}",
             $"[EnableSystemLogs]{Bool(settings.EnableSystemLogs)}",
             $"[WiringFaultConfirmationEnabled]{Bool(settings.WiringFaultConfirmationEnabled)}",
@@ -168,9 +164,6 @@ public static class ProductionConfigService
             $"[RelayWiringMode]{settings.RelayWiringMode}",
             $"[FaultJigRelayNumber]{settings.FaultJigRelayNumber}",
             $"[PassMarkingToJigDelayMs]{settings.PassMarkingToJigDelayMs}",
-            $"[StampDelayMs]{settings.Relay1JigPulseMs},{settings.Relay2MarkingPulseMs}", // compatibility
-            $"[OversizeWaitSeconds]{settings.OversizeWaitSeconds}",
-            $"[ShieldDelayMs]{settings.ShieldDelay}",
             $"[ResistanceDelayMs]{settings.ResistanceDelayMs}",
             $"[ItemHeight]{settings.ItemHeight}",
             $"[ScrollDelayMs]{settings.ScrollDelay}",
@@ -180,7 +173,6 @@ public static class ProductionConfigService
 
             $"[LastThtPath]{settings.LastThtPath}",
             $"[LastThtPartKey]{settings.LastThtPartKey}",
-            $"[AutoPrintLabelOnPass]{Bool(settings.AutoPrintLabelOnPass)}",
             $"[HistoryDirectory]{settings.HistoryDirectory}",
 
             $"[BcwVehicleCode]{settings.Label.BcwVehicleCode}",
@@ -206,20 +198,6 @@ public static class ProductionConfigService
             $"[LabelExternalHelperArgument]{settings.Label.ExternalHelperArgument}",
             $"[LabelExternalPrintFile]{settings.Label.ExternalPrintFile}"
         };
-
-        foreach ((string modelKey, MasterSampleType sampleType) in settings.MasterSampleTypesByModel)
-            lines.Add($"[MasterSample.{Uri.EscapeDataString(modelKey)}]{(int)sampleType}");
-        foreach ((string modelKey, MasterSampleSelection selected) in settings.MasterSelectedFaultSamplesByModel)
-            lines.Add($"[MasterSelected.{Uri.EscapeDataString(modelKey)}]{(int)selected}");
-        foreach ((string modelKey, int count) in settings.MasterOpenFaultCountsByModel)
-            lines.Add($"[MasterOpenFault.{Uri.EscapeDataString(modelKey)}]{count}");
-
-        foreach ((string modelKey, int requiredCount) in settings.MasterFaultCountsByModel
-                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            string encodedKey = Uri.EscapeDataString(modelKey);
-            lines.Add($"[MasterFault.{encodedKey}]{requiredCount}");
-        }
 
         foreach ((string productKey, ProductLotSettings lot) in settings.LotSettingsByProduct
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
@@ -248,7 +226,11 @@ public static class ProductionConfigService
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
         {
             string encodedKey = Uri.EscapeDataString(modelKey);
-            foreach (ResistanceChannelSetting resistance in ResistanceMeasurementPlan.Normalize(profile))
+            // R1 keeps the explicit profile present (including all-disabled).
+            // Missing default slots are restored by the existing R1-R10 reader.
+            foreach (ResistanceChannelSetting resistance in ResistanceMeasurementPlan.Normalize(profile)
+                         .Where((slot, index) => index == 0 || slot.Enabled || slot.Channel != index + 1 ||
+                                                slot.MinOhm != 0 || slot.MaxOhm != 0))
             {
                 lines.Add(
                     $"[Resistance.Model.{encodedKey}.{resistance.Name}]" +
@@ -269,6 +251,12 @@ public static class ProductionConfigService
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
 
+        // Missing optional strings load their existing empty defaults.
+        lines.RemoveAll(line =>
+        {
+            string key = ParseCfgLine(line).Key;
+            return line.EndsWith(']') && (key.StartsWith("Label", StringComparison.Ordinal) || key == "BcwVehicleCode");
+        });
         AtomicWrite(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
@@ -747,6 +735,7 @@ public static class ProductionConfigService
 
     private static void Normalize(ProductionSettings settings)
     {
+        settings.AutoPrintLabelOnPass = true;
         settings.MissingConnectionConfirmationSeconds = Math.Clamp(settings.MissingConnectionConfirmationSeconds, 1, 120);
         if (!Enum.IsDefined(typeof(BoardMode), settings.BoardMode))
             settings.BoardMode = BoardMode.Auto;

@@ -79,7 +79,7 @@ internal static partial class Program
                 ProductionConfigService.SaveLegacyCfg(new ProductionSettings { DeviceName = "WRITER-" + index }, cfg))))
                 .GetAwaiter().GetResult();
             string saved = File.ReadAllText(cfg);
-            Assert(saved.Contains("[DeviceName]WRITER-") && saved.Split("[CardCount]").Length == 2 && !File.Exists(cfg + ".tmp"),
+            Assert(saved.Contains("[DeviceName]WRITER-") && saved.Split("[ExpansionCardCount]").Length == 2 && !File.Exists(cfg + ".tmp"),
                 "Concurrent config writers cannot collide on the atomic temporary file or leave a partial config");
             Assert(ProductionConfigService.LoadSavedSettings(cfg).DeviceName.StartsWith("WRITER-"),
                 "Applying settings reads the complete persisted configuration");

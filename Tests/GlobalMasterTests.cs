@@ -352,8 +352,9 @@ internal static partial class Program
                 BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, new object[] { configPath })!;
             Assert(ProductionConfigService.GetMasterSampleRequiredCount(reload, second) == 3 &&
                    ProductionConfigService.GetMasterOpenFaultRequiredCount(reload, second) == 2 &&
-                   reload.MasterFaultCountsByModel[first.PartNumber] == 4,
-                "Shared settings survive CFG reload while legacy entries are preserved");
+                   reload.MasterFaultCountsByModel.Count == 0 &&
+                   !File.ReadAllText(configPath).Contains("[MasterFault.", StringComparison.Ordinal),
+                "Shared settings survive CFG reload without writing unused per-model Master archives");
 
             TestViewModel vm = CreateTestViewModel(settings);
             LoadReadyModel(vm, first);
