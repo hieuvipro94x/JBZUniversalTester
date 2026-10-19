@@ -241,7 +241,8 @@ public sealed class WaterProofChannelResult : ObservableObject
 
     public string LiveCellForeground => IsMeasured ? "#FFFFFF" : "#0F172A";
 
-    public string ResultText => !IsMeasured ? "---" : Passed ? "PASS" : "FAIL";
+    public string? ResultTextOverride { get; init; }
+    public string ResultText => ResultTextOverride ?? (!IsMeasured ? "---" : Passed ? "PASS" : "FAIL");
 
     private void RaiseDisplay()
     {

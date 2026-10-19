@@ -557,6 +557,10 @@
                     <Setter Property="Background" Value="{StaticResource PiFailBrush}"/>
                     <Setter Property="Foreground" Value="White"/>
                 </DataTrigger>
+                <DataTrigger Binding="{Binding ResultText}" Value="NG LEAK">
+                    <Setter Property="Background" Value="{StaticResource PiFailBrush}"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </DataTrigger>
             </Style.Triggers>
         </Style>
 

@@ -434,6 +434,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public ObservableCollection<ResistanceResult> ResistanceDisplayRows { get; } = new();
     public ObservableCollection<WaterProofChannelResult> WaterProofChannels { get; } = new();
     public ObservableCollection<WaterProofChannelResult> FinalWaterProofRows { get; } = new();
+    private IReadOnlyList<WaterProofChannelMeasurement>? _pendingLeakFailureMeasurements;
     public bool IsWaterProofCardVisible => _model is not null && _waterProofProfile.Enabled;
     public string WaterProofStageText => _waterProofStageText;
     public string WaterProofOverallResult => _waterProofOverallResult;
@@ -627,6 +628,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         get
         {
+            if (SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null &&
+                !IsDeviceFault && !IsPersistenceFault)
+                return "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT";
             if (!IsMasterSequenceActive || IsDeviceFault || IsPersistenceFault ||
                 _dailyMasterAwaitingRemoval || IsProductRemovalPending)
                 return ProductionPresentationService.GetResultStatusText(this);
@@ -655,7 +659,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// chờ/đang kiểm tra dùng nền vàng dễ quan sát từ xa.
     /// </summary>
     public string StateBackground =>
-        ProductionPresentationService.GetStateBackground(this);
+        SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null
+            ? "#C62828"
+            : ProductionPresentationService.GetStateBackground(this);
 
     public string StateForeground =>
         ProductionPresentationService.GetStateForeground(StateBackground);
@@ -1142,7 +1148,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 value = 0;
             if (Set(ref _selectedOperationTabIndex, value))
             {
-                if (value != 2) FinalWaterProofRows.Clear();
+                if (value != 2)
+                {
+                    FinalWaterProofRows.Clear();
+                    _pendingLeakFailureMeasurements = null;
+                }
+                Raise(nameof(ResultStatusText));
+                Raise(nameof(StateBackground));
+                Raise(nameof(StateForeground));
                 RaiseCenterPresentation();
             }
         }
@@ -3429,6 +3442,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (!IsProductionFaultContext(generation))
             return;
 
+        ObservePassedWaterProofConnectorRemoval();
+
         ProductionElectricalSnapshot electrical =
             rowsSnapshot?.Electrical ?? _engine.GetProductionElectricalSnapshot();
         ApplyAuthoritativeProductionState(electrical);
@@ -3587,6 +3602,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 WaterProofRetestConnectorState.Running)
             {
                 ObserveWaterProofRetestConnectorCycle(generation);
+                UpdatePendingWaterProofFailurePresentation();
                 return;
             }
 
@@ -3594,6 +3610,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 ObserveWaterProofRetestConnectorCycle(generation);
             }
+            UpdatePendingWaterProofFailurePresentation();
             return;
         }
 
@@ -9374,6 +9391,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (measurements.Length != _waterProofProfile.EnabledChannelCount || measurements.Any(item => !item.Passed))
             return;
 
+        _pendingLeakFailureMeasurements = null;
         FinalWaterProofRows.Clear();
         foreach (WaterProofChannelMeasurement measurement in measurements)
             FinalWaterProofRows.Add(new WaterProofChannelResult
@@ -9389,6 +9407,51 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 Passed = true
             });
         SelectedOperationTabIndex = 2;
+    }
+
+    private void UpdatePendingWaterProofFailurePresentation()
+    {
+        bool show = _cycleActive && MasterApproved && !IsDeviceFault && !IsPersistenceFault &&
+            IsRuntimeMode(RuntimeMode.Production) && IsWaterProofEnabledForCurrentModel() &&
+            CurrentProductionPhase == ProductionPhase.WaterProof &&
+            !_waitForProductRelease && !_waitForFaultProductRemoval &&
+            Volatile.Read(ref _waterProofRunning) == 0 &&
+            Volatile.Read(ref _probeSessionActive) == 0 && Volatile.Read(ref _inlineProbeContactIo) == 0 &&
+            _engine.LastFrameValid && _engine.ContinuityPassed && !_engine.HasWiringFault &&
+            _lastWaterProofMeasurements.Any(item => item.Enabled && !item.Passed &&
+                _waterProofProfile.IsChannelEnabled(item.Channel));
+        if (!show)
+        {
+            if (_pendingLeakFailureMeasurements is not null)
+                SelectedOperationTabIndex = 0;
+            return;
+        }
+
+        // Projection only: retain the active cycle and connector retry state.
+        // Do not rebuild bound rows on every incoming D2XX frame.
+        if (!ReferenceEquals(_pendingLeakFailureMeasurements, _lastWaterProofMeasurements) ||
+            SelectedOperationTabIndex != 2)
+        {
+            FinalWaterProofRows.Clear();
+            foreach (int channel in Enumerable.Range(1, 3).Where(_waterProofProfile.IsChannelEnabled))
+            {
+                WaterProofChannelMeasurement? measurement = _lastWaterProofMeasurements
+                    .FirstOrDefault(item => item.Enabled && item.Channel == channel);
+                FinalWaterProofRows.Add(new WaterProofChannelResult
+                {
+                    Channel = channel, Enabled = true,
+                    Connector = _waterProofProfile.ConnectorForChannel(channel),
+                    FirstResultPressure = measurement?.FirstPressure,
+                    SecondResultPressure = measurement?.SecondPressure,
+                    Leak = measurement?.Leak, LeakLimit = _waterProofProfile.LeakLimit,
+                    IsMeasured = measurement is not null, Passed = measurement?.Passed == true,
+                    ResultTextOverride = measurement is { Passed: false } ? "NG LEAK" : null
+                });
+            }
+            _pendingLeakFailureMeasurements = _lastWaterProofMeasurements;
+            SelectedOperationTabIndex = 2;
+        }
+        State = "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT";
     }
 
     private bool IsResistanceEnabledForModel(ProductModel? model) =>
@@ -9444,11 +9507,37 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .Where(channel => channel.Enabled && channel.Passed)
             .Aggregate(0, (mask, channel) => mask | (1 << (channel.Channel - 1)));
         Interlocked.Or(ref _waterProofPassedChannelsMask, passedMask);
-        if ((Volatile.Read(ref _waterProofPassedChannelsMask) & RequiredWaterProofChannelMask()) ==
-            RequiredWaterProofChannelMask())
-        {
-            Interlocked.Exchange(ref _preContinuityWaterProofPassed, 1);
-        }
+        Interlocked.Exchange(ref _preContinuityWaterProofPassed,
+            (Volatile.Read(ref _waterProofPassedChannelsMask) & RequiredWaterProofChannelMask()) ==
+            RequiredWaterProofChannelMask() ? 1 : 0);
+    }
+
+    private void ObservePassedWaterProofConnectorRemoval()
+    {
+        // Only an unfinished product may lose its Leak qualification. A durable
+        // production PASS and its removal/relay lifecycle remain immutable.
+        if (!_cycleActive || !MasterApproved || !IsWaterProofEnabledForCurrentModel() ||
+            !IsRuntimeMode(RuntimeMode.Production) || !_engine.LastFrameValid ||
+            Volatile.Read(ref _probeSessionActive) != 0 ||
+            Volatile.Read(ref _inlineProbeContactIo) != 0 ||
+            _waitForProductRelease || _waitForFaultProductRemoval ||
+            CurrentProductionPhase is not (ProductionPhase.Continuity or ProductionPhase.WaterProof))
+            return;
+
+        int passedMask = Volatile.Read(ref _waterProofPassedChannelsMask);
+        int removedMask = Enumerable.Range(1, 3)
+            .Where(channel => _waterProofProfile.IsChannelEnabled(channel) &&
+                (passedMask & (1 << (channel - 1))) != 0 &&
+                IsWaterProofConnectorTriggerDisconnected(_waterProofProfile.ConnectorForChannel(channel)))
+            .Aggregate(0, (mask, channel) => mask | (1 << (channel - 1)));
+        if (removedMask == 0) return;
+
+        Interlocked.And(ref _waterProofPassedChannelsMask, ~removedMask);
+        Interlocked.Exchange(ref _preContinuityWaterProofPassed, 0);
+        _cycleContinuityCompletedAt = null;
+        _cycleWaterProofCompletedAt = null;
+        AddLog($"[WATERPROOF] Connector đã tháo; hủy PASS Leak của kênh mask={removedMask}; " +
+               "lắp lại connector sẽ chạy lại kênh tương ứng, giữ nguyên các kênh khác.");
     }
 
     private void OpenWaterProofWindow(ProductModel model, WaterProofModelSettings? runProfile = null)
@@ -10152,7 +10241,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     await StartProductionScanAndVerifyFrameAsync(
                         CurrentCycleToken(),
                         "WATERPROOF_RETEST_COMPLETE");
-                    if (CurrentProductionPhase == ProductionPhase.Continuity)
+                    if (CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaterProof)
                         await InvokeUiAsync(() => ProcessEngineChangedOnUi(generation));
                 }
                 catch (Exception scanEx)
@@ -10433,7 +10522,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 {
                     await StartProductionScanAndVerifyFrameAsync(
                         CurrentCycleToken(), "WATERPROOF_CONNECTOR_COMPLETE");
-                    if (CurrentProductionPhase == ProductionPhase.Continuity)
+                    if (CurrentProductionPhase is ProductionPhase.Continuity or ProductionPhase.WaterProof)
                         await InvokeUiAsync(() => ProcessEngineChangedOnUi(generation));
                 }
                 catch (Exception ex)
@@ -10892,6 +10981,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // MARKING/JIG được phép tác động, để không có sản phẩm đã eject nhưng
             // lịch sử lại mất khi DB/schema/ổ đĩa lỗi.
             await WaitForProbeRelayInterlockAsync(ct);
+            if (IsWaterProofEnabledForCurrentModel() &&
+                Volatile.Read(ref _preContinuityWaterProofPassed) == 0)
+            {
+                Interlocked.Exchange(ref _postContinuityStarted, 0);
+                SetProductionPhase(ProductionPhase.Continuity);
+                State = "ĐANG KIỂM TRA...";
+                AddLog("[WATERPROOF] Chặn PASS sản phẩm: connector Leak đã tháo, cần chạy lại Leak.");
+                return;
+            }
             // Continuity đã được chốt trước khi vào bước điện trở cuối cùng.
             // Các thao tác đo có thể dừng scan nên dùng snapshot đã xác nhận.
             bool continuityLatchedForFinalPass = _cycleContinuityCompletedAt.HasValue;

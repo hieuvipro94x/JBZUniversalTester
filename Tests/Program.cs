@@ -20,6 +20,22 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-leak-ng", string previewPath])
+        {
+            RenderLeakSummaryPreview(previewPath);
+            return 0;
+        }
+        if (args is ["--test-early-leak"])
+        {
+            TestLeakFailureSummary();
+            TestFinalLeakResultTable();
+            TestPassedLeakReconnect();
+            TestEarlyLeakSharedRet();
+            TestLeakWithoutRetTrigger();
+            TestLeakIndependentContinuityPresentation();
+            Console.WriteLine("PASS: Early Leak per-connector trigger and retry isolation");
+            return 0;
+        }
         if (args is ["--test-good-master-sound"])
         {
             TestGoodMasterWiringSound();
@@ -226,6 +242,9 @@ internal static partial class Program
             ("All Master samples persist detailed installation, confirmation and removal history", TestDetailedMasterHistory),
             ("Master transitions only through explicitly selected NG samples", TestMasterSelectedSamplesOnly),
             ("Committed PASS rejects stale installation rows until actual removal", TestCommittedPassRejectsInstallationRows),
+            ("Continuity PASS with Leak NG shows separate results and preserves connector retry", TestLeakFailureSummary),
+            ("Passed Leak channel removal requires a new run on reconnect", TestPassedLeakReconnect),
+            ("Leak shared RET starts on the fitted connector before complete continuity", TestEarlyLeakSharedRet),
             ("Leak connector without RET uses only expected IO edges to another connector", TestLeakWithoutRetTrigger),
             ("Leak keeps continuity rows live and retries only the failed connector", TestLeakIndependentContinuityPresentation),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),

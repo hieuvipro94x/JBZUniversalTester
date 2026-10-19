@@ -2960,8 +2960,30 @@ public sealed class TestEngine : IDisposable
 
             if (HasRetTopology(selected))
             {
-                connected = HasConnectedRetWire(selected);
-                disconnected = IsRetWireDisconnected(selected);
+                // Installation of this connector must not wait for every other
+                // endpoint of a shared RET net. One declared local RET edge is
+                // sufficient; final continuity still validates the whole net.
+                bool suppressedRetEdge = false;
+                foreach (WireNet net in _model.Nets.Where(net =>
+                             IsEligibleProductionNet(net) && IsRetWireName(net.Name)))
+                {
+                    foreach (PinRecord pin in net.Pins.Where(pin => string.Equals(
+                                 pin.Connector, selected, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        foreach (PinRecord peer in net.Pins)
+                        {
+                            if (pin.IoNumber <= 0 || peer.IoNumber <= 0 || pin.IoNumber == peer.IoNumber ||
+                                _model.IgnoredIo.Contains(pin.IoNumber) || _model.IgnoredIo.Contains(peer.IoNumber))
+                                continue;
+                            bool edgePresent = HasElectricalEdge(_currentConnections, pin.IoNumber, peer.IoNumber);
+                            bool productEdge = IsProductConnectivityEdgeUnsafe(_model, pin.IoNumber, peer.IoNumber);
+                            connected |= productEdge && edgePresent;
+                            suppressedRetEdge |= !productEdge && edgePresent;
+                        }
+                    }
+                }
+                // A partially fitted RET is not a removal/reconnect event.
+                disconnected = !connected && !suppressedRetEdge;
                 return true;
             }
 
