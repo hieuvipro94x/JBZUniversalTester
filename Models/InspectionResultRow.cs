@@ -23,7 +23,7 @@ public sealed class InspectionResultRow : ObservableObject, IDisposable
     }
     public bool IsResistance => _resistance is not null;
     public string Name => _resistance?.Name ?? "TEST LEAK";
-    public string ChannelText => _resistance?.ChannelText ?? _leak!.ChannelText;
+    public string ChannelText => _resistance?.ChannelText ?? $"CH{_leak!.Channel}";
     public string MinDisplayText => _resistance?.MinDisplayText ?? "—";
     public string Display => _resistance?.Display ?? "—";
     public string MaxDisplayText => _resistance?.MaxDisplayText ?? "—";

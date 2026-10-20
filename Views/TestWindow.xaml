@@ -956,7 +956,7 @@
                       RowHeight="36">
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="LO&#7840;I" Binding="{Binding Name}" Width="2*" CellStyle="{StaticResource PiCellStyle}" ElementStyle="{StaticResource PiGridTextStyle}"/>
-                    <DataGridTextColumn Header="KÊNH / CONNECTOR" Binding="{Binding ChannelText}" Width="2*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
+                    <DataGridTextColumn Header="KÊNH" Binding="{Binding ChannelText}" Width="2*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn x:Name="ResistanceMinColumn" Header="MIN Ω" Binding="{Binding MinDisplayText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn x:Name="ResistanceValueColumn" Header="ĐIỆN TRỞ" Binding="{Binding Display}" Width="1.8*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn x:Name="ResistanceMaxColumn" Header="MAX Ω" Binding="{Binding MaxDisplayText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>

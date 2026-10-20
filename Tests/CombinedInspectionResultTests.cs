@@ -43,7 +43,8 @@ internal static partial class Program
             {
                 Call("ShowFinalWaterProofResults");
                 var display = vm.InspectionResultRows.Last();
-                Assert(display.Name == "TEST LEAK" && display.FirstPressureText == "84.1" &&
+                Assert(display.Name == "TEST LEAK" && display.ChannelText == "CH1" &&
+                    vm.FinalWaterProofRows[0].Connector == "CN1" && display.FirstPressureText == "84.1" &&
                     display.SecondPressureText == "83.5" && display.LeakText == "0.6" && display.ResultText == "PASS" &&
                     vm.InspectionResultRows.Count == (resistance ? 2 : 1),
                     "Final Leak display preserves all pressures and the preceding resistance rows in one table");
