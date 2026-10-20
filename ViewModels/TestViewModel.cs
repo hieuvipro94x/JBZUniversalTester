@@ -119,6 +119,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private ProductionPersistenceService? _productionPersistence;
     private readonly LabelPrintService _labelPrintService;
     private readonly AppSoundService _sound = AppSoundService.Current;
+    private readonly Func<bool, Task> _playProductionPassSound;
+    private Task? _productionPassSoundTask;
     private readonly DiscardContactInterlock _discardInterlock = new();
     private readonly ThtModelParser _modelParser = new();
     private readonly object _initializationGate = new();
@@ -1209,7 +1211,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ProductionSettings productionSettings,
         LegacyPhtHistoryService? legacyHistory = null,
         bool requireStartupIoClear = true,
-        LabelPrintService? labelPrintService = null)
+        LabelPrintService? labelPrintService = null,
+        Func<bool, Task>? passSoundPlayback = null)
     {
         _main = main;
         _engine = engine;
@@ -1220,6 +1223,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _settings = settings;
         _productionSettings = productionSettings;
         _labelPrintService = labelPrintService ?? new LabelPrintService();
+        _playProductionPassSound = passSoundPlayback ?? _sound.PlayTestOkAsync;
 
         // ALWAYS_PROBE_2026-09-05:
         // Test pointer không còn là tùy chọn vận hành. Que dò luôn hoạt động.
@@ -3911,6 +3915,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ResetCycleInspectionTrace()
     {
+        _productionPassSoundTask = null;
         Interlocked.Exchange(ref _preContinuityWaterProofPassed, 0);
         Interlocked.Exchange(ref _waterProofPassedChannelsMask, 0);
         _waterProofCurrentRunProfile = new WaterProofModelSettings();
@@ -9502,6 +9507,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 // Set the header before publishing the final numeric row so both
                 // bindings paint PASS within this same measurement callback.
                 State = "PASS";
+                StartProductionPassSound(resistancePassed: true);
             }
             UpdateResistanceRows([result]);
         }
@@ -9510,8 +9516,43 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void PublishProductionPassPresentation()
     {
         // Durable product PASS confirms the earlier measured presentation.
-        // Sound, printing, counters and relays still wait for this commit path.
+        // Printing, counters and relays still wait for this commit path.
+        // Resistance PASS audio can already be playing during route recovery.
         State = "PASS";
+    }
+
+    private void StartProductionPassSound(bool resistancePassed)
+    {
+        // Exactly one playback task per product. The measured PASS starts it;
+        // the later durable PASS joins it instead of replaying either WAV.
+        if (_productionPassSoundTask is not null)
+            return;
+        try { _productionPassSoundTask = _playProductionPassSound(resistancePassed); }
+        catch (Exception ex) { _productionPassSoundTask = Task.FromException(ex); }
+    }
+
+    private async Task<bool> WaitForProductionPassSoundAsync(CancellationToken ct)
+    {
+        ProductModel? model = _model;
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        try
+        {
+            await (_productionPassSoundTask ?? throw new InvalidOperationException("PASS audio was not started.")).WaitAsync(ct);
+            ct.ThrowIfCancellationRequested();
+            AddLog("PASS_SOUND_COMPLETE - STAGEOK/DINGDONG hoàn tất; cho phép kiểm tra gate relay.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(model, _model) || generation != Volatile.Read(ref _runtimeGeneration))
+                return false;
+            _cycleActive = false;
+            SetProductionPhase(ProductionPhase.EquipmentError);
+            State = "LỖI ÂM THANH PASS - CHƯA CHẠY RELAY";
+            AddLog($"PASS_SOUND_BLOCKED: {ex.Message}; không chạy MARKING/JIG.");
+            return false;
+        }
     }
 
     private bool IsWaterProofEnabledForCurrentModel() =>
@@ -11011,7 +11052,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 AsyncFileLogService.Current.Performance(
                     $"PASS_LATENCY T_PASS_UI cycle={_activeCycleId}");
                 _sound.SetWiringFaultAlarm(false);
-                _sound.PlayTestOk(resistancePassed: IsResistanceEnabledForModel(cycleModel));
+                StartProductionPassSound(resistancePassed: IsResistanceEnabledForModel(cycleModel));
                 AddLog("PASS - continuity/điện trở/kín nước theo cấu hình đã đạt; chuẩn bị chuỗi relay MARKING/JIG.");
             }
 
@@ -11071,11 +11112,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
-            // Từ đây PASS đã durable. UI/âm thanh và relay chỉ được chạy sau commit.
+            // PASS đã durable; giữ UI PASS và chờ hết âm thanh trước chuỗi relay.
             passLedRequest = BeginPassStatusLedPresentation(generation);
             TriggerPassUi();
             long passRelaySequenceStartedTimestamp = Stopwatch.GetTimestamp();
             await PauseProductionScanForFinalPassAsync(ct);
+            if (!await WaitForProductionPassSoundAsync(ct))
+                return;
+            if (!ReferenceEquals(_model, cycleModel) || !IsRuntimeContext(RuntimeMode.Production, generation) ||
+                ct != CurrentCycleToken() || !_cycleActive)
+                return;
+            await WaitForProbeRelayInterlockAsync(ct);
             bool ok = await _engine.CompletePassAsync(
                 Resistance,
                 onPassStarted: () => AddLog(PassRelaySequenceText() + " bắt đầu."),

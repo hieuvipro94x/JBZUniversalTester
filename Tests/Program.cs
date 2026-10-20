@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-pass-sound-relay-order"])
+        {
+            TestPassSoundRelayOrder();
+            Console.WriteLine("PASS: PASS audio completes before relay gate, cancellation and error guards");
+            return 0;
+        }
         if (args is ["--test-resistance-trace-timing"])
         {
             TestResistanceTraceTiming();
@@ -257,6 +263,7 @@ internal static partial class Program
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
             ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
+            ("PASS sound completion gates relays", TestPassSoundRelayOrder),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
@@ -9329,7 +9336,8 @@ internal static partial class Program
         out FakeBoard board,
         bool requireStartupIoClear = false,
         TimeProvider? timeProvider = null,
-        KeysightVisaService? visa = null)
+        KeysightVisaService? visa = null,
+        Func<bool, Task>? passSoundPlayback = null)
     {
         board = new FakeBoard();
         var app = new AppSettings();
@@ -9343,7 +9351,8 @@ internal static partial class Program
             app,
             production,
             new LegacyPhtHistoryService(enabled: false),
-            requireStartupIoClear);
+            requireStartupIoClear,
+            passSoundPlayback: passSoundPlayback ?? (_ => Task.CompletedTask));
 
         // START is gated by ScanSupervisor.Monitoring. Prime the in-memory
         // transport through the same clean complete-frame transition used by

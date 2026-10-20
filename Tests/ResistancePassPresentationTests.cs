@@ -80,7 +80,8 @@ internal static partial class Program
             var visa = new FakeKeysightVisaService(true, passed ? 2 : 4);
             using var engine = new TestEngine(transport, visa, app, settings);
             var live = new TestViewModel(new MainViewModel(), engine, transport, visa, new WaterProofSerialService(),
-                app, settings, new LegacyPhtHistoryService(enabled: false), false);
+                app, settings, new LegacyPhtHistoryService(enabled: false), false,
+                passSoundPlayback: _ => Task.CompletedTask);
             void Set(string field, object value) => typeof(TestViewModel).GetField(field, flags)!.SetValue(live, value);
             Set("_model", model);
             engine.SetModel(model);

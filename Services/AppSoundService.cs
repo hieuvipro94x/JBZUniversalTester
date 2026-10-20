@@ -52,6 +52,7 @@ public sealed class AppSoundService : IDisposable
     private int _startupPlaybackActive;
     private int _productStartPlaybackActive;
     private int _testOkPlaybackActive;
+    private Task _testOkPlaybackTask = Task.CompletedTask;
     private int _clickPlaybackQueued;
     private int _soundGeneration;
 
@@ -255,7 +256,9 @@ public sealed class AppSoundService : IDisposable
         PlayTestOk(resistancePassed: false);
     }
 
-    public void PlayTestOk(bool resistancePassed)
+    public void PlayTestOk(bool resistancePassed) => _ = PlayTestOkAsync(resistancePassed);
+
+    public Task PlayTestOkAsync(bool resistancePassed)
     {
         EnsureInitialized();
 
@@ -263,19 +266,13 @@ public sealed class AppSoundService : IDisposable
         // PASS -> THÁO SẢN PHẨM -> SẴN SÀNG. SoundPlayer dùng chung
         // PlaySound của Windows, vì vậy Stop() trên player Probe/fault khác
         // cũng có thể cắt âm PASS nếu không có khoảng bảo vệ này.
-        if (Interlocked.CompareExchange(ref _testOkPlaybackActive, 1, 0) != 0)
-            return;
-
-        SoundPlayer? player;
-        SoundPlayer? stagePlayer;
-        int generation;
         lock (_gate)
         {
             if (_disposed)
-            {
-                Interlocked.Exchange(ref _testOkPlaybackActive, 0);
-                return;
-            }
+                return Task.FromCanceled(new CancellationToken(true));
+            if (Volatile.Read(ref _testOkPlaybackActive) != 0)
+                return _testOkPlaybackTask;
+            Interlocked.Exchange(ref _testOkPlaybackActive, 1);
 
             _wiringFaultAlarmActive = false;
             _testPointContactSoundActive = false;
@@ -284,46 +281,46 @@ public sealed class AppSoundService : IDisposable
             SafeStop(_startupPlayer);
             SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
-            player = _testOkPlayer;
-            stagePlayer = resistancePassed ? _stageOkPlayer : null;
-            generation = Volatile.Read(ref _soundGeneration);
-        }
+            SoundPlayer? player = _testOkPlayer;
+            SoundPlayer? stagePlayer = resistancePassed ? _stageOkPlayer : null;
+            int generation = Volatile.Read(ref _soundGeneration);
 
-        if (player is null)
-        {
-            Interlocked.Exchange(ref _testOkPlaybackActive, 0);
-            AsyncFileLogService.Current.Error("PASS_SOUND resource DINGDONG.wav is unavailable");
-            return;
-        }
-
-        _ = Task.Run(() =>
-        {
-            try
+            if (player is null)
             {
-                if (generation != Volatile.Read(ref _soundGeneration))
-                    return;
-                if (resistancePassed)
+                Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+                AsyncFileLogService.Current.Error("PASS_SOUND resource DINGDONG.wav is unavailable");
+                return Task.FromCanceled(new CancellationToken(true));
+            }
+
+            _testOkPlaybackTask = Task.Run(() =>
+            {
+                try
                 {
-                    if (stagePlayer is null)
-                        AsyncFileLogService.Current.Error("RESISTANCE_PASS_SOUND resource STAGEOK.wav is unavailable");
-                    else
+                    if (generation != Volatile.Read(ref _soundGeneration))
+                        throw new OperationCanceledException("PASS playback interrupted.");
+                    if (resistancePassed)
                     {
+                        if (stagePlayer is null)
+                        {
+                            AsyncFileLogService.Current.Error("RESISTANCE_PASS_SOUND resource STAGEOK.wav is unavailable");
+                            throw new OperationCanceledException("STAGEOK resource unavailable.");
+                        }
                         AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_BEGIN");
-                        SafePlaySync(stagePlayer);
+                        PlayPassSoundSync(stagePlayer);
                         AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_END");
                     }
+                    if (generation != Volatile.Read(ref _soundGeneration))
+                        throw new OperationCanceledException("PASS playback interrupted.");
+                    AsyncFileLogService.Current.Application("PASS_SOUND PLAY_BEGIN");
+                    PlayPassSoundSync(player);
+                    if (generation != Volatile.Read(ref _soundGeneration))
+                        throw new OperationCanceledException("PASS playback interrupted.");
+                    AsyncFileLogService.Current.Application("PASS_SOUND PLAY_END");
                 }
-                if (generation != Volatile.Read(ref _soundGeneration))
-                    return;
-                AsyncFileLogService.Current.Application("PASS_SOUND PLAY_BEGIN");
-                SafePlaySync(player);
-                AsyncFileLogService.Current.Application("PASS_SOUND PLAY_END");
-            }
-            finally
-            {
-                CompleteTestOkPlayback();
-            }
-        });
+                finally { CompleteTestOkPlayback(); }
+            });
+            return _testOkPlaybackTask;
+        }
     }
 
     /// <summary>Phát TESTPOINT.wav một lần khi đầu dò firmware chuyển sang ON.</summary>
@@ -632,6 +629,16 @@ public sealed class AppSoundService : IDisposable
         {
             Debug.WriteLine($"Không thể phát hết âm thanh: {ex}");
             AsyncFileLogService.Current.Error($"SYNC_SOUND PLAY_FAILED: {ex.Message}");
+        }
+    }
+
+    private static void PlayPassSoundSync(SoundPlayer player)
+    {
+        try { player.PlaySync(); }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"PASS_SOUND PLAY_FAILED: {ex.Message}");
+            throw new IOException("Không thể phát hết âm thanh PASS.", ex);
         }
     }
 
