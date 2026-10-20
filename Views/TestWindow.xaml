@@ -44,9 +44,9 @@
         <SolidColorBrush x:Key="LabelReprintBackground" Color="#E5F5F3"/>
         <SolidColorBrush x:Key="LabelReprintForeground" Color="#0F766E"/>
         <SolidColorBrush x:Key="LabelReprintBorder" Color="#86C8C1"/>
-        <SolidColorBrush x:Key="TestExitBackground" Color="#FFF0F0"/>
-        <SolidColorBrush x:Key="TestExitForeground" Color="#A61B1B"/>
-        <SolidColorBrush x:Key="TestExitBorder" Color="#D97979"/>
+        <SolidColorBrush x:Key="TestExitBackground" Color="#F1F5F9"/>
+        <SolidColorBrush x:Key="TestExitForeground" Color="#334155"/>
+        <SolidColorBrush x:Key="TestExitBorder" Color="#CBD5E1"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <sys:Double x:Key="TestGridBaseFontSize">18</sys:Double>
         <sys:Double x:Key="TestFaultGridFontSize">22</sys:Double>

@@ -18,26 +18,26 @@
         <SolidColorBrush x:Key="PageBackground" Color="#FFFFFF"/>
         <SolidColorBrush x:Key="TextPrimary" Color="#555555"/>
         <SolidColorBrush x:Key="TextMuted" Color="#777777"/>
-        <SolidColorBrush x:Key="BrandBlue" Color="#273F91"/>
-        <SolidColorBrush x:Key="HistoryBackground" Color="#E8EDF5"/>
-        <SolidColorBrush x:Key="HistoryBorder" Color="#AEBBD2"/>
-        <SolidColorBrush x:Key="SettingsBackground" Color="#ECEFF1"/>
-        <SolidColorBrush x:Key="SettingsForeground" Color="#455A64"/>
-        <SolidColorBrush x:Key="SettingsBorder" Color="#B0BEC5"/>
-        <SolidColorBrush x:Key="ModelAction" Color="#B45309"/>
-        <SolidColorBrush x:Key="TopologyAction" Color="#0F766E"/>
-        <SolidColorBrush x:Key="ExitBackground" Color="#FFF0F0"/>
-        <SolidColorBrush x:Key="ExitForeground" Color="#A61B1B"/>
-        <SolidColorBrush x:Key="ExitBorder" Color="#D97979"/>
+        <SolidColorBrush x:Key="BrandBlue" Color="#1E3A5F"/>
+        <SolidColorBrush x:Key="HistoryBackground" Color="#F1F5F9"/>
+        <SolidColorBrush x:Key="HistoryBorder" Color="#CBD5E1"/>
+        <SolidColorBrush x:Key="SettingsBackground" Color="#F1F5F9"/>
+        <SolidColorBrush x:Key="SettingsForeground" Color="#334155"/>
+        <SolidColorBrush x:Key="SettingsBorder" Color="#CBD5E1"/>
+        <SolidColorBrush x:Key="ModelAction" Color="#2563EB"/>
+        <SolidColorBrush x:Key="TopologyAction" Color="#F1F5F9"/>
+        <SolidColorBrush x:Key="ExitBackground" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="ExitForeground" Color="#B91C1C"/>
+        <SolidColorBrush x:Key="ExitBorder" Color="#FECACA"/>
 
         <Style x:Key="FlatButton" TargetType="Button">
             <Setter Property="Height" Value="50"/>
             <Setter Property="Margin" Value="3"/>
             <Setter Property="MinWidth" Value="0"/>
             <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="Background" Value="#EFEFEE"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="BorderBrush" Value="#666666"/>
+            <Setter Property="Background" Value="#F1F5F9"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -112,7 +112,7 @@
             <Setter Property="Height" Value="50"/>
             <Setter Property="Background" Value="{StaticResource BrandBlue}"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#1E3278"/>
+            <Setter Property="BorderBrush" Value="#1E3A5F"/>
             <Setter Property="FontSize" Value="18"/>
             <Setter Property="FontWeight" Value="Bold"/>
         </Style>
@@ -121,7 +121,7 @@
                TargetType="Button"
                BasedOn="{StaticResource FlatButton}">
             <Setter Property="Background" Value="{StaticResource HistoryBackground}"/>
-            <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
+            <Setter Property="Foreground" Value="#334155"/>
             <Setter Property="BorderBrush" Value="{StaticResource HistoryBorder}"/>
         </Style>
 
@@ -138,15 +138,15 @@
                BasedOn="{StaticResource FlatButton}">
             <Setter Property="Background" Value="{StaticResource ModelAction}"/>
             <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#92400E"/>
+            <Setter Property="BorderBrush" Value="#1D4ED8"/>
         </Style>
 
         <Style x:Key="TopologyButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource FlatButton}">
             <Setter Property="Background" Value="{StaticResource TopologyAction}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#0B5F59"/>
+            <Setter Property="Foreground" Value="#334155"/>
+            <Setter Property="BorderBrush" Value="#CBD5E1"/>
         </Style>
 
         <Style x:Key="ExitButtonStyle"

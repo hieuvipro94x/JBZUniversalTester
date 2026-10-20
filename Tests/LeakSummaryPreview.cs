@@ -41,6 +41,9 @@ internal static partial class Program
             root.DataContext = vm;
             root.Resources.MergedDictionaries.Add(window.Resources);
             root.SetValue(System.Windows.Controls.TextBlock.FontFamilyProperty, new FontFamily("Segoe UI"));
+            // Preview enabled button colors without connecting hardware or invoking commands.
+            foreach (var name in new[] { "StartTestButton", "SelectModelButton", "LearnTopologyButton" })
+                ((System.Windows.Controls.Button)window.FindName(name)).IsEnabled = true;
             Descendants(root).OfType<System.Windows.Controls.Image>().First().Source = new BitmapImage(
                 new Uri("pack://application:,,,/JBZUniversalTester;component/Assets/mainlogo.gif", UriKind.Absolute));
             const int width = 1440, height = 900;

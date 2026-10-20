@@ -1835,9 +1835,9 @@ internal static partial class Program
             "TestView clearly separates failed first-print retry from audited duplicate printing without showing LabelStatusText");
         Assert(xaml.Contains("Click=\"BackToMain_Click\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource TestExitButtonStyle}\"", StringComparison.Ordinal) &&
-               xaml.Contains("x:Key=\"TestExitBackground\" Color=\"#FFF0F0\"", StringComparison.Ordinal) &&
-               xaml.Contains("x:Key=\"TestExitForeground\" Color=\"#A61B1B\"", StringComparison.Ordinal),
-            "TestView back navigation uses the shared light-red exit treatment");
+               xaml.Contains("x:Key=\"TestExitBackground\" Color=\"#F1F5F9\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"TestExitForeground\" Color=\"#334155\"", StringComparison.Ordinal),
+            "TestView back navigation uses neutral navigation colors");
         Assert(xaml.Contains("x:Name=\"HeaderNavigationRow\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Name=\"StatusLedPanel\"", StringComparison.Ordinal) &&
                xaml.Contains("Margin=\"10,0,2,0\"", StringComparison.Ordinal) &&
@@ -6206,9 +6206,9 @@ internal static partial class Program
                !d2xxTransportSource.Contains("waitForRxNotification", StringComparison.Ordinal) &&
                !d2xxTransportSource.Contains("attempt <= 6", StringComparison.Ordinal),
             "D2XX watchdog keeps recovery safety while the reader drains queued bytes before waiting for RX events");
-        Assert(mainWindowXaml.Contains("Color=\"#273F91\"", StringComparison.Ordinal) &&
-               mainWindowXaml.Contains("Color=\"#B45309\"", StringComparison.Ordinal) &&
-               mainWindowXaml.Contains("Color=\"#0F766E\"", StringComparison.Ordinal) &&
+        Assert(mainWindowXaml.Contains("Color=\"#1E3A5F\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Color=\"#2563EB\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Color=\"#F1F5F9\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource HistoryButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource SettingsButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource ModelButtonStyle}\"", StringComparison.Ordinal) &&
