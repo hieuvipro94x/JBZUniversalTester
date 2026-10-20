@@ -17,9 +17,6 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private TestWindow? _testWindow;
     private ProductionSettingsPage? _settingsPage;
-    private Window? _settingsWindow;
-    private bool _closingSettingsWindow;
-    private bool _settingsCloseRequested;
     private bool _settingsPageCloseInProgress;
     private HistoryPage? _historyPage;
     private bool _shutdownStarted;
@@ -179,7 +176,7 @@ public partial class MainWindow : Window
 
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
-        if (_shutdownStarted || _settingsWindow is not null || _settingsPageCloseInProgress)
+        if (_shutdownStarted || _settingsPage is not null || _historyPage is not null || _settingsPageCloseInProgress)
             return;
         // Also guard deferred opens (for example the model-loaded callback).
         // The physical removal gate must be clear before entering TestView.
@@ -236,6 +233,9 @@ public partial class MainWindow : Window
 
         try
         {
+            // A deferred settings preparation must not attach a page after
+            // the operator has already entered the production window.
+            Interlocked.Increment(ref _internalPageGeneration);
             _testWindow = new TestWindow(
                 _viewModel.Test,
                 autoStartProduction: hasCapacity && _viewModel.Test.IsBoardConnected)
@@ -367,9 +367,8 @@ public partial class MainWindow : Window
 
     private async Task ShowSettingsPageAsync()
     {
-        if (_settingsWindow is not null)
+        if (_settingsPage is not null || _historyPage is not null || _settingsPageCloseInProgress || _testWindow is not null)
         {
-            _settingsWindow.Activate();
             return;
         }
 
@@ -395,56 +394,12 @@ public partial class MainWindow : Window
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
 
-        _settingsWindow = new Window
-        {
-            Title = $"Cài đặt Production - {AppVersion.DisplayVersion}",
-            WindowState = WindowState.Maximized,
-            ResizeMode = ResizeMode.NoResize,
-            WindowStyle = WindowStyle.None,
-            WindowStartupLocation = WindowStartupLocation.CenterScreen,
-            Content = _settingsPage
-        };
-        _settingsWindow.Closing += SettingsWindow_Closing;
-        _settingsWindow.Show();
+        InternalPageHost.Content = _settingsPage;
+        InternalPageHost.Visibility = Visibility.Visible;
         MainActionBar.IsEnabled = false;
         AsyncFileLogService.Current.Performance(
             $"SETTINGS_PERF phase=OPEN_VIEW elapsed_ms={Stopwatch.GetElapsedTime(settingsRenderStarted).TotalMilliseconds:0.###}");
         LogMemory("MEM AFTER_SETTINGS_OPEN");
-    }
-
-    private void SettingsWindow_Closing(object? sender, CancelEventArgs e)
-    {
-        if (_closingSettingsWindow || _shutdownStarted)
-            return;
-
-        e.Cancel = true;
-        if (_settingsCloseRequested || _settingsPageCloseInProgress)
-            return;
-
-        _settingsCloseRequested = true;
-        // Closing chưa kết thúc: gọi Close ngay tại đây sẽ khiến WPF ném
-        // InvalidOperationException. Xử lý yêu cầu rời trang ở lượt UI kế tiếp.
-        _ = Dispatcher.BeginInvoke(new Action(() => _ = TryLeaveSettingsWindowAsync()));
-    }
-
-    private async Task TryLeaveSettingsWindowAsync()
-    {
-        try
-        {
-            if (_settingsPage is not null)
-                await _settingsPage.TryLeaveAsync();
-        }
-        catch (Exception ex)
-        {
-            AsyncFileLogService.Current.Error($"Close Settings window failed: {ex}");
-            if (_settingsWindow is not null)
-                MessageBox.Show(_settingsWindow, "Chưa thể đóng Cài đặt. Vui lòng thử lại.",
-                    "CHƯA THỂ TRỞ VỀ", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            _settingsCloseRequested = false;
-        }
     }
 
     private async Task SettingsPage_SettingsSaved(object? sender, EventArgs e)
@@ -479,6 +434,8 @@ public partial class MainWindow : Window
         object sender,
         RoutedEventArgs e)
     {
+        if (_shutdownStarted || _settingsPage is not null || _historyPage is not null ||
+            _settingsPageCloseInProgress || _testWindow is not null) return;
         try
         {
             await CloseInternalPageAsync();
@@ -488,6 +445,7 @@ public partial class MainWindow : Window
 
             InternalPageHost.Content = _historyPage;
             InternalPageHost.Visibility = Visibility.Visible;
+            MainActionBar.IsEnabled = false;
         }
         catch (Exception ex)
         {
@@ -529,7 +487,7 @@ public partial class MainWindow : Window
                 "Hardware.SettingsCloseRelaySafety",
                 $"Model={_viewModel.Model?.ModelName ?? "(none)"}");
             MessageBox.Show(
-                _settingsWindow ?? this,
+                this,
                 "Máy test chưa về trạng thái an toàn. Vui lòng khởi động lại phần mềm.",
                 "VUI LÒNG KHỞI ĐỘNG LẠI",
                 MessageBoxButton.OK,
@@ -565,32 +523,6 @@ public partial class MainWindow : Window
             }
         }
 
-        Window? settingsWindow = _settingsWindow;
-        if (settingsWindow is not null)
-        {
-            _settingsWindow = null;
-            settingsWindow.Closing -= SettingsWindow_Closing;
-            if (!_shutdownStarted)
-            {
-                WindowState = WindowState.Maximized;
-                if (!IsVisible)
-                    Show();
-                UpdateProductRemovalGate();
-                Activate();
-                Focus();
-            }
-            _closingSettingsWindow = true;
-            try
-            {
-                settingsWindow.Close();
-                MainActionBar.IsEnabled = !_shutdownStarted;
-            }
-            finally
-            {
-                _closingSettingsWindow = false;
-            }
-        }
-
         if (_historyPage is not null)
         {
             _historyPage.RequestClose -= InternalPage_RequestClose;
@@ -600,6 +532,8 @@ public partial class MainWindow : Window
 
         InternalPageHost.Content = null;
         InternalPageHost.Visibility = Visibility.Collapsed;
+        MainActionBar.IsEnabled = !_shutdownStarted;
+        if (!_shutdownStarted) UpdateProductRemovalGate();
     }
 
     private static void LogMemory(string marker)
@@ -629,6 +563,17 @@ public partial class MainWindow : Window
     {
         if (_shutdownComplete)
             return;
+
+        // Alt+F4 on an internal page follows the same Back/unsaved-edit and
+        // manual-output cleanup path, rather than closing a second window.
+        if (!_shutdownStarted && (_settingsPage is not null || _historyPage is not null))
+        {
+            e.Cancel = true;
+            if (_settingsPageCloseInProgress) return;
+            if (_settingsPage is not null) await _settingsPage.TryLeaveAsync();
+            else await CloseInternalPageAsync();
+            return;
+        }
 
         // Không cho WPF hủy cửa sổ trước khi worker D2XX/VISA được dừng.
         e.Cancel = true;

@@ -18,7 +18,7 @@ using JBZUniversalTester.ViewModels;
 namespace JBZUniversalTester.Views;
 
 /// <summary>
-/// Trang Cài đặt được đặt trong cửa sổ riêng khi mở từ MainWindow.
+/// Trang Cài đặt được nhúng vào MainWindow, dùng chung host với Lịch sử.
 /// </summary>
 public partial class ProductionSettingsPage : UserControl
 {

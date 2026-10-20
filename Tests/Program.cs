@@ -20,6 +20,18 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-single-window-navigation"])
+        {
+            TestSingleWindowNavigation();
+            Console.WriteLine("PASS: Settings/History share one window and require safe close before navigation");
+            return 0;
+        }
+        if (args is ["--test-leak-result-framing"])
+        {
+            TestLeakResultFragmentedPayload();
+            Console.WriteLine("PASS: Fragmented Leak RESULT waits for six numeric values");
+            return 0;
+        }
         if (args is ["--test-settings-opening"])
         {
             TestSettingsOpeningResponsiveness();
@@ -284,6 +296,7 @@ internal static partial class Program
             ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
+            ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
             ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
@@ -2006,15 +2019,12 @@ internal static partial class Program
                settingsSource.Contains("Content = \"LƯU\"", StringComparison.Ordinal) &&
                settingsSource.Contains("Content = \"HỦY\"", StringComparison.Ordinal) &&
                mainWindowSource.Contains("await settingsPage.ReleaseManualOutputsAsync();", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("_settingsWindow.Show();", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("Hide();", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("ResizeMode = ResizeMode.NoResize", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("WindowStyle = WindowStyle.None", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("WindowStartupLocation = WindowStartupLocation.CenterScreen", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("Dispatcher.BeginInvoke(new Action(() => _ = TryLeaveSettingsWindowAsync()))", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("settingsWindow.Close();", StringComparison.Ordinal) &&
-               mainWindowSource.Contains("Show();", StringComparison.Ordinal),
-            "Settings opens in a separate window, restores Main after safe relay reset, and warns before leaving with dirty settings");
+               mainWindowSource.Contains("InternalPageHost.Content = _settingsPage;", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("InternalPageHost.Content = _historyPage;", StringComparison.Ordinal) &&
+               !mainWindowSource.Contains("_settingsWindow", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("await _settingsPage.TryLeaveAsync();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("InternalPageHost.Content = null;", StringComparison.Ordinal),
+            "Settings and History share one window, restore Main after safe relay reset, and preserve unsaved-edit checks");
         Assert(settingsXaml.Contains("x:Name=\"LabelPrintSettingsForm\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("<ColumnDefinition Width=\"48\"/>", StringComparison.Ordinal) &&
                (settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) ||

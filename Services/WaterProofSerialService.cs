@@ -282,8 +282,7 @@ public sealed class WaterProofSerialService : IAsyncDisposable
                     // Some leak machines return :RESULT without CR/LF.
                     // Process it once all six values are present.
                     string pending = buffer.ToString().Trim();
-                    if (pending.StartsWith(":RESULT", StringComparison.OrdinalIgnoreCase) &&
-                        pending.Split(',').Length >= 7)
+                    if (HasCompleteUnterminatedResult(pending))
                     {
                         buffer.Clear();
 
@@ -814,6 +813,18 @@ public sealed class WaterProofSerialService : IAsyncDisposable
         }
 
         return true;
+    }
+
+    private static bool HasCompleteUnterminatedResult(string line)
+    {
+        const string prefix = ":RESULT,";
+        if (!line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return false;
+        string[] fields = line[prefix.Length..].Split(',', StringSplitOptions.TrimEntries);
+        // A trailing comma is a separator, not the next measurement. Leave
+        // partial data buffered until all six channel values actually arrive.
+        return fields.Length >= 6 && fields.Take(6).All(field =>
+            double.TryParse(field, NumberStyles.Float, CultureInfo.InvariantCulture, out double value) &&
+            double.IsFinite(value));
     }
 
     private static IEnumerable<string> ExtractCompleteLines(StringBuilder buffer)
