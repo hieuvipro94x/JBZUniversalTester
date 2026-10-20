@@ -13,9 +13,9 @@
         <SolidColorBrush x:Key="HistoryNeutralBorder" Color="#B0BEC5"/>
         <SolidColorBrush x:Key="HistoryExportLightBackground" Color="#E5F5F3"/>
         <SolidColorBrush x:Key="HistoryExportAction" Color="#0F766E"/>
-        <SolidColorBrush x:Key="HistoryExitBackground" Color="#FFF0F0"/>
-        <SolidColorBrush x:Key="HistoryExitForeground" Color="#A61B1B"/>
-        <SolidColorBrush x:Key="HistoryExitBorder" Color="#D97979"/>
+        <SolidColorBrush x:Key="HistoryExitBackground" Color="#ECEFF1"/>
+        <SolidColorBrush x:Key="HistoryExitForeground" Color="#455A64"/>
+        <SolidColorBrush x:Key="HistoryExitBorder" Color="#B0BEC5"/>
 
         <Style x:Key="CompactButton"
                TargetType="Button"
@@ -106,15 +106,24 @@
 
         <Style x:Key="HistoryLoadMoreButtonStyle"
                TargetType="Button"
-               BasedOn="{StaticResource HistoryExcelButtonStyle}">
-            <Setter Property="Height" Value="32"/>
-            <Setter Property="Width" Value="108"/>
-            <Setter Property="MinWidth" Value="108"/>
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="#E8EDF5"/>
+            <Setter Property="Foreground" Value="#23449B"/>
+            <Setter Property="BorderBrush" Value="#AEBBD2"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Width" Value="180"/>
+            <Setter Property="MinWidth" Value="180"/>
             <Setter Property="Margin" Value="0"/>
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="BorderThickness" Value="1"/>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="#64748B"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <Style x:Key="HistoryCloseButtonStyle"
@@ -516,7 +525,7 @@
         <Grid Grid.Row="3" Margin="2,4,2,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="124"/>
+                <ColumnDefinition Width="196"/>
                 <ColumnDefinition Width="310"/>
             </Grid.ColumnDefinitions>
 
@@ -524,17 +533,17 @@
                        Grid.Column="0"
                        VerticalAlignment="Center"
                        Foreground="#66717C"
-                       FontSize="10.5"
+                       FontSize="12"
                        TextTrimming="CharacterEllipsis"/>
 
             <Button x:Name="LoadMoreButton"
                     Grid.Column="1"
-                    Content="TẢI THÊM"
+                    Content="XEM THÊM LỊCH SỬ"
                     Style="{StaticResource HistoryLoadMoreButtonStyle}"
                     Click="LoadMore_Click"/>
 
             <TextBlock Grid.Column="2"
-                       Text="Enter: tìm kiếm  •  Có thể kéo giãn và sắp xếp cột"
+                       Text="Enter: tìm kiếm  •  Rê chuột để xem hồ sơ"
                        VerticalAlignment="Center"
                        Foreground="#9098A1"
                        FontSize="10"
