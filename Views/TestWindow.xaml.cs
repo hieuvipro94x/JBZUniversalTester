@@ -61,6 +61,16 @@ public partial class TestWindow : Window
         Title = $"UniversalTester {AppVersion.DisplayVersion} - Màn hình kiểm tra";
         TestAppVersionText.Text = AppVersion.DisplayVersion;
         DataContext = viewModel;
+        // DataGridColumn is outside the visual tree; bind its visibility with
+        // an explicit source so unused measurement columns collapse reliably.
+        foreach (var column in new[] { ResistanceMinColumn, ResistanceValueColumn, ResistanceMaxColumn })
+            System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
+                new System.Windows.Data.Binding(nameof(TestViewModel.HasResistanceResultRows))
+                { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });
+        foreach (var column in new[] { LeakSuctionColumn, LeakHoldColumn, LeakValueColumn, LeakLimitColumn })
+            System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
+                new System.Windows.Data.Binding(nameof(TestViewModel.HasLeakResultRows))
+                { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });
         _autoStartProduction = autoStartProduction;
 
         if (!_autoStartProduction && viewModel.IsBoardConnected)

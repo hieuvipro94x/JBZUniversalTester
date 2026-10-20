@@ -20,6 +20,19 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-combined-results", string combinedPreviewPath])
+        {
+            RenderLeakSummaryPreview(combinedPreviewPath, combined: true);
+            return 0;
+        }
+        if (args is ["--test-combined-inspection-results"])
+        {
+            TestCombinedInspectionResults();
+            TestFinalLeakResultTable();
+            TestProductionResistancePassPresentation();
+            Console.WriteLine("PASS: Combined Leak/resistance table, live PASS and cycle cleanup");
+            return 0;
+        }
         if (args is ["--test-pass-sound-relay-order"])
         {
             TestPassSoundRelayOrder();
@@ -264,6 +277,7 @@ internal static partial class Program
             ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound completion gates relays", TestPassSoundRelayOrder),
+            ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
@@ -3339,10 +3353,10 @@ internal static partial class Program
         int resultStyleUses = xaml.Split(
             "CellStyle=\"{StaticResource PassFailResultCellStyle}\"",
             StringSplitOptions.None).Length - 1;
-        Assert(resultStyleUses == 2 &&
-               xaml.Contains("ItemsSource=\"{Binding FinalWaterProofRows}\"", StringComparison.Ordinal) &&
+        Assert(resultStyleUses == 1 &&
+               xaml.Contains("ItemsSource=\"{Binding InspectionResultRows}\"", StringComparison.Ordinal) &&
                !xaml.Contains("WaterProofResultCellStyle", StringComparison.Ordinal),
-            "Resistance and final Leak tables share PASS/FAIL styling; final Leak results have their own rows");
+            "One combined table applies the same PASS/FAIL styling to resistance and individual Leak rows");
         Assert(xaml.Contains("<Viewbox Grid.Row=\"0\"", StringComparison.Ordinal) &&
                xaml.Contains("StretchDirection=\"DownOnly\"", StringComparison.Ordinal),
             "The fixed Htdrv header surface scales down at narrow resolutions without scaling up above design size");
@@ -3939,21 +3953,18 @@ internal static partial class Program
                testViewModelSource.Contains("Master.{inspectionType}.OpenStore", StringComparison.Ordinal),
             "Master GOOD/BAD history must commit before JIG eject; SQLite open failures stay in persistence-fault routing");
 
-        var leakDisplayRow = new ResistanceResult
+        using var leakDisplayRow = new InspectionResultRow(new WaterProofChannelResult
         {
-            Name = "TEST LEAK",
-            ChannelTextOverride = "CH1",
-            MinDisplayTextOverride = "—",
-            DisplayOverride = "CH1 Δ0.2",
-            MaxDisplayTextOverride = "≤ 2",
-            ResultTextOverride = "PASS"
-        };
-        Assert(xaml.Contains("ItemsSource=\"{Binding ResistanceDisplayRows}\"", StringComparison.Ordinal) &&
+            Channel = 1, Enabled = true, IsMeasured = true, Passed = true,
+            FirstResultPressure = 80.5, SecondResultPressure = 80.3, Leak = 0.2, LeakLimit = 2
+        });
+        Assert(xaml.Contains("ItemsSource=\"{Binding InspectionResultRows}\"", StringComparison.Ordinal) &&
                leakDisplayRow.Name == "TEST LEAK" &&
                leakDisplayRow.ChannelText == "CH1" &&
-               leakDisplayRow.Display == "CH1 Δ0.2" &&
+               leakDisplayRow.LeakText == "0.2" && leakDisplayRow.FirstPressureText == "80.5" &&
+               leakDisplayRow.SecondPressureText == "80.3" &&
                leakDisplayRow.ResultText == "PASS",
-            "Resistance result table can show two resistance measurements plus a separate TEST LEAK PASS row");
+            "Combined result table preserves individual Leak pressures and PASS alongside resistance");
 
         var idleLeakService = new WaterProofSerialService();
         Stopwatch disposeWatch = Stopwatch.StartNew();

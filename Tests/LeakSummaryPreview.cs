@@ -156,7 +156,7 @@ internal static partial class Program
         });
     }
 
-    private static void RenderLeakSummaryPreview(string path)
+    private static void RenderLeakSummaryPreview(string path, bool combined = false)
     {
         OnSettingsDispatcher(async () =>
         {
@@ -189,7 +189,21 @@ internal static partial class Program
             Set("_cycleActive", true);
             Set("_productionPhase", (int)Enum.Parse(typeof(TestViewModel).GetNestedType("ProductionPhase", flags)!, "WaterProof"));
             var window = new TestWindow(vm, autoStartProduction: false);
-            typeof(TestViewModel).GetMethod("UpdatePendingWaterProofFailurePresentation", flags)!.Invoke(vm, null);
+            if (combined)
+            {
+                vm.ResistanceDisplayRows.Add(new ResistanceResult { Name = "R1", Channel = 1,
+                    MinOhm = 7500, MaxOhm = 11000, ValueOhm = 9065, IsStable = true, Passed = true });
+                vm.ResistanceDisplayRows.Add(new ResistanceResult { Name = "R2", Channel = 2,
+                    MinOhm = 7500, MaxOhm = 11000, ValueOhm = 9070, IsStable = true, Passed = true });
+                for (int channel = 1; channel <= 3; channel++)
+                    vm.FinalWaterProofRows.Add(new WaterProofChannelResult { Channel = channel,
+                        Connector = $"CN{channel}", Enabled = true, FirstResultPressure = 80.5,
+                        SecondResultPressure = 79.8, Leak = 0.7, LeakLimit = 2, IsMeasured = true, Passed = true });
+                Set("_productionPhase", (int)Enum.Parse(typeof(TestViewModel).GetNestedType("ProductionPhase", flags)!, "Completed"));
+                vm.SelectedOperationTabIndex = 2;
+                vm.State = "PASS";
+            }
+            else typeof(TestViewModel).GetMethod("UpdatePendingWaterProofFailurePresentation", flags)!.Invoke(vm, null);
             var root = (FrameworkElement)window.Content;
             window.Content = null; // Render the real view without opening a test window or triggering its Loaded lifecycle.
             root.DataContext = vm;

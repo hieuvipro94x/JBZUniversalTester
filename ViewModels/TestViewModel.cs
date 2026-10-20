@@ -436,6 +436,19 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public ObservableCollection<ResistanceResult> ResistanceDisplayRows { get; } = new();
     public ObservableCollection<WaterProofChannelResult> WaterProofChannels { get; } = new();
     public ObservableCollection<WaterProofChannelResult> FinalWaterProofRows { get; } = new();
+    public ObservableCollection<InspectionResultRow> InspectionResultRows { get; } = new();
+    public bool HasResistanceResultRows => ResistanceDisplayRows.Count > 0;
+    public bool HasLeakResultRows => FinalWaterProofRows.Count > 0;
+
+    private void RebuildInspectionResultRows()
+    {
+        foreach (InspectionResultRow row in InspectionResultRows) row.Dispose();
+        InspectionResultRows.Clear();
+        foreach (ResistanceResult row in ResistanceDisplayRows) InspectionResultRows.Add(new(row));
+        foreach (WaterProofChannelResult row in FinalWaterProofRows) InspectionResultRows.Add(new(row));
+        Raise(nameof(HasResistanceResultRows));
+        Raise(nameof(HasLeakResultRows));
+    }
     private IReadOnlyList<WaterProofChannelMeasurement>? _pendingLeakFailureMeasurements;
     public bool IsWaterProofCardVisible => _model is not null && _waterProofProfile.Enabled;
     public string WaterProofStageText => _waterProofStageText;
@@ -523,7 +536,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 : string.Empty;
 
     public bool IsCenterResultVisible =>
-        (IsFinalPassPresentation && SelectedOperationTabIndex != 2) ||
+        (IsFinalPassPresentation && SelectedOperationTabIndex == 0) ||
         IsDiscardFaultConfirmationPresentation ||
         IsWaitingProductPresentation;
 
@@ -1150,7 +1163,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 value = 0;
             if (Set(ref _selectedOperationTabIndex, value))
             {
-                if (value != 2)
+                if (value == 0)
                 {
                     FinalWaterProofRows.Clear();
                     _pendingLeakFailureMeasurements = null;
@@ -1224,6 +1237,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _productionSettings = productionSettings;
         _labelPrintService = labelPrintService ?? new LabelPrintService();
         _playProductionPassSound = passSoundPlayback ?? _sound.PlayTestOkAsync;
+        ResistanceDisplayRows.CollectionChanged += (_, _) => RebuildInspectionResultRows();
+        FinalWaterProofRows.CollectionChanged += (_, _) => RebuildInspectionResultRows();
 
         // ALWAYS_PROBE_2026-09-05:
         // Test pointer không còn là tùy chọn vận hành. Que dò luôn hoạt động.
@@ -9347,6 +9362,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         Resistance.Clear();
         ResistanceDisplayRows.Clear();
+        FinalWaterProofRows.Clear();
 
         foreach (ResistanceStep step in ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings))
         {
@@ -9361,40 +9377,25 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ResistanceDisplayRows.Add(row);
         }
 
-        if (IsWaterProofEnabledForCurrentModel() &&
-            Volatile.Read(ref _preContinuityWaterProofPassed) != 0)
-        {
-            string channels = string.Join(", ", _lastWaterProofMeasurements
-                .Where(item => item.Enabled)
-                .OrderBy(item => item.Channel)
-                .Select(item => $"CH{item.Channel}"));
-            string values = string.Join("; ", _lastWaterProofMeasurements
-                .Where(item => item.Enabled)
-                .OrderBy(item => item.Channel)
-                .Select(item => $"CH{item.Channel} Δ{item.Leak:0.###}"));
-            ResistanceDisplayRows.Add(new ResistanceResult
-            {
-                Name = "TEST LEAK",
-                ChannelTextOverride = channels,
-                MinDisplayTextOverride = "—",
-                DisplayOverride = values,
-                MaxDisplayTextOverride = $"≤ {_waterProofProfile.LeakLimit:0.###}",
-                ResultTextOverride = "PASS"
-            });
-        }
+        PopulateFinalWaterProofRows();
     }
 
     private void ShowFinalWaterProofResults()
     {
+        if (PopulateFinalWaterProofRows()) SelectedOperationTabIndex = 2;
+    }
+
+    private bool PopulateFinalWaterProofRows()
+    {
         if (!IsWaterProofEnabledForCurrentModel() ||
             Volatile.Read(ref _preContinuityWaterProofPassed) == 0 ||
             !_cycleContinuityCompletedAt.HasValue)
-            return;
+            return false;
         WaterProofChannelMeasurement[] measurements = _lastWaterProofMeasurements
             .Where(item => item.Enabled && _waterProofProfile.IsChannelEnabled(item.Channel))
             .OrderBy(item => item.Channel).ToArray();
         if (measurements.Length != _waterProofProfile.EnabledChannelCount || measurements.Any(item => !item.Passed))
-            return;
+            return false;
 
         _pendingLeakFailureMeasurements = null;
         FinalWaterProofRows.Clear();
@@ -9411,7 +9412,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 IsMeasured = true,
                 Passed = true
             });
-        SelectedOperationTabIndex = 2;
+        return true;
     }
 
     private void UpdatePendingWaterProofFailurePresentation()
