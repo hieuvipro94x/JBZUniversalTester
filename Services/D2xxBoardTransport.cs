@@ -873,9 +873,11 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
         byte[] routeA = D2xxResistanceRouting.BuildRouteA();
         byte[] routeB = D2xxResistanceRouting.BuildRouteB(step.Channel);
 
-        await WriteAsync(routeA, ct);
-        await Task.Delay(350, ct);
-        await WriteAsync(routeB, ct);
+        long routeATx = await WriteAsync(routeA, ct).ConfigureAwait(false);
+        await WaitForResistanceCommandGapAsync(routeATx, ct).ConfigureAwait(false);
+        long routeBTx = await WriteAsync(routeB, ct).ConfigureAwait(false);
+        SafeDiagnostic(FormattableString.Invariant(
+            $"RESISTANCE_TIMING phase=SELECT channel={step.Channel} tx_gap_ms={Stopwatch.GetElapsedTime(routeATx, routeBTx).TotalMilliseconds:0.###} required_ms=350"));
         _scanPrepared = false;
         _preparedScanCapacity = null;
     }
@@ -886,21 +888,46 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
         if (!IsConnected)
             return;
 
-        // Production trace sends three recovery/preparation cycles after R2.
+        // Original session 20261020_141444 confirms three recovery pairs,
+        // five ~350 ms native TX gaps, and no extra pair before START_SCAN.
         // The last INIT_2 leaves the board prepared, so after the pass relay
         // sequence the next product starts with START_SCAN directly.
-        for (int cycle = 0; cycle < 3; cycle++)
-        {
-            await WriteAsync(CmdInit1, ct);
-            await Task.Delay(350, ct);
-            await WriteAsync(CmdInit2, ct);
-
-            if (cycle < 2)
-                await Task.Delay(350, ct);
-        }
+        long recoveryStarted = Stopwatch.GetTimestamp();
+        SafeDiagnostic("RESISTANCE_TIMING phase=RECOVERY_BEGIN pairs=3 required_gaps=5 gap_ms=350");
+        await RunResistanceRecoveryAsync(
+            (command, token) => WriteAsync(command, token),
+            WaitForResistanceCommandGapAsync, ct).ConfigureAwait(false);
 
         _scanPrepared = true;
         _preparedScanCapacity = _capacity;
+        SafeDiagnostic(FormattableString.Invariant(
+            $"RESISTANCE_TIMING phase=RECOVERY_END elapsed_ms={Stopwatch.GetElapsedTime(recoveryStarted).TotalMilliseconds:0.###} pairs=3"));
+    }
+
+    private static async Task RunResistanceRecoveryAsync(
+        Func<byte[], CancellationToken, Task<long>> write,
+        Func<long, CancellationToken, Task> waitForGap,
+        CancellationToken ct)
+    {
+        for (int cycle = 0; cycle < 3; cycle++)
+        {
+            ct.ThrowIfCancellationRequested();
+            long init1Tx = await write(CmdInit1, ct).ConfigureAwait(false);
+            await waitForGap(init1Tx, ct).ConfigureAwait(false);
+            long init2Tx = await write(CmdInit2, ct).ConfigureAwait(false);
+            if (cycle < 2)
+                await waitForGap(init2Tx, ct).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task WaitForResistanceCommandGapAsync(long txTimestamp, CancellationToken ct)
+    {
+        // Count from native FT_Write completion. Time already spent returning
+        // through driver/log/UI work must not be added to the hardware gap.
+        ct.ThrowIfCancellationRequested();
+        double remainingMs;
+        while ((remainingMs = 350 - Stopwatch.GetElapsedTime(txTimestamp).TotalMilliseconds) > 0)
+            await Task.Delay((int)Math.Ceiling(remainingMs), ct).ConfigureAwait(false);
     }
 
     public async Task SetRelayAsync(int relay, CancellationToken ct = default) =>
@@ -1640,7 +1667,7 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
             else if (data.Length == 4 && data[0] == 0x8C)
                 Interlocked.Exchange(ref _lastStartScanTxTimestamp, txTimestamp);
             return txTimestamp;
-        }, ct);
+        }, ct).ConfigureAwait(false);
         SafeLog($"TX {BitConverter.ToString(data).Replace("-", " ")}");
         PublishProtocolTrace("TX", data, txTimestamp);
         return txTimestamp;

@@ -20,6 +20,14 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-resistance-trace-timing"])
+        {
+            TestResistanceTraceTiming();
+            TestD2xxNativeIoResponsiveness();
+            TestProductionResistancePassPresentation();
+            Console.WriteLine("PASS: Original resistance recovery timing, UI independence and PASS synchronization");
+            return 0;
+        }
         if (args is ["--test-resistance-pass-presentation"])
         {
             TestProductionResistancePassPresentation();
@@ -247,6 +255,7 @@ internal static partial class Program
             ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
+            ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
