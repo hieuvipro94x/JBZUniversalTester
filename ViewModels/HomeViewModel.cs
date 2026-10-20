@@ -37,6 +37,10 @@ public sealed class HomeViewModel : ObservableObject
     public string SourcePath =>
         _main.Model?.SourcePath ?? string.Empty;
 
+    public string LabelTemplateType => _main.Model is null
+        ? "CHƯA NẠP MÃ HÀNG"
+        : LabelProfileResolver.NormalizeTemplateType(_main.ProductionSettings.Label.TemplateType);
+
     public HomeViewModel(MainViewModel main)
     {
         _main = main;
@@ -175,6 +179,7 @@ public sealed class HomeViewModel : ObservableObject
         Raise(nameof(ProductName));
         Raise(nameof(VehicleType));
         Raise(nameof(SourcePath));
+        Raise(nameof(LabelTemplateType));
 
         StartCommand.RaiseCanExecuteChanged();
     }

@@ -12,6 +12,58 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void RenderMainLabelPreview(string path)
+    {
+        OnSettingsDispatcher(async () =>
+        {
+            System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+            var appDocument = System.Xml.Linq.XDocument.Load(Path.Combine(Environment.CurrentDirectory, "App.xaml"));
+            var resourceXml = new System.Xml.Linq.XElement(ns + "ResourceDictionary",
+                new System.Xml.Linq.XAttribute("xmlns", ns.NamespaceName),
+                new System.Xml.Linq.XAttribute(System.Xml.Linq.XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml"),
+                appDocument.Root!.Element(ns + "Application.Resources")!.Elements());
+            var application = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            application.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceXml.ToString());
+            var settings = new ProductionSettings { MasterFaultRequiredCount = 0 };
+            settings.Label.TemplateType = LabelSettings.SmallQrTemplate;
+            var vm = new MainViewModel(new AppSettings(), settings);
+            var model = Model(("PAIR", new[] { 1, 2 }));
+            model.ModelName = "DL3_LAM WH322444";
+            model.PartNumber = "WH322444";
+            vm.Model = model;
+            vm.Home.Refresh();
+            vm.Status = "ĐÃ NẠP MÃ HÀNG: DL3_LAM WH322444";
+            Assert(vm.Home.LabelTemplateType == LabelSettings.SmallQrTemplate,
+                "MainWindow label information follows the loaded model and current print selection");
+            var window = new MainWindow(vm);
+            var root = (FrameworkElement)window.Content;
+            window.Content = null; // Never show the window or start its hardware lifecycle.
+            root.DataContext = vm;
+            root.Resources.MergedDictionaries.Add(window.Resources);
+            root.SetValue(System.Windows.Controls.TextBlock.FontFamilyProperty, new FontFamily("Segoe UI"));
+            Descendants(root).OfType<System.Windows.Controls.Image>().First().Source = new BitmapImage(
+                new Uri("pack://application:,,,/JBZUniversalTester;component/Assets/mainlogo.gif", UriKind.Absolute));
+            const int width = 1440, height = 900;
+            using var source = new HwndSource(new HwndSourceParameters("MainLabelPreview")
+                { Width = width, Height = height, WindowStyle = unchecked((int)0x80000000) });
+            source.RootVisual = root;
+            root.Measure(new Size(width, height));
+            root.Arrange(new Rect(0, 0, width, height));
+            root.UpdateLayout();
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            root.UpdateLayout();
+            Assert(Descendants(root).OfType<System.Windows.Controls.TextBlock>().Any(text =>
+                text.Text == "Loại tem: TEM_BE_QRCODE"), "The actual MainWindow view renders the selected label type");
+            var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+            bitmap.Render(root);
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+            using var file = File.Create(path);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            encoder.Save(file);
+        });
+    }
+
     private static void RenderStatusPalettePreview(string path)
     {
         OnSettingsDispatcher(() =>

@@ -219,6 +219,13 @@
                                 <TextBlock Text="{Binding Home.ModelName}" Margin="0,5,8,0"
                                            FontSize="21" FontWeight="Bold" Foreground="#1E3278"
                                            TextTrimming="CharacterEllipsis" ToolTip="{Binding Home.ModelName}"/>
+                                <Border Margin="0,8,8,0" Padding="10,5" CornerRadius="5"
+                                        Background="#E0F2FE" BorderBrush="#BAE6FD" BorderThickness="1"
+                                        HorizontalAlignment="Left">
+                                    <TextBlock Text="{Binding Home.LabelTemplateType, StringFormat=Loại tem: {0}}"
+                                               FontSize="14" FontWeight="SemiBold" Foreground="#075985"
+                                               TextWrapping="Wrap"/>
+                                </Border>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Margin="16,0,0,0">
                                 <TextBlock Text="MÃ SẢN PHẨM" FontSize="12"

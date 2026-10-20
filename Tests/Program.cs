@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-main-label", string mainPreviewPath])
+        {
+            RenderMainLabelPreview(mainPreviewPath);
+            return 0;
+        }
         if (args is ["--preview-status-colors", string palettePath])
         {
             RenderStatusPalettePreview(palettePath);
