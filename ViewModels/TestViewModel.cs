@@ -9530,29 +9530,21 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         try { _productionPassSoundTask = _playProductionPassSound(resistancePassed); }
         catch (Exception ex) { _productionPassSoundTask = Task.FromException(ex); }
+        _ = ObserveProductionPassSoundAsync(_productionPassSoundTask);
     }
 
-    private async Task<bool> WaitForProductionPassSoundAsync(CancellationToken ct)
+    private static async Task ObserveProductionPassSoundAsync(Task playback)
     {
-        ProductModel? model = _model;
-        long generation = Volatile.Read(ref _runtimeGeneration);
         try
         {
-            await (_productionPassSoundTask ?? throw new InvalidOperationException("PASS audio was not started.")).WaitAsync(ct);
-            ct.ThrowIfCancellationRequested();
-            AddLog("PASS_SOUND_COMPLETE - STAGEOK/DINGDONG hoàn tất; cho phép kiểm tra gate relay.");
-            return true;
+            await playback.ConfigureAwait(false);
+            AsyncFileLogService.Current.Application("PASS_SOUND_COMPLETE - âm thanh PASS hoàn tất; relay chạy độc lập.");
         }
         catch (Exception ex)
         {
-            ct.ThrowIfCancellationRequested();
-            if (!ReferenceEquals(model, _model) || generation != Volatile.Read(ref _runtimeGeneration))
-                return false;
-            _cycleActive = false;
-            SetProductionPhase(ProductionPhase.EquipmentError);
-            State = "LỖI ÂM THANH PASS - CHƯA CHẠY RELAY";
-            AddLog($"PASS_SOUND_BLOCKED: {ex.Message}; không chạy MARKING/JIG.");
-            return false;
+            // Sound failure/cancellation is independent of product verdict and
+            // hardware completion. Observe it without mutating a later cycle.
+            AsyncFileLogService.Current.Error($"PASS_SOUND_INTERRUPTED: {ex.Message}; không chặn chuỗi relay PASS.");
         }
     }
 
@@ -11113,13 +11105,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
-            // PASS đã durable; giữ UI PASS và chờ hết âm thanh trước chuỗi relay.
+            // PASS đã durable. Âm thanh chạy song song, không giữ chuỗi relay.
             passLedRequest = BeginPassStatusLedPresentation(generation);
             TriggerPassUi();
             long passRelaySequenceStartedTimestamp = Stopwatch.GetTimestamp();
             await PauseProductionScanForFinalPassAsync(ct);
-            if (!await WaitForProductionPassSoundAsync(ct))
-                return;
             if (!ReferenceEquals(_model, cycleModel) || !IsRuntimeContext(RuntimeMode.Production, generation) ||
                 ct != CurrentCycleToken() || !_cycleActive)
                 return;

@@ -43,7 +43,7 @@ internal static partial class Program
         if (args is ["--test-pass-sound-relay-order"])
         {
             TestPassSoundRelayOrder();
-            Console.WriteLine("PASS: PASS audio completes before relay gate, cancellation and error guards");
+            Console.WriteLine("PASS: PASS audio runs independently of relays and preserves sequential WAV playback");
             return 0;
         }
         if (args is ["--test-resistance-trace-timing"])
@@ -283,7 +283,7 @@ internal static partial class Program
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
             ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
-            ("PASS sound completion gates relays", TestPassSoundRelayOrder),
+            ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
