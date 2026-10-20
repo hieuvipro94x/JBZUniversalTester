@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-resistance-pass-presentation"])
+        {
+            TestProductionResistancePassPresentation();
+            Console.WriteLine("PASS: Production resistance and large PASS display synchronize");
+            return 0;
+        }
         if (args is ["--preview-main-label", string mainPreviewPath])
         {
             RenderMainLabelPreview(mainPreviewPath);
@@ -241,6 +247,7 @@ internal static partial class Program
             ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
+            ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),

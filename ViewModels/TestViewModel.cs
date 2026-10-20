@@ -9482,6 +9482,29 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
+    private void UpdateProductionResistanceRows(IReadOnlyList<ResistanceResult> results)
+    {
+        foreach (ResistanceResult result in results)
+        {
+            ResistanceResult? row = Resistance.FirstOrDefault(item => item.Channel == result.Channel &&
+                string.Equals(item.Name, result.Name, StringComparison.OrdinalIgnoreCase));
+            if (row is not null && !row.Passed && result.Passed &&
+                Resistance.All(item => ReferenceEquals(item, row) || item.Passed))
+                row.IsPassPresentationPending = true;
+            UpdateResistanceRows([result]);
+        }
+    }
+
+    private void PublishProductionPassPresentation()
+    {
+        // This runs only after durable PASS. Both bindings change within the
+        // same Dispatcher action, so WPF paints the final resistance PASS and
+        // the large PASS together. Earlier channel results remain live.
+        State = "PASS";
+        foreach (ResistanceResult row in Resistance)
+            row.IsPassPresentationPending = false;
+    }
+
     private bool IsWaterProofEnabledForCurrentModel() =>
         _model is not null &&
         _waterProofProfile.Enabled &&
@@ -10855,10 +10878,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
                 List<ResistanceResult> results =
                     await _engine.MeasureResistanceAsync(
-                        result => UpdateResistanceRows([result]),
+                        result => UpdateProductionResistanceRows([result]),
                         ct);
 
-                UpdateResistanceRows(results);
+                UpdateProductionResistanceRows(results);
                 _cycleResistanceCompletedAt = DateTime.Now;
                 _ = PersistActiveCycleStageAsync("RESISTANCE_COMPLETED");
 
@@ -10965,7 +10988,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
                 passUiTriggered = true;
                 passUiTimestamp = Stopwatch.GetTimestamp();
-                State = "PASS";
+                InvokeUi(PublishProductionPassPresentation);
                 SynchronizeFaultRows(Array.Empty<FaultRow>());
                 if (waterProofCompleted) ShowFinalWaterProofResults();
                 AsyncFileLogService.Current.Performance(
