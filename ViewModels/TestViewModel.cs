@@ -9488,21 +9488,30 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             ResistanceResult? row = Resistance.FirstOrDefault(item => item.Channel == result.Channel &&
                 string.Equals(item.Name, result.Name, StringComparison.OrdinalIgnoreCase));
-            if (row is not null && !row.Passed && result.Passed &&
-                Resistance.All(item => ReferenceEquals(item, row) || item.Passed))
-                row.IsPassPresentationPending = true;
+            bool allMeasuredPass = row is not null && result.Passed && result.IsStable &&
+                Resistance.Count == ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count &&
+                Resistance.All(item => ReferenceEquals(item, row) || (item.Passed && item.IsStable));
+            if (allMeasuredPass && _cycleActive && MasterApproved &&
+                IsRuntimeMode(RuntimeMode.Production) && CurrentProductionPhase == ProductionPhase.Resistance &&
+                _cycleContinuityCompletedAt.HasValue && !_engine.HasWiringFault &&
+                !IsDeviceFault && !IsPersistenceFault && !IsProbeOwningProductionPresentation() &&
+                (!IsWaterProofEnabledForCurrentModel() || Volatile.Read(ref _preContinuityWaterProofPassed) != 0))
+            {
+                // Measured PASS is visible immediately, before route recovery.
+                // Lifecycle phase, persistence, printing and relays are untouched.
+                // Set the header before publishing the final numeric row so both
+                // bindings paint PASS within this same measurement callback.
+                State = "PASS";
+            }
             UpdateResistanceRows([result]);
         }
     }
 
     private void PublishProductionPassPresentation()
     {
-        // This runs only after durable PASS. Both bindings change within the
-        // same Dispatcher action, so WPF paints the final resistance PASS and
-        // the large PASS together. Earlier channel results remain live.
+        // Durable product PASS confirms the earlier measured presentation.
+        // Sound, printing, counters and relays still wait for this commit path.
         State = "PASS";
-        foreach (ResistanceResult row in Resistance)
-            row.IsPassPresentationPending = false;
     }
 
     private bool IsWaterProofEnabledForCurrentModel() =>
@@ -10878,9 +10887,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
                 List<ResistanceResult> results =
                     await _engine.MeasureResistanceAsync(
-                        result => UpdateProductionResistanceRows([result]),
+                        result =>
+                        {
+                            if (!ct.IsCancellationRequested && ReferenceEquals(_model, cycleModel) &&
+                                IsRuntimeContext(RuntimeMode.Production, generation))
+                                UpdateProductionResistanceRows([result]);
+                        },
                         ct);
 
+                ct.ThrowIfCancellationRequested();
+                if (!ReferenceEquals(_model, cycleModel) || !IsRuntimeContext(RuntimeMode.Production, generation))
+                    return;
                 UpdateProductionResistanceRows(results);
                 _cycleResistanceCompletedAt = DateTime.Now;
                 _ = PersistActiveCycleStageAsync("RESISTANCE_COMPLETED");
@@ -11147,6 +11164,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            if (ct == CurrentCycleToken() && ReferenceEquals(_model, cycleModel) && IsRuntimeContext(RuntimeMode.Production, generation) &&
+                CurrentProductionPhase == ProductionPhase.Resistance && State == "PASS")
+                State = "ĐANG KIỂM TRA...";
             AddLog("Chu trình cũ đã được hủy sạch.");
             return;
         }

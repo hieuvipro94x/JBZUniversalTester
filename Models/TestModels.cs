@@ -152,7 +152,6 @@ public sealed class ResistanceResult : ObservableObject
     private bool _isMeasured;
     private bool _isStable;
     private bool _passed;
-    private bool _isPassPresentationPending;
     private string _measurementStatus = "—";
 
     public string Name { get; init; } = "";
@@ -228,18 +227,6 @@ public sealed class ResistanceResult : ObservableObject
                 Raise(nameof(ResultText));
         }
     }
-    // Presentation only; the measured Passed value remains authoritative for
-    // persistence and the final production gates.
-    [System.Text.Json.Serialization.JsonIgnore]
-    public bool IsPassPresentationPending
-    {
-        get => _isPassPresentationPending;
-        set
-        {
-            if (Set(ref _isPassPresentationPending, value))
-                Raise(nameof(ResultText));
-        }
-    }
     public int SampleCount { get; set; }
     public long StabilizationTimeMs { get; set; }
     public string MinDisplayText => !string.IsNullOrWhiteSpace(MinDisplayTextOverride)
@@ -254,7 +241,6 @@ public sealed class ResistanceResult : ObservableObject
         : !_isMeasured ? "—" : IsOpen ? "OPEN" : ValueOhm is null ? "—" : FormatOhm(ValueOhm.Value, DisplayScale);
     public string ResultText => !string.IsNullOrWhiteSpace(ResultTextOverride)
         ? ResultTextOverride
-        : IsPassPresentationPending && Passed ? "ĐANG ĐO"
         : !_isMeasured && MeasurementStatus != "—" ? MeasurementStatus : !_isMeasured ? "—" : MeasurementStatus == "UNSTABLE" ? "UNSTABLE" : Passed ? "PASS" : "FAIL";
 
     private ResistanceDisplayScale DisplayScale => ChooseDisplayScale(ValueOhm, MinOhm, MaxOhm);

@@ -10225,6 +10225,7 @@ internal static partial class Program
         public List<byte[]> ResistanceFrames { get; } = [];
         public byte[] ReleaseResistanceFrames { get; private set; } = [];
         public int ReleaseResistanceRouteCount { get; private set; }
+        public Action? BeforeReleaseResistance { get; set; }
         public bool ThrowOnSetRelay { get; set; }
         public bool ThrowOnConnect { get; set; }
         public int StartFailuresRemaining { get; set; }
@@ -10318,6 +10319,7 @@ internal static partial class Program
         }
         public Task ReleaseResistanceRouteAsync(CancellationToken ct = default)
         {
+            BeforeReleaseResistance?.Invoke();
             ReleaseResistanceRouteCount++;
             ReleaseResistanceFrames = D2xxResistanceRouting.BuildReleaseRouteB()
                 .Concat(D2xxResistanceRouting.BuildReleaseRouteA())

@@ -1,5 +1,6 @@
 using System.Reflection;
 using JBZUniversalTester.Models;
+using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
 
 namespace JBZUniversalTester.SelfTests;
@@ -21,6 +22,11 @@ internal static partial class Program
         typeof(TestViewModel).GetField("_model", flags)!.SetValue(vm, model);
         typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(vm, true);
         typeof(TestViewModel).GetField("_presentationCycleStarted", flags)!.SetValue(vm, true);
+        typeof(TestViewModel).GetField("_runtimeMode", flags)!.SetValue(vm, 1);
+        typeof(TestViewModel).GetField("_cycleActive", flags)!.SetValue(vm, true);
+        typeof(TestViewModel).GetField("_cycleContinuityCompletedAt", flags)!.SetValue(vm, DateTime.Now);
+        typeof(TestViewModel).GetField("_productionPhase", flags)!.SetValue(vm,
+            (int)Enum.Parse(typeof(TestViewModel).GetNestedType("ProductionPhase", flags)!, "Resistance"));
         void Call(string method, params object?[] args) => typeof(TestViewModel).GetMethod(method, flags)!.Invoke(vm, args);
         Call("PrepareResistanceRows", model);
         vm.SelectedOperationTabIndex = 1;
@@ -30,27 +36,26 @@ internal static partial class Program
         Call("UpdateProductionResistanceRows", (object)new ResistanceResult[] { r1 });
         Assert(vm.ResistanceDisplayRows[0].ResultText == "PASS" && vm.ResultStatusText == "ĐANG KIỂM TRA",
             "An earlier channel remains live while another resistance channel still needs measurement");
-        Call("UpdateProductionResistanceRows", (object)new ResistanceResult[] { r2 });
-        Assert(vm.Resistance.All(row => row.Passed) && vm.Resistance[1].ValueOhm == 2.5 &&
-               vm.ResistanceDisplayRows[1].ResultText == "ĐANG ĐO" && vm.ResultStatusText == "ĐANG KIỂM TRA",
-            "Final measured values stay accurate but the last visual PASS waits for the committed production result");
-        Call("UpdateProductionResistanceRows", (object)new ResistanceResult[] { r1, r2 });
-        Assert(vm.ResistanceDisplayRows[0].ResultText == "PASS" && vm.ResistanceDisplayRows[1].ResultText == "ĐANG ĐO",
-            "Final measurement consolidation cannot make an earlier PASS flash back to measuring");
         bool sawSynchronizedPass = false;
         vm.ResistanceDisplayRows[1].PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ResistanceResult.ResultText) && vm.ResistanceDisplayRows[1].ResultText == "PASS")
+            if (e.PropertyName == nameof(ResistanceResult.ValueOhm) ||
+                (e.PropertyName == nameof(ResistanceResult.ResultText) && vm.ResistanceDisplayRows[1].ResultText == "PASS"))
             {
                 Assert(vm.ResultStatusText == "PASS", "Final resistance PASS must never precede the large PASS status");
                 sawSynchronizedPass = true;
             }
         };
+        Call("UpdateProductionResistanceRows", (object)new ResistanceResult[] { r2 });
+        Assert(sawSynchronizedPass && vm.Resistance[1].ValueOhm == 2.5 && vm.ResultStatusText == "PASS" &&
+               vm.ResistanceDisplayRows.All(row => row.ResultText == "PASS") && !vm.IsCenterResultVisible,
+            "Final numeric value, final resistance PASS and large PASS appear together before recovery without covering the table");
+        Call("UpdateProductionResistanceRows", (object)new ResistanceResult[] { r1, r2 });
+        Assert(vm.ResistanceDisplayRows.All(row => row.ResultText == "PASS"),
+            "Consolidating measured results never flashes the PASS table back to measuring");
         Call("PublishProductionPassPresentation");
         Assert(sawSynchronizedPass && vm.ResistanceDisplayRows.All(row => row.ResultText == "PASS") && vm.ResultStatusText == "PASS",
-            "Publishing the committed result updates final resistance PASS and large PASS in one UI action");
-        Assert(!System.Text.Json.JsonSerializer.Serialize(vm.Resistance[1]).Contains("IsPassPresentationPending", StringComparison.Ordinal),
-            "The presentation latch never enters serialized measurement data");
+            "Durable commit keeps the already measured PASS presentation");
         Call("PrepareResistanceRows", model);
         vm.State = "KIỂM TRA ĐIỆN TRỞ";
         Call("UpdateProductionResistanceRows", (object)new ResistanceResult[] { r1,
@@ -59,8 +64,46 @@ internal static partial class Program
             "An actual failed channel remains immediately visible and cannot publish product PASS");
         Call("PrepareResistanceRows", model);
         Call("UpdateResistanceRows", (object)new ResistanceResult[] { r1, r2 });
-        Assert(vm.ResistanceDisplayRows.All(row => row.ResultText == "PASS" && !row.IsPassPresentationPending) &&
+        Assert(vm.ResistanceDisplayRows.All(row => row.ResultText == "PASS") &&
                !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
             "Master/manual measurement presentation is unchanged and display synchronization cannot pulse relays");
+
+        // Use the real measurement engine to verify the timing boundary: its
+        // callback must publish PASS before the board recovery is even entered.
+        foreach (bool passed in new[] { true, false })
+        {
+            var app = new AppSettings();
+            app.Test.ResistanceMinimumSettleMs = 0;
+            app.Test.ResistanceSampleIntervalMs = 0;
+            app.Test.ResistanceStableSampleCount = 2;
+            var transport = new FakeBoard();
+            var visa = new FakeKeysightVisaService(true, passed ? 2 : 4);
+            using var engine = new TestEngine(transport, visa, app, settings);
+            var live = new TestViewModel(new MainViewModel(), engine, transport, visa, new WaterProofSerialService(),
+                app, settings, new LegacyPhtHistoryService(enabled: false), false);
+            void Set(string field, object value) => typeof(TestViewModel).GetField(field, flags)!.SetValue(live, value);
+            Set("_model", model);
+            engine.SetModel(model);
+            Set("_masterApproved", true);
+            Set("_runtimeMode", 1);
+            Set("_cycleActive", true);
+            Set("_cycleContinuityCompletedAt", DateTime.Now);
+            Set("_productionPhase", (int)Enum.Parse(typeof(TestViewModel).GetNestedType("ProductionPhase", flags)!, "Resistance"));
+            typeof(TestViewModel).GetMethod("PrepareResistanceRows", flags)!.Invoke(live, [model]);
+            live.SelectedOperationTabIndex = 1;
+            live.State = "KIỂM TRA ĐIỆN TRỞ";
+            bool observedRecovery = false;
+            transport.BeforeReleaseResistance = () =>
+            {
+                observedRecovery = true;
+                Assert((live.ResultStatusText == "PASS") == passed && live.ResistanceDisplayRows.All(row => row.Passed == passed) &&
+                       !transport.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                    "Measured result is visible before recovery, while relay execution remains blocked");
+            };
+            engine.MeasureResistanceAsync(result => typeof(TestViewModel).GetMethod("UpdateProductionResistanceRows", flags)!
+                .Invoke(live, [new ResistanceResult[] { result }])).GetAwaiter().GetResult();
+            Assert(observedRecovery && transport.ReleaseResistanceRouteCount == 1,
+                "Early measured PASS never skips board recovery");
+        }
     }
 }
