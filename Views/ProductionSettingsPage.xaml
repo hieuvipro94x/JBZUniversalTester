@@ -732,6 +732,11 @@
                                     </Grid>
                                 </Border>
                 </Grid></Grid></ScrollViewer>
+        <Border x:Name="SettingsOpeningOverlay" Grid.Row="1" Background="#F4F6F9"
+                Visibility="Collapsed" IsHitTestVisible="False">
+            <TextBlock Text="ĐANG MỞ CÀI ĐẶT..." FontSize="20" Foreground="#475569"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
         <Border Grid.Row="2" Background="Transparent" BorderThickness="0">
             <Grid Margin="16,4">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -743,7 +748,7 @@
                                VerticalAlignment="Center"
                                Margin="0,0,16,0"
                                Visibility="Collapsed"/>
-                    <Button Width="150" Margin="0,0,8,0" Height="38" Content="LƯU CÀI ĐẶT" FontWeight="Bold" Click="Save_Click" Style="{StaticResource SettingsActionButtonStyle}"/>
+                    <Button x:Name="SaveSettingsButton" Width="150" Margin="0,0,8,0" Height="38" Content="LƯU CÀI ĐẶT" FontWeight="Bold" Click="Save_Click" Style="{StaticResource SettingsActionButtonStyle}"/>
                     <Button Width="150" Height="38" Content="TRỞ VỀ" FontWeight="Bold" Click="Cancel_Click" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
                 </StackPanel>
             </Grid>

@@ -44,6 +44,8 @@ public partial class ProductionSettingsPage : UserControl
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
     private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
+    private Task? _displayPreparationTask;
+    private readonly bool _deferInitialLayout;
 
     public event Func<object?, EventArgs, Task>? SettingsSaved;
     public event EventHandler? RequestClose;
@@ -61,11 +63,24 @@ public partial class ProductionSettingsPage : UserControl
 
     public ProductionSettingsPage(
         MainViewModel? main,
-        ProductionSettingsViewModel viewModel)
+        ProductionSettingsViewModel viewModel,
+        bool deferInitialLayout = false)
     {
         _main = main;
         _vm = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
+        _deferInitialLayout = deferInitialLayout;
+        long bamlStarted = Stopwatch.GetTimestamp();
         InitializeComponent();
+        AsyncFileLogService.Current.Performance(
+            $"SETTINGS_PERF phase=VIEW_BAML elapsed_ms={Stopwatch.GetElapsedTime(bamlStarted).TotalMilliseconds:0.###}");
+        if (_deferInitialLayout)
+        {
+            foreach (Border panel in SettingsPanels()) panel.Visibility = Visibility.Collapsed;
+            UnifiedSettingsGrid.Opacity = 0;
+            SettingsScrollViewer.IsEnabled = false;
+            SaveSettingsButton.IsEnabled = false;
+            SettingsOpeningOverlay.Visibility = Visibility.Visible;
+        }
         SinglePrintLotTextBox.Text = _vm.Settings.LotNo.ToString(CultureInfo.InvariantCulture);
         _labelPrintModelPath = _vm.Settings.LastThtPath;
         if (!string.IsNullOrWhiteSpace(_labelPrintModelPath))
@@ -123,10 +138,45 @@ public partial class ProductionSettingsPage : UserControl
         if (IsReleased)
             return;
 
+        await PrepareForDisplayAsync();
+        if (IsReleased)
+            return;
         await Task.WhenAll(RefreshPortsAsync(), LoadLabelPrintModelsAsync());
         if (IsReleased)
             return;
         _printerPortSelectionInitialized = true;
+    }
+
+    private Border[] SettingsPanels() =>
+        [IoSettingsPanel, RelayLeakMainPanel, LabelSettingsPanel, ResistanceSettingsPanel];
+
+    public Task PrepareForDisplayAsync() =>
+        _displayPreparationTask ??= PrepareForDisplayCoreAsync();
+
+    private async Task PrepareForDisplayCoreAsync()
+    {
+        if (!_deferInitialLayout || IsReleased) return;
+        long started = Stopwatch.GetTimestamp();
+        foreach (Border panel in SettingsPanels())
+        {
+            // Input/render work can run before each bounded layout batch. Keep
+            // the panels covered until all are ready, avoiding visible reflow.
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            if (IsReleased) return;
+            long panelStarted = Stopwatch.GetTimestamp();
+            panel.Visibility = Visibility.Visible;
+            UpdateLayout();
+            AsyncFileLogService.Current.Performance(
+                $"SETTINGS_PERF phase=OPEN_PANEL panel={panel.Name} elapsed_ms={Stopwatch.GetElapsedTime(panelStarted).TotalMilliseconds:0.###}");
+        }
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+        if (IsReleased) return;
+        UnifiedSettingsGrid.Opacity = 1;
+        SettingsOpeningOverlay.Visibility = Visibility.Collapsed;
+        SettingsScrollViewer.IsEnabled = true;
+        SaveSettingsButton.IsEnabled = true;
+        AsyncFileLogService.Current.Performance(
+            $"SETTINGS_PERF phase=OPEN_READY elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
     }
 
     public void ReleasePageResources()

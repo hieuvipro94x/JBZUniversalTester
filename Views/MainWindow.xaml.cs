@@ -391,7 +391,7 @@ public partial class MainWindow : Window
         }
 
         long settingsRenderStarted = Stopwatch.GetTimestamp();
-        _settingsPage = new ProductionSettingsPage(_viewModel, settingsViewModel);
+        _settingsPage = new ProductionSettingsPage(_viewModel, settingsViewModel, deferInitialLayout: true);
         _settingsPage.RequestClose += InternalPage_RequestClose;
         _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
 

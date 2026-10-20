@@ -20,6 +20,13 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-settings-opening"])
+        {
+            TestSettingsOpeningResponsiveness();
+            TestSettingsLongLeakErrorLayout();
+            Console.WriteLine("PASS: Settings staged opening, input responsiveness, cancellation and layout");
+            return 0;
+        }
         if (args is ["--preview-combined-results", string combinedPreviewPath])
         {
             RenderLeakSummaryPreview(combinedPreviewPath, combined: true);
@@ -278,6 +285,7 @@ internal static partial class Program
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound completion gates relays", TestPassSoundRelayOrder),
             ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
+            ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
