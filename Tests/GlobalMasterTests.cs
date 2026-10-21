@@ -52,6 +52,9 @@ internal static partial class Program
                    vm.MasterState == MasterSequenceState.TestingGoodMaster && vm.SelectedOperationTabIndex == 1 &&
                    vm.ResistanceDisplayRows.Count == 1 && !vm.MasterApproved,
                 "Rejected Master must restart D2XX to watch removal, retaining measured results and keeping production locked");
+            Assert(vm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
+                   vm.StateBackground == "#C62828" && vm.StateForeground == "#FFFFFF",
+                "Rejected resistance or lost continuity explicitly asks for removal in the red product-failure status");
             board.Publish(Frame(301, false, 3));
             Assert(vm.MasterState == MasterSequenceState.TestingGoodMaster && vm.ResistanceDisplayRows.Count == 1,
                 "Removing only one connection cannot reset the rejected sample");
@@ -63,6 +66,8 @@ internal static partial class Program
             Assert(vm.MasterState == MasterSequenceState.WaitingGoodMaster && vm.Resistance.Count == 0 &&
                    vm.ResistanceDisplayRows.Count == 0 && vm.SelectedOperationTabIndex == 0 && !vm.MasterApproved,
                 "Confirmed full removal clears the failed sample and returns to waiting for a good Master");
+            Assert(vm.ResultStatusText == "KIỂM TRA MẪU ĐẠT",
+                "Full removal replaces the rejection prompt with the request for another good sample");
             Assert(vm.Total == total && vm.Pass == pass && vm.Fail == fail &&
                    !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
                 $"Rejected Master retry cannot pulse relays or count production: Rpass={resistancePass}, " +

@@ -119,7 +119,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private ProductionPersistenceService? _productionPersistence;
     private readonly LabelPrintService _labelPrintService;
     private readonly AppSoundService _sound = AppSoundService.Current;
+    private int _faultAlarmEmptyFrames;
+    private long _faultAlarmFrameRuntimeGeneration = -1;
+    private long _faultAlarmFrameScanGeneration;
+    private long _faultAlarmFrameSequence;
     private readonly Func<bool, Task> _playProductionPassSound;
+    private readonly Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? _waterProofRunOverride;
     private Task? _productionPassSoundTask;
     private readonly DiscardContactInterlock _discardInterlock = new();
     private readonly ThtModelParser _modelParser = new();
@@ -387,6 +392,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _masterEjectStarted;
     private int _masterEjectInProgress;
     private int _masterWaterProofSequenceActive;
+    private int _masterWaterProofPassedChannelsMask;
     private int _legacyGoodMasterRecorded;
     private int _legacyBadMasterRecorded;
     private long _masterBadCollectNotBeforeUtcTicks;
@@ -519,6 +525,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 RaiseCenterPresentation();
                 RaiseActiveFault();
             }
+            TryReleaseElectricalFaultAlarmAfterRemoval();
         }
     }
 
@@ -549,7 +556,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     // The three PASS lamps are held only while the committed PASS workflow runs,
     // independently of the product-removal interlock or sticky result label.
     public bool IsPassStatusLedHeld =>
-        !IsDeviceFault &&
+        !IsDeviceFault && !IsPersistenceFault &&
+        !ProductionPresentationService.IsSpecificSystemError(State) &&
         Volatile.Read(ref _passStatusLedActiveRequest) != 0 &&
         Volatile.Read(ref _passStatusLedRuntimeGeneration) == Volatile.Read(ref _runtimeGeneration);
 
@@ -575,12 +583,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     // dành riêng cho hướng dẫn đưa hàng NG qua cảm biến. Ô trạng thái nhỏ vẫn
     // hiển thị CHỜ XÁC NHẬN THÙNG LỖI qua ResultStatusText.
     private bool IsDiscardFaultConfirmationPresentation =>
-        !IsDeviceFault &&
+        !IsDeviceFault && !IsPersistenceFault &&
         _waitForFaultProductRemoval &&
         Volatile.Read(ref _discardRequiredForFault) != 0;
 
     private bool IsPassResultHeldDuringRemoval =>
-        !IsDeviceFault &&
+        !IsDeviceFault && !IsPersistenceFault &&
         _waitForProductRelease &&
         Volatile.Read(ref _passRemovalArmed) != 0 &&
         !_waterProofEquipmentErrorAwaitingRemoval &&
@@ -588,14 +596,16 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Volatile.Read(ref _passProductRemoved) == 0;
 
     private bool IsFinalPassPresentation =>
-        !IsDeviceFault &&
+        !IsDeviceFault && !IsPersistenceFault && ResultStatusText == "PASS" &&
         State.StartsWith("PASS", StringComparison.OrdinalIgnoreCase) &&
         ((CurrentProductionPhase == ProductionPhase.Completed &&
           !IsProductRemovalPending) ||
          IsPassResultHeldDuringRemoval);
 
     private bool IsWaitingProductPresentation =>
-        !IsDeviceFault &&
+        !IsDeviceFault && !IsPersistenceFault &&
+        (ResultStatusText == "LẮP SẢN PHẨM" ||
+         (IsWaitingMasterSample && ResultStatusText == MasterSampleRequestText)) &&
         !_presentationCycleStarted &&
         !_engine.HasRealtimePresentationProductActivity &&
         ((CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
@@ -643,19 +653,46 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         get
         {
+            if (IsDeviceFault || IsPersistenceFault)
+                return ProductionPresentationService.GetResultStatusText(this);
+            if (ProductionPresentationService.IsSpecificSystemError(State))
+            {
+                if (IsMasterSequenceActive && State.StartsWith("LỖI", StringComparison.OrdinalIgnoreCase) &&
+                    MasterStatus.StartsWith("MASTER ĐÃ LƯU PASS", StringComparison.OrdinalIgnoreCase))
+                    return MasterStatus;
+                return ProductionPresentationService.GetResultStatusText(this);
+            }
             if (SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null &&
                 !IsDeviceFault && !IsPersistenceFault)
                 return "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT";
+            if (IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
+                !_dailyMasterAwaitingRemoval &&
+                MasterState == MasterSequenceState.EjectingGoodMaster && _masterGoodVerified)
+                return MasterSampleRequestText;
+            if (IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
+                !_dailyMasterAwaitingRemoval && MasterState == MasterSequenceState.TestingGoodMaster &&
+                Volatile.Read(ref _masterWaterProofSequenceActive) != 0)
+            {
+                if (MasterStatus.Contains("THÁO CONNECTOR LEAK", StringComparison.OrdinalIgnoreCase))
+                    return "SẢN PHẨM KHÔNG ĐẠT\nTHÁO CONNECTOR LEAK";
+                if (MasterStatus.Contains("LẮP LẠI CONNECTOR LEAK", StringComparison.OrdinalIgnoreCase))
+                    return MasterSampleRequestText + "\nLẮP LẠI CONNECTOR LEAK";
+            }
             if (!IsMasterSequenceActive || IsDeviceFault || IsPersistenceFault ||
                 _dailyMasterAwaitingRemoval || IsProductRemovalPending)
                 return ProductionPresentationService.GetResultStatusText(this);
 
+            if (MasterState == MasterSequenceState.TestingGoodMaster &&
+                State.Equals("MASTER PASS - FAIL", StringComparison.OrdinalIgnoreCase))
+                return ProductionPresentationService.RejectedProductRemovalText;
+
             if (State.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
+                State.StartsWith("LỖI", StringComparison.OrdinalIgnoreCase) ||
                 MasterStatus.StartsWith("LỖI", StringComparison.OrdinalIgnoreCase) ||
                 MasterStatus.Contains(" - LỖI", StringComparison.OrdinalIgnoreCase) ||
                 MasterStatus.Contains("KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
                 MasterStatus.Contains("KHÔNG HỢP LỆ", StringComparison.OrdinalIgnoreCase))
-                return MasterSampleRequestText + "\nKHÔNG ĐẠT";
+                return string.IsNullOrWhiteSpace(MasterStatus) ? State : MasterStatus;
 
             if (MasterStatus.Contains("LEAK", StringComparison.OrdinalIgnoreCase))
             {
@@ -663,6 +700,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     ? "THÁO CONNECTOR LEAK"
                     : MasterStatus.Contains("LẮP LẠI CONNECTOR", StringComparison.OrdinalIgnoreCase)
                         ? "LẮP LẠI CONNECTOR LEAK" : "ĐANG TEST LEAK";
+                if (leakAction == "THÁO CONNECTOR LEAK")
+                    return "SẢN PHẨM KHÔNG ĐẠT\n" + leakAction;
                 return MasterSampleRequestText + "\n" + leakAction;
             }
             return MasterSampleRequestText;
@@ -674,7 +713,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// lấy màu từ chính sách hiển thị hiện tại.
     /// </summary>
     public string StateBackground =>
-        SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null
+        (SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null) ||
+        ResultStatusText == ProductionPresentationService.RejectedProductRemovalText ||
+        ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO CONNECTOR LEAK"
             ? "#C62828"
             : ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!"
                 ? "#2AA84A"
@@ -1227,7 +1268,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         LegacyPhtHistoryService? legacyHistory = null,
         bool requireStartupIoClear = true,
         LabelPrintService? labelPrintService = null,
-        Func<bool, Task>? passSoundPlayback = null)
+        Func<bool, Task>? passSoundPlayback = null,
+        Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null)
     {
         _main = main;
         _engine = engine;
@@ -1235,6 +1277,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _scanSupervisor = new ScanSupervisor(_board, AddLog);
         _visa = visa;
         _waterProof = waterProof;
+        _waterProofRunOverride = waterProofRun;
         _settings = settings;
         _productionSettings = productionSettings;
         _labelPrintService = labelPrintService ?? new LabelPrintService();
@@ -1357,6 +1400,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         Interlocked.Exchange(ref _masterWaterProofSequenceActive, 0);
+        Interlocked.Exchange(ref _masterWaterProofPassedChannelsMask, 0);
         _cycleActive = false;
         _waitForProductRelease = false;
         _waitForFaultProductRemoval = false;
@@ -1901,7 +1945,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Volatile.Write(ref _manualActiveRelay, 0);
         SwitchRuntimeMode(RuntimeMode.Background);
         CancelCycleOperations();
-        _sound.SetWiringFaultAlarm(false);
+        _sound.HoldElectricalFaultAlarm();
         _engine.SetFrameProcessingEnabled(false);
         ShowBoardUnavailablePresentation(force: true);
         State = "LỖI THIẾT BỊ";
@@ -3109,13 +3153,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             : ResolveModelPath(path);
     }
 
-    private void ResetEngineWithoutChangedReentry()
+    private void ResetEngineWithoutChangedReentry(bool preserveProductPresence = false)
     {
         _productPresenceStability.Reset();
         Interlocked.Increment(ref _suppressEngineChanged);
         try
         {
-            _engine.Reset();
+            if (preserveProductPresence) _engine.ResetForProductRemoval();
+            else _engine.Reset();
         }
         finally
         {
@@ -4370,7 +4415,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 // Cửa sổ QUÉT/HỌC MÃ là observer riêng của cùng stream. Không
                 // diễn giải frame chạm GND ở đây lần thứ hai thành các cặp sản phẩm.
                 if (Volatile.Read(ref _topologyLearningActive) == 0)
+                {
+                    ObserveElectricalFaultAlarmFrame(frame, generation);
                     HandleBackgroundProductRemovalInterlock(frame, generation);
+                }
                 return;
             }
 
@@ -4471,6 +4519,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         $"FRESH_FRAME_ACCEPTED seq={frame.Sequence} cycleStartSeq={cycleStartSequence} " +
                         $"generation={frame.ScanGeneration}/{cycleStartGeneration}");
                 }
+
+                ObserveElectricalFaultAlarmFrame(frame, generation);
 
                 // Probe classification phải hoàn tất trước mọi ProductEvidence,
                 // startup product interlock và wiring evaluator. Preview candidate
@@ -4701,6 +4751,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
         {
             EnterDeviceFault(ex, "BoardFrameReceived");
+        }
+        finally
+        {
+            TryReleaseElectricalFaultAlarmAfterRemoval();
         }
     }
 
@@ -5331,6 +5385,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 $"rendered_seq={previousTopology.FrameSequence} generation={topology.ScanGeneration}");
             return;
         }
+        if (topology.Pairs.Count > 0) LatchElectricalFaultAlarm();
         _sound.SetTestPointContactSound(topology.Pairs.Count > 0);
         if (string.Equals(topology.Signature, _lastIoMappingSignature, StringComparison.Ordinal))
             return;
@@ -6670,7 +6725,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Interlocked.Exchange(ref _probeSessionActive, 0);
 
         _sound.SetWiringFaultAlarm(false);
-        _sound.StopAll();
+        _sound.StopAll(force: true);
         _engine.SetFrameProcessingEnabled(false);
 
         try
@@ -7296,7 +7351,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // việc tháo hoàn toàn; không suy diễn một cạnh vừa mất là ProductRemoved.
         if (!IsProductRemovalPending && _engine.HasProductActivity)
         {
-            ResetEngineWithoutChangedReentry();
+            ResetEngineWithoutChangedReentry(preserveProductPresence: true);
             _engine.SetFrameProcessingEnabled(true);
             Interlocked.Exchange(ref _passRemovalArmed, 0);
             _waitForProductRelease = true;
@@ -7309,7 +7364,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (!_waitForProductRelease && !_waitForFaultProductRemoval)
             {
-                ResetEngineWithoutChangedReentry();
+                ResetEngineWithoutChangedReentry(preserveProductPresence: true);
                 _engine.SetFrameProcessingEnabled(true);
                 Interlocked.Exchange(ref _passRemovalArmed, 0);
                 _waitForProductRelease = true;
@@ -7519,8 +7574,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // ngay trước khi dừng scan/mở popup để bảng không còn trống.
         InvokeUi(RefreshFaults);
 
-        // TESTPOINT.wav phải kêu liên tục cho tới khi người vận hành xác nhận.
-        _sound.SetWiringFaultAlarm(true);
+        // TESTPOINT survives confirmation until clean removal and ready state.
+        LatchElectricalFaultAlarm();
 
         try
         {
@@ -7894,6 +7949,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Interlocked.Exchange(ref _masterPostStarted, 0);
         Interlocked.Exchange(ref _masterEjectStarted, 0);
         Interlocked.Exchange(ref _masterWaterProofSequenceActive, 0);
+        Interlocked.Exchange(ref _masterWaterProofPassedChannelsMask, 0);
         Interlocked.Exchange(ref _legacyGoodMasterRecorded, 0);
         Interlocked.Exchange(ref _legacyBadMasterRecorded, 0);
         Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
@@ -8072,13 +8128,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // Trong lúc MASTER đang chạy Leak hoặc chờ tháo/lắp lại connector Leak,
         // frame D2XX chỉ dùng để quan sát connector. Không cho frame thiếu tạm thời
         // reset state MASTER hay ghi/eject trước khi Leak PASS.
+        ObservePassedMasterWaterProofConnectorRemoval();
         if (Volatile.Read(ref _masterWaterProofSequenceActive) != 0)
             return;
 
         switch (MasterState)
         {
             case MasterSequenceState.WaitingGoodMaster:
-                if (_engine.HasProductActivity)
+                if (_engine.HasProductActivity || (IsWaterProofEnabledForCurrentModel() &&
+                    _engine.LastFrameValid && SelectReadyMasterWaterProofChannel() != 0))
                 {
                     _masterValidationProductionDay = MasterSampleCatalog.ProductionDay(DateTime.Now);
                     BeginMasterHistoryCycle(HistoryInspectionType.MasterGood);
@@ -8086,6 +8144,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     State = "KIỂM TRA MASTER PASS";
                     MasterStatus = "KIỂM TRA MASTER PASS";
                     AddLog("MASTER GOOD: phát hiện mẫu, bắt đầu kiểm tra tự động.");
+                    TryBeginMasterWaterProofOnConnector(generation);
                 }
                 break;
 
@@ -8125,7 +8184,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     break;
                 }
 
-                if (_engine.ContinuityPassed &&
+                if (TryBeginMasterWaterProofOnConnector(generation))
+                    break;
+
+                if (_engine.ContinuityPassed && AreMasterWaterProofChannelsPassed() &&
                     Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
                 {
                     CaptureMasterTestStartedAt();
@@ -8444,6 +8506,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         CancellationToken ct = CurrentCycleToken();
         string masterCycleId = _masterHistoryCycleId;
+        if (!AreMasterWaterProofChannelsPassed())
+        {
+            Interlocked.Exchange(ref _masterPostStarted, 0);
+            return;
+        }
         bool ownsEject = false;
         bool resistanceMeasurementCompleted = false;
         try
@@ -8492,14 +8559,20 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
-            if (!await RunMasterWaterProofUntilPassAsync(
-                    masterModel,
-                    generation,
-                    MasterSequenceState.TestingGoodMaster,
-                    "MASTER GOOD",
-                    ct))
+            if (IsWaterProofEnabledForCurrentModel())
             {
-                return;
+                // Resistance stops scanning; reacquire actual connector state
+                // before relying on Leak results captured during installation.
+                await EnsureProductionScanForWaterProofAsync(ct);
+                if (!IsMasterWaterProofContext(masterModel, generation, MasterSequenceState.TestingGoodMaster) ||
+                    !string.Equals(masterCycleId, _masterHistoryCycleId, StringComparison.Ordinal)) return;
+                ObservePassedMasterWaterProofConnectorRemoval();
+                if (!AreMasterWaterProofChannelsPassed())
+                {
+                    Interlocked.Exchange(ref _masterPostStarted, 0);
+                    State = MasterStatus = "KIỂM TRA MASTER PASS";
+                    return;
+                }
             }
 
             await WaitForProbeRelayInterlockAsync(ct);
@@ -8698,12 +8771,109 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ReferenceEquals(_model, masterModel) &&
         MasterState == expectedState;
 
+    private bool AreMasterWaterProofChannelsPassed()
+    {
+        if (!IsWaterProofEnabledForCurrentModel()) return true;
+        int required = RequiredWaterProofChannelMask();
+        return required != 0 && (Volatile.Read(ref _masterWaterProofPassedChannelsMask) & required) == required;
+    }
+
+    private int SelectReadyMasterWaterProofChannel()
+    {
+        int passed = Volatile.Read(ref _masterWaterProofPassedChannelsMask);
+        return Enumerable.Range(1, 3).FirstOrDefault(channel =>
+            _waterProofProfile.IsChannelEnabled(channel) && (passed & (1 << (channel - 1))) == 0 &&
+            HasWaterProofConnectorTrigger(_waterProofProfile.ConnectorForChannel(channel)));
+    }
+
+    private void ObservePassedMasterWaterProofConnectorRemoval()
+    {
+        if (MasterApproved || MasterState != MasterSequenceState.TestingGoodMaster ||
+            !IsWaterProofEnabledForCurrentModel() || !_engine.LastFrameValid ||
+            Volatile.Read(ref _probeSessionActive) != 0 || Volatile.Read(ref _inlineProbeContactIo) != 0) return;
+        int passed = Volatile.Read(ref _masterWaterProofPassedChannelsMask);
+        int removed = Enumerable.Range(1, 3).Where(channel =>
+            _waterProofProfile.IsChannelEnabled(channel) && (passed & (1 << (channel - 1))) != 0 &&
+            IsWaterProofConnectorTriggerDisconnected(_waterProofProfile.ConnectorForChannel(channel)))
+            .Aggregate(0, (mask, channel) => mask | (1 << (channel - 1)));
+        if (removed == 0) return;
+        Interlocked.And(ref _masterWaterProofPassedChannelsMask, ~removed);
+        AddLog($"[MASTER GOOD-LEAK] Connector đã tháo; cần Leak lại các kênh mask={removed}.");
+    }
+
+    private bool TryBeginMasterWaterProofOnConnector(long generation)
+    {
+        if (_model is not ProductModel model || !IsMasterWaterProofContext(model, generation, MasterSequenceState.TestingGoodMaster) ||
+            !IsWaterProofEnabledForCurrentModel() || Volatile.Read(ref _masterPostStarted) != 0 ||
+            !_engine.LastFrameValid || _engine.HasWiringFault || _engine.HasContactInstability ||
+            IsProbeOwningProductionPresentation()) return false;
+        if (Volatile.Read(ref _masterWaterProofSequenceActive) != 0 || Volatile.Read(ref _waterProofRunning) != 0 ||
+            _waterProofStage == WaterProofStage.Error) return true;
+
+        if (_waterProofProfile.EnabledChannelCount == 0 ||
+            Enumerable.Range(1, 3).Where(_waterProofProfile.IsChannelEnabled).Any(channel =>
+                !_engine.TryGetLeakConnectorTriggerState(_waterProofProfile.ConnectorForChannel(channel), out _, out _)))
+        {
+            State = MasterStatus = "MASTER GOOD - CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ";
+            SetWaterProofStage(WaterProofStage.Error, "KIỂM TRA CẤU HÌNH CONNECTOR LEAK", "ERROR");
+            AddLog("[MASTER GOOD-LEAK] Cần chọn kênh và connector có RET/RT hoặc cặp IO liên connector đúng THT.");
+            return true;
+        }
+        int channel = SelectReadyMasterWaterProofChannel();
+        if (channel == 0) return false;
+        WaterProofModelSettings profile = WaterProofProfileForChannels(item => item == channel);
+        CaptureMasterTestStartedAt();
+        AddLog($"[MASTER GOOD-LEAK] CH{channel} connector={profile.ConnectorForChannel(channel)} đã lắp; chạy Leak trước khi thông mạch đầy đủ.");
+        _ = RunEarlyMasterWaterProofAsync(model, generation, _masterHistoryCycleId, profile);
+        return true;
+    }
+
+    private async Task RunEarlyMasterWaterProofAsync(
+        ProductModel model, long generation, string cycleId, WaterProofModelSettings profile)
+    {
+        CancellationToken ct = CurrentCycleToken();
+        bool CurrentSample() => IsMasterWaterProofContext(model, generation, MasterSequenceState.TestingGoodMaster) &&
+            string.Equals(cycleId, _masterHistoryCycleId, StringComparison.Ordinal);
+        try
+        {
+            bool passed = await RunMasterWaterProofUntilPassAsync(model, generation,
+                MasterSequenceState.TestingGoodMaster, "MASTER GOOD", ct, profile);
+            if (!passed || ct.IsCancellationRequested || !CurrentSample()) return;
+            int passedMask = _lastWaterProofMeasurements.Where(item => item.Enabled && item.Passed &&
+                profile.IsChannelEnabled(item.Channel) && HasWaterProofConnectorTrigger(profile.ConnectorForChannel(item.Channel)))
+                .Aggregate(0, (mask, item) => mask | (1 << (item.Channel - 1)));
+            Interlocked.Or(ref _masterWaterProofPassedChannelsMask, passedMask);
+            State = MasterStatus = "KIỂM TRA MASTER PASS";
+            AddLog("[MASTER GOOD-LEAK] Kênh đã PASS; tiếp tục lắp các connector còn lại, vẫn khóa xác nhận mẫu.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested || !CurrentSample())
+        {
+            AddLog("[MASTER GOOD-LEAK] Hủy lượt Leak của mẫu cũ.");
+        }
+        catch (Exception ex)
+        {
+            if (CurrentSample())
+            {
+                State = MasterStatus = "MASTER GOOD - LỖI KIỂM TRA LEAK";
+                SetWaterProofStage(WaterProofStage.Error, "LỖI KIỂM TRA LEAK", "ERROR");
+                AddLog($"[MASTER GOOD-LEAK] ERROR: {ex}");
+                if (!_board.IsConnected) EnterDeviceFault(ex, "MasterGoodEarlyLeak");
+            }
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested && CurrentSample() && !IsDeviceFault && !IsPersistenceFault)
+                await InvokeUiAsync(() => ProcessMasterEngineChangedOnUi(generation));
+        }
+    }
+
     private async Task<bool> RunMasterWaterProofUntilPassAsync(
         ProductModel masterModel,
         long generation,
         MasterSequenceState expectedState,
         string masterLabel,
-        CancellationToken ct)
+        CancellationToken ct,
+        WaterProofModelSettings? runProfile = null)
     {
         if (!IsWaterProofEnabledForCurrentModel())
         {
@@ -8714,12 +8884,16 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (Interlocked.CompareExchange(ref _masterWaterProofSequenceActive, 1, 0) != 0)
             throw new InvalidOperationException("Một chu trình Leak MASTER khác đang chạy.");
 
+        string cycleId = _masterHistoryCycleId;
         try
         {
-            string[] connectorIds = ConfiguredWaterProofConnectorIds();
+            bool CurrentSample() => IsMasterWaterProofContext(masterModel, generation, expectedState) &&
+                string.Equals(cycleId, _masterHistoryCycleId, StringComparison.Ordinal) &&
+                !_engine.IsConfirmedProductRemoved;
+            string[] connectorIds = ConfiguredWaterProofConnectorIds(runProfile);
             string connectorGateError = string.Empty;
             if (connectorIds.Length == 0 ||
-                !TryValidateWaterProofConnectorGate(masterModel, out connectorGateError))
+                !TryValidateWaterProofConnectorGate(masterModel, out connectorGateError, runProfile))
             {
                 string error = connectorIds.Length == 0
                     ? "Chưa cấu hình connector Leak cho MASTER."
@@ -8737,11 +8911,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             int attempt = 0;
-            while (IsMasterWaterProofContext(masterModel, generation, expectedState))
+            while (CurrentSample())
             {
                 ct.ThrowIfCancellationRequested();
                 attempt++;
-                ResetWaterProofDisplay();
+                if (runProfile is null) ResetWaterProofDisplay();
                 State = attempt == 1
                     ? $"{masterLabel} - ĐANG TEST LEAK"
                     : $"{masterLabel} - ĐANG TEST LEAK LẠI LẦN {attempt - 1}";
@@ -8749,12 +8923,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 AddLog($"[{masterLabel}-LEAK] START attempt={attempt}; bắt buộc PASS trước khi xác nhận MASTER.");
 
                 await EnsureProductionScanForWaterProofAsync(ct);
+                if (!CurrentSample()) return false;
                 bool passed = await RunAutomaticWaterProofAsync(
                     masterModel,
                     generation,
                     ct,
                     masterValidation: true,
-                    masterLabel: masterLabel);
+                    masterLabel: masterLabel,
+                    runProfile: runProfile);
                 if (passed)
                 {
                     AddLog($"[{masterLabel}-LEAK] PASS attempt={attempt}; tiếp tục xác nhận MASTER.");
@@ -8773,18 +8949,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 AddLog($"[{masterLabel}-LEAK] FAIL attempt={attempt}; chờ tháo/lắp đúng connector Leak, không yêu cầu tháo toàn bộ mẫu.");
                 await StartProductionScanAndVerifyFrameAsync(ct, $"{masterLabel.Replace(' ', '_')}_LEAK_RETRY");
 
-                while (IsMasterWaterProofContext(masterModel, generation, expectedState) &&
+                while (CurrentSample() &&
                        !connectorIds.All(IsWaterProofConnectorTriggerDisconnected))
                 {
                     await Task.Delay(50, ct);
                 }
 
-                if (!IsMasterWaterProofContext(masterModel, generation, expectedState))
+                if (!CurrentSample())
                     return false;
 
                 State = $"{masterLabel} - LẮP LẠI CONNECTOR LEAK {string.Join(", ", connectorIds)}";
                 MasterStatus = State;
-                while (IsMasterWaterProofContext(masterModel, generation, expectedState) &&
+                while (CurrentSample() &&
                        !connectorIds.All(HasWaterProofConnectorTrigger))
                 {
                     await Task.Delay(50, ct);
@@ -8795,7 +8971,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         finally
         {
-            Interlocked.Exchange(ref _masterWaterProofSequenceActive, 0);
+            if (IsRuntimeContext(RuntimeMode.Production, generation) && ReferenceEquals(_model, masterModel) &&
+                string.Equals(cycleId, _masterHistoryCycleId, StringComparison.Ordinal))
+                Interlocked.Exchange(ref _masterWaterProofSequenceActive, 0);
         }
     }
 
@@ -9009,6 +9187,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         _lastWaterProofMeasurements = [];
+        Interlocked.Exchange(ref _masterWaterProofPassedChannelsMask, 0);
+        if (inspectionType == HistoryInspectionType.MasterGood) ResetWaterProofDisplay();
     }
 
     private void ResetMasterHistoryTracking()
@@ -10618,6 +10798,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (Interlocked.CompareExchange(ref _waterProofRunning, 1, 0) != 0)
             throw new InvalidOperationException("Một chu trình kiểm tra kín nước khác đang chạy.");
 
+        string masterCycleId = _masterHistoryCycleId;
         try
         {
             WaterProofModelSettings profile = runProfile ?? _waterProofProfile;
@@ -10654,7 +10835,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             WaterProofRunResult run;
             try
             {
-                run = await _waterProof.RunTestAsync(
+                run = _waterProofRunOverride is not null
+                    ? await _waterProofRunOverride(profile, ct)
+                    : await _waterProof.RunTestAsync(
                     _productionSettings.WaterProofMachine,
                     profile,
                     progress => InvokeUi(() =>
@@ -10662,7 +10845,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         bool currentContext = masterValidation
                             ? IsRuntimeContext(RuntimeMode.Production, generation) &&
                               !MasterApproved &&
-                              ReferenceEquals(_model, cycleModel)
+                              ReferenceEquals(_model, cycleModel) &&
+                              string.Equals(masterCycleId, _masterHistoryCycleId, StringComparison.Ordinal)
                             : IsProductionFaultContext(generation);
                         if (!ct.IsCancellationRequested && currentContext &&
                             ReferenceEquals(_model, cycleModel))
@@ -10673,7 +10857,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 bool currentContext = masterValidation
                     ? IsRuntimeContext(RuntimeMode.Production, generation) &&
                       !MasterApproved &&
-                      ReferenceEquals(_model, cycleModel)
+                      ReferenceEquals(_model, cycleModel) &&
+                      string.Equals(masterCycleId, _masterHistoryCycleId, StringComparison.Ordinal)
                     : IsProductionFaultContext(generation);
                 if (!currentContext || !ReferenceEquals(_model, cycleModel))
                     throw new OperationCanceledException("Leak cycle is no longer current.");
@@ -12874,6 +13059,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void RefreshFaultsFromSnapshot(TestEnginePresentationSnapshot? rowsSnapshot)
     {
         long refreshStarted = Stopwatch.GetTimestamp();
+        if (IsRuntimeMode(RuntimeMode.Production) &&
+            Volatile.Read(ref _probeSessionActive) == 0 &&
+            _engine.LastFrameValid && _engine.HasWiringFault)
+            LatchElectricalFaultAlarm();
         if (IsRuntimeMode(RuntimeMode.Probe) ||
             Volatile.Read(ref _probeSessionActive) != 0)
         {
@@ -12994,9 +13183,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         RaiseTestStatistics();
 
-        // A good Master must warn about confirmed wrong/short wiring too.
-        // Fault samples still use faults only as validation data, without an alarm.
-        // Neither path enters Product FAIL, pulses relays or counts production.
+        // Confirmed electrical errors already hold TESTPOINT above. Master
+        // faults remain validation data, never production FAIL/counters/relays;
+        // presentation cleanup cannot release the sound before full removal.
         if (!MasterApproved)
         {
             _sound.SetWiringFaultAlarm(
@@ -13048,6 +13237,66 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         return ShouldContinueWiringFaultAlarm(
             alarmActive, frameValid, confirmedFault, candidateFault);
+    }
+
+    private void LatchElectricalFaultAlarm()
+    {
+        if (!_sound.IsElectricalFaultAlarmHeld)
+        {
+            Volatile.Write(ref _faultAlarmEmptyFrames, 0);
+            Volatile.Write(ref _faultAlarmFrameRuntimeGeneration, -1);
+        }
+        _sound.HoldElectricalFaultAlarm();
+    }
+
+    private void ObserveElectricalFaultAlarmFrame(ScanFrame frame, long generation)
+    {
+        if (!_sound.IsElectricalFaultAlarmHeld) return;
+        if (Volatile.Read(ref _faultAlarmFrameRuntimeGeneration) != generation)
+        {
+            Volatile.Write(ref _faultAlarmFrameRuntimeGeneration, generation);
+            _faultAlarmFrameScanGeneration = 0;
+            _faultAlarmFrameSequence = 0;
+            Volatile.Write(ref _faultAlarmEmptyFrames, 0);
+        }
+        if (frame.Mode != BoardScanMode.Production || !frame.Complete ||
+            frame.UnknownBytes != 0 || !frame.TerminatorKnown ||
+            (frame.ExpectedIoCount != 0 && frame.ExpectedIoCount != _board.Capacity.TotalIoCapacity) ||
+            (frame.ScanUnitCount != 0 && frame.ScanUnitCount != _board.Capacity.ScanCardCount))
+        {
+            Volatile.Write(ref _faultAlarmEmptyFrames, 0);
+            return;
+        }
+        if (frame.ScanGeneration != 0 && _faultAlarmFrameScanGeneration != 0 &&
+            frame.ScanGeneration < _faultAlarmFrameScanGeneration) return;
+        bool sameScan = frame.ScanGeneration == 0 || _faultAlarmFrameScanGeneration == 0 ||
+            frame.ScanGeneration == _faultAlarmFrameScanGeneration;
+        if (sameScan && frame.Sequence > 0 && _faultAlarmFrameSequence > 0 &&
+            frame.Sequence <= _faultAlarmFrameSequence) return;
+        if (!sameScan) Volatile.Write(ref _faultAlarmEmptyFrames, 0);
+        _faultAlarmFrameScanGeneration = frame.ScanGeneration;
+        _faultAlarmFrameSequence = frame.Sequence;
+        bool empty = frame.ActiveIo.Count == 0 &&
+            !frame.Connections.Any(source => source.Value.Any(target => target != source.Key));
+        Volatile.Write(ref _faultAlarmEmptyFrames,
+            empty ? Math.Min(2, Volatile.Read(ref _faultAlarmEmptyFrames) + 1) : 0);
+    }
+
+    private void TryReleaseElectricalFaultAlarmAfterRemoval()
+    {
+        if (!_sound.IsElectricalFaultAlarmHeld || Volatile.Read(ref _faultAlarmEmptyFrames) < 2 ||
+            Volatile.Read(ref _faultAlarmFrameRuntimeGeneration) != Volatile.Read(ref _runtimeGeneration) ||
+            IsDeviceFault || IsPersistenceFault || IsProductRemovalPending ||
+            _waitForProductRelease || _waitForFaultProductRemoval ||
+            Volatile.Read(ref _probeSessionActive) != 0 ||
+            Volatile.Read(ref _discardRequiredForFault) != 0 ||
+            Volatile.Read(ref _discardContactClosed) != 0) return;
+        bool ready = ResultStatusText == "LẮP SẢN PHẨM" ||
+            (IsMasterSequenceActive && MasterState is
+                MasterSequenceState.WaitingGoodMaster or MasterSequenceState.WaitingBadMaster);
+        if (!ready) return;
+        _sound.ReleaseElectricalFaultAlarmAfterRemoval();
+        AddLog("TESTPOINT: hai frame sạch và đã trở về chờ lắp sản phẩm/mẫu; dừng cảnh báo điện.");
     }
 
     // Chỉ confirmed fault được khởi động âm. Khi âm đã phát, candidate kế tiếp

@@ -1311,7 +1311,11 @@ public partial class ProductionSettingsPage : UserControl
             var store = new BcwSerialStore();
             var saved = await Task.Run(() => store.Latest(pendingOnly: true) ?? store.Latest(), _pageLifetime.Token);
             if (IsReleased) return;
-            if (saved is null) throw new InvalidOperationException("Chưa có tem BCW đã lưu.");
+            if (saved is null)
+            {
+                ShowMessage("Chưa có tem BCW đã lưu để in lại.", "IN LẠI BCW", MessageBoxImage.Warning);
+                return;
+            }
             if (MessageBox.Show(HostWindow, $"BCW: {saved.Data.PartNumber}\nQR: {saved.Data.Barcode}\nGửi lại đúng tem này? Hãy kiểm tra tem tại máy in trước để tránh in trùng.",
                 "IN LẠI BCW", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
             var settings = _vm.Settings.Label;
@@ -1325,7 +1329,8 @@ public partial class ProductionSettingsPage : UserControl
         {
             AsyncFileLogService.Current.Error($"BCW reprint: {ex}");
             if (IsReleased) return;
-            ShowMessage(ex.Message, "IN LẠI BCW", MessageBoxImage.Warning);
+            ShowMessage("Không thể đọc hoặc gửi lại tem BCW đã lưu. Hãy kiểm tra dữ liệu tem, cổng COM và kết nối máy in rồi thử lại.",
+                "IN LẠI BCW", MessageBoxImage.Warning);
         }
         finally
         {
@@ -1634,6 +1639,9 @@ public partial class ProductionSettingsPage : UserControl
             List<ComPortOption> options = ports
                 .Select(x => new ComPortOption(x, x))
                 .ToList();
+            if (!string.IsNullOrWhiteSpace(savedPort) &&
+                !options.Any(option => string.Equals(option.PortName, savedPort, StringComparison.OrdinalIgnoreCase)))
+                options.Add(new ComPortOption(savedPort, savedPort));
 
             _suppressPrinterPortSelection = true;
             try
@@ -1642,8 +1650,9 @@ public partial class ProductionSettingsPage : UserControl
                 PrinterComComboBox.SelectedValue = savedPort;
                 // A missing port must not silently erase the saved configuration.
                 _vm.Settings.Label.PrinterCom = savedPort;
-                PrinterComComboBox.ToolTip = ports.Length == 0
-                    ? "Không tìm thấy cổng COM. Hãy kết nối máy in rồi bấm QUÉT."
+                PrinterComComboBox.ToolTip = !string.IsNullOrWhiteSpace(savedPort) &&
+                    !ports.Contains(savedPort, StringComparer.OrdinalIgnoreCase)
+                    ? $"Cổng {savedPort} đã lưu hiện chưa được phát hiện. Hãy kết nối máy in rồi bấm QUÉT."
                     : "Chọn cổng COM của máy in tem.";
             }
             finally
@@ -1664,10 +1673,11 @@ public partial class ProductionSettingsPage : UserControl
             try
             {
                 string savedPort = _vm.Settings.Label.PrinterCom ?? string.Empty;
-                PrinterComComboBox.ItemsSource = Array.Empty<ComPortOption>();
+                PrinterComComboBox.ItemsSource = string.IsNullOrWhiteSpace(savedPort)
+                    ? Array.Empty<ComPortOption>() : new[] { new ComPortOption(savedPort, savedPort) };
+                PrinterComComboBox.SelectedValue = savedPort;
                 _vm.Settings.Label.PrinterCom = savedPort;
                 PrinterComComboBox.ToolTip = "Chưa quét được cổng COM. Hãy bấm QUÉT để thử lại.";
-                PrinterComComboBox.SelectedIndex = -1;
             }
             finally
             {

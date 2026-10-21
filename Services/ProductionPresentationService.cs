@@ -4,6 +4,7 @@ internal interface IProductionPresentationState
 {
     string State { get; }
     bool IsDeviceFault { get; }
+    bool IsPersistenceFault { get; }
     bool IsPassResultHeldDuringRemoval { get; }
     bool IsProductRemovalPending { get; }
     bool IsWaitingProductRemovalPhase { get; }
@@ -25,9 +26,35 @@ internal interface IProductionPresentationState
 /// </summary>
 internal static class ProductionPresentationService
 {
+    internal const string RejectedProductRemovalText = "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM";
+    internal const string D2xxFaultText = "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM";
+    internal const string PersistenceFaultText = "LỖI LƯU DỮ LIỆU\nDỪNG KIỂM TRA";
+
+    internal static bool IsSpecificSystemError(string value) =>
+        value.Contains("LỖI THIẾT BỊ", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("LỖI KEYSIGHT", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("LỖI LƯU", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("LỖI THỰC THI RELAY", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("RELAY BỊ CHẶN", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("KHÔNG THỂ MỞ JIG", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("LỖI KIỂM TRA LEAK", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("LỖI KIỂM TRA MẪU NG", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("CHƯA KẾT NỐI", StringComparison.OrdinalIgnoreCase) ||
+        value.Contains("KHÔNG KẾT NỐI", StringComparison.OrdinalIgnoreCase) ||
+        (value.Contains("CẤU HÌNH", StringComparison.OrdinalIgnoreCase) &&
+         (value.Contains("LỖI", StringComparison.OrdinalIgnoreCase) ||
+          value.Contains("KHÔNG ĐỦ", StringComparison.OrdinalIgnoreCase) ||
+          value.Contains("KHÔNG HỢP LỆ", StringComparison.OrdinalIgnoreCase)));
+
     public static string GetResultStatusText(IProductionPresentationState state)
     {
         string value = state.State ?? string.Empty;
+
+        // Blocking faults outrank PASS/removal labels so the operator sees
+        // why testing stopped even when a previous cycle is still latched.
+        if (state.IsDeviceFault) return D2xxFaultText;
+        if (state.IsPersistenceFault) return PersistenceFaultText;
+        if (IsSpecificSystemError(value)) return value;
 
         if (state.IsPassResultHeldDuringRemoval)
             return "PASS";
@@ -40,7 +67,7 @@ internal static class ProductionPresentationService
             if (state.WaitForFaultProductRemoval &&
                 (value.Contains("LỖI SAI DÂY", StringComparison.OrdinalIgnoreCase) ||
                  value.Contains("LỖI CHẬP MẠCH", StringComparison.OrdinalIgnoreCase)))
-                return "KHÔNG ĐẠT";
+                return RejectedProductRemovalText;
 
             return "THÁO SẢN PHẨM";
         }
@@ -58,7 +85,16 @@ internal static class ProductionPresentationService
             value.Contains("FAIL", StringComparison.OrdinalIgnoreCase) ||
             value.Contains("LỖI", StringComparison.OrdinalIgnoreCase))
         {
-            return "KHÔNG ĐẠT";
+            if (!state.IsDeviceFault &&
+                !value.Contains("THIẾT BỊ", StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains("CẤU HÌNH", StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains("LƯU", StringComparison.OrdinalIgnoreCase) &&
+                !value.Contains("KẾT NỐI", StringComparison.OrdinalIgnoreCase) &&
+                (value.Contains("CHƯA ĐẠT", StringComparison.OrdinalIgnoreCase) ||
+                 value.Contains("KHÔNG ĐẠT", StringComparison.OrdinalIgnoreCase) ||
+                 value.Contains("FAIL", StringComparison.OrdinalIgnoreCase)))
+                return RejectedProductRemovalText;
+            return value;
         }
 
         if (state.IsWaitingMasterSample)
@@ -120,7 +156,7 @@ internal static class ProductionPresentationService
 
     public static string GetStateBackground(IProductionPresentationState state)
     {
-        if (state.IsDeviceFault)
+        if (state.IsDeviceFault || state.IsPersistenceFault || IsSpecificSystemError(state.State ?? string.Empty))
             return "#C62828";
 
         // Every Master sample uses the same yellow throughout its sample flow.

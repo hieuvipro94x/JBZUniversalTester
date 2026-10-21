@@ -163,6 +163,15 @@ public partial class FaultConfirmationWindow : Window
             : fault.PinFrom.Trim();
         string actualWire = actualRecord?.WireName?.Trim() ?? string.Empty;
         string actualColor = actualRecord?.Color?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(sourceWire) ||
+            (string.IsNullOrWhiteSpace(actualPin) &&
+             (string.IsNullOrWhiteSpace(actualWire) ||
+              string.Equals(sourceWire, actualWire, StringComparison.OrdinalIgnoreCase))))
+        {
+            // Missing THT labels must not hide the known physical IO pair.
+            text.Inlines.Add(new Run(item.Summary));
+            return;
+        }
         AddWire(text, sourceWire, sourceColor, sourcePin);
 
         if (!string.IsNullOrWhiteSpace(actualWire) &&

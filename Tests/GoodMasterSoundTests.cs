@@ -38,30 +38,38 @@ internal static partial class Program
             long generation = (long)typeof(TestViewModel).GetField("_runtimeGeneration", flags)!.GetValue(vm)!;
             typeof(TestViewModel).GetMethod("ProcessMasterEngineChangedOnUi", flags)!.Invoke(vm, [generation]);
             Assert(AppSoundService.Current.IsWiringFaultAlarmActive && !vm.MasterApproved &&
-                   vm.MasterState == MasterSequenceState.TestingGoodMaster,
+                   vm.MasterState == MasterSequenceState.TestingGoodMaster &&
+                   vm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
+                   vm.StateBackground == "#C62828" && vm.StateForeground == "#FFFFFF",
                 "Rejected Good Master retains the warning while production stays locked");
             Set("_requiredMasterFaultSamples", Array.Empty<MasterSampleType>());
             Set("_masterSequenceState", MasterSequenceState.TestingBadMaster);
             Refresh();
-            Assert(!AppSoundService.Current.IsWiringFaultAlarmActive,
-                "A fault sample does not inherit the Good Master wiring alarm");
+            Assert(AppSoundService.Current.IsWiringFaultAlarmActive,
+                "Changing the requested sample cannot silence a confirmed electrical alarm before removal");
             Set("_masterSequenceState", MasterSequenceState.TestingGoodMaster);
             Refresh();
             Assert(AppSoundService.Current.IsWiringFaultAlarmActive, "Returning to Good Master restores its live warning");
             Set("_probeSessionActive", 1);
             Refresh();
-            Assert(!AppSoundService.Current.IsWiringFaultAlarmActive, "Probe keeps its separate sound ownership");
+            Assert(AppSoundService.Current.IsWiringFaultAlarmActive, "Probe cannot silence an already confirmed electrical alarm");
             Set("_probeSessionActive", 0);
             engine.SetModel(model);
             engine.ProcessFrame(FrameSeq(103), false);
             Refresh();
-            Assert(!AppSoundService.Current.IsWiringFaultAlarmActive &&
+            Assert(AppSoundService.Current.IsWiringFaultAlarmActive &&
                    !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
-                "Clearing wiring faults stops TESTPOINT without pulsing a relay");
+                "Clearing engine rows alone cannot release TESTPOINT before confirmed clean removal");
+            typeof(TestViewModel).GetMethod("ObserveElectricalFaultAlarmFrame", flags)!.Invoke(vm, [FrameSeq(104), generation]);
+            typeof(TestViewModel).GetMethod("ObserveElectricalFaultAlarmFrame", flags)!.Invoke(vm, [FrameSeq(105), generation]);
+            Set("_masterSequenceState", MasterSequenceState.WaitingGoodMaster);
+            vm.State = "KIỂM TRA MASTER PASS";
+            Assert(!AppSoundService.Current.IsWiringFaultAlarmActive,
+                "Two clean frames and the request for another sample release the Master alarm");
         }
         finally
         {
-            AppSoundService.Current.SetWiringFaultAlarm(false);
+            AppSoundService.Current.StopAll(force: true);
         }
     }
 }

@@ -207,7 +207,7 @@ public sealed class MainViewModel : ObservableObject
             _shutdownCompleted = true;
 
             // Dừng mọi âm báo ngay để không còn TESTPOINT.wav sau khi UI đóng.
-            AppSoundService.Current.StopAll();
+            AppSoundService.Current.StopAll(force: true);
 
             try
             {

@@ -20,6 +20,32 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-ui-status-audit"])
+        {
+            try
+            {
+                TestFinalTestStatusGuards();
+                TestD2xxResistanceRouting();
+                TestLearnedTopology();
+                TestProductionFaultConfirmation();
+                TestDiagnosticUiAudit();
+                Console.WriteLine("PASS: UI status, Master transitions, diagnostic details, ten resistance slots and fault confirmation");
+                return 0;
+            }
+            finally { AppSoundService.Current.StopAll(force: true); }
+        }
+        if (args is ["--test-persistent-electrical-alarm"])
+        {
+            TestPersistentElectricalAlarm();
+            Console.WriteLine("PASS: TESTPOINT survives operator actions until confirmed clean removal and ready state");
+            return 0;
+        }
+        if (args is ["--test-early-master-leak"])
+        {
+            TestEarlyGoodMasterLeak();
+            Console.WriteLine("PASS: Good Master Leak starts per connector before complete continuity, retry and stale-result guards");
+            return 0;
+        }
         if (args is ["--test-single-window-navigation"])
         {
             TestSingleWindowNavigation();
@@ -297,9 +323,12 @@ internal static partial class Program
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
+            ("Good Master Leak starts per connector before complete continuity", TestEarlyGoodMasterLeak),
             ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
+            ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
+            ("Diagnostic fault popup retains every physical IO detail", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
@@ -338,6 +367,11 @@ internal static partial class Program
             {
                 failed++;
                 Console.WriteLine($"FAIL: {name}\n  {ex}");
+            }
+            finally
+            {
+                // Each self-test is a separate simulated application lifetime.
+                AppSoundService.Current.StopAll(force: true);
             }
         }
 
@@ -1607,9 +1641,9 @@ internal static partial class Program
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
-        Assert(enabledMasterVm.ResultStatusText == "LẮP MẪU MASTER" &&
+        Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT" &&
                (!enabledMasterVm.IsCenterResultVisible ||
-                enabledMasterVm.CenterResultText == "LẮP MẪU MASTER") &&
+                enabledMasterVm.CenterResultText == "KIỂM TRA MẪU ĐẠT") &&
                enabledMasterVm.StateBackground == "#F5E731" &&
                enabledMasterVm.StateForeground == "#222222",
             $"Good-Master waiting state prompts for the sample before any product activity: status={enabledMasterVm.ResultStatusText}, center={enabledMasterVm.CenterResultText}, background={enabledMasterVm.StateBackground}, foreground={enabledMasterVm.StateForeground}, master={enabledMasterVm.MasterState}, runtime={enabledMasterVm.CurrentProductionRuntimeState}");
@@ -1617,7 +1651,7 @@ internal static partial class Program
         TestViewModel masterExitVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 1 },
             out FakeBoard masterExitBoard);
-        ProductModel masterExitModel = Model(("MASTER-PAIR", new[] { 1, 18 }));
+        ProductModel masterExitModel = Model(("MASTER-PAIR", new[] { 1, 18 }), ("PENDING-PAIR", new[] { 2, 19 }));
         masterExitVm.LoadPreparedModelAsync(masterExitModel).GetAwaiter().GetResult();
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(masterExitVm, 1);
@@ -1625,7 +1659,7 @@ internal static partial class Program
             (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(masterExitVm) ?? throw new InvalidOperationException("Master exit TestEngine not found"));
         masterExitEngine.SetFrameProcessingEnabled(true);
-        Assert(masterExitVm.ResultStatusText == "LẮP MẪU MASTER",
+        Assert(masterExitVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT",
             "Good-Master status remains a sample prompt before a scan detects it");
         HashSet<string> masterPresentationChanges = new(StringComparer.Ordinal);
         masterExitVm.PropertyChanged += (_, args) =>
@@ -1636,7 +1670,7 @@ internal static partial class Program
         masterExitBoard.Publish(FrameSeq(100, (1, new[] { 18 })));
         masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
         Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster &&
-               masterExitVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               masterExitVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT" &&
                masterExitVm.StateBackground == "#F5E731" &&
                masterPresentationChanges.Contains(nameof(TestViewModel.ResultStatusText)) &&
                masterPresentationChanges.Contains(nameof(TestViewModel.StateBackground)) &&
@@ -1649,11 +1683,11 @@ internal static partial class Program
         Assert(masterExitVm.HasProductOnTestTable,
             "Master exit remains blocked while the sample is physically connected");
         masterExitBoard.Publish(FrameSeq(103));
-        Assert(!masterExitVm.HasProductOnTestTable,
-            "A fresh empty Master frame releases the blocked exit");
+        Assert(masterExitVm.HasProductOnTestTable,
+            "One empty Master frame cannot bypass the full-removal confirmation gate");
         masterExitBoard.Publish(FrameSeq(104));
         Assert(!masterExitVm.HasProductOnTestTable &&
-               masterExitVm.ResultStatusText == "LẮP MẪU MASTER" &&
+               masterExitVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT" &&
                masterExitVm.Faults.Count == 0,
             "Further empty frames restore the Master sample prompt");
 
@@ -1668,9 +1702,9 @@ internal static partial class Program
             ?? throw new InvalidOperationException("Bad-Master transition not found");
         transitionToBadMaster.Invoke(enabledMasterVm, null);
         Assert(enabledMasterVm.MasterState == MasterSequenceState.WaitingBadMaster &&
-               enabledMasterVm.ResultStatusText == "LẮP MẪU MASTER" &&
+               enabledMasterVm.ResultStatusText == "KIỂM TRA MẪU SAI DÂY" &&
                (!enabledMasterVm.IsCenterResultVisible ||
-                enabledMasterVm.CenterResultText == "LẮP MẪU MASTER") &&
+                enabledMasterVm.CenterResultText == "KIỂM TRA MẪU SAI DÂY") &&
                enabledMasterVm.WrongCountText == "0/1" &&
                enabledMasterVm.Faults.Count == 0,
             "Bad Master waits for its sample at 0/N with an empty table");
@@ -1716,8 +1750,8 @@ internal static partial class Program
                statusVm.StateForeground == "#000000",
             "Leak stage uses the canonical checking presentation before PASS");
         statusVm.State = "CHƯA ĐẠT";
-        Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
-            "FAIL state keeps the existing Vietnamese KHÔNG ĐẠT header mapping");
+        Assert(statusVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
+            "Product FAIL reports rejection and explicitly requests removal");
         statusVm.State = "CHỜ THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" &&
                statusVm.StateBackground == "#FFF3A0" &&
@@ -1732,10 +1766,10 @@ internal static partial class Program
                statusVm.StateForeground == "#000000",
             "Board connection progress uses the canonical checking presentation");
         statusVm.State = "LỖI THIẾT BỊ";
-        Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" &&
+        Assert(statusVm.ResultStatusText == "LỖI THIẾT BỊ" &&
                statusVm.StateBackground == "#C62828" &&
                statusVm.StateForeground == "#FFFFFF",
-            "A non-latched equipment error keeps the generic red error presentation");
+            "A non-latched equipment error retains its source message instead of a product rejection label");
 
         statusVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         MethodInfo buildFinalPassRejectionFaults = typeof(TestViewModel).GetMethod(
@@ -1866,7 +1900,7 @@ internal static partial class Program
             "TestView renders full-cell wire colors with outlined readable codes and no #1..#4 columns");
         Assert(xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"Open\">", StringComparison.Ordinal) &&
                xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"MissingConnection\">", StringComparison.Ordinal) &&
-               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#2563EB\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#91B6D0\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,10,0,0\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#C62828\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"WrongWiring\"/>", StringComparison.Ordinal) &&
@@ -1888,7 +1922,8 @@ internal static partial class Program
                xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelReprintButtonStyle}\"", StringComparison.Ordinal) &&
-               xaml.Contains("kh&#244;ng t&#259;ng LOT", StringComparison.Ordinal) &&
+               xaml.Contains("Command=\"{Binding RetryLabelCommand}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Command=\"{Binding ReprintLabelCommand}\"", StringComparison.Ordinal) &&
                !xaml.Contains("Text=\"{Binding LabelStatusText}\"", StringComparison.Ordinal),
             "TestView clearly separates failed first-print retry from audited duplicate printing without showing LabelStatusText");
         Assert(xaml.Contains("Click=\"BackToMain_Click\"", StringComparison.Ordinal) &&
@@ -1916,11 +1951,13 @@ internal static partial class Program
         int redLedIndex = xaml.IndexOf("x:Name=\"RedStatusLed\"", StringComparison.Ordinal);
         Assert(yellowLedIndex >= 0 && yellowLedIndex < whiteLedIndex &&
                whiteLedIndex < greenLedIndex && greenLedIndex < redLedIndex &&
-               testWindowSource.Contains("TimeSpan.FromMilliseconds(180)", StringComparison.Ordinal) &&
-               testWindowSource.Contains("TimeSpan.FromMilliseconds(90)", StringComparison.Ordinal) &&
-               testWindowSource.Contains("blink < 3", StringComparison.Ordinal) &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(200)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(100)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(50)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("viewModel.IsPassStatusLedHeld", StringComparison.Ordinal) &&
+               testWindowSource.Contains("StatusLedFrameTracker.IsCompleteScan(frame)", StringComparison.Ordinal) &&
                testWindowSource.Contains("viewModel.IsDeviceFault", StringComparison.Ordinal),
-            "TestView LEDs keep YELLOW-WHITE-GREEN-RED order, pulse timing, three PASS blinks, and hardware-fault blackout");
+            "TestView LEDs keep YELLOW-WHITE-GREEN-RED order, scan pulses, relay-scoped PASS hold and hardware-fault blackout");
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
@@ -2005,7 +2042,7 @@ internal static partial class Program
                settingsSource.Contains("private async Task<bool> PersistSettingsAsync()", StringComparison.Ordinal) &&
                settingsSource.Contains("CommitPendingEditorValues();", StringComparison.Ordinal) &&
                settingsSource.Contains("await NotifySettingsSavedAsync();", StringComparison.Ordinal) &&
-               settingsSource.Contains("ConnectLabelPrinterAsync(_vm.Settings.Label)", StringComparison.Ordinal) &&
+               settingsSource.Contains("ConnectLabelPrinterAsync(_vm.Settings.Label, selectionToken)", StringComparison.Ordinal) &&
                settingsSource.Contains("DisconnectLabelPrinterAsync()", StringComparison.Ordinal) &&
                settingsSource.Contains("new ComPortOption(savedPort, savedPort)", StringComparison.Ordinal) &&
                !settingsSource.Contains("$\"{savedPort} - chưa kết nối\"", StringComparison.Ordinal),
@@ -2014,7 +2051,9 @@ internal static partial class Program
                settingsXaml.Contains("Click=\"Save_Click\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Content=\"TRỞ VỀ\"", StringComparison.Ordinal) &&
                settingsSource.Contains("if (await PersistSettingsAsync())", StringComparison.Ordinal) &&
-               settingsSource.Contains("if (!ConfirmSaveBeforeLeaving() || !await PersistSettingsAsync())", StringComparison.Ordinal) &&
+               settingsSource.Contains("bool? saveChanges = ConfirmSaveBeforeLeaving();", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (saveChanges is null)", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (saveChanges == true && !await PersistSettingsAsync())", StringComparison.Ordinal) &&
                settingsSource.Contains("_savedSettingsSnapshot = CaptureEditableSettingsSnapshot();", StringComparison.Ordinal) &&
                settingsSource.Contains("Content = \"LƯU\"", StringComparison.Ordinal) &&
                settingsSource.Contains("Content = \"HỦY\"", StringComparison.Ordinal) &&
@@ -2042,16 +2081,16 @@ internal static partial class Program
                xaml.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto\"", StringComparison.Ordinal) &&
                xaml.Contains("MinWidth=\"125\"", StringComparison.Ordinal),
             "TestView scales its fixed header and preserves table text at 1024/1368 widths");
-        Assert(settingsXaml.Contains("<ScrollViewer Grid.Row=\"1\"", StringComparison.Ordinal) &&
+        Assert(settingsXaml.Contains("<ScrollViewer x:Name=\"SettingsScrollViewer\" Grid.Row=\"1\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
             "Production settings wraps panels and scrolls instead of clipping at 1024x768");
-        Assert(settingsSource.Contains("double availableWidth =", StringComparison.Ordinal) &&
+        Assert(settingsSource.Contains("e.ViewportWidth / MinimumSettingsColumnWidth", StringComparison.Ordinal) &&
                settingsXaml.Contains("ScrollChanged=\"SettingsScrollViewer_ScrollChanged\"", StringComparison.Ordinal) &&
-               settingsSource.Contains("Math.Max(minimumUsableContentWidth, availableWidth)", StringComparison.Ordinal) &&
-               settingsSource.Contains("SettingsPanelsHost.Width = targetWidth", StringComparison.Ordinal) &&
-               settingsSource.Contains("SettingsPanelsHost.HorizontalAlignment = HorizontalAlignment.Left", StringComparison.Ordinal) &&
-               settingsSource.Contains("UnifiedSettingsGrid.HorizontalAlignment = HorizontalAlignment.Stretch", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Width=\"{Binding ViewportWidth, ElementName=SettingsScrollViewer}\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("GridUnitType.Star", StringComparison.Ordinal) &&
+               settingsSource.Contains("Grid.SetColumn(panels[index], column);", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"UnifiedSettingsGrid\" Margin=\"4\" HorizontalAlignment=\"Stretch\"", StringComparison.Ordinal) &&
                 settingsXaml.Contains("<Grid x:Name=\"LabelPrintActionsPanel\"", StringComparison.Ordinal) &&
                 settingsXaml.Contains("Columns=\"3\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"WaterProofChannelRows\"", StringComparison.Ordinal),
@@ -2083,7 +2122,7 @@ internal static partial class Program
                settingsXaml.Contains("SettingsExitButtonStyle", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal),
             "Every Production Settings button uses the shared semantic palette and interaction template");
-        Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
+        Assert(settingsXaml.Contains("Tag=\"TEM_BE_QRCODE\"", StringComparison.Ordinal),
             "Production settings exposes the dedicated TEM BE QR selection");
         Assert(settingsXaml.Contains("Tag=\"TEM_TO_SQDZ\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"BatchPrintStartLotTextBox\"", StringComparison.Ordinal) &&
@@ -2163,7 +2202,7 @@ internal static partial class Program
         }
         Assert(appSource.Contains("AppSoundService.Current.PlayStartup();", StringComparison.Ordinal) &&
                appSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
-               soundSource.Contains("SafePlaySync(player)", StringComparison.Ordinal) &&
+               soundSource.Contains("SafePlay(player);", StringComparison.Ordinal) &&
                soundSource.Contains("_startupPlaybackActive", StringComparison.Ordinal),
             "START.wav begins after first-render idle and is protected from Probe reset/click interruption");
         Assert(typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
@@ -2180,11 +2219,11 @@ internal static partial class Program
                    "CurrentProductionPhase != ProductionPhase.Continuity",
                    StringComparison.Ordinal),
             "COMPUTER.wav is embedded and requested once on the first real Production connection of each cycle");
-        Assert(!typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
+        Assert(typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
                    name.EndsWith(".Assets.Sounds.STAGEOK.wav", StringComparison.OrdinalIgnoreCase)) &&
                typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
                    name.EndsWith(".Assets.Sounds.NG.wav", StringComparison.OrdinalIgnoreCase)) &&
-               !soundSource.Contains("CreatePlayer(\"STAGEOK.wav\"", StringComparison.Ordinal) &&
+               soundSource.Contains("CreatePlayer(\"STAGEOK.wav\"", StringComparison.Ordinal) &&
                soundSource.Contains("CreatePlayer(\"NG.wav\"", StringComparison.Ordinal) &&
                soundSource.Contains("public void PlayLeakFail()", StringComparison.Ordinal) &&
                testViewModelSource.Contains("if (!result.Passed)", StringComparison.Ordinal) &&
@@ -2209,7 +2248,7 @@ internal static partial class Program
         Assert(deviceFaultVm.IsDeviceFault, "DeviceFault latches after index exception");
         Assert(deviceFaultVm.DeviceFaultTransitionCount == 1, "Repeated index exceptions produce one DeviceFault transition");
         Assert(deviceFaultVm.DeviceFaultDialogCount == 1, "Repeated index exceptions produce one operator dialog episode");
-        Assert(deviceFaultVm.ResultStatusText == "KHÔNG ĐẠT" &&
+        Assert(deviceFaultVm.ResultStatusText == "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM" &&
                deviceFaultVm.StateBackground == "#C62828" &&
                deviceFaultVm.StateForeground == "#FFFFFF",
             "DeviceFault status mapping");
@@ -2773,7 +2812,7 @@ internal static partial class Program
                settingsResistanceXaml.Contains("ManualResistanceOptions", StringComparison.Ordinal) &&
                settingsResistanceXaml.Contains("ManualResistanceResults", StringComparison.Ordinal) &&
                settingsResistanceXaml.Contains("Value=\"ĐANG ĐO\"", StringComparison.Ordinal) &&
-               settingsResistanceXaml.Contains("MinHeight=\"290\"", StringComparison.Ordinal) &&
+               settingsResistanceXaml.Contains("x:Name=\"ManualResistanceResultLines\"", StringComparison.Ordinal) &&
                !settingsResistanceXaml.Contains("Height=\"150\" MaxHeight=\"150\"", StringComparison.Ordinal),
             "Settings exposes manual ALL/single-CH measurement and a stretchable result grid for ten rows");
 
@@ -3608,7 +3647,7 @@ internal static partial class Program
         shortRemovalBoard.Publish(FrameSeq(32, (3, new[] { 7 })));
         Assert(shortRemovalVm.IsProductRemovalPending &&
                !shortRemovalEngine.IsFaultConnectionReleased &&
-               shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+               shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
                shortRemovalVm.StateBackground == "#C62828" &&
                shortRemovalVm.ActiveFaultTitle == "KIỂM TRA LỖI CHẬP MẠCH" &&
                shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 &&
@@ -3619,7 +3658,7 @@ internal static partial class Program
             $"title={shortRemovalVm.ActiveFaultTitle} rows={string.Join(" | ", shortRemovalVm.Faults.Select(row => $"{row.Kind}:{row.ActualSourceIo}->{row.ActualTargetIo}"))} " +
             $"engine={string.Join(" | ", shortRemovalEngine.WiringFaults.Select(pair => $"{pair.FaultType}:{pair.SourceIo}->{pair.TargetIo}"))}");
         shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.WrongWiring);
-        Assert(shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+        Assert(shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
                shortRemovalVm.StateBackground == "#C62828",
             "Wrong-wiring FAIL also stays red while awaiting full product removal");
         shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.ShortCircuit);
@@ -3628,7 +3667,7 @@ internal static partial class Program
             ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 5));
         shortRemovalBoard.Publish(FrameSeq(34, (3, new[] { 7 }), (5, new[] { 6 })));
         Assert(shortRemovalVm.IsProductRemovalPending &&
-               shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+               shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
                shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 && row.ActualTargetIo == 7) &&
                shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 5 && row.ActualTargetIo == 6) &&
                shortRemovalVm.ActiveFaultActualText.Contains("IO 5", StringComparison.Ordinal),
@@ -3659,7 +3698,7 @@ internal static partial class Program
         shortRemovalBoard.Publish(FrameSeq(39, (7, new[] { 7 })));
         Assert(shortRemovalVm.IsProductRemovalPending &&
                !shortRemovalEngine.IsFaultConnectionReleased &&
-               shortRemovalVm.ResultStatusText == "KHÔNG ĐẠT" &&
+               shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
                shortRemovalVm.Faults.Count == 0 &&
                shortRemovalVm.ActiveFaultActualText == string.Empty,
             "All fault rows clear when their pairs release, while an active IO keeps the FAIL cycle pending");
@@ -6182,7 +6221,8 @@ internal static partial class Program
             : faultDialogXaml[faultItemsStart..faultItemsTagEnd];
         Assert(faultDialogXaml.Contains("SizeToContent=\"Height\"", StringComparison.Ordinal) &&
                faultDialogXaml.Contains("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal) &&
-               faultDialogXaml.Contains("Text=\"{Binding Summary}\"", StringComparison.Ordinal) &&
+               faultDialogXaml.Contains("Loaded=\"FaultSummary_Loaded\"", StringComparison.Ordinal) &&
+               faultDialogSource.Contains("new Run(item.Summary)", StringComparison.Ordinal) &&
                !faultItemsOpeningTag.Contains("Visibility=\"Collapsed\"", StringComparison.Ordinal) &&
                !faultDialogXaml.Contains("x:Name=\"FaultTypeText\"", StringComparison.Ordinal) &&
                !faultDialogXaml.Contains("x:Name=\"SummaryText\"", StringComparison.Ordinal) &&
@@ -6270,11 +6310,17 @@ internal static partial class Program
                !mainWindowXaml.Contains("Value=\"#DDDDDA\"", StringComparison.Ordinal) &&
                !mainWindowXaml.Contains("Value=\"#CBCBC8\"", StringComparison.Ordinal),
             "MainWindow buttons use semantic colors and preserve them through shared hover feedback");
-        Assert(mainWindowXaml.Contains("x:Name=\"MainActionBar\"", StringComparison.Ordinal) &&
+        System.Xml.Linq.XElement actionBar = System.Xml.Linq.XDocument.Parse(mainWindowXaml)
+            .Descendants().Single(element => element.Attribute(
+                System.Xml.Linq.XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "MainActionBar");
+        System.Xml.Linq.XElement[] actionColumns = actionBar.Elements()
+            .Single(element => element.Name.LocalName == "Grid.ColumnDefinitions").Elements().ToArray();
+        Assert(actionColumns.Length == 6 && actionColumns.All(column =>
+                   column.Attribute("Width")?.Value.EndsWith('*') == true) &&
+               mainWindowXaml.Contains("x:Name=\"MainActionBar\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("UseLayoutRounding=\"True\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("SnapsToDevicePixels=\"True\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("<ColumnDefinition Width=\"1.25*\"/>", StringComparison.Ordinal) &&
-               mainWindowXaml.Contains("<ColumnDefinition Width=\"0.75*\"/>", StringComparison.Ordinal) &&
                !mainWindowXaml.Contains("<Setter Property=\"Width\" Value=\"260\"/>", StringComparison.Ordinal) &&
                !mainWindowXaml.Contains("<ColumnDefinition Width=\"230\"/>", StringComparison.Ordinal),
             "MainWindow action buttons use DPI-safe proportional columns without fixed-width border clipping");
@@ -9366,8 +9412,10 @@ internal static partial class Program
         bool requireStartupIoClear = false,
         TimeProvider? timeProvider = null,
         KeysightVisaService? visa = null,
-        Func<bool, Task>? passSoundPlayback = null)
+        Func<bool, Task>? passSoundPlayback = null,
+        Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null)
     {
+        AppSoundService.Current.StopAll(force: true);
         board = new FakeBoard();
         var app = new AppSettings();
         var engine = new TestEngine(board, visa ?? new KeysightVisaService(), app, production, timeProvider);
@@ -9381,7 +9429,8 @@ internal static partial class Program
             production,
             new LegacyPhtHistoryService(enabled: false),
             requireStartupIoClear,
-            passSoundPlayback: passSoundPlayback ?? (_ => Task.CompletedTask));
+            passSoundPlayback: passSoundPlayback ?? (_ => Task.CompletedTask),
+            waterProofRun: waterProofRun);
 
         // START is gated by ScanSupervisor.Monitoring. Prime the in-memory
         // transport through the same clean complete-frame transition used by
@@ -10130,9 +10179,9 @@ internal static partial class Program
             string mainXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));
             string learningXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml"));
             Assert(mainXaml.Contains("Content=\"QUÉT / HỌC MÃ\"", StringComparison.Ordinal) &&
-                   learningXaml.Contains("CHUẨN ĐOÁN IO", StringComparison.Ordinal) &&
+                   learningXaml.Contains("x:Name=\"ActiveIoGrid\"", StringComparison.Ordinal) &&
                    learningXaml.Contains("ItemsSource=\"{Binding ActiveIoRows}\"", StringComparison.Ordinal) &&
-                   learningXaml.Contains("KẸT / CHƯA THÁO", StringComparison.Ordinal) &&
+                   learningXaml.Contains("x:Name=\"StuckIoCountText\"", StringComparison.Ordinal) &&
                    !learningXaml.Contains("THỜI GIAN", StringComparison.Ordinal) &&
                    !learningXaml.Contains("3 giây", StringComparison.Ordinal) &&
                    learningXaml.Contains("EnableRowVirtualization", StringComparison.Ordinal),

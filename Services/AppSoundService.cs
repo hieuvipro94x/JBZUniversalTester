@@ -45,6 +45,7 @@ public sealed class AppSoundService : IDisposable
     private bool _initialized;
     private bool _disposed;
     private bool _wiringFaultAlarmActive;
+    private bool _electricalFaultAlarmHeld;
     private bool _testPointContactSoundActive;
 
     private int _globalButtonHandlerRegistered;
@@ -57,6 +58,36 @@ public sealed class AppSoundService : IDisposable
     private int _soundGeneration;
 
     public static AppSoundService Current => LazyInstance.Value;
+
+    public bool IsElectricalFaultAlarmHeld
+    {
+        get { lock (_gate) return _electricalFaultAlarmHeld; }
+    }
+
+    // Only authoritative product-removal evidence may release this hold.
+    // Ordinary UI cleanup and competing WAV requests cannot silence it.
+    public void HoldElectricalFaultAlarm()
+    {
+        EnsureInitialized();
+        lock (_gate)
+        {
+            if (_disposed || _electricalFaultAlarmHeld) return;
+            StopAll(force: true);
+            _electricalFaultAlarmHeld = true;
+            SetWiringFaultAlarm(true);
+        }
+    }
+
+    public void ReleaseElectricalFaultAlarmAfterRemoval()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_electricalFaultAlarmHeld) return;
+            _electricalFaultAlarmHeld = false;
+            _testPointContactSoundActive = false;
+            SetWiringFaultAlarm(false);
+        }
+    }
 
     public bool IsWiringFaultAlarmActive
     {
@@ -150,6 +181,8 @@ public sealed class AppSoundService : IDisposable
         lock (_gate)
         {
             if (_disposed)
+                return;
+            if (_electricalFaultAlarmHeld || _wiringFaultAlarmActive)
                 return;
             Interlocked.Exchange(ref _startupPlaybackActive, 1);
             AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_BEGIN");
@@ -270,6 +303,8 @@ public sealed class AppSoundService : IDisposable
         {
             if (_disposed)
                 return Task.FromCanceled(new CancellationToken(true));
+            if (_electricalFaultAlarmHeld || _wiringFaultAlarmActive)
+                return Task.CompletedTask;
             if (Volatile.Read(ref _testOkPlaybackActive) != 0)
                 return _testOkPlaybackTask;
             Interlocked.Exchange(ref _testOkPlaybackActive, 1);
@@ -292,7 +327,7 @@ public sealed class AppSoundService : IDisposable
                 return Task.FromCanceled(new CancellationToken(true));
             }
 
-            _testOkPlaybackTask = Task.Run(() =>
+            _testOkPlaybackTask = Task.Run(async () =>
             {
                 try
                 {
@@ -306,18 +341,18 @@ public sealed class AppSoundService : IDisposable
                             throw new OperationCanceledException("STAGEOK resource unavailable.");
                         }
                         AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_BEGIN");
-                        PlayPassSoundSync(stagePlayer);
+                        await PlayPassSoundAsync(stagePlayer, GetWaveDurationMs(_stageOkStream), generation).ConfigureAwait(false);
                         AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_END");
                     }
                     if (generation != Volatile.Read(ref _soundGeneration))
                         throw new OperationCanceledException("PASS playback interrupted.");
                     AsyncFileLogService.Current.Application("PASS_SOUND PLAY_BEGIN");
-                    PlayPassSoundSync(player);
+                    await PlayPassSoundAsync(player, GetWaveDurationMs(_testOkStream), generation).ConfigureAwait(false);
                     if (generation != Volatile.Read(ref _soundGeneration))
                         throw new OperationCanceledException("PASS playback interrupted.");
                     AsyncFileLogService.Current.Application("PASS_SOUND PLAY_END");
                 }
-                finally { CompleteTestOkPlayback(); }
+                finally { CompleteTestOkPlayback(generation); }
             });
             return _testOkPlaybackTask;
         }
@@ -429,6 +464,9 @@ public sealed class AppSoundService : IDisposable
                 return;
             }
 
+            if (!active && _electricalFaultAlarmHeld)
+                return;
+
             if (Volatile.Read(ref _testOkPlaybackActive) != 0)
             {
                 // Nếu fault vẫn còn sau DINGDONG thì bật lại alarm ở
@@ -470,15 +508,19 @@ public sealed class AppSoundService : IDisposable
         }
     }
 
-    public void StopAll()
+    public void StopAll(bool force = false)
     {
-        Interlocked.Increment(ref _soundGeneration);
         lock (_gate)
         {
             if (_disposed)
             {
                 return;
             }
+
+            if (_electricalFaultAlarmHeld && !force)
+                return;
+            Interlocked.Increment(ref _soundGeneration);
+            _electricalFaultAlarmHeld = false;
 
             _wiringFaultAlarmActive = false;
             _testPointContactSoundActive = false;
@@ -493,6 +535,9 @@ public sealed class AppSoundService : IDisposable
             SafeStop(_discardContactPlayer);
             SafeStop(_leakFailPlayer);
             Interlocked.Exchange(ref _startupPlaybackActive, 0);
+            Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+            Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+            _testOkPlaybackTask = Task.CompletedTask;
         }
     }
 
@@ -632,9 +677,19 @@ public sealed class AppSoundService : IDisposable
         }
     }
 
-    private static void PlayPassSoundSync(SoundPlayer player)
+    private async Task PlayPassSoundAsync(SoundPlayer player, double durationMs, int generation)
     {
-        try { player.PlaySync(); }
+        try
+        {
+            lock (_gate)
+            {
+                if (_disposed || _electricalFaultAlarmHeld || generation != Volatile.Read(ref _soundGeneration))
+                    throw new OperationCanceledException("PASS playback interrupted by electrical fault or shutdown.");
+                player.Play();
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(durationMs)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"PASS_SOUND PLAY_FAILED: {ex.Message}");
@@ -642,10 +697,11 @@ public sealed class AppSoundService : IDisposable
         }
     }
 
-    private void CompleteTestOkPlayback()
+    private void CompleteTestOkPlayback(int generation)
     {
         lock (_gate)
         {
+            if (generation != Volatile.Read(ref _soundGeneration)) return;
             Interlocked.Exchange(ref _testOkPlaybackActive, 0);
             if (_disposed)
                 return;
@@ -695,7 +751,7 @@ public sealed class AppSoundService : IDisposable
                 return;
             }
 
-            StopAll();
+            StopAll(force: true);
 
             _clickPlayer?.Dispose();
             _productStartPlayer?.Dispose();

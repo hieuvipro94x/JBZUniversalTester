@@ -345,7 +345,7 @@ public partial class TestWindow : Window
         if (Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
             sender is not TestViewModel viewModel ||
             !viewModel.IsBoardConnected ||
-            viewModel.IsDeviceFault)
+            viewModel.IsDeviceFault || viewModel.IsPersistenceFault)
             return;
 
         if (!StatusLedFrameTracker.IsCompleteScan(frame))
@@ -371,7 +371,7 @@ public partial class TestWindow : Window
                 DataContext is not TestViewModel currentViewModel ||
                 !ReferenceEquals(currentViewModel, viewModel) ||
                 !currentViewModel.IsBoardConnected ||
-                currentViewModel.IsDeviceFault)
+                currentViewModel.IsDeviceFault || currentViewModel.IsPersistenceFault)
                 return;
 
             ApplyStatusLedState(currentViewModel);
@@ -388,6 +388,7 @@ public partial class TestWindow : Window
     {
         if (e.PropertyName is not (nameof(TestViewModel.IsBoardConnected) or
                                    nameof(TestViewModel.IsDeviceFault) or
+                                   nameof(TestViewModel.IsPersistenceFault) or
                                    nameof(TestViewModel.State) or
                                    nameof(TestViewModel.ResultStatusText) or
                                    nameof(TestViewModel.WiringFaultCount) or
@@ -422,7 +423,7 @@ public partial class TestWindow : Window
 
         UpdateTestingDots(viewModel);
 
-        if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault)
+        if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault || viewModel.IsPersistenceFault)
         {
             ResetActivityLeds();
             SetRedLed(false);

@@ -160,5 +160,70 @@ internal static partial class Program
             .Invoke(vm, [engine.GetProductionElectricalSnapshot()]);
         Assert(vm.State == "LẮP SẢN PHẨM" && rendered == "LẮP SẢN PHẨM" && vm.StateBackground == "#83CCEB",
             "An authoritative waiting snapshot refreshes the bound label/colors even when raw State does not change");
+
+        Set("_productRemovalPending", 1);
+        Set("_waitForFaultProductRemoval", true);
+        foreach (string fault in new[] { "LỖI SAI DÂY", "LỖI CHẬP MẠCH" })
+        {
+            vm.State = fault;
+            Assert(rendered == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
+                   vm.StateBackground == "#C62828" && vm.StateForeground == "#FFFFFF" && vm.IsProductRemovalPending,
+                "Confirmed product failures retain the removal lock and explicitly instruct removal in red");
+        }
+        Set("_discardRequiredForFault", 1);
+        Assert(vm.ResultStatusText == "CHỜ XÁC NHẬN THÙNG LỖI",
+            "The new failure prompt cannot bypass the configured discard confirmation");
+        Set("_discardRequiredForFault", 0);
+        Set("_waitForFaultProductRemoval", false);
+        Set("_productRemovalPending", 0);
+        vm.State = "CHƯA ĐẠT";
+        Assert(vm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM",
+            "Measured product rejection also requests removal");
+        Set("_deviceFault", 1);
+        Assert(vm.ResultStatusText == "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM",
+            "A D2XX device fault explicitly names the board and restart requirement");
+        Set("_productRemovalPending", 1);
+        vm.State = "PASS";
+        Assert(vm.ResultStatusText == "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM",
+            "A stale PASS or pending-removal label cannot hide the latched D2XX error");
+        Set("_deviceFault", 0);
+        Set("_persistenceFault", 1);
+        Assert(vm.ResultStatusText == "LỖI LƯU DỮ LIỆU\nDỪNG KIỂM TRA" && vm.StateBackground == "#C62828",
+            "Persistence errors retain their own blocking status even while a product awaits removal");
+        Assert(!vm.IsCenterResultVisible && !vm.IsPassStatusLedHeld,
+            "A blocked data write cannot leave PASS or installation instructions visible at the center");
+        Set("_persistenceFault", 0);
+        foreach (string reason in new[] { "LỖI THIẾT BỊ LEAK - CHỜ THÁO SẢN PHẨM",
+            "LỖI KEYSIGHT - CHỜ THÁO SẢN PHẨM", "LỖI LƯU LỊCH SỬ LEAK - CHỜ THÁO SẢN PHẨM",
+            "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST", "KHÔNG KẾT NỐI KEYSIGHT 34461A",
+            "MASTER GOOD - CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ" })
+        {
+            vm.State = reason;
+            Assert(vm.ResultStatusText == reason && vm.StateBackground == "#C62828" && vm.StateForeground == "#FFFFFF",
+                "Equipment, configuration and history errors preserve the exact reason ahead of generic removal presentation");
+        }
+        Set("_productRemovalPending", 0);
+        Set("_masterApproved", false);
+        foreach (string reason in new[] { "PASS ĐÃ LƯU - RELAY BỊ CHẶN", "LỖI KEYSIGHT", "LỖI LƯU DỮ LIỆU", "CẤU HÌNH CARD KHÔNG ĐỦ" })
+        {
+            Set("_masterApproved", true);
+            vm.State = reason;
+            Assert(vm.ResultStatusText == reason && vm.StateBackground == "#C62828" &&
+                   !vm.IsCenterResultVisible && !vm.IsCenterPassPresentation,
+                "Specific hardware/data errors cannot masquerade as PASS or show the installation overlay");
+        }
+        Set("_masterApproved", false);
+        Set("_masterSequenceState", MasterSequenceState.TestingGoodMaster);
+        vm.State = "CẤU HÌNH CARD KHÔNG ĐỦ";
+        Assert(vm.ResultStatusText == vm.State && !vm.IsCenterResultVisible && vm.StateBackground == "#C62828",
+            "Insufficient card capacity must remain explicit while Master validation is enabled");
+        vm.State = "MASTER GOOD - CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ";
+        Set("_masterStatus", vm.State);
+        Assert(vm.ResultStatusText == vm.State && vm.StateBackground == "#C62828",
+            "Invalid Master Leak configuration retains its explicit cause rather than a generic unsuccessful-sample prompt");
+        vm.State = "LỖI THỰC THI RELAY MASTER";
+        Set("_masterStatus", "MASTER ĐÃ LƯU PASS NHƯNG KHÔNG THỂ MỞ JIG");
+        Assert(vm.ResultStatusText == vm.MasterStatus && vm.StateBackground == "#C62828",
+            "A Master relay error identifies the saved PASS and failed JIG action without hiding behind the sample prompt");
     }
 }

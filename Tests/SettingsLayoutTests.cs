@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using JBZUniversalTester.Models;
 using JBZUniversalTester.ViewModels;
 using JBZUniversalTester.Views;
 
@@ -40,6 +41,15 @@ internal static partial class Program
                     $"A long Leak error must not widen the settings column: before={before}, after={relay.ActualWidth}, viewport={scroll.ViewportWidth}, extent={scroll.ExtentWidth}");
                 Assert(scroll.ExtentWidth <= scroll.ViewportWidth + 1,
                     "Leak errors wrap without introducing horizontal overflow on a wide settings page");
+                for (int channel = 1; channel <= 10; channel++)
+                    vm.ManualResistanceResults.Add(new ResistanceResult { Name = $"R{channel}", Channel = channel,
+                        ValueOhm = 1000 + channel, Passed = true, IsStable = true, MeasurementStatus = "PASS" });
+                Layout();
+                var results = (ItemsControl)page.FindName("ManualResistanceResultLines");
+                Assert(results.Items.Count == 10 && results.ActualHeight >= 200 &&
+                       results.ActualWidth > 0 && !results.ClipToBounds &&
+                       double.IsPositiveInfinity(results.MaxHeight),
+                    "All ten manual resistance results have real layout space in the scrollable page without a fixed-height clipping box");
                 page.ReleasePageResources();
             }
             catch (Exception ex) { failure = ex; }
