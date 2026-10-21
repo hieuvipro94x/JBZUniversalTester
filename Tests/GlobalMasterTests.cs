@@ -93,7 +93,8 @@ internal static partial class Program
         vm.ResistanceDisplayRows.Add(result);
         vm.SelectedOperationTabIndex = 1;
         int total = vm.Total, pass = vm.Pass, fail = vm.Fail;
-        Assert(vm.ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!",
+        Assert(vm.ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!" &&
+               vm.StateBackground == "#2AA84A" && vm.StateForeground == "#FFFFFF",
             "Good Master resistance PASS cannot request the wrong-wire sample before full removal");
         board.Publish(FrameSeq(100, (1, new[] { 2 }), (3, new[] { 4 })));
         board.Publish(FrameSeq(101, (3, new[] { 4 })));

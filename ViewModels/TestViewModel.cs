@@ -670,13 +670,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     }
 
     /// <summary>
-    /// Màu trạng thái lớn giống máy production: PASS phải xanh lá; lỗi đỏ;
-    /// chờ/đang kiểm tra dùng nền vàng dễ quan sát từ xa.
+    /// PASS và mẫu đạt đã xác nhận dùng xanh lá; các trạng thái khác
+    /// lấy màu từ chính sách hiển thị hiện tại.
     /// </summary>
     public string StateBackground =>
         SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null
             ? "#C62828"
-            : ProductionPresentationService.GetStateBackground(this);
+            : ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!"
+                ? "#2AA84A"
+                : ProductionPresentationService.GetStateBackground(this);
 
     public string StateForeground =>
         ProductionPresentationService.GetStateForeground(StateBackground, ResultStatusText == "ĐANG KIỂM TRA");
