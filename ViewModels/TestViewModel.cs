@@ -3153,13 +3153,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             : ResolveModelPath(path);
     }
 
-    private void ResetEngineWithoutChangedReentry(bool preserveProductPresence = false)
+    private void ResetEngineWithoutChangedReentry(bool preserveProductPresence = false, bool resetProductCycle = false)
     {
         _productPresenceStability.Reset();
         Interlocked.Increment(ref _suppressEngineChanged);
         try
         {
-            if (preserveProductPresence) _engine.ResetForProductRemoval();
+            if (resetProductCycle) _engine.ResetProductCycle();
+            else if (preserveProductPresence) _engine.ResetForProductRemoval();
             else _engine.Reset();
         }
         finally
@@ -8117,7 +8118,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (!_engine.IsConfirmedProductRemoved)
                 return;
             _dailyMasterAwaitingRemoval = false;
-            ResetEngineWithoutChangedReentry();
+            ResetMasterProductCycleAfterRemoval();
             State = "LẮP MẪU MASTER ĐẠT ĐẦU CA";
             MasterStatus = "KIỂM TRA MASTER PASS";
             return;
@@ -8129,7 +8130,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // frame D2XX chỉ dùng để quan sát connector. Không cho frame thiếu tạm thời
         // reset state MASTER hay ghi/eject trước khi Leak PASS.
         ObservePassedMasterWaterProofConnectorRemoval();
-        if (Volatile.Read(ref _masterWaterProofSequenceActive) != 0)
+        bool unfinishedSampleRemoved = (MasterState is MasterSequenceState.TestingGoodMaster or MasterSequenceState.TestingBadMaster) &&
+            IsIncompleteMasterRemovalConfirmed();
+        if (Volatile.Read(ref _masterWaterProofSequenceActive) != 0 && !unfinishedSampleRemoved)
             return;
 
         switch (MasterState)
@@ -8149,7 +8152,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.TestingGoodMaster:
-                if (_engine.IsConfirmedProductRemoved && _engine.IsFaultConnectionReleased)
+                if (IsIncompleteMasterRemovalConfirmed())
                 {
                     RecordMasterHistory(HistoryInspectionType.MasterGood, passed: false,
                         CaptureFaultDetails(includeMasterDisplay: false));
@@ -8157,7 +8160,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     Interlocked.Exchange(ref _masterPostStarted, 0);
                     MasterState = MasterSequenceState.WaitingGoodMaster;
                     SelectedOperationTabIndex = 0;
-                    ResetEngineWithoutChangedReentry();
+                    ResetMasterProductCycleAfterRemoval();
                     ResetProductPresentationCycle();
                     RefreshFaults();
                     State = "KIỂM TRA MASTER PASS";
@@ -8221,7 +8224,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 break;
 
             case MasterSequenceState.TestingBadMaster:
-                if (_engine.IsConfirmedProductRemoved && _engine.IsFaultConnectionReleased)
+                if (IsIncompleteMasterRemovalConfirmed())
                 {
                     RecordMasterHistory(HistoryInspectionType.MasterBad, passed: false,
                         _masterDetectedFaultDetails.Count > 0
@@ -8234,7 +8237,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     MasterFaults.Clear();
                     Interlocked.Exchange(ref _masterBadCollectNotBeforeUtcTicks, 0);
                     MasterState = MasterSequenceState.WaitingBadMaster;
-                    ResetEngineWithoutChangedReentry();
+                    ResetMasterProductCycleAfterRemoval();
                     ResetProductPresentationCycle();
                     RefreshFaults();
                     State = "LẮP SẢN PHẨM";
@@ -8862,7 +8865,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         finally
         {
-            if (!ct.IsCancellationRequested && CurrentSample() && !IsDeviceFault && !IsPersistenceFault)
+            // A removed sample may have released this COM run after the next
+            // installation already arrived. Revisit the current sample once;
+            // the model/generation and the single COM gate still own ordering.
+            if (!ct.IsCancellationRequested && !IsDeviceFault && !IsPersistenceFault &&
+                IsRuntimeContext(RuntimeMode.Production, generation) && ReferenceEquals(_model, model) && !MasterApproved &&
+                (MasterState is MasterSequenceState.WaitingGoodMaster or MasterSequenceState.TestingGoodMaster))
                 await InvokeUiAsync(() => ProcessMasterEngineChangedOnUi(generation));
         }
     }
@@ -8993,7 +9001,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             Volatile.Read(ref _removalMonitoringFromMain) != 0 ||
             Volatile.Read(ref _masterEjectInProgress) != 0 ||
             Volatile.Read(ref _masterRemovalConfirmed) != 0 ||
-            removalState is not (MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster) ||
+            removalState is not (MasterSequenceState.TestingGoodMaster or MasterSequenceState.TestingBadMaster or
+                MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster) ||
             _model is not ProductModel masterModel ||
             frame.Mode != BoardScanMode.Production || !frame.Complete ||
             frame.UnknownBytes != 0 || !frame.TerminatorKnown || !_engine.LastFrameValid)
@@ -9046,6 +9055,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Volatile.Read(ref _masterEjectInProgress) == 0 &&
         Volatile.Read(ref _masterRemovalConfirmed) != 0;
 
+    private bool IsIncompleteMasterRemovalConfirmed() =>
+        Volatile.Read(ref _masterRemovalConfirmed) != 0 ||
+        (_engine.IsConfirmedProductRemoved && _engine.IsFaultConnectionReleased);
+
     private void FinishMasterEjectSequence(long generation)
     {
         Interlocked.Exchange(ref _masterEjectInProgress, 0);
@@ -9054,6 +9067,21 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // no longer produce an engine Changed event.
         if (Volatile.Read(ref _masterRemovalConfirmed) != 0)
             InvokeUi(() => ProcessMasterEngineChangedOnUi(generation));
+    }
+
+    private void ResetMasterProductCycleAfterRemoval()
+    {
+        // A scan/routing reset preserves CLIP qualification within one sample.
+        // Confirmed removal starts a new physical sample, like production.
+        AdvanceProductionUiCycleEpoch();
+        ResetEngineWithoutChangedReentry(resetProductCycle: true);
+        ResetMasterSampleRemovalObservation();
+        ResetMasterHistoryTracking();
+        Interlocked.Exchange(ref _masterWaterProofSequenceActive, 0);
+        Interlocked.Exchange(ref _masterWaterProofPassedChannelsMask, 0);
+        _lastWaterProofMeasurements = [];
+        FinalWaterProofRows.Clear();
+        ResetWaterProofDisplay();
     }
 
     private void TransitionToBadMaster()
@@ -9079,8 +9107,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // Đổi state trước khi reset để tuyệt đối không thể tái nhập
         // EjectingGoodMaster -> TransitionToBadMaster -> Reset -> Changed -> ...
         MasterState = MasterSequenceState.WaitingBadMaster;
-        AdvanceProductionUiCycleEpoch();
-        ResetEngineWithoutChangedReentry();
+        ResetMasterProductCycleAfterRemoval();
         _masterDetectedFaultKeys.Clear();
         _masterDetectedFaultDetails.Clear();
         MasterFaults.Clear();
@@ -9171,6 +9198,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void BeginMasterHistoryCycle(string inspectionType)
     {
+        ResetMasterSampleRemovalObservation();
         SelectedOperationTabIndex = 0;
         DateTime now = DateTime.Now;
         _masterInstallStartedAt = now;
@@ -9493,8 +9521,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _sound.SetWiringFaultAlarm(false);
         // Reject queued presentation snapshots from the last Master sample so
         // they cannot overwrite the new production installation screen.
-        AdvanceProductionUiCycleEpoch();
-        ResetEngineWithoutChangedReentry();
+        ResetMasterProductCycleAfterRemoval();
         _engine.SetFrameProcessingEnabled(true);
         RefreshFaults();
 
@@ -10877,6 +10904,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
             catch (Exception ex)
             {
+                if (masterValidation &&
+                    (!IsRuntimeContext(RuntimeMode.Production, generation) || MasterApproved ||
+                     !ReferenceEquals(_model, cycleModel) ||
+                     !string.Equals(masterCycleId, _masterHistoryCycleId, StringComparison.Ordinal)))
+                    throw new OperationCanceledException("Leak error belongs to a removed Master sample.", ex);
                 if (ex is TimeoutException)
                     _waterProofWindowViewModel?.SetTimeout();
                 else

@@ -1200,9 +1200,11 @@ public sealed class TestEngine : IDisposable
     public void ResetProductCycle()
     {
         lock (_gate)
+        {
             _latchedClipKeys.Clear();
-
-        Reset();
+            ResetUnsafe();
+        }
+        NotifyChanged();
     }
 
     public void ResetForProductRemoval()

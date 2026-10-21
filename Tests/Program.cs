@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-master-clip-reinstall"])
+        {
+            TestMasterClipReinstallation();
+            Console.WriteLine("PASS: Removed incomplete Masters and sample transitions require fresh AO/aN connections");
+            return 0;
+        }
         if (args is ["--test-ui-status-audit"])
         {
             try
@@ -350,6 +356,7 @@ internal static partial class Program
             ("Candidate-only Probe releases center after discard or complete empty frame", TestOrphanedProbeCandidateRestoresCenter),
             ("Removal refreshes bound status even when raw State is unchanged", TestRemovalStatusNotifications),
             ("Incomplete product full release resets normal and CLIP cycle", TestIncompleteProductFullReleaseResetsClipCycle),
+            ("Master full removal clears CLIP and requires fresh installation", TestMasterClipReinstallation),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),
             ("Original PHT20 PASS/ERR history compatibility", TestLegacyPhtHistory),
             ("Per-model production/probe maintenance counters", TestProductionCounters)
