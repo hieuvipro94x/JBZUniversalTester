@@ -367,9 +367,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Keep the prompt and measurement table on the same physical sample.
             // The next sample is requested only after confirmed full removal.
             if (MasterState == MasterSequenceState.EjectingGoodMaster)
-                return "MẪU ĐẠT ĐÃ PASS\nVUI LÒNG THÁO SẢN PHẨM!!";
+                return "ĐÃ KIỂM TRA MẪU ĐẠT!";
             if (MasterState == MasterSequenceState.EjectingBadMaster)
-                return $"MẪU {MasterSampleCatalog.Name(_masterSampleType)} ĐÃ XÁC NHẬN\nVUI LÒNG THÁO SẢN PHẨM!!";
+                return $"ĐÃ KIỂM TRA MẪU {MasterSampleCatalog.Name(_masterSampleType)}!";
             return $"KIỂM TRA MẪU {(requestedSample is null ? "ĐẠT" : MasterSampleCatalog.Name(requestedSample.Value))}";
         }
     }
@@ -679,7 +679,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             : ProductionPresentationService.GetStateBackground(this);
 
     public string StateForeground =>
-        ProductionPresentationService.GetStateForeground(StateBackground);
+        ProductionPresentationService.GetStateForeground(StateBackground, ResultStatusText == "ĐANG KIỂM TRA");
 
     bool IProductionPresentationState.IsPassResultHeldDuringRemoval =>
         IsPassResultHeldDuringRemoval;

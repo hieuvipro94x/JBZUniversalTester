@@ -93,7 +93,7 @@ internal static partial class Program
         vm.ResistanceDisplayRows.Add(result);
         vm.SelectedOperationTabIndex = 1;
         int total = vm.Total, pass = vm.Pass, fail = vm.Fail;
-        Assert(vm.ResultStatusText.Contains("ĐẠT") && !vm.ResultStatusText.Contains("SAI DÂY"),
+        Assert(vm.ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!",
             "Good Master resistance PASS cannot request the wrong-wire sample before full removal");
         board.Publish(FrameSeq(100, (1, new[] { 2 }), (3, new[] { 4 })));
         board.Publish(FrameSeq(101, (3, new[] { 4 })));
@@ -393,7 +393,7 @@ internal static partial class Program
                    vm.StateBackground == "#83CCEB" && vm.StateForeground == "#222222",
                 "A delayed generic testing message cannot replace the confirmed idle state after Master completion");
             SetField("_presentationCycleStarted", true);
-            Assert(vm.ResultStatusText == "ĐANG KIỂM TRA" && vm.StateBackground == "#C1F0C8" && vm.StateForeground == "#C00000",
+            Assert(vm.ResultStatusText == "ĐANG KIỂM TRA" && vm.StateBackground == "#83CCEB" && vm.StateForeground == "#000000",
                 "A new product installation after Master still shows active testing");
             SetField("_presentationCycleStarted", false);
             vm.State = "LẮP SẢN PHẨM";
