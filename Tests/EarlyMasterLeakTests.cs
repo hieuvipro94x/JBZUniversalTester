@@ -130,7 +130,7 @@ internal static partial class Program
                         Feed((40, [41, 42]), (43, [44]), (50, [51]));
                         await Until(() => vm.MasterState == MasterSequenceState.EjectingGoodMaster && Get("_masterEjectInProgress") == 0);
                         Assert(requests.Count == secondChannel + 1 && !vm.IsPersistenceFault && !vm.IsDeviceFault &&
-                            vm.ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!" &&
+                            vm.ResultStatusText == "HOÀN THÀNH KIỂM TRA MẪU ĐẠT" &&
                             board.Commands.Count(command => command == "SET:1") == 1 && !board.Commands.Contains("SET:2") &&
                             vm.Total == total && vm.Pass == pass && vm.Fail == fail,
                             $"Full continuity confirms and persists the good Master using its early Leak cache, ejecting JIG once without re-running Leak or counting production: requests={requests.Count}, persistence={vm.IsPersistenceFault}, device={vm.IsDeviceFault}, status={vm.ResultStatusText}, commands={string.Join(',', board.Commands)}, counters={total}/{pass}/{fail}->{vm.Total}/{vm.Pass}/{vm.Fail}");

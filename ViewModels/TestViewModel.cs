@@ -372,9 +372,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Keep the prompt and measurement table on the same physical sample.
             // The next sample is requested only after confirmed full removal.
             if (MasterState == MasterSequenceState.EjectingGoodMaster)
-                return "ĐÃ KIỂM TRA MẪU ĐẠT!";
+                return "HOÀN THÀNH KIỂM TRA MẪU ĐẠT";
             if (MasterState == MasterSequenceState.EjectingBadMaster)
-                return $"ĐÃ KIỂM TRA MẪU {MasterSampleCatalog.Name(_masterSampleType)}!";
+                return $"HOÀN THÀNH KIỂM TRA MẪU {MasterSampleCatalog.Name(_masterSampleType)}";
             return $"KIỂM TRA MẪU {(requestedSample is null ? "ĐẠT" : MasterSampleCatalog.Name(requestedSample.Value))}";
         }
     }
@@ -709,7 +709,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     }
 
     /// <summary>
-    /// PASS và mẫu đạt đã xác nhận dùng xanh lá; các trạng thái khác
+    /// PASS và mọi mẫu đã xác nhận dùng xanh lá; các trạng thái khác
     /// lấy màu từ chính sách hiển thị hiện tại.
     /// </summary>
     public string StateBackground =>
@@ -717,7 +717,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ResultStatusText == ProductionPresentationService.RejectedProductRemovalText ||
         ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO CONNECTOR LEAK"
             ? "#C62828"
-            : ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!"
+            : ResultStatusText.StartsWith("HOÀN THÀNH KIỂM TRA MẪU ", StringComparison.Ordinal)
                 ? "#2AA84A"
                 : ProductionPresentationService.GetStateBackground(this);
 

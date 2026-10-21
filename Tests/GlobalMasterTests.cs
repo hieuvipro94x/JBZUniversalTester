@@ -98,7 +98,7 @@ internal static partial class Program
         vm.ResistanceDisplayRows.Add(result);
         vm.SelectedOperationTabIndex = 1;
         int total = vm.Total, pass = vm.Pass, fail = vm.Fail;
-        Assert(vm.ResultStatusText == "ĐÃ KIỂM TRA MẪU ĐẠT!" &&
+        Assert(vm.ResultStatusText == "HOÀN THÀNH KIỂM TRA MẪU ĐẠT" &&
                vm.StateBackground == "#2AA84A" && vm.StateForeground == "#FFFFFF",
             "Good Master resistance PASS cannot request the wrong-wire sample before full removal");
         board.Publish(FrameSeq(100, (1, new[] { 2 }), (3, new[] { 4 })));
@@ -205,6 +205,17 @@ internal static partial class Program
                     "Master transitions only to the next explicitly selected sample");
                 Assert(vm.MasterSampleRequestText.Contains(MasterSampleCatalog.Name(expected)),
                     "Operator prompt follows the selected sample");
+                typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(vm,
+                    MasterSequenceState.EjectingBadMaster);
+                Assert(vm.MasterSampleRequestText == $"HOÀN THÀNH KIỂM TRA MẪU {MasterSampleCatalog.Name(expected)}" &&
+                       vm.ResultStatusText == vm.MasterSampleRequestText &&
+                       vm.StateBackground == "#2AA84A" && vm.StateForeground == "#FFFFFF",
+                    "Each validated fault sample shows its own completion text in PASS green until removal");
+                typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(vm,
+                    MasterSequenceState.WaitingBadMaster);
+                Assert(vm.ResultStatusText == $"KIỂM TRA MẪU {MasterSampleCatalog.Name(expected)}" &&
+                       vm.StateBackground == "#F5E731",
+                    "Waiting for another installation shows the sample request without completion text");
                 validated.Add(expected);
             }
         }
