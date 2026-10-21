@@ -390,16 +390,41 @@ public partial class MainWindow : Window
         }
 
         long settingsRenderStarted = Stopwatch.GetTimestamp();
-        _settingsPage = new ProductionSettingsPage(_viewModel, settingsViewModel, deferInitialLayout: true);
-        _settingsPage.RequestClose += InternalPage_RequestClose;
-        _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
+        var preparedPage = new ProductionSettingsPage(_viewModel, settingsViewModel, deferInitialLayout: true);
+        bool attached = false;
+        try
+        {
+            // Warm templates/layout at the actual host size while Main remains
+            // visible and responsive. No loading page or partial editor is shown.
+            var size = new Size(
+                Math.Max(540, ActualWidth > 0 ? ActualWidth : SystemParameters.WorkArea.Width),
+                Math.Max(1, ActualHeight > 0 ? ActualHeight : SystemParameters.WorkArea.Height));
+            preparedPage.Measure(size);
+            preparedPage.Arrange(new Rect(size));
+            await preparedPage.PrepareForDisplayAsync();
+            if (_shutdownStarted || navigationGeneration != Volatile.Read(ref _internalPageGeneration))
+                return;
 
-        InternalPageHost.Content = _settingsPage;
-        InternalPageHost.Visibility = Visibility.Visible;
-        MainActionBar.IsEnabled = false;
-        AsyncFileLogService.Current.Performance(
-            $"SETTINGS_PERF phase=OPEN_VIEW elapsed_ms={Stopwatch.GetElapsedTime(settingsRenderStarted).TotalMilliseconds:0.###}");
-        LogMemory("MEM AFTER_SETTINGS_OPEN");
+            AsyncFileLogService.Current.Performance(
+                $"SETTINGS_PERF phase=OPEN_PREPARED elapsed_ms={Stopwatch.GetElapsedTime(settingsRenderStarted).TotalMilliseconds:0.###}");
+            long attachStarted = Stopwatch.GetTimestamp();
+            _settingsPage = preparedPage;
+            _settingsPage.RequestClose += InternalPage_RequestClose;
+            _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
+            InternalPageHost.Content = _settingsPage;
+            InternalPageHost.Visibility = Visibility.Visible;
+            MainActionBar.IsEnabled = false;
+            attached = true;
+            AsyncFileLogService.Current.Performance(
+                $"SETTINGS_PERF phase=OPEN_VIEW elapsed_ms={Stopwatch.GetElapsedTime(attachStarted).TotalMilliseconds:0.###}");
+            LogMemory("MEM AFTER_SETTINGS_OPEN");
+        }
+        finally
+        {
+            // Navigation may change while preparation yields. Never attach stale
+            // settings or leave background page callbacks alive after that.
+            if (!attached) preparedPage.ReleasePageResources();
+        }
     }
 
     private async Task SettingsPage_SettingsSaved(object? sender, EventArgs e)

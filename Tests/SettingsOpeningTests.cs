@@ -52,9 +52,8 @@ internal static partial class Program
                     events[index * 2] == panels[index].Name && events[index * 2 + 1] == "INPUT"),
                     "Dispatcher services input between every panel layout instead of blocking across the entire settings page");
                 Assert(panels.All(panel => panel.Visibility == Visibility.Visible) && save.IsEnabled &&
-                    ((Grid)page.FindName("UnifiedSettingsGrid")).Opacity == 1 &&
-                    ((Border)page.FindName("SettingsOpeningOverlay")).Visibility == Visibility.Collapsed,
-                    "All editors become visible and editable together after preparation");
+                    page.FindName("SettingsOpeningOverlay") is null,
+                    "Prepared editors are ready for direct navigation without a loading overlay");
                 Assert(vm.ResistanceChannels.Count == 10 && ReferenceEquals(page.DataContext, vm),
                     "Deferred layout retains every resistance editor and its original configuration bindings");
                 Console.WriteLine($"SETTINGS_OPEN_TEST width={width} staged_total_ms={clock.Elapsed.TotalMilliseconds:0.###} batches_ms={string.Join("/", batches.Select(value => value.ToString("0.###")))}");

@@ -76,10 +76,8 @@ public partial class ProductionSettingsPage : UserControl
         if (_deferInitialLayout)
         {
             foreach (Border panel in SettingsPanels()) panel.Visibility = Visibility.Collapsed;
-            UnifiedSettingsGrid.Opacity = 0;
             SettingsScrollViewer.IsEnabled = false;
             SaveSettingsButton.IsEnabled = false;
-            SettingsOpeningOverlay.Visibility = Visibility.Visible;
         }
         SinglePrintLotTextBox.Text = _vm.Settings.LotNo.ToString(CultureInfo.InvariantCulture);
         _labelPrintModelPath = _vm.Settings.LastThtPath;
@@ -159,8 +157,8 @@ public partial class ProductionSettingsPage : UserControl
         long started = Stopwatch.GetTimestamp();
         foreach (Border panel in SettingsPanels())
         {
-            // Input/render work can run before each bounded layout batch. Keep
-            // the panels covered until all are ready, avoiding visible reflow.
+            // MainWindow prepares this disconnected page before attaching it.
+            // Input/render work can run between batches without showing reflow.
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             if (IsReleased) return;
             long panelStarted = Stopwatch.GetTimestamp();
@@ -171,10 +169,9 @@ public partial class ProductionSettingsPage : UserControl
         }
         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
         if (IsReleased) return;
-        UnifiedSettingsGrid.Opacity = 1;
-        SettingsOpeningOverlay.Visibility = Visibility.Collapsed;
         SettingsScrollViewer.IsEnabled = true;
         SaveSettingsButton.IsEnabled = true;
+        UpdateLayout();
         AsyncFileLogService.Current.Performance(
             $"SETTINGS_PERF phase=OPEN_READY elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
     }

@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using System.Xml.Linq;
 using JBZUniversalTester.ViewModels;
 using JBZUniversalTester.Views;
@@ -29,10 +30,23 @@ internal static partial class Program
             var actions = (Grid)main.FindName("MainActionBar");
             try
             {
+                Task abandonedOpen = (Task)Call("ShowSettingsPageAsync")!;
+                await Dispatcher.Yield(DispatcherPriority.Input);
+                Assert(host.Content is null && host.Visibility == Visibility.Collapsed && actions.IsEnabled,
+                    "Main stays interactive while disconnected settings templates are prepared; no loading page is attached");
+                await (Task)Call("CloseInternalPageAsync")!;
+                await abandonedOpen;
+                Assert(host.Content is null && actions.IsEnabled,
+                    "Navigation changed during preparation cannot attach the stale settings page");
                 await (Task)Call("ShowSettingsPageAsync")!;
-                var settings = (ProductionSettingsPage)host.Content;
+                var settings = (ProductionSettingsPage)(host.Content ?? throw new InvalidOperationException("Settings page was not opened"));
                 Assert(application.Windows.Count == 1 && main.OwnedWindows.Count == 0 && !actions.IsEnabled,
                     "Opening Settings attaches a page without constructing another Window");
+                Assert(settings.PrepareForDisplayAsync().IsCompletedSuccessfully &&
+                    ((Button)settings.FindName("SaveSettingsButton")).IsEnabled &&
+                    new[] { "IoSettingsPanel", "RelayLeakMainPanel", "LabelSettingsPanel", "ResistanceSettingsPanel" }
+                        .All(name => ((Border)settings.FindName(name)).Visibility == Visibility.Visible),
+                    "Settings is attached only after all editor panels are ready, so its first visible frame has no staged reveal");
                 await (Task)Call("ShowSettingsPageAsync")!;
                 Call("OpenHistory_Click", main, new RoutedEventArgs());
                 Assert(ReferenceEquals(host.Content, settings),
