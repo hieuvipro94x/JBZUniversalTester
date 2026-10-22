@@ -303,30 +303,22 @@ public sealed class TestEngine : IDisposable
         {
             if (_disposed || !_lastFrameValid || _model is not ProductModel model)
                 return [];
+            var componentSizes = _actualComponentByIo.Values.GroupBy(component => component)
+                .ToDictionary(group => group.Key, group => group.Count());
             return _wiringFaults.Select(fault =>
             {
-                bool sourceKnown = _modelIo.Contains(fault.SourceIo);
-                bool targetKnown = _modelIo.Contains(fault.TargetIo);
-                if (!sourceKnown || !targetKnown)
-                    return fault;
-
-                // A bridge with both original networks intact is a short sample.
-                // Missing an original relationship indicates a miswired sample.
-                // This interpretation is Master-only; production classification is unchanged.
-                bool missingExpected = model.Nets.Any(net => IsEligibleProductionNet(net) &&
-                    (net.IoNumbers.Contains(fault.SourceIo) || net.IoNumbers.Contains(fault.TargetIo)) &&
-                    !IsWireNetConnected(net));
-                if (model.Clip is not null)
-                    missingExpected |= model.Clip.Branches.Any(branch =>
-                        IsEligibleClipBranch(model.Clip, branch) &&
-                        (model.Clip.CommonIo == fault.SourceIo || model.Clip.CommonIo == fault.TargetIo ||
-                         branch.TargetIo == fault.SourceIo || branch.TargetIo == fault.TargetIo) &&
-                        !IsClipBranchConnected(model.Clip, branch, _currentConnections));
+                // Master samples: an unexpected connected group of at least
+                // three distinct physical IOs is short-circuit evidence.
+                // Correct THT common nets never enter this confirmed fault list.
+                // Production fault classification remains unchanged.
+                bool shortGroup = _actualComponentByIo.TryGetValue(fault.SourceIo, out int component) &&
+                    _actualComponentByIo.TryGetValue(fault.TargetIo, out int targetComponent) &&
+                    component == targetComponent && componentSizes[component] >= 3;
                 return fault with
                 {
-                    FaultType = missingExpected ? ProductFaultType.WrongWiring : ProductFaultType.ShortCircuit,
-                    ExpectedSourceIo = missingExpected ? fault.ExpectedSourceIo : null,
-                    ExpectedTargetIo = missingExpected ? fault.ExpectedTargetIo : null
+                    FaultType = shortGroup ? ProductFaultType.ShortCircuit : ProductFaultType.WrongWiring,
+                    ExpectedSourceIo = shortGroup ? null : fault.ExpectedSourceIo,
+                    ExpectedTargetIo = shortGroup ? null : fault.ExpectedTargetIo
                 };
             }).ToArray();
         }
@@ -335,7 +327,7 @@ public sealed class TestEngine : IDisposable
     public IReadOnlyList<FaultDetail> GetMissingConnectionFaults() => GetOpenMasterFaults();
 
     // Master evidence from the authoritative complete production snapshot.
-    // The Master workflow automatically accepts the configured exact live missing-connection count.
+    // The Master workflow captures this live missing count when the operator confirms installation.
     public IReadOnlyList<FaultDetail> GetOpenMasterFaults()
     {
         lock (_gate)

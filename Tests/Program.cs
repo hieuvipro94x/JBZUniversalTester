@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-master-sample-confirmation"])
+        {
+            TestMasterShortGroupAndManualOpen();
+            Console.WriteLine("PASS: Master three-IO short groups and operator-confirmed unknown open count");
+            return 0;
+        }
         if (args is ["--test-master-clip-reinstall"])
         {
             TestMasterClipReinstallation();
@@ -339,6 +345,7 @@ internal static partial class Program
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
             ("All NG Masters keep wire rows and open Master requires an exact complete pattern", TestAllMasterWireRowsAndOpenPattern),
+            ("Master three-IO short groups and operator-confirmed unknown open count", TestMasterShortGroupAndManualOpen),
             ("Master completion replays removal confirmed while JIG was busy", TestMasterRemovalDuringEjectCompletion),
             ("History PASS/FAIL ordinals restart for each product LOT batch", TestHistoryLotBatchOrdinals),
             ("Master History hides session identifiers without changing audit data", TestMasterHistorySessionPresentation),

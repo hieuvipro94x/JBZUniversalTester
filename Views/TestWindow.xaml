@@ -668,6 +668,21 @@
                         <ColumnDefinition Width="6"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
+                    <Grid Grid.ColumnSpan="3">
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
                     <Button Grid.Column="0"
                             Content="TH&#7916; L&#7840;I IN TEM"
                             Command="{Binding RetryLabelCommand}"
@@ -680,6 +695,24 @@
                             Style="{StaticResource LabelReprintButtonStyle}"
                             Height="30"
                             FontSize="9.5"/>
+                    </Grid>
+                    <Button Grid.ColumnSpan="3"
+                            Content="XÁC NHẬN ĐÃ LẮP XONG MẪU"
+                            Command="{Binding ConfirmOpenMasterCommand}"
+                            IsEnabled="{Binding CanConfirmOpenMaster}"
+                            Height="30" FontSize="11" FontWeight="Bold"
+                            Background="#0F766E" Foreground="White" BorderBrush="#0B5D56">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
                 <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>

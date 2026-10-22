@@ -667,7 +667,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT";
             if (IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
                 !_dailyMasterAwaitingRemoval &&
-                MasterState == MasterSequenceState.EjectingGoodMaster && _masterGoodVerified)
+                ((MasterState == MasterSequenceState.EjectingGoodMaster && _masterGoodVerified) ||
+                 (MasterState == MasterSequenceState.EjectingBadMaster && _masterBadVerified)))
                 return MasterSampleRequestText;
             if (IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
                 !_dailyMasterAwaitingRemoval && MasterState == MasterSequenceState.TestingGoodMaster &&
@@ -843,7 +844,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public int WrongCount => _cachedWrongCount;
 
     public string WrongCountText => IsMasterBadPhase
-        ? $"{MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
+        ? _masterSampleType == MasterSampleType.OpenCircuit && !_masterFaultCollectionLocked
+            ? MasterDetectedFaultCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : $"{MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
         : WrongCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public int ShortCount => _cachedShortCount;
@@ -859,7 +862,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _engine.ExpectedNetCount;
 
     public string NetworkProgress => IsMasterBadPhase
-        ? $"{MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
+        ? WrongCountText
         : $"{PassedNetworkCount}/{ExpectedNetworkCount}";
 
     public string ActiveFaultTitle
@@ -1133,6 +1136,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     ResetMasterSampleRemovalObservation();
                 }
                 Raise(nameof(MasterSampleRequestText));
+                Raise(nameof(IsOpenMasterAwaitingConfirmation));
+                Raise(nameof(CanConfirmOpenMaster));
                 Raise(nameof(IsMasterSequenceActive));
                 Raise(nameof(IsMasterBadPhase));
                 Raise(nameof(ProductionEnabled));
@@ -1228,6 +1233,16 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public AsyncRelayCommand RelaysOffCommand { get; }
     public AsyncRelayCommand RetryLabelCommand { get; }
     public AsyncRelayCommand ReprintLabelCommand { get; }
+    public AsyncRelayCommand ConfirmOpenMasterCommand { get; }
+    public bool IsOpenMasterAwaitingConfirmation => !MasterApproved &&
+        MasterState == MasterSequenceState.TestingBadMaster &&
+        _masterSampleType == MasterSampleType.OpenCircuit && !_masterFaultCollectionLocked;
+    public bool CanConfirmOpenMaster => IsOpenMasterAwaitingConfirmation &&
+        !IsDeviceFault && !IsPersistenceFault && _board.IsConnected &&
+        IsRuntimeContext(RuntimeMode.Production, Volatile.Read(ref _runtimeGeneration)) &&
+        !IsProbeOwningProductionPresentation() &&
+        DateTime.UtcNow.Ticks >= Interlocked.Read(ref _masterBadCollectNotBeforeUtcTicks) &&
+        _engine.CanConfirmOpenMasterSample(_engine.GetOpenMasterFaults().Count);
 
     public string LabelStatusText
     {
@@ -1370,6 +1385,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         RetryLabelCommand = new AsyncRelayCommand(RetryLastFailedLabelAsync, () => CanRetryLabel);
         ReprintLabelCommand = new AsyncRelayCommand(ReprintLastSuccessfulLabelAsync, () => CanReprintLabel);
+        ConfirmOpenMasterCommand = new AsyncRelayCommand(ConfirmOpenMasterAsync);
 
     }
 
@@ -7975,6 +7991,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void RaiseMasterState()
     {
+        Raise(nameof(IsOpenMasterAwaitingConfirmation));
+        Raise(nameof(CanConfirmOpenMaster));
         Raise(nameof(MasterSampleRequestText));
         Raise(nameof(ResultStatusText));
         RaiseCenterPresentation();
@@ -8328,17 +8346,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (_masterSampleType == MasterSampleType.OpenCircuit)
         {
-            if (MasterDetectedFaultCount != MasterRequiredFaultCount ||
-                !_engine.CanConfirmOpenMasterSample(MasterRequiredFaultCount))
-            {
-                MasterStatus = $"MẪU TUỘT TUÝT: ĐÃ NỐI {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal}; " +
-                    $"LẮP ĐỦ CÁC DÂY CÒN LẠI, CHỈ THIẾU {MasterRequiredFaultCount} KẾT NỐI";
-                State = MasterStatus;
-                return;
-            }
-            _masterFaultCollectionLocked = true;
-            _masterBadVerified = true;
-            _ = CompleteBadMasterAsync(generation);
+            MasterStatus = $"MẪU TUỘT TUÝT / ĐỨT DÂY: THIẾU {MasterDetectedFaultCount} KẾT NỐI; " +
+                "LẮP XONG MẪU RỒI BẤM XÁC NHẬN";
+            State = MasterStatus;
             return;
         }
 
@@ -8722,6 +8732,32 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
+    private async Task ConfirmOpenMasterAsync()
+    {
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        if (!IsOpenMasterAwaitingConfirmation || IsDeviceFault || IsPersistenceFault ||
+            !_board.IsConnected || IsProbeOwningProductionPresentation() ||
+            !IsRuntimeContext(RuntimeMode.Production, generation) ||
+            DateTime.UtcNow.Ticks < Interlocked.Read(ref _masterBadCollectNotBeforeUtcTicks))
+            return;
+
+        // Re-read the authoritative live frame when the operator confirms.
+        // Neither an old missing count nor a remembered CLIP result is evidence.
+        CollectCurrentMasterFaults(generation);
+        int missing = MasterDetectedFaultCount;
+        if (!IsOpenMasterAwaitingConfirmation || !_engine.CanConfirmOpenMasterSample(missing))
+        {
+            AddLog("MASTER OPEN: chưa xác nhận được mẫu; cần kết nối thực tế, quét đủ nguồn, còn dây hở và không có lỗi sai dây/chập mạch/tiếp xúc.");
+            return;
+        }
+        _masterRequiredFaultCount = missing;
+        _masterFaultCollectionLocked = true;
+        _masterBadVerified = true;
+        RebuildMasterFaultDisplayRows();
+        RaiseMasterState();
+        await CompleteBadMasterAsync(generation);
+    }
+
     private async Task CompleteBadMasterAsync(long generation)
     {
         if (_model is not ProductModel masterModel ||
@@ -9100,7 +9136,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _masterRequiredFaultCount = _masterSampleType switch
         {
             MasterSampleType.WrongWiring => _masterWrongWiringRequiredCount,
-            MasterSampleType.OpenCircuit => _masterOpenRequiredCount,
+            // Open count is captured from the live frame on explicit confirmation.
+            // Keep this gate armed until then; legacy CFG counts are not a target.
+            MasterSampleType.OpenCircuit => 1,
             _ => 1
         };
 
