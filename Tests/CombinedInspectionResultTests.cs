@@ -18,6 +18,7 @@ internal static partial class Program
             void Set(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
             object? Call(string name, params object?[] args) => typeof(TestViewModel).GetMethod(name, flags)!.Invoke(vm, args);
             Set("_model", model);
+            Set("_masterApproved", true); // This fixture exercises production qualification.
             Set("_waterProofProfile", new WaterProofModelSettings { Enabled = leak,
                 Channel1Enabled = true, Channel2Enabled = false, Channel3Enabled = false,
                 Channel1Connector = "CN1", LeakLimit = 2 });

@@ -8764,6 +8764,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             masterPassAt = DateTime.Now;
+            ShowFinalWaterProofResults();
             RecordMasterHistory(
                 HistoryInspectionType.MasterGood,
                 passed: true,
@@ -8866,7 +8867,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Giữ latch cho tới khi MASTER GOOD được tháo/nhả. Nếu resistance hoặc
             // continuity không đạt, không được tự đo/lặp PASS liên tục theo từng frame.
             // Nhánh IsProductReleased ở state TestingGoodMaster sẽ reset latch về 0.
-            if (!IsResistanceEnabledForModel(masterModel) ||
+            if ((!IsResistanceEnabledForModel(masterModel) && !HasLeakResultRows) ||
                 !IsRuntimeContext(RuntimeMode.Production, generation) ||
                 !ReferenceEquals(_model, masterModel) ||
                 MasterState is not (MasterSequenceState.TestingGoodMaster or MasterSequenceState.EjectingGoodMaster))
@@ -9777,9 +9778,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private bool PopulateFinalWaterProofRows()
     {
+        bool leakQualified = IsMasterSequenceActive
+            ? MasterState is MasterSequenceState.TestingGoodMaster or MasterSequenceState.EjectingGoodMaster &&
+                AreMasterWaterProofChannelsPassed() && _engine.ContinuityPassed
+            : Volatile.Read(ref _preContinuityWaterProofPassed) != 0 && _cycleContinuityCompletedAt.HasValue;
         if (!IsWaterProofEnabledForCurrentModel() ||
-            Volatile.Read(ref _preContinuityWaterProofPassed) == 0 ||
-            !_cycleContinuityCompletedAt.HasValue)
+            !leakQualified)
             return false;
         WaterProofChannelMeasurement[] measurements = _lastWaterProofMeasurements
             .Where(item => item.Enabled && _waterProofProfile.IsChannelEnabled(item.Channel))

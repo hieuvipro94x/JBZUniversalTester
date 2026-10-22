@@ -129,6 +129,10 @@ internal static partial class Program
                         await Task.Delay(250); // Existing continuity confirmation policy.
                         Feed((40, [41, 42]), (43, [44]), (50, [51]));
                         await Until(() => vm.MasterState == MasterSequenceState.EjectingGoodMaster && Get("_masterEjectInProgress") == 0);
+                        Assert(vm.SelectedOperationTabIndex == 2 && vm.HasLeakResultRows &&
+                            !vm.HasResistanceResultRows && vm.InspectionResultRows.Count == 2 &&
+                            vm.InspectionResultRows.All(row => row.ResultText == "PASS"),
+                            "Leak-only good Master retains both channel results in the common table until full sample removal");
                         Assert(requests.Count == secondChannel + 1 && !vm.IsPersistenceFault && !vm.IsDeviceFault &&
                             vm.ResultStatusText == "HOÀN THÀNH KIỂM TRA MẪU ĐẠT" &&
                             board.Commands.Count(command => command == "SET:1") == 1 && !board.Commands.Contains("SET:2") &&

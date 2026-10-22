@@ -97,20 +97,23 @@ internal static partial class Program
         vm.Resistance.Add(result);
         vm.ResistanceDisplayRows.Add(result);
         vm.SelectedOperationTabIndex = 1;
+        vm.FinalWaterProofRows.Add(new WaterProofChannelResult
+            { Channel = 1, Enabled = true, IsMeasured = true, Passed = true });
         int total = vm.Total, pass = vm.Pass, fail = vm.Fail;
         Assert(vm.ResultStatusText == "HOÀN THÀNH KIỂM TRA MẪU ĐẠT" &&
                vm.StateBackground == "#2AA84A" && vm.StateForeground == "#FFFFFF",
             "Good Master resistance PASS cannot request the wrong-wire sample before full removal");
         board.Publish(FrameSeq(100, (1, new[] { 2 }), (3, new[] { 4 })));
         board.Publish(FrameSeq(101, (3, new[] { 4 })));
-        Assert(vm.MasterState == MasterSequenceState.EjectingGoodMaster && vm.SelectedOperationTabIndex == 1,
+        Assert(vm.MasterState == MasterSequenceState.EjectingGoodMaster && vm.SelectedOperationTabIndex == 1 && vm.HasLeakResultRows,
             "Partial removal keeps the good sample and its measured results until all connections release");
         board.Publish(FrameSeq(102));
         Assert(vm.MasterState == MasterSequenceState.EjectingGoodMaster,
             "One empty scan cannot advance to the next sample");
         board.Publish(FrameSeq(103));
         Assert(vm.MasterState == MasterSequenceState.WaitingBadMaster && vm.ResultStatusText.Contains("SAI DÂY") &&
-               vm.SelectedOperationTabIndex == 0 && vm.Resistance.Count == 0 && vm.ResistanceDisplayRows.Count == 0,
+               vm.SelectedOperationTabIndex == 0 && vm.Resistance.Count == 0 && vm.ResistanceDisplayRows.Count == 0 &&
+               !vm.HasLeakResultRows && vm.InspectionResultRows.Count == 0,
             "Confirmed full removal clears resistance results and opens the wrong-wire sample's electrical table");
         vm.SelectedOperationTabIndex = 1;
         Assert(vm.SelectedOperationTabIndex == 0,
@@ -153,13 +156,30 @@ internal static partial class Program
         typeof(TestViewModel).GetField("_runtimeMode", flags)!.SetValue(vm,
             Convert.ToInt32(Enum.Parse(runtimeModeType, "Production")));
         typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(vm, MasterSequenceState.TestingGoodMaster);
+        typeof(TestViewModel).GetField("_waterProofProfile", flags)!.SetValue(vm,
+            new WaterProofModelSettings { Enabled = true, Channel1Enabled = true,
+                Channel2Enabled = false, Channel3Enabled = false, Channel1Connector = "CN1", LeakLimit = 2 });
+        typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(vm, false);
+        typeof(TestViewModel).GetField("_masterWaterProofPassedChannelsMask", flags)!.SetValue(vm, 1);
+        typeof(TestViewModel).GetField("_lastWaterProofMeasurements", flags)!.SetValue(vm,
+            new WaterProofChannelMeasurement[] { new(1, true, 80, 79, 1, true) });
+        typeof(TestViewModel).GetField("_suppressEngineChanged", flags)!.SetValue(vm, 1);
+        engine.SetFrameProcessingEnabled(true);
+        engine.ProcessFrame(FrameSeq(100, (1, [2])), false);
+        engine.ProcessFrame(FrameSeq(101, (1, [2])), false);
+        typeof(TestViewModel).GetField("_suppressEngineChanged", flags)!.SetValue(vm, 0);
         long generation = (long)typeof(TestViewModel).GetField("_runtimeGeneration", flags)!.GetValue(vm)!;
         bool sawFirstMeasuring = false;
         bool sawFirstPass = false;
+        bool sawCombined = false;
         visa.BeforeMeasure = () =>
         {
             Assert(vm.SelectedOperationTabIndex == 1 && vm.ResistanceDisplayRows.Count == 2,
                 "Master selects the resistance table with all configured channels before reading");
+            sawCombined = vm.HasLeakResultRows && vm.InspectionResultRows.Count == 3 &&
+                   vm.InspectionResultRows.Last().ChannelText == "CH1" &&
+                   vm.InspectionResultRows.Last().ResultText == "PASS" &&
+                   vm.InspectionResultRows.Last().FirstPressureText == "80.0";
             if (board.ResistanceSteps.Count == 1)
             {
                 sawFirstMeasuring = true;
@@ -180,9 +200,11 @@ internal static partial class Program
         ((Task)typeof(TestViewModel).GetMethod("CompleteGoodMasterAsync", flags)!
             .Invoke(vm, [generation])!).GetAwaiter().GetResult();
         Assert(sawFirstMeasuring && sawFirstPass && vm.SelectedOperationTabIndex == 1,
-            "Master keeps the measured results visible while the sample remains installed");
+            $"Master keeps the measured results visible while the sample remains installed: first={sawFirstMeasuring}, pass={sawFirstPass}, tab={vm.SelectedOperationTabIndex}, state={vm.State}, master={vm.MasterStatus}");
         Assert(!vm.MasterApproved && !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
             "Showing resistance progress cannot approve Master or trigger a relay");
+        Assert(sawCombined,
+            $"Good Master displays qualified Leak beside live resistance: rows={vm.InspectionResultRows.Count}, leak={vm.HasLeakResultRows}, continuity={engine.ContinuityPassed}, master={vm.MasterState}");
     }
 
     private static void TestMasterSelectedSamplesOnly()
