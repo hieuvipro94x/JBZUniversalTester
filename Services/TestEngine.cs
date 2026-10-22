@@ -153,6 +153,9 @@ public sealed class TestEngine : IDisposable
     readonly ProductionFaultConfirmationGate _faultConfirmation;
     readonly object _gate = new();
     readonly SemaphoreSlim _relayPulseGate = new(1, 1);
+    readonly SemaphoreSlim _resistanceRecoveryGate = new(1, 1);
+    private int _deferredResistanceRecoveryPending;
+    public bool HasDeferredResistanceRecovery => Volatile.Read(ref _deferredResistanceRecoveryPending) != 0;
     long _lastPassRelayOffTimestamp;
 
     ProductModel? _model;
@@ -3548,7 +3551,8 @@ public sealed class TestEngine : IDisposable
 
     public async Task<List<ResistanceResult>> MeasureResistanceAsync(
         Action<ResistanceResult>? onChannelUpdated,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool deferSuccessfulRecovery = false)
     {
         ProductModel? model = _model;
         if (model is null)
@@ -3569,15 +3573,18 @@ public sealed class TestEngine : IDisposable
         }
 
         List<ResistanceStep> enabledSteps = ResistanceMeasurementPlan.BuildEnabledSteps(_production);
-        return await MeasureResistanceStepsAsync(enabledSteps, onChannelUpdated, ct);
+        return await MeasureResistanceStepsAsync(enabledSteps, onChannelUpdated, ct, deferSuccessfulRecovery);
     }
 
     public async Task<List<ResistanceResult>> MeasureResistanceStepsAsync(
         IReadOnlyList<ResistanceStep> steps,
         Action<ResistanceResult>? onChannelUpdated = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool deferSuccessfulRecovery = false)
     {
         ArgumentNullException.ThrowIfNull(steps);
+        if (HasDeferredResistanceRecovery)
+            throw new InvalidOperationException("Chưa khôi phục đường đo sau sản phẩm PASS trước đó.");
 
         ResistanceStep[] enabledSteps = steps
             .Where(step => step.Channel is >= D2xxResistanceRouting.MinChannel and
@@ -3597,6 +3604,7 @@ public sealed class TestEngine : IDisposable
 
         var results = new List<ResistanceResult>();
 
+        bool measurementCompleted = false;
         try
         {
             foreach (ResistanceStep step in enabledSteps)
@@ -3627,13 +3635,35 @@ public sealed class TestEngine : IDisposable
                 results.Add(result);
                 onChannelUpdated?.Invoke(result);
             }
+            measurementCompleted = true;
         }
         finally
         {
-            await _board.ReleaseResistanceRouteAsync(CancellationToken.None);
+            if (deferSuccessfulRecovery && measurementCompleted && !ct.IsCancellationRequested &&
+                results.Count == enabledSteps.Length && results.All(result => result.Passed && result.IsStable))
+            {
+                Interlocked.Exchange(ref _deferredResistanceRecoveryPending, 1);
+                AsyncFileLogService.Current.Performance("RESISTANCE_RECOVERY_DEFERRED reason=PRODUCTION_PASS_AWAITING_FULL_REMOVAL");
+            }
+            else await _board.ReleaseResistanceRouteAsync(CancellationToken.None);
         }
 
         return results;
+    }
+
+    public async Task CompleteDeferredResistanceRecoveryAsync()
+    {
+        await _resistanceRecoveryGate.WaitAsync();
+        try
+        {
+            if (!HasDeferredResistanceRecovery) return;
+            // Scan initialization used to observe removal is not the full
+            // six-command recovery. Stop that stream before replaying recovery.
+            await _board.StopScanAsync(CancellationToken.None);
+            await _board.ReleaseResistanceRouteAsync(CancellationToken.None);
+            Interlocked.Exchange(ref _deferredResistanceRecoveryPending, 0);
+        }
+        finally { _resistanceRecoveryGate.Release(); }
     }
 
     private async Task<ResistanceResult> MeasureChannelStableAsync(

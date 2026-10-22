@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-deferred-resistance-recovery"])
+        {
+            TestDeferredResistanceRecovery();
+            Console.WriteLine("PASS: Production resistance recovery waits for full removal; relays do not wait for recovery/audio");
+            return 0;
+        }
         if (args is ["--test-master-sample-confirmation"])
         {
             TestMasterShortGroupAndManualOpen();
@@ -332,6 +338,7 @@ internal static partial class Program
             ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
             ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
+            ("Production resistance recovery waits for full removal after immediate PASS relays", TestDeferredResistanceRecovery),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
@@ -10356,6 +10363,7 @@ internal static partial class Program
             IsConnected = connected;
         public CancellationToken? LastStartScanToken { get; private set; }
         public Action<FakeBoard>? StartScanCallback { get; set; }
+        public Func<Task>? ResistanceRecoveryWork { get; set; }
         private event EventHandler<ScanFrame>? FrameReceivedCore;
         public event EventHandler<ScanFrame>? FrameReceived { add { FrameReceivedCore += value; } remove { FrameReceivedCore -= value; } }
         private event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceivedCore;
@@ -10418,7 +10426,7 @@ internal static partial class Program
                     .ToArray());
             return Task.CompletedTask;
         }
-        public Task ReleaseResistanceRouteAsync(CancellationToken ct = default)
+        public async Task ReleaseResistanceRouteAsync(CancellationToken ct = default)
         {
             BeforeReleaseResistance?.Invoke();
             ReleaseResistanceRouteCount++;
@@ -10426,7 +10434,7 @@ internal static partial class Program
                 .Concat(D2xxResistanceRouting.BuildReleaseRouteA())
                 .ToArray();
             Commands.Add("RELEASE_R");
-            return Task.CompletedTask;
+            if (ResistanceRecoveryWork is not null) await ResistanceRecoveryWork();
         }
         public Task SetRelayAsync(int relay, CancellationToken ct = default)
         {

@@ -134,6 +134,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private readonly ProductionUiVersionGate _productionUiVersionGate = new();
     private readonly SemaphoreSlim _manualRelayGate = new(1, 1);
     private readonly SemaphoreSlim _scanRecoveryGate = new(1, 1);
+    private int _deferredResistanceRecoveryActive;
+    private Task _deferredResistanceRecoveryTask = Task.CompletedTask;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private CancellationTokenSource? _cycleCts;
 
@@ -1511,6 +1513,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return rows;
     }
     public bool HasProductOnTestTable =>
+        _engine.HasDeferredResistanceRecovery || Volatile.Read(ref _deferredResistanceRecoveryActive) != 0 ||
         IsProductRemovalPending ||
         _engine.HasProductActivity ||
         _engine.GetProductEvidenceSnapshot().ValidProductEvidence ||
@@ -5083,10 +5086,20 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void TryCompletePassProductRemoval()
     {
-        if (!_waitForProductRelease ||
+        if (IsDeviceFault || !_waitForProductRelease ||
             Volatile.Read(ref _passRemovalArmed) == 0 ||
             Volatile.Read(ref _passProductRemoved) == 0)
         {
+            return;
+        }
+
+        if (Volatile.Read(ref _deferredResistanceRecoveryActive) != 0)
+            return;
+        if (_engine.HasDeferredResistanceRecovery)
+        {
+            if (Interlocked.CompareExchange(ref _deferredResistanceRecoveryActive, 1, 0) == 0)
+                _deferredResistanceRecoveryTask = RecoverResistanceAfterProductRemovalAsync(
+                    _model, Volatile.Read(ref _runtimeGeneration), _activeCycleId);
             return;
         }
 
@@ -5115,6 +5128,34 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         AddLog(wasWaterProofEquipmentRecovery
             ? "Đã tháo sản phẩm sau lỗi thiết bị leak - ARM lại chu kỳ, leak COM sẽ reconnect ở lần chạy kế tiếp."
             : "PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
+    }
+
+    private async Task RecoverResistanceAfterProductRemovalAsync(ProductModel? model, long generation, string cycleId)
+    {
+        bool ready = false;
+        try
+        {
+            _scanSupervisor.Suspend("ResistanceRecoveryAfterRemoval");
+            AddLog($"RESISTANCE_RECOVERY_AFTER_REMOVAL BEGIN cycle={cycleId}; giữ khóa lượt mới.");
+            await _engine.CompleteDeferredResistanceRecoveryAsync();
+            if (_lifetimeCts.IsCancellationRequested || generation != Volatile.Read(ref _runtimeGeneration) ||
+                !ReferenceEquals(_model, model) || cycleId != _activeCycleId)
+                return;
+            await StartProductionScanAndVerifyFrameAsync(_lifetimeCts.Token, "RESISTANCE_RECOVERY_AFTER_REMOVAL");
+            ready = !_lifetimeCts.IsCancellationRequested && !IsDeviceFault &&
+                generation == Volatile.Read(ref _runtimeGeneration) && ReferenceEquals(_model, model) && cycleId == _activeCycleId;
+            AddLog($"RESISTANCE_RECOVERY_AFTER_REMOVAL END cycle={cycleId} ready={ready}.");
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            EnterDeviceFault(ex, "ResistanceRecoveryAfterRemoval");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _deferredResistanceRecoveryActive, 0);
+        }
+        if (ready) InvokeUi(TryCompletePassProductRemoval);
     }
 
     private void TryCompleteFaultProductRemoval()
@@ -6723,6 +6764,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         try { await _boardFrameWorkerTask; } catch { }
+        await _deferredResistanceRecoveryTask;
 
         // Các commit đã nhận trước thời điểm shutdown phải hoàn tất trước khi
         // đóng store/service. Mỗi trường là task mới nhất của một hàng đợi có
@@ -11104,6 +11146,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
 
         long passLedRequest = 0;
+        bool committedPass = false;
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -11184,7 +11227,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                                 IsRuntimeContext(RuntimeMode.Production, generation))
                                 UpdateProductionResistanceRows([result]);
                         },
-                        ct);
+                        ct, deferSuccessfulRecovery: true);
 
                 ct.ThrowIfCancellationRequested();
                 if (!ReferenceEquals(_model, cycleModel) || !IsRuntimeContext(RuntimeMode.Production, generation))
@@ -11363,6 +11406,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             // PASS đã durable. Âm thanh chạy song song, không giữ chuỗi relay.
+            committedPass = true;
             passLedRequest = BeginPassStatusLedPresentation(generation);
             TriggerPassUi();
             long passRelaySequenceStartedTimestamp = Stopwatch.GetTimestamp();
@@ -11477,6 +11521,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         finally
         {
             EndPassStatusLedPresentation(passLedRequest);
+            if (!committedPass && _engine.HasDeferredResistanceRecovery)
+            {
+                try
+                {
+                    _scanSupervisor.Suspend("UncommittedResistanceRecovery");
+                    await _engine.CompleteDeferredResistanceRecoveryAsync();
+                    if (!_lifetimeCts.IsCancellationRequested && !IsDeviceFault &&
+                        generation == Volatile.Read(ref _runtimeGeneration) && ReferenceEquals(_model, cycleModel))
+                        await StartProductionScanAndVerifyFrameAsync(_lifetimeCts.Token, "UNCOMMITTED_RESISTANCE_RECOVERY");
+                }
+                catch (Exception ex) { EnterDeviceFault(ex, "UncommittedResistanceRecovery"); }
+            }
         }
     }
 
