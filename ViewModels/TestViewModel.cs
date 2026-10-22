@@ -10529,7 +10529,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        bool alreadyRemoved = connectorIds.All(IsWaterProofConnectorTriggerDisconnected);
+        // A removal observed during the completed run already satisfies the
+        // unplug step. Reconnection during that same run must not require a
+        // second unplug/replug after RESULT; the COM run still finishes first.
+        int removedDuringRun = Volatile.Read(ref _waterProofRemovedDuringRunMask);
+        bool alreadyRemoved = Enumerable.Range(1, 3)
+            .Where(_waterProofCurrentRunProfile.IsChannelEnabled)
+            .All(channel => (removedDuringRun & (1 << (channel - 1))) != 0 ||
+                IsWaterProofConnectorTriggerDisconnected(_waterProofCurrentRunProfile.ConnectorForChannel(channel)));
         Interlocked.Exchange(ref _waterProofRetestConnectorState,
             (int)(alreadyRemoved ? WaterProofRetestConnectorState.AwaitingConnectorReconnect
                 : WaterProofRetestConnectorState.AwaitingConnectorRemoval));
@@ -10706,9 +10713,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 State = WaterProofConnectorWaitingState();
                 armAnotherRetry = true;
                 restartProductionScan = true;
-                AddLog(
-                    $"[WATERPROOF-RETEST] FAIL attempt={retestAttempt}; " +
-                    "không chốt FAIL sản phẩm; tiếp tục chờ tháo/lắp connector Leak.");
+                AddLog(run.Passed
+                    ? $"[WATERPROOF-RETEST] PASS đo attempt={retestAttempt}, nhưng connector đã mất kết nối trong lúc đo; chạy lại sau khi lắp lại connector."
+                    : $"[WATERPROOF-RETEST] FAIL attempt={retestAttempt}; không chốt FAIL sản phẩm; tiếp tục chờ tháo/lắp connector Leak.");
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -11018,11 +11025,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     run.Channels.Any(item => item.Channel == channel && item.Enabled &&
                         (!item.Passed || (Volatile.Read(ref _waterProofRemovedDuringRunMask) & (1 << (channel - 1))) != 0)));
                 ArmWaterProofRetestConnectorCycle();
-                AddLog($"[WATERPROOF] FAIL kênh {string.Join(",", run.Channels.Where(x => x.Enabled && !x.Passed).Select(x => x.Channel))}; " +
-                       "chỉ chờ tháo/lắp lại connector tương ứng.");
+                AddLog(run.Passed
+                    ? "[WATERPROOF] PASS đo, nhưng connector đã mất kết nối trong lúc đo; chạy lại sau khi lắp lại connector."
+                    : $"[WATERPROOF] FAIL kênh {string.Join(",", run.Channels.Where(x => x.Enabled && !x.Passed).Select(x => x.Channel))}; chỉ chờ tháo/lắp lại connector tương ứng.");
             }
 
-            State = run.Passed ? "ĐANG KIỂM TRA..." : WaterProofConnectorWaitingState();
+            State = CurrentProductionPhase == ProductionPhase.Continuity
+                ? "ĐANG KIỂM TRA..." : WaterProofConnectorWaitingState();
             restartScan = true;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

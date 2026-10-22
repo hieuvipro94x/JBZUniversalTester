@@ -100,12 +100,26 @@ internal static partial class Program
                 Feed(); Feed((40, [41]));
                 Assert(!tokens[2].IsCancellationRequested, "An unplug/replug while measuring still cannot abort the active Leak run");
                 replies[2].SetResult(new WaterProofRunResult([new(1, true, 80, 79, 1, true)], true, "FINAL_PASS"));
-                await Until(() => (int)Get("_waterProofRunning")! == 0 && (int)Get("_waterProofRetestConnectorState")! == 1);
-                Assert((int)Get("_waterProofPassedChannelsMask")! == 0 && replies.Count == 3 && vm.Total == 1,
-                    "A connector removed and reinserted during the old run cannot reuse its PASS; it requires a fresh run after the final result");
+                await Until(() =>
+                {
+                    Feed((40, [41]));
+                    return replies.Count == 4;
+                });
+                Assert((int)Get("_waterProofPassedChannelsMask")! == 0 && vm.Total == 1 &&
+                       !tokens[2].IsCancellationRequested,
+                    "Reconnection during the initial run queues a fresh Leak run after RESULT without a second unplug or premature product PASS");
                 Feed(); Feed((40, [41]));
-                await Until(() => replies.Count == 4);
+                Assert(replies.Count == 4 && !tokens[3].IsCancellationRequested,
+                    "Reconnection during a retry also waits for its own final result without overlapping COM runs");
                 replies[3].SetResult(new WaterProofRunResult([new(1, true, 80, 79, 1, true)], true, "FINAL_PASS"));
+                await Until(() =>
+                {
+                    Feed((40, [41]));
+                    return replies.Count == 5;
+                });
+                Assert((int)Get("_waterProofPassedChannelsMask")! == 0 && vm.Total == 1,
+                    "A retry interrupted by connector removal automatically restarts once after its result when already reconnected");
+                replies[4].SetResult(new WaterProofRunResult([new(1, true, 80, 79, 1, true)], true, "FINAL_PASS"));
                 await Until(() => (int)Get("_waterProofRunning")! == 0 && (int)Get("_preContinuityWaterProofPassed")! == 1);
                 Feed((40, [41]));
                 Assert(vm.Total == 1 && vm.Fail == 1 && vm.Pass == 0,
