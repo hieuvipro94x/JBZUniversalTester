@@ -136,6 +136,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private readonly SemaphoreSlim _scanRecoveryGate = new(1, 1);
     private int _deferredResistanceRecoveryActive;
     private Task _deferredResistanceRecoveryTask = Task.CompletedTask;
+    private Task _leakFailureCommitTask = Task.CompletedTask;
+    private int _homeExitClearFrames;
+    private long _homeExitFrameSequence = -1;
+    private long _homeExitScanGeneration = -1;
+    private bool IsEquipmentErrorExit => IsDeviceFault || IsPersistenceFault ||
+        _waterProofEquipmentErrorAwaitingRemoval || CurrentProductionPhase == ProductionPhase.EquipmentError;
+    private bool IsEquipmentErrorTableConfirmedClear => IsEquipmentErrorExit &&
+        Volatile.Read(ref _homeExitClearFrames) >= ProductReleaseConfirmationFrames;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private CancellationTokenSource? _cycleCts;
 
@@ -153,6 +161,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _waterProofRunning;
     private int _preContinuityWaterProofPassed;
     private int _waterProofPassedChannelsMask;
+    private int _waterProofRemovedDuringRunMask;
     private WaterProofModelSettings _waterProofCurrentRunProfile = new();
     private WaterProofRunResult? _lastWaterProofRun;
     private int _waterProofRetestConnectorState;
@@ -1354,6 +1363,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Relay1Command =
             new AsyncRelayCommand(async () =>
             {
+                await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
                 if (!EnsureManualBoardReady("thử Relay 1", requireD2xxRelay: true))
                     return;
 
@@ -1366,6 +1376,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Relay2Command =
             new AsyncRelayCommand(async () =>
             {
+                await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
                 if (!EnsureManualBoardReady("thử Relay 2", requireD2xxRelay: true))
                     return;
 
@@ -1378,6 +1389,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         RelaysOffCommand =
             new AsyncRelayCommand(async () =>
             {
+                await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
                 if (!EnsureManualBoardReady("tắt relay", requireD2xxRelay: true))
                     return;
 
@@ -1393,6 +1405,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private bool EnsureManualBoardReady(string action, bool requireD2xxRelay = false)
     {
+        if (IsDeviceFault) return false;
         if (!_board.IsConnected)
         {
             ReportBoardUnavailableForOperatorAction($"Manual:{action}");
@@ -1404,6 +1417,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task EnterManualModeAsync()
     {
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
         if (!CanEnterManualMode)
             throw new InvalidOperationException(
                 "Không thể bật Manual khi đang kiểm tra. Hãy kết thúc chu kỳ trước.");
@@ -1513,14 +1527,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return rows;
     }
     public bool HasProductOnTestTable =>
-        _engine.HasDeferredResistanceRecovery || Volatile.Read(ref _deferredResistanceRecoveryActive) != 0 ||
-        IsProductRemovalPending ||
+        !IsEquipmentErrorTableConfirmedClear && (IsProductRemovalPending ||
         _engine.HasProductActivity ||
         _engine.GetProductEvidenceSnapshot().ValidProductEvidence ||
         // Ejection resets the engine snapshot before the sample is removed.
         // Keep its physical-presence latch until real scan frames confirm removal.
         ((MasterState is MasterSequenceState.EjectingGoodMaster or MasterSequenceState.EjectingBadMaster) &&
-         Volatile.Read(ref _masterRemovalConfirmed) == 0);
+         Volatile.Read(ref _masterRemovalConfirmed) == 0));
 
     private void SetProductRemovalPending(bool pending)
     {
@@ -1540,6 +1553,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task ExitManualModeAsync(bool outputsAlreadyOff = false)
     {
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
         await _manualRelayGate.WaitAsync();
         try
         {
@@ -1570,6 +1584,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// </summary>
     public async Task<int> SetManualRelayAsync(int relay, bool turnOn)
     {
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
         if (IsDeviceFault)
             throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy thoát và mở lại ứng dụng.");
         if (relay is not 1 and not 2)
@@ -1634,6 +1649,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task ResetManualOutputsAsync()
     {
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
         if (IsDeviceFault)
             throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy thoát và mở lại ứng dụng.");
         if (!EnsureManualBoardReady("manual RESET", requireD2xxRelay: true))
@@ -2307,7 +2323,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task EnsureContinuousProductionScanAsync()
     {
-        if (_lifetimeCts.IsCancellationRequested ||
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        if (IsDeviceFault || _lifetimeCts.IsCancellationRequested ||
             IsManualModeActive ||
             Volatile.Read(ref _probeSessionActive) != 0 ||
             Volatile.Read(ref _postContinuityStarted) != 0 ||
@@ -2485,8 +2502,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         CancellationToken ct,
         string reason,
         bool allowTransportReopen = true,
-        bool enterDeviceFaultOnFailure = true)
+        bool enterDeviceFaultOnFailure = true,
+        bool recoveryOwner = false)
     {
+        if (!recoveryOwner) await WaitForResistanceRecoveryAsync(ct);
+        if (IsDeviceFault) return false;
         try
         {
             await _scanSupervisor.StartProductionScanAndVerifyFrameAsync(
@@ -3689,6 +3709,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 ObserveWaterProofRetestConnectorCycle(generation);
                 UpdatePendingWaterProofFailurePresentation();
+                TryFinalizeWaterProofFailure(generation);
                 return;
             }
 
@@ -3697,6 +3718,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 ObserveWaterProofRetestConnectorCycle(generation);
             }
             UpdatePendingWaterProofFailurePresentation();
+            TryFinalizeWaterProofFailure(generation);
             return;
         }
 
@@ -4361,7 +4383,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ProcessBoardFrameReceived(ScanFrame frame)
     {
-        if (IsDeviceFault || !_board.IsConnected)
+        // The raw transport/scan supervisor still receives verification frames.
+        // Product/probe evaluation resumes only after route recovery owns no IO.
+        if (IsDeviceFault || !_board.IsConnected || Volatile.Read(ref _deferredResistanceRecoveryActive) != 0)
             return;
 
         if (TryHandleContinuityPreviewFrame(frame))
@@ -4424,6 +4448,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Một lần đưa hàng qua _DISCARD ngoài chu trình FAIL khóa scan logic
             // trong lúc cảm biến đang tác động. Khi cảm biến nhả, lượt 1/1 hoàn tất
             // và Production được mở khóa lại.
+            ObserveHomeExitTableFrame(frame);
             if (discardBlocksProduction)
                 return;
 
@@ -4715,6 +4740,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         _productPresenceStability.PrepareFrameContext(
                             generation, Volatile.Read(ref _productionUiCycleEpoch), frame.ScanGeneration);
                     engineChanged = _engine.ProcessFrame(frame, false);
+                    ObserveWaterProofRemovalDuringRun();
                     bool presenceConfirmedNow = ObserveProductPresenceForCompletion(frame, generation, processStarted);
                     if (presenceConfirmedNow)
                         OnEngineChanged(_engine, EventArgs.Empty);
@@ -5084,6 +5110,27 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         InvokeUi(TryCompletePassProductRemoval);
     }
 
+    private void ObserveHomeExitTableFrame(ScanFrame frame)
+    {
+        if (frame.Mode != BoardScanMode.Production || !frame.Complete ||
+            frame.UnknownBytes != 0 || !frame.TerminatorKnown ||
+            (frame.ExpectedIoCount != 0 && frame.ExpectedIoCount != _board.Capacity.TotalIoCapacity) ||
+            (frame.ScanUnitCount != 0 && frame.ScanUnitCount != _board.Capacity.ScanCardCount))
+        {
+            Interlocked.Exchange(ref _homeExitClearFrames, 0);
+            return;
+        }
+        long previousGeneration = Volatile.Read(ref _homeExitScanGeneration);
+        if (frame.ScanGeneration < previousGeneration) return;
+        if (frame.ScanGeneration == previousGeneration && frame.Sequence <= Volatile.Read(ref _homeExitFrameSequence)) return;
+        if (frame.ScanGeneration != previousGeneration) Interlocked.Exchange(ref _homeExitClearFrames, 0);
+        Volatile.Write(ref _homeExitScanGeneration, frame.ScanGeneration);
+        Volatile.Write(ref _homeExitFrameSequence, frame.Sequence);
+        bool empty = frame.ActiveIo.Count == 0 && !frame.Connections.Any(source => source.Value.Any(target => target != source.Key));
+        Interlocked.Exchange(ref _homeExitClearFrames, empty
+            ? Math.Min(ProductReleaseConfirmationFrames, Volatile.Read(ref _homeExitClearFrames) + 1) : 0);
+    }
+
     private void TryCompletePassProductRemoval()
     {
         if (IsDeviceFault || !_waitForProductRelease ||
@@ -5095,12 +5142,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (Volatile.Read(ref _deferredResistanceRecoveryActive) != 0)
             return;
-        if (_engine.HasDeferredResistanceRecovery)
+        bool recoverInBackground = _engine.HasDeferredResistanceRecovery;
+        string removedCycleId = _activeCycleId;
+        TaskCompletionSource? recoveryCompletion = null;
+        if (recoverInBackground)
         {
-            if (Interlocked.CompareExchange(ref _deferredResistanceRecoveryActive, 1, 0) == 0)
-                _deferredResistanceRecoveryTask = RecoverResistanceAfterProductRemovalAsync(
-                    _model, Volatile.Read(ref _runtimeGeneration), _activeCycleId);
-            return;
+            recoveryCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _deferredResistanceRecoveryTask = recoveryCompletion.Task;
+            Interlocked.Exchange(ref _deferredResistanceRecoveryActive, 1);
+            _engine.SetFrameProcessingEnabled(false);
         }
 
         _waitForProductRelease = false;
@@ -5128,22 +5178,31 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         AddLog(wasWaterProofEquipmentRecovery
             ? "Đã tháo sản phẩm sau lỗi thiết bị leak - ARM lại chu kỳ, leak COM sẽ reconnect ở lần chạy kế tiếp."
             : "PASS đã tháo hoàn toàn: toàn bộ continuity sản phẩm đã mất -> ARM lượt test mới.");
+        if (recoverInBackground)
+            _ = RecoverResistanceAfterProductRemovalAsync(_model, removedCycleId, recoveryCompletion!);
     }
 
-    private async Task RecoverResistanceAfterProductRemovalAsync(ProductModel? model, long generation, string cycleId)
+    private async Task WaitForResistanceRecoveryAsync(CancellationToken ct)
     {
-        bool ready = false;
+        if (Volatile.Read(ref _deferredResistanceRecoveryActive) != 0)
+            await _deferredResistanceRecoveryTask.WaitAsync(ct);
+    }
+
+    private async Task RecoverResistanceAfterProductRemovalAsync(ProductModel? model, string cycleId, TaskCompletionSource completion)
+    {
+        // Publish LẮP SẢN PHẨM and release the removed product first. Yield also
+        // ensures the shared task is assigned before another hardware caller waits.
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
         try
         {
             _scanSupervisor.Suspend("ResistanceRecoveryAfterRemoval");
-            AddLog($"RESISTANCE_RECOVERY_AFTER_REMOVAL BEGIN cycle={cycleId}; giữ khóa lượt mới.");
+            AddLog($"RESISTANCE_RECOVERY_AFTER_REMOVAL BEGIN cycle={cycleId}; nền, màn hình đã chờ lắp sản phẩm mới.");
             await _engine.CompleteDeferredResistanceRecoveryAsync();
-            if (_lifetimeCts.IsCancellationRequested || generation != Volatile.Read(ref _runtimeGeneration) ||
-                !ReferenceEquals(_model, model) || cycleId != _activeCycleId)
+            if (_lifetimeCts.IsCancellationRequested || IsDeviceFault || !ReferenceEquals(_model, model) ||
+                IsManualModeActive || CurrentRuntimeMode is not (RuntimeMode.Production or RuntimeMode.Background))
                 return;
-            await StartProductionScanAndVerifyFrameAsync(_lifetimeCts.Token, "RESISTANCE_RECOVERY_AFTER_REMOVAL");
-            ready = !_lifetimeCts.IsCancellationRequested && !IsDeviceFault &&
-                generation == Volatile.Read(ref _runtimeGeneration) && ReferenceEquals(_model, model) && cycleId == _activeCycleId;
+            bool ready = await StartProductionScanAndVerifyFrameAsync(_lifetimeCts.Token,
+                "RESISTANCE_RECOVERY_AFTER_REMOVAL", recoveryOwner: true);
             AddLog($"RESISTANCE_RECOVERY_AFTER_REMOVAL END cycle={cycleId} ready={ready}.");
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
@@ -5154,8 +5213,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         finally
         {
             Interlocked.Exchange(ref _deferredResistanceRecoveryActive, 0);
+            if (!_lifetimeCts.IsCancellationRequested && !IsDeviceFault)
+                _engine.SetFrameProcessingEnabled(CurrentRuntimeMode == RuntimeMode.Production && _cycleActive && !IsModelTransitionActive);
+            completion.TrySetResult();
         }
-        if (ready) InvokeUi(TryCompletePassProductRemoval);
     }
 
     private void TryCompleteFaultProductRemoval()
@@ -6730,6 +6791,29 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (HasProductOnTestTable)
             return false;
 
+        // An already-started measurement owns the Leak COM until RESULT.
+        // Leaving an empty table must not truncate that result/history either.
+        while (!IsEquipmentErrorExit && Volatile.Read(ref _waterProofRunning) != 0)
+        {
+            await Task.Delay(20, _lifetimeCts.Token);
+            if (HasProductOnTestTable) return false;
+        }
+
+        if (IsEquipmentErrorTableConfirmedClear)
+        {
+            CancelCycleOperations();
+            _cycleActive = false;
+            _waitForProductRelease = false;
+            _waitForFaultProductRemoval = false;
+            Interlocked.Exchange(ref _passRemovalArmed, 0);
+            SetProductRemovalPending(false);
+            SwitchRuntimeMode(RuntimeMode.Background);
+            _engine.SetFrameProcessingEnabled(false);
+            CloseWaterProofWindow("RETURN_MAIN_EQUIPMENT_ERROR_TABLE_CLEAR");
+            AddLog("Về trang chính: đã xác nhận bàn test sạch; giữ nguyên trạng thái lỗi thiết bị, không gửi lệnh bo.");
+            return true;
+        }
+
         await StopTestAsync();
         return !HasProductOnTestTable;
     }
@@ -6765,6 +6849,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         try { await _boardFrameWorkerTask; } catch { }
         await _deferredResistanceRecoveryTask;
+        await _leakFailureCommitTask;
 
         // Các commit đã nhận trước thời điểm shutdown phải hoàn tất trước khi
         // đóng store/service. Mỗi trường là task mới nhất của một hàng đợi có
@@ -6900,6 +6985,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task StartProbeScanAsync()
     {
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
         if (!_board.IsConnected || IsDeviceFault)
         {
             ReportBoardUnavailableForOperatorAction("ProbeScan.NoBoard");
@@ -6948,6 +7034,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// </summary>
     public async Task StartTopologyLearningAsync()
     {
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
         if (IsDeviceFault || !_board.IsConnected)
         {
             ReportBoardUnavailableForOperatorAction("TopologyLearning.NoBoard");
@@ -6999,8 +7086,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// Được TestWindow gọi tự động ngay sau khi người vận hành bấm
     /// "BẮT ĐẦU KIỂM TRA" tại MainWindow. Không còn nút Start I/O thứ hai.
     /// </summary>
-    public Task StartProductionTestAsync(CancellationToken cancellationToken = default) =>
-        StartTestAsync(cancellationToken);
+    public async Task StartProductionTestAsync(CancellationToken cancellationToken = default)
+    {
+        await WaitForResistanceRecoveryAsync(cancellationToken);
+        await StartTestAsync(cancellationToken);
+    }
 
     private bool IsProductionScanReadyForArm()
     {
@@ -7388,6 +7478,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private async Task StopTestAsync()
     {
         ResetManualProbeSession("leave-test-view");
+        if (Volatile.Read(ref _deferredResistanceRecoveryActive) != 0 && !HasProductOnTestTable)
+        {
+            _cycleActive = false;
+            SetProductionPhase(ProductionPhase.WaitingProduct);
+            SwitchRuntimeMode(RuntimeMode.Background);
+            CancelCycleOperations();
+            _engine.SetFrameProcessingEnabled(false);
+            State = "CHỜ LẮP SẢN PHẨM";
+            AddLog("Đã rời TestView; khôi phục điện trở tiếp tục nền, không còn sản phẩm trên bàn.");
+            return;
+        }
         if (Volatile.Read(ref _discardStandaloneLocked) != 0)
         {
             CancelCycleOperations();
@@ -9749,6 +9850,42 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         State = "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT";
     }
 
+    private void TryFinalizeWaterProofFailure(long generation)
+    {
+        if (!_cycleActive || CurrentProductionPhase != ProductionPhase.WaterProof ||
+            !IsProductionFaultContext(generation) || IsDeviceFault || IsPersistenceFault ||
+            _pendingLeakFailureMeasurements is null || SelectedOperationTabIndex != 2 ||
+            Volatile.Read(ref _waterProofRunning) != 0 || !_engine.LastFrameValid ||
+            !_engine.ContinuityPassed || _engine.HasWiringFault || _model is not ProductModel model)
+            return;
+        // End-of-cycle NG is a product result. Before full continuity, a failed
+        // channel may still retry; after this point only full removal rearms.
+        _cycleActive = false;
+        SetProductionPhase(ProductionPhase.WaitingFaultConfirmation);
+        Interlocked.Exchange(ref _waterProofRetestConnectorState, (int)WaterProofRetestConnectorState.Inactive);
+        _cycleContinuityCompletedAt ??= DateTime.Now;
+        _leakFailureCommitTask = FinalizeWaterProofFailureAsync(model, generation, CurrentCycleToken());
+    }
+
+    private async Task FinalizeWaterProofFailureAsync(ProductModel model, long generation, CancellationToken ct)
+    {
+        try
+        {
+            FaultDetail[] faults = FinalWaterProofRows.Where(row => row.Enabled && !row.Passed)
+                .Select(CreateWaterProofFaultDetail).ToArray();
+            if (!await RecordCompletedProductAsync(false, "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT", model,
+                    generation, ct, faults))
+                return;
+            if (ct.IsCancellationRequested || !IsProductionFaultContext(generation) || !ReferenceEquals(_model, model))
+                return;
+            ArmWaterProofFaultRemovalWait();
+            State = "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT";
+            AddLog("[LEAK-PRODUCT-FAIL] Đã chốt 1 sản phẩm FAIL Leak; thông mạch PASS; không MARKING, chờ tháo hết sản phẩm.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) { EnterDeviceFault(ex, "FinalizeWaterProofFailure"); }
+    }
+
     private bool IsResistanceEnabledForModel(ProductModel? model) =>
         model is not null && ResistanceMeasurementPlan.BuildEnabledSteps(_productionSettings).Count > 0;
 
@@ -9858,13 +9995,31 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void RecordPassedWaterProofChannels(WaterProofRunResult run)
     {
-        int passedMask = run.Channels
-            .Where(channel => channel.Enabled && channel.Passed)
+        int measuredMask = run.Channels.Where(channel => channel.Enabled)
             .Aggregate(0, (mask, channel) => mask | (1 << (channel.Channel - 1)));
+        int passedMask = run.Channels
+            .Where(channel => channel.Enabled && channel.Passed &&
+                (Volatile.Read(ref _waterProofRemovedDuringRunMask) & (1 << (channel.Channel - 1))) == 0)
+            .Aggregate(0, (mask, channel) => mask | (1 << (channel.Channel - 1)));
+        Interlocked.And(ref _waterProofPassedChannelsMask, ~measuredMask);
         Interlocked.Or(ref _waterProofPassedChannelsMask, passedMask);
         Interlocked.Exchange(ref _preContinuityWaterProofPassed,
             (Volatile.Read(ref _waterProofPassedChannelsMask) & RequiredWaterProofChannelMask()) ==
             RequiredWaterProofChannelMask() ? 1 : 0);
+    }
+
+    private void ObserveWaterProofRemovalDuringRun()
+    {
+        if (!MasterApproved || !IsRuntimeMode(RuntimeMode.Production) ||
+            Volatile.Read(ref _waterProofRunning) == 0 || !_engine.LastFrameValid)
+            return;
+        int removed = Enumerable.Range(1, 3)
+            .Where(channel => _waterProofCurrentRunProfile.IsChannelEnabled(channel) &&
+                IsWaterProofConnectorTriggerDisconnected(_waterProofCurrentRunProfile.ConnectorForChannel(channel)))
+            .Aggregate(0, (mask, channel) => mask | (1 << (channel - 1)));
+        // Observe every authoritative scan, even if UI notifications coalesce.
+        // This never cancels the active COM run or discards its final result.
+        if (removed != 0) Interlocked.Or(ref _waterProofRemovedDuringRunMask, removed);
     }
 
     private void ObservePassedWaterProofConnectorRemoval()
@@ -10363,6 +10518,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             CurrentProductionPhase == ProductionPhase.WaterProof &&
             Volatile.Read(ref _preContinuityWaterProofPassed) == 0;
         if (!IsWaterProofEnabledForCurrentModel() ||
+            Volatile.Read(ref _resultRecordedThisCycle) != 0 ||
             _lastWaterProofMeasurements.Count == 0 ||
             connectorIds.Length == 0 ||
             (!preContinuityRetry && !_waitForProductRelease && !_waitForFaultProductRemoval))
@@ -10373,9 +10529,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        Interlocked.Exchange(
-            ref _waterProofRetestConnectorState,
-            (int)WaterProofRetestConnectorState.AwaitingConnectorRemoval);
+        bool alreadyRemoved = connectorIds.All(IsWaterProofConnectorTriggerDisconnected);
+        Interlocked.Exchange(ref _waterProofRetestConnectorState,
+            (int)(alreadyRemoved ? WaterProofRetestConnectorState.AwaitingConnectorReconnect
+                : WaterProofRetestConnectorState.AwaitingConnectorRemoval));
         State = WaterProofConnectorWaitingState();
         AddLog(
             $"[WATERPROOF-RETEST] Đã ARM; tháo rồi lắp lại connector " +
@@ -10389,6 +10546,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             Volatile.Read(ref _preContinuityWaterProofPassed) == 0;
         if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
             Volatile.Read(ref _removalMonitoringFromMain) != 0 ||
+            Volatile.Read(ref _resultRecordedThisCycle) != 0 ||
             !IsWaterProofEnabledForCurrentModel() ||
             (!preContinuityRetry && !_waitForProductRelease && !_waitForFaultProductRemoval) ||
             _model is not ProductModel cycleModel)
@@ -10497,7 +10655,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             await EnsureProductionScanForWaterProofAsync(ct);
             DateTime retestStartedAt = DateTime.Now;
-            WaterProofRunResult run = await _waterProof.RunTestAsync(
+            Interlocked.Exchange(ref _waterProofRemovedDuringRunMask, 0);
+            WaterProofRunResult run = _waterProofRunOverride is not null
+                ? await _waterProofRunOverride(runProfile, ct)
+                : await _waterProof.RunTestAsync(
                 _productionSettings.WaterProofMachine,
                 runProfile,
                 ApplyWaterProofProgress,
@@ -10521,7 +10682,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 !ReferenceEquals(_model, cycleModel))
                 return;
             RecordPassedWaterProofChannels(run);
-            if (run.Passed)
+            if (run.Passed && (Volatile.Read(ref _waterProofRemovedDuringRunMask) &
+                run.Channels.Where(item => item.Enabled).Aggregate(0, (mask, item) => mask | (1 << (item.Channel - 1)))) == 0)
             {
                 // The previous Leak run owns this gate. Its successful retest must
                 // re-arm post-continuity so the same cycle can reach final PASS.
@@ -10539,7 +10701,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             else
             {
                 _waterProofCurrentRunProfile = WaterProofProfileForChannels(channel =>
-                    run.Channels.Any(item => item.Channel == channel && item.Enabled && !item.Passed));
+                    run.Channels.Any(item => item.Channel == channel && item.Enabled &&
+                        (!item.Passed || (Volatile.Read(ref _waterProofRemovedDuringRunMask) & (1 << (channel - 1))) != 0)));
                 State = WaterProofConnectorWaitingState();
                 armAnotherRetry = true;
                 restartProductionScan = true;
@@ -10842,7 +11005,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
 
             RecordPassedWaterProofChannels(run);
-            if (run.Passed)
+            if (run.Passed && (Volatile.Read(ref _waterProofRemovedDuringRunMask) &
+                run.Channels.Where(item => item.Enabled).Aggregate(0, (mask, item) => mask | (1 << (item.Channel - 1)))) == 0)
             {
                 SetProductionPhase(ProductionPhase.Continuity);
                 AddLog($"[WATERPROOF] PASS kênh {string.Join(",", run.Channels.Where(x => x.Enabled).Select(x => x.Channel))}; " +
@@ -10851,7 +11015,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             else
             {
                 _waterProofCurrentRunProfile = WaterProofProfileForChannels(channel =>
-                    run.Channels.Any(item => item.Channel == channel && item.Enabled && !item.Passed));
+                    run.Channels.Any(item => item.Channel == channel && item.Enabled &&
+                        (!item.Passed || (Volatile.Read(ref _waterProofRemovedDuringRunMask) & (1 << (channel - 1))) != 0)));
                 ArmWaterProofRetestConnectorCycle();
                 AddLog($"[WATERPROOF] FAIL kênh {string.Join(",", run.Channels.Where(x => x.Enabled && !x.Passed).Select(x => x.Channel))}; " +
                        "chỉ chờ tháo/lắp lại connector tương ứng.");
@@ -10905,6 +11070,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (Interlocked.CompareExchange(ref _waterProofRunning, 1, 0) != 0)
             throw new InvalidOperationException("Một chu trình kiểm tra kín nước khác đang chạy.");
 
+        Interlocked.Exchange(ref _waterProofRemovedDuringRunMask, 0);
         string masterCycleId = _masterHistoryCycleId;
         try
         {
@@ -11130,6 +11296,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task RunAutomaticPostContinuityAsync()
     {
+        await WaitForResistanceRecoveryAsync(CurrentCycleToken());
         if (IsDeviceFault || !_cycleActive || _model is null)
             return;
 
@@ -11760,6 +11927,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// </summary>
     public async Task RefreshProductionConfigurationAsync(bool forceNativeRestart = false)
     {
+        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
         LastProductionConfigurationSyncSucceeded = false;
         LastProductionConfigurationSyncMessage = string.Empty;
         if (IsDeviceFault)
@@ -12039,7 +12207,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         // Chỉ áp dụng SỐ CARD ĐÃ CẤU HÌNH. Không tự nâng theo model.
         // MainWindow sẽ chặn test nếu max IO của THT vượt dung lượng card.
-        _board.ConfigureActiveScanRange(model.MaxIo);
+        // The model's asynchronous scan reconciliation applies this range once
+        // the single recovery owner releases the transport.
+        if (Volatile.Read(ref _deferredResistanceRecoveryActive) == 0)
+            _board.ConfigureActiveScanRange(model.MaxIo);
         InvokeUi(RebuildActiveCards);
 
         CurrentModelPath = ResolveOptionalModelPath(model.SourcePath);

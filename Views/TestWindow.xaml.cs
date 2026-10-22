@@ -672,7 +672,8 @@ public partial class TestWindow : Window
             return;
         }
 
-        if (DataContext is TestViewModel deviceFaultViewModel && deviceFaultViewModel.IsDeviceFault)
+        if (DataContext is TestViewModel deviceFaultViewModel && deviceFaultViewModel.IsDeviceFault &&
+            !deviceFaultViewModel.HasProductOnTestTable)
         {
             _allowClose = true;
             CleanupUiHandlers();

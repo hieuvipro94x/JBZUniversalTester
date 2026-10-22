@@ -20,6 +20,9 @@ internal static partial class Program
             new Terminal(45, "ANCHOR", "3", "3", "WIRE"));
         vm.SetModel(model);
         void Set(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
+        // Projection/pre-final connector retry fixture. The real production
+        // commit boundary is exercised by TestLeakRunCompletionAndProductFailure.
+        Set("_suppressEngineChanged", 1);
         object? Call(string name, params object?[] args) => typeof(TestViewModel).GetMethod(name, flags)!.Invoke(vm, args);
         int Get(string name) => (int)typeof(TestViewModel).GetField(name, flags)!.GetValue(vm)!;
         int Phase(string value) => (int)Enum.Parse(typeof(TestViewModel).GetNestedType("ProductionPhase", flags)!, value);
@@ -43,6 +46,7 @@ internal static partial class Program
         var failedProfile = (WaterProofModelSettings)Call("WaterProofProfileForChannels",
             new Func<int, bool>(channel => run.Channels.Any(item => item.Channel == channel && !item.Passed)))!;
         Set("_waterProofCurrentRunProfile", failedProfile);
+        engine.ProcessFrame(FrameSeq(99, (40, new[] { 41 }), (42, new[] { 43 })), false);
         Set("_runtimeMode", 1);
         Call("ArmWaterProofRetestConnectorCycle");
         engine.ProcessFrame(FrameSeq(100, (40, new[] { 41 }), (42, new[] { 43 })), false);
@@ -50,16 +54,16 @@ internal static partial class Program
         Assert(vm.SelectedOperationTabIndex == 0, "Leak FAIL waits for full continuity before showing the end-of-test summary");
         engine.ProcessFrame(FrameSeq(101, (40, new[] { 41 }), (42, new[] { 43 }), (44, new[] { 45 })), false);
         long generation = (long)typeof(TestViewModel).GetField("_runtimeGeneration", flags)!.GetValue(vm)!;
-        Call("ProcessEngineChangedOnUi", generation, null);
+        Call("UpdatePendingWaterProofFailurePresentation");
         Assert(engine.ContinuityPassed && Get("_preContinuityWaterProofPassed") == 0 &&
                vm.SelectedOperationTabIndex == 2 && vm.FinalWaterProofRows.Count == 2 &&
                vm.FinalWaterProofRows[0].ResultText == "PASS" && vm.FinalWaterProofRows[1].ResultText == "NG LEAK" &&
                vm.FinalWaterProofRows[1].SecondResultPressure == 70 &&
                vm.ResultStatusText == "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT" &&
                vm.StateBackground == "#C62828",
-            "Continuity PASS with a failed Leak channel shows measured NG LEAK and the exact water-tightness failure status");
+            $"Continuity PASS with a failed Leak channel shows measured NG LEAK and the exact water-tightness failure status: continuity={engine.ContinuityPassed}, mask={Get("_preContinuityWaterProofPassed")}, tab={vm.SelectedOperationTabIndex}, rows={vm.FinalWaterProofRows.Count}, status={vm.ResultStatusText}, bg={vm.StateBackground}");
         var firstRow = vm.FinalWaterProofRows[0];
-        Call("ProcessEngineChangedOnUi", generation, null);
+        Call("UpdatePendingWaterProofFailurePresentation");
         Assert(ReferenceEquals(firstRow, vm.FinalWaterProofRows[0]) && !vm.IsCenterResultVisible,
             "Repeated scan frames retain the same result rows without flicker or a center overlay");
         engine.ProcessFrame(FrameSeq(102, (40, new[] { 41 }), (44, new[] { 45 })), false);

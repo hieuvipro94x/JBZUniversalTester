@@ -72,22 +72,46 @@ internal static partial class Program
                 board.Publish(FrameSeq(sequence++));
                 Assert(board.ReleaseResistanceRouteCount == 0, "One empty frame cannot run deferred recovery");
                 board.BeforeReleaseResistance = () =>
-                    Assert((int)Get("_passProductRemoved")! == 1 && vm.HasProductOnTestTable,
-                        "Recovery starts only after confirmed full removal and holds the next cycle closed");
+                    Assert(!vm.HasProductOnTestTable && !vm.IsProductRemovalPending &&
+                           vm.ResultStatusText == "LẮP SẢN PHẨM" && vm.IsCenterResultVisible &&
+                           vm.CenterResultText == "LẮP SẢN PHẨM" && vm.ResistanceDisplayRows.Count == 0,
+                        "Confirmed removal clears old results and publishes installation before recovery starts");
                 var recoveryRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 board.ResistanceRecoveryWork = () => recoveryRelease.Task;
                 board.StartScanCallback = transport => transport.Publish(FrameSeq(sequence++));
                 board.Publish(FrameSeq(sequence++));
-                Assert(engine.HasDeferredResistanceRecovery && vm.HasProductOnTestTable && vm.IsProductRemovalPending,
-                    "A slow hardware recovery retains the removal/navigation gate until it really completes");
+                Assert(engine.HasDeferredResistanceRecovery && !vm.HasProductOnTestTable && !vm.IsProductRemovalPending &&
+                       vm.ResultStatusText == "LẮP SẢN PHẨM",
+                    "A slow hardware recovery cannot retain the previous removal prompt or physical-product gate");
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                while (board.ReleaseResistanceRouteCount == 0) await Task.Delay(5, deadline.Token);
                 Call("TryCompletePassProductRemoval");
                 Assert(board.ReleaseResistanceRouteCount == 1, "Repeated UI callbacks cannot start a parallel recovery");
+                bool uiResponsive = false;
+                await System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeAsync(() => uiResponsive = true);
+                Assert(uiResponsive && !((Task)Get("_deferredResistanceRecoveryTask")!).IsCompleted,
+                    "The UI continues processing events while native recovery remains deliberately blocked");
+                int beforeQueuedStart = board.Commands.Count;
+                using (var cancelQueuedStart = new CancellationTokenSource())
+                {
+                    Task queuedStart = vm.StartProductionTestAsync(cancelQueuedStart.Token);
+                    Assert(!queuedStart.IsCompleted && board.Commands.Count == beforeQueuedStart,
+                        "A new test waits asynchronously and sends no overlapping hardware commands");
+                    cancelQueuedStart.Cancel();
+                    try { await queuedStart; } catch (OperationCanceledException) { }
+                    Assert(engine.HasDeferredResistanceRecovery,
+                        "Cancelling a waiting action cannot cancel the recovery owner");
+                }
+                Task<bool> leaveView = vm.StopViewAsync();
+                Assert(leaveView.IsCompletedSuccessfully && await leaveView &&
+                       !((Task)Get("_deferredResistanceRecoveryTask")!).IsCompleted,
+                    "After physical removal the operator can return to Main immediately while recovery continues");
                 recoveryRelease.SetResult();
                 await (Task)Get("_deferredResistanceRecoveryTask")!;
                 Assert(board.ReleaseResistanceRouteCount == 1 && !engine.HasDeferredResistanceRecovery &&
                        (int)Get("_deferredResistanceRecoveryActive")! == 0 && !vm.IsProductRemovalPending &&
                        vm.Pass == 1 && vm.Fail == 0 && !vm.IsDeviceFault,
-                    "Full removal restores once, verifies a new scan and rearms without duplicating counters");
+                    "Background recovery restores once and resumes current background scanning without duplicating counters");
                 Call("TryCompletePassProductRemoval");
                 await engine.CompleteDeferredResistanceRecoveryAsync();
                 Assert(board.ReleaseResistanceRouteCount == 1, "Duplicate callbacks cannot repeat the route recovery");
@@ -98,7 +122,7 @@ internal static partial class Program
                 board.BeforeReleaseResistance = () => throw new IOException("Recovery hardware write failed");
                 Call("TryCompletePassProductRemoval");
                 await (Task)Get("_deferredResistanceRecoveryTask")!;
-                Assert(vm.IsDeviceFault && vm.IsProductRemovalPending && engine.HasDeferredResistanceRecovery &&
+                Assert(vm.IsDeviceFault && engine.HasDeferredResistanceRecovery &&
                        vm.Pass == 1 && vm.Fail == 0,
                     "Failed recovery blocks rearm and preserves the already committed PASS and counters");
                 int commandsAfterFault = board.Commands.Count;

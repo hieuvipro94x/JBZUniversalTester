@@ -20,6 +20,13 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-leak-run-completion"])
+        {
+            TestLeakRunCompletionAndProductFailure();
+            TestEquipmentErrorReturnToMain();
+            Console.WriteLine("PASS: Leak completes after connector removal, final NG counts once, equipment-error Back uses physical removal");
+            return 0;
+        }
         if (args is ["--test-deferred-resistance-recovery"])
         {
             TestDeferredResistanceRecovery();
@@ -339,6 +346,8 @@ internal static partial class Program
             ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
             ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
             ("Production resistance recovery waits for full removal after immediate PASS relays", TestDeferredResistanceRecovery),
+            ("Leak run finishes after unplug and final NG commits one failed product", TestLeakRunCompletionAndProductFailure),
+            ("Equipment errors permit Main only after physical full removal", TestEquipmentErrorReturnToMain),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
