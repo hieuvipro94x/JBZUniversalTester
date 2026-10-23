@@ -128,6 +128,7 @@ public sealed class BoardIoDecoder
         _bufferOffset = 0;
         _productionProbePreviews.Clear();
         _lastProductionSourceTargets.Clear();
+        _probeActive.Clear();
         ResetFrameState(resetSequence: true);
     }
 
@@ -137,7 +138,6 @@ public sealed class BoardIoDecoder
         _connections.Clear();
         _activeTargets.Clear();
         _targetHitCounts.Clear();
-        _probeActive.Clear();
         _frameRaw.Clear();
         _lastProductionProbePreviewIo = [];
         _currentSource = null;
@@ -425,10 +425,9 @@ public sealed class BoardIoDecoder
                 // V12.9.2: protocol Probe được xử lý như event-based state.
                 // TARGET = TOUCH/ON, SOURCE = RELEASE/OFF. Cả hai đều cập nhật
                 // tập hiện tại và phát frame ngay; không chờ C0/TTL/timer để UI đổi.
-                if (active)
-                    _probeActive.Add(io);
-                else
-                    _probeActive.Remove(io);
+                bool changed = active ? _probeActive.Add(io) : _probeActive.Remove(io);
+                if (!changed)
+                    continue;
 
                 HashSet<int> instantIo = _probeActive.ToHashSet();
                 (frames ??= []).Add(new ScanFrame(
@@ -453,10 +452,9 @@ public sealed class BoardIoDecoder
                 _bufferOffset += 2;
                 _sequence++;
 
-                // C0 kết thúc snapshot: luôn phát trạng thái đầy đủ. Nếu một chân
-                // đã nhả thì nó không còn trong tập này; nhả hết => tập rỗng.
-                // Nhờ vậy release từng IO được xử lý độc lập và không reset UI
-                // Production/configuration.
+                // C0 closes the scan, not the contact lifetime. Keep each IO
+                // until its own SOURCE/OFF word; the beginning of the next
+                // 640-IO scan cannot manufacture an empty/released snapshot.
                 HashSet<int> snapshot = _probeActive.ToHashSet();
                 (frames ??= []).Add(new ScanFrame(
                     DateTime.Now,

@@ -20,6 +20,13 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-probe-and-fault-status"])
+        {
+            TestLargeProbeImmediateTransitions();
+            TestWrongWiringDelayedRemovalStatus();
+            Console.WriteLine("PASS: 640-IO Probe immediate transitions and five-second wrong-wire removal status");
+            return 0;
+        }
         if (args is ["--test-leak-run-completion"])
         {
             TestLeakRunCompletionAndProductFailure();
@@ -287,6 +294,8 @@ internal static partial class Program
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
+            ("640-IO Probe updates immediately and retains contacts across scans", TestLargeProbeImmediateTransitions),
+            ("Wrong-wire removal status waits five seconds independently of confirmation", TestWrongWiringDelayedRemovalStatus),
             ("Production probe preview arrives before frame terminator", TestProductionProbePreview),
             ("10-card complete-frame stress", TestTenCardCompleteFrameStress),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),

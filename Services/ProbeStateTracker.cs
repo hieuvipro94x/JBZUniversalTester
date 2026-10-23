@@ -28,6 +28,20 @@ public sealed class ProbeStateTracker
     /// </summary>
     public bool HasTrackedContacts => _candidateIos.Length > 0 || _activeIos.Length > 0;
 
+    // Dedicated Probe protocol reports explicit ON/OFF per IO. These are
+    // authoritative states, unlike inferred Production fan-in candidates.
+    public bool UpdateAuthoritative(IReadOnlyCollection<int> observedIos)
+    {
+        int[] observed = observedIos.Where(io => io > 0).Distinct()
+            .OrderBy(io => io).Take(MaxContacts).ToArray();
+        bool changed = !_activeIos.SequenceEqual(observed) || _candidateIos.Length > 0;
+        _candidateIos = [];
+        _candidateFrames = 0;
+        _missingFrames = 0;
+        _activeIos = observed;
+        return changed;
+    }
+
     public bool Update(IReadOnlyCollection<int> observedIos)
     {
         int[] observed = observedIos

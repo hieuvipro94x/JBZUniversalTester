@@ -140,6 +140,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _homeExitClearFrames;
     private long _homeExitFrameSequence = -1;
     private long _homeExitScanGeneration = -1;
+    private long _wrongWiringStatusStartedTimestamp;
+    private string? _wrongWiringStatusCycleId;
+    private static readonly TimeSpan WrongWiringRemovalStatusDelay = TimeSpan.FromSeconds(5);
     private bool IsEquipmentErrorExit => IsDeviceFault || IsPersistenceFault ||
         _waterProofEquipmentErrorAwaitingRemoval || CurrentProductionPhase == ProductionPhase.EquipmentError;
     private bool IsEquipmentErrorTableConfirmedClear => IsEquipmentErrorExit &&
@@ -673,6 +676,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     return MasterStatus;
                 return ProductionPresentationService.GetResultStatusText(this);
             }
+            if (WrongWiringRemovalStatusText is string wrongWiringStatus)
+                return wrongWiringStatus;
             if (SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null &&
                 !IsDeviceFault && !IsPersistenceFault)
                 return "KIỂM TRA KÍN NƯỚC KHÔNG ĐẠT";
@@ -725,6 +730,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// lấy màu từ chính sách hiển thị hiện tại.
     /// </summary>
     public string StateBackground =>
+        WrongWiringRemovalStatusText is not null ||
         (SelectedOperationTabIndex == 2 && _pendingLeakFailureMeasurements is not null) ||
         ResultStatusText == ProductionPresentationService.RejectedProductRemovalText ||
         ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO CONNECTOR LEAK"
@@ -4472,7 +4478,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (mode == RuntimeMode.Probe)
             {
                 if (Volatile.Read(ref _probeSessionActive) != 0 &&
-                    frame.Mode == BoardScanMode.Probe)
+                    frame.Mode == BoardScanMode.Probe && frame.UnknownBytes == 0)
                 {
                     int[] probeIos = frame.ActiveIo
                         .Where(_board.Capacity.ContainsGlobalIo)
@@ -4483,7 +4489,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
                     bool hadTrackedContacts = _probeStateTracker.HasTrackedContacts;
                     bool changed = probeIos.Length > 0
-                        ? UpdateInlineProbeContacts(probeIos)
+                        ? UpdateInlineProbeContacts(probeIos, authoritative: true)
                         : ClearInlineProbeContactsState();
                     long probeRevision = (!hadTrackedContacts || changed)
                         ? Interlocked.Increment(ref _inlineProbeUiRevision)
@@ -6280,7 +6286,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return _inlineProbeContactIos.ToArray();
     }
 
-    private bool UpdateInlineProbeContacts(IReadOnlyList<int> ios)
+    private bool UpdateInlineProbeContacts(IReadOnlyList<int> ios, bool authoritative = false)
     {
         BoardCapacity capacity = _board.Capacity;
         int[] normalized = ios
@@ -6289,7 +6295,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .OrderBy(value => value)
             .ToArray();
 
-        bool changed = _probeStateTracker.Update(normalized);
+        bool changed = authoritative
+            ? _probeStateTracker.UpdateAuthoritative(normalized)
+            : _probeStateTracker.Update(normalized);
         int[] active = _probeStateTracker.ActiveIos.ToArray();
         lock (_inlineProbeGate)
         {
@@ -7668,6 +7676,53 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _ = HandleWiringFaultAsync(generation, pairs, _engine.BuildRows().ToArray(), confirmed);
     }
 
+    private string? WrongWiringRemovalStatusText
+    {
+        get
+        {
+            long started = Interlocked.Read(ref _wrongWiringStatusStartedTimestamp);
+            if (started == 0 || !MasterApproved || IsMasterSequenceActive ||
+                IsDeviceFault || IsPersistenceFault || IsDiscardFaultConfirmationPresentation ||
+                !string.Equals(_wrongWiringStatusCycleId, _activeCycleId, StringComparison.Ordinal) ||
+                !IsRuntimeMode(RuntimeMode.Production) ||
+                !(CurrentProductionPhase == ProductionPhase.WaitingFaultConfirmation ||
+                  (CurrentProductionPhase == ProductionPhase.WaitingProductRemoval && _waitForFaultProductRemoval)))
+                return null;
+            return Stopwatch.GetElapsedTime(started) >= WrongWiringRemovalStatusDelay
+                ? "THÁO SẢN PHẨM LỖI"
+                : FaultDisplayFormatter.OperatorInstruction(ProductFaultType.WrongWiring);
+        }
+    }
+
+    private void BeginWrongWiringRemovalStatus(long generation)
+    {
+        long started = Stopwatch.GetTimestamp();
+        string cycleId = _activeCycleId;
+        _wrongWiringStatusCycleId = cycleId;
+        Interlocked.Exchange(ref _wrongWiringStatusStartedTimestamp, started);
+        _ = RefreshWrongWiringRemovalStatusAsync(generation, cycleId, started);
+    }
+
+    private async Task RefreshWrongWiringRemovalStatusAsync(long generation, string cycleId, long started)
+    {
+        try
+        {
+            await Task.Delay(WrongWiringRemovalStatusDelay, _lifetimeCts.Token);
+            await InvokeUiAsync(() =>
+            {
+                if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
+                    !string.Equals(cycleId, _activeCycleId, StringComparison.Ordinal) ||
+                    Interlocked.Read(ref _wrongWiringStatusStartedTimestamp) != started ||
+                    WrongWiringRemovalStatusText is null)
+                    return;
+                Raise(nameof(ResultStatusText));
+                Raise(nameof(StateBackground));
+                Raise(nameof(StateForeground));
+            });
+        }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
+    }
+
     private async Task HandleWiringFaultAsync(
         long generation,
         WiringFaultPair[] confirmedPairs,
@@ -7692,6 +7747,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             .Select(fault => fault.FaultType)
             .OrderBy(FaultTypeCatalog.Priority)
             .First();
+        if (primaryType == ProductFaultType.WrongWiring)
+            BeginWrongWiringRemovalStatus(generation);
         WiringFaultPair[] wiringPairs = confirmedPairs
             .OrderBy(pair => pair.SourceIo)
             .ThenBy(pair => pair.TargetIo)
