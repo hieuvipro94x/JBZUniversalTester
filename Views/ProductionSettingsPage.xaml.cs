@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.IO.Ports;
 using System.Text.RegularExpressions;
 using System.Text;
@@ -50,6 +50,36 @@ public partial class ProductionSettingsPage : UserControl
     public event Func<object?, EventArgs, Task>? SettingsSaved;
     public event EventHandler? RequestClose;
     public bool LastSaveChanged { get; private set; }
+    private SettingsAccessSession _accessSession = SettingsAccessSession.Administrator;
+
+    public void SetAccessSession(SettingsAccessSession access)
+    {
+        _accessSession = access;
+        _vm.SetAccessSession(access);
+        IoMasterConfiguration.IsEnabled = IoGeneralConfiguration.IsEnabled = access.Allows(SettingsPermission.Io);
+        RelaySettingsPanel.IsEnabled = ManualRelayControlsGrid.IsEnabled = access.Allows(SettingsPermission.Relay);
+        WaterProofSettingsPanel.IsEnabled = access.Allows(SettingsPermission.Leak);
+        WaterProofConfigurationBody.IsEnabled = !_vm.HasWaterProofConfigurationError;
+        ResistanceSettingsPanel.IsEnabled = access.Allows(SettingsPermission.Resistance);
+        LabelSettingsPanel.IsEnabled = access.Allows(SettingsPermission.Label);
+        SettingsAccessRoleText.Text = access.IsAdmin ? "ADMIN • Toàn quyền"
+            : $"NGƯỜI VẬN HÀNH • {SettingsSecurityDialogs.Groups.Count(group => access.Allows(group.Permission))}/5 nhóm";
+        ChangeAdminPasswordButton.Visibility = ManageSettingsPermissionsButton.Visibility =
+            access.IsAdmin ? Visibility.Visible : Visibility.Collapsed;
+        SaveSettingsButton.IsEnabled = access.IsAdmin || access.Permissions != SettingsPermission.None;
+    }
+
+    private void ChangeAdminPassword_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_accessSession.IsAdmin || IsReleased) return;
+        SettingsSecurityDialogs.ChangePassword(Window.GetWindow(this), SettingsAccessService.Current, _accessSession);
+    }
+
+    private void ManageSettingsPermissions_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_accessSession.IsAdmin || IsReleased) return;
+        SettingsSecurityDialogs.Permissions(Window.GetWindow(this), SettingsAccessService.Current, _accessSession);
+    }
 
     public ProductionSettingsPage()
         : this(null)
@@ -71,6 +101,7 @@ public partial class ProductionSettingsPage : UserControl
         _deferInitialLayout = deferInitialLayout;
         long bamlStarted = Stopwatch.GetTimestamp();
         InitializeComponent();
+        WaterProofConfigurationBody.IsEnabled = !_vm.HasWaterProofConfigurationError;
         AsyncFileLogService.Current.Performance(
             $"SETTINGS_PERF phase=VIEW_BAML elapsed_ms={Stopwatch.GetElapsedTime(bamlStarted).TotalMilliseconds:0.###}");
         if (_deferInitialLayout)
@@ -170,7 +201,7 @@ public partial class ProductionSettingsPage : UserControl
         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
         if (IsReleased) return;
         SettingsScrollViewer.IsEnabled = true;
-        SaveSettingsButton.IsEnabled = true;
+        SaveSettingsButton.IsEnabled = _accessSession.IsAdmin || _accessSession.Permissions != SettingsPermission.None;
         UpdateLayout();
         AsyncFileLogService.Current.Performance(
             $"SETTINGS_PERF phase=OPEN_READY elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
@@ -1840,6 +1871,7 @@ public partial class ProductionSettingsPage : UserControl
         try
         {
             CommitPendingEditorValues();
+            _vm.ValidateAccessForSave();
             if (HasEditorValidationErrors(this))
             {
                 ShowMessage("Hãy sửa các ô nhập chưa hợp lệ trước khi lưu.",
@@ -1879,6 +1911,12 @@ public partial class ProductionSettingsPage : UserControl
             await NotifySettingsSavedAsync();
             _savedSettingsSnapshot = savedSnapshot;
             return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ShowMessage("Bạn chưa được cấp quyền để lưu thay đổi này. Hãy đóng và mở lại Cài đặt bằng quyền phù hợp.",
+                "CHƯA ĐƯỢC CẤP QUYỀN", MessageBoxImage.Warning);
+            return false;
         }
         catch (Exception ex)
         {
@@ -2038,7 +2076,7 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         }
 
-        if (_vm.WaterProof.Enabled)
+        if (_vm.WaterProof.Enabled && !_vm.HasWaterProofConfigurationError)
         {
             if (string.IsNullOrWhiteSpace(_vm.Settings.WaterProofMachine.PortName))
             {

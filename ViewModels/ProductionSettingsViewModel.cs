@@ -55,6 +55,38 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
     private readonly TestViewModel? _test;
     private readonly Action<ProductionSettings> _saveSettings;
+    private SettingsAccessSession _accessSession = SettingsAccessSession.Administrator;
+    private string _deniedSettingsSnapshot = string.Empty;
+    private string _deniedEditorsSnapshot = string.Empty;
+
+    public void SetAccessSession(SettingsAccessSession access)
+    {
+        _accessSession = access;
+        _deniedSettingsSnapshot = SettingsPermissionPolicy.DeniedSnapshot(Settings, access);
+        _deniedEditorsSnapshot = CaptureDeniedEditors();
+        RefreshManualCommands();
+    }
+
+    private string CaptureDeniedEditors() => JsonSerializer.Serialize(new
+    {
+        Master = _accessSession.Allows(SettingsPermission.Io) ? null :
+            new { MasterFaultRequiredCount, MasterSelectedFaultSamples, MasterOpenFaultRequiredCount },
+        Resistance = _accessSession.Allows(SettingsPermission.Resistance) ? null :
+            ResistanceChannels.Select(editor => editor.ToSetting()).ToArray(),
+        Leak = _accessSession.Allows(SettingsPermission.Leak) ? null : WaterProof
+    });
+
+    public void ValidateAccessForSave()
+    {
+        if (HasWaterProofConfigurationError && _unavailableLeakSnapshot != CaptureLeakSettings())
+            throw new InvalidOperationException("Cấu hình Leak chưa hợp lệ. Hãy khôi phục đúng cặp file THT và cấu hình Leak rồi mở lại Cài đặt.");
+        if (_accessSession.IsAdmin) return;
+        if (_accessSession.Permissions == SettingsPermission.None)
+            throw new UnauthorizedAccessException("Bạn chỉ có quyền xem Cài đặt.");
+        if (_deniedSettingsSnapshot != SettingsPermissionPolicy.DeniedSnapshot(Settings, _accessSession) ||
+            _deniedEditorsSnapshot != CaptureDeniedEditors())
+            throw new UnauthorizedAccessException("Có thay đổi trong nhóm bạn chưa được cấp quyền. Hãy đóng và mở lại Cài đặt.");
+    }
     private CancellationTokenSource? _manualOperationCts;
     private Task _manualOperationCompletion = Task.CompletedTask;
     private bool _manualOperationRunning;
@@ -78,6 +110,11 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public ObservableCollection<ResistanceResult> ManualResistanceResults { get; } = new();
     public ObservableCollection<WaterProofChannelResult> ManualWaterProofResults { get; } = new();
     public WaterProofModelSettings WaterProof { get; }
+    public string WaterProofConfigurationError { get; } = string.Empty;
+    public bool HasWaterProofConfigurationError => WaterProofConfigurationError.Length > 0;
+    private readonly string _unavailableLeakSnapshot = string.Empty;
+    private string CaptureLeakSettings() => JsonSerializer.Serialize(new
+        { WaterProof, Settings.WaterProofMachine, Settings.WaterProofProfilesByModel, Settings.WaterproofSerialPort });
     public IReadOnlyList<string> WaterProofConnectorOptions { get; }
     public string WaterProofModelKey =>
         ProductionConfigService.GetMasterModelKeyFromPath(_modelPath);
@@ -186,11 +223,12 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public AsyncRelayCommand ManualMeasureResistanceCommand { get; }
     public AsyncRelayCommand ManualWaterProofTestCommand { get; }
 
-    public ProductionSettingsViewModel(TestViewModel? test = null, Action<ProductionSettings>? saveSettings = null)
+    public ProductionSettingsViewModel(TestViewModel? test = null, Action<ProductionSettings>? saveSettings = null,
+        ProductionSettings? initialSettings = null)
     {
         _test = test;
         _saveSettings = saveSettings ?? ProductionConfigService.Save;
-        Settings = ProductionConfigService.Load();
+        Settings = initialSettings ?? ProductionConfigService.Load();
         _modelPath = test?.CurrentModelPath ?? Settings.LastThtPath;
         _lotProductKey = ProductionConfigService.GetLotProductKey(
             test?.PartNumber,
@@ -212,8 +250,22 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ResistanceChannels = new ObservableCollection<ResistanceChannelEditor>(
             ProductionConfigService.GetResistanceProfileForPath(Settings, _modelPath).Select((setting, index) =>
                 new ResistanceChannelEditor(setting, index + 1)));
-        WaterProof = ProductionConfigService.GetWaterProofProfileForPath(
-            Settings, _modelPath);
+        try
+        {
+            WaterProof = ProductionConfigService.GetWaterProofProfileForPath(Settings, _modelPath);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            // Editor recovery only: never import suspect assignments, alter the
+            // stored profile, or weaken production model validation.
+            string key = ProductionConfigService.GetMasterModelKeyFromPath(_modelPath);
+            WaterProof = Settings.WaterProofProfilesByModel.TryGetValue(key, out var saved)
+                ? saved.Clone() : new WaterProofModelSettings();
+            WaterProofConfigurationError = "Cấu hình Leak không đọc được, không hợp lệ hoặc không khớp THT. " +
+                "Hãy chép đúng cặp THT và .tht.leak.json rồi mở lại Cài đặt. Các nhóm khác vẫn sử dụng được.";
+            _unavailableLeakSnapshot = CaptureLeakSettings();
+            AsyncFileLogService.Current.Error($"Settings Leak profile unavailable; other groups remain editable: model={_modelPath}; {ex}");
+        }
         ResetManualWaterProofResults(WaterProof);
         WaterProofConnectorOptions = LoadWaterProofConnectorOptions(test, _modelPath);
         _masterFaultRequiredCount = ProductionConfigService.GetMasterFaultRequiredCountForPath(
@@ -223,19 +275,19 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, true)),
-            CanUseManualControls);
+            CanUseManualRelay);
         ManualRelay1OffCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, false)),
-            CanUseManualControls);
+            CanUseManualRelay);
         ManualRelay2OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, true)),
-            CanUseManualControls);
+            CanUseManualRelay);
         ManualRelay2OffCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, false)),
-            CanUseManualControls);
+            CanUseManualRelay);
         ManualResetCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualResetAsync()),
-            CanUseManualControls);
+            CanUseManualRelay);
         ManualMeasureResistanceCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(RunManualResistanceAsync),
             CanUseManualResistance);
@@ -292,9 +344,11 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         !_manualWaterProofRunning &&
         (_test.IsManualModeActive || _test.CanEnterManualMode);
 
-    private bool CanUseManualResistance() => CanUseManualControls();
+    private bool CanUseManualRelay() => _accessSession.Allows(SettingsPermission.Relay) && CanUseManualControls();
+    private bool CanUseManualResistance() => _accessSession.Allows(SettingsPermission.Resistance) && CanUseManualControls();
 
-    private bool CanUseManualWaterProof() => CanUseManualControls();
+    private bool CanUseManualWaterProof() => !HasWaterProofConfigurationError &&
+        _accessSession.Allows(SettingsPermission.Leak) && CanUseManualControls();
 
     private async Task RunManualOperationAsync(Func<CancellationToken, Task> operation)
     {
@@ -334,6 +388,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private async Task RunManualWaterProofAsync(CancellationToken cancellationToken)
     {
+        _accessSession.Demand(SettingsPermission.Leak);
+        if (HasWaterProofConfigurationError)
+            throw new InvalidOperationException("Cấu hình Leak chưa hợp lệ; chưa thể chạy máy Leak.");
         if (_test is null)
             return;
 
@@ -497,6 +554,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private async Task RunManualRelayCommandAsync(int relay, bool turnOn)
     {
+        _accessSession.Demand(SettingsPermission.Relay);
         if (_test is null)
             return;
 
@@ -527,6 +585,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private async Task RunManualResetAsync()
     {
+        _accessSession.Demand(SettingsPermission.Relay);
         if (_test is null)
             return;
 
@@ -552,6 +611,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private async Task RunManualResistanceAsync(CancellationToken cancellationToken)
     {
+        _accessSession.Demand(SettingsPermission.Resistance);
         if (_test is null)
             return;
 
@@ -680,37 +740,47 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private void PrepareSettingsForSave()
     {
-        Settings.ExpansionCardCount = Math.Clamp(
-            Settings.ExpansionCardCount,
-            1,
-            BoardIoDecoder.MaxExpansionCardCount);
-        Settings.StartCardNumber = Math.Clamp(
-            Settings.StartCardNumber,
-            1,
-            BoardCapacity.MaxExpansionCardCount);
-        Settings.ExpansionCardCount = Math.Min(
-            Settings.ExpansionCardCount,
-            BoardCapacity.MaxExpansionCardCount - Settings.StartCardNumber + 1);
-        Settings.CardCount = BoardCapacity.FromSettings(Settings).ScanCardCount;
-        Settings.ResistanceChannels = ResistanceChannels
-            .Select(editor => editor.ToSetting())
-            .ToArray();
-        ProductionConfigService.SetResistanceProfileForPath(
-            Settings, _modelPath, Settings.ResistanceChannels);
-        Settings.AutoMasterSequence = true;
-        // Manual là thao tác runtime tức thời, không phải cấu hình cần lưu.
-        Settings.ManualModeEnabled = false;
-        ProductionConfigService.SetMasterFaultRequiredCountForPath(
-            Settings, _modelPath, MasterFaultRequiredCount);
-        ProductionConfigService.SetMasterSelectedFaultSamplesForPath(Settings, _modelPath, MasterSelectedFaultSamples);
-        ProductionConfigService.SetMasterOpenFaultRequiredCountForPath(Settings, _modelPath, MasterOpenFaultRequiredCount);
-        ProductionConfigService.SetWaterProofProfileForPath(
-            Settings, _modelPath, WaterProof);
-        ProductionConfigService.SetProductLot(
-            Settings,
-            _lotProductKey,
-            Settings.LotNo,
-            DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+        ValidateAccessForSave();
+        if (_accessSession.Allows(SettingsPermission.Io))
+        {
+            Settings.ExpansionCardCount = Math.Clamp(
+                Settings.ExpansionCardCount,
+                1,
+                BoardIoDecoder.MaxExpansionCardCount);
+            Settings.StartCardNumber = Math.Clamp(
+                Settings.StartCardNumber,
+                1,
+                BoardCapacity.MaxExpansionCardCount);
+            Settings.ExpansionCardCount = Math.Min(
+                Settings.ExpansionCardCount,
+                BoardCapacity.MaxExpansionCardCount - Settings.StartCardNumber + 1);
+            Settings.CardCount = BoardCapacity.FromSettings(Settings).ScanCardCount;
+        }
+        if (_accessSession.Allows(SettingsPermission.Resistance))
+        {
+            Settings.ResistanceChannels = ResistanceChannels
+                .Select(editor => editor.ToSetting())
+                .ToArray();
+            ProductionConfigService.SetResistanceProfileForPath(
+                Settings, _modelPath, Settings.ResistanceChannels);
+        }
+        if (_accessSession.Allows(SettingsPermission.Io))
+        {
+            Settings.AutoMasterSequence = true;
+            // Manual là thao tác runtime tức thời, không phải cấu hình cần lưu.
+            Settings.ManualModeEnabled = false;
+            ProductionConfigService.SetMasterFaultRequiredCountForPath(
+                Settings, _modelPath, MasterFaultRequiredCount);
+            ProductionConfigService.SetMasterSelectedFaultSamplesForPath(Settings, _modelPath, MasterSelectedFaultSamples);
+            ProductionConfigService.SetMasterOpenFaultRequiredCountForPath(Settings, _modelPath, MasterOpenFaultRequiredCount);
+            ProductionConfigService.SetProductLot(
+                Settings,
+                _lotProductKey,
+                Settings.LotNo,
+                DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        if (_accessSession.Allows(SettingsPermission.Leak) && !HasWaterProofConfigurationError)
+            ProductionConfigService.SetWaterProofProfileForPath(Settings, _modelPath, WaterProof);
     }
 
     public void Save()

@@ -20,6 +20,21 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-settings-recovery-perf"])
+        {
+            TestSettingsInvalidLeakLayoutRecovery();
+            TestSettingsAuthenticationResponsiveness();
+            Console.WriteLine("PASS: Settings recovery from invalid Leak files and asynchronous authentication responsiveness");
+            return 0;
+        }
+        if (args is ["--test-settings-access"])
+        {
+            TestSettingsCredentialsAndPermissions();
+            TestSettingsPermissionSaveGuards();
+            TestSettingsPermissionUi();
+            Console.WriteLine("PASS: Admin password, password changes, five permission groups, UI and save guards");
+            return 0;
+        }
         if (args is ["--test-probe-and-fault-status"])
         {
             TestLargeProbeImmediateTransitions();
@@ -294,6 +309,11 @@ internal static partial class Program
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
+            ("Settings Admin credentials and group permissions persist securely", TestSettingsCredentialsAndPermissions),
+            ("Settings opens despite invalid Leak sidecar without bypassing production validation", TestSettingsInvalidLeakLayoutRecovery),
+            ("Settings password verification leaves Dispatcher and permission reads responsive", TestSettingsAuthenticationResponsiveness),
+            ("Settings operator saves cannot modify denied groups", TestSettingsPermissionSaveGuards),
+            ("Settings UI honors Admin/operator permissions after staged opening", TestSettingsPermissionUi),
             ("640-IO Probe updates immediately and retains contacts across scans", TestLargeProbeImmediateTransitions),
             ("Wrong-wire removal status waits five seconds independently of confirmation", TestWrongWiringDelayedRemovalStatus),
             ("Production probe preview arrives before frame terminator", TestProductionProbePreview),
@@ -2151,7 +2171,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 17 &&
+        Assert(settingsButtons.Length == 19 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&

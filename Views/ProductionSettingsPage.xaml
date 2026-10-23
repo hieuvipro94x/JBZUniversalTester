@@ -234,7 +234,7 @@
                                 <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Stretch">
                                     <StackPanel>
                                         <TextBlock Text="I/O / PRODUCTION" Style="{StaticResource SectionTitleStyle}"/>
-                                        <Grid Margin="0,0,0,4">
+                                        <Grid x:Name="IoMasterConfiguration" Margin="0,0,0,4">
                                             <Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                             <Grid.RowDefinitions><RowDefinition Height="30"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                             <TextBlock Text="Kiểm tra Master" Style="{StaticResource FieldLabelStyle}"/>
@@ -247,7 +247,7 @@
                                                 <CheckBox Content="Tuột tuýt / đứt dây" IsChecked="{Binding MasterOpenCircuitRequired, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Height="26"/>
                                             </UniformGrid>
                                         </Grid>
-                                        <Grid>
+                                        <Grid x:Name="IoGeneralConfiguration">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="150"/>
                                                 <ColumnDefinition Width="*"/>
@@ -403,6 +403,15 @@
                                     <Border x:Name="WaterProofSettingsPanel" HorizontalAlignment="Stretch" Margin="0" Padding="7" Background="#F3F7FF" BorderBrush="#9CADCF" BorderThickness="1" CornerRadius="3">
                                         <StackPanel>
                                             <TextBlock Text="KIỂM TRA KÍN NƯỚC" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,2"/>
+                                            <TextBlock Text="{Binding WaterProofConfigurationError}" Foreground="#B91C1C" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,4,0,8">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                        <Style.Triggers><DataTrigger Binding="{Binding HasWaterProofConfigurationError}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <StackPanel x:Name="WaterProofConfigurationBody">
                                             <Grid Margin="0,0,0,3">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*"/>
@@ -493,6 +502,7 @@
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
                                             </Grid>
+                                            </StackPanel>
                                         </StackPanel>
                                     </Border>
                                 </StackPanel>
@@ -734,7 +744,15 @@
                 </Grid></Grid></ScrollViewer>
         <Border Grid.Row="2" Background="Transparent" BorderThickness="0">
             <Grid Margin="16,4">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Viewbox HorizontalAlignment="Left" Stretch="Uniform" StretchDirection="DownOnly" Margin="0,0,12,0">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="SettingsAccessRoleText" Text="ADMIN • Toàn quyền" Foreground="White" FontSize="14" FontWeight="SemiBold" Margin="0,0,12,0"/>
+                        <Button x:Name="ChangeAdminPasswordButton" Content="ĐỔI MẬT KHẨU" Click="ChangeAdminPassword_Click" Height="36" Width="142" FontSize="13" Margin="0,0,8,0" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
+                        <Button x:Name="ManageSettingsPermissionsButton" Content="PHÂN QUYỀN" Click="ManageSettingsPermissions_Click" Height="36" Width="132" FontSize="13" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
+                    </StackPanel>
+                </Viewbox>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                     <TextBlock x:Name="SettingsSavedStatusText"
                                Text="Đã lưu cài đặt"
                                FontSize="20"

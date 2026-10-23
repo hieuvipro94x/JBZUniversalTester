@@ -342,13 +342,24 @@ public partial class MainWindow : Window
         LearnTopologyButton.IsEnabled = hardwareReady;
     }
 
+    private int _settingsAccessPromptActive;
     private async void OpenSettings_Click(
         object sender,
         RoutedEventArgs e)
     {
+        if (_settingsPage is not null || _historyPage is not null || _testWindow is not null ||
+            Interlocked.CompareExchange(ref _settingsAccessPromptActive, 1, 0) != 0)
+            return;
         try
         {
-            await ShowSettingsPageAsync();
+            MainActionBar.IsEnabled = false;
+            long accessStarted = Stopwatch.GetTimestamp();
+            SettingsAccessService accessService = await Task.Run(() => SettingsAccessService.Current);
+            AsyncFileLogService.Current.Performance($"AUTH_PERF phase=ACCESS_LOAD elapsed_ms={Stopwatch.GetElapsedTime(accessStarted).TotalMilliseconds:0.###}");
+            if (_shutdownStarted) return;
+            SettingsAccessSession? access = SettingsSecurityDialogs.Login(this, accessService);
+            if (access is null || _shutdownStarted) return;
+            await ShowSettingsPageAsync(access);
         }
         catch (Exception ex)
         {
@@ -358,14 +369,20 @@ public partial class MainWindow : Window
             AsyncFileLogService.Current.Error($"Open Settings failed: {ex}");
             MessageBox.Show(
                 this,
-                "Chưa mở được Cài đặt. Vui lòng thử lại.",
+                "Chưa mở được Cài đặt. Vui lòng kiểm tra cấu hình và thử lại.",
                 "CHƯA MỞ ĐƯỢC CÀI ĐẶT",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+        finally
+        {
+            Interlocked.Exchange(ref _settingsAccessPromptActive, 0);
+            if (!_shutdownStarted && _settingsPage is null && _historyPage is null)
+                MainActionBar.IsEnabled = true;
+        }
     }
 
-    private async Task ShowSettingsPageAsync()
+    private async Task ShowSettingsPageAsync(SettingsAccessSession access)
     {
         if (_settingsPage is not null || _historyPage is not null || _settingsPageCloseInProgress || _testWindow is not null)
         {
@@ -391,6 +408,7 @@ public partial class MainWindow : Window
 
         long settingsRenderStarted = Stopwatch.GetTimestamp();
         var preparedPage = new ProductionSettingsPage(_viewModel, settingsViewModel, deferInitialLayout: true);
+        preparedPage.SetAccessSession(access);
         bool attached = false;
         try
         {

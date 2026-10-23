@@ -30,7 +30,7 @@ internal static partial class Program
             var actions = (Grid)main.FindName("MainActionBar");
             try
             {
-                Task abandonedOpen = (Task)Call("ShowSettingsPageAsync")!;
+                Task abandonedOpen = (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
                 await Dispatcher.Yield(DispatcherPriority.Input);
                 Assert(host.Content is null && host.Visibility == Visibility.Collapsed && actions.IsEnabled,
                     "Main stays interactive while disconnected settings templates are prepared; no loading page is attached");
@@ -38,7 +38,7 @@ internal static partial class Program
                 await abandonedOpen;
                 Assert(host.Content is null && actions.IsEnabled,
                     "Navigation changed during preparation cannot attach the stale settings page");
-                await (Task)Call("ShowSettingsPageAsync")!;
+                await (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
                 var settings = (ProductionSettingsPage)(host.Content ?? throw new InvalidOperationException("Settings page was not opened"));
                 Assert(application.Windows.Count == 1 && main.OwnedWindows.Count == 0 && !actions.IsEnabled,
                     "Opening Settings attaches a page without constructing another Window");
@@ -47,7 +47,7 @@ internal static partial class Program
                     new[] { "IoSettingsPanel", "RelayLeakMainPanel", "LabelSettingsPanel", "ResistanceSettingsPanel" }
                         .All(name => ((Border)settings.FindName(name)).Visibility == Visibility.Visible),
                     "Settings is attached only after all editor panels are ready, so its first visible frame has no staged reveal");
-                await (Task)Call("ShowSettingsPageAsync")!;
+                await (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
                 Call("OpenHistory_Click", main, new RoutedEventArgs());
                 Assert(ReferenceEquals(host.Content, settings),
                     "Another page cannot replace active Settings before it is closed safely");
@@ -56,7 +56,7 @@ internal static partial class Program
                     "Closing Settings releases its bindings and restores main actions");
                 Call("OpenHistory_Click", main, new RoutedEventArgs());
                 var history = (HistoryPage)(host.Content ?? throw new InvalidOperationException("History page was not opened"));
-                await (Task)Call("ShowSettingsPageAsync")!;
+                await (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
                 Assert(ReferenceEquals(host.Content, history) && application.Windows.Count == 1 && !actions.IsEnabled,
                     "History occupies the same single window and must be closed before another page opens");
                 await (Task)Call("CloseInternalPageAsync")!;
