@@ -26,9 +26,9 @@
         <SolidColorBrush x:Key="SettingsBorder" Color="#CBD5E1"/>
         <SolidColorBrush x:Key="ModelAction" Color="#2563EB"/>
         <SolidColorBrush x:Key="TopologyAction" Color="#F1F5F9"/>
-        <SolidColorBrush x:Key="ExitBackground" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="ExitForeground" Color="#B91C1C"/>
-        <SolidColorBrush x:Key="ExitBorder" Color="#FECACA"/>
+        <SolidColorBrush x:Key="ExitBackground" Color="#B91C1C"/>
+        <SolidColorBrush x:Key="ExitForeground" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="ExitBorder" Color="#991B1B"/>
 
         <Style x:Key="FlatButton" TargetType="Button">
             <Setter Property="Height" Value="50"/>
