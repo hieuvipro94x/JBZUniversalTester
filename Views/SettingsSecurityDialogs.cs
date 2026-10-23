@@ -18,7 +18,7 @@ internal static class SettingsSecurityDialogs
         if (message is "Mật khẩu hiện tại không đúng." or "Hai lần nhập mật khẩu mới không khớp." or
             "Mật khẩu mới phải có từ 1 đến 128 ký tự và không được chỉ chứa khoảng trắng." or
             "Chỉ Admin được đổi mật khẩu." or "Chỉ Admin được phân quyền.")
-            return message;
+            return message.Replace("Admin", "quản trị");
         AsyncFileLogService.Current.Error($"Settings access operation failed: {error}");
         return "Không thể cập nhật thông tin truy cập. Vui lòng thử lại.";
     }
@@ -26,11 +26,11 @@ internal static class SettingsSecurityDialogs
     public static SettingsAccessSession? Login(Window owner, SettingsAccessService service)
     {
         var (window, panel, error) = Create(owner, "QUYỀN TRUY CẬP CÀI ĐẶT");
-        panel.Children.Add(Label("Nhập mật khẩu Admin để chỉnh toàn bộ cài đặt."));
-        PasswordBox password = Password(panel, "Mật khẩu Admin");
+        panel.Children.Add(Label("Nhập mật khẩu để truy cập cài đặt với quyền quản trị."));
+        PasswordBox password = Password(panel, "Mật khẩu");
         SettingsAccessSession? result = null;
         var actions = new WrapPanel { Margin = new Thickness(0, 16, 0, 0) };
-        Button admin = Button("ĐĂNG NHẬP ADMIN", true);
+        Button admin = Button("ĐĂNG NHẬP", true);
         Button operatorButton = Button("NGƯỜI VẬN HÀNH");
         admin.IsDefault = true;
         actions.Children.Add(admin); actions.Children.Add(operatorButton);
@@ -44,7 +44,7 @@ internal static class SettingsSecurityDialogs
             {
                 bool valid = await service.VerifyAdminAsync(supplied);
                 if (!window.IsLoaded) return;
-                if (!valid) { error.Text = "Mật khẩu Admin không đúng."; password.SelectAll(); password.Focus(); return; }
+                if (!valid) { error.Text = "Mật khẩu không đúng."; password.SelectAll(); password.Focus(); return; }
                 result = SettingsAccessSession.Administrator;
                 window.DialogResult = true;
             }
@@ -61,7 +61,7 @@ internal static class SettingsSecurityDialogs
     public static void ChangePassword(Window owner, SettingsAccessService service, SettingsAccessSession session)
     {
         if (!session.IsAdmin) throw new UnauthorizedAccessException("Chỉ Admin được đổi mật khẩu.");
-        var (window, panel, error) = Create(owner, "ĐỔI MẬT KHẨU ADMIN");
+        var (window, panel, error) = Create(owner, "ĐỔI MẬT KHẨU QUẢN TRỊ");
         PasswordBox current = Password(panel, "Mật khẩu hiện tại");
         PasswordBox next = Password(panel, "Mật khẩu mới");
         PasswordBox confirmation = Password(panel, "Nhập lại mật khẩu mới");
@@ -89,7 +89,7 @@ internal static class SettingsSecurityDialogs
     {
         if (!session.IsAdmin) throw new UnauthorizedAccessException("Chỉ Admin được phân quyền.");
         var (window, panel, error) = Create(owner, "PHÂN QUYỀN NGƯỜI VẬN HÀNH");
-        panel.Children.Add(Label("Chọn nhóm được phép chỉnh và thao tác. Nhóm bỏ chọn chỉ được xem.\nAdmin luôn có toàn quyền."));
+        panel.Children.Add(Label("Chọn nhóm được phép chỉnh và thao tác. Nhóm bỏ chọn chỉ được xem.\nQuản trị luôn có toàn quyền."));
         SettingsAccessSession current = service.OperatorSession;
         var boxes = Groups.Select(group => (group.Permission, Box: new CheckBox
         {
@@ -134,7 +134,7 @@ internal static class SettingsSecurityDialogs
     private static PasswordBox Password(StackPanel panel, string label)
     {
         panel.Children.Add(Label(label));
-        var box = new PasswordBox { Height = 36, FontSize = 18, Padding = new Thickness(7, 3, 7, 3), MaxLength = 128 };
+        var box = new PasswordBox { PasswordChar = '●', Height = 36, FontSize = 18, Padding = new Thickness(7, 3, 7, 3), MaxLength = 128 };
         panel.Children.Add(box);
         return box;
     }

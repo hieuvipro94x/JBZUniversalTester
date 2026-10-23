@@ -62,7 +62,7 @@ public partial class ProductionSettingsPage : UserControl
         WaterProofConfigurationBody.IsEnabled = !_vm.HasWaterProofConfigurationError;
         ResistanceSettingsPanel.IsEnabled = access.Allows(SettingsPermission.Resistance);
         LabelSettingsPanel.IsEnabled = access.Allows(SettingsPermission.Label);
-        SettingsAccessRoleText.Text = access.IsAdmin ? "ADMIN • Toàn quyền"
+        SettingsAccessRoleText.Text = access.IsAdmin ? "QUẢN TRỊ • Toàn quyền"
             : $"NGƯỜI VẬN HÀNH • {SettingsSecurityDialogs.Groups.Count(group => access.Allows(group.Permission))}/5 nhóm";
         ChangeAdminPasswordButton.Visibility = ManageSettingsPermissionsButton.Visibility =
             access.IsAdmin ? Visibility.Visible : Visibility.Collapsed;
