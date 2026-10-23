@@ -192,6 +192,26 @@
 
         <Style x:Key="PiFieldStyle" TargetType="TextBox" BasedOn="{StaticResource IndustrialValueStyle}">
             <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <Viewbox Margin="{TemplateBinding Padding}"
+                                     HorizontalAlignment="Left"
+                                     Stretch="Uniform" StretchDirection="DownOnly">
+                                <TextBlock Text="{TemplateBinding Text}"
+                                           Foreground="{TemplateBinding Foreground}"
+                                           FontFamily="{TemplateBinding FontFamily}"
+                                           FontSize="{TemplateBinding FontSize}"
+                                           FontWeight="{TemplateBinding FontWeight}"
+                                           TextWrapping="NoWrap" TextTrimming="None"/>
+                            </Viewbox>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="IndustrialCounterValueStyle" TargetType="TextBox" BasedOn="{StaticResource IndustrialValueStyle}">
@@ -620,7 +640,7 @@
                  StretchDirection="DownOnly"
                  HorizontalAlignment="Stretch"
                  VerticalAlignment="Top">
-        <Grid x:Name="TestHeaderSurface" Width="1344" Height="234">
+        <Grid x:Name="TestHeaderSurface" Width="1344" Height="198">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="250"/>
                 <ColumnDefinition Width="*"/>
@@ -662,58 +682,6 @@
                                  Fill="#5A3030" Stroke="#4B5563" StrokeThickness="1"/>
                     </StackPanel>
                 </Grid>
-                <Grid x:Name="LabelActionButtonsPanel" Margin="0,6,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="6"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <Grid Grid.ColumnSpan="3">
-                        <Grid.Style>
-                            <Style TargetType="Grid">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Grid.Style>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="6"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0"
-                            Content="TH&#7916; L&#7840;I IN TEM"
-                            Command="{Binding RetryLabelCommand}"
-                            Style="{StaticResource LabelRetryButtonStyle}"
-                            Height="30"
-                            FontSize="9.5"/>
-                    <Button Grid.Column="2"
-                            Content="IN TH&#202;M B&#7842;N SAO"
-                            Command="{Binding ReprintLabelCommand}"
-                            Style="{StaticResource LabelReprintButtonStyle}"
-                            Height="30"
-                            FontSize="9.5"/>
-                    </Grid>
-                    <Button Grid.ColumnSpan="3"
-                            Content="XÁC NHẬN ĐÃ LẮP XONG MẪU"
-                            Command="{Binding ConfirmOpenMasterCommand}"
-                            IsEnabled="{Binding CanConfirmOpenMaster}"
-                            Height="30" FontSize="11" FontWeight="Bold"
-                            Background="#0F766E" Foreground="White" BorderBrush="#0B5D56">
-                        <Button.Style>
-                            <Style TargetType="Button">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                    </Button>
-                </Grid>
                 <Grid Margin="0,8,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="132"/>
@@ -746,36 +714,95 @@
 
             <Grid Grid.Column="1" Margin="8,0,18,0">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="92"/>
+                    <RowDefinition Height="82"/>
                     <RowDefinition Height="42"/>
                     <RowDefinition Height="42"/>
                 </Grid.RowDefinitions>
                 <Grid Grid.Row="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="38"/>
+                        <RowDefinition Height="44"/>
+                    </Grid.RowDefinitions>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" MinWidth="120"/>
                         <ColumnDefinition Width="194"/>
                     </Grid.ColumnDefinitions>
 
-                    <Viewbox Grid.Column="0"
-                             Margin="4"
+                <Grid x:Name="LabelActionButtonsPanel" Grid.Column="0" Width="300" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="6"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid Grid.ColumnSpan="3">
+                        <Grid.Style>
+                            <Style TargetType="Grid">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Grid.Style>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Content="TH&#7916; L&#7840;I IN TEM"
+                            Command="{Binding RetryLabelCommand}"
+                            Style="{StaticResource LabelRetryButtonStyle}"
+                            Height="30"
+                            FontSize="11.5"/>
+                    <Button Grid.Column="2"
+                            Content="IN TH&#202;M B&#7842;N SAO"
+                            Command="{Binding ReprintLabelCommand}"
+                            Style="{StaticResource LabelReprintButtonStyle}"
+                            Height="30"
+                            FontSize="11.5"/>
+                    </Grid>
+                    <Button Grid.ColumnSpan="3"
+                            Content="XÁC NHẬN ĐÃ LẮP XONG MẪU"
+                            Command="{Binding ConfirmOpenMasterCommand}"
+                            IsEnabled="{Binding CanConfirmOpenMaster}"
+                            Height="30" FontSize="11" FontWeight="Bold"
+                            Background="#0F766E" Foreground="White" BorderBrush="#0B5D56">
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+                    <Viewbox Grid.Row="1" Grid.ColumnSpan="2"
+                             Margin="2,0"
                              Stretch="Uniform"
                              StretchDirection="DownOnly">
                         <TextBlock x:Name="ModelTitleText"
                                    Text="{Binding ModelName, Mode=OneWay}"
                                    Foreground="{StaticResource PiIndustrialTextBrush}"
-                                   FontSize="31"
-                                   FontWeight="SemiBold"
+                                   FontSize="34"
+                                   FontWeight="Bold"
                                    TextAlignment="Center"
-                                   TextWrapping="NoWrap"/>
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="None"/>
                     </Viewbox>
 
-                    <Border Grid.Column="1"
+                    <Border x:Name="ClockHost" Grid.Column="1"
                             HorizontalAlignment="Stretch"
-                            VerticalAlignment="Top"
-                            Margin="0,2,2,0"
-                            Padding="8,6"
-                            Background="Transparent"
-                            BorderThickness="0">
+                            VerticalAlignment="Stretch"
+                            Margin="0,0,2,0"
+                            Padding="8,0"
+                            Background="{StaticResource PiFieldBrush}"
+                            BorderBrush="#94A3B8"
+                            BorderThickness="1">
+                        <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
                         <TextBlock x:Name="CurrentTimeText"
                                    Foreground="#1E293B"
                                    FontSize="36"
@@ -783,6 +810,7 @@
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
                                    TextAlignment="Center"/>
+                        </Viewbox>
                     </Border>
                 </Grid>
 
@@ -822,8 +850,8 @@
                         Height="150"
                         VerticalAlignment="Top"
                         Background="{Binding StateBackground}"
-                        BorderBrush="{StaticResource PiBorderBrush}"
-                        BorderThickness="1">
+                        BorderBrush="#94A3B8"
+                        BorderThickness="2">
                     <Viewbox Margin="8,6" Stretch="Uniform" StretchDirection="DownOnly">
                         <TextBlock Width="204"
                                    Foreground="{Binding StateForeground}"
@@ -861,17 +889,17 @@
                         <ColumnDefinition Width="118"/>
                     </Grid.ColumnDefinitions>
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="39"/>
-                        <RowDefinition Height="4"/>
-                        <RowDefinition Height="39"/>
-                        <RowDefinition Height="4"/>
-                        <RowDefinition Height="39"/>
-                        <RowDefinition Height="4"/>
-                        <RowDefinition Height="39"/>
-                        <RowDefinition Height="4"/>
-                        <RowDefinition Height="24"/>
+                        <RowDefinition Height="34"/>
+                        <RowDefinition Height="3"/>
+                        <RowDefinition Height="34"/>
+                        <RowDefinition Height="3"/>
+                        <RowDefinition Height="34"/>
+                        <RowDefinition Height="3"/>
+                        <RowDefinition Height="34"/>
+                        <RowDefinition Height="3"/>
+                        <RowDefinition Height="20"/>
                         <RowDefinition Height="2"/>
-                        <RowDefinition Height="30"/>
+                        <RowDefinition Height="26"/>
                     </Grid.RowDefinitions>
                     <TextBlock Text="T&#7893;ng s&#7889;" Style="{StaticResource IndustrialCounterLabelStyle}"/>
                     <Border Grid.Column="2" Width="118" Style="{StaticResource PiCounterValueBorderStyle}">

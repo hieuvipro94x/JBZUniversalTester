@@ -2114,7 +2114,7 @@ internal static partial class Program
         Assert(settingsXaml.Contains("x:Name=\"RelayWiringModeComboBox\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Settings.RelayWiringMode", StringComparison.Ordinal),
             "Production settings exposes one physical relay-role mapping and states FAIL behavior clearly");
-        Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"234\"", StringComparison.Ordinal) &&
+        Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"198\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Name=\"TestAppVersionText\"", StringComparison.Ordinal) &&
                xaml.Contains("Grid.Row=\"8\"", StringComparison.Ordinal) &&
                xaml.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto\"", StringComparison.Ordinal) &&
