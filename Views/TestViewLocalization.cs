@@ -96,6 +96,7 @@ internal static class TestViewLocalization
         public string Language { get; } = language;
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
+            if (value is "PASS" && parameter is "ResultStatusText" or "CenterResultText") return "PASS";
             if (parameter is "Name" && value is not "TEST LEAK") return value;
             string text = TestViewText.Translate(value as string, Language);
             // Break at Korean word boundaries inside the narrow large-status panel.

@@ -113,6 +113,12 @@ internal static partial class Program
             await Dispatcher.Yield(DispatcherPriority.Background);
             Assert(run.Text == "KEYSIGHT 오류 - 제품 탈거 대기" && !HasVietnamese(run.Text) && board.Commands.Count == commandsBefore,
                 "Live device faults remain specific in Korean and localization sends no hardware commands");
+            var resultBinding = BindingOperations.GetBinding(run, Run.TextProperty)!;
+            foreach (string statusPath in new[] { "ResultStatusText", "CenterResultText" })
+                Assert((string)resultBinding.Converter.Convert("PASS", typeof(string), statusPath, System.Globalization.CultureInfo.InvariantCulture) == "PASS",
+                    "Large and center PASS labels remain PASS in Korean mode");
+            Assert((string)resultBinding.Converter.Convert("PASS", typeof(string), "ResultText", System.Globalization.CultureInfo.InvariantCulture) == "합격",
+                "Keeping large PASS labels does not change the Korean measurement table");
             typeof(TestWindow).GetField("_allowClose", flags)!.SetValue(window, true);
             window.Close();
             var settingsVm = new ProductionSettingsViewModel(saveSettings: _ => { }, initialSettings: new ProductionSettings { TestViewLanguage = "ko" });
