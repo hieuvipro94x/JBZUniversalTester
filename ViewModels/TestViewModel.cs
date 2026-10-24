@@ -1120,6 +1120,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     }
 
     public long ProbeReplacementThreshold => _probeReplacementThreshold;
+    public string TestViewLanguage => TestViewText.NormalizeLanguage(_productionSettings.TestViewLanguage);
 
     private static string FormatProbeCycleNumber(long value) =>
         value.ToString(
@@ -2017,7 +2018,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (generation != Volatile.Read(ref _runtimeGeneration) || !ReferenceEquals(model, _model))
             return;
         if (Application.Current is not null)
-            await InvokeUiAsync(() => MessageBox.Show(
+            await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
                 ResolveOperatorDialogOwner(),
                 "Không kết nối hoặc đọc được đồng hồ Keysight. Kiểm tra nguồn, USB và VISA. " +
                 "Tháo sản phẩm rồi lắp lại để thử lại.\n" + exception.GetBaseException().Message,
@@ -2082,7 +2083,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     Message = _deviceFaultMessage
                 }],
                 "Bấm XÁC NHẬN để đóng chương trình.",
-                windowHeader: "LỖI THIẾT BỊ");
+                windowHeader: "LỖI THIẾT BỊ", language: TestViewLanguage);
             Window? owner = ResolveOperatorDialogOwner();
             if (owner is not null)
                 dialog.Owner = owner;
@@ -4904,7 +4905,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 : model.HasDiscardInterlock
                 ? "Bấm XÁC NHẬN để mở JIG. Sau đó đưa hàng lỗi qua cảm biến thùng NG 1 lần."
                 : "Bấm XÁC NHẬN để mở đầu gá và tháo sản phẩm.",
-            model: model);
+            model: model, language: TestViewLanguage);
         Window? resolvedOwner = owner ?? ResolveOperatorDialogOwner();
         if (resolvedOwner is not null)
             dialog.Owner = resolvedOwner;
@@ -6753,7 +6754,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // An unavailable operator action is not a fatal hardware session error.
         // Keep device faults raised by the running scan/monitor on their safety path.
         if (Application.Current?.Dispatcher is not null)
-            InvokeUi(() => MessageBox.Show(
+            InvokeUi(() => LocalizedMessageBox.Show(TestViewLanguage,
                 ResolveOperatorDialogOwner(), message, "CHƯA KẾT NỐI BO D2XX",
                 MessageBoxButton.OK, MessageBoxImage.Warning));
     }
@@ -9146,7 +9147,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 State = $"{masterLabel} - CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ";
                 MasterStatus = State;
                 AddLog($"[{masterLabel}-LEAK] CONFIG ERROR: {error}");
-                await InvokeUiAsync(() => MessageBox.Show(
+                await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
                     ResolveOperatorDialogOwner(),
                     error,
                     "CẤU HÌNH TEST LEAK MASTER KHÔNG HỢP LỆ",
@@ -10536,7 +10537,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ArmWaterProofEquipmentErrorRemovalWait();
         State = "CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ - CHỜ THÁO SẢN PHẨM";
 
-        await InvokeUiAsync(() => MessageBox.Show(
+        await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
             ResolveOperatorDialogOwner(),
             "Connector TEST LEAK cần dây RET/RT, hoặc một cặp IO trong THT " +
             "nối sang một connector khác.\n\n" +
@@ -10796,7 +10797,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             restartProductionScan = true;
             AddLog($"[WATERPROOF-RETEST] ERROR: {ex.Message}");
             if (Application.Current is not null)
-                await InvokeUiAsync(() => MessageBox.Show(
+                await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
                     ResolveOperatorDialogOwner(),
                     "Lỗi máy Leak. Kiểm tra nguồn và cổng COM, tháo/lắp lại connector để thử lại.\n" + ex.Message,
                     "LỖI MÁY LEAK", MessageBoxButton.OK, MessageBoxImage.Error));
@@ -10928,7 +10929,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         catch (Exception ex)
         {
             AddLog($"[WATERPROOF-RETEST] LỖI LƯU LỊCH SỬ: {ex.Message}");
-            await InvokeUiAsync(() => MessageBox.Show(
+            await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
                 ResolveOperatorDialogOwner(),
                 $"Đã có kết quả Leak retest {completed.ResultText} nhưng chưa lưu được lịch sử.",
                 "CHƯA LƯU ĐƯỢC KẾT QUẢ",
@@ -11253,7 +11254,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     AddLog($"[WATERPROOF] Không thể disconnect Leak COM sau lỗi: {disconnectEx.Message}");
                 }
 
-                await InvokeUiAsync(() => MessageBox.Show(
+                await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
                     ResolveOperatorDialogOwner(),
                     "Mất kết nối máy Leak. Hãy rút/cắm lại cáp, chọn lại cổng COM rồi thử lại.",
                     "KIỂM TRA MÁY LEAK",
@@ -13142,7 +13143,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 ApplyPartCounter(counter);
                 if (!wasDue && reachedDue)
                 {
-                    MessageBox.Show(
+                    LocalizedMessageBox.Show(TestViewLanguage,
                         Application.Current?.MainWindow,
                         $"ĐẾN CHU KỲ THAY PROBE PIN\n\nMã hàng: {PartNumber}\n" +
                         $"Chu kỳ hiện tại: {ProbeCycleCount:N0}\nChu kỳ thay thế: {ProbeReplacementThreshold:N0}\n\n" +
@@ -13409,7 +13410,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     }
 
     private void ShowLabelWarning(string message) =>
-        InvokeUi(() => MessageBox.Show(
+        InvokeUi(() => LocalizedMessageBox.Show(TestViewLanguage,
             message,
             "Lỗi in tem",
             MessageBoxButton.OK,

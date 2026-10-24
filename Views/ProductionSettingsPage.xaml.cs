@@ -57,6 +57,7 @@ public partial class ProductionSettingsPage : UserControl
         _accessSession = access;
         _vm.SetAccessSession(access);
         IoMasterConfiguration.IsEnabled = IoGeneralConfiguration.IsEnabled = access.Allows(SettingsPermission.Io);
+        TestLanguageComboBox.IsEnabled = access.Allows(SettingsPermission.Io);
         RelaySettingsPanel.IsEnabled = ManualRelayControlsGrid.IsEnabled = access.Allows(SettingsPermission.Relay);
         WaterProofSettingsPanel.IsEnabled = access.Allows(SettingsPermission.Leak);
         WaterProofConfigurationBody.IsEnabled = !_vm.HasWaterProofConfigurationError;
@@ -1971,6 +1972,11 @@ public partial class ProductionSettingsPage : UserControl
 
     private bool ValidateSettings(out string error)
     {
+        if (!_vm.IsProbeReplacementThresholdValid)
+        {
+            error = "Chu kỳ thay PIN phải là số nguyên lớn hơn 0, ví dụ 200.000.";
+            return false;
+        }
         if (_vm.Settings.MissingConnectionConfirmationSeconds is < 1 or > 120)
         {
             error = "Thời gian xác nhận đứt dây / tuột tuýt phải từ 1 đến 120 giây.";

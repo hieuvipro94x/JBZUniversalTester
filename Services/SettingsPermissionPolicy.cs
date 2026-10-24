@@ -8,7 +8,7 @@ internal static class SettingsPermissionPolicy
     public static SettingsPermission GroupFor(string property)
     {
         if (property.StartsWith("WaterProof", StringComparison.OrdinalIgnoreCase)) return SettingsPermission.Leak;
-        if (property == nameof(ProductionSettings.ResistanceDelayMs)) return SettingsPermission.Relay;
+        if (property is nameof(ProductionSettings.ResistanceDelayMs) or nameof(ProductionSettings.ProbeReplacementThreshold)) return SettingsPermission.Relay;
         if (property.StartsWith("Resistance", StringComparison.Ordinal)) return SettingsPermission.Resistance;
         if (property == nameof(ProductionSettings.Label) || property == nameof(ProductionSettings.AutoPrintLabelOnPass))
             return SettingsPermission.Label;

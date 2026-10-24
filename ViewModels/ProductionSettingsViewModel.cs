@@ -106,6 +106,26 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private readonly double?[] _manualWaterProofPressBaseline = new double?[3];
 
     public ProductionSettings Settings { get; }
+    private string? _probeReplacementThresholdText;
+    public string ProbeReplacementThresholdText
+    {
+        get => _probeReplacementThresholdText ?? Settings.ProbeReplacementThreshold.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("vi-VN"));
+        set
+        {
+            _probeReplacementThresholdText = value;
+            if (TryParseProbeThreshold(value, out long threshold)) Settings.ProbeReplacementThreshold = threshold;
+            Raise();
+        }
+    }
+    public bool IsProbeReplacementThresholdValid => TryParseProbeThreshold(ProbeReplacementThresholdText, out _);
+    private static bool TryParseProbeThreshold(string text, out long threshold)
+    {
+        threshold = 0;
+        string[] groups = text.Trim().Split('.');
+        if (groups.Length > 1 && (groups[0].Length is < 1 or > 3 || groups.Skip(1).Any(group => group.Length != 3))) return false;
+        return long.TryParse(string.Concat(groups), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out threshold) && threshold > 0;
+    }
     public ObservableCollection<ResistanceChannelEditor> ResistanceChannels { get; }
     public ObservableCollection<ResistanceResult> ManualResistanceResults { get; } = new();
     public ObservableCollection<WaterProofChannelResult> ManualWaterProofResults { get; } = new();
@@ -741,6 +761,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private void PrepareSettingsForSave()
     {
         ValidateAccessForSave();
+        if (!IsProbeReplacementThresholdValid)
+            throw new InvalidOperationException("Chu kỳ thay PIN phải là số nguyên lớn hơn 0, ví dụ 200.000.");
         if (_accessSession.Allows(SettingsPermission.Io))
         {
             Settings.ExpansionCardCount = Math.Clamp(

@@ -12,6 +12,7 @@ public partial class WaterProofTestWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        Loaded += (_, _) => TestViewLocalization.Apply(this, Owner is null ? "vi" : TestViewLocalization.GetLanguage(Owner));
     }
 
     public void CloseOnce()

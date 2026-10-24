@@ -27,6 +27,14 @@ internal static partial class Program
             Console.WriteLine("PASS: Settings recovery from invalid Leak files and asynchronous authentication responsiveness");
             return 0;
         }
+        if (args is ["--test-testview-language"])
+        {
+            TestTestViewLanguagePersistence();
+            TestTestViewLanguageCoverage();
+            TestTestViewKoreanPresentation();
+            Console.WriteLine("PASS: TestView language persistence, Korean coverage, rendered bindings and unchanged hardware behavior");
+            return 0;
+        }
         if (args is ["--test-settings-access"])
         {
             TestSettingsCredentialsAndPermissions();
@@ -313,6 +321,9 @@ internal static partial class Program
             ("Settings opens despite invalid Leak sidecar without bypassing production validation", TestSettingsInvalidLeakLayoutRecovery),
             ("Settings password verification leaves Dispatcher and permission reads responsive", TestSettingsAuthenticationResponsiveness),
             ("Settings operator saves cannot modify denied groups", TestSettingsPermissionSaveGuards),
+            ("TestView language persists without changing printer data", TestTestViewLanguagePersistence),
+            ("Korean catalog covers TestView captions and fixed statuses", TestTestViewLanguageCoverage),
+            ("Korean TestView preserves product data, raw states and hardware behavior", TestTestViewKoreanPresentation),
             ("Settings UI honors Admin/operator permissions after staged opening", TestSettingsPermissionUi),
             ("640-IO Probe updates immediately and retains contacts across scans", TestLargeProbeImmediateTransitions),
             ("Wrong-wire removal status waits five seconds independently of confirmation", TestWrongWiringDelayedRemovalStatus),
@@ -4869,6 +4880,18 @@ internal static partial class Program
             mirror.MirrorAll(repository.GetAllProbeCounters());
             Assert(File.ReadAllText(counterPath, Encoding.UTF8) == "PART-A 50000 42\r\n",
                 "Missing PartCnt mirror is rebuilt from SQLite");
+            var pinPart = new PartIdentitySnapshot("PN:PART-A", "PART-A", "", "", "", "", "", "");
+            ProbeCounterSnapshot changedThreshold = repository.GetProbeCounter(pinPart, 150000);
+            Assert(changedThreshold.Counter == 42 && changedThreshold.ReplacementThreshold == 150000,
+                "Configured PIN threshold replaces the old per-part threshold without resetting the existing count");
+            ProbeCounterSnapshot incremented = repository.IncrementProbeCounter(pinPart, 150000);
+            Assert(incremented.Counter == 43 && incremented.ReplacementThreshold == 150000,
+                "Next product keeps the configured PIN threshold and increments only the existing counter");
+            using var pinConnection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            pinConnection.Open();
+            using var pinIntegrity = pinConnection.CreateCommand();
+            pinIntegrity.CommandText = "PRAGMA integrity_check;";
+            Assert((string?)pinIntegrity.ExecuteScalar() == "ok", "PIN threshold update preserves SQLite integrity");
         }
         finally
         {
@@ -6700,7 +6723,7 @@ internal static partial class Program
                     StringComparison.OrdinalIgnoreCase),
                 "PHT ERR path uses original Year/Month/Day.err hierarchy");
             Assert(errorText.StartsWith(
-                    "[정상마스터 Short Open] *BMS EXT; 1200020430; US4 HEV; 12000/20430; ; ; 2000 2026/08/22 08:55:34 - 08:55:36|\r\n",
+                    "[정상마스터 합선 단선] *BMS EXT; 1200020430; US4 HEV; 12000/20430; ; ; 2000 2026/08/22 08:55:34 - 08:55:36|\r\n",
                     StringComparison.Ordinal) &&
                    errorText.Contains(" >검사 IO:12\r\n -합선 IO:14", StringComparison.Ordinal) &&
                    errorText.Contains(" >검사 IO:10\r\n  단선 IO:11", StringComparison.Ordinal) &&
@@ -6708,6 +6731,29 @@ internal static partial class Program
                 "PHT ERR header, Korean IO detail and CRLF record separator match original format");
             Assert(errorBytes.Length > 4 && !(errorBytes[0] == 0xEF && errorBytes[1] == 0xBB && errorBytes[2] == 0xBF),
                 "PHT shared files use CP949 without UTF-8 BOM");
+
+            var leakFailure = new CompletedTestResult
+            {
+                Started = failed.Started.AddDays(1),
+                Finished = failed.Finished.AddDays(1),
+                Passed = false,
+                ResultText = "FAIL",
+                Faults = [new FaultDetail
+                {
+                    Type = ProductFaultType.WaterProofLeak,
+                    Message = "CH1 • 1: áp giữ 16.7; độ rò 67.5; yêu cầu áp >= 35, độ sụt <= 20"
+                }]
+            };
+            var leakWriter = new LegacyPhtHistoryService(Path.Combine(root, "LeakPass"), Path.Combine(root, "LeakError"));
+            string leakPath = leakWriter.AppendProduct(model, leakFailure, 2000);
+            string leakText = cp949.GetString(File.ReadAllBytes(leakPath));
+            Assert(leakText.Contains("누수 CH1 / 1: 유지압력 16.7  누설량 67.5  최소압력 >= 35, 최대압력강하 <= 20", StringComparison.Ordinal) &&
+                   !leakText.Contains('?') && !leakText.Contains("áp", StringComparison.Ordinal),
+                "Leak ERR details preserve channel, measured values and limits in CP949 Korean without replacement characters");
+            leakWriter.AppendProduct(model, leakFailure, 2000);
+            Assert(cp949.GetString(File.ReadAllBytes(leakPath)) == leakText + leakText &&
+                   File.ReadAllBytes(errorPath).SequenceEqual(errorBytes),
+                "Korean Leak appends preserve existing daily records without rewriting historical files");
 
             var reader = new LegacyPhtHistoryReader(passRoot, errorRoot);
             LegacyProductionSnapshot shared = reader.GetProductionSnapshot(

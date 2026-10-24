@@ -279,7 +279,8 @@ public sealed partial class LegacyPhtHistoryReader
             row.VehicleType = match.Groups["vehicle"].Value.Trim();
             row.Alc = match.Groups["alc"].Value.Trim();
             row.FaultSummary = string.Join(" ", lines.Skip(1).Select(value => value.Trim()).Where(value => value.Length > 0));
-            row.FaultType = lines[0].Contains("Open", StringComparison.OrdinalIgnoreCase)
+            row.FaultType = lines[0].Contains("Open", StringComparison.OrdinalIgnoreCase) ||
+                            lines[0].Contains("단선", StringComparison.Ordinal)
                 ? "HỞ MẠCH"
                 : "SAI DÂY / CHẬP MẠCH";
             yield return row;

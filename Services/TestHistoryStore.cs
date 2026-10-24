@@ -1802,8 +1802,7 @@ public sealed class TestHistoryStore
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            UPDATE Parts SET ProbeReplacementThreshold=CASE
-                WHEN ProbeReplacementThreshold<=0 THEN $Threshold ELSE ProbeReplacementThreshold END
+            UPDATE Parts SET ProbeReplacementThreshold=$Threshold
             WHERE Id=$Id;
             """;
         command.Parameters.AddWithValue("$Threshold", Math.Max(1, threshold));

@@ -16,6 +16,12 @@ public partial class ProbeMaintenanceResetWindow : Window
         CurrentCyclesText.Text = currentCycles.ToString("N0");
         ThresholdText.Text = replacementThreshold.ToString("N0");
         Loaded += (_, _) => AdminPasswordBox.Focus();
+        Loaded += (_, _) =>
+        {
+            string language = Owner is null ? "vi" : TestViewLocalization.GetLanguage(Owner);
+            TestViewLocalization.Apply(this, language);
+            ModelText.Text = $"{JBZUniversalTester.Services.TestViewText.Translate("Mã hàng: " + partNumber, language)}\n{JBZUniversalTester.Services.TestViewText.Translate("Model: " + modelName, language)}";
+        };
     }
 
     public string AdminPassword => AdminPasswordBox.Password;

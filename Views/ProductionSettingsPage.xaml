@@ -379,8 +379,8 @@
                                                     <RowDefinition Height="30"/>
                                                     <RowDefinition Height="30"/>
                                                 </Grid.RowDefinitions>
-                                                <TextBlock Text="Probe cycle" Style="{StaticResource FieldLabelStyle}"/>
-                                                <TextBox Grid.Column="1" Text="PartCnt.txt" IsReadOnly="True" ToolTip="Ngưỡng thay Pin và counter được quản lý theo từng mã hàng trong PartCnt.txt."/>
+                                                <TextBlock Text="Chu kỳ thay PIN" Style="{StaticResource FieldLabelStyle}"/>
+                                                <TextBox Grid.Column="1" Text="{Binding ProbeReplacementThresholdText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Số chu kỳ kiểm tra trước khi thay PIN. Mặc định 200.000; áp dụng cho các mã hàng, giữ nguyên số chu kỳ đã chạy."/>
                                                 <TextBlock Grid.Row="1" Text="R1 Delay" Style="{StaticResource FieldLabelStyle}"/>
                                                 <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
                                                 <TextBlock Grid.Row="2" Text="R2 Delay" Style="{StaticResource FieldLabelStyle}"/>
@@ -747,6 +747,11 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <Viewbox HorizontalAlignment="Left" Stretch="Uniform" StretchDirection="DownOnly" Margin="0,0,12,0">
                     <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Ngôn ngữ TestView" Foreground="White" FontSize="14" Margin="0,0,8,0"/>
+                        <ComboBox x:Name="TestLanguageComboBox" Width="132" Height="32" Margin="0,0,16,0" SelectedValuePath="Tag" SelectedValue="{Binding Settings.TestViewLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                            <ComboBoxItem Content="Tiếng Việt" Tag="vi"/>
+                            <ComboBoxItem Content="한국어" Tag="ko"/>
+                        </ComboBox>
                         <TextBlock x:Name="SettingsAccessRoleText" Text="QUẢN TRỊ • Toàn quyền" Foreground="White" FontSize="14" FontWeight="SemiBold" Margin="0,0,12,0"/>
                         <Button x:Name="ChangeAdminPasswordButton" Content="ĐỔI MẬT KHẨU" Click="ChangeAdminPassword_Click" Height="36" Width="142" FontSize="13" Margin="0,0,8,0" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
                         <Button x:Name="ManageSettingsPermissionsButton" Content="PHÂN QUYỀN" Click="ManageSettingsPermissions_Click" Height="36" Width="132" FontSize="13" Style="{StaticResource SettingsPrimaryButtonStyle}"/>

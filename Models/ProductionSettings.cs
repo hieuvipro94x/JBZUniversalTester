@@ -167,6 +167,9 @@ public sealed class ProductionSettings
     /// <summary>Chu kỳ bảo trì Probe Pin dùng chung; counter vẫn tách theo model.</summary>
     public long ProbeReplacementThreshold { get; set; } = 200_000;
 
+    /// <summary>Presentation only: vi or ko. Never changes test/label/history data.</summary>
+    public string TestViewLanguage { get; set; } = "vi";
+
     // Compatibility cho config cũ. Normalize đồng bộ về ShortCircuitConfirmMs.
     public int ShortConfirmMs { get; set; } = 0;
 

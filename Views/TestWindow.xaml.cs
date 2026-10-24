@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
@@ -61,6 +61,7 @@ public partial class TestWindow : Window
         Title = $"UniversalTester {AppVersion.DisplayVersion} - Màn hình kiểm tra";
         TestAppVersionText.Text = AppVersion.DisplayVersion;
         DataContext = viewModel;
+        TestViewLocalization.Apply(this, viewModel.TestViewLanguage);
         // DataGridColumn is outside the visual tree; bind its visibility with
         // an explicit source so unused measurement columns collapse reliably.
         foreach (var column in new[] { ResistanceMinColumn, ResistanceValueColumn, ResistanceMaxColumn })
@@ -245,7 +246,7 @@ public partial class TestWindow : Window
                 return;
 
             AsyncFileLogService.Current.Error($"TestWindow initialization failed: {ex}");
-            MessageBox.Show(this,
+            LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this), this,
                 "Chưa thể bắt đầu kiểm tra. Vui lòng quay về trang chính và thử lại.",
                 "CHƯA BẮT ĐẦU KIỂM TRA", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
@@ -628,7 +629,7 @@ public partial class TestWindow : Window
             return;
 
         (bool reset, string message) = await viewModel.TryResetProbeCycleAsync(dialog.AdminPassword);
-        MessageBox.Show(
+        LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this),
             this,
             message,
             reset ? "Đã reset counter Pin" : "Không thể reset counter Pin",
@@ -691,7 +692,7 @@ public partial class TestWindow : Window
             return;
         }
 
-        MessageBoxResult result = MessageBox.Show(this,
+        MessageBoxResult result = LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this), this,
             "Bạn có muốn dừng kiểm tra và quay về màn hình chọn mã?",
             "Xác nhận", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result != MessageBoxResult.Yes)
@@ -723,7 +724,7 @@ public partial class TestWindow : Window
 
     private void ShowProductRemovalRequired()
     {
-        MessageBox.Show(
+        LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this),
             this,
             "VUI LÒNG THÁO SẢN PHẨM!!",
             "CHƯA THÁO SẢN PHẨM",

@@ -56,6 +56,25 @@ internal static partial class Program
 
     private static void TestSettingsPermissionSaveGuards()
     {
+        int thresholdSaves = 0;
+        var thresholdVm = new ProductionSettingsViewModel(saveSettings: _ => thresholdSaves++, initialSettings: new ProductionSettings());
+        Assert(thresholdVm.ProbeReplacementThresholdText == "200.000", "PIN threshold defaults to 200.000 in settings");
+        thresholdVm.SetAccessSession(new(false, SettingsPermission.Relay));
+        foreach (string input in new[] { "150.000", "250000" })
+        {
+            thresholdVm.ProbeReplacementThresholdText = input;
+            thresholdVm.Save();
+        }
+        Assert(thresholdSaves == 2 && thresholdVm.Settings.ProbeReplacementThreshold == 250000,
+            "Relay maintenance permission can save grouped or plain PIN thresholds");
+        foreach (string input in new[] { "0", "-1", "1.5", "abc", "", "9999999999999999999999" })
+        {
+            thresholdVm.ProbeReplacementThresholdText = input;
+            bool invalidBlocked = false;
+            try { thresholdVm.Save(); } catch (InvalidOperationException) { invalidBlocked = true; }
+            Assert(invalidBlocked && thresholdSaves == 2, "Invalid PIN threshold cannot be silently saved");
+        }
+
         foreach (SettingsPermission permission in new[] { SettingsPermission.Io, SettingsPermission.Relay,
             SettingsPermission.Leak, SettingsPermission.Resistance, SettingsPermission.Label })
         {

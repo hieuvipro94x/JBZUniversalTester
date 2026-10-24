@@ -152,15 +152,15 @@ public sealed class LegacyPhtHistoryService
                 break;
 
             case ProductFaultType.ResistanceOutOfRange:
-                lines.Add($" 측정오류 {CleanField(fault.Message)}".TrimEnd());
+                lines.Add($" 측정오류 {CleanField(KoreanHistoryFormatter.FormatFault(fault))}".TrimEnd());
                 break;
 
             case ProductFaultType.WaterProofLeak:
-                lines.Add($" 누수 {CleanField(fault.Message)}".TrimEnd());
+                lines.Add($" 누수 {CleanField(KoreanHistoryFormatter.FormatLeakDetail(fault.Message))}".TrimEnd());
                 break;
 
             default:
-                lines.Add($" 오류 {CleanField(fault.Message)}".TrimEnd());
+                lines.Add($" 오류 {CleanField(KoreanHistoryFormatter.FormatFault(fault))}".TrimEnd());
                 break;
         }
     }
@@ -172,9 +172,9 @@ public sealed class LegacyPhtHistoryService
         bool hasOpen = faults.Any(fault => fault.Type == ProductFaultType.OpenCircuit);
         return (hasShort, hasOpen) switch
         {
-            (true, true) => " Short Open",
-            (true, false) => " Short",
-            (false, true) => " Open",
+            (true, true) => " 합선 단선",
+            (true, false) => " 합선",
+            (false, true) => " 단선",
             _ => string.Empty
         };
     }

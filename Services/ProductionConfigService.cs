@@ -156,6 +156,7 @@ public static class ProductionConfigService
             $"[MissingConnectionConfirmationEnabled]{Bool(settings.MissingConnectionConfirmationEnabled)}",
             $"[MissingConnectionConfirmationSeconds]{settings.MissingConnectionConfirmationSeconds}",
             $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
+            $"[TestViewLanguage]{TestViewText.NormalizeLanguage(settings.TestViewLanguage)}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
             $"[Relay2MarkingPulseMs]{settings.Relay2MarkingPulseMs}",
             $"[JigEjectRelayEnabled]{Bool(settings.JigEjectRelayEnabled)}",
@@ -604,6 +605,7 @@ public static class ProductionConfigService
         settings.ProductSettleTimeMs = I(map, "ProductSettleTimeMs", settings.ProductSettleTimeMs);
         settings.JigContactUnstableWindowMs = I(map, "JigContactUnstableWindowMs", settings.JigContactUnstableWindowMs);
         settings.ProbeReplacementThreshold = L(map, "ProbeReplacementThreshold", settings.ProbeReplacementThreshold);
+        settings.TestViewLanguage = TestViewText.NormalizeLanguage(SAny(map, "vi", "TestViewLanguage"));
         settings.StampDelay = SAny(map, settings.StampDelay, "StampDelayMs", "스탬프 지연(msec)");
         bool hasSplitRelay = map.ContainsKey("Relay1JigPulseMs") || map.ContainsKey("Relay2MarkingPulseMs");
         if (hasSplitRelay)
@@ -735,6 +737,7 @@ public static class ProductionConfigService
 
     private static void Normalize(ProductionSettings settings)
     {
+        settings.TestViewLanguage = TestViewText.NormalizeLanguage(settings.TestViewLanguage);
         settings.AutoPrintLabelOnPass = true;
         settings.MissingConnectionConfirmationSeconds = Math.Clamp(settings.MissingConnectionConfirmationSeconds, 1, 120);
         if (!Enum.IsDefined(typeof(BoardMode), settings.BoardMode))

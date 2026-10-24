@@ -4,6 +4,7 @@ using System.Windows.Documents;
 using System.Windows.Media;
 using JBZUniversalTester.Converters;
 using JBZUniversalTester.Models;
+using JBZUniversalTester.Services;
 
 namespace JBZUniversalTester.Views;
 
@@ -12,6 +13,8 @@ public partial class FaultConfirmationWindow : Window
     private readonly string? _requiredDiscardPassword;
     private readonly ProductModel? _model;
     private bool _authorized;
+    private readonly string _language;
+    private string T(string text) => TestViewText.Translate(text, _language);
 
     private sealed record FaultItem(FaultDetail Fault, string Title, string Summary);
 
@@ -20,8 +23,10 @@ public partial class FaultConfirmationWindow : Window
         string footer,
         string? requiredDiscardPassword = null,
         string? windowHeader = null,
-        ProductModel? model = null)
+        ProductModel? model = null,
+        string language = "vi")
     {
+        _language = TestViewText.NormalizeLanguage(language);
         InitializeComponent();
 
         _requiredDiscardPassword = requiredDiscardPassword;
@@ -53,6 +58,7 @@ public partial class FaultConfirmationWindow : Window
             .ToArray();
         FooterText.Text = footer ?? string.Empty;
         Loaded += PositionBelowFaultRows;
+        Loaded += (_, _) => TestViewLocalization.Apply(this, _language);
     }
 
     private void PositionBelowFaultRows(object sender, RoutedEventArgs e)
@@ -120,10 +126,17 @@ public partial class FaultConfirmationWindow : Window
             return;
 
         text.Inlines.Clear();
+        text.Tag = "KeepProductData";
         FaultDetail fault = item.Fault;
         if (fault.Type != ProductFaultType.WrongWiring)
         {
-            text.Inlines.Add(new Run(item.Summary));
+            if (_language != "ko")
+            {
+                text.Inlines.Add(new Run(item.Summary));
+                return;
+            }
+            text.Inlines.Add(new Run(fault.Type == ProductFaultType.WaterProofLeak ? KoreanHistoryFormatter.FormatLeakDetail(fault.Message)
+                : fault.Type == ProductFaultType.SystemDeviceError ? T(fault.Message) : KoreanHistoryFormatter.FormatFault(fault)));
             return;
         }
 
@@ -169,7 +182,7 @@ public partial class FaultConfirmationWindow : Window
               string.Equals(sourceWire, actualWire, StringComparison.OrdinalIgnoreCase))))
         {
             // Missing THT labels must not hide the known physical IO pair.
-            text.Inlines.Add(new Run(item.Summary));
+            text.Inlines.Add(new Run(_language == "ko" ? KoreanHistoryFormatter.FormatFault(fault) : item.Summary));
             return;
         }
         AddWire(text, sourceWire, sourceColor, sourcePin);
@@ -177,30 +190,30 @@ public partial class FaultConfirmationWindow : Window
         if (!string.IsNullOrWhiteSpace(actualWire) &&
             !string.Equals(sourceWire, actualWire, StringComparison.OrdinalIgnoreCase))
         {
-            text.Inlines.Add(new Run(" cắm nhầm với "));
+            text.Inlines.Add(new Run(T(" cắm nhầm với ")));
             AddWire(text, actualWire, actualColor, actualPin);
             return;
         }
 
         if (!string.IsNullOrWhiteSpace(actualPin))
-            text.Inlines.Add(new Run($" cắm nhầm lỗ chân {actualPin}"));
+            text.Inlines.Add(new Run(T($" cắm nhầm lỗ chân {actualPin}")));
         else
-            text.Inlines.Add(new Run(" cắm nhầm vị trí chưa xác định"));
+            text.Inlines.Add(new Run(T(" cắm nhầm vị trí chưa xác định")));
     }
 
-    private static void AddWire(TextBlock text, string wireName, string color, string housingPosition)
+    private void AddWire(TextBlock text, string wireName, string color, string housingPosition)
     {
-        text.Inlines.Add(new Run(string.IsNullOrWhiteSpace(wireName) ? "Mã dây chưa xác định" : wireName)
+        text.Inlines.Add(new Run(string.IsNullOrWhiteSpace(wireName) ? T("Mã dây chưa xác định") : wireName)
         {
             Foreground = Brushes.Red
         });
         if (!string.IsNullOrWhiteSpace(color))
         {
-            text.Inlines.Add(new Run(" màu "));
+            text.Inlines.Add(new Run(T(" màu ")));
             AddColorCode(text, color);
         }
         if (!string.IsNullOrWhiteSpace(housingPosition))
-            text.Inlines.Add(new Run($" vị trí Housing: {housingPosition}"));
+            text.Inlines.Add(new Run(T($" vị trí Housing: {housingPosition}")));
     }
 
     private static void AddColorCode(TextBlock text, string code)
@@ -221,7 +234,7 @@ public partial class FaultConfirmationWindow : Window
             if (string.IsNullOrEmpty(_requiredDiscardPassword))
             {
                 DiscardPasswordErrorText.Text =
-                    "Chưa cài Mật khẩu thùng lỗi trong Cài đặt Production.";
+                    T("Chưa cài Mật khẩu thùng lỗi trong Cài đặt Production.");
                 DiscardPasswordErrorText.Visibility = Visibility.Visible;
                 return;
             }
@@ -230,7 +243,7 @@ public partial class FaultConfirmationWindow : Window
                     _requiredDiscardPassword,
                     DiscardPasswordBox.Password))
             {
-                DiscardPasswordErrorText.Text = "Mật khẩu xử lý hàng lỗi không đúng.";
+                DiscardPasswordErrorText.Text = T("Mật khẩu xử lý hàng lỗi không đúng.");
                 DiscardPasswordErrorText.Visibility = Visibility.Visible;
                 DiscardPasswordBox.SelectAll();
                 DiscardPasswordBox.Focus();

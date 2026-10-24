@@ -86,6 +86,13 @@ public static class KoreanHistoryFormatter
         };
     }
 
+    public static string FormatLeakDetail(string? value) => Clean(value)
+        .Replace("áp giữ", "유지압력", StringComparison.Ordinal)
+        .Replace("độ rò", "누설량", StringComparison.Ordinal)
+        .Replace("yêu cầu áp", "최소압력", StringComparison.Ordinal)
+        .Replace("độ sụt", "최대압력강하", StringComparison.Ordinal)
+        .Replace("•", "/", StringComparison.Ordinal);
+
     public static string FormatResistanceSummary(string? value)
     {
         string text = Clean(value);
