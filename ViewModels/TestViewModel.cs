@@ -326,7 +326,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private long _monthlyTestCount;
     private long _lifetimeTestCount;
     private long _probeCycleCount;
-    private long _probeReplacementThreshold = PartCounterStore.DefaultReplacementThreshold;
     private string _deviceFaultMessage =
         "Mất kết nối với máy test. Vui lòng khởi động lại.";
     private LabelPrintContext? _failedLabelPrint;
@@ -1119,7 +1118,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
-    public long ProbeReplacementThreshold => _probeReplacementThreshold;
+    public long ProbeReplacementThreshold => Math.Max(1, _productionSettings.ProbeReplacementThreshold);
     public string TestViewLanguage => TestViewText.NormalizeLanguage(_productionSettings.TestViewLanguage);
 
     private static string FormatProbeCycleNumber(long value) =>
@@ -12161,6 +12160,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Raise(nameof(BoardCapacity));
         Raise(nameof(BoardCapacityText));
         Raise(nameof(WaterProofPortText));
+        Raise(nameof(ProbeReplacementThreshold));
+        Raise(nameof(ProbeCycleText));
+        Raise(nameof(ProbeMaintenanceDue));
+        Raise(nameof(ProbeMaintenanceStatus));
+        Raise(nameof(ProbeMaintenanceBackground));
     }
 
     public void SetModel(ProductModel model) => SetModel(model, preparedEngineModel: null);
@@ -13042,7 +13046,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void ApplyPartCounter(PartCounterEntry entry)
     {
         ProbeCycleCount = entry.Counter;
-        _probeReplacementThreshold = Math.Max(1, entry.ReplacementThreshold);
         Raise(nameof(ProbeReplacementThreshold));
         Raise(nameof(ProbeCycleText));
         Raise(nameof(ProbeMaintenanceDue));
@@ -13053,7 +13056,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void ApplyPartCounter(ProbeCounterSnapshot entry)
     {
         ProbeCycleCount = entry.Counter;
-        _probeReplacementThreshold = Math.Max(1, entry.ReplacementThreshold);
         Raise(nameof(ProbeReplacementThreshold));
         Raise(nameof(ProbeCycleText));
         Raise(nameof(ProbeMaintenanceDue));

@@ -30,6 +30,6 @@ public static class ProductionTimingPolicy
         settings.WrongConnectionConfirmMs = DefaultWrongConnectionConfirmMs;
         settings.ProductSettleTimeMs = DefaultProductSettleTimeMs;
         settings.JigContactUnstableWindowMs = DefaultJigContactUnstableWindowMs;
-        settings.ProbeReplacementThreshold = Math.Clamp(settings.ProbeReplacementThreshold, 1_000, 100_000_000);
+        settings.ProbeReplacementThreshold = Math.Max(1, settings.ProbeReplacementThreshold);
     }
 }

@@ -27,6 +27,12 @@ internal static partial class Program
             Console.WriteLine("PASS: Settings recovery from invalid Leak files and asynchronous authentication responsiveness");
             return 0;
         }
+        if (args is ["--test-probe-threshold-refresh"])
+        {
+            TestProbeThresholdRefreshAfterSettingsSave();
+            Console.WriteLine("PASS: PIN threshold refresh, warning updates, preserved count and stale snapshot protection");
+            return 0;
+        }
         if (args is ["--test-testview-language"])
         {
             TestTestViewLanguagePersistence();
@@ -321,6 +327,7 @@ internal static partial class Program
             ("Settings opens despite invalid Leak sidecar without bypassing production validation", TestSettingsInvalidLeakLayoutRecovery),
             ("Settings password verification leaves Dispatcher and permission reads responsive", TestSettingsAuthenticationResponsiveness),
             ("Settings operator saves cannot modify denied groups", TestSettingsPermissionSaveGuards),
+            ("PIN threshold updates TestView immediately after saving settings", TestProbeThresholdRefreshAfterSettingsSave),
             ("TestView language persists without changing printer data", TestTestViewLanguagePersistence),
             ("Korean catalog covers TestView captions and fixed statuses", TestTestViewLanguageCoverage),
             ("Korean TestView preserves product data, raw states and hardware behavior", TestTestViewKoreanPresentation),
@@ -6481,8 +6488,8 @@ internal static partial class Program
                invalid.WrongConnectionConfirmMs == ProductionTimingPolicy.DefaultWrongConnectionConfirmMs &&
                invalid.ProductSettleTimeMs == ProductionTimingPolicy.DefaultProductSettleTimeMs &&
                invalid.JigContactUnstableWindowMs == ProductionTimingPolicy.DefaultJigContactUnstableWindowMs &&
-               invalid.ProbeReplacementThreshold >= 1_000,
-            "Timing settings normalize to internal defaults and maintenance setting keeps bounds");
+               invalid.ProbeReplacementThreshold == 1,
+            "Timing settings normalize to internal defaults and invalid PIN thresholds normalize to the minimum positive cycle");
 
         string settingsJson = JsonSerializer.Serialize(settings);
         ProductionSettings reloaded = JsonSerializer.Deserialize<ProductionSettings>(settingsJson)
