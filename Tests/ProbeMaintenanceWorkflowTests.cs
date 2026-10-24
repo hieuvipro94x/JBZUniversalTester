@@ -96,12 +96,24 @@ internal static partial class Program
         OnSettingsDispatcher(async () =>
         {
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            string root = Path.Combine(Path.GetTempPath(), "JBZ-PinDialog-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var access = new SettingsAccessService(Path.Combine(root, "access.json"));
+            access.ChangePassword(SettingsAccessSession.Administrator, "admin", "settings-password", "settings-password");
             var settings = new ProductionSettings { MasterFaultRequiredCount = 0, ProbeReplacementThreshold = 10 };
-            var vm = CreateTestViewModel(settings);
+            var vm = CreateTestViewModel(settings, out _, verifyProbeMaintenancePassword: access.VerifyAdminAsync);
             var model = Model(("PIN", new[] { 1, 2 }));
             model.PartNumber = "PIN-TEST";
             typeof(TestViewModel).GetField("_model", flags)!.SetValue(vm, model);
             typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(vm, true);
+            var repository = new TestHistoryStore(Path.Combine(root, "history.db"));
+            var persistence = new ProductionPersistenceService(repository, settings, "SELF-TEST");
+            await persistence.Initialization;
+            typeof(TestViewModel).GetField("_historyStore", flags)!.SetValue(vm, repository);
+            typeof(TestViewModel).GetField("_productionPersistence", flags)!.SetValue(vm, persistence);
+            typeof(TestViewModel).GetField("_partCounterStore", flags)!.SetValue(vm,
+                new Lazy<PartCounterStore>(() => new PartCounterStore(Path.Combine(root, "PartCnt.txt"))));
+            for (int i = 0; i < 10; i++) await persistence.IncrementProbeCounterAsync(PartIdentitySnapshot.Capture(model), 10);
             var apply = typeof(TestViewModel).GetMethod("ApplyPartCounter", flags, null, [typeof(ProbeCounterSnapshot)], null)!;
             apply.Invoke(vm, [new ProbeCounterSnapshot("PIN-TEST", 10, 9)]);
             var window = new TestWindow(vm, autoStartProduction: false)
@@ -112,12 +124,13 @@ internal static partial class Program
             var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             int attempts = 0, seen = 0;
             var watcher = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(20) };
-            watcher.Tick += (_, _) =>
+            watcher.Tick += async (_, _) =>
             {
                 attempts++;
                 var dialog = window.OwnedWindows.OfType<ProbeMaintenanceResetWindow>().FirstOrDefault();
                 if (dialog is not null)
                 {
+                    watcher.Stop();
                     seen++;
                     try
                     {
@@ -126,15 +139,43 @@ internal static partial class Program
                             "Automatic replacement dialog displays the reached 10/10 threshold");
                         ((PasswordBox)dialog.FindName("AdminPasswordBox")).Password = "not-the-settings-password";
                         var confirm = (Task)typeof(ProbeMaintenanceResetWindow).GetMethod("ConfirmAsync", flags)!.Invoke(dialog, null)!;
-                        // Product remains physically present: no password service or DB is touched in this dialog test.
-                        confirm.GetAwaiter().GetResult();
+                        await confirm;
                         Assert(dialog.IsVisible && vm.ProbeCycleCount == 10,
                             "Rejected replacement leaves the same dialog open and preserves the counter");
                         dialog.Close();
+                        Assert(dialog.IsVisible && dialog.WindowStyle == WindowStyle.None &&
+                               ((Button)dialog.FindName("CancelResetButton")).Visibility == Visibility.Collapsed,
+                            "Overdue replacement has no Cancel/close button and rejects closing without a successful reset");
+                        var escape = new System.Windows.Input.KeyEventArgs(System.Windows.Input.Keyboard.PrimaryDevice,
+                            PresentationSource.FromVisual(dialog), 0, System.Windows.Input.Key.Escape)
+                        { RoutedEvent = System.Windows.Input.Keyboard.PreviewKeyDownEvent };
+                        dialog.RaiseEvent(escape);
+                        Assert(escape.Handled && dialog.IsVisible, "Escape cannot dismiss a mandatory PIN replacement");
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        dialog.UpdateLayout();
+                        var button = (Button)dialog.FindName("ConfirmResetButton");
+                        Point bottom = button.TranslatePoint(new Point(button.ActualWidth, button.ActualHeight), dialog);
+                        Assert(button.ActualHeight >= 38 && bottom.Y <= dialog.ActualHeight && bottom.X <= dialog.ActualWidth,
+                            "Auto-sized maintenance dialog fully contains its confirmation button and label");
+                        var surface = (FrameworkElement)dialog.Content;
+                        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(surface.ActualWidth),
+                            (int)Math.Ceiling(surface.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                        bitmap.Render(surface);
+                        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                        using (var output = File.Create(Path.Combine(Path.GetTempPath(), "jbz-v313-pin-confirmation.png"))) encoder.Save(output);
+                        ((PasswordBox)dialog.FindName("AdminPasswordBox")).Password = "settings-password";
+                        await (Task)typeof(ProbeMaintenanceResetWindow).GetMethod("ConfirmAsync", flags)!.Invoke(dialog, null)!;
+                        Assert(!dialog.IsVisible && vm.ProbeCycleCount == 0, "Only a successful current settings password reset closes the mandatory dialog");
                         completed.TrySetResult();
                     }
-                    catch (Exception ex) { dialog.Close(); completed.TrySetException(ex); }
-                    watcher.Stop();
+                    catch (Exception ex)
+                    {
+                        // Tear down this isolated test fixture even if its assertions fail.
+                        typeof(ProbeMaintenanceResetWindow).GetField("_resetSucceeded", flags)!.SetValue(dialog, true);
+                        dialog.Close();
+                        completed.TrySetException(ex);
+                    }
                 }
                 else if (attempts > 150)
                 {
@@ -147,18 +188,25 @@ internal static partial class Program
                 window.Show();
                 await Dispatcher.Yield(DispatcherPriority.Background);
                 Assert(window.OwnedWindows.OfType<ProbeMaintenanceResetWindow>().Count() == 0, "9/10 does not open a replacement dialog");
-                typeof(TestViewModel).GetField("_productDetectedThisCycle", flags)!.SetValue(vm, true);
                 watcher.Start();
                 apply.Invoke(vm, [new ProbeCounterSnapshot("PIN-TEST", 10, 10)]);
                 await completed.Task;
                 await Dispatcher.Yield(DispatcherPriority.Background);
-                Assert(seen == 1 && vm.ProbeCycleCount == 10, "10/10 opens one confirmation and cancellation never resets the counter");
+                Assert(seen == 1 && vm.ProbeCycleCount == 0, "10/10 opens one mandatory confirmation and resets only after password authorization");
             }
             finally
             {
                 watcher.Stop();
+                foreach (var dialog in window.OwnedWindows.OfType<ProbeMaintenanceResetWindow>().ToArray())
+                {
+                    typeof(ProbeMaintenanceResetWindow).GetField("_resetSucceeded", flags)!.SetValue(dialog, true);
+                    dialog.Close();
+                }
                 typeof(TestWindow).GetField("_allowClose", flags)!.SetValue(window, true);
                 window.Close();
+                await persistence.DisposeAsync();
+                SqliteConnection.ClearAllPools();
+                Directory.Delete(root, true);
             }
         });
     }
