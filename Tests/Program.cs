@@ -806,9 +806,11 @@ internal static partial class Program
 
     private static void TestStartupWithoutBoardStaysUiOnly()
     {
+        var reports = new List<(Exception Error, string Source, string? Context)>();
         TestViewModel viewModel = CreateTestViewModel(
-            new ProductionSettings { MasterFaultRequiredCount = 0 },
-            out FakeBoard board);
+            new ProductionSettings { MasterFaultRequiredCount = 0, EnableSystemLogs = false },
+            out FakeBoard board,
+            hardwareFaultReport: (error, source, context) => reports.Add((error, source, context)));
         board.SetConnectionStateForTest(false);
         board.ThrowOnConnect = true;
 
@@ -817,6 +819,20 @@ internal static partial class Program
         viewModel.LoadPreparedModelAsync(Model(("OFFLINE", new[] { 1, 2 })))
             .GetAwaiter().GetResult();
         viewModel.StartProductionTestAsync().GetAwaiter().GetResult();
+        viewModel.ReportStartupBoardTimeout();
+
+        Assert(reports.Count == 1 && reports[0].Source == "Hardware.DeviceFault.BoardStartup" &&
+               reports[0].Context?.Contains("StartupUnavailable=true", StringComparison.Ordinal) == true,
+            "Handled board startup failure reports once even when system logs are disabled");
+
+        var timeoutReports = new List<Exception>();
+        TestViewModel timeoutVm = CreateTestViewModel(new ProductionSettings(), out _,
+            hardwareFaultReport: (error, _, _) => timeoutReports.Add(error));
+        timeoutVm.ReportStartupBoardTimeout();
+        timeoutVm.ReportStartupBoardTimeout();
+        Assert(timeoutReports.Count == 1 && timeoutReports[0] is TimeoutException &&
+               timeoutVm.IsBoardStartupUnavailable && !timeoutVm.IsDeviceFault,
+            "Startup timeout creates one report without becoming a fatal device fault");
 
         Assert(!viewModel.IsDeviceFault &&
                viewModel.IsBoardStartupUnavailable &&
@@ -9537,7 +9553,8 @@ internal static partial class Program
         KeysightVisaService? visa = null,
         Func<bool, Task>? passSoundPlayback = null,
         Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null,
-        Func<string, Task<bool>>? verifyProbeMaintenancePassword = null)
+        Func<string, Task<bool>>? verifyProbeMaintenancePassword = null,
+        Action<Exception, string, string?>? hardwareFaultReport = null)
     {
         AppSoundService.Current.StopAll(force: true);
         board = new FakeBoard();
@@ -9555,7 +9572,8 @@ internal static partial class Program
             requireStartupIoClear,
             passSoundPlayback: passSoundPlayback ?? (_ => Task.CompletedTask),
             waterProofRun: waterProofRun,
-            verifyProbeMaintenancePassword: verifyProbeMaintenancePassword);
+            verifyProbeMaintenancePassword: verifyProbeMaintenancePassword,
+            hardwareFaultReport: hardwareFaultReport);
 
         // START is gated by ScanSupervisor.Monitoring. Prime the in-memory
         // transport through the same clean complete-frame transition used by

@@ -99,6 +99,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private readonly SemaphoreSlim _statisticsLoadGate = new(1, 1);
     private readonly SemaphoreSlim _productionPersistenceGate = new(1, 1);
     private readonly Func<string, Task<bool>> _verifyProbeMaintenancePassword;
+    private readonly Action<Exception, string, string?> _writeHardwareFaultReport;
     private int _probeMaintenanceResetActive;
     private readonly SemaphoreSlim _removalPersistenceGate = new(1, 1);
     private readonly SemaphoreSlim _modelPersistenceGate = new(1, 1);
@@ -1304,7 +1305,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         LabelPrintService? labelPrintService = null,
         Func<bool, Task>? passSoundPlayback = null,
         Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null,
-        Func<string, Task<bool>>? verifyProbeMaintenancePassword = null)
+        Func<string, Task<bool>>? verifyProbeMaintenancePassword = null,
+        Action<Exception, string, string?>? hardwareFaultReport = null)
     {
         _main = main;
         _engine = engine;
@@ -1317,6 +1319,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _productionSettings = productionSettings;
         _verifyProbeMaintenancePassword = verifyProbeMaintenancePassword ??
             (password => Task.Run(() => SettingsAccessService.Current.VerifyAdmin(password)));
+        _writeHardwareFaultReport = hardwareFaultReport ?? ((exception, source, context) =>
+        {
+            if (Application.Current is not null)
+                CrashReportService.Write(exception, source, context);
+        });
         _labelPrintService = labelPrintService ?? new LabelPrintService();
         _playProductionPassSound = passSoundPlayback ?? _sound.PlayTestOkAsync;
         ResistanceDisplayRows.CollectionChanged += (_, _) => RebuildInspectionResultRows();
@@ -1966,13 +1973,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (!firstTransition)
             return;
 
-        if (Application.Current is not null)
-        {
-            CrashReportService.Write(
-                exception,
-                $"Hardware.DeviceFault.{source}",
-                diagnostic);
-        }
+        _writeHardwareFaultReport(exception, $"Hardware.DeviceFault.{source}", diagnostic);
 
         _deviceFaultMessage = "Mất kết nối với máy test. Vui lòng khởi động lại.";
         BoardConnectionMessage = _deviceFaultMessage;
@@ -2040,6 +2041,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (!firstTransition)
             return;
+
+        // Startup failures are handled (UI-only mode), so they never reach the
+        // unhandled-exception reporter. Preserve one report even with logs off.
+        _writeHardwareFaultReport(exception, $"Hardware.DeviceFault.{source}",
+            $"StartupUnavailable=true; Model={_model?.ModelName ?? "(none)"}");
 
         _engine.SetFrameProcessingEnabled(false);
         BoardConnectionMessage =
