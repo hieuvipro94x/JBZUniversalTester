@@ -76,16 +76,16 @@
 
         <Border Grid.Row="2" Background="#FFF7ED" BorderBrush="#FCD9A8"
                 BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,15">
-            <TextBlock Text="Chỉ xác nhận sau khi đã thay Probe Pin thực tế. Bộ đếm sẽ được đặt về 0 và ghi nhận vào lịch sử bảo trì."
+            <TextBlock Text="Hoàn tất kiểm tra, tháo hết sản phẩm và thay PIN thực tế. Nhập mật khẩu đăng nhập Cài đặt để xác nhận; bộ đếm sẽ về 0 và ghi lịch sử bảo trì."
                        Foreground="#92400E" FontSize="13" TextWrapping="Wrap"/>
         </Border>
 
         <StackPanel Grid.Row="3">
-            <TextBlock Text="MẬT KHẨU QUẢN TRỊ" Style="{StaticResource CaptionStyle}"/>
+            <TextBlock Text="MẬT KHẨU ĐĂNG NHẬP CÀI ĐẶT" Style="{StaticResource CaptionStyle}"/>
             <PasswordBox x:Name="AdminPasswordBox" Height="40" Margin="0,6,0,0"
                          FontSize="16" Padding="9,4" BorderBrush="#CBD5E1"
                          KeyDown="AdminPasswordBox_KeyDown"/>
-           
+            <TextBlock x:Name="ValidationMessageText" TextWrapping="Wrap" Foreground="#B91C1C" FontSize="13" Margin="0,6,0,0"/>
         </StackPanel>
 
         <Grid Grid.Row="5" Margin="0,18,0,0">
@@ -94,9 +94,9 @@
                 <ColumnDefinition Width="126"/>
                 <ColumnDefinition Width="156"/>
             </Grid.ColumnDefinitions>
-            <Button Grid.Column="1" Margin="0,0,8,0" Content="HỦY" IsCancel="True"
+            <Button x:Name="CancelResetButton" Grid.Column="1" Margin="0,0,8,0" Content="HỦY" IsCancel="True"
                     Style="{StaticResource DialogButtonStyle}" Background="#E2E8F0" Foreground="#334155"/>
-            <Button Grid.Column="2" Content="XÁC NHẬN" IsDefault="True"
+            <Button x:Name="ConfirmResetButton" Grid.Column="2" Content="XÁC NHẬN" IsDefault="True"
                     Style="{StaticResource DialogButtonStyle}" Background="#B45309"
                     Foreground="White" Click="Confirm_Click"/>
         </Grid>

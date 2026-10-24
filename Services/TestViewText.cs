@@ -132,6 +132,12 @@ public static class TestViewText
         ["Máy Leak đang chạy test; không thể mở COM thủ công."] = "기밀 검사 진행 중에는 COM 포트를 수동으로 열 수 없습니다.",
         ["Baudrate may leak khong hop le."] = "기밀 검사기 통신 속도 설정 오류.",
         ["MASTER PASS"] = "정상 마스터", ["MASTER NG"] = "불량 마스터",
+        ["Hoàn tất kiểm tra, tháo hết sản phẩm và thay PIN thực tế. Nhập mật khẩu đăng nhập Cài đặt để xác nhận; bộ đếm sẽ về 0 và ghi lịch sử bảo trì."] = "검사를 완료하고 제품을 모두 탈거한 후 검사 핀을 실제로 교체하세요. 설정 로그인 비밀번호를 입력하여 확인하면 카운터가 0으로 초기화되고 유지보수 이력에 기록됩니다.",
+        ["MẬT KHẨU ĐĂNG NHẬP CÀI ĐẶT"] = "설정 로그인 비밀번호",
+        ["Đang kiểm tra mật khẩu Cài đặt..."] = "설정 비밀번호 확인 중...",
+        ["Mật khẩu đăng nhập Cài đặt không đúng."] = "설정 로그인 비밀번호가 올바르지 않습니다.",
+        ["Đang xử lý xác nhận thay PIN."] = "검사 핀 교체 확인 처리 중입니다.",
+        ["Mã hàng đã thay đổi. Vui lòng xác nhận lại."] = "품번이 변경되었습니다. 다시 확인하세요.",
     };
 
     // Captured values are copied verbatim, even if a model/wire name resembles a UI label.

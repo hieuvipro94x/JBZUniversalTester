@@ -98,6 +98,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private readonly LegacyPhtHistoryService _legacyHistory;
     private readonly SemaphoreSlim _statisticsLoadGate = new(1, 1);
     private readonly SemaphoreSlim _productionPersistenceGate = new(1, 1);
+    private readonly Func<string, Task<bool>> _verifyProbeMaintenancePassword;
+    private int _probeMaintenanceResetActive;
     private readonly SemaphoreSlim _removalPersistenceGate = new(1, 1);
     private readonly SemaphoreSlim _modelPersistenceGate = new(1, 1);
     // Serialize scan reconciliation so rapid model changes cannot run two
@@ -1301,7 +1303,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         bool requireStartupIoClear = true,
         LabelPrintService? labelPrintService = null,
         Func<bool, Task>? passSoundPlayback = null,
-        Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null)
+        Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null,
+        Func<string, Task<bool>>? verifyProbeMaintenancePassword = null)
     {
         _main = main;
         _engine = engine;
@@ -1312,6 +1315,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _waterProofRunOverride = waterProofRun;
         _settings = settings;
         _productionSettings = productionSettings;
+        _verifyProbeMaintenancePassword = verifyProbeMaintenancePassword ??
+            (password => Task.Run(() => SettingsAccessService.Current.VerifyAdmin(password)));
         _labelPrintService = labelPrintService ?? new LabelPrintService();
         _playProductionPassSound = passSoundPlayback ?? _sound.PlayTestOkAsync;
         ResistanceDisplayRows.CollectionChanged += (_, _) => RebuildInspectionResultRows();
@@ -13074,8 +13079,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        bool wasDue = ProbeCycleCount >= ProbeReplacementThreshold;
-        _probePersistenceTask = PersistProbeCycleStartedAsync(model, wasDue);
+        _probePersistenceTask = PersistProbeCycleStartedAsync(model);
     }
 
     private void ScheduleSelectedModelPersistence(string? selectedPath)
@@ -13116,7 +13120,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
-    private async Task PersistProbeCycleStartedAsync(ProductModel model, bool wasDue)
+    private async Task PersistProbeCycleStartedAsync(ProductModel model)
     {
         await _productionPersistenceGate.WaitAsync();
         try
@@ -13137,23 +13141,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             AddLog($"SQLite ProbeCounter: {counter.PartNumber} {counter.Counter:N0}/{counter.ReplacementThreshold:N0}.");
-            bool reachedDue = counter.Counter >= counter.ReplacementThreshold;
             InvokeUi(() =>
             {
                 if (!ReferenceEquals(_model, model))
                     return;
                 ApplyPartCounter(counter);
-                if (!wasDue && reachedDue)
-                {
-                    LocalizedMessageBox.Show(TestViewLanguage,
-                        Application.Current?.MainWindow,
-                        $"ĐẾN CHU KỲ THAY PROBE PIN\n\nMã hàng: {PartNumber}\n" +
-                        $"Chu kỳ hiện tại: {ProbeCycleCount:N0}\nChu kỳ thay thế: {ProbeReplacementThreshold:N0}\n\n" +
-                        "Trạng thái: CẦN THAY PROBE PIN",
-                        "Cảnh báo bảo trì Probe Pin",
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
             });
         }
         catch (Exception ex)
@@ -13172,17 +13164,29 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (model is null)
             return (false, "Chưa chọn mã hàng.");
 
-        if (_productDetectedThisCycle || _waitForProductRelease || _waitForFaultProductRemoval)
+        if (HasProductOnTestTable || _productDetectedThisCycle || _waitForProductRelease || _waitForFaultProductRemoval)
             return (false, "Không thể reset trong khi sản phẩm/JIG đang ở trong chu kỳ test.");
 
         if (!MasterApproved)
             return (false, "Không thể reset counter trong chu trình xác nhận MASTER.");
 
-        if (!AdminAuthenticationService.VerifyProbeMaintenance(password))
-            return (false, "Mật khẩu quản trị thay Probe Pin không đúng.");
-
+        if (Interlocked.CompareExchange(ref _probeMaintenanceResetActive, 1, 0) != 0)
+            return (false, "Đang xử lý xác nhận thay PIN.");
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        bool ownsGate = false;
         try
         {
+            if (!await _verifyProbeMaintenancePassword(password))
+                return (false, "Mật khẩu đăng nhập Cài đặt không đúng.");
+            await _productionPersistenceGate.WaitAsync(_lifetimeCts.Token);
+            ownsGate = true;
+            // Authentication is asynchronous. Recheck model/removal gates after it completes.
+            if (!ReferenceEquals(_model, model) || generation != Volatile.Read(ref _runtimeGeneration))
+                return (false, "Mã hàng đã thay đổi. Vui lòng xác nhận lại.");
+            if (HasProductOnTestTable || _productDetectedThisCycle || _waitForProductRelease || _waitForFaultProductRemoval)
+                return (false, "Không thể reset trong khi sản phẩm/JIG đang ở trong chu kỳ test.");
+            if (!MasterApproved)
+                return (false, "Không thể reset counter trong chu trình xác nhận MASTER.");
             long previous = ProbeCycleCount;
             ProbeCounterSnapshot reset = await ProductionPersistence.ResetProbeCounterAsync(
                 PartIdentitySnapshot.Capture(model),
@@ -13201,8 +13205,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 AddLog($"LEGACY_MIRROR_FAILED sau reset Probe Pin: {ex.Message}");
             }
 
-            ApplyPartCounter(reset);
-            Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+            if (ReferenceEquals(_model, model) && generation == Volatile.Read(ref _runtimeGeneration))
+            {
+                ApplyPartCounter(reset);
+                Interlocked.Exchange(ref _probeCycleRecordedThisCycle, 0);
+            }
             string message = $"Đã lưu thay Probe Pin vào SQLite. Counter {previous:N0} → 0.";
             AddLog(
                 $"MAINTENANCE: PROBE PIN REPLACED; part={reset.PartNumber}; " +
@@ -13213,6 +13220,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             AddLog($"Không thể lưu reset Probe Pin: {ex.Message}");
             return (false, "Chưa lưu được thay đổi Probe Pin. Vui lòng thử lại.");
+        }
+        finally
+        {
+            if (ownsGate) _productionPersistenceGate.Release();
+            Interlocked.Exchange(ref _probeMaintenanceResetActive, 0);
         }
     }
 

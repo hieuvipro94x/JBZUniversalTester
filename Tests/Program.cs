@@ -27,6 +27,13 @@ internal static partial class Program
             Console.WriteLine("PASS: Settings recovery from invalid Leak files and asynchronous authentication responsiveness");
             return 0;
         }
+        if (args is ["--test-probe-maintenance"])
+        {
+            TestProbeMaintenanceSharedPasswordAndReset();
+            TestProbeMaintenanceAutomaticDialog();
+            Console.WriteLine("PASS: Automatic PIN replacement confirmation, shared settings password and durable maintenance audit");
+            return 0;
+        }
         if (args is ["--test-probe-threshold-refresh"])
         {
             TestProbeThresholdRefreshAfterSettingsSave();
@@ -328,6 +335,8 @@ internal static partial class Program
             ("Settings password verification leaves Dispatcher and permission reads responsive", TestSettingsAuthenticationResponsiveness),
             ("Settings operator saves cannot modify denied groups", TestSettingsPermissionSaveGuards),
             ("PIN threshold updates TestView immediately after saving settings", TestProbeThresholdRefreshAfterSettingsSave),
+            ("PIN replacement uses current settings password and records confirmed maintenance", TestProbeMaintenanceSharedPasswordAndReset),
+            ("Reaching PIN replacement threshold opens the confirmation dialog", TestProbeMaintenanceAutomaticDialog),
             ("TestView language persists without changing printer data", TestTestViewLanguagePersistence),
             ("Korean catalog covers TestView captions and fixed statuses", TestTestViewLanguageCoverage),
             ("Korean TestView preserves product data, raw states and hardware behavior", TestTestViewKoreanPresentation),
@@ -6991,10 +7000,10 @@ internal static partial class Program
             Assert(!AdminAuthenticationService.Verify(string.Empty, string.Empty), "Empty admin password cannot authorize reset");
             Assert(!AdminAuthenticationService.Verify("admin-secret", "wrong"), "Wrong admin password rejected");
             Assert(AdminAuthenticationService.Verify("admin-secret", "admin-secret"), "Configured admin password accepted");
-            Assert(!AdminAuthenticationService.VerifyProbeMaintenance("wrong"),
-                "Probe maintenance rejects a wrong independent password");
-            Assert(AdminAuthenticationService.VerifyProbeMaintenance("admin"),
-                "Probe maintenance uses the independent admin password");
+            var access = new SettingsAccessService(Path.Combine(root, "settings-access.json"));
+            access.ChangePassword(SettingsAccessSession.Administrator, "admin", "settings-secret", "settings-secret");
+            Assert(!access.VerifyAdmin("wrong") && !access.VerifyAdmin("admin") && access.VerifyAdmin("settings-secret"),
+                "Maintenance authentication follows the current settings password instead of a fixed independent password");
         }
         finally
         {
@@ -9525,7 +9534,8 @@ internal static partial class Program
         TimeProvider? timeProvider = null,
         KeysightVisaService? visa = null,
         Func<bool, Task>? passSoundPlayback = null,
-        Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null)
+        Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null,
+        Func<string, Task<bool>>? verifyProbeMaintenancePassword = null)
     {
         AppSoundService.Current.StopAll(force: true);
         board = new FakeBoard();
@@ -9542,7 +9552,8 @@ internal static partial class Program
             new LegacyPhtHistoryService(enabled: false),
             requireStartupIoClear,
             passSoundPlayback: passSoundPlayback ?? (_ => Task.CompletedTask),
-            waterProofRun: waterProofRun);
+            waterProofRun: waterProofRun,
+            verifyProbeMaintenancePassword: verifyProbeMaintenancePassword);
 
         // START is gated by ScanSupervisor.Monitoring. Prime the in-memory
         // transport through the same clean complete-frame transition used by

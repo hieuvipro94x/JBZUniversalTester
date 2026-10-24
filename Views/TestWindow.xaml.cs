@@ -41,6 +41,9 @@ public partial class TestWindow : Window
     private int _whitePulsePending;
     private int _greenPulsePending;
     private bool _passLedsHeld;
+    private bool _probeMaintenanceDialogOpen;
+    private int _probeMaintenancePromptQueued;
+    private string _lastProbeMaintenancePromptKey = string.Empty;
     private bool _wiringFaultLedsHeld;
     private WaterProofTestWindow? _waterProofWindow;
 
@@ -129,6 +132,8 @@ public partial class TestWindow : Window
     private void ClockTimer_Tick(object? sender, EventArgs e)
     {
         (DataContext as TestViewModel)?.CheckMissingConnectionTimeout();
+        if (DataContext is TestViewModel { ProbeMaintenanceDue: true } && !_probeMaintenanceDialogOpen)
+            QueueProbeMaintenancePrompt();
         UpdateClock();
         if (DataContext is TestViewModel viewModel)
             viewModel.RefreshDailyMasterRequirement();
@@ -263,6 +268,7 @@ public partial class TestWindow : Window
         viewModel.WaterProofWindowCloseRequested += ViewModel_WaterProofWindowCloseRequested;
         ResetActivityLeds();
         ApplyStatusLedState(viewModel);
+        QueueProbeMaintenancePrompt();
     }
 
     private void ViewModel_WaterProofWindowOpenRequested(object? sender, WaterProofTestViewModel viewModel)
@@ -387,6 +393,11 @@ public partial class TestWindow : Window
 
     private void ViewModel_StatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(TestViewModel.ProbeMaintenanceDue))
+        {
+            QueueProbeMaintenancePrompt();
+            return;
+        }
         if (e.PropertyName is not (nameof(TestViewModel.IsBoardConnected) or
                                    nameof(TestViewModel.IsDeviceFault) or
                                    nameof(TestViewModel.IsPersistenceFault) or
@@ -611,30 +622,52 @@ public partial class TestWindow : Window
         }
     }
 
-    private async void ResetProbeCounter_Click(object sender, RoutedEventArgs e)
+    private void ResetProbeCounter_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not TestViewModel viewModel)
             return;
+        ShowProbeMaintenanceDialog(viewModel);
+    }
 
-        var dialog = new ProbeMaintenanceResetWindow(
-            viewModel.PartNumber,
-            viewModel.ModelName,
-            viewModel.ProbeCycleCount,
-            viewModel.ProbeReplacementThreshold)
+    private void QueueProbeMaintenancePrompt()
+    {
+        if (Interlocked.Exchange(ref _probeMaintenancePromptQueued, 1) != 0) return;
+        _ = Dispatcher.BeginInvoke(() =>
         {
-            Owner = this
-        };
+            Interlocked.Exchange(ref _probeMaintenancePromptQueued, 0);
+            if (_viewLifetimeCts.IsCancellationRequested || _closeInProgress || !IsVisible ||
+                DataContext is not TestViewModel viewModel || viewModel.IsDeviceFault || viewModel.IsPersistenceFault) return;
+            if (OwnedWindows.OfType<FaultConfirmationWindow>().Any(window => window.IsVisible)) return;
+            if (!viewModel.ProbeMaintenanceDue)
+            {
+                _lastProbeMaintenancePromptKey = string.Empty;
+                return;
+            }
+            string key = $"{viewModel.PartNumber}|{viewModel.ModelName}|{viewModel.ProbeCycleCount}|{viewModel.ProbeReplacementThreshold}";
+            if (_probeMaintenanceDialogOpen || key == _lastProbeMaintenancePromptKey) return;
+            _lastProbeMaintenancePromptKey = key;
+            ShowProbeMaintenanceDialog(viewModel);
+        }, DispatcherPriority.Background);
+    }
 
-        if (dialog.ShowDialog() != true)
-            return;
-
-        (bool reset, string message) = await viewModel.TryResetProbeCycleAsync(dialog.AdminPassword);
-        LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this),
-            this,
-            message,
-            reset ? "Đã reset counter Pin" : "Không thể reset counter Pin",
-            MessageBoxButton.OK,
-            reset ? MessageBoxImage.Information : MessageBoxImage.Warning);
+    private void ShowProbeMaintenanceDialog(TestViewModel viewModel)
+    {
+        if (_probeMaintenanceDialogOpen || _viewLifetimeCts.IsCancellationRequested) return;
+        _probeMaintenanceDialogOpen = true;
+        try
+        {
+            var dialog = new ProbeMaintenanceResetWindow(
+                viewModel.PartNumber,
+                viewModel.ModelName,
+                viewModel.ProbeCycleCount,
+                viewModel.ProbeReplacementThreshold,
+                viewModel.TryResetProbeCycleAsync)
+            {
+                Owner = this
+            };
+            dialog.ShowDialog();
+        }
+        finally { _probeMaintenanceDialogOpen = false; }
     }
 
     private async void BackToMain_Click(object sender, RoutedEventArgs e)
