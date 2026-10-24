@@ -851,7 +851,14 @@
                         Background="{Binding StateBackground}"
                         BorderThickness="0">
                     <Viewbox Margin="8,6" Stretch="Uniform" StretchDirection="DownOnly">
-                        <TextBlock Width="204"
+                        <Grid Width="204">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ResultStatusTextBlock"
+                                   Grid.Column="0"
+                                   Text="{Binding ResultStatusText, Mode=OneWay}"
                                    Foreground="{Binding StateForeground}"
                                    FontSize="32"
                                    FontWeight="Bold"
@@ -860,8 +867,13 @@
                                    TextAlignment="Center"
                                    TextWrapping="Wrap"
                                    LineStackingStrategy="BlockLineHeight"
-                                   LineHeight="38"><Run Text="{Binding ResultStatusText, Mode=OneWay}"/><InlineUIContainer BaselineAlignment="Baseline"><TextBlock x:Name="TestingStatusDots"
+                                   LineHeight="38"/>
+                                <TextBlock x:Name="TestingStatusDots"
+                                        Grid.Column="1"
                                         Width="36"
+                                        Height="38"
+                                        VerticalAlignment="Bottom"
+                                        Foreground="{Binding StateForeground}"
                                         FontSize="32"
                                         FontWeight="Bold"
                                         TextAlignment="Left"
@@ -876,7 +888,8 @@
                                             </Style.Triggers>
                                         </Style>
                                     </TextBlock.Style>
-                                </TextBlock></InlineUIContainer></TextBlock>
+                                </TextBlock>
+                        </Grid>
                     </Viewbox>
                 </Border>
 
@@ -1027,11 +1040,20 @@
                 </DataGrid.Columns>
             </DataGrid>
 
-            <Border IsHitTestVisible="False"
+            <Border x:Name="CenterResultHost" IsHitTestVisible="False"
                     Panel.ZIndex="20"
                     Margin="1,58,1,1"
-                    Background="Transparent"
-                    Visibility="{Binding IsCenterResultVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                    Background="Transparent">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Visibility" Value="{Binding IsCenterResultVisible, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ResultStatusText}" Value="ĐANG KIỂM TRA">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
                 <TextBlock Text="{Binding CenterResultText}"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"

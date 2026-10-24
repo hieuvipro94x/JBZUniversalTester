@@ -45,6 +45,7 @@ internal static partial class Program
             TestTestViewLanguagePersistence();
             TestTestViewLanguageCoverage();
             TestTestViewKoreanPresentation();
+            TestExclusiveTestingAndPassLabels();
             Console.WriteLine("PASS: TestView language persistence, Korean coverage, rendered bindings and unchanged hardware behavior");
             return 0;
         }
@@ -340,6 +341,7 @@ internal static partial class Program
             ("TestView language persists without changing printer data", TestTestViewLanguagePersistence),
             ("Korean catalog covers TestView captions and fixed statuses", TestTestViewLanguageCoverage),
             ("Korean TestView preserves product data, raw states and hardware behavior", TestTestViewKoreanPresentation),
+            ("Testing and PASS labels never overlap across Vietnamese/Korean transitions", TestExclusiveTestingAndPassLabels),
             ("Settings UI honors Admin/operator permissions after staged opening", TestSettingsPermissionUi),
             ("640-IO Probe updates immediately and retains contacts across scans", TestLargeProbeImmediateTransitions),
             ("Wrong-wire removal status waits five seconds independently of confirmation", TestWrongWiringDelayedRemovalStatus),

@@ -95,10 +95,9 @@ internal static partial class Program
                    vm.PartNumber == model.PartNumber && vm.ProductName == model.ProductName,
                 "Product names, full model titles and wire data bindings are never translated");
             var statusHost = (Border)window.FindName("ResultStatusHost");
-            var statusBlock = (TextBlock)((Viewbox)statusHost.Child).Child;
-            var run = statusBlock.Inlines.OfType<Run>().First();
-            Assert(run.Text == "제품을\n장착하세요" && vm.ResultStatusText == "LẮP SẢN PHẨM",
-                $"Only rendered status changes language; canonical state logic remains Vietnamese: rendered={run.Text}; raw={vm.ResultStatusText}");
+            var statusBlock = (TextBlock)window.FindName("ResultStatusTextBlock");
+            Assert(statusBlock.Text == "제품을\n장착하세요" && vm.ResultStatusText == "LẮP SẢN PHẨM",
+                $"Only rendered status changes language; canonical state logic remains Vietnamese: rendered={statusBlock.Text}; raw={vm.ResultStatusText}");
             // Render the actual WPF content without showing/starting a production window.
             var surface = (FrameworkElement)window.Content;
             surface.Measure(new Size(1920, 1080));
@@ -111,9 +110,9 @@ internal static partial class Program
             using (var output = File.Create(Path.Combine(Path.GetTempPath(), "jbz-v309-testview-ko.png"))) encoder.Save(output);
             vm.State = "LỖI KEYSIGHT - CHỜ THÁO SẢN PHẨM";
             await Dispatcher.Yield(DispatcherPriority.Background);
-            Assert(run.Text == "KEYSIGHT 오류 - 제품 탈거 대기" && !HasVietnamese(run.Text) && board.Commands.Count == commandsBefore,
+            Assert(statusBlock.Text == "KEYSIGHT 오류 - 제품 탈거 대기" && !HasVietnamese(statusBlock.Text) && board.Commands.Count == commandsBefore,
                 "Live device faults remain specific in Korean and localization sends no hardware commands");
-            var resultBinding = BindingOperations.GetBinding(run, Run.TextProperty)!;
+            var resultBinding = BindingOperations.GetBinding(statusBlock, TextBlock.TextProperty)!;
             foreach (string statusPath in new[] { "ResultStatusText", "CenterResultText" })
                 Assert((string)resultBinding.Converter.Convert("PASS", typeof(string), statusPath, System.Globalization.CultureInfo.InvariantCulture) == "PASS",
                     "Large and center PASS labels remain PASS in Korean mode");
@@ -130,6 +129,85 @@ internal static partial class Program
             Assert(((ComboBox)page.FindName("TestLanguageComboBox")).IsEnabled &&
                 (string)((ComboBox)page.FindName("TestLanguageComboBox")).SelectedValue == "ko", "Settings shows and enables the saved Korean selection for authorized operators");
             page.ReleasePageResources();
+        });
+    }
+
+    private static void TestExclusiveTestingAndPassLabels()
+    {
+        OnSettingsDispatcher(async () =>
+        {
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            foreach (string language in new[] { "vi", "ko" })
+            {
+                var settings = new ProductionSettings { MasterFaultRequiredCount = 0, TestViewLanguage = language };
+                var vm = CreateTestViewModel(settings, out FakeBoard board);
+                typeof(TestViewModel).GetField("_model", flags)!.SetValue(vm, Model(("PAIR", new[] { 1, 2 })));
+                typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(vm, true);
+                typeof(TestViewModel).GetField("_presentationCycleStarted", flags)!.SetValue(vm, true);
+                var phase = typeof(TestViewModel).GetField("_productionPhase", flags)!;
+                var phaseType = typeof(TestViewModel).GetNestedType("ProductionPhase", flags)!;
+                var window = new TestWindow(vm, autoStartProduction: false);
+                var text = (TextBlock)window.FindName("ResultStatusTextBlock");
+                var dots = (TextBlock)window.FindName("TestingStatusDots");
+                var center = (Border)window.FindName("CenterResultHost");
+                var panel = (FrameworkElement)text.Parent;
+                var surface = (FrameworkElement)window.Content;
+                int commandsBefore = board.Commands.Count;
+                void Layout()
+                {
+                    surface.Measure(new Size(1920, 1080));
+                    surface.Arrange(new Rect(0, 0, 1920, 1080));
+                    surface.UpdateLayout();
+                }
+                void SaveImage(string name)
+                {
+                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(1920, 1080, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                    bitmap.Render(surface);
+                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                    using var output = File.Create(Path.Combine(Path.GetTempPath(), name));
+                    encoder.Save(output);
+                }
+                try
+                {
+                    for (int i = 0; i < 20; i++)
+                    {
+                        phase.SetValue(vm, (int)Enum.Parse(phaseType, "Continuity"));
+                        vm.State = "ĐANG KIỂM TRA";
+                        typeof(TestWindow).GetMethod("UpdateTestingDots", flags)!.Invoke(window, [vm]);
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        Layout();
+                        Point before = text.TranslatePoint(new Point(), panel);
+                        for (int dot = 0; dot < 4; dot++)
+                        {
+                            typeof(TestWindow).GetMethod("TestingDotsTimer_Tick", flags)!.Invoke(window, [window, EventArgs.Empty]);
+                            Layout();
+                            Assert(text.Text == (language == "ko" ? "검사 중" : "ĐANG KIỂM TRA") &&
+                                   text.TranslatePoint(new Point(), panel) == before && center.Visibility == Visibility.Collapsed,
+                                "Testing text remains stationary and center PASS is hidden throughout the animated dots");
+                            Point dotStart = dots.TranslatePoint(new Point(), panel);
+                            Assert(before.X + text.ActualWidth <= dotStart.X + 0.1 && dots.Visibility == Visibility.Visible,
+                                "Testing text and animated dots occupy separate non-overlapping layout columns");
+                        }
+                        if (language == "ko" && i == 19) SaveImage("jbz-v314-testing-ko.png");
+                        phase.SetValue(vm, (int)Enum.Parse(phaseType, "Completed"));
+                        vm.State = "PASS";
+                        typeof(TestWindow).GetMethod("UpdateTestingDots", flags)!.Invoke(window, [vm]);
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        Layout();
+                        Assert(text.Text == "PASS" && dots.Text.Length == 0 && dots.Visibility == Visibility.Collapsed &&
+                               center.Visibility == Visibility.Visible && ((TextBlock)center.Child).Text == "PASS",
+                            "PASS replaces testing text in both views without retained Korean/Vietnamese text or dots");
+                    }
+                    Assert(board.Commands.Count == commandsBefore, "Status layout transitions never send relay or scan commands");
+                    if (language == "ko") SaveImage("jbz-v314-pass-ko.png");
+                }
+                finally
+                {
+                    typeof(TestWindow).GetField("_allowClose", flags)!.SetValue(window, true);
+                    window.Close();
+                }
+            }
         });
     }
 }
