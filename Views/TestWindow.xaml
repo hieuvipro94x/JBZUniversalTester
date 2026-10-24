@@ -939,7 +939,7 @@
                                FontWeight="SemiBold"
                                Foreground="#6B7280"/>
 
-                    <!-- Chu kỳ Probe Pin: căn đều, không cắt chữ, RESET là Button màu vàng cam. -->
+                    <!-- Compact maintenance action; keep the counter and wire table unobstructed. -->
                     <Grid x:Name="ProbeCycleHost" Grid.Row="10"
                           Grid.Column="0"
                           Grid.ColumnSpan="3"
@@ -979,20 +979,25 @@
                                    TextWrapping="NoWrap"
                                    TextTrimming="None"/>
 
-                        <Button Grid.Column="3"
+                        <Button x:Name="ResetProbeCycleButton"
+                                Grid.Column="3"
                                 Click="ResetProbeCounter_Click"
-                                Width="52"
+                                Style="{StaticResource LabelRetryButtonStyle}"
+                                AutomationProperties.Name="Đặt lại chu kỳ thay PIN"
+                                Width="32"
                                 Height="24"
-                                Padding="0"
+                                Padding="7,4"
                                 VerticalAlignment="Center"
-                                HorizontalAlignment="Left"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                Cursor="Hand">
-                                <Image Source="pack://application:,,,/JBZUniversalTester;component/Assets/reset_probe_cycle.png"
-                                   Width="22"
-                                   Height="22"
-                                   Stretch="Uniform"/>
+                                HorizontalAlignment="Left">
+                            <Path Width="14" Height="14"
+                                  Data="M 12,4 A 5,5 0 1 0 12,10 M 12,0 L 12,4 L 8,4"
+                                  Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                                  StrokeThickness="1.7"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"
+                                  Stretch="Uniform"
+                                  IsHitTestVisible="False"/>
                         </Button>
                     </Grid>
                 </Grid>
