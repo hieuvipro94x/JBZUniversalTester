@@ -89,13 +89,24 @@ internal static partial class Program
                    HistoryExportService.ExportXlsx(xlsx, store.EnumerateForExport(all)) == 4,
                 "Both exports include the full filtered dataset even when the UI page size is one");
             string[] expected = ["장착시간", "파일", "파트명", "파트번호", "Eco", "Nco", "Alc", "Lot",
-                "진도", "결과", "합격", "검사기록", "바코드입력", "바코드출력", "측정", "HtdrvName", "내용", "메모"];
+                "진도", "결과", "합격", "검사기록", "바코드입력", "바코드출력", "측정", "JBZUniversalTester", "내용", "메모"];
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string[] lines = File.ReadAllLines(csv, Encoding.GetEncoding(949));
             Assert(lines.Length == 5 && lines[0].Split(',').SequenceEqual(expected) &&
                    lines[1].Contains(",AE EV PE,NCO-7,ALC-SAVED,,1/1,합격,2001,", StringComparison.Ordinal) &&
                    lines[2].Contains(",,0/1,불량,,", StringComparison.Ordinal),
                 "CSV has original column order and exact parsed THT metadata with separate blank Lot and PASS count");
+            string exportVersion = $"V{ProgramIdentityService.VersionText}";
+            using (var csvReader = new Microsoft.VisualBasic.FileIO.TextFieldParser(csv, Encoding.GetEncoding(949)))
+            {
+                csvReader.SetDelimiters(",");
+                csvReader.ReadFields();
+                for (int index = 0; index < loaded.Count; index++)
+                    Assert(csvReader.ReadFields()![15] == exportVersion,
+                        "CSV displays the running software version, including existing history");
+            }
+            Assert(loaded.All(row => row.HtdrvName == "SAVED-VERSION"),
+                "Export leaves saved program identities unchanged");
             using (ZipArchive archive = ZipFile.OpenRead(xlsx))
             {
                 using var reader = new StreamReader(archive.GetEntry("xl/worksheets/sheet1.xml")!.Open());
@@ -112,6 +123,8 @@ internal static partial class Program
                        DateTime.FromOADate(double.Parse(rows[1].Elements(ns + "c").First().Element(ns + "v")!.Value,
                            CultureInfo.InvariantCulture)) == at,
                     "Actual XLSX cells retain THT fields, legacy test-start timestamp, PASS count and barcode semantics");
+                Assert(Enumerable.Range(2, 4).All(row => Cell(row, $"P{row}") == exportVersion),
+                    "Every XLSX row, including existing history, displays the running software version under JBZUniversalTester");
             }
 
             Assert(HistoryDataSnapshot(db) == before,

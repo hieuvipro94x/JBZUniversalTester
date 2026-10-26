@@ -180,11 +180,11 @@ internal static partial class Program
         Assert(vm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM",
             "Measured product rejection also requests removal");
         Set("_deviceFault", 1);
-        Assert(vm.ResultStatusText == "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM",
-            "A D2XX device fault explicitly names the board and restart requirement");
+        Assert(vm.ResultStatusText == TesterConnectionNotice.Message,
+            "A D2XX device fault shows the shared tester connection notice");
         Set("_productRemovalPending", 1);
         vm.State = "PASS";
-        Assert(vm.ResultStatusText == "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM",
+        Assert(vm.ResultStatusText == TesterConnectionNotice.Message,
             "A stale PASS or pending-removal label cannot hide the latched D2XX error");
         Set("_deviceFault", 0);
         Set("_persistenceFault", 1);
@@ -195,7 +195,7 @@ internal static partial class Program
         Set("_persistenceFault", 0);
         foreach (string reason in new[] { "LỖI THIẾT BỊ LEAK - CHỜ THÁO SẢN PHẨM",
             "LỖI KEYSIGHT - CHỜ THÁO SẢN PHẨM", "LỖI LƯU LỊCH SỬ LEAK - CHỜ THÁO SẢN PHẨM",
-            "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST", "KHÔNG KẾT NỐI KEYSIGHT 34461A",
+            TesterConnectionNotice.Message, "KHÔNG KẾT NỐI KEYSIGHT 34461A",
             "MASTER GOOD - CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ" })
         {
             vm.State = reason;

@@ -96,7 +96,7 @@ public partial class MainWindow : Window
                 // mở khóa test hoặc hồi sinh kết nối.
                 _viewModel.Test.ReportStartupBoardTimeout();
                 _viewModel.Status =
-                    "CHƯA KẾT NỐI BO - CHỈ XEM MÃ HÀNG, KHÔNG THỂ TEST";
+                    TesterConnectionNotice.Message;
                 AsyncFileLogService.Current.Error(
                     $"STARTUP HARDWARE TIMEOUT after {StartupControlUnlockTimeout.TotalSeconds:0}s; " +
                     "session latched until application restart.");
@@ -321,7 +321,7 @@ public partial class MainWindow : Window
             if (_viewModel.Test.IsDeviceFault)
             {
                 _viewModel.Status =
-                    "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG";
+                    TesterConnectionNotice.Message;
             }
             Dispatcher.BeginInvoke(UpdateProductRemovalGate);
         }

@@ -54,7 +54,10 @@ public partial class FaultConfirmationWindow : Window
             .ToArray();
 
         FaultItemsControl.ItemsSource = orderedFaults
-            .Select((fault, index) => new FaultItem(fault, displays[index].Title, displays[index].Summary))
+            .Select((fault, index) => new FaultItem(fault,
+                fault.Type == ProductFaultType.SystemDeviceError && fault.Message == TesterConnectionNotice.Message
+                    ? TesterConnectionNotice.Message : displays[index].Title,
+                displays[index].Summary))
             .ToArray();
         FooterText.Text = footer ?? string.Empty;
         Loaded += PositionBelowFaultRows;

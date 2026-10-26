@@ -32,6 +32,12 @@ internal static partial class Program
             model.PartNumber = "WH322444";
             vm.Model = model;
             vm.Home.Refresh();
+            void Counters(long quantity, string lot)
+            {
+                typeof(TestViewModel).GetProperty(nameof(TestViewModel.LifetimeTestCount))!.SetValue(vm.Test, quantity);
+                typeof(TestViewModel).GetProperty(nameof(TestViewModel.Lot))!.SetValue(vm.Test, lot);
+            }
+            Counters(10, "2010");
             vm.Status = "ĐÃ NẠP MÃ HÀNG: DL3_LAM WH322444";
             Assert(vm.Home.LabelTemplateType == LabelSettings.SmallQrTemplate,
                 "MainWindow label information follows the loaded model and current print selection");
@@ -57,6 +63,45 @@ internal static partial class Program
             root.UpdateLayout();
             Assert(Descendants(root).OfType<System.Windows.Controls.TextBlock>().Any(text =>
                 text.Text == "Loại tem: TEM_BE_QRCODE"), "The actual MainWindow view renders the selected label type");
+            var lotCard = (System.Windows.Controls.Border)window.FindName("CurrentLotCard");
+            var quantityCard = (System.Windows.Controls.Border)window.FindName("ProductionQuantityCard");
+            var lotText = (System.Windows.Controls.TextBlock)window.FindName("CurrentLotText");
+            var quantityText = (System.Windows.Controls.TextBlock)window.FindName("ProductionQuantityText");
+            Assert(lotCard.Visibility == Visibility.Visible && lotText.Text == "2010" && quantityText.Text == "10" &&
+                   quantityText.FontSize >= 40 && lotText.FontSize >= 40,
+                "Main renders prominent saved quantity and current LOT for a product with label printing enabled");
+            Counters(11, "2011");
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            Assert(lotText.Text == "2011" && quantityText.Text == "11",
+                "Main quantity and LOT update through live bindings without reopening the window");
+            string productKey = ProductionConfigService.GetLotProductKey(model);
+            settings.LabelTemplateTypesByProduct[productKey] = ProductionConfigService.NoProductLabel;
+            vm.Home.Refresh();
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            Assert(lotCard.Visibility == Visibility.Collapsed && System.Windows.Controls.Grid.GetColumnSpan(quantityCard) == 2,
+                "A product with printing disabled hides LOT and gives the quantity card the full width");
+            settings.LabelTemplateTypesByProduct[productKey] = LabelSettings.SmallQrTemplate;
+            vm.Model = null;
+            vm.Home.Refresh();
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            Assert(lotCard.Visibility == Visibility.Collapsed, "No selected product cannot display a stale label LOT");
+            vm.Model = model;
+            vm.Home.Refresh();
+            Counters(10, "2010");
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            root.UpdateLayout();
+            Assert(lotCard.Visibility == Visibility.Visible && System.Windows.Controls.Grid.GetColumnSpan(quantityCard) == 1,
+                "Re-enabling product printing restores the separate quantity and LOT cards");
+            var summary = (FrameworkElement)window.FindName("ModelSummaryCard");
+            foreach (var size in new[] { new Size(1366, 768), new Size(1920, 1080) })
+            {
+                root.Measure(size); root.Arrange(new Rect(size)); root.UpdateLayout();
+                Point top = summary.TranslatePoint(new Point(), root);
+                Assert(top.Y >= 0 && top.Y + summary.ActualHeight < size.Height - 50 &&
+                       quantityCard.ActualWidth > 250 && lotCard.ActualWidth > 250,
+                    "Main summary and prominent numbers fit the supported production screen sizes above the action bar");
+            }
+            root.Measure(new Size(width, height)); root.Arrange(new Rect(0, 0, width, height)); root.UpdateLayout();
             var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(root);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);

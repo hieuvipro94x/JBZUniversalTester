@@ -27,6 +27,7 @@ public static class HistoryExportService
 
     // Original 18-column order. Date/filter/order semantics remain test-start;
     // Lot is presentation-only blank, while 합격 shows the saved production LOT.
+    // The software column shows the running exporter, preserving the stored producer identity.
     private static readonly HistoryColumn[] Columns =
     [
         new("장착시간", 22, HistoryCellType.DateTime, r => r.EffectiveTestStartedAt),
@@ -44,7 +45,7 @@ public static class HistoryExportService
         new("바코드입력", 24, HistoryCellType.Text, r => r.ExportBarcodeInputText),
         new("바코드출력", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
         new("측정", 30, HistoryCellType.Text, r => r.ExportResistanceText),
-        new("HtdrvName", 30, HistoryCellType.Text, r => r.HtdrvName),
+        new(ProgramIdentityService.ProgramName, 30, HistoryCellType.Text, _ => $"V{ProgramIdentityService.VersionText}"),
         new("내용", 40, HistoryCellType.Text, r => r.ExportContentText),
         new("메모", 24, HistoryCellType.Text, _ => string.Empty)
     ];

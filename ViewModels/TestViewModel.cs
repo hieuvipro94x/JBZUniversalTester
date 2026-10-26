@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -182,7 +182,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     // Không tham gia PASS/FAIL, history hoặc kết quả :RESULT cuối cùng.
     private readonly double?[] _waterProofLivePressBaseline = new double?[3];
     private string _hardwareStatus = "Bo: đang khởi tạo...";
-    private string _boardConnectionMessage = "Chưa kết nối bo JBZ.";
+    private string _boardConnectionMessage = TesterConnectionNotice.Message;
     private int _boardStartupUnavailable;
     private string? _currentModelPath;
 
@@ -334,7 +334,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private long _lifetimeTestCount;
     private long _probeCycleCount;
     private string _deviceFaultMessage =
-        "Mất kết nối với máy test. Vui lòng khởi động lại.";
+        TesterConnectionNotice.Message;
     private LabelPrintContext? _failedLabelPrint;
     private LabelPrintContext? _lastSuccessfulLabelPrint;
     private string _labelStatusText = "TEM: CHỜ LẮP SẢN PHẨM";
@@ -867,9 +867,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public int WrongCount => _cachedWrongCount;
 
     public string WrongCountText => IsMasterBadPhase
-        ? _masterSampleType == MasterSampleType.OpenCircuit && !_masterFaultCollectionLocked
-            ? MasterDetectedFaultCount.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            : $"{MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
+        ? $"{MasterDetectedFaultCount}/{MasterRequiredFaultCount}"
         : WrongCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public int ShortCount => _cachedShortCount;
@@ -884,9 +882,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public int ExpectedNetworkCount =>
         _engine.ExpectedNetCount;
 
-    public string NetworkProgress => IsMasterBadPhase
-        ? WrongCountText
-        : $"{PassedNetworkCount}/{ExpectedNetworkCount}";
+    public string NetworkProgress => IsOpenMasterSample
+        ? $"{_masterOpenExpectedTotal}/{(_masterFaultCollectionLocked
+            ? Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)
+            : _engine.GetMasterConnectedConnectionCount())}"
+        : IsMasterBadPhase ? WrongCountText : $"{PassedNetworkCount}/{ExpectedNetworkCount}";
 
     public string ActiveFaultTitle
     {
@@ -1160,8 +1160,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     ResetMasterSampleRemovalObservation();
                 }
                 Raise(nameof(MasterSampleRequestText));
-                Raise(nameof(IsOpenMasterAwaitingConfirmation));
-                Raise(nameof(CanConfirmOpenMaster));
+                Raise(nameof(IsOpenMasterSample));
+                Raise(nameof(IsOpenMasterSampleAccepted));
+                Raise(nameof(MasterOpenProgressText));
+                Raise(nameof(IsMasterSampleAccepted));
+                Raise(nameof(MasterSampleProgressText));
                 Raise(nameof(IsMasterSequenceActive));
                 Raise(nameof(IsMasterBadPhase));
                 Raise(nameof(ProductionEnabled));
@@ -1188,6 +1191,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 Raise(nameof(ResultStatusText));
                 Raise(nameof(WrongCountText));
                 Raise(nameof(NetworkProgress));
+                Raise(nameof(IsMasterSampleAccepted));
+                Raise(nameof(MasterSampleProgressText));
                 RaiseActiveFault();
             }
         }
@@ -1257,16 +1262,16 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public AsyncRelayCommand RelaysOffCommand { get; }
     public AsyncRelayCommand RetryLabelCommand { get; }
     public AsyncRelayCommand ReprintLabelCommand { get; }
-    public AsyncRelayCommand ConfirmOpenMasterCommand { get; }
-    public bool IsOpenMasterAwaitingConfirmation => !MasterApproved &&
-        MasterState == MasterSequenceState.TestingBadMaster &&
-        _masterSampleType == MasterSampleType.OpenCircuit && !_masterFaultCollectionLocked;
-    public bool CanConfirmOpenMaster => IsOpenMasterAwaitingConfirmation &&
-        !IsDeviceFault && !IsPersistenceFault && _board.IsConnected &&
-        IsRuntimeContext(RuntimeMode.Production, Volatile.Read(ref _runtimeGeneration)) &&
-        !IsProbeOwningProductionPresentation() &&
-        DateTime.UtcNow.Ticks >= Interlocked.Read(ref _masterBadCollectNotBeforeUtcTicks) &&
-        _engine.CanConfirmOpenMasterSample(_engine.GetOpenMasterFaults().Count);
+    public bool IsOpenMasterSample => IsMasterBadPhase && _masterSampleType == MasterSampleType.OpenCircuit;
+    public bool IsOpenMasterSampleAccepted => IsOpenMasterSample && _masterBadVerified &&
+        _masterFaultCollectionLocked && !IsDeviceFault && !IsPersistenceFault;
+    public string MasterOpenProgressText => NetworkProgress + (IsOpenMasterSampleAccepted ? " • OK" : string.Empty);
+    public bool IsMasterSampleAccepted => IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
+        (IsMasterBadPhase ? _masterBadVerified && _masterFaultCollectionLocked :
+            MasterState == MasterSequenceState.EjectingGoodMaster && _masterGoodVerified);
+    public string MasterSampleProgressText => (IsMasterBadPhase ? NetworkProgress :
+        $"{_masterOpenExpectedTotal}/{(IsMasterSampleAccepted ? _masterOpenExpectedTotal : _engine.GetMasterConnectedConnectionCount())}") +
+        (IsMasterSampleAccepted ? " • OK" : string.Empty);
 
     public string LabelStatusText
     {
@@ -1434,7 +1439,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         RetryLabelCommand = new AsyncRelayCommand(RetryLastFailedLabelAsync, () => CanRetryLabel);
         ReprintLabelCommand = new AsyncRelayCommand(ReprintLastSuccessfulLabelAsync, () => CanReprintLabel);
-        ConfirmOpenMasterCommand = new AsyncRelayCommand(ConfirmOpenMasterAsync);
 
     }
 
@@ -2009,9 +2013,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         _writeHardwareFaultReport(exception, $"Hardware.DeviceFault.{source}", diagnostic);
 
-        _deviceFaultMessage = "Mất kết nối với máy test. Vui lòng khởi động lại.";
+        _deviceFaultMessage = TesterConnectionNotice.Message;
         BoardConnectionMessage = _deviceFaultMessage;
-        HardwareStatus = "Máy test: MẤT KẾT NỐI";
+        HardwareStatus = TesterConnectionNotice.Message;
+        MasterStatus = TesterConnectionNotice.Message;
         ResetManualProbeSession("device-fault");
         _cycleActive = false;
         _waitForProductRelease = false;
@@ -2029,7 +2034,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _sound.HoldElectricalFaultAlarm();
         _engine.SetFrameProcessingEnabled(false);
         ShowBoardUnavailablePresentation(force: true);
-        State = "LỖI THIẾT BỊ";
+        State = TesterConnectionNotice.Message;
         RaiseDeviceFaultState();
 
         _deviceFaultHardwareLockTask = SafeLockHardwareForDeviceFaultAsync();
@@ -2098,9 +2103,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         _engine.SetFrameProcessingEnabled(false);
         BoardConnectionMessage =
-            "Chưa kết nối bo mạch. Chỉ có thể xem giao diện và mã hàng; không thể kiểm tra.";
-        HardwareStatus = "Bo: CHƯA KẾT NỐI";
-        State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+            TesterConnectionNotice.Message;
+        HardwareStatus = TesterConnectionNotice.Message;
+        State = TesterConnectionNotice.Message;
+        MasterStatus = TesterConnectionNotice.Message;
         Raise(nameof(IsBoardStartupUnavailable));
         Raise(nameof(IsBoardConnected));
     }
@@ -2142,7 +2148,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     Message = _deviceFaultMessage
                 }],
                 "Bấm XÁC NHẬN để đóng chương trình.",
-                windowHeader: "LỖI THIẾT BỊ", language: TestViewLanguage);
+                windowHeader: TesterConnectionNotice.Message, language: TestViewLanguage);
             Window? owner = ResolveOperatorDialogOwner();
             if (owner is not null)
                 dialog.Owner = owner;
@@ -2174,6 +2180,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void RaiseDeviceFaultState()
     {
         Raise(nameof(IsDeviceFault));
+        Raise(nameof(IsOpenMasterSampleAccepted));
+        Raise(nameof(MasterOpenProgressText));
+        Raise(nameof(IsMasterSampleAccepted));
+        Raise(nameof(MasterSampleProgressText));
         Raise(nameof(IsBoardConnected));
         Raise(nameof(BoardConnectionMessage));
         Raise(nameof(HasBoardConnectionError));
@@ -2233,6 +2243,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             Interlocked.Exchange(ref _persistenceFault, 0);
             Raise(nameof(IsPersistenceFault));
+            Raise(nameof(IsOpenMasterSampleAccepted));
+            Raise(nameof(MasterOpenProgressText));
+            Raise(nameof(IsMasterSampleAccepted));
+            Raise(nameof(MasterSampleProgressText));
             return true;
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
@@ -2259,6 +2273,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ArgumentNullException.ThrowIfNull(exception);
         Interlocked.Exchange(ref _persistenceFault, 1);
         Raise(nameof(IsPersistenceFault));
+        Raise(nameof(IsOpenMasterSampleAccepted));
+        Raise(nameof(MasterOpenProgressText));
+        Raise(nameof(IsMasterSampleAccepted));
+        Raise(nameof(MasterSampleProgressText));
 
         string diagnostic =
             $"PERSISTENCE FAULT [{source}]{Environment.NewLine}" +
@@ -2807,7 +2825,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             return;
         }
 
-        State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+        State = TesterConnectionNotice.Message;
         StartupPerformanceTrace.Mark("T12 STARTUP_OFFLINE");
     }
 
@@ -2924,9 +2942,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
         State = _board.IsConnected && !IsDeviceFault
             ? ReadyStateForCurrentModel()
-            : IsBoardStartupUnavailable
-                ? "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST"
-                : "LỖI THIẾT BỊ";
+            : TesterConnectionNotice.Message;
         return model;
     }
 
@@ -3004,9 +3020,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         State = _board.IsConnected && !IsDeviceFault
             ? ReadyStateForCurrentModel()
-            : IsBoardStartupUnavailable
-                ? "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST"
-                : "LỖI THIẾT BỊ";
+            : TesterConnectionNotice.Message;
         return model;
     }
 
@@ -3077,13 +3091,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             State = _board.IsConnected && !IsDeviceFault
                 ? ReadyStateForCurrentModel()
-                : "LỖI THIẾT BỊ";
+                : TesterConnectionNotice.Message;
         }
         catch (Exception ex)
         {
             State = _board.IsConnected
                 ? "LẮP SẢN PHẨM"
-                : "LỖI KẾT NỐI BO";
+                : TesterConnectionNotice.Message;
             AddLog($"Không thể tải model gần nhất: {ex.Message}");
         }
     }
@@ -6857,16 +6871,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public void ReportBoardUnavailableForOperatorAction(string source)
     {
-        const string message = "Chưa kết nối bo mạch D2XX. Hãy kiểm tra nguồn và cáp USB của bo trước khi thực hiện chức năng này.";
+        const string message = TesterConnectionNotice.Message;
         if (!IsDeviceFault)
-            State = "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST";
+            State = TesterConnectionNotice.Message;
         BoardConnectionMessage = message;
+        HardwareStatus = TesterConnectionNotice.Message;
+        MasterStatus = TesterConnectionNotice.Message;
         AddLog($"Bỏ qua thao tác phần cứng [{source}]: chưa kết nối bo D2XX.");
         // An unavailable operator action is not a fatal hardware session error.
         // Keep device faults raised by the running scan/monitor on their safety path.
         if (Application.Current?.Dispatcher is not null)
             InvokeUi(() => LocalizedMessageBox.Show(TestViewLanguage,
-                ResolveOperatorDialogOwner(), message, "CHƯA KẾT NỐI BO D2XX",
+                ResolveOperatorDialogOwner(), message, TesterConnectionNotice.Message,
                 MessageBoxButton.OK, MessageBoxImage.Warning));
     }
 
@@ -7137,7 +7153,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         try
         {
             if (!_board.IsConnected)
-                throw new InvalidOperationException("Bo JBZ chưa kết nối.");
+                throw new InvalidOperationException(TesterConnectionNotice.Message);
 
             bool started = await _scanSupervisor.EnsureProductionScanAsync(
                 _model?.MaxIo ?? 0,
@@ -8325,8 +8341,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void RaiseMasterState()
     {
-        Raise(nameof(IsOpenMasterAwaitingConfirmation));
-        Raise(nameof(CanConfirmOpenMaster));
+        Raise(nameof(IsOpenMasterSample));
+        Raise(nameof(IsOpenMasterSampleAccepted));
+        Raise(nameof(MasterOpenProgressText));
+        Raise(nameof(IsMasterSampleAccepted));
+        Raise(nameof(MasterSampleProgressText));
         Raise(nameof(MasterSampleRequestText));
         Raise(nameof(ResultStatusText));
         RaiseCenterPresentation();
@@ -8680,9 +8699,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (_masterSampleType == MasterSampleType.OpenCircuit)
         {
-            MasterStatus = $"MẪU TUỘT TUÝT / ĐỨT DÂY: THIẾU {MasterDetectedFaultCount} KẾT NỐI; " +
-                "LẮP XONG MẪU RỒI BẤM XÁC NHẬN";
+            MasterStatus = $"MẪU TUỘT TUÝT / ĐỨT DÂY: KẾT NỐI {NetworkProgress}; THIẾU {MasterDetectedFaultCount}/{MasterRequiredFaultCount}";
             State = MasterStatus;
+            // Exact configured count, complete source coverage and clean current
+            // topology are required. More missing connections cannot qualify.
+            if (_engine.CanConfirmOpenMasterSample(MasterRequiredFaultCount))
+            {
+                _masterFaultCollectionLocked = true;
+                _masterBadVerified = true;
+                RaiseMasterState();
+                _ = CompleteBadMasterAsync(generation);
+            }
             return;
         }
 
@@ -9027,7 +9054,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex)
         {
-            MasterStatus = "MẤT KẾT NỐI MÁY TEST - VUI LÒNG KHỞI ĐỘNG LẠI";
+            MasterStatus = TesterConnectionNotice.Message;
             AddLog($"LỖI KIỂM TRA MASTER PASS: {ex}");
             EnterDeviceFault(ex, "MasterGood");
         }
@@ -9065,32 +9092,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 SelectedOperationTabIndex = 0;
             RaiseMasterState();
         }
-    }
-
-    private async Task ConfirmOpenMasterAsync()
-    {
-        long generation = Volatile.Read(ref _runtimeGeneration);
-        if (!IsOpenMasterAwaitingConfirmation || IsDeviceFault || IsPersistenceFault ||
-            !_board.IsConnected || IsProbeOwningProductionPresentation() ||
-            !IsRuntimeContext(RuntimeMode.Production, generation) ||
-            DateTime.UtcNow.Ticks < Interlocked.Read(ref _masterBadCollectNotBeforeUtcTicks))
-            return;
-
-        // Re-read the authoritative live frame when the operator confirms.
-        // Neither an old missing count nor a remembered CLIP result is evidence.
-        CollectCurrentMasterFaults(generation);
-        int missing = MasterDetectedFaultCount;
-        if (!IsOpenMasterAwaitingConfirmation || !_engine.CanConfirmOpenMasterSample(missing))
-        {
-            AddLog("MASTER OPEN: chưa xác nhận được mẫu; cần kết nối thực tế, quét đủ nguồn, còn dây hở và không có lỗi sai dây/chập mạch/tiếp xúc.");
-            return;
-        }
-        _masterRequiredFaultCount = missing;
-        _masterFaultCollectionLocked = true;
-        _masterBadVerified = true;
-        RebuildMasterFaultDisplayRows();
-        RaiseMasterState();
-        await CompleteBadMasterAsync(generation);
     }
 
     private async Task CompleteBadMasterAsync(long generation)
@@ -9471,9 +9472,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _masterRequiredFaultCount = _masterSampleType switch
         {
             MasterSampleType.WrongWiring => _masterWrongWiringRequiredCount,
-            // Open count is captured from the live frame on explicit confirmation.
-            // Keep this gate armed until then; legacy CFG counts are not a target.
-            MasterSampleType.OpenCircuit => 1,
+            MasterSampleType.OpenCircuit => _masterOpenRequiredCount,
             _ => 1
         };
 
@@ -9556,7 +9555,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex)
         {
-            MasterStatus = "MẤT KẾT NỐI MÁY TEST - VUI LÒNG KHỞI ĐỘNG LẠI";
+            MasterStatus = TesterConnectionNotice.Message;
             AddLog($"LỖI EJECT MASTER: {ex}");
             Interlocked.Exchange(ref _masterEjectStarted, 0);
             EnterDeviceFault(ex, "MasterBad");
@@ -9708,7 +9707,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         history.InspectionTrace += " | MẪU YÊU CẦU: ĐẠT → " +
             string.Join(" → ", _requiredMasterFaultSamples.Select(MasterSampleCatalog.Name));
         if (inspectionType == HistoryInspectionType.MasterBad && _masterSampleType == MasterSampleType.OpenCircuit)
-            history.InspectionTrace += $" | KẾT NỐI {Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}/{_masterOpenExpectedTotal}";
+            history.InspectionTrace += $" | KẾT NỐI {_masterOpenExpectedTotal}/{Math.Max(0, _masterOpenExpectedTotal - MasterDetectedFaultCount)}";
 
         TestHistoryStore store;
         try
@@ -12724,6 +12723,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 // khóa Production ở preflight cho tới khi SQLite mở lại được.
                 Interlocked.Exchange(ref _persistenceFault, 1);
                 Raise(nameof(IsPersistenceFault));
+                Raise(nameof(IsOpenMasterSampleAccepted));
+                Raise(nameof(MasterOpenProgressText));
+                Raise(nameof(IsMasterSampleAccepted));
+                Raise(nameof(MasterSampleProgressText));
                 State = "LỖI LƯU DỮ LIỆU - KHÔNG BẮT ĐẦU TEST";
                 RaiseTestStatistics();
                 AddLog($"Không thể nạp lịch sử sản lượng: {ex.Message}");
@@ -14212,6 +14215,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Raise(nameof(PassedNetworkCount));
         Raise(nameof(ExpectedNetworkCount));
         Raise(nameof(NetworkProgress));
+        Raise(nameof(IsMasterSampleAccepted));
+        Raise(nameof(MasterSampleProgressText));
         Raise(nameof(MasterDetectedFaultCount));
         Raise(nameof(MasterRequiredFaultCount));
         Raise(nameof(WrongCountText));

@@ -305,9 +305,10 @@
                                             <TextBlock Grid.Row="10" Text="Dây chuyền" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding Settings.ProductionLine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <TextBlock Grid.Row="11" Text="Số điểm sai dây" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Row="11" Grid.Column="1" Text="{Binding MasterFaultRequiredCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanEditMasterWrongCount}" ToolTip="Số cạnh sai dây duy nhất cần phát hiện, ví dụ 2 hoặc 4. Mẫu đứt dây tự đếm kết nối thiếu khi người vận hành xác nhận đã lắp xong."/>
-                                            <TextBlock Grid.Row="12" Text="Mẫu đứt dây" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBlock Grid.Row="12" Grid.Column="1" Text="Tự đếm dây thiếu · xác nhận sau khi lắp xong" VerticalAlignment="Center" FontSize="11" TextWrapping="Wrap"/>
+                                            <TextBox Grid.Row="11" Grid.Column="1" Text="{Binding MasterFaultRequiredCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding CanEditMasterWrongCount}" ToolTip="Số cạnh sai dây duy nhất cần phát hiện, ví dụ 2 hoặc 4."/>
+                                            <TextBlock Grid.Row="12" Text="Số điểm đứt dây" Style="{StaticResource FieldLabelStyle}"/>
+                                            <TextBox Grid.Row="12" Grid.Column="1" Text="{Binding MasterOpenFaultRequiredCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                     IsEnabled="{Binding CanEditMasterOpenCount}" ToolTip="Mẫu Master tự đạt khi thiếu đúng số kết nối đã đặt và các kết nối còn lại đều đúng. Ví dụ THT có 20 kết nối, đặt 2 điểm đứt dây: còn 18 kết nối thì hiển thị 20/18 và OK, không cần bấm xác nhận."/>
                                             <TextBlock Grid.Row="13" Text="Xác nhận lỗi dây" Style="{StaticResource FieldLabelStyle}"/>
                                             <CheckBox Grid.Row="13" Grid.Column="1" IsChecked="{Binding Settings.WiringFaultConfirmationEnabled, Mode=TwoWay}" ToolTip="Bật: hiện cửa sổ XÁC NHẬN sau khi lưu FAIL; chỉ kích relay mở JIG sau xác nhận. Tắt: vẫn tính FAIL và ghi lịch sử nhưng không hiện cửa sổ xác nhận, không kích relay; lỗi hiển thị trên bảng để tháo sản phẩm."/>
                                             <TextBlock Grid.Row="14" Text="Tự lưu lỗi" Style="{StaticResource FieldLabelStyle}"/>
@@ -749,7 +750,7 @@
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <Viewbox HorizontalAlignment="Left" Stretch="Uniform" StretchDirection="DownOnly" Margin="0,0,12,0">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Ngôn ngữ TestView" Foreground="White" FontSize="14" Margin="0,0,8,0"/>
+                        <TextBlock Text="NGÔN NGỮ" Foreground="White" FontSize="14" Margin="0,0,8,0"/>
                         <ComboBox x:Name="TestLanguageComboBox" Width="132" Height="32" Margin="0,0,16,0" SelectedValuePath="Tag" SelectedValue="{Binding Settings.TestViewLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
                             <ComboBoxItem Content="Tiếng Việt" Tag="vi"/>
                             <ComboBoxItem Content="한국어" Tag="ko"/>

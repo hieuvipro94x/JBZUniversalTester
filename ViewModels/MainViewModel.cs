@@ -9,7 +9,7 @@ namespace JBZUniversalTester.ViewModels;
 public sealed class MainViewModel : ObservableObject
 {
     private object _page;
-    private string _status = "CHƯA KẾT NỐI";
+    private string _status = TesterConnectionNotice.Message;
     private ProductModel? _model;
 
     private readonly AppSettings _settings;
@@ -173,9 +173,9 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(HasEnoughCardsForModel));
 
         if (Test.IsDeviceFault)
-            Status = "MẤT KẾT NỐI BO - THOÁT VÀ MỞ LẠI ỨNG DỤNG";
+            Status = TesterConnectionNotice.Message;
         else if (Test.IsBoardStartupUnavailable)
-            Status = "CHƯA KẾT NỐI BO - CHỈ XEM MÃ HÀNG, KHÔNG THỂ TEST";
+            Status = TesterConnectionNotice.Message;
         else if (Model is not null)
             Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName}";
         else

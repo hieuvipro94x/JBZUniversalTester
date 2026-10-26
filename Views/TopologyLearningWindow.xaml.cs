@@ -43,13 +43,15 @@ public partial class TopologyLearningWindow : Window
             _test.BoardFrameActivity += Test_BoardFrameActivity;
             _test.PropertyChanged += Test_PropertyChanged;
             UpdateBoardStatus();
-            LearningStatusText.Text = "Đang giám sát trực tiếp toàn bộ chân IO trên các card.";
+            if (_test.IsBoardConnected && !_test.IsDeviceFault)
+                LearningStatusText.Text = "Đang giám sát trực tiếp toàn bộ chân IO trên các card.";
         }
         catch (Exception ex)
         {
             DiagnoseButton.IsEnabled = false;
             AsyncFileLogService.Current.Error($"Topology learning startup failed: {ex}");
-            LearningStatusText.Text = "MÁY TEST CHƯA SẴN SÀNG - VUI LÒNG KHỞI ĐỘNG LẠI";
+            LearningStatusText.Text = !_test.IsBoardConnected || _test.IsDeviceFault
+                ? TesterConnectionNotice.Message : "Không thể mở chẩn đoán IO. Vui lòng thử lại.";
         }
     }
 
@@ -83,7 +85,7 @@ public partial class TopologyLearningWindow : Window
         {
             _diagnosing = false;
             SaveButton.IsEnabled = false;
-            LearningStatusText.Text = "Không thể học topology khi bo mất kết nối hoặc lỗi.";
+            LearningStatusText.Text = TesterConnectionNotice.Message;
         }
     }
 

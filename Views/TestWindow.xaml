@@ -1,4 +1,4 @@
-<Window x:Class="JBZUniversalTester.Views.TestWindow"
+﻿<Window x:Class="JBZUniversalTester.Views.TestWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:sys="clr-namespace:System;assembly=System.Runtime"
@@ -701,13 +701,52 @@
                     <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource PiCounterValueBorderStyle}">
                         <TextBlock Text="{Binding OpenCount, Mode=OneWay}" Foreground="{StaticResource PiFailBrush}" Style="{StaticResource PiCounterTextStyle}"/>
                     </Border>
-                    <TextBlock Grid.Row="2" Text="S&#7889; l&#7895;i &#273;&#7845;u sai" Style="{StaticResource IndustrialCounterLabelStyle}"/>
+                    <TextBlock Grid.Row="2">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource IndustrialCounterLabelStyle}">
+                                <Setter Property="Text" Value="S&#7889; l&#7895;i &#273;&#7845;u sai"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsOpenMasterSample}" Value="True">
+                                        <Setter Property="Text" Value="Số điểm đứt dây"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
                     <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource PiCounterValueBorderStyle}">
                         <TextBlock Text="{Binding WrongCountText, Mode=OneWay}" Foreground="{StaticResource PiFailBrush}" Style="{StaticResource PiCounterTextStyle}"/>
                     </Border>
                     <TextBlock Grid.Row="3" Text="S&#7889; l&#7895;i" Style="{StaticResource IndustrialCounterLabelStyle}"/>
-                    <Border Grid.Row="3" Grid.Column="1" Style="{StaticResource PiCounterValueBorderStyle}">
-                        <TextBlock Text="{Binding CurrentFaultCount, Mode=OneWay}" Foreground="{StaticResource PiBlueTextBrush}" Style="{StaticResource PiCounterTextStyle}"/>
+                    <Border x:Name="FaultCountValueBorder" Grid.Row="3" Grid.Column="1">
+                        <Border.Style>
+                            <Style TargetType="Border" BasedOn="{StaticResource PiCounterValueBorderStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsMasterSampleAccepted}" Value="True">
+                                        <Setter Property="Background" Value="#DCFCE7"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Viewbox Margin="2,0" Height="28" Stretch="Uniform" StretchDirection="DownOnly">
+                            <TextBlock x:Name="FaultCountValueText">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource PiCounterTextStyle}">
+                                        <Setter Property="Text" Value="{Binding CurrentFaultCount, Mode=OneWay}"/>
+                                        <Setter Property="Foreground" Value="{StaticResource PiBlueTextBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsMasterSequenceActive}" Value="True">
+                                                <Setter Property="Text" Value="{Binding MasterSampleProgressText, Mode=OneWay}"/>
+                                                <Setter Property="Padding" Value="0"/>
+                                                <Setter Property="FontWeight" Value="Bold"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsMasterSampleAccepted}" Value="True">
+                                                <Setter Property="Foreground" Value="#14532D"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Viewbox>
                     </Border>
                 </Grid>
             </StackPanel>
@@ -738,7 +777,7 @@
                         <Grid.Style>
                             <Style TargetType="Grid">
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
+                                    <DataTrigger Binding="{Binding IsOpenMasterSample}" Value="True">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -762,23 +801,7 @@
                             Height="30"
                             FontSize="11.5"/>
                     </Grid>
-                    <Button Grid.ColumnSpan="3"
-                            Content="XÁC NHẬN ĐÃ LẮP XONG MẪU"
-                            Command="{Binding ConfirmOpenMasterCommand}"
-                            IsEnabled="{Binding CanConfirmOpenMaster}"
-                            Height="30" FontSize="11" FontWeight="Bold"
-                            Background="#0F766E" Foreground="White" BorderBrush="#0B5D56">
-                        <Button.Style>
-                            <Style TargetType="Button">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsOpenMasterAwaitingConfirmation}" Value="True">
-                                        <Setter Property="Visibility" Value="Visible"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </Button.Style>
-                    </Button>
+
                 </Grid>
                     <Viewbox Grid.Row="1" Grid.ColumnSpan="2"
                              Margin="2,0"

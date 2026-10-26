@@ -54,7 +54,8 @@ public sealed class AsyncRelayCommand : ICommand
                 string.IsNullOrWhiteSpace(ex.Message)
                     ? "Thao tác không thực hiện được. Hãy kiểm tra kết nối thiết bị và thử lại."
                     : ex.Message,
-                "Không thể thực hiện thao tác",
+                ex.Message == TesterConnectionNotice.Message
+                    ? TesterConnectionNotice.Message : "Không thể thực hiện thao tác",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }

@@ -9,6 +9,13 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
+# A cmd launched from PowerShell 7 can pass its module paths to Windows
+# PowerShell. Load Security from this host, rather than an incompatible runtime.
+Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
+if (-not (Get-PSDrive -Name Cert -PSProvider Certificate -ErrorAction SilentlyContinue)) {
+    New-PSDrive -Name Cert -PSProvider Certificate -Root '\' -Scope Script -ErrorAction Stop | Out-Null
+}
+
 $exe = (Resolve-Path -LiteralPath $ExePath).ProviderPath
 $certificateDirectory = Join-Path $PublishDirectory "Certificate"
 $certificatePath = Join-Path $certificateDirectory "JBZ-CodeSigning.cer"

@@ -37,6 +37,10 @@ public sealed class HomeViewModel : ObservableObject
     public string SourcePath =>
         _main.Model?.SourcePath ?? string.Empty;
 
+    public bool IsLabelPrintingEnabled => _main.Model is not null &&
+        ProductionConfigService.IsProductLabelPrintingEnabled(
+            _main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model));
+
     public string LabelTemplateType => _main.Model is null
         ? "CHƯA NẠP MÃ HÀNG"
         : !ProductionConfigService.IsProductLabelPrintingEnabled(_main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model))
@@ -182,6 +186,7 @@ public sealed class HomeViewModel : ObservableObject
         Raise(nameof(VehicleType));
         Raise(nameof(SourcePath));
         Raise(nameof(LabelTemplateType));
+        Raise(nameof(IsLabelPrintingEnabled));
 
         StartCommand.RaiseCanExecuteChanged();
     }

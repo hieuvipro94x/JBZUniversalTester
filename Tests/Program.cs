@@ -20,6 +20,14 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-tester-connection-notice"])
+        {
+            TestUnifiedTesterConnectionNotice();
+            TestStartupWithoutBoardStaysUiOnly();
+            TestDisconnectedBoardOperatorActions();
+            Console.WriteLine("PASS: Unified tester connection notice and preserved disconnected hardware guards");
+            return 0;
+        }
         if (args is ["--test-settings-recovery-perf"])
         {
             TestSettingsInvalidLeakLayoutRecovery();
@@ -110,8 +118,8 @@ internal static partial class Program
         }
         if (args is ["--test-master-sample-confirmation"])
         {
-            TestMasterShortGroupAndManualOpen();
-            Console.WriteLine("PASS: Master three-IO short groups and operator-confirmed unknown open count");
+            TestMasterShortGroupAndConfiguredOpen();
+            Console.WriteLine("PASS: Master three-IO short groups and automatic configured open counts");
             return 0;
         }
         if (args is ["--test-master-clip-reinstall"])
@@ -397,6 +405,7 @@ internal static partial class Program
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("Original History export columns preserve THT metadata and existing database", TestOriginalHistoryExportColumns),
+            ("Tester connection notice is consistent across startup, manual actions and actual device loss", TestUnifiedTesterConnectionNotice),
             ("History exactly-once transaction crash recovery", TestHistoryTransactionAtomicity),
             ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
             ("SQLite schema v7 chronological History migration and query plans", TestDatabaseSchemaV5),
@@ -456,7 +465,7 @@ internal static partial class Program
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
             ("All NG Masters keep wire rows and open Master requires an exact complete pattern", TestAllMasterWireRowsAndOpenPattern),
-            ("Master three-IO short groups and operator-confirmed unknown open count", TestMasterShortGroupAndManualOpen),
+            ("Master three-IO short groups and automatic configured open counts", TestMasterShortGroupAndConfiguredOpen),
             ("Master completion replays removal confirmed while JIG was busy", TestMasterRemovalDuringEjectCompletion),
             ("History PASS/FAIL ordinals restart for each product LOT batch", TestHistoryLotBatchOrdinals),
             ("Master History hides session identifiers without changing audit data", TestMasterHistorySessionPresentation),
@@ -877,7 +886,7 @@ internal static partial class Program
                viewModel.DeviceFaultDialogCount == 0 &&
                board.ConnectAttempts == 1 &&
                !board.Commands.Contains("START", StringComparer.Ordinal) &&
-               viewModel.State == "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST",
+               viewModel.State == TesterConnectionNotice.Message,
             "No-board startup keeps model UI available without scan, Production ARM, or DeviceFault");
     }
 
@@ -916,8 +925,8 @@ internal static partial class Program
                 Assert(!viewModel.IsDeviceFault && viewModel.DeviceFaultTransitionCount == 0 &&
                        viewModel.DeviceFaultDialogCount == 0 && !viewModel.IsManualModeActive &&
                        (int)typeof(TestViewModel).GetField("_probeSessionActive", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewModel)! == 0 &&
-                       viewModel.State == "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST" &&
-                       viewModel.BoardConnectionMessage.Contains("Chưa kết nối bo mạch D2XX", StringComparison.Ordinal) &&
+                       viewModel.State == TesterConnectionNotice.Message &&
+                       viewModel.BoardConnectionMessage == TesterConnectionNotice.Message &&
                        board.Commands.Count == 0,
                     "An unavailable D2XX action reports the connection warning without shutdown, scan, relay, or mode changes");
             }
@@ -1816,7 +1825,7 @@ internal static partial class Program
                masterPresentationChanges.Contains(nameof(TestViewModel.ResultStatusText)) &&
                masterPresentationChanges.Contains(nameof(TestViewModel.StateBackground)) &&
                masterPresentationChanges.Contains(nameof(TestViewModel.CenterResultText)),
-            "Detected Master sample starts the good-Master test and checking presentation");
+            $"Detected Master sample starts the good-Master test and checking presentation: master={masterExitVm.MasterState}, status={masterExitVm.ResultStatusText}, raw={masterExitVm.State}, background={masterExitVm.StateBackground}, device={masterExitVm.IsDeviceFault}, notifications={string.Join(',', masterPresentationChanges)}");
         bool masterExitAllowed = masterExitVm.StopViewAsync().GetAwaiter().GetResult();
         Assert(!masterExitAllowed,
             "Returning to Main during Master is blocked until the sample is removed");
@@ -2115,7 +2124,7 @@ internal static partial class Program
         string mainViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
         Assert(mainViewModelSource.Contains(
-                   "CHƯA KẾT NỐI BO - CHỈ XEM MÃ HÀNG, KHÔNG THỂ TEST",
+                   "TesterConnectionNotice.Message",
                    StringComparison.Ordinal),
             "Main status clearly identifies the no-board UI-only state");
         Assert(mainViewModelSource.Contains("requireStartupIoClear: false", StringComparison.Ordinal),
@@ -2298,7 +2307,7 @@ internal static partial class Program
                crashReportSource.Contains("!AsyncFileLogService.Current.FileLoggingEnabled", StringComparison.Ordinal) &&
                crashReportSource.Contains("ToString(\"G\", CultureInfo.CurrentCulture)", StringComparison.Ordinal) &&
                !crashReportSource.Contains("DateTime.Now.ToString(\"O\")", StringComparison.Ordinal) &&
-               crashReportSource.Contains("Loại lỗi: LỖI KẾT NỐI THIẾT BỊ", StringComparison.Ordinal) &&
+               crashReportSource.Contains("TesterConnectionNotice.Message", StringComparison.Ordinal) &&
                crashReportSource.Contains("BuildOperatorConnectionReport()", StringComparison.Ordinal) &&
                !crashReportSource[crashReportSource.IndexOf("BuildOperatorConnectionReport() =>", StringComparison.Ordinal)..
                    crashReportSource.IndexOf("private static string BuildTechnicalReport", StringComparison.Ordinal)]
@@ -2390,7 +2399,7 @@ internal static partial class Program
         Assert(deviceFaultVm.IsDeviceFault, "DeviceFault latches after index exception");
         Assert(deviceFaultVm.DeviceFaultTransitionCount == 1, "Repeated index exceptions produce one DeviceFault transition");
         Assert(deviceFaultVm.DeviceFaultDialogCount == 1, "Repeated index exceptions produce one operator dialog episode");
-        Assert(deviceFaultVm.ResultStatusText == "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM" &&
+        Assert(deviceFaultVm.ResultStatusText == TesterConnectionNotice.Message &&
                deviceFaultVm.StateBackground == "#C62828" &&
                deviceFaultVm.StateForeground == "#FFFFFF",
             "DeviceFault status mapping");
@@ -2403,12 +2412,12 @@ internal static partial class Program
                deviceFaultVm.DeviceFaultDialogCount == 1,
             "DeviceFault remains latched for the process lifetime and cannot be reset in-app");
         Assert(deviceFaultVm.DeviceFaultMessage ==
-               "Mất kết nối với máy test. Vui lòng khởi động lại.",
-            "The single board-fault message is short and explicitly requests a restart");
+               TesterConnectionNotice.Message,
+            "The board-fault message matches the shared tester connection notice");
         Assert(testViewModelSource.Contains("ExitApplicationAfterDeviceFaultAsync", StringComparison.Ordinal) &&
                testViewModelSource.Contains("await _deviceFaultHardwareLockTask;", StringComparison.Ordinal) &&
                testViewModelSource.Contains("mainWindow.Close();", StringComparison.Ordinal) &&
-               testViewModelSource.Contains("windowHeader: \"LỖI THIẾT BỊ\"", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("windowHeader: TesterConnectionNotice.Message", StringComparison.Ordinal) &&
                testWindowSource.Contains("deviceFaultViewModel.IsDeviceFault", StringComparison.Ordinal),
             "DeviceFault uses the shared fault confirmation window, then safely locks hardware and exits");
 
@@ -2435,7 +2444,7 @@ internal static partial class Program
                startupFaultVm.DeviceFaultDialogCount == 0 &&
                startupFaultBoard.ConnectAttempts == 1 &&
                !startupFaultBoard.Commands.Contains("START", StringComparer.Ordinal) &&
-               startupFaultVm.State == "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST",
+               startupFaultVm.State == TesterConnectionNotice.Message,
             "Startup board failure allows model UI but never arms scan or raises a DeviceFault dialog");
     }
 
@@ -4912,7 +4921,7 @@ internal static partial class Program
                 "Hardware.DeviceFault.BoardStartup",
                 "BoardGeneration=7; transport=D2XX");
             string operatorReport = File.ReadAllText(RuntimePaths.CrashReportFile, Encoding.UTF8);
-            Assert(operatorReport.Contains("LỖI KẾT NỐI THIẾT BỊ", StringComparison.Ordinal) &&
+            Assert(operatorReport.Contains(TesterConnectionNotice.Message, StringComparison.Ordinal) &&
                    !operatorReport.Contains("Hardware.DeviceFault", StringComparison.Ordinal) &&
                    !operatorReport.Contains("FTDI", StringComparison.OrdinalIgnoreCase) &&
                    !operatorReport.Contains("D2XX", StringComparison.OrdinalIgnoreCase) &&
@@ -8114,7 +8123,7 @@ internal static partial class Program
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
             Assert(csvText.StartsWith(
-                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,진도,결과,합격,검사기록,바코드입력,바코드출력,측정,HtdrvName,내용,메모\n",
+                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,진도,결과,합격,검사기록,바코드입력,바코드출력,측정,JBZUniversalTester,내용,메모\n",
                     StringComparison.Ordinal),
                 "History CSV has the original 18 Korean columns in order");
             Assert(csvText.Contains(

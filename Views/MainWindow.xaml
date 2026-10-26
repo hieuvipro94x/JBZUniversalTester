@@ -200,7 +200,7 @@
                            SnapsToDevicePixels="True"/>
                 </Border>
 
-                <Border Margin="0,22,0,0" Background="#F8FAFD" BorderBrush="#D9E3F0"
+                <Border x:Name="ModelSummaryCard" Margin="0,22,0,0" Background="#F8FAFD" BorderBrush="#D9E3F0"
                         BorderThickness="1" CornerRadius="10" Padding="22,18">
                     <Grid>
                         <Grid.RowDefinitions>
@@ -242,25 +242,66 @@
                             <TextBlock Text="{Binding Status}" Margin="0,5,0,13"
                                        FontSize="15" FontWeight="SemiBold" Foreground="#1E3278"
                                        TextWrapping="Wrap"/>
+                            <Grid Margin="0,0,0,16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Border x:Name="ProductionQuantityCard" Padding="16,12" CornerRadius="8"
+                                        Background="#EAF1FF" BorderBrush="#BDD0F4" BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Grid.ColumnSpan" Value="2"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Home.IsLabelPrintingEnabled}" Value="True">
+                                                    <Setter Property="Grid.ColumnSpan" Value="1"/>
+                                                    <Setter Property="Margin" Value="0,0,8,0"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel>
+                                        <TextBlock Text="SẢN LƯỢNG MỚI NHẤT" FontSize="14" FontWeight="Bold" Foreground="#1E3A8A"/>
+                                        <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                            <TextBlock x:Name="ProductionQuantityText" Text="{Binding Test.LifetimeTestCount, Mode=OneWay, StringFormat={}{0:N0}}"
+                                                       FontSize="46" FontWeight="Bold" Foreground="#173B88"/>
+                                        </Viewbox>
+                                        <TextBlock Text="PASS + FAIL của mã hàng hiện tại" FontSize="12"
+                                                   Foreground="#475569" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border x:Name="CurrentLotCard" Grid.Column="1" Margin="8,0,0,0" Padding="16,12" CornerRadius="8"
+                                        Background="#E8F7EF" BorderBrush="#A7DAB9" BorderThickness="1">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Home.IsLabelPrintingEnabled}" Value="False">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <StackPanel>
+                                        <TextBlock Text="LOTNo HIỆN TẠI" FontSize="14" FontWeight="Bold" Foreground="#14532D"/>
+                                        <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                            <TextBlock x:Name="CurrentLotText" Text="{Binding Test.Lot, Mode=OneWay}"
+                                                       FontSize="46" FontWeight="Bold" Foreground="#166534"/>
+                                        </Viewbox>
+                                        <TextBlock Text="LOTNo của mã hàng đang bật in tem" FontSize="12" Foreground="#475569" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Margin="0,0,12,0">
-                                    <TextBlock Text="TỔNG LƯỢT TEST ĐÃ LƯU" FontSize="11" FontWeight="Bold" Foreground="#64748B"/>
-                                    <TextBlock Text="{Binding Test.LifetimeTestCount, StringFormat={}{0:N0}}" Margin="0,3,0,0"
-                                               FontSize="23" FontWeight="Bold" Foreground="#1E3278"/>
-                                    <TextBlock Text="PASS + FAIL của mã hàng hiện tại" FontSize="11"
-                                               Foreground="#64748B" TextWrapping="Wrap"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Margin="12,0">
                                     <TextBlock Text="MÁY IN TEM" FontSize="11" FontWeight="Bold" Foreground="#64748B"/>
                                     <TextBlock Text="{Binding Test.LabelStatusText}" Margin="0,4,0,0"
                                                FontSize="12" Foreground="#334155" TextWrapping="Wrap"/>
                                 </StackPanel>
-                                <StackPanel Grid.Column="2" Margin="12,0,0,0">
+                                <StackPanel Grid.Column="1" Margin="12,0,0,0">
                                     <TextBlock Text="CỔNG MÁY LEAK" FontSize="11" FontWeight="Bold" Foreground="#64748B"/>
                                     <TextBlock Text="{Binding Test.WaterProofPortText}" Margin="0,4,0,0"
                                                FontSize="12" Foreground="#334155" TextWrapping="Wrap"/>

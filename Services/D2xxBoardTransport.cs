@@ -1640,7 +1640,7 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
             long txTimestamp = 0;
             IntPtr handle = _handle;
             if (handle == IntPtr.Zero)
-                throw new InvalidOperationException("Bo JBZ đã đóng kết nối.");
+                throw new InvalidOperationException(TesterConnectionNotice.Message);
 
             if (purgeBeforeWrite)
                 EnsureIo(FT_Purge(handle, FT_PURGE_RX | FT_PURGE_TX), "FT_Purge");
@@ -1918,7 +1918,7 @@ public sealed class D2xxBoardTransport : IBoardTransport, IBoardCommandTimingDia
         ThrowIfDisposed();
 
         if (!IsConnected)
-            throw new InvalidOperationException("Chưa kết nối bo JBZ");
+            throw new InvalidOperationException(TesterConnectionNotice.Message);
     }
 
     void ThrowIfDisposed()

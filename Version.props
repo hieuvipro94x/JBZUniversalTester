@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project>
   <!--
     JBZUniversalTester - SINGLE SOURCE OF TRUTH FOR VERSIONING
@@ -15,15 +15,15 @@
       VersionFileTag  12_10_2 -> next release
   -->
   <PropertyGroup>
-    <VersionPrefix>2026.09.321</VersionPrefix>
-    <Version>2026.09.321</Version>
-    <AssemblyVersion>2026.09.321.0</AssemblyVersion>
-    <FileVersion>2026.09.321.0</FileVersion>
-    <InformationalVersion>2026.09.321</InformationalVersion>
+    <VersionPrefix>2026.09.328</VersionPrefix>
+    <Version>2026.09.328</Version>
+    <AssemblyVersion>2026.09.328.0</AssemblyVersion>
+    <FileVersion>2026.09.328.0</FileVersion>
+    <InformationalVersion>2026.09.328</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <VersionFileTag>2026_09_321</VersionFileTag>
+    <VersionFileTag>2026_09_328</VersionFileTag>
     <Product>JBZUniversalTester</Product>
-    <AssemblyTitle>JBZUniversalTester V2026.09.321</AssemblyTitle>
+    <AssemblyTitle>JBZUniversalTester V2026.09.328</AssemblyTitle>
     <Description>JBZ Universal Tester - Production Harness Tester</Description>
     <Company>JBZ</Company>
     <Copyright>Copyright JBZ 2026</Copyright>

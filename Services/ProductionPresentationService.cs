@@ -27,7 +27,7 @@ internal interface IProductionPresentationState
 internal static class ProductionPresentationService
 {
     internal const string RejectedProductRemovalText = "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM";
-    internal const string D2xxFaultText = "LỖI BO D2XX\nKHỞI ĐỘNG LẠI PHẦN MỀM";
+    internal const string D2xxFaultText = TesterConnectionNotice.Message;
     internal const string PersistenceFaultText = "LỖI LƯU DỮ LIỆU\nDỪNG KIỂM TRA";
 
     internal static bool IsSpecificSystemError(string value) =>

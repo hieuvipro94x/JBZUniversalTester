@@ -330,7 +330,7 @@ public sealed class TestEngine : IDisposable
     public IReadOnlyList<FaultDetail> GetMissingConnectionFaults() => GetOpenMasterFaults();
 
     // Master evidence from the authoritative complete production snapshot.
-    // The Master workflow captures this live missing count when the operator confirms installation.
+    // Automatic Master acceptance compares this live count with the configured target.
     public IReadOnlyList<FaultDetail> GetOpenMasterFaults()
     {
         lock (_gate)
@@ -368,6 +368,25 @@ public sealed class TestEngine : IDisposable
                 _hasExpectedSourceCoverage && !_contactUnstable &&
                 GetMasterExpectedConnectionCount() > requiredMissingConnections &&
                 GetOpenMasterFaults().Count == requiredMissingConnections;
+        }
+    }
+
+    public int GetMasterConnectedConnectionCount()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_lastFrameValid || _model is not ProductModel model) return 0;
+            var pairs = new HashSet<(int, int)>();
+            foreach (WireNet net in model.Nets.Where(IsEligibleProductionNet))
+                foreach (int target in net.ExpectedActiveIo.Where(io => io > 0 && io != net.SourceIo))
+                    if (_actualComponentByIo.TryGetValue(net.SourceIo, out int sourceComponent) &&
+                        _actualComponentByIo.TryGetValue(target, out int targetComponent) && sourceComponent == targetComponent)
+                        pairs.Add((Math.Min(net.SourceIo, target), Math.Max(net.SourceIo, target)));
+            if (model.Clip is not null)
+                foreach (ClipBranch branch in model.Clip.Branches.Where(branch => IsEligibleClipBranch(model.Clip, branch)))
+                    if (IsClipBranchConnected(model.Clip, branch, _currentConnections))
+                        pairs.Add((Math.Min(model.Clip.CommonIo, branch.TargetIo), Math.Max(model.Clip.CommonIo, branch.TargetIo)));
+            return pairs.Count;
         }
     }
 

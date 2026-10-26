@@ -593,6 +593,11 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         try
         {
             int activeRelay = await _test.SetManualRelayAsync(relay, turnOn);
+            if (!_test.IsBoardConnected || _test.IsDeviceFault)
+            {
+                ManualStatus = TesterConnectionNotice.Message;
+                return;
+            }
             ManualRuntimeActive = _test.IsManualModeActive;
             ManualRelay1Status = activeRelay == 1 ? "ON" : "OFF";
             ManualRelay2Status = activeRelay == 2 ? "ON" : "OFF";
@@ -601,12 +606,15 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                 : $"MANUAL - Relay {activeRelay} ON";
             RefreshManualCommands();
         }
-        catch
+        catch (Exception ex)
         {
             ManualRelay1Status = "OFF";
             ManualRelay2Status = "OFF";
-            ManualStatus = "MANUAL FAULT - kiểm tra DeviceFault";
+            ManualStatus = _test.IsDeviceFault || !_test.IsBoardConnected
+                ? TesterConnectionNotice.Message : "MANUAL FAULT - kiểm tra DeviceFault";
             RefreshManualCommands();
+            if (_test.IsDeviceFault || !_test.IsBoardConnected)
+                throw new InvalidOperationException(TesterConnectionNotice.Message, ex);
             throw;
         }
     }
@@ -621,18 +629,26 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         try
         {
             await _test.ResetManualOutputsAsync();
+            if (!_test.IsBoardConnected || _test.IsDeviceFault)
+            {
+                ManualStatus = TesterConnectionNotice.Message;
+                return;
+            }
             ManualRuntimeActive = _test.IsManualModeActive;
             ManualRelay1Status = "OFF";
             ManualRelay2Status = "OFF";
             ManualStatus = "MANUAL - reset complete, relay OFF";
             RefreshManualCommands();
         }
-        catch
+        catch (Exception ex)
         {
             ManualRelay1Status = "OFF";
             ManualRelay2Status = "OFF";
-            ManualStatus = "MANUAL FAULT - kiểm tra DeviceFault";
+            ManualStatus = _test.IsDeviceFault || !_test.IsBoardConnected
+                ? TesterConnectionNotice.Message : "MANUAL FAULT - kiểm tra DeviceFault";
             RefreshManualCommands();
+            if (_test.IsDeviceFault || !_test.IsBoardConnected)
+                throw new InvalidOperationException(TesterConnectionNotice.Message, ex);
             throw;
         }
     }
@@ -688,6 +704,11 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                             UpdateManualResistanceResult(update);
                     },
                     cancellationToken);
+            if (!_test.IsBoardConnected || _test.IsDeviceFault)
+            {
+                ManualResistanceStatus = TesterConnectionNotice.Message;
+                return;
+            }
             foreach (ResistanceResult result in results)
                 UpdateManualResistanceResult(result);
 
@@ -722,10 +743,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             }
 
             // Lỗi bo/relay thật vẫn giữ DeviceFault toàn cục.
-            if (_test.IsDeviceFault)
+            if (_test.IsDeviceFault || !_test.IsBoardConnected)
             {
-                ManualResistanceStatus = "LỖI BO TEST / RELAY - THAO TÁC ĐÃ BỊ KHÓA";
-                throw;
+                ManualResistanceStatus = TesterConnectionNotice.Message;
+                throw new InvalidOperationException(TesterConnectionNotice.Message, ex);
             }
 
             // Lỗi Keysight manual chỉ là lỗi thiết bị đo phụ. Không MessageBox modal,

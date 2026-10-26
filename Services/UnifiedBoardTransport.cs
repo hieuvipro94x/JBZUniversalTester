@@ -67,7 +67,7 @@ public sealed class UnifiedBoardTransport : IBoardTransport, IBoardCommandTiming
             {
                 try { await _d2xx.DisconnectAsync(); } catch { }
                 throw new InvalidOperationException(
-                    "Không kết nối được bo JBZ D2XX. Kiểm tra cáp USB/driver FTDI. " + ex.Message,
+                    TesterConnectionNotice.Message,
                     ex);
             }
         }

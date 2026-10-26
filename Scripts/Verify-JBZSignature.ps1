@@ -7,6 +7,8 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
 try {
+    # Match the current host even when PSModulePath was inherited from PowerShell 7.
+    Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
     $exe = (Resolve-Path -LiteralPath $ExePath).ProviderPath
     $certificateDirectory = Join-Path (Split-Path -Parent $exe) "Certificate"
     $certificatePath = Join-Path $certificateDirectory "JBZ-CodeSigning.cer"

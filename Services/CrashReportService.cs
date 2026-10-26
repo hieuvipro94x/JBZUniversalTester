@@ -50,7 +50,7 @@ public static class CrashReportService
             .AppendLine("============================================================")
             .Append("Thời gian: ").AppendLine(FormatPcLocalTime(DateTime.Now))
             .Append("Phiên bản: ").AppendLine(AppVersion.DisplayVersion)
-            .AppendLine("Loại lỗi: LỖI KẾT NỐI THIẾT BỊ")
+            .AppendLine("Loại lỗi: " + TesterConnectionNotice.Message)
             .AppendLine("Hướng dẫn: Kiểm tra nguồn và cáp kết nối, sau đó khởi động lại chương trình.")
             .AppendLine()
             .ToString();

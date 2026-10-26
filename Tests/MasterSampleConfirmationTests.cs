@@ -8,7 +8,7 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
-    private static void TestMasterShortGroupAndManualOpen()
+    private static void TestMasterShortGroupAndConfiguredOpen()
     {
         using (TestEngine engine = CreateEngine(out _))
         {
@@ -57,13 +57,12 @@ internal static partial class Program
                 foreach (int missingCount in new[] { 1, 2, 3 })
                 {
                     var settings = new ProductionSettings { MasterFaultRequiredCount = 1,
-                        MasterOpenFaultRequiredCount = 99, MasterSelectedFaultSamples = MasterSampleSelection.OpenCircuit,
-                        IoConfirm1 = 1, IoConfirmN = 1, ProductSettleTimeMs = 0,
-                        ShortCircuitConfirmMs = 0, WrongConnectionConfirmMs = 0, JigContactUnstableWindowMs = 0 };
+                        MasterOpenFaultRequiredCount = missingCount, MasterSelectedFaultSamples = MasterSampleSelection.OpenCircuit,
+                        IoConfirm1 = 1, IoConfirmN = 1 };
                     var vm = CreateTestViewModel(settings, out FakeBoard board);
-                    var model = Model(("A", new[] { 1, 18 }), ("B", new[] { 2, 19 }),
-                        ("C", new[] { 3, 20 }), ("D", new[] { 4, 21 }));
-                    model.PartNumber = "OPEN-CONFIRM-" + missingCount;
+                    var model = Model(Enumerable.Range(1, 20).Select(source =>
+                        ("W" + source, new[] { source, source + 20 })).ToArray());
+                    model.PartNumber = "OPEN-AUTO-" + missingCount;
                     vm.SetModel(model);
                     await (Task)typeof(TestViewModel).GetField("_statisticsLoadTask", flags)!.GetValue(vm)!;
                     void Set(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
@@ -80,6 +79,9 @@ internal static partial class Program
                     engine.SetFrameProcessingEnabled(true);
                     long generation = (long)Get("_runtimeGeneration")!;
                     long sequence = 100;
+                    (int Source, int[] Targets)[] Pairs(int missing, bool allSources = true) =>
+                        Enumerable.Range(1, allSources ? 20 : 19).Select(source =>
+                            (source, source <= 20 - missing ? new[] { source + 20 } : Array.Empty<int>())).ToArray();
                     void Feed(params (int Source, int[] Targets)[] pairs)
                     {
                         Set("_runtimeMode", 0);
@@ -90,39 +92,142 @@ internal static partial class Program
                         Call("ProcessMasterEngineChangedOnUi", generation);
                     }
                     int total = vm.Total, pass = vm.Pass, fail = vm.Fail;
-                    Feed((1, [18]), (2, []), (3, []), (4, []));
+                    string lot = vm.Lot;
+                    Feed(Pairs(20));
+                    Assert(vm.MasterState == MasterSequenceState.WaitingBadMaster && vm.MasterOpenProgressText == "20/0",
+                        "An absent sample remains locked and cannot display a false fully connected count");
+                    Feed(Pairs(19));
                     await Task.Delay(150);
                     Set("_masterBadCollectNotBeforeUtcTicks", 0L);
-                    Feed((1, [18]), (2, []), (3, []), (4, []));
+                    Feed(Pairs(19));
                     Assert(vm.MasterState == MasterSequenceState.TestingBadMaster && !vm.MasterApproved &&
-                           vm.MasterDetectedFaultCount == 3 && vm.IsOpenMasterAwaitingConfirmation &&
+                           vm.MasterDetectedFaultCount == 19 && vm.MasterRequiredFaultCount == missingCount &&
+                           vm.MasterOpenProgressText == "20/1" &&
                            !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
-                        "A partially fitted open sample remains unconfirmed regardless of its missing count until the operator clicks");
-                    Feed((1, [18]), (2, missingCount < 3 ? [19] : []),
-                        (3, missingCount < 2 ? [20] : []), (4, []));
-                    Assert(vm.MasterDetectedFaultCount == missingCount && vm.CanConfirmOpenMaster,
-                        "Confirmation accepts the live missing count without using the obsolete configured value 99");
-                    Feed((1, [2]), (2, []), (3, []), (4, []));
-                    Assert(!vm.CanConfirmOpenMaster, "Wrong wiring cannot enable open-Master confirmation");
-                    await (Task)Call("ConfirmOpenMasterAsync")!;
-                    Assert(vm.MasterState == MasterSequenceState.TestingBadMaster && !vm.MasterApproved,
-                        "Direct invocation also rejects a changed live frame containing wrong wiring");
-                    Feed((1, [18]), (2, [19]), (3, [20]), (4, [21]));
-                    Assert(!vm.CanConfirmOpenMaster, "A fully connected good sample cannot qualify as an open sample");
-                    Feed((1, [18]), (2, missingCount < 3 ? [19] : []),
-                        (3, missingCount < 2 ? [20] : []), (4, []));
-                    board.StartScanCallback = transport => transport.Publish(FrameSeq(sequence++, (1, [18])));
-                    await (Task)Call("ConfirmOpenMasterAsync")!;
+                        "Partially fitted samples cannot auto-pass with more missing connections than configured");
+                    Feed(Pairs(missingCount, allSources: false));
+                    Assert(vm.MasterState == MasterSequenceState.TestingBadMaster && !vm.IsOpenMasterSampleAccepted &&
+                           engine.GetMasterConnectedConnectionCount() == 20 - missingCount &&
+                           vm.MasterOpenProgressText == $"20/{20 - missingCount}",
+                        "The exact missing count still requires coverage of every THT source");
+                    var wrong = Pairs(missingCount);
+                    wrong[0] = (1, [2]);
+                    Feed(wrong);
+                    Assert(!vm.IsOpenMasterSampleAccepted, "An unexpected wire candidate blocks automatic open-Master acceptance");
+                    Feed(Pairs(Math.Max(0, missingCount - 1)));
+                    Assert(vm.MasterState == MasterSequenceState.TestingBadMaster && !vm.IsOpenMasterSampleAccepted,
+                        "Fewer missing connections, including a good sample, cannot satisfy the configured open count");
+                    Feed(Pairs(0));
+                    Assert(!vm.IsOpenMasterSampleAccepted, "A fully connected good sample cannot pass as an open sample");
+                    string cycleId = (string)Get("_masterHistoryCycleId")!;
+                    board.StartScanCallback = transport => transport.Publish(FrameSeq(sequence++, (1, [21])));
+                    Feed(Pairs(missingCount));
+                    for (int attempt = 0; attempt < 100 && vm.MasterState != MasterSequenceState.EjectingBadMaster; attempt++)
+                        await Task.Delay(10);
                     Assert(vm.MasterState == MasterSequenceState.EjectingBadMaster &&
-                           vm.MasterRequiredFaultCount == missingCount &&
+                           vm.MasterRequiredFaultCount == missingCount && vm.MasterDetectedFaultCount == missingCount &&
+                           vm.MasterOpenProgressText == $"20/{20 - missingCount} • OK" &&
                            vm.ResultStatusText == "HOÀN THÀNH KIỂM TRA MẪU TUỘT TUÝT / ĐỨT DÂY" &&
-                           vm.StateBackground == "#2AA84A" && !vm.IsOpenMasterAwaitingConfirmation &&
+                           vm.StateBackground == "#2AA84A" && vm.IsOpenMasterSampleAccepted &&
                            !vm.MasterApproved && !vm.IsPersistenceFault &&
                            board.Commands.Count(command => command == "SET:1") == 1 && !board.Commands.Contains("SET:2"),
-                        $"An explicit confirmation commits the detected open count and ejects only JIG, retaining removal interlock: missing={missingCount}, state={vm.MasterState}, required={vm.MasterRequiredFaultCount}, status={vm.ResultStatusText}, approved={vm.MasterApproved}, persistence={vm.IsPersistenceFault}, device={vm.IsDeviceFault}, commands={string.Join(',', board.Commands)}");
+                        $"Exact configured open count auto-passes and ejects only JIG, preserving removal interlock: required={missingCount}, status={vm.MasterOpenProgressText}");
                     await (Task)Get("_masterPersistenceTask")!;
-                    Assert(vm.Total == total && vm.Pass == pass && vm.Fail == fail,
-                        "Manual sample confirmation cannot count production");
+                    Call("CollectCurrentMasterFaults", generation);
+                    await (Task)Get("_masterPersistenceTask")!;
+                    using var connection = new SqliteConnection($"Data Source={Path.Combine(root, $"{missingCount}.db")};Pooling=False");
+                    connection.Open();
+                    using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT COUNT(*) FROM Tests WHERE CycleId=$Cycle AND Passed=1 AND InspectionTrace LIKE $Trace;";
+                    command.Parameters.AddWithValue("$Cycle", cycleId);
+                    command.Parameters.AddWithValue("$Trace", $"%KẾT NỐI 20/{20 - missingCount}%");
+                    Assert(Convert.ToInt64(command.ExecuteScalar()) == 1,
+                        "Automatic open acceptance records the configured count and total/connected progress exactly once");
+                    command.CommandText = "SELECT COUNT(*) FROM TestFaults f JOIN Tests t ON t.Id=f.TestId WHERE t.CycleId=$Cycle;";
+                    Assert(Convert.ToInt64(command.ExecuteScalar()) == missingCount,
+                        "Every detected open fault remains attached to its original Master test");
+                    command.CommandText = "PRAGMA integrity_check;";
+                    Assert((string?)command.ExecuteScalar() == "ok", "Automatic Master recording retains temporary SQLite integrity");
+                    command.CommandText = "PRAGMA foreign_key_check;";
+                    using (var foreignKeys = command.ExecuteReader())
+                        Assert(!foreignKeys.Read(), "Automatic Master recording creates no orphan history rows");
+                    Assert(vm.Total == total && vm.Pass == pass && vm.Fail == fail && vm.Lot == lot,
+                        "Automatic Master acceptance cannot increment production counts or LOT");
+                    if (missingCount == 2)
+                    {
+                        for (int attempt = 0; attempt < 100 && (int)Get("_masterEjectInProgress")! != 0; attempt++)
+                            await Task.Delay(10);
+                        int commands = board.Commands.Count;
+                        string acceptedState = vm.State;
+                        var window = new JBZUniversalTester.Views.TestWindow(vm, autoStartProduction: false);
+                        // The offline-view constructor sets a capacity warning;
+                        // restore the accepted fixture state without starting production.
+                        vm.State = acceptedState;
+                        var surface = (System.Windows.FrameworkElement)window.Content;
+                        window.Content = null; // No Loaded/startup hardware lifecycle.
+                        surface.DataContext = vm;
+                        surface.Resources.MergedDictionaries.Add(window.Resources);
+                        surface.Measure(new System.Windows.Size(1920, 1080));
+                        surface.Arrange(new System.Windows.Rect(0, 0, 1920, 1080));
+                        surface.UpdateLayout();
+                        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                        var counter = (System.Windows.Controls.TextBlock)window.FindName("FaultCountValueText");
+                        var counterBorder = (System.Windows.Controls.Border)window.FindName("FaultCountValueBorder");
+                        Assert(counter.Text == "20/18 • OK" &&
+                               System.Windows.Controls.Grid.GetRow(counterBorder) == 3 &&
+                               System.Windows.Controls.Grid.GetColumn(counterBorder) == 1 &&
+                               Descendants(surface).OfType<System.Windows.Controls.TextBlock>()
+                                   .Count(text => text.Text == "20/18 • OK") == 1 &&
+                               !Descendants(surface).OfType<System.Windows.Controls.Button>()
+                                   .Any(button => Equals(button.Content, "XÁC NHẬN ĐÃ LẮP XONG MẪU")),
+                            "Actual TestView renders 20/18 OK once, inside the Số lỗi value cell, without a confirmation button");
+                        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(1920, 1080, 96, 96,
+                            System.Windows.Media.PixelFormats.Pbgra32);
+                        bitmap.Render(surface);
+                        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                        using (var output = File.Create(Path.Combine(Path.GetTempPath(), "JBZ-MasterOpen-V327.png")))
+                            encoder.Save(output);
+                        // Project each sample into the real bound counter without
+                        // running another hardware cycle or writing more history.
+                        foreach (var sample in new[] { MasterSampleType.WrongWiring, MasterSampleType.ShortCircuit })
+                        {
+                            Set("_masterSampleType", sample);
+                            Call("RaiseMasterState");
+                            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                            Assert(counter.Text == "2/2 • OK" && vm.IsMasterSampleAccepted &&
+                                   ((System.Windows.Media.SolidColorBrush)counterBorder.Background).Color.ToString() == "#FFDCFCE7",
+                                $"{sample} renders accepted detected/required progress in the Số lỗi cell");
+                            Set("_masterBadVerified", false);
+                            Call("RaiseMasterState");
+                            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                            Assert(counter.Text == "2/2" && !vm.IsMasterSampleAccepted,
+                                $"{sample} has no OK before acceptance");
+                            Set("_masterBadVerified", true);
+                        }
+                        Set("_masterSequenceState", MasterSequenceState.EjectingGoodMaster);
+                        Call("RaiseMasterState");
+                        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                        Assert(counter.Text == "20/20 • OK" && vm.IsMasterSampleAccepted,
+                            "Accepted good Master renders total/connected progress in the Số lỗi cell");
+                        Set("_masterSequenceState", MasterSequenceState.TestingGoodMaster);
+                        Call("RaiseMasterState");
+                        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                        Assert(counter.Text == $"20/{engine.GetMasterConnectedConnectionCount()}" && !vm.IsMasterSampleAccepted,
+                            "Good Master shows live connections without premature OK");
+                        Set("_masterApproved", true);
+                        Call("RaiseMasterState");
+                        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                        Assert(counter.Text == vm.CurrentFaultCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            "Production restores the ordinary fault count outside Master");
+                        Set("_masterApproved", false);
+                        Set("_masterSequenceState", MasterSequenceState.EjectingBadMaster);
+                        Set("_masterSampleType", MasterSampleType.OpenCircuit);
+                        Call("RaiseMasterState");
+                        Assert(board.Commands.Count == commands, "Rendering automatic Master status never sends hardware commands");
+                        typeof(JBZUniversalTester.Views.TestWindow).GetField("_allowClose", flags)!.SetValue(window, true);
+                        window.Close();
+                    }
                 }
             }
             finally

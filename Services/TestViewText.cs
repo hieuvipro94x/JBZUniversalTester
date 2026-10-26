@@ -10,8 +10,10 @@ public static class TestViewText
 
     private static readonly Dictionary<string, string> Korean = new(StringComparer.Ordinal)
     {
+        [TesterConnectionNotice.Message] = "검사기가 연결되지 않았습니다!",
         ["TRANG CHÍNH"] = "메인 화면", ["Số LOT"] = "LOT 번호",
         ["Số lỗi hở mạch"] = "단선 수", ["Số lỗi đấu sai"] = "오배선 수", ["Số lỗi"] = "불량 수",
+        ["Số điểm đứt dây"] = "단선 지점 수",
         ["THỬ LẠI IN TEM"] = "라벨 인쇄 재시도", ["IN THÊM BẢN SAO"] = "라벨 추가 인쇄",
         ["XÁC NHẬN ĐÃ LẮP XONG MẪU"] = "샘플 장착 완료 확인",
         ["Mã sản phẩm"] = "품번", ["Tên sản phẩm"] = "품명", ["Loại xe"] = "차종", ["Mã khách hàng"] = "고객 코드",
@@ -149,7 +151,7 @@ public static class TestViewText
         Template("KIỂM TRA MASTER {0}", "{0} 마스터 검사"),
         Template("CHƯA ĐÚNG MẪU MASTER {0}", "{0} 마스터 샘플이 올바르지 않습니다"),
         Template("CHƯA PHÁT HIỆN LỖI MASTER {0}", "{0} 마스터 불량이 검출되지 않았습니다"),
-        Template("MẪU TUỘT TUÝT / ĐỨT DÂY: THIẾU {0} KẾT NỐI; LẮP XONG MẪU RỒI BẤM XÁC NHẬN", "핀 빠짐 / 단선 샘플: 연결 {0}개 부족; 샘플 장착 후 확인을 누르세요"),
+        Template("MẪU TUỘT TUÝT / ĐỨT DÂY: KẾT NỐI {0}; THIẾU {1}/{2}", "핀 빠짐 / 단선 샘플: 연결 {0}; 단선 {1}/{2}"),
         Template("UniversalTester {0} - Màn hình kiểm tra", "UniversalTester {0} - 검사 화면"),
         Template("ĐANG ĐỒNG BỘ {0} CARD...", "보드 {0}개 동기화 중..."),
         Template("ĐANG TEST LEAK LẠI LẦN {0}", "기밀 재검사 {0}회 진행 중"),
