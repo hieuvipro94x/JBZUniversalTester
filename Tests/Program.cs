@@ -94,6 +94,14 @@ internal static partial class Program
             Console.WriteLine("PASS: Per-product label selection, immediate LOT base changes and preserved history");
             return 0;
         }
+        if (args is ["--test-lot-responsiveness"])
+        {
+            TestLotPersistenceResponsiveness();
+            TestProductLabelAndImmediateLotSettings();
+            TestLotBaseRetainsDailyPassProgress();
+            Console.WriteLine("PASS: Slow CFG storage keeps input/LOT reads responsive and retains transaction semantics");
+            return 0;
+        }
         if (args is ["--test-deferred-resistance-recovery"])
         {
             TestDeferredResistanceRecovery();
@@ -434,6 +442,7 @@ internal static partial class Program
             ("Product label choices and LOT base edits apply immediately without rewriting history", TestProductLabelAndImmediateLotSettings),
             ("First untested product selection requires and retains LOT/template setup", TestFirstProductPrintSetup),
             ("LOT base edits retain the daily PASS count in display and printer output", TestLotBaseRetainsDailyPassProgress),
+            ("Slow LOT configuration writes never block input or counter reads", TestLotPersistenceResponsiveness),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
@@ -9306,7 +9315,7 @@ internal static partial class Program
         string labelFlowSource = File.ReadAllText(Path.Combine(
             Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
         int recordStart = labelFlowSource.IndexOf(
-            "private async Task<bool> RecordCompletedProductAsync",
+            "private async Task<bool> RecordCompletedProductCoreAsync",
             StringComparison.Ordinal);
         int captureStart = labelFlowSource.IndexOf(
             "private static bool TryCapturePassLabel",
@@ -9326,8 +9335,8 @@ internal static partial class Program
             retryStart,
             StringComparison.Ordinal);
         string retrySource = labelFlowSource[retryStart..reprintStart];
-        Assert(recordSource.IndexOf("TryCommitSuccessfulPass", StringComparison.Ordinal) >= 0 &&
-               recordSource.IndexOf("TryCommitSuccessfulPass", StringComparison.Ordinal) <
+        Assert(recordSource.IndexOf("CommitSuccessfulPassAsync", StringComparison.Ordinal) >= 0 &&
+               recordSource.IndexOf("CommitSuccessfulPassAsync", StringComparison.Ordinal) <
                recordSource.IndexOf("PrintPassLabelSafeAsync", StringComparison.Ordinal),
             "LOT commits after durable PASS before asynchronous first-label printing");
         Assert(!firstPrintSource.Contains("IsCommitCandidate", StringComparison.Ordinal) &&

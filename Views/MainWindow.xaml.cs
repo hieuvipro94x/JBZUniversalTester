@@ -395,6 +395,7 @@ public partial class MainWindow : Window
 
         // Config/THT preparation có disk/parse work; tạo ViewModel ngoài
         // Dispatcher để BAML của page được cấp phát sau khi UI đã rảnh.
+        await _viewModel.Test.WaitForLotConfigurationWritesAsync();
         ProductionSettingsViewModel settingsViewModel = await Task.Run(
             () => new ProductionSettingsViewModel(_viewModel.Test));
 

@@ -143,6 +143,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _deferredResistanceRecoveryActive;
     private Task _deferredResistanceRecoveryTask = Task.CompletedTask;
     private Task _leakFailureCommitTask = Task.CompletedTask;
+    private Task _productionResultCommitTask = Task.CompletedTask;
     private int _homeExitClearFrames;
     private long _homeExitFrameSequence = -1;
     private long _homeExitScanGeneration = -1;
@@ -2832,6 +2833,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         int generation = Interlocked.Increment(ref _modelLoadGeneration);
         State = "ĐANG NẠP MÃ HÀNG...";
+        await WaitForLotConfigurationWritesAsync();
+        if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
 
         ProductModel model;
         TestEngine.PreparedModelState preparedEngineModel;
@@ -2943,13 +2946,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (stats.LifetimeTotal > 0) return true;
         async Task Save(JBZUniversalTester.Views.ProductInitialPrintSetup setup)
         {
+            await WaitForLotConfigurationWritesAsync();
             if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested || IsProductRemovalPending)
                 throw new InvalidOperationException("Lựa chọn mã hàng đã thay đổi hoặc chưa tháo hết sản phẩm.");
             if (setup.StartLot < 0 || setup.StartLot == long.MaxValue ||
                 (setup.PrintLabel && setup.TemplateType != LabelProfileResolver.NormalizeTemplateType(setup.TemplateType)))
                 throw new InvalidOperationException("LOTNO hoặc loại tem không hợp lệ.");
-            ProductionSettings snapshot = System.Text.Json.JsonSerializer.Deserialize<ProductionSettings>(
-                System.Text.Json.JsonSerializer.Serialize(_productionSettings))!;
+            ProductionSettings snapshot = await Task.Run(() =>
+                System.Text.Json.JsonSerializer.Deserialize<ProductionSettings>(
+                    System.Text.Json.JsonSerializer.Serialize(_productionSettings))!);
+            if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested || IsProductRemovalPending)
+                throw new InvalidOperationException("Lựa chọn mã hàng đã thay đổi hoặc chưa tháo hết sản phẩm.");
             ProductionConfigService.SetProductLot(snapshot, key, setup.StartLot,
                 DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
             snapshot.LabelTemplateTypesByProduct[key] = setup.PrintLabel ? setup.TemplateType : ProductionConfigService.NoProductLabel;
@@ -6984,6 +6991,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         try { await _boardFrameWorkerTask; } catch { }
         await _deferredResistanceRecoveryTask;
         await _leakFailureCommitTask;
+        await _productionResultCommitTask;
 
         // Các commit đã nhận trước thời điểm shutdown phải hoàn tất trước khi
         // đóng store/service. Mỗi trường là task mới nhất của một hàng đợi có
@@ -12649,14 +12657,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (selectedDateLot != _lotSequence.NextLot)
             {
                 long previousLot = _lotSequence.NextLot;
-                if (!_lotSequence.TryReconcileCommittedLot(
-                        selectedDateLot,
-                        out string reconcileError,
-                        batchKey,
-                        restoreSelectedDate: true))
+                var reconciled = await PersistLotWithoutBlockingUiAsync(() =>
+                    _lotSequence.ReconcileCommittedLotAsync(selectedDateLot, batchKey, restoreSelectedDate: true));
+                if (!reconciled.Success)
                 {
                     throw new InvalidOperationException(
-                        $"Không thể đồng bộ LOTNO từ SQLite: {reconcileError}");
+                        $"Không thể đồng bộ LOTNO từ SQLite: {reconciled.Error}");
                 }
 
                 AddLog(
@@ -12794,7 +12800,24 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         return string.Join(' ', stages);
     }
 
-    private async Task<bool> RecordCompletedProductAsync(
+    private Task<bool> RecordCompletedProductAsync(
+        bool passed,
+        string resultText,
+        ProductModel cycleModel,
+        long runtimeGeneration,
+        CancellationToken cycleToken,
+        IReadOnlyList<FaultDetail>? failureDetails = null,
+        DateTime? resultAtOverride = null)
+    {
+        Task<bool> committing = RecordCompletedProductCoreAsync(passed, resultText, cycleModel,
+            runtimeGeneration, cycleToken, failureDetails, resultAtOverride);
+        // Rejected/duplicate synchronous calls must not replace the accepted
+        // transaction that shutdown still needs to drain.
+        if (!committing.IsCompleted) _productionResultCommitTask = committing;
+        return committing;
+    }
+
+    private async Task<bool> RecordCompletedProductCoreAsync(
         bool passed,
         string resultText,
         ProductModel cycleModel,
@@ -12989,21 +13012,23 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 if (databaseResult.AlreadyCommitted)
                 {
                     _lotSequence.ReleaseReservation(cycleId);
-                    if (databaseResult.Statistics.DailyTotal > 0 &&
-                        !_lotSequence.TryReconcileCommittedLot(
-                            databaseResult.Statistics.LastLotNo,
-                            out string reconcileError,
-                            history.ProductionBatchKey))
+                    var reconciled = databaseResult.Statistics.DailyTotal > 0
+                        ? await PersistLotWithoutBlockingUiAsync(() => _lotSequence.ReconcileCommittedLotAsync(
+                            databaseResult.Statistics.LastLotNo, history.ProductionBatchKey))
+                        : (Success: true, Error: string.Empty);
+                    if (!reconciled.Success)
                     {
                         throw new InvalidOperationException(
-                            $"PASS đã tồn tại nhưng chưa thể đồng bộ LOTNO: {reconcileError}");
+                            $"PASS đã tồn tại nhưng chưa thể đồng bộ LOTNO: {reconciled.Error}");
                     }
                 }
-                else if (!_lotSequence.TryCommitSuccessfulPass(
-                             cycleId, completedLot, out string lotCommitError))
+                else
                 {
-                    throw new InvalidOperationException(
-                        $"PASS đã lưu nhưng chưa thể tăng LOT {completedLot}: {lotCommitError}");
+                    var savedLot = await PersistLotWithoutBlockingUiAsync(() =>
+                        _lotSequence.CommitSuccessfulPassAsync(cycleId, completedLot));
+                    if (!savedLot.Success)
+                        throw new InvalidOperationException(
+                            $"PASS đã lưu nhưng chưa thể tăng LOT {completedLot}: {savedLot.Error}");
                 }
             }
             _recordedHistoryCycleId = cycleId;
@@ -13218,6 +13243,23 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
 
         _probePersistenceTask = PersistProbeCycleStartedAsync(model);
+    }
+
+    public async Task WaitForLotConfigurationWritesAsync()
+    {
+        await _statisticsLoadTask;
+        await _modelPersistenceGate.WaitAsync();
+        _modelPersistenceGate.Release();
+    }
+
+    private async Task<(bool Success, string Error)> PersistLotWithoutBlockingUiAsync(
+        Func<Task<(bool Success, string Error)>> persist)
+    {
+        // Share the existing CFG owner with LastThtPath writes. Settings and
+        // explicit model selection await this barrier before taking snapshots.
+        await _modelPersistenceGate.WaitAsync();
+        try { return await persist(); }
+        finally { _modelPersistenceGate.Release(); }
     }
 
     private void ScheduleSelectedModelPersistence(string? selectedPath)

@@ -6,6 +6,7 @@ namespace JBZUniversalTester.Services;
 public sealed class LotSequenceService
 {
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _asyncPersistenceGate = new(1, 1);
     private readonly ProductionSettings _settings;
     private readonly Action<ProductionSettings> _persist;
     private readonly Func<DateTime> _now;
@@ -210,6 +211,90 @@ public sealed class LotSequenceService
     public bool TryCommitSuccessfulPrint(string cycleId, long printedLot, out string error) =>
         TryCommitSuccessfulPass(cycleId, printedLot, out error);
 
+    public Task<(bool Success, string Error)> CommitSuccessfulPassAsync(string cycleId, long completedLot) =>
+        PersistDetachedAsync(cycleId, worker =>
+        {
+            bool success = worker.TryCommitSuccessfulPass(cycleId, completedLot, out string error);
+            return (success, error);
+        });
+
+    public Task<(bool Success, string Error)> ReconcileCommittedLotAsync(
+        long committedLot, string? batchKey = null, bool restoreSelectedDate = false) =>
+        PersistDetachedAsync(null, worker =>
+        {
+            bool success = worker.TryReconcileCommittedLot(committedLot, out string error, batchKey, restoreSelectedDate);
+            return (success, error);
+        });
+
+    private async Task<(bool Success, string Error)> PersistDetachedAsync(
+        string? cycleId, Func<LotSequenceService, (bool Success, string Error)> operation)
+    {
+        await _asyncPersistenceGate.WaitAsync();
+        try
+        {
+            string activeKey, productKey, revision;
+            long previous;
+            ProductionSettings snapshot;
+            KeyValuePair<string, LotReservation>[] reservations;
+            lock (_gate)
+            {
+                activeKey = _activeProductKey;
+                productKey = cycleId is not null && _reservations.TryGetValue(cycleId, out LotReservation reserved)
+                    ? reserved.ProductKey : activeKey;
+                ProductLotSettings current = GetLotLocked(productKey, false);
+                previous = current.LotNo;
+                revision = Revision(current);
+                snapshot = new ProductionSettings();
+                ProductionConfigService.CopyInto(snapshot, _settings);
+                // Freeze the small mutable counter records now. The VM's CFG
+                // owner prevents other settings edits until this job drains;
+                // expensive serializer metadata/deep-copy work belongs to the worker.
+                snapshot.LotSettingsByProduct = _settings.LotSettingsByProduct.ToDictionary(
+                    item => item.Key, item => new ProductLotSettings
+                    {
+                        StartLotNo = item.Value.StartLotNo, LotNo = item.Value.LotNo,
+                        LotNoDate = item.Value.LotNoDate, BulkPrintLotNo = item.Value.BulkPrintLotNo,
+                        HistoryBatchId = item.Value.HistoryBatchId, LastStartChangedDate = item.Value.LastStartChangedDate
+                    }, StringComparer.OrdinalIgnoreCase);
+                reservations = _reservations.ToArray();
+            }
+
+            // The worker owns a detached DTO and its own counter lock. Slow
+            // Flush(true) never holds the live lock used by clock/input reads.
+            var outcome = await Task.Run(() =>
+            {
+                ProductionSettings detached = System.Text.Json.JsonSerializer.Deserialize<ProductionSettings>(
+                    System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot))!;
+                var worker = new LotSequenceService(detached, _persist, _now);
+                worker.SelectProduct(activeKey, false);
+                foreach (var item in reservations) worker._reservations[item.Key] = item.Value;
+                var result = operation(worker);
+                return (Result: result, Lot: detached.LotSettingsByProduct[productKey]);
+            });
+            if (!outcome.Result.Success) return outcome.Result;
+            lock (_gate)
+            {
+                ProductLotSettings live = GetLotLocked(productKey, false);
+                if (live.LotNo == previous && Revision(live) == revision)
+                {
+                    live.LotNo = outcome.Lot.LotNo;
+                    live.LotNoDate = outcome.Lot.LotNoDate;
+                    if (IsActiveProduct(productKey)) SyncCompatibilityFieldsLocked(live);
+                    RemoveCommittedReservationsLocked(productKey, live.LotNo);
+                }
+                if (cycleId is not null) _reservations.Remove(cycleId);
+            }
+            return outcome.Result;
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Cannot persist LOT snapshot: {ex.Message}");
+        }
+        finally { _asyncPersistenceGate.Release(); }
+    }
+
+    private static string Revision(ProductLotSettings lot) => $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}";
+
     public bool IsCommitCandidate(string cycleId, long lotNo)
     {
         lock (_gate)
@@ -274,8 +359,7 @@ public sealed class LotSequenceService
             return false;
         }
 
-        ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
-            _settings, productKey, migrateCurrentLot: false);
+        ProductLotSettings lot = GetLotLocked(productKey, false);
         string today = _now().Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string storedDate = (lot.LotNoDate ?? string.Empty).Trim();
         if (string.Equals(storedDate, today, StringComparison.Ordinal))
@@ -328,9 +412,11 @@ public sealed class LotSequenceService
         }
     }
 
-    private ProductLotSettings ActiveLotLocked() =>
-        ProductionConfigService.GetOrCreateProductLot(
-            _settings, _activeProductKey, migrateCurrentLot: true);
+    private ProductLotSettings ActiveLotLocked() => GetLotLocked(_activeProductKey, true);
+
+    private ProductLotSettings GetLotLocked(string key, bool migrateCurrentLot) =>
+        _settings.LotSettingsByProduct.TryGetValue(key, out ProductLotSettings? lot)
+            ? lot : ProductionConfigService.GetOrCreateProductLot(_settings, key, migrateCurrentLot);
 
     private void SyncCompatibilityFieldsLocked(ProductLotSettings lot)
     {
