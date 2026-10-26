@@ -8,6 +8,7 @@ namespace JBZUniversalTester.Services;
 
 public static class ProductionConfigService
 {
+    public const string NoProductLabel = "NONE";
     private static readonly object AtomicWriteGate = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -200,13 +201,17 @@ public static class ProductionConfigService
             $"[LabelExternalPrintFile]{settings.Label.ExternalPrintFile}"
         };
 
+        foreach ((string productKey, string template) in settings.LabelTemplateTypesByProduct
+                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
+            lines.Add($"[Label.Product.{Uri.EscapeDataString(productKey)}]{NormalizeProductLabel(template)}");
+
         foreach ((string productKey, ProductLotSettings lot) in settings.LotSettingsByProduct
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
         {
             string encodedKey = Uri.EscapeDataString(productKey);
             lines.Add(
                 $"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate};" +
-                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId}");
+                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId};{lot.LastStartChangedDate}");
         }
 
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
@@ -311,6 +316,38 @@ public static class ProductionConfigService
         return lot;
     }
 
+    public static string GetProductLabelTemplate(ProductionSettings settings, string productKey) =>
+        LabelProfileResolver.NormalizeTemplateType(
+            settings.LabelTemplateTypesByProduct.TryGetValue(productKey, out string? template)
+                ? template : settings.Label.TemplateType);
+
+    public static bool IsProductLabelPrintingEnabled(ProductionSettings settings, string productKey) =>
+        !settings.LabelTemplateTypesByProduct.TryGetValue(productKey, out string? value) ||
+        !string.Equals(value, NoProductLabel, StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeProductLabel(string? value) =>
+        string.Equals(value, NoProductLabel, StringComparison.OrdinalIgnoreCase)
+            ? NoProductLabel : LabelProfileResolver.NormalizeTemplateType(value);
+
+    public static void ApplyProductLabelTemplate(ProductionSettings settings, string productKey)
+    {
+        LabelSettings label = settings.Label;
+        if (!IsProductLabelPrintingEnabled(settings, productKey))
+        {
+            label.PreferSelectedTemplate = false;
+            return;
+        }
+        label.PreferSelectedTemplate = settings.LabelTemplateTypesByProduct.ContainsKey(productKey);
+        label.TemplateType = GetProductLabelTemplate(settings, productKey);
+        if (!label.PreferSelectedTemplate) return; // Preserve legacy global/custom dimensions.
+        (label.WidthMm, label.HeightMm) = label.TemplateType switch
+        {
+            LabelSettings.SmallTemplate => (60, 25),
+            LabelSettings.SmallQrTemplate or LabelSettings.BcwTemplate => (60, 15),
+            _ => (90, 15)
+        };
+    }
+
     public static void SetProductLot(
         ProductionSettings settings,
         string productKey,
@@ -327,7 +364,10 @@ public static class ProductionConfigService
             // cũ khi lưu các cài đặt độc lập như số card mở rộng.
             lot.StartLotNo = normalizedStart;
             if (startChanged)
+            {
                 lot.HistoryBatchId = Guid.NewGuid().ToString("N");
+                lot.LastStartChangedDate = normalizedDate;
+            }
             lot.LotNo = normalizedStart;
             lot.BulkPrintLotNo = normalizedStart;
             lot.LotNoDate = normalizedDate;
@@ -548,6 +588,17 @@ public static class ProductionConfigService
 
         foreach ((string key, string value) in map)
         {
+            const string prefix = "Label.Product.";
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string productKey = Uri.UnescapeDataString(key[prefix.Length..]);
+                if (!string.IsNullOrWhiteSpace(productKey))
+                    settings.LabelTemplateTypesByProduct[productKey] = NormalizeProductLabel(value);
+            }
+        }
+
+        foreach ((string key, string value) in map)
+        {
             const string prefix = "ProductLot.";
             if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -564,6 +615,7 @@ public static class ProductionConfigService
             {
                 LotNo = Math.Max(0, lotNo),
                 HistoryBatchId = parts.Length > 4 ? parts[4] : string.Empty,
+                LastStartChangedDate = parts.Length > 5 ? parts[5].Trim() : string.Empty,
                 LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty,
                 StartLotNo = parts.Length > 2 &&
                              long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long startLotNo)
@@ -767,6 +819,12 @@ public static class ProductionConfigService
             if (string.IsNullOrWhiteSpace(key) || !Enum.IsDefined(settings.MasterSampleTypesByModel[key]))
                 settings.MasterSampleTypesByModel.Remove(key);
         settings.LotSettingsByProduct ??= new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase);
+        settings.LabelTemplateTypesByProduct ??= new(StringComparer.OrdinalIgnoreCase);
+        if (settings.LabelTemplateTypesByProduct.Comparer != StringComparer.OrdinalIgnoreCase)
+            settings.LabelTemplateTypesByProduct = new(settings.LabelTemplateTypesByProduct, StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settings.LabelTemplateTypesByProduct.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key)) settings.LabelTemplateTypesByProduct.Remove(key);
+            else settings.LabelTemplateTypesByProduct[key] = NormalizeProductLabel(settings.LabelTemplateTypesByProduct[key]);
         if (settings.MasterFaultCountsByModel.Comparer != StringComparer.OrdinalIgnoreCase)
         {
             settings.MasterFaultCountsByModel = new Dictionary<string, int>(

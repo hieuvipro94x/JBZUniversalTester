@@ -118,6 +118,13 @@ public class KeysightVisaService : IDisposable
     /// </summary>
     public virtual string ConnectAutomatic(string? preferredResource = null)
     {
+        // Reconnect and production/manual connection share one VISA session.
+        // Hold the same lock through discovery, identity validation and cleanup.
+        lock (_sync) return ConnectAutomaticCore(preferredResource);
+    }
+
+    private string ConnectAutomaticCore(string? preferredResource)
+    {
         if (IsConnected) return InstrumentId;
 
         var candidates = new List<string>();

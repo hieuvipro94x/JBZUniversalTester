@@ -1599,6 +1599,7 @@ public partial class ProductionSettingsPage : UserControl
         long lot = Math.Max(0, lotNo ?? _vm.Settings.LotNo);
         LabelSettings labelSettings = JsonSerializer.Deserialize<LabelSettings>(
             JsonSerializer.Serialize(_vm.Settings.Label))!;
+        labelSettings.PreferSelectedTemplate = true;
         CancellationToken token = cancellationToken ?? _pageLifetime.Token;
         return Task.Run(() => BuildSettingsLabelRequest(purpose, lot, loadedModel, thtPath, labelSettings), token);
     }
@@ -1854,6 +1855,7 @@ public partial class ProductionSettingsPage : UserControl
     private string CaptureEditableSettingsSnapshot() => JsonSerializer.Serialize(new
     {
         _vm.Settings,
+        _vm.PrintLabelForCurrentProduct,
         _vm.MasterFaultRequiredCount,
         _vm.MasterSelectedFaultSamples,
         _vm.MasterOpenFaultRequiredCount,

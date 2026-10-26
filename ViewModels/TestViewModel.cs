@@ -100,6 +100,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private readonly SemaphoreSlim _productionPersistenceGate = new(1, 1);
     private readonly Func<string, Task<bool>> _verifyProbeMaintenancePassword;
     private readonly Action<Exception, string, string?> _writeHardwareFaultReport;
+    private readonly PeripheralReconnectWorker _keysightReconnect;
+    private readonly PeripheralReconnectWorker _leakReconnect;
+    private WaterProofMachineSettings? _leakReconnectSettings;
     private int _probeMaintenanceResetActive;
     private readonly SemaphoreSlim _removalPersistenceGate = new(1, 1);
     private readonly SemaphoreSlim _modelPersistenceGate = new(1, 1);
@@ -1317,6 +1320,19 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _waterProofRunOverride = waterProofRun;
         _settings = settings;
         _productionSettings = productionSettings;
+        _keysightReconnect = new PeripheralReconnectWorker("Keysight", async ct =>
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Run(() => _visa.ConnectAutomatic(_settings.Keysight.Resource));
+        }, _lifetimeCts.Token);
+        _leakReconnect = new PeripheralReconnectWorker("Leak", async ct =>
+        {
+            WaterProofMachineSettings machine = Volatile.Read(ref _leakReconnectSettings)!;
+            if (!string.IsNullOrWhiteSpace(LabelPrinterConnectedPort) &&
+                string.Equals(machine.PortName, LabelPrinterConnectedPort, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Leak COM đang được máy in sử dụng.");
+            await _waterProof.EnsureConnectedAsync(machine, ct);
+        }, _lifetimeCts.Token);
         _verifyProbeMaintenancePassword = verifyProbeMaintenancePassword ??
             (password => Task.Run(() => SettingsAccessService.Current.VerifyAdmin(password)));
         _writeHardwareFaultReport = hardwareFaultReport ?? ((exception, source, context) =>
@@ -1771,6 +1787,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Để lớp Settings hiển thị thông báo cho người vận hành rồi cho phép thử lại.
             throw;
         }
+        catch (KeysightEquipmentException ex) when (_board.IsConnected)
+        {
+            // The Settings operation owns manual cleanup. Do not start a second
+            // production recovery concurrently with ExitManualModeAsync.
+            State = "KHÔNG KẾT NỐI KEYSIGHT 34461A";
+            AsyncFileLogService.Current.Error($"[MANUAL-R] KEYSIGHT READ FAILED - APP PRESERVED: {ex}");
+            await Task.Run(_visa.Dispose);
+            RequestKeysightReconnect();
+            throw new ManualResistanceKeysightException(
+                "Không đọc được đồng hồ Keysight. Kiểm tra nguồn, USB và VISA rồi thử lại.", ex);
+        }
         catch (Exception ex)
         {
             // Các lỗi còn lại của đường relay/D2XX vẫn giữ chính sách an toàn cũ.
@@ -1862,11 +1889,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     firstResponseCts.IsCancellationRequested &&
                     Volatile.Read(ref firstResponseReceived) == 0)
                 {
+                    RequestLeakReconnect(machine);
                     throw new TimeoutException(
                         $"Không nhận được phản hồi hợp lệ từ máy Leak trên {machine.PortName} " +
                         $"trong {firstResponseTimeoutMs / 1000.0:0.#} giây. " +
                         "Hãy chọn đúng cổng COM và kiểm tra cáp/kết nối máy Leak.",
                         ex);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    RequestLeakReconnect(machine);
+                    throw;
                 }
                 if (!result.Passed)
                     _sound.PlayLeakFail();
@@ -2006,22 +2039,37 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         long generation = Volatile.Read(ref _runtimeGeneration);
         ProductModel? model = _model;
+        CancellationToken ct = CurrentCycleToken();
+        bool IsCurrentRecovery() => !ct.IsCancellationRequested && !_lifetimeCts.IsCancellationRequested &&
+            generation == Volatile.Read(ref _runtimeGeneration) && ReferenceEquals(model, _model);
+        if (!IsCurrentRecovery()) return;
         AsyncFileLogService.Current.Error($"KEYSIGHT EQUIPMENT ERROR - APP PRESERVED: {exception}");
         ArmWaterProofEquipmentErrorRemovalWait();
         State = "LỖI KEYSIGHT - CHỜ THÁO SẢN PHẨM";
-        await Task.Run(_visa.Dispose);
+        try { await Task.Run(_visa.Dispose); }
+        catch (Exception closeException)
+        {
+            AsyncFileLogService.Current.Error($"KEYSIGHT session cleanup failed: {closeException}");
+        }
+        RequestKeysightReconnect();
+        if (!IsCurrentRecovery()) return;
         try
         {
-            await _board.AllRelaysOffAsync();
-            await StartProductionScanAndVerifyFrameAsync(CurrentCycleToken(), "KEYSIGHT_DEVICE_ERROR");
+            await _board.AllRelaysOffAsync(ct);
+            await StartProductionScanAndVerifyFrameAsync(ct, "KEYSIGHT_DEVICE_ERROR");
+        }
+        catch (OperationCanceledException) when (!IsCurrentRecovery())
+        {
+            AddLog("Bỏ qua khôi phục Keysight: đã rời màn hình hoặc hủy chu kỳ.");
+            return;
         }
         catch (Exception boardException)
         {
+            if (!IsCurrentRecovery()) return;
             EnterDeviceFault(boardException, "KeysightRecovery.D2XX");
             return;
         }
-        if (generation != Volatile.Read(ref _runtimeGeneration) || !ReferenceEquals(model, _model))
-            return;
+        if (!IsCurrentRecovery()) return;
         if (Application.Current is not null)
             await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
                 ResolveOperatorDialogOwner(),
@@ -2840,6 +2888,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (generation != Volatile.Read(ref _modelLoadGeneration))
             return null;
 
+        if (!await EnsureInitialProductPrintSetupAsync(model))
+        {
+            if (!IsDeviceFault && !IsBoardStartupUnavailable && !IsPersistenceFault)
+                State = ReadyStateForCurrentModel();
+            return null;
+        }
+        if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
+
         _productionSettings.LastThtPartKey = JBZUniversalTester.Views.PartSelectionWindow.PartKey(model);
         BeginModelTransition(generation);
         try
@@ -2869,6 +2925,44 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 ? "CHƯA KẾT NỐI BO - KHÔNG THỂ TEST"
                 : "LỖI THIẾT BỊ";
         return model;
+    }
+
+    public async Task<bool> EnsureInitialProductPrintSetupAsync(ProductModel model,
+        Func<ProductModel, Func<JBZUniversalTester.Views.ProductInitialPrintSetup, Task>, Task<bool>>? showDialog = null,
+        Action<ProductionSettings>? persist = null)
+    {
+        // Real application prompts only on explicit selection; headless fixtures
+        // can supply a dialog callback without touching actual station config.
+        if (showDialog is null && Application.Current is null) return true;
+        string key = ProductionConfigService.GetLotProductKey(model);
+        if (_productionSettings.LabelTemplateTypesByProduct.ContainsKey(key)) return true;
+        int generation = Volatile.Read(ref _modelLoadGeneration);
+        ProductionStatisticsSnapshot stats = await ProductionPersistence.GetStatisticsAsync(
+            PartIdentitySnapshot.Capture(model), DateTime.Now, _lifetimeCts.Token);
+        if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested) return false;
+        if (stats.LifetimeTotal > 0) return true;
+        async Task Save(JBZUniversalTester.Views.ProductInitialPrintSetup setup)
+        {
+            if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested || IsProductRemovalPending)
+                throw new InvalidOperationException("Lựa chọn mã hàng đã thay đổi hoặc chưa tháo hết sản phẩm.");
+            if (setup.StartLot < 0 || setup.StartLot == long.MaxValue ||
+                (setup.PrintLabel && setup.TemplateType != LabelProfileResolver.NormalizeTemplateType(setup.TemplateType)))
+                throw new InvalidOperationException("LOTNO hoặc loại tem không hợp lệ.");
+            ProductionSettings snapshot = System.Text.Json.JsonSerializer.Deserialize<ProductionSettings>(
+                System.Text.Json.JsonSerializer.Serialize(_productionSettings))!;
+            ProductionConfigService.SetProductLot(snapshot, key, setup.StartLot,
+                DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+            snapshot.LabelTemplateTypesByProduct[key] = setup.PrintLabel ? setup.TemplateType : ProductionConfigService.NoProductLabel;
+            await Task.Run(() => (persist ?? ProductionConfigService.Save)(snapshot));
+            if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested) return;
+            ProductionConfigService.CopyInto(_productionSettings, snapshot);
+        }
+        if (showDialog is not null) return await showDialog(model, Save);
+        var dialog = new JBZUniversalTester.Views.ProductPrintSetupWindow(model, Save)
+        {
+            Owner = ResolveOperatorDialogOwner()
+        };
+        return dialog.ShowDialog() == true;
     }
 
     /// <summary>Nhận model đã parse sẵn bởi caller nội bộ.</summary>
@@ -6794,10 +6888,30 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            RequestKeysightReconnect();
             throw new KeysightEquipmentException("Không kết nối được đồng hồ Keysight.", ex);
         }
         AddLog($"[AUTO-R] Keysight connected: {idn}");
         AddLog($"Đã tự kết nối Keysight: {idn}");
+    }
+
+    private void RequestKeysightReconnect()
+    {
+        // Headless simulations never open real VISA/COM devices.
+        if (Application.Current is not null && !IsDeviceFault)
+            _keysightReconnect.Request();
+    }
+
+    private void RequestLeakReconnect(WaterProofMachineSettings machine)
+    {
+        if (Application.Current is null || IsDeviceFault) return;
+        Volatile.Write(ref _leakReconnectSettings, new WaterProofMachineSettings
+        {
+            PortName = machine.PortName, BaudRate = machine.BaudRate,
+            ReadTimeoutMs = machine.ReadTimeoutMs, WriteTimeoutMs = machine.WriteTimeoutMs,
+            AutoConnect = machine.AutoConnect
+        });
+        _leakReconnect.Request();
     }
 
     /// <summary>
@@ -6859,6 +6973,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _board.ProductionProbePreviewReceived -= OnProductionProbePreviewReceived;
         _lifetimeCts.Cancel();
         CancelCycleOperations();
+        await Task.WhenAll(_keysightReconnect.Completion, _leakReconnect.Completion);
         ResetManualProbeSession("shutdown");
 
         if (_hardwareMonitorTask is not null)
@@ -11263,13 +11378,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 {
                     AddLog($"[WATERPROOF] Không thể disconnect Leak COM sau lỗi: {disconnectEx.Message}");
                 }
+                RequestLeakReconnect(_productionSettings.WaterProofMachine);
 
-                await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
-                    ResolveOperatorDialogOwner(),
-                    "Mất kết nối máy Leak. Hãy rút/cắm lại cáp, chọn lại cổng COM rồi thử lại.",
-                    "KIỂM TRA MÁY LEAK",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error));
+                if (Application.Current is not null)
+                    await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
+                        ResolveOperatorDialogOwner(),
+                        "Mất kết nối máy Leak. Cắm lại USB; phần mềm sẽ tự kết nối lại. Tháo/lắp lại sản phẩm để kiểm tra tiếp.",
+                        "KIỂM TRA MÁY LEAK",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error));
 
                 if (!masterValidation)
                     ArmWaterProofEquipmentErrorRemovalWait();
@@ -11281,9 +11398,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     if (!masterValidation && _waitForProductRelease)
                         State = "LỖI THIẾT BỊ LEAK - CHỜ THÁO SẢN PHẨM";
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
                 catch (Exception scanEx)
                 {
-                    EnterDeviceFault(scanEx, "WaterProofRecovery.RestartD2XX");
+                    if (generation == Volatile.Read(ref _runtimeGeneration) && ReferenceEquals(_model, cycleModel))
+                        EnterDeviceFault(scanEx, "WaterProofRecovery.RestartD2XX");
                 }
                 return false;
             }
@@ -12154,6 +12276,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void RefreshProductionUiSettings()
     {
         _lotSequence.RefreshActiveProduct();
+        if (_model is not null)
+            ProductionConfigService.ApplyProductLabelTemplate(_productionSettings, ProductionConfigService.GetLotProductKey(_model));
         RefreshProductionCounterPeriod();
         lock (_historyStoreGate)
             _historyStore = null;
@@ -12257,6 +12381,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _lotSequence.SelectProduct(
             ProductionConfigService.GetLotProductKey(_model),
             migrateLegacyLot);
+        ProductionConfigService.ApplyProductLabelTemplate(_productionSettings, ProductionConfigService.GetLotProductKey(_model));
         // Không để sản lượng mã trước còn hiện trong lúc SQLite đang tải mã mới.
         // Mỗi mã bắt đầu UI ở 0 rồi nhận đúng daily statistics theo PartNumber.
         Total = 0;
@@ -12478,8 +12603,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             PartIdentitySnapshot part = PartIdentitySnapshot.Capture(model);
             string batchKey = _lotSequence.HistoryBatchKey;
+            DateTime statisticsNow = DateTime.Now;
+            _productionSettings.LotSettingsByProduct.TryGetValue(ProductionConfigService.GetLotProductKey(model), out ProductLotSettings? productLot);
+            bool startChangedOnSelectedDate = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId) &&
+                productLot.LastStartChangedDate == statisticsNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            Task<long?> batchLotTask = startChangedOnSelectedDate
+                ? ProductionPersistence.GetLatestCommittedLotForBatchAsync(part, statisticsNow, batchKey, _lifetimeCts.Token)
+                : Task.FromResult<long?>(null);
             Task<ProductionStatisticsSnapshot> statisticsTask =
-                ProductionPersistence.GetStatisticsAsync(part, DateTime.Now, _lifetimeCts.Token);
+                ProductionPersistence.GetStatisticsAsync(part, statisticsNow, _lifetimeCts.Token);
             Task<ProbeCounterSnapshot> probeTask = ProductionPersistence.GetProbeCounterAsync(
                 part,
                 _productionSettings.ProbeReplacementThreshold,
@@ -12499,6 +12631,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }, _lifetimeCts.Token);
             var snapshot = (
                 Stats: await statisticsTask,
+                BatchLot: await batchLotTask,
                 PartCounter: await probeTask,
                 RetryLabel: await retryLabelTask,
                 PendingLabel: await pendingLabelTask,
@@ -12512,9 +12645,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
-            long selectedDateLot = snapshot.Stats.DailyPass > 0
-                ? snapshot.Stats.LastLotNo
-                : _lotSequence.StartLot;
+            long selectedDateLot = startChangedOnSelectedDate
+                ? snapshot.BatchLot ?? _lotSequence.StartLot
+                : snapshot.Stats.DailyPass > 0 ? snapshot.Stats.LastLotNo : _lotSequence.StartLot;
             if (selectedDateLot != _lotSequence.NextLot)
             {
                 long previousLot = _lotSequence.NextLot;
@@ -12690,7 +12823,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             : _activeCycleId;
         bool autoPrintRequested = ShouldAutoPrintLabel(
             passed,
-            _productionSettings.AutoPrintLabelOnPass);
+            _productionSettings.AutoPrintLabelOnPass) &&
+            ProductionConfigService.IsProductLabelPrintingEnabled(_productionSettings, ProductionConfigService.GetLotProductKey(model));
         bool shouldAutoPrint = autoPrintRequested;
         long completedLot = passed
             ? _lotSequence.ReserveForCycle(cycleId)

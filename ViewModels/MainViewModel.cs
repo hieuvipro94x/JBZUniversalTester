@@ -286,7 +286,11 @@ public sealed class MainViewModel : ObservableObject
             model = await Test.LoadSelectedModelFromPathAsync(full);
         }
 
-        if (model is null) return null;
+        if (model is null)
+        {
+            Status = Model is null ? "CHƯA CHỌN MÃ HÀNG" : $"MODEL ĐÃ TẢI: {Model.ModelName}";
+            return null;
+        }
 
         Model = model;
         Home.Refresh();

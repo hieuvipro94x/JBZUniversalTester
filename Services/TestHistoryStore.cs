@@ -1470,6 +1470,24 @@ public sealed class TestHistoryStore
         return new(testId, duplicate, statistics, probe);
     }
 
+    public long? GetLatestCommittedLotForBatch(PartIdentitySnapshot part, DateTime now, string batchKey)
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT t.Lot FROM Tests t JOIN Parts p ON p.Id=t.PartId
+            WHERE p.PartKey=$PartKey AND t.InspectionType='PRODUCT' AND t.Passed=1
+              AND t.ProductionBatchKey=$Batch AND t.ResultAt >= $From AND t.ResultAt < $To
+            ORDER BY t.ResultAt DESC,t.Id DESC LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$PartKey", part.PartKey);
+        command.Parameters.AddWithValue("$Batch", batchKey);
+        command.Parameters.AddWithValue("$From", now.Date.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$To", now.Date.AddDays(1).ToString("O", CultureInfo.InvariantCulture));
+        object? value = command.ExecuteScalar();
+        return value is null or DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
     public ProductionStatisticsSnapshot GetStatistics(PartIdentitySnapshot part, DateTime now)
     {
         using SqliteConnection connection = Open();

@@ -71,6 +71,28 @@ internal static partial class Program
             Console.WriteLine("PASS: Leak completes after connector removal, final NG counts once, equipment-error Back uses physical removal");
             return 0;
         }
+        if (args is ["--test-peripheral-equipment-exit"])
+        {
+            TestPeripheralEquipmentRecoveryCancellation();
+            TestRecoverableKeysightEquipmentFault();
+            TestEquipmentErrorReturnToMain();
+            Console.WriteLine("PASS: Peripheral connection errors and canceled recovery preserve the app and physical-removal Back gate");
+            return 0;
+        }
+        if (args is ["--test-peripheral-reconnect"])
+        {
+            TestPeripheralAutomaticReconnect();
+            TestPeripheralEquipmentRecoveryCancellation();
+            Console.WriteLine("PASS: Automatic peripheral reconnect, exclusive ownership, responsive UI, shutdown and removal gates");
+            return 0;
+        }
+        if (args is ["--test-product-label-lot"])
+        {
+            TestProductLabelAndImmediateLotSettings();
+            TestFirstProductPrintSetup();
+            Console.WriteLine("PASS: Per-product label selection, immediate LOT base changes and preserved history");
+            return 0;
+        }
         if (args is ["--test-deferred-resistance-recovery"])
         {
             TestDeferredResistanceRecovery();
@@ -406,6 +428,10 @@ internal static partial class Program
             ("Production resistance recovery waits for full removal after immediate PASS relays", TestDeferredResistanceRecovery),
             ("Leak run finishes after unplug and final NG commits one failed product", TestLeakRunCompletionAndProductFailure),
             ("Equipment errors permit Main only after physical full removal", TestEquipmentErrorReturnToMain),
+            ("Peripheral recovery cancellation never becomes a board fault", TestPeripheralEquipmentRecoveryCancellation),
+            ("Peripheral USB reconnect is automatic, serialized and independent", TestPeripheralAutomaticReconnect),
+            ("Product label choices and LOT base edits apply immediately without rewriting history", TestProductLabelAndImmediateLotSettings),
+            ("First untested product selection requires and retains LOT/template setup", TestFirstProductPrintSetup),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
@@ -2268,12 +2294,13 @@ internal static partial class Program
                    .Contains("Source:", StringComparison.Ordinal),
             "Device-fault RPT hides technical details unless the operator explicitly enables all system logs");
         Assert(testViewModelSource.Contains(
-                   "Mất kết nối máy Leak. Hãy rút/cắm lại cáp, chọn lại cổng COM rồi thử lại.",
+                   "Mất kết nối máy Leak. Cắm lại USB; phần mềm sẽ tự kết nối lại. Tháo/lắp lại sản phẩm để kiểm tra tiếp.",
                    StringComparison.Ordinal) &&
+               testViewModelSource.Contains("RequestLeakReconnect(_productionSettings.WaterProofMachine)", StringComparison.Ordinal) &&
                labelPrintServiceSource.Contains(
                    "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
                    StringComparison.Ordinal),
-            "Leak and label-printer connection failures guide the operator to reconnect and reselect COM");
+            "Leak failures schedule automatic reconnect after USB return; printer failures retain their COM guidance");
         Assert(!appSource.Contains("$\"Chi tiết: {e.Exception.Message}\"", StringComparison.Ordinal) &&
                !mainWindowSource.Contains("ex.ToString()", StringComparison.Ordinal) &&
                !settingsSource.Contains("ShowMessage(ex.Message", StringComparison.Ordinal) &&

@@ -534,9 +534,11 @@
                                                 <ComboBoxItem Content="TEM_TO_SQDZ" Tag="TEM_TO_SQDZ"/>
                                                 <ComboBoxItem Content="TEM_BE_SQDZ" Tag="TEM_BE_SQDZ"/>
                                                 <ComboBoxItem Content="TEM_BE_QRCODE" Tag="TEM_BE_QRCODE"/>
-                                                <ComboBoxItem Content="BCW" Tag="BCW"/>
+                                            <ComboBoxItem Content="BCW" Tag="BCW"/>
                                             </ComboBox>
-                                            <TextBlock Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Text="TỰ ĐỘNG GỬI TEM KHI PASS" VerticalAlignment="Center" Foreground="#0F766E" FontWeight="SemiBold"/>
+                                            <CheckBox x:Name="ProductLabelEnabledCheckBox" Grid.Row="2" Grid.ColumnSpan="3"
+                                                      Content="IN TEM CHO MÃ HÀNG NÀY" VerticalAlignment="Center"
+                                                      IsChecked="{Binding PrintLabelForCurrentProduct, Mode=TwoWay}"/>
                                         </Grid>
                                         <Grid x:Name="LabelPrintActionsPanel" Grid.Row="2" Margin="0,6,0,0">
                                             <Grid.RowDefinitions>

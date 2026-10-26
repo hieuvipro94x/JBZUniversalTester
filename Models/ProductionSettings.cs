@@ -110,6 +110,9 @@ public sealed class ProductionSettings
     public Dictionary<string, ProductLotSettings> LotSettingsByProduct { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    public Dictionary<string, string> LabelTemplateTypesByProduct { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // Giữ trường cũ để đọc các file cấu hình V11.4 trở về trước.
     public string Lot { get; set; } = string.Empty;
 
@@ -341,6 +344,7 @@ public sealed class ProductionSettings
 public sealed class ProductLotSettings
 {
     public string HistoryBatchId { get; set; } = string.Empty;
+    public string LastStartChangedDate { get; set; } = string.Empty;
     /// <summary>
     /// LOTNO bắt đầu do operator đặt một lần cho mã hàng. -1 chỉ xuất hiện khi
     /// đọc cấu hình cũ chưa có field này và sẽ được migrate từ LotNo hiện tại.
@@ -407,6 +411,10 @@ public sealed class LabelSettings
 
     /// <summary>Chọn một trong ba mẫu lệnh in tích hợp trong EXE.</summary>
     public string TemplateType { get; set; } = LargeTemplate;
+
+    // Derived from an explicitly saved product choice; never a global CFG flag.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool PreferSelectedTemplate { get; set; }
 
     /// <summary>Explicit profile/template selection. No part-number inference is allowed.</summary>
     public string TemplatePath { get; set; } = string.Empty;

@@ -10,7 +10,8 @@ internal static class SettingsPermissionPolicy
         if (property.StartsWith("WaterProof", StringComparison.OrdinalIgnoreCase)) return SettingsPermission.Leak;
         if (property is nameof(ProductionSettings.ResistanceDelayMs) or nameof(ProductionSettings.ProbeReplacementThreshold)) return SettingsPermission.Relay;
         if (property.StartsWith("Resistance", StringComparison.Ordinal)) return SettingsPermission.Resistance;
-        if (property == nameof(ProductionSettings.Label) || property == nameof(ProductionSettings.AutoPrintLabelOnPass))
+        if (property == nameof(ProductionSettings.Label) || property == nameof(ProductionSettings.AutoPrintLabelOnPass) ||
+            property == nameof(ProductionSettings.LabelTemplateTypesByProduct))
             return SettingsPermission.Label;
         if (property.Contains("Relay", StringComparison.Ordinal) || property.StartsWith("PassMarking", StringComparison.Ordinal) ||
             property is nameof(ProductionSettings.StampDelay) or nameof(ProductionSettings.ShieldDelay) or

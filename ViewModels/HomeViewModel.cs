@@ -39,7 +39,9 @@ public sealed class HomeViewModel : ObservableObject
 
     public string LabelTemplateType => _main.Model is null
         ? "CHƯA NẠP MÃ HÀNG"
-        : LabelProfileResolver.NormalizeTemplateType(_main.ProductionSettings.Label.TemplateType);
+        : !ProductionConfigService.IsProductLabelPrintingEnabled(_main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model))
+        ? "KHÔNG IN TEM"
+        : ProductionConfigService.GetProductLabelTemplate(_main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model));
 
     public HomeViewModel(MainViewModel main)
     {

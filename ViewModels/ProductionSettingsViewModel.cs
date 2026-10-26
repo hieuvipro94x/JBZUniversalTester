@@ -94,6 +94,12 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public bool IsManualOperationRunning => _manualOperationRunning;
     private readonly string _modelPath;
     private readonly string _lotProductKey;
+    private bool _printLabelForCurrentProduct;
+    public bool PrintLabelForCurrentProduct
+    {
+        get => _printLabelForCurrentProduct;
+        set => Set(ref _printLabelForCurrentProduct, value);
+    }
     private bool _manualRuntimeActive;
     private string _manualRelay1Status = "OFF";
     private string _manualRelay2Status = "OFF";
@@ -262,6 +268,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         // tăng trong quá trình sản xuất.
         Settings.LotNo = productLot.StartLotNo;
         Settings.LotNoDate = productLot.LotNoDate;
+        ProductionConfigService.ApplyProductLabelTemplate(Settings, _lotProductKey);
+        _printLabelForCurrentProduct = ProductionConfigService.IsProductLabelPrintingEnabled(Settings, _lotProductKey);
         if (!string.IsNullOrWhiteSpace(_modelPath))
             Settings.LastThtPath = _modelPath;
         Settings.ManualModeEnabled = false;
@@ -803,6 +811,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
         if (_accessSession.Allows(SettingsPermission.Leak) && !HasWaterProofConfigurationError)
             ProductionConfigService.SetWaterProofProfileForPath(Settings, _modelPath, WaterProof);
+        if (_accessSession.Allows(SettingsPermission.Label))
+            Settings.LabelTemplateTypesByProduct[_lotProductKey] =
+                PrintLabelForCurrentProduct ? LabelProfileResolver.NormalizeTemplateType(Settings.Label.TemplateType)
+                    : ProductionConfigService.NoProductLabel;
     }
 
     public void Save()

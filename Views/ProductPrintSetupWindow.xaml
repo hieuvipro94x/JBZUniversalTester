@@ -1,0 +1,42 @@
+<Window x:Class="JBZUniversalTester.Views.ProductPrintSetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Thiết lập mã hàng mới" Width="540" SizeToContent="Height"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
+        Background="#F3F6FA" FontFamily="Segoe UI" Closing="Window_Closing">
+    <ScrollViewer Background="#F3F6FA" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="24">
+            <TextBlock Text="THIẾT LẬP LẦN ĐẦU" Foreground="#0F766E" FontSize="12" FontWeight="SemiBold"/>
+            <TextBlock Text="LOTNO và loại tem" FontSize="24" FontWeight="SemiBold" Foreground="#16324F" Margin="0,5,0,8"/>
+            <TextBlock Text="Mã hàng này chưa có lịch sử kiểm tra. Nhập thông tin một lần; phần mềm sẽ lưu cho các lần chọn sau."
+                       TextWrapping="Wrap" Foreground="#52657A" FontSize="13"/>
+            <Border Background="White" BorderBrush="#DCE4EE" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,18,0,16">
+                <StackPanel>
+                    <TextBlock Text="MÃ HÀNG" Foreground="#64748B" FontSize="12"/>
+                    <TextBlock x:Name="ProductText" TextWrapping="Wrap" Foreground="#16324F" FontSize="18" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="ModelText" TextWrapping="Wrap" Foreground="#52657A" FontSize="12" Margin="0,5,0,0"/>
+                </StackPanel>
+            </Border>
+            <TextBlock Text="LOTNO BẮT ĐẦU" Foreground="#334155" FontSize="12" FontWeight="SemiBold"/>
+            <TextBox x:Name="StartLotTextBox" Height="38" VerticalContentAlignment="Center" FontSize="18" Padding="10,0" Margin="0,6,0,4"/>
+            <TextBlock Text="Ví dụ: nhập 2000 thì sản phẩm PASS đầu tiên là LOT 2001."
+                       Foreground="#64748B" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,16"/>
+            <TextBlock Text="MÃ HÀNG NÀY CÓ IN TEM KHÔNG?" Foreground="#334155" FontSize="12" FontWeight="SemiBold"/>
+            <WrapPanel Margin="0,10,0,14">
+                <RadioButton x:Name="PrintYesRadioButton" Content="Có in tem" GroupName="PrintChoice" Checked="PrintChoice_Changed" Margin="0,0,28,0" FontSize="15"/>
+                <RadioButton x:Name="PrintNoRadioButton" Content="Không in tem" GroupName="PrintChoice" Checked="PrintChoice_Changed" FontSize="15"/>
+            </WrapPanel>
+            <StackPanel x:Name="TemplateOptionsPanel" Visibility="Collapsed">
+                <TextBlock Text="LOẠI TEM IN" Foreground="#334155" FontSize="12" FontWeight="SemiBold"/>
+                <ComboBox x:Name="TemplateComboBox" Height="38" VerticalContentAlignment="Center" FontSize="15" Margin="0,6,0,0"/>
+            </StackPanel>
+            <TextBlock x:Name="ValidationText" Foreground="#B91C1C" FontSize="13" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed"/>
+            <Grid Margin="0,22,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Button x:Name="CancelButton" Content="HỦY CHỌN MÃ" IsCancel="True" Height="40" Background="#E2E8F0" Foreground="#334155" BorderBrush="#CBD5E1"/>
+                <Button x:Name="ConfirmButton" Grid.Column="2" Content="LƯU VÀ CHỌN MÃ" IsDefault="True" Height="40" Click="Confirm_Click"
+                        Background="#0F766E" Foreground="White" BorderThickness="0" FontWeight="SemiBold"/>
+            </Grid>
+        </StackPanel>
+    </ScrollViewer>
+</Window>

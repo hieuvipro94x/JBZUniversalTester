@@ -96,6 +96,7 @@ public static class TestViewText
         ["LỖI MÁY LEAK"] = "기밀 검사기 오류", ["KIỂM TRA MÁY LEAK"] = "기밀 검사기 확인",
         ["CHƯA LƯU ĐƯỢC KẾT QUẢ"] = "결과 저장 안 됨", ["Lỗi in tem"] = "라벨 인쇄 오류",
         ["Mất kết nối máy Leak. Hãy rút/cắm lại cáp, chọn lại cổng COM rồi thử lại."] = "기밀 검사기 연결이 끊겼습니다. 케이블을 다시 연결하고 COM 포트를 선택한 후 재시도하세요.",
+        ["Mất kết nối máy Leak. Cắm lại USB; phần mềm sẽ tự kết nối lại. Tháo/lắp lại sản phẩm để kiểm tra tiếp."] = "기밀 검사기 연결이 끊겼습니다. USB를 다시 연결하면 자동으로 재연결됩니다. 제품을 탈거한 후 다시 장착하여 검사하세요.",
         ["Kênh Leak 1"] = "기밀 검사 채널 1", ["Kênh Leak 2"] = "기밀 검사 채널 2", ["Kênh Leak 3"] = "기밀 검사 채널 3",
         [" cắm nhầm với "] = " 오접속 상대: ", [" cắm nhầm vị trí chưa xác định"] = " 오접속 위치 미확인",
         ["Mã dây chưa xác định"] = "와이어 코드 미확인", [" màu "] = " 색상 ",

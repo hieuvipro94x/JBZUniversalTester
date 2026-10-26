@@ -461,7 +461,8 @@ public sealed record LabelPrintRequest(
         }
 
         LabelProfile profile = JBZUniversalTester.Services.LabelProfileResolver.Resolve(model, settings);
-        string template = JBZUniversalTester.Services.LabelTemplateProvider.Load(profile, model.LabelTemplate.RawTemplate);
+        string template = JBZUniversalTester.Services.LabelTemplateProvider.Load(
+            profile, settings.PreferSelectedTemplate ? string.Empty : model.LabelTemplate.RawTemplate);
         string payload = JBZUniversalTester.Services.LabelTemplateRenderer.Render(
             profile, template, variables, model.PartNumber);
 

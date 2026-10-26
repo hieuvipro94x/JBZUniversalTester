@@ -79,6 +79,10 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
         CancellationToken cancellationToken = default) =>
         EnqueueAsync(() => _repository.GetStatistics(part, now), cancellationToken);
 
+    public Task<long?> GetLatestCommittedLotForBatchAsync(
+        PartIdentitySnapshot part, DateTime now, string batchKey, CancellationToken cancellationToken = default) =>
+        EnqueueAsync(() => _repository.GetLatestCommittedLotForBatch(part, now, batchKey), cancellationToken);
+
     public Task<ProbeCounterSnapshot> GetProbeCounterAsync(
         PartIdentitySnapshot part,
         long defaultThreshold,
