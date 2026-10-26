@@ -74,13 +74,13 @@ internal static partial class Program
                 Assert(settings.Label.TemplateType == LabelSettings.LargeSqdzTemplate && vm.Lot == "2003",
                     "A -> B -> A restores A's label and committed LOT independently");
                 await Save(LabelSettings.LargeSqdzTemplate, 7000);
-                Assert(vm.Lot == "7000" && settings.LotSettingsByProduct[a.PartNumber].StartLotNo == 7000 && vm.Pass == 1,
-                    "Saving 2000 -> 7000 applies immediately; old daily PASS cannot overwrite the new base or disappear");
+                Assert(vm.Lot == "7001" && settings.LotSettingsByProduct[a.PartNumber].StartLotNo == 7000 && vm.Pass == 1,
+                    "Saving 2000 -> 7000 retains today's existing PASS and applies base plus progress immediately");
                 long first = lots.ReserveForCycle("new-a");
                 var print = LabelPrintRequest.Capture(new TestHistoryRecord { CycleId = "new-a", LotNo = first, Finished = now }, a, settings.Label);
-                Assert(first == 7001 && print.Data.LotNo == 7001 && print.Profile.Id == LabelSettings.LargeSqdzTemplate &&
+                Assert(first == 7002 && print.Data.LotNo == 7002 && print.Profile.Id == LabelSettings.LargeSqdzTemplate &&
                        !print.Payload.Contains("OLD_THT_FORMAT", StringComparison.Ordinal),
-                    "Next PASS uses the new base plus one and A's explicitly selected format rather than embedded old THT commands");
+                    "Next PASS uses the new base plus retained progress plus one and A's selected format rather than old THT commands");
                 Commit("new-a", first, lots.HistoryBatchKey);
                 Assert(lots.TryCommitSuccessfulPass("new-a", first, out _), "New base commits normally");
                 vm.SetModel(b); await Loaded();
@@ -88,11 +88,11 @@ internal static partial class Program
                 Assert(settings.Label.TemplateType == LabelSettings.SmallTemplate && small.Profile.Id == LabelSettings.SmallTemplate &&
                        !small.Payload.Contains("OLD_THT_FORMAT", StringComparison.Ordinal), "B retains its own small SQDZ format");
                 vm.SetModel(a); await Loaded();
-                Assert(vm.Lot == "7001" && vm.Pass == 2, "Reload recovers the latest committed LOT from the new batch and retains all daily history");
+                Assert(vm.Lot == "7002" && vm.Pass == 2, "Reload retains the base plus every daily PASS");
                 await Save(LabelSettings.LargeSqdzTemplate, 1000);
-                Assert(vm.Lot == "1000" && vm.Pass == 2, "Lowering the base is also immediate and cannot restore an older larger LOT");
+                Assert(vm.Lot == "1002" && vm.Pass == 2, "Lowering the base retains both daily PASS products");
                 await Save(LabelSettings.LargeSqdzTemplate, 1000);
-                Assert(vm.Lot == "1000", "Unrelated/repeated saves do not advance or reset the base again");
+                Assert(vm.Lot == "1002", "Repeated saves do not add progress a second time");
                 var reloaded = ProductionConfigService.LoadSavedSettings(cfg);
                 Assert(reloaded.LabelTemplateTypesByProduct[a.PartNumber] == LabelSettings.LargeSqdzTemplate &&
                        reloaded.LabelTemplateTypesByProduct[b.PartNumber] == LabelSettings.SmallTemplate &&
@@ -124,7 +124,7 @@ internal static partial class Program
                 long generation = (long)typeof(TestViewModel).GetField("_runtimeGeneration", flags)!.GetValue(vm)!;
                 var committed = (Task<bool>)typeof(TestViewModel).GetMethod("RecordCompletedProductAsync", flags)!
                     .Invoke(vm, [true, "PASS", a, generation, CancellationToken.None, null, now])!;
-                Assert(await committed.WaitAsync(TimeSpan.FromSeconds(5)) && vm.Lot == "1001" &&
+                Assert(await committed.WaitAsync(TimeSpan.FromSeconds(5)) && vm.Lot == "1003" &&
                        ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='disabled-a' AND Passed=1 AND PrintStatus='NotRequested' AND LabelPayload='';") == 1 &&
                        !File.Exists(settings.Label.RawDestination),
                     "A nonprinting PASS still commits LOT/history once and never captures or sends printer commands");

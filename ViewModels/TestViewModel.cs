@@ -12605,11 +12605,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             string batchKey = _lotSequence.HistoryBatchKey;
             DateTime statisticsNow = DateTime.Now;
             _productionSettings.LotSettingsByProduct.TryGetValue(ProductionConfigService.GetLotProductKey(model), out ProductLotSettings? productLot);
-            bool startChangedOnSelectedDate = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId) &&
+            bool useDailyPassOffset = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId) &&
                 productLot.LastStartChangedDate == statisticsNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-            Task<long?> batchLotTask = startChangedOnSelectedDate
-                ? ProductionPersistence.GetLatestCommittedLotForBatchAsync(part, statisticsNow, batchKey, _lifetimeCts.Token)
-                : Task.FromResult<long?>(null);
             Task<ProductionStatisticsSnapshot> statisticsTask =
                 ProductionPersistence.GetStatisticsAsync(part, statisticsNow, _lifetimeCts.Token);
             Task<ProbeCounterSnapshot> probeTask = ProductionPersistence.GetProbeCounterAsync(
@@ -12631,7 +12628,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }, _lifetimeCts.Token);
             var snapshot = (
                 Stats: await statisticsTask,
-                BatchLot: await batchLotTask,
                 PartCounter: await probeTask,
                 RetryLabel: await retryLabelTask,
                 PendingLabel: await pendingLabelTask,
@@ -12645,8 +12641,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
-            long selectedDateLot = startChangedOnSelectedDate
-                ? snapshot.BatchLot ?? _lotSequence.StartLot
+            // Editing the base retains every PASS already produced today.
+            // Do not reset progress or derive it from an old printed LOT range.
+            long selectedDateLot = useDailyPassOffset
+                ? checked(_lotSequence.StartLot + snapshot.Stats.DailyPass)
                 : snapshot.Stats.DailyPass > 0 ? snapshot.Stats.LastLotNo : _lotSequence.StartLot;
             if (selectedDateLot != _lotSequence.NextLot)
             {

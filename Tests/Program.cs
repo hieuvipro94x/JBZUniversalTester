@@ -90,6 +90,7 @@ internal static partial class Program
         {
             TestProductLabelAndImmediateLotSettings();
             TestFirstProductPrintSetup();
+            TestLotBaseRetainsDailyPassProgress();
             Console.WriteLine("PASS: Per-product label selection, immediate LOT base changes and preserved history");
             return 0;
         }
@@ -432,6 +433,7 @@ internal static partial class Program
             ("Peripheral USB reconnect is automatic, serialized and independent", TestPeripheralAutomaticReconnect),
             ("Product label choices and LOT base edits apply immediately without rewriting history", TestProductLabelAndImmediateLotSettings),
             ("First untested product selection requires and retains LOT/template setup", TestFirstProductPrintSetup),
+            ("LOT base edits retain the daily PASS count in display and printer output", TestLotBaseRetainsDailyPassProgress),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),

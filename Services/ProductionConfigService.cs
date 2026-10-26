@@ -360,8 +360,8 @@ public static class ProductionConfigService
         bool startChanged = normalizedStart != lot.StartLotNo;
         if (startChanged || !string.Equals(normalizedDate, lot.LotNoDate, StringComparison.Ordinal))
         {
-            // Giá trị nhập là LOT đã hoàn thành gần nhất. Không cộng lại tiến độ
-            // cũ khi lưu các cài đặt độc lập như số card mở rộng.
+            // Giá trị nhập là số nền. Runtime sẽ cộng số PASS của ngày được
+            // chọn; lưu các cài đặt độc lập không cộng lại tiến độ lần nữa.
             lot.StartLotNo = normalizedStart;
             if (startChanged)
             {
