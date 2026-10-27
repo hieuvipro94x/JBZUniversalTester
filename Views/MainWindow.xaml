@@ -282,7 +282,7 @@
                                         </Style>
                                     </Border.Style>
                                     <StackPanel>
-                                        <TextBlock Text="LOTNo HIỆN TẠI" FontSize="14" FontWeight="Bold" Foreground="#14532D"/>
+                                        <TextBlock Text="LOTNO:" FontSize="14" FontWeight="Bold" Foreground="#14532D"/>
                                         <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
                                             <TextBlock x:Name="CurrentLotText" Text="{Binding Test.Lot, Mode=OneWay}"
                                                        FontSize="46" FontWeight="Bold" Foreground="#166534"/>
