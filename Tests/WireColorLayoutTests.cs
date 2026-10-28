@@ -41,6 +41,7 @@ internal static partial class Program
                     SnapsToDevicePixels = true,
                     ColumnHeaderStyle = (Style)resources["HtdrvGridHeaderStyle"],
                     ItemsSource = new[] { new { WireColorText = "R", WireColorBrush = tone,
+                        WireNameDisplay = "MC1", IsNetworkStart = true, KindName = "Open",
                         RowBackgroundBrush = Brushes.White, RowForegroundBrush = Brushes.Black } }
                 };
                 foreach (XElement column in faultGrid.Element(ns + "DataGrid.Columns")!.Elements())
@@ -52,6 +53,10 @@ internal static partial class Program
                     actual.Width = (DataGridLength)new DataGridLengthConverter().ConvertFromInvariantString(column.Attribute("Width")!.Value)!;
                     actual.MinWidth = double.Parse(column.Attribute("MinWidth")!.Value, System.Globalization.CultureInfo.InvariantCulture);
                     actual.Header = (string?)column.Attribute("Header");
+                    if (actual is DataGridTextColumn textColumn && column.Attribute("Binding") is { } textBinding)
+                        textColumn.Binding = new System.Windows.Data.Binding(textBinding.Value.Replace("{Binding ", "").TrimEnd('}'));
+                    if (column.Attribute("HeaderStyle") is { } headerStyle)
+                        actual.HeaderStyle = (Style)resources[headerStyle.Value.Replace("{StaticResource ", "").TrimEnd('}')];
                     grid.Columns.Add(actual);
                 }
                 using var source = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("WireColorLayoutTest")
@@ -71,7 +76,7 @@ internal static partial class Program
                     .First(item => item.Column == cell.Column);
                 double headerLeft = header.TranslatePoint(new Point(), grid).X;
                 double cellLeft = cell.TranslatePoint(new Point(), grid).X;
-                Assert(Math.Abs(headerLeft - cellLeft) * scale <= 1.01,
+                Assert(Math.Abs(headerLeft - cellLeft) * scale <= 0.01,
                     $"Header and wire-color cells must align: width={width}, dpi={scale}, header={headerLeft}, cell={cellLeft}");
                 Point offset = color.TranslatePoint(new Point(), cell);
                 Assert(grid.GridLinesVisibility == DataGridGridLinesVisibility.Horizontal &&
@@ -81,7 +86,28 @@ internal static partial class Program
                     $"Wire color must reach cell edges: width={width}, offset={offset}, color={color.ActualWidth}, cell={cell.ActualWidth}");
                 var image = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(width * scale), (int)Math.Ceiling(160 * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
                 image.Render(grid);
+                if (scale == 1 && width == 1904 && tone == Brushes.Red)
+                {
+                    var preview = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    double wireLeft = Descendants(grid).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
+                        .First(item => item.Column?.DisplayIndex == 4).TranslatePoint(new Point(), grid).X;
+                    preview.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(
+                        new System.Windows.Media.Imaging.CroppedBitmap(image, new Int32Rect((int)wireLeft - 2, 0, 440, 100))));
+                    using var output = System.IO.File.Create(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "jbz-v331-wire-divider.png"));
+                    preview.Save(output);
+                }
                 Point origin = cell.TranslatePoint(new Point(0, 3), grid);
+                Point headerOrigin = header.TranslatePoint(new Point(0, 3), grid);
+                int boundary = (int)Math.Round(origin.X * scale);
+                int[] HeaderDividerPixels() => DividerPixels((int)Math.Round(headerOrigin.Y * scale));
+                int[] DividerPixels(int y) => Enumerable.Range(boundary - 3, 7).Where(x =>
+                {
+                    byte[] sample = new byte[4];
+                    image.CopyPixels(new Int32Rect(x, y, 1, 1), sample, 4, 0);
+                    return sample[0] == 0xD6 && sample[1] == 0xD6 && sample[2] == 0xD6;
+                }).ToArray();
+                Assert(HeaderDividerPixels().Length > 0 && HeaderDividerPixels().SequenceEqual(DividerPixels((int)Math.Ceiling(origin.Y * scale))),
+                    $"Rendered header/body divider must occupy identical device pixels: width={width}, dpi={scale}, header={string.Join(',', HeaderDividerPixels())}, body={string.Join(',', DividerPixels((int)Math.Ceiling(origin.Y * scale)))}");
                 var previous = Descendants(grid).OfType<DataGridCell>().First(item => item.Column.DisplayIndex == 4);
                 Point previousRight = previous.TranslatePoint(new Point(previous.ActualWidth, 3), grid);
                 // At a fractional boundary, the pixel before the nearest device
@@ -104,7 +130,7 @@ internal static partial class Program
                 await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
                 grid.UpdateLayout();
                 double populatedLeft = header.TranslatePoint(new Point(), grid).X;
-                Assert(Math.Abs(populatedLeft - headerLeft) * scale <= 1.01,
+                Assert(Math.Abs(populatedLeft - headerLeft) * scale <= 0.01,
                     $"Wire columns must not jump when installation populates the grid: width={width}, dpi={scale}, before={headerLeft}, after={populatedLeft}");
                 AssertStableColumns();
                 var scrollViewer = Descendants(grid).OfType<ScrollViewer>().First();
@@ -132,7 +158,7 @@ internal static partial class Program
                             $"Header/column must remain fixed through empty/populated/recycled rows: width={width}, dpi={scale}, column={index}");
                     }
                     foreach (var currentCell in Descendants(grid).OfType<DataGridCell>())
-                        Assert(Math.Abs(currentCell.TranslatePoint(new Point(), grid).X - headerPositions[currentCell.Column.DisplayIndex]) * scale <= 1.01,
+                        Assert(Math.Abs(currentCell.TranslatePoint(new Point(), grid).X - headerPositions[currentCell.Column.DisplayIndex]) * scale <= 0.01,
                             $"Recycled cell must stay aligned with header: width={width}, dpi={scale}, column={currentCell.Column.DisplayIndex}");
                 }
             }

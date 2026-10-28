@@ -362,6 +362,7 @@
         <Style x:Key="HtdrvGridHeaderStyle"
                TargetType="DataGridColumnHeader"
                BasedOn="{StaticResource IndustrialGridHeaderStyle}">
+            <Setter Property="UseLayoutRounding" Value="False"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
             <Setter Property="FontSize" Value="{DynamicResource TestFaultGridHeaderFontSize}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
@@ -381,6 +382,17 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- Match the body's divider ownership: the color column draws the
+             shared left edge, never the wire-name column's right edge. -->
+        <Style x:Key="WireNameHeaderStyle" TargetType="DataGridColumnHeader"
+               BasedOn="{StaticResource HtdrvGridHeaderStyle}">
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+        </Style>
+        <Style x:Key="WireColorHeaderStyle" TargetType="DataGridColumnHeader"
+               BasedOn="{StaticResource HtdrvGridHeaderStyle}">
+            <Setter Property="BorderThickness" Value="1,0,1,1"/>
         </Style>
 
         <Style x:Key="PiFaultGridStyle" TargetType="DataGrid">
@@ -1046,8 +1058,8 @@
                     <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="0.80*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource FaultCenterCellStyle}" ElementStyle="{StaticResource HtdrvIoTextStyle}"/>
                     <DataGridTextColumn x:Name="ConnectorColumn" Header="Connector" Binding="{Binding Connector}" Width="0.95*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource FaultCenterCellStyle}" ElementStyle="{StaticResource OperatorConnectorTextStyle}"/>
                     <DataGridTextColumn Header="Chân Pin" Binding="{Binding Pin}" Width="0.90*" MinWidth="105" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource FaultCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridCenterTextStyle}"/>
-                    <DataGridTextColumn Header="Mã Dây" Binding="{Binding WireNameDisplay}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource WireNameCellStyle}" ElementStyle="{StaticResource OperatorWireNameTextStyle}"/>
-                    <DataGridTemplateColumn Header="M&#224;u" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource WireColorCellStyle}" CellTemplate="{StaticResource WireColorCellTemplate}"/>
+                    <DataGridTextColumn Header="Mã Dây" Binding="{Binding WireNameDisplay}" Width="1.25*" MinWidth="100" CanUserSort="False" CanUserReorder="False" CanUserResize="False" HeaderStyle="{StaticResource WireNameHeaderStyle}" CellStyle="{StaticResource WireNameCellStyle}" ElementStyle="{StaticResource OperatorWireNameTextStyle}"/>
+                    <DataGridTemplateColumn Header="M&#224;u" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" HeaderStyle="{StaticResource WireColorHeaderStyle}" CellStyle="{StaticResource WireColorCellStyle}" CellTemplate="{StaticResource WireColorCellTemplate}"/>
                     <DataGridTextColumn Header="Tiết Diện" Binding="{Binding Section}" Width="0.85*" MinWidth="90" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource FaultCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="Tr&#7841;ng th&#225;i" Binding="{Binding Status}" Width="1.30*" MinWidth="125" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource FaultGridCellStyle}" ElementStyle="{StaticResource OperatorStatusTextStyle}"/>
                     <DataGridTextColumn Header="IO-CN-PN" Binding="{Binding IoCnPnText}" Width="1.20*" MinWidth="120" CanUserSort="False" CanUserReorder="False" CanUserResize="False" CellStyle="{StaticResource FaultCenterCellStyle}" ElementStyle="{StaticResource HtdrvGridStrongCenterTextStyle}"/>
