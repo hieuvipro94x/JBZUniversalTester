@@ -263,10 +263,10 @@
                                     <StackPanel>
                                         <TextBlock Text="SẢN LƯỢNG MỚI NHẤT" FontSize="14" FontWeight="Bold" Foreground="#1E3A8A"/>
                                         <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
-                                            <TextBlock x:Name="ProductionQuantityText" Text="{Binding Test.LifetimeTestCount, Mode=OneWay, StringFormat={}{0:N0}}"
+                                            <TextBlock x:Name="ProductionQuantityText" Text="{Binding Test.DailyTestCount, Mode=OneWay, StringFormat={}{0:N0}}"
                                                        FontSize="46" FontWeight="Bold" Foreground="#173B88"/>
                                         </Viewbox>
-                                        <TextBlock Text="PASS + FAIL của mã hàng hiện tại" FontSize="12"
+                                        <TextBlock Text="PASS + FAIL trong ngày của mã hàng hiện tại" FontSize="12"
                                                    Foreground="#475569" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Border>

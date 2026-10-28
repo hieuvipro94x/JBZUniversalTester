@@ -20,6 +20,17 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-main-daily-quantity"])
+        {
+            TestMainDailyQuantityByProduct();
+            Console.WriteLine("PASS: MainWindow daily product quantity, live updates and date/product isolation");
+            return 0;
+        }
+        if (args is ["--preview-master-counters", var masterCounterPreviewPath])
+        {
+            RenderMasterCounterPreview(masterCounterPreviewPath);
+            return 0;
+        }
         if (args is ["--test-tester-connection-notice"])
         {
             TestUnifiedTesterConnectionNotice();
@@ -345,6 +356,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("MainWindow quantity follows selected product and day instead of lifetime totals", TestMainDailyQuantityByProduct),
             ("Wire table keeps headers and color boundaries stable as rows arrive and recycle", TestWireColorCellFillsBounds),
             ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),
             ("Every PASS retains its printer command offline with clean History", TestAlwaysPrintHistory),

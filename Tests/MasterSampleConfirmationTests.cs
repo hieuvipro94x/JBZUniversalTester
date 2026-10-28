@@ -173,14 +173,14 @@ internal static partial class Program
                         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
                         var counter = (System.Windows.Controls.TextBlock)window.FindName("FaultCountValueText");
                         var counterBorder = (System.Windows.Controls.Border)window.FindName("FaultCountValueBorder");
-                        Assert(counter.Text == "20/18 • OK" &&
+                        Assert(counter.Text == "2/2" &&
                                System.Windows.Controls.Grid.GetRow(counterBorder) == 3 &&
                                System.Windows.Controls.Grid.GetColumn(counterBorder) == 1 &&
                                Descendants(surface).OfType<System.Windows.Controls.TextBlock>()
-                                   .Count(text => text.Text == "20/18 • OK") == 1 &&
+                                   .All(text => text.Text != "20/18 • OK") &&
                                !Descendants(surface).OfType<System.Windows.Controls.Button>()
                                    .Any(button => Equals(button.Content, "XÁC NHẬN ĐÃ LẮP XONG MẪU")),
-                            "Actual TestView renders 20/18 OK once, inside the Số lỗi value cell, without a confirmation button");
+                            "Actual TestView renders detected/required open faults, never total/connected pins, without a confirmation button");
                         var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(1920, 1080, 96, 96,
                             System.Windows.Media.PixelFormats.Pbgra32);
                         bitmap.Render(surface);
@@ -190,12 +190,38 @@ internal static partial class Program
                             encoder.Save(output);
                         // Project each sample into the real bound counter without
                         // running another hardware cycle or writing more history.
-                        foreach (var sample in new[] { MasterSampleType.WrongWiring, MasterSampleType.ShortCircuit })
+                        foreach (var sample in new[] { MasterSampleType.WrongWiring, MasterSampleType.ShortCircuit, MasterSampleType.OpenCircuit })
                         {
                             Set("_masterSampleType", sample);
+                            var detectedKeys = (HashSet<MasterFaultKey>)Get("_masterDetectedFaultKeys")!;
+                            MasterFaultKey[] acceptedKeys = detectedKeys.ToArray();
+                            Set("_masterSequenceState", MasterSequenceState.WaitingBadMaster);
+                            Set("_masterBadVerified", false);
+                            Set("_masterFaultCollectionLocked", false);
+                            detectedKeys.Clear();
+                            for (int detected = 0; detected <= 2; detected++)
+                            {
+                                if (detected > 0)
+                                {
+                                    Set("_masterSequenceState", MasterSequenceState.TestingBadMaster);
+                                    var key = new MasterFaultKey(MasterSampleCatalog.FaultType(sample), detected, detected + 20, 0, 0);
+                                    detectedKeys.Add(key);
+                                    detectedKeys.Add(key); // Repeated physical evidence is one fault.
+                                }
+                                Call("RaiseMasterState");
+                                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                                Assert(counter.Text == $"{detected}/2" && vm.WrongCountText == $"{detected}/2" &&
+                                       !vm.IsMasterSampleAccepted,
+                                    $"{sample} advances actual bound fault counters 0/2 -> 1/2 -> 2/2 without counting pins or duplicate evidence");
+                            }
+                            detectedKeys.Clear();
+                            detectedKeys.UnionWith(acceptedKeys);
+                            Set("_masterSequenceState", MasterSequenceState.EjectingBadMaster);
+                            Set("_masterBadVerified", true);
+                            Set("_masterFaultCollectionLocked", true);
                             Call("RaiseMasterState");
                             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                            Assert(counter.Text == "2/2 • OK" && vm.IsMasterSampleAccepted &&
+                            Assert(counter.Text == "2/2" && vm.IsMasterSampleAccepted &&
                                    ((System.Windows.Media.SolidColorBrush)counterBorder.Background).Color.ToString() == "#FFDCFCE7",
                                 $"{sample} renders accepted detected/required progress in the Số lỗi cell");
                             Set("_masterBadVerified", false);
@@ -208,13 +234,15 @@ internal static partial class Program
                         Set("_masterSequenceState", MasterSequenceState.EjectingGoodMaster);
                         Call("RaiseMasterState");
                         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                        Assert(counter.Text == "20/20 • OK" && vm.IsMasterSampleAccepted,
-                            "Accepted good Master renders total/connected progress in the Số lỗi cell");
+                        Assert(counter.Text == vm.CurrentFaultCount.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
+                               !counter.Text.Contains('/') && vm.IsMasterSampleAccepted,
+                            "Accepted good Master retains the ordinary production fault count");
                         Set("_masterSequenceState", MasterSequenceState.TestingGoodMaster);
                         Call("RaiseMasterState");
                         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                        Assert(counter.Text == $"20/{engine.GetMasterConnectedConnectionCount()}" && !vm.IsMasterSampleAccepted,
-                            "Good Master shows live connections without premature OK");
+                        Assert(counter.Text == vm.CurrentFaultCount.ToString(System.Globalization.CultureInfo.InvariantCulture) &&
+                               !counter.Text.Contains('/') && !vm.IsMasterSampleAccepted,
+                            "Good Master shows only actual faults, never connected-pin progress");
                         Set("_masterApproved", true);
                         Call("RaiseMasterState");
                         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);

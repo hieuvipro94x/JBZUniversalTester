@@ -752,11 +752,15 @@
                                         <Setter Property="Text" Value="{Binding CurrentFaultCount, Mode=OneWay}"/>
                                         <Setter Property="Foreground" Value="{StaticResource PiBlueTextBrush}"/>
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding IsMasterSequenceActive}" Value="True">
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding IsMasterSequenceActive}" Value="True"/>
+                                                    <Condition Binding="{Binding IsMasterBadPhase}" Value="True"/>
+                                                </MultiDataTrigger.Conditions>
                                                 <Setter Property="Text" Value="{Binding MasterSampleProgressText, Mode=OneWay}"/>
                                                 <Setter Property="Padding" Value="0"/>
                                                 <Setter Property="FontWeight" Value="Bold"/>
-                                            </DataTrigger>
+                                            </MultiDataTrigger>
                                             <DataTrigger Binding="{Binding IsMasterSampleAccepted}" Value="True">
                                                 <Setter Property="Foreground" Value="#14532D"/>
                                             </DataTrigger>

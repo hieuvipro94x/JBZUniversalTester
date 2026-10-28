@@ -1269,9 +1269,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public bool IsMasterSampleAccepted => IsMasterSequenceActive && !IsDeviceFault && !IsPersistenceFault &&
         (IsMasterBadPhase ? _masterBadVerified && _masterFaultCollectionLocked :
             MasterState == MasterSequenceState.EjectingGoodMaster && _masterGoodVerified);
-    public string MasterSampleProgressText => (IsMasterBadPhase ? NetworkProgress :
-        $"{_masterOpenExpectedTotal}/{(IsMasterSampleAccepted ? _masterOpenExpectedTotal : _engine.GetMasterConnectedConnectionCount())}") +
-        (IsMasterSampleAccepted ? " • OK" : string.Empty);
+    // This is a fault counter, not a connected-pin counter. All NG samples
+    // share detected/required progress; good samples retain production counts.
+    public string MasterSampleProgressText => IsMasterBadPhase
+        ? WrongCountText
+        : CurrentFaultCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     public string LabelStatusText
     {

@@ -34,7 +34,7 @@ internal static partial class Program
             vm.Home.Refresh();
             void Counters(long quantity, string lot)
             {
-                typeof(TestViewModel).GetProperty(nameof(TestViewModel.LifetimeTestCount))!.SetValue(vm.Test, quantity);
+                typeof(TestViewModel).GetProperty(nameof(TestViewModel.DailyTestCount))!.SetValue(vm.Test, quantity);
                 typeof(TestViewModel).GetProperty(nameof(TestViewModel.Lot))!.SetValue(vm.Test, lot);
             }
             Counters(10, "2010");
