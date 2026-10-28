@@ -478,6 +478,9 @@
                TargetType="DataGrid"
                BasedOn="{StaticResource PiFaultGridStyle}">
             <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <!-- Reserve the scrollbar gutter before rows arrive; Auto changes star
+                 column widths as installation adds/removes visible connections. -->
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Visible"/>
             <Setter Property="Visibility" Value="Collapsed"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding SelectedOperationTabIndex}" Value="0">
@@ -526,6 +529,9 @@
         <Style x:Key="PiCellStyle" TargetType="DataGridCell" BasedOn="{StaticResource IndustrialGridCellStyle}"/>
 
         <Style x:Key="FaultGridCellStyle" TargetType="DataGridCell" BasedOn="{StaticResource PiCellStyle}">
+            <!-- The star columns already supply shared boundaries. Rounding each
+                 recycled cell separately can leave a one-pixel gap between them. -->
+            <Setter Property="UseLayoutRounding" Value="False"/>
             <Setter Property="BorderThickness" Value="0,0,1,0"/>
         </Style>
 

@@ -345,6 +345,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("Wire table keeps headers and color boundaries stable as rows arrive and recycle", TestWireColorCellFillsBounds),
             ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),
             ("Every PASS retains its printer command offline with clean History", TestAlwaysPrintHistory),
             ("Compact settings preserve required profiles and read legacy files", TestCompactPrintConfig),
