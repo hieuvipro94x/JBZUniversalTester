@@ -505,8 +505,8 @@
                     <DataGridTemplateColumn Header="Mã vạch đầu ra" Width="260" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding PrinterCommandSingleLineText}"
-                                           ToolTip="{Binding ExportBarcodeText}"
+                                <TextBlock Text="{Binding BarcodeOutputText}"
+                                           ToolTip="{Binding BarcodeOutputText}"
                                            TextTrimming="CharacterEllipsis"
                                            TextWrapping="NoWrap"
                                            HorizontalAlignment="Stretch"

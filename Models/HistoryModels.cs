@@ -3,6 +3,8 @@ namespace JBZUniversalTester.Models;
 public sealed class TestHistoryRecord
 {
     private CustomerFaultDisplay? _customerFault;
+    private string? _barcodePayloadSource;
+    private string _barcodeFromPayload = string.Empty;
 
     public long Id { get; set; }
     public DateTime Started { get; set; }
@@ -72,9 +74,22 @@ public sealed class TestHistoryRecord
     public string LabelTypeText => !string.IsNullOrWhiteSpace(LabelTemplateType)
         ? LabelTemplateType
         : LabelProfile;
-    // PASS keeps its original printer command even when no printer is connected.
-    // Older rows without a payload retain their saved barcode as a fallback.
-    public string BarcodeOutputText => BarcodeValue ?? string.Empty;
+    // Show output only after a successful send. The captured barcode and full
+    // command remain stored independently for offline audit and explicit retry.
+    public string BarcodeOutputText
+    {
+        get
+        {
+            if (!IsProductionRecord || !Passed || PrintStatus != LabelPrintStatus.Printed.ToString()) return string.Empty;
+            if (!string.IsNullOrWhiteSpace(BarcodeValue)) return BarcodeValue;
+            if (!string.Equals(_barcodePayloadSource, LabelPayload, StringComparison.Ordinal))
+            {
+                _barcodeFromPayload = JBZUniversalTester.Services.SavedLabelBarcodeReader.Read(LabelPayload);
+                _barcodePayloadSource = LabelPayload;
+            }
+            return _barcodeFromPayload;
+        }
+    }
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
     // The original export keeps Lot empty and puts the saved production LOT
     // in the PASS-count column. Do not rewrite or renumber legacy Tests.Lot.
@@ -107,7 +122,7 @@ public sealed class TestHistoryRecord
     public string ExportBarcodeText =>
         IsProductionRecord &&
         Passed
-            ? !string.IsNullOrEmpty(LabelPayload) ? LabelPayload : BarcodeOutputText
+            ? !string.IsNullOrEmpty(LabelPayload) ? LabelPayload : BarcodeValue ?? string.Empty
             : string.Empty;
     public string ExportPercentText => string.Empty;
     public string PrinterCommandSingleLineText => SingleLineLog(ExportBarcodeText);
@@ -571,7 +586,9 @@ public sealed record LabelPrintRequest(
                 Alc = history.Alc,
                 LotNo = history.LotNo,
                 TestedAt = history.Finished,
-                CycleId = history.CycleId
+                CycleId = history.CycleId,
+                Barcode = string.IsNullOrWhiteSpace(history.BarcodeValue) ? captured.Data.Barcode : history.BarcodeValue,
+                BarcodePrint = string.IsNullOrWhiteSpace(history.BarcodeValue) ? captured.Data.BarcodePrint : history.BarcodeValue
             }
         };
     }

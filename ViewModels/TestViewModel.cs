@@ -12971,6 +12971,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 }
                 if (printRequest is not null)
                 {
+                    history.BarcodeValue = printRequest.Data.Barcode;
                     history.LabelSerial = printRequest.Profile.Id == LabelSettings.BcwTemplate ? printRequest.Data.Barcode : identity!.SerialText;
                     history.LabelProfile = printRequest.FormatName;
                     history.LabelPayload = printRequest.Payload;

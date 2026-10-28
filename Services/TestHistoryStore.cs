@@ -2214,7 +2214,7 @@ public sealed class TestHistoryStore
         using SqliteConnection connection = Open();
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            UPDATE Tests SET PrintStatus=$Pending,PrintMessage='',Barcode=''
+            UPDATE Tests SET PrintStatus=$Pending,PrintMessage=''
             WHERE Id=$Id AND CycleId=$Cycle AND PrintStatus IN ($None,$Failed);
             """;
         command.Parameters.AddWithValue("$Pending", LabelPrintStatus.Pending.ToString());
@@ -2243,7 +2243,7 @@ public sealed class TestHistoryStore
         command.CommandText = $"""
             SELECT t.Id,t.FinishedAt,p.PartName,p.PartNumber,p.VehicleType,p.Eco,p.Nco,p.Alc,
                    t.Lot,t.CycleId,m.ModelName,m.FilePath,t.LabelProfile,t.LabelTemplateType,
-                   t.LabelPayload,t.PrintStatus,t.Printer,t.LabelCopies,t.PrintMessage
+                   t.LabelPayload,t.PrintStatus,t.Printer,t.LabelCopies,t.PrintMessage,t.Barcode,t.LabelSerial
             FROM Tests t
             JOIN Parts p ON p.Id=t.PartId
             JOIN Models m ON m.Id=t.ModelId
@@ -2266,6 +2266,7 @@ public sealed class TestHistoryStore
             LabelProfile = reader.GetString(12), LabelTemplateType = reader.GetString(13),
             LabelPayload = reader.GetString(14), PrintStatus = reader.GetString(15),
             Printer = reader.GetString(16), LabelCopies = reader.GetInt32(17), PrintMessage = reader.GetString(18),
+            BarcodeValue = reader.GetString(19), LabelSerial = reader.GetString(20),
             Passed = true, InspectionType = HistoryInspectionType.Product
         };
     }
@@ -2298,7 +2299,7 @@ public sealed class TestHistoryStore
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
             UPDATE Tests SET PrintStatus=$Status,PrintTimestamp=$At,PrintMessage=$Message,
-                Barcode=CASE WHEN $Status=$Printed AND $Barcode<>'' THEN $Barcode ELSE '' END
+                Barcode=CASE WHEN $Status=$Printed AND $Barcode<>'' THEN $Barcode ELSE Barcode END
             WHERE Id=$Id AND CycleId=$Cycle;
             """;
         command.Parameters.AddWithValue("$Status", status.ToString());
@@ -2316,7 +2317,7 @@ public sealed class TestHistoryStore
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            UPDATE Tests SET LabelSerial=$Qr,LabelProfile='JBZBCW',LabelTemplateType='BCW',LabelPayload=$Payload
+            UPDATE Tests SET Barcode=$Qr,LabelSerial=$Qr,LabelProfile='JBZBCW',LabelTemplateType='BCW',LabelPayload=$Payload
             WHERE Id=$Id AND CycleId=$Cycle AND LabelTemplateType='BCW';
             """;
         command.Parameters.AddWithValue("$Qr", request.Data.Barcode);

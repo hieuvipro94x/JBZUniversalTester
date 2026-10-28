@@ -20,6 +20,18 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-history-barcodes", var barcodePreviewPath])
+        {
+            RenderHistoryBarcodePreview(barcodePreviewPath);
+            return 0;
+        }
+        if (args is ["--test-history-barcode-display"])
+        {
+            TestHistoryBarcodeOnlyAndPassLot();
+            TestAlwaysPrintHistory();
+            Console.WriteLine("PASS: Barcode-only History, offline immutable snapshots and PASS-driven LOT sequence");
+            return 0;
+        }
         if (args is ["--test-main-daily-quantity"])
         {
             TestMainDailyQuantityByProduct();
@@ -356,6 +368,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("History displays encoded barcodes with PASS-only LOT progression, including offline printers", TestHistoryBarcodeOnlyAndPassLot),
             ("MainWindow quantity follows selected product and day instead of lifetime totals", TestMainDailyQuantityByProduct),
             ("Wire table keeps headers and color boundaries stable as rows arrive and recycle", TestWireColorCellFillsBounds),
             ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),

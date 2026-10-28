@@ -69,10 +69,12 @@ internal static partial class Program
                     row.LabelPayload = payload;
                     row.LabelProfile = request.Profile.Id;
                     row.LabelSerial = request.Data.Barcode;
+                    row.BarcodeValue = request.Data.Barcode;
                     long id = store.Add(row);
                     ((Task)print.Invoke(vm, [request, store, id, false])!).GetAwaiter().GetResult();
                     TestHistoryRecord saved = store.Search(new HistorySearchCriteria(null, null, null, row.PartNumber, "ALL")).Single();
                     Assert(saved.Passed && saved.LotNo == row.LotNo && saved.LabelPayload == payload && saved.ExportBarcodeText == payload &&
+                           saved.BarcodeValue == request.Data.Barcode && saved.BarcodeOutputText.Length == 0 &&
                            saved.PrintMessage.Length == 0 && !saved.ExportContentText.Contains("인쇄", StringComparison.Ordinal),
                         "Offline PASS retains exact command and LOT without COM/print diagnostics in history");
                     Assert(saved.PrintStatus != LabelPrintStatus.Printed.ToString(), "An offline send cannot fabricate a printed result");
