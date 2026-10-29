@@ -119,25 +119,38 @@ internal static partial class Program
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
             var vm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
             var model = Model(("PAIR", new[] { 1, 2 }));
-            vm.SetModel(model);
+            typeof(TestViewModel).GetField("_model", flags)!.SetValue(vm, model);
             typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(vm, true);
             var entries = new List<(string Title, string Text, string Background, string Foreground)>();
             void Add(string title, string state, string? display = null)
             {
                 vm.State = state;
-                entries.Add((title, display ?? vm.ResultStatusText, vm.StateBackground, vm.StateForeground));
+                string text = display ?? vm.ResultStatusText;
+                if (text == "ĐANG KIỂM TRA") text += "...";
+                entries.Add((title, text, vm.StateBackground, vm.StateForeground));
             }
             Add("01 · CHỜ LẮP SẢN PHẨM", "LẮP SẢN PHẨM");
             typeof(TestViewModel).GetField("_presentationCycleStarted", flags)!.SetValue(vm, true);
             Add("02 · ĐANG KIỂM TRA", "ĐANG KIỂM TRA...");
+            Add("ĐANG CHẠY LEAK", "ĐANG TEST LEAK");
+            Add("ĐANG ĐO ĐIỆN TRỞ", "ĐANG ĐO ĐIỆN TRỞ");
             Add("03 · KẾT QUẢ ĐẠT", "PASS");
             Add("04 · KẾT QUẢ KHÔNG ĐẠT", "FAIL");
             typeof(TestViewModel).GetField("_productRemovalPending", flags)!.SetValue(vm, 1);
             Add("05 · CHỜ THÁO SẢN PHẨM", "THÁO SẢN PHẨM");
             typeof(TestViewModel).GetField("_productRemovalPending", flags)!.SetValue(vm, 0);
-            Add("06 · TEST LEAK KHÔNG ĐẠT", "FAIL LEAK", "KIỂM TRA KÍN NƯỚC\nKHÔNG ĐẠT");
+            Add("SAI DÂY", "LỖI SAI DÂY");
+            Add("CHẬP MẠCH", "LỖI CHẬP MẠCH");
+            typeof(TestViewModel).GetField("_pendingLeakFailureMeasurements", flags)!.SetValue(vm,
+                new WaterProofChannelMeasurement[] { new(1, true, 80, 75, 5, false) });
+            vm.SelectedOperationTabIndex = 2;
+            Add("TEST LEAK KHÔNG ĐẠT", "FAIL LEAK");
+            vm.SelectedOperationTabIndex = 0;
+            typeof(TestViewModel).GetField("_productRemovalPending", flags)!.SetValue(vm, 1);
+            Add("CHỜ THÁO · CHƯA CHỐT PASS", "THÁO SẢN PHẨM");
+            typeof(TestViewModel).GetField("_productRemovalPending", flags)!.SetValue(vm, 0);
             var master = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
-            master.SetModel(model);
+            typeof(TestViewModel).GetField("_model", flags)!.SetValue(master, model);
             typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(master, false);
             foreach (var (title, text, type, state) in new[]
             {
@@ -150,30 +163,45 @@ internal static partial class Program
                 typeof(TestViewModel).GetField("_masterSampleType", flags)!.SetValue(master, type);
                 typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(master, state);
                 master.State = text;
-                entries.Add((title, text, master.StateBackground, master.StateForeground));
+                entries.Add((title, master.ResultStatusText, master.StateBackground, master.StateForeground));
+                typeof(TestViewModel).GetField("_masterGoodVerified", flags)!.SetValue(master, true);
+                typeof(TestViewModel).GetField("_masterBadVerified", flags)!.SetValue(master, true);
+                typeof(TestViewModel).GetField("_masterFaultCollectionLocked", flags)!.SetValue(master, true);
+                typeof(TestViewModel).GetField("_masterSequenceState", flags)!.SetValue(master,
+                    state == MasterSequenceState.TestingGoodMaster ? MasterSequenceState.EjectingGoodMaster : MasterSequenceState.EjectingBadMaster);
+                entries.Add((title + " · HOÀN THÀNH", master.ResultStatusText, master.StateBackground, master.StateForeground));
             }
             Add("11 · ĐANG KẾT NỐI BO", "ĐANG KẾT NỐI BO");
             Add("12 · LỖI THIẾT BỊ", "LỖI THIẾT BỊ", "LỖI THIẾT BỊ");
+            Add("LỖI ĐỒNG HỒ ĐIỆN TRỞ", "LỖI KEYSIGHT - CHỜ THÁO SẢN PHẨM");
+            Add("LỖI MÁY LEAK", "LỖI KIỂM TRA LEAK");
+            Add("LỖI LƯU DỮ LIỆU", "LỖI LƯU DỮ LIỆU\nDỪNG KIỂM TRA");
+            Add("LỖI ĐIỀU KHIỂN RELAY", "LỖI THỰC THI RELAY");
+            Add("THAO TÁC TAY", "MANUAL");
             Brush BrushOf(string color) => new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
             var root = new System.Windows.Controls.DockPanel
             {
-                Background = BrushOf("#F1F5F9"), Width = 1440, Height = 1120,
+                Background = BrushOf("#F1F5F9"), Width = 1600, Height = 1740,
                 LastChildFill = true
             };
             var heading = new System.Windows.Controls.TextBlock
             {
-                Text = "MÀU TRẠNG THÁI · V2026.09.268\nMàu lấy trực tiếp từ phần mềm · Mẫu chờ lắp và đang kiểm tra dùng chung nền vàng",
+                Text = "MÀU TRẠNG THÁI · " + JBZUniversalTester.Versioning.AppVersion.DisplayVersion +
+                    "\nĐANG KIỂM TRA: nền #DCEBFF · chữ #173B88 | Màu và nội dung lấy từ trạng thái thực của phần mềm",
                 FontSize = 25, FontWeight = FontWeights.Bold, Margin = new Thickness(24, 20, 24, 18),
                 Foreground = BrushOf("#0F172A"), FontFamily = new FontFamily("Malgun Gothic")
             };
             System.Windows.Controls.DockPanel.SetDock(heading, System.Windows.Controls.Dock.Top);
             root.Children.Add(heading);
-            var tiles = new System.Windows.Controls.Primitives.UniformGrid { Columns = 3, Rows = 4, Margin = new Thickness(14, 0, 14, 14) };
+            var tiles = new System.Windows.Controls.Primitives.UniformGrid { Columns = 4, Rows = (int)Math.Ceiling(entries.Count / 4d), Margin = new Thickness(14, 0, 14, 14) };
             root.Children.Add(tiles);
+            int number = 0;
             foreach (var entry in entries)
             {
                 var layout = new System.Windows.Controls.DockPanel { Margin = new Thickness(10), Background = Brushes.White };
-                var title = new System.Windows.Controls.TextBlock { Text = entry.Title, FontSize = 17, FontWeight = FontWeights.Bold,
+                string caption = System.Text.RegularExpressions.Regex.Replace(entry.Title, "^[0-9]+ · ", "");
+                var title = new System.Windows.Controls.TextBlock { Text = $"{++number:00} · {caption}", FontSize = 15, FontWeight = FontWeights.Bold,
+                    TextWrapping = TextWrapping.Wrap,
                     Padding = new Thickness(12, 10, 12, 8), Foreground = BrushOf("#334155") };
                 System.Windows.Controls.DockPanel.SetDock(title, System.Windows.Controls.Dock.Top);
                 layout.Children.Add(title);
@@ -182,15 +210,16 @@ internal static partial class Program
                 System.Windows.Controls.DockPanel.SetDock(codes, System.Windows.Controls.Dock.Bottom);
                 layout.Children.Add(codes);
                 layout.Children.Add(new System.Windows.Controls.Border { Background = BrushOf(entry.Background), Margin = new Thickness(10, 0, 10, 0),
-                    Child = new System.Windows.Controls.TextBlock { Text = entry.Text, Foreground = BrushOf(entry.Foreground),
+                    Child = new System.Windows.Controls.Viewbox { Stretch = Stretch.Uniform, StretchDirection = System.Windows.Controls.StretchDirection.DownOnly,
+                        Child = new System.Windows.Controls.TextBlock { Width = 310, Text = entry.Text, Foreground = BrushOf(entry.Foreground),
                         FontSize = 25, FontWeight = FontWeights.Bold, TextAlignment = TextAlignment.Center,
-                        TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8) } });
+                        TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8) } } });
                 tiles.Children.Add(layout);
             }
-            root.Measure(new Size(1440, 1120));
-            root.Arrange(new Rect(0, 0, 1440, 1120));
+            root.Measure(new Size(1600, 1740));
+            root.Arrange(new Rect(0, 0, 1600, 1740));
             root.UpdateLayout();
-            var bitmap = new RenderTargetBitmap(1440, 1120, 96, 96, PixelFormats.Pbgra32);
+            var bitmap = new RenderTargetBitmap(1600, 1740, 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(root);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             using var file = File.Create(path);

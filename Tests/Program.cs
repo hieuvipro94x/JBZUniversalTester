@@ -1935,8 +1935,8 @@ internal static partial class Program
             "Committed PASS explicitly asks for product removal until ProductRemoved returns the UI to ready");
         statusVm.State = "ĐANG TEST LEAK";
         Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
-               statusVm.StateBackground == "#83CCEB" &&
-               statusVm.StateForeground == "#000000",
+               statusVm.StateBackground == "#DCEBFF" &&
+               statusVm.StateForeground == "#173B88",
             "Leak stage uses the canonical checking presentation before PASS");
         statusVm.State = "CHƯA ĐẠT";
         Assert(statusVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
@@ -1947,12 +1947,12 @@ internal static partial class Program
                statusVm.StateForeground == "#222222",
             "Removal interlock must not be presented as LẮP SẢN PHẨM");
         statusVm.State = "ĐANG KIỂM TRA...";
-        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#83CCEB" && statusVm.StateForeground == "#000000",
-            "Current testing status uses the requested blue background and black text");
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#DCEBFF" && statusVm.StateForeground == "#173B88",
+            "Current testing status uses the requested pale blue background and navy text");
         statusVm.State = "ĐANG KẾT NỐI BO";
         Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
-               statusVm.StateBackground == "#83CCEB" &&
-               statusVm.StateForeground == "#000000",
+               statusVm.StateBackground == "#DCEBFF" &&
+               statusVm.StateForeground == "#173B88",
             "Board connection progress uses the canonical checking presentation");
         statusVm.State = "LỖI THIẾT BỊ";
         Assert(statusVm.ResultStatusText == "LỖI THIẾT BỊ" &&
