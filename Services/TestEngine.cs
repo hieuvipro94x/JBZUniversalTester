@@ -304,19 +304,53 @@ public sealed class TestEngine : IDisposable
     {
         lock (_gate)
         {
-            if (_disposed || !_lastFrameValid || _model is not ProductModel model)
+            if (_disposed || !_lastFrameValid || _model is not ProductModel || _wiringFaults.Count == 0)
                 return [];
             var componentSizes = _actualComponentByIo.Values.GroupBy(component => component)
                 .ToDictionary(group => group.Key, group => group.Count());
+            // A factory splice/CLIP can legitimately contain many IOs. If part
+            // of that expected group is missing and its actual group contains
+            // foreign IOs, it is replacement evidence, not a short based merely
+            // on the actual group's size. Keep independent groups independent.
+            var replacements = new Dictionary<int, Dictionary<int, (int Anchor, int Missing)>>();
+            foreach (var expectedGroup in _componentByIo.GroupBy(pair => pair.Value))
+            {
+                int[] members = expectedGroup.Select(pair => pair.Key).Where(io => io > 0).ToArray();
+                if (members.Length < 3) continue;
+                foreach (var portion in members.Where(_actualComponentByIo.ContainsKey)
+                             .GroupBy(io => _actualComponentByIo[io]))
+                {
+                    if (portion.Count() == members.Length || componentSizes[portion.Key] <= portion.Count())
+                        continue;
+                    int missing = members.First(io => !_actualComponentByIo.TryGetValue(io, out int actual) || actual != portion.Key);
+                    if (!replacements.TryGetValue(portion.Key, out var byExpected))
+                        replacements.Add(portion.Key, byExpected = []);
+                    byExpected.Add(expectedGroup.Key, (portion.First(), missing));
+                }
+            }
             return _wiringFaults.Select(fault =>
             {
-                // Master samples: an unexpected connected group of at least
-                // three distinct physical IOs is short-circuit evidence.
-                // Correct THT common nets never enter this confirmed fault list.
-                // Production fault classification remains unchanged.
-                bool shortGroup = _actualComponentByIo.TryGetValue(fault.SourceIo, out int component) &&
+                bool sameGroup = _actualComponentByIo.TryGetValue(fault.SourceIo, out int component) &&
                     _actualComponentByIo.TryGetValue(fault.TargetIo, out int targetComponent) &&
-                    component == targetComponent && componentSizes[component] >= 3;
+                    component == targetComponent;
+                if (sameGroup && replacements.TryGetValue(component, out var byExpected))
+                {
+                    // Prefer the expected group of this edge's source/target,
+                    // including reverse scan directions and shared CLIP topology.
+                    var replacement = _componentByIo.TryGetValue(fault.SourceIo, out int sourceExpected) &&
+                        byExpected.TryGetValue(sourceExpected, out var fromSource) ? fromSource :
+                        _componentByIo.TryGetValue(fault.TargetIo, out int targetExpected) &&
+                        byExpected.TryGetValue(targetExpected, out var fromTarget) ? fromTarget : byExpected.Values.First();
+                    return fault with
+                    {
+                        FaultType = ProductFaultType.WrongWiring,
+                        ExpectedSourceIo = replacement.Anchor,
+                        ExpectedTargetIo = replacement.Missing
+                    };
+                }
+                // Preserve the existing three-IO short rule for unexpected groups
+                // without a split factory splice. Never mutate production faults.
+                bool shortGroup = sameGroup && componentSizes[component] >= 3;
                 return fault with
                 {
                     FaultType = shortGroup ? ProductFaultType.ShortCircuit : ProductFaultType.WrongWiring,

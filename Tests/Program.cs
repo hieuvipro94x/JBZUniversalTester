@@ -20,6 +20,18 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-master-splice-items", var spliceItemDirectory])
+        {
+            TestMasterSpliceClassification();
+            TestMasterSpliceOnItemFiles(spliceItemDirectory);
+            return 0;
+        }
+        if (args is ["--test-master-splice"])
+        {
+            TestMasterSpliceClassification();
+            Console.WriteLine("PASS: Master splice replacement and intact-splice bridge classification");
+            return 0;
+        }
         if (args is ["--preview-history-barcodes", var barcodePreviewPath])
         {
             RenderHistoryBarcodePreview(barcodePreviewPath);
@@ -368,6 +380,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),
             ("History displays encoded barcodes with PASS-only LOT progression, including offline printers", TestHistoryBarcodeOnlyAndPassLot),
             ("MainWindow quantity follows selected product and day instead of lifetime totals", TestMainDailyQuantityByProduct),
             ("Wire table keeps headers and color boundaries stable as rows arrive and recycle", TestWireColorCellFillsBounds),
