@@ -71,7 +71,7 @@ public partial class TestWindow : Window
             System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
                 new System.Windows.Data.Binding(nameof(TestViewModel.HasResistanceResultRows))
                 { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });
-        foreach (var column in new[] { LeakSuctionColumn, LeakHoldColumn, LeakValueColumn, LeakLimitColumn })
+        foreach (var column in new[] { LeakSuctionColumn, LeakHoldColumn, LeakValueColumn })
             System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
                 new System.Windows.Data.Binding(nameof(TestViewModel.HasLeakResultRows))
                 { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });

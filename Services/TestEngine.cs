@@ -2908,8 +2908,8 @@ public sealed class TestEngine : IDisposable
     }
 
     /// <summary>
-    /// Leak chỉ được kích hoạt khi một mạng dây có mã RET/RT + số
-    /// (RET1, RET01, RT1, RET02', RT15...) đã thông đúng toàn bộ topology và mạng đó
+    /// Leak chỉ được kích hoạt khi một mạng dây có mã RET/RT/SEAL + số
+    /// (RET1, RET01, RT1, RET02', SEAL1, seal01...) đã thông đúng toàn bộ topology và mạng đó
     /// đi qua connector được cấu hình cho kênh Leak.
     /// </summary>
     public bool HasConnectedRetWire(string? connectorId)
@@ -2942,7 +2942,7 @@ public sealed class TestEngine : IDisposable
     }
 
     /// <summary>
-    /// Xác nhận riêng các mạng RET/RT thuộc connector Leak đã được tháo.
+    /// Xác nhận riêng các mạng RET/RT/SEAL thuộc connector Leak đã được tháo.
     /// Không yêu cầu những mạng dây thường hoặc connector khác của sản phẩm
     /// phải mất continuity; dùng cho chu kỳ Leak-only retest.
     /// </summary>
@@ -3011,7 +3011,7 @@ public sealed class TestEngine : IDisposable
             if (HasRetTopology(selected))
             {
                 // Installation of this connector must not wait for every other
-                // endpoint of a shared RET net. One declared local RET edge is
+                // endpoint of a shared RET/RT/SEAL net. One declared local edge is
                 // sufficient; final continuity still validates the whole net.
                 bool suppressedRetEdge = false;
                 foreach (WireNet net in _model.Nets.Where(net =>
@@ -3037,7 +3037,7 @@ public sealed class TestEngine : IDisposable
                 return true;
             }
 
-            // Without RET, only a declared THT edge to another connector can
+            // Without RET/RT/SEAL, only a declared THT edge to another connector can
             // prove installation. Arbitrary activity cannot.
             var anchors = _model.Connectors.Select(connector => connector.ConnectorId)
                 .Where(id => !string.Equals(id, selected, StringComparison.OrdinalIgnoreCase))
@@ -3079,7 +3079,9 @@ public sealed class TestEngine : IDisposable
             ? 3
             : value.StartsWith("RT", StringComparison.OrdinalIgnoreCase)
                 ? 2
-                : -1;
+                : value.StartsWith("SEAL", StringComparison.OrdinalIgnoreCase)
+                    ? 4
+                    : -1;
         return numericIndex >= 0 &&
                value.Length > numericIndex &&
                char.IsDigit(value[numericIndex]);

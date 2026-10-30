@@ -284,16 +284,18 @@ internal static partial class Program
             root.Resources.MergedDictionaries.Add(window.Resources);
             root.SetValue(System.Windows.Controls.TextBlock.FontFamilyProperty, new FontFamily("Malgun Gothic"));
             const int width = 1600, height = 720;
+            ((FrameworkElement)window.FindName("TestHeaderSurface")).Width = width - 16;
+            var previewCanvas = new System.Windows.Controls.Border { Background = Brushes.White, Child = root };
             using var source = new HwndSource(new HwndSourceParameters("LeakSummaryPreview")
                 { Width = width, Height = height, WindowStyle = unchecked((int)0x80000000) });
-            source.RootVisual = root;
-            root.Measure(new Size(width, height));
-            root.Arrange(new Rect(0, 0, width, height));
-            root.UpdateLayout();
+            source.RootVisual = previewCanvas;
+            previewCanvas.Measure(new Size(width, height));
+            previewCanvas.Arrange(new Rect(0, 0, width, height));
+            previewCanvas.UpdateLayout();
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             root.UpdateLayout();
             var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-            bitmap.Render(root);
+            bitmap.Render(previewCanvas);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
             using var file = File.Create(path);
             var encoder = new PngBitmapEncoder();

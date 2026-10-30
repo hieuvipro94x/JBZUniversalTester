@@ -20,6 +20,15 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-seal-leak"])
+        {
+            TestSealLeakTrigger();
+            TestEarlyLeakSharedRet();
+            TestLeakWithoutRetTrigger();
+            TestCombinedInspectionResults();
+            Console.WriteLine("PASS: SEAL/RET triggers, early fitting, Probe isolation, per-channel removal and combined results");
+            return 0;
+        }
         if (args is ["--test-master-splice-items", var spliceItemDirectory])
         {
             TestMasterSpliceClassification();
@@ -380,6 +389,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("SEAL Leak trigger follows declared connector edges and preserves early/retry isolation", TestSealLeakTrigger),
             ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),
             ("History displays encoded barcodes with PASS-only LOT progression, including offline printers", TestHistoryBarcodeOnlyAndPassLot),
             ("MainWindow quantity follows selected product and day instead of lifetime totals", TestMainDailyQuantityByProduct),

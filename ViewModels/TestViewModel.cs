@@ -9193,7 +9193,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             State = MasterStatus = "MASTER GOOD - CẤU HÌNH TEST LEAK KHÔNG HỢP LỆ";
             SetWaterProofStage(WaterProofStage.Error, "KIỂM TRA CẤU HÌNH CONNECTOR LEAK", "ERROR");
-            AddLog("[MASTER GOOD-LEAK] Cần chọn kênh và connector có RET/RT hoặc cặp IO liên connector đúng THT.");
+            AddLog("[MASTER GOOD-LEAK] Cần chọn kênh và connector có RET/RT/SEAL hoặc cặp IO liên connector đúng THT.");
             return true;
         }
         int channel = SelectReadyMasterWaterProofChannel();
@@ -10648,7 +10648,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             if (!HasWaterProofConnectorTrigger(connectorId))
             {
-                error = $"CONNECTOR {connectorId}: LẮP ĐÚNG DÂY RET/RT; NẾU KHÔNG CÓ RET, CẦN MỘT CẶP IO ĐÚNG THT NỐI SANG CONNECTOR KHÁC.";
+                error = $"CONNECTOR {connectorId}: LẮP ĐÚNG DÂY RET/RT/SEAL; NẾU KHÔNG CÓ RET/RT/SEAL, CẦN MỘT CẶP IO ĐÚNG THT NỐI SANG CONNECTOR KHÁC.";
                 return false;
             }
         }
@@ -10673,7 +10673,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
             ResolveOperatorDialogOwner(),
-            "Connector TEST LEAK cần dây RET/RT, hoặc một cặp IO trong THT " +
+            "Connector TEST LEAK cần dây RET/RT/SEAL, hoặc một cặp IO trong THT " +
             "nối sang một connector khác.\n\n" +
             error + "\n\n" +
             "Hãy tháo sản phẩm, vào CÀI ĐẶT và tắt TEST LEAK hoặc cấu hình lại " +
@@ -11134,7 +11134,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     continue;
                 }
 
-                string error = $"CH{channel}: connector '{connectorId}' không có RET/RT hoặc cặp IO nối sang connector khác trong THT.";
+                string error = $"CH{channel}: connector '{connectorId}' không có RET/RT/SEAL hoặc cặp IO nối sang connector khác trong THT.";
                 _ = HandleWaterProofConfigurationErrorAsync(cycleModel, error);
                 return true;
             }

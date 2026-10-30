@@ -60,5 +60,36 @@ internal static partial class Program
             Assert(vm.InspectionResultRows.Single().ResultText == "NG LEAK",
                 "Combined table preserves NG LEAK instead of presenting a false PASS");
         }
+        OnSettingsDispatcher(async () =>
+        {
+            foreach (string language in new[] { "vi", "ko" })
+            {
+                var settings = new ProductionSettings { MasterFaultRequiredCount = 0, TestViewLanguage = language };
+                var vm = CreateTestViewModel(settings, out FakeBoard board);
+                typeof(TestViewModel).GetField("_model", flags)!.SetValue(vm, Model(("PAIR", new[] { 1, 2 })));
+                typeof(TestViewModel).GetField("_masterApproved", flags)!.SetValue(vm, true);
+                vm.FinalWaterProofRows.Add(new WaterProofChannelResult { Channel = 1, Enabled = true, IsMeasured = true,
+                    FirstResultPressure = 80, SecondResultPressure = 79.3, Leak = 0.7, LeakLimit = 0.2,
+                    Passed = false, ResultTextOverride = "NG LEAK" });
+                vm.SelectedOperationTabIndex = 2;
+                var window = new JBZUniversalTester.Views.TestWindow(vm, autoStartProduction: false);
+                var surface = (System.Windows.FrameworkElement)window.Content;
+                window.Content = null;
+                surface.DataContext = vm; surface.Resources.MergedDictionaries.Add(window.Resources);
+                surface.Measure(new System.Windows.Size(1600, 900));
+                surface.Arrange(new System.Windows.Rect(0, 0, 1600, 900));
+                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                surface.UpdateLayout();
+                var grid = (System.Windows.Controls.DataGrid)window.FindName("ResistanceGrid");
+                Assert(window.FindName("LeakLimitColumn") is null && !grid.Columns.OfType<System.Windows.Controls.DataGridBoundColumn>()
+                    .Any(column => column.Binding is System.Windows.Data.Binding binding && binding.Path?.Path == "LeakLimitText") &&
+                    grid.Columns.Count(column => column.Visibility == System.Windows.Visibility.Visible) == 6 &&
+                    vm.InspectionResultRows.Single().LeakText == "0.7" && vm.InspectionResultRows.Single().ResultText == "NG LEAK" &&
+                    vm.FinalWaterProofRows[0].LeakLimit == 0.2 && !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                    "Actual localized Leak table has six columns without a limit column; configured limits, measurements and NG are retained");
+                typeof(JBZUniversalTester.Views.TestWindow).GetField("_allowClose", flags)!.SetValue(window, true);
+                window.Close();
+            }
+        });
     }
 }

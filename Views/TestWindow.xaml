@@ -1085,7 +1085,6 @@
                     <DataGridTextColumn x:Name="LeakSuctionColumn" Header="ÁP SUẤT HÚT" Binding="{Binding FirstPressureText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn x:Name="LeakHoldColumn" Header="ÁP SUẤT GIỮ" Binding="{Binding SecondPressureText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn x:Name="LeakValueColumn" Header="ĐỘ RÒ" Binding="{Binding LeakText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
-                    <DataGridTextColumn x:Name="LeakLimitColumn" Header="GIỚI HẠN RÒ" Binding="{Binding LeakLimitText}" Width="1.5*" CellStyle="{StaticResource PiCenterCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                     <DataGridTextColumn Header="KẾT QUẢ" Binding="{Binding ResultText}" Width="1.5*" CellStyle="{StaticResource PassFailResultCellStyle}" ElementStyle="{StaticResource PiGridCenterTextStyle}"/>
                 </DataGrid.Columns>
             </DataGrid>
