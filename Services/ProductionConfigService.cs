@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -131,6 +131,8 @@ public static class ProductionConfigService
         {
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
             $"[StartCardNumber]{settings.StartCardNumber}",
+            $"[DiscardContactIo1]{settings.DiscardContactIo1}",
+            $"[DiscardContactIo2]{settings.DiscardContactIo2}",
             $"[IoConfirm1]{settings.IoConfirm1}",
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",
@@ -554,6 +556,8 @@ public static class ProductionConfigService
             if (key.StartsWith("MasterSelected.", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out int mask))
                 settings.MasterSelectedFaultSamplesByModel[Uri.UnescapeDataString(key["MasterSelected.".Length..])] = (MasterSampleSelection)mask;
         settings.MasterOpenFaultRequiredCount = I(map, "MasterOpenFaultRequiredCount", settings.MasterOpenFaultRequiredCount);
+        settings.DiscardContactIo1 = I(map, "DiscardContactIo1", settings.DiscardContactIo1);
+        settings.DiscardContactIo2 = I(map, "DiscardContactIo2", settings.DiscardContactIo2);
         foreach ((string key, string value) in map)
             if (key.StartsWith("MasterOpenFault.", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out int count))
                 settings.MasterOpenFaultCountsByModel[Uri.UnescapeDataString(key["MasterOpenFault.".Length..])] = count;

@@ -1,4 +1,4 @@
-namespace JBZUniversalTester.Models;
+﻿namespace JBZUniversalTester.Models;
 
 public sealed class ProductionSettings
 {
@@ -23,6 +23,9 @@ public sealed class ProductionSettings
     public int IoConfirmN { get; set; } = 1;
 
     public int UsbDelay { get; set; } = 1;
+    // 0/0 preserves existing THT configuration; a pair updates explicitly selected files.
+    public int DiscardContactIo1 { get; set; }
+    public int DiscardContactIo2 { get; set; }
     /// <summary>
     /// Card vật lý đầu tiên của dải được lắp. Firmware vẫn quét từ card 1 tới
     /// card cuối của dải; decoder bỏ vùng đứng trước và ánh xạ Start Card thành IO1.

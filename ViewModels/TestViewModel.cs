@@ -484,6 +484,27 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public string WaterProofPortText => string.IsNullOrWhiteSpace(_productionSettings.WaterProofMachine.PortName)
         ? "CHƯA CẤU HÌNH COM"
         : _productionSettings.WaterProofMachine.PortName;
+    public string HomeInspectionModeText => _model is null ? "CHƯA CHỌN MÃ HÀNG" :
+        "ĐIỆN" + (IsResistanceEnabledForModel(_model) ? " + ĐIỆN TRỞ" : string.Empty) +
+        (IsWaterProofEnabledForCurrentModel() ? " + LEAK" : string.Empty);
+    public string HomeLeakStatusText => _model is null ? "CHƯA CHỌN MÃ HÀNG" :
+        !_waterProofProfile.Enabled ? "KHÔNG SỬ DỤNG" :
+        _waterProofProfile.EnabledChannelCount == 0 ? "CHƯA CHỌN KÊNH LEAK" :
+        string.IsNullOrWhiteSpace(_productionSettings.WaterProofMachine.PortName) ? "CHƯA CẤU HÌNH COM" :
+        $"{(_waterProof.IsConnected ? "ĐÃ KẾT NỐI" : "CHƯA KẾT NỐI")} • {WaterProofPortText}";
+    public string HomePrinterStatusText => _model is null ? "CHƯA CHỌN MÃ HÀNG" :
+        !ProductionConfigService.IsProductLabelPrintingEnabled(_productionSettings,
+            ProductionConfigService.GetLotProductKey(_model)) ? "KHÔNG SỬ DỤNG" :
+        string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterCom) ? "CHƯA CẤU HÌNH COM" :
+        IsLabelPrinterConnected ? $"ĐÃ KẾT NỐI • {LabelPrinterConnectedPort}" :
+        LabelStatusText.StartsWith("TEM: ", StringComparison.Ordinal) ? LabelStatusText[5..] : LabelStatusText;
+    private int _homeLeakConnectionState;
+    private void RaiseHomeEquipmentPresentation()
+    {
+        Raise(nameof(HomeInspectionModeText));
+        Raise(nameof(HomeLeakStatusText));
+        Raise(nameof(HomePrinterStatusText));
+    }
     public string WaterProofCardBackground => _waterProofStage switch
     {
         WaterProofStage.Passed => "#E8F6EC",
@@ -1281,7 +1302,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public string LabelStatusText
     {
         get => _labelStatusText;
-        private set => Set(ref _labelStatusText, value);
+        private set
+        {
+            if (Set(ref _labelStatusText, value)) Raise(nameof(HomePrinterStatusText));
+        }
     }
 
     public bool IsLabelPrinterConnected => _labelPrintService.IsConnected;
@@ -2859,6 +2883,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         await WaitForLotConfigurationWritesAsync();
         if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
 
+        int discardFirst = _productionSettings.DiscardContactIo1;
+        int discardSecond = _productionSettings.DiscardContactIo2;
+        ThtModelParser.ValidateDiscardContacts(discardFirst, discardSecond, _board.Capacity.TotalIoCapacity);
+        bool discardInserted = false;
         ProductModel model;
         TestEngine.PreparedModelState preparedEngineModel;
         using (StartupPerformanceTrace.Measure("THT_MODEL_LOAD"))
@@ -2866,6 +2894,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             IReadOnlyList<ProductModel> candidates = await Task.Run(() =>
             {
                 long parseStarted = Stopwatch.GetTimestamp();
+                string? discardBackup = _modelParser.EnsureDiscardContacts(fullPath, discardFirst, discardSecond);
+                discardInserted = discardBackup is not null;
+                if (discardBackup is not null)
+                    AddLog($"[DISCARD-THT] Đã cập nhật IO {discardFirst}/{discardSecond}; bản gốc: {discardBackup}");
                 IReadOnlyList<ProductModel> parsed = _modelParser.LoadAll(fullPath);
                 double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
@@ -2897,6 +2929,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 model = candidates[0];
             }
 
+            if (!discardInserted && model.HasDiscardInterlock)
+            {
+                AddLog($"[DISCARD-THT] ĐÃ CÓ XÁC NHẬN THÙNG LỖI: IO {string.Join('/', model.DiscardContactIo)}; giữ nguyên THT.");
+                if (Application.Current is not null)
+                {
+                    var notice = new JBZUniversalTester.Views.DiscardConfigurationNoticeWindow(model);
+                    if (ResolveOperatorDialogOwner() is { } noticeOwner) notice.Owner = noticeOwner;
+                    notice.ShowDialog();
+                }
+                if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
+            }
             preparedEngineModel = await Task.Run(() =>
             {
                 ModelFileIdentityService.Capture(model, fullPath);
@@ -4301,6 +4344,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         AsyncFileLogService.Current.Board($"WATERPROOF {text}", AppLogLevel.Normal);
         AddLog($"[WATERPROOF] {text}");
+        int connected = _waterProof.IsConnected ? 1 : 0;
+        if (Interlocked.Exchange(ref _homeLeakConnectionState, connected) != connected)
+            InvokeUi(() => Raise(nameof(HomeLeakStatusText)));
     }
 
     private static bool IsContinuityPreviewFrame(ScanFrame frame) =>
@@ -4572,7 +4618,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (frame.Mode == BoardScanMode.Production &&
                 _model is { DiscardContactIo.Count: > 0 } discardModel)
             {
-                if (discardModel.HasDiscardInterlock)
+                if (discardModel.HasDiscardInterlock && Volatile.Read(ref _topologyLearningActive) == 0)
                     discardBlocksProduction = ProcessDiscardContactFrame(
                         frame,
                         discardModel,
@@ -10312,6 +10358,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Raise(nameof(IsWaterProofCardVisible));
         Raise(nameof(WaterProofLeakLimitText));
         Raise(nameof(WaterProofPortText));
+        RaiseHomeEquipmentPresentation();
     }
 
     private void ResetWaterProofDisplay()
@@ -12201,6 +12248,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Raise(nameof(BoardCapacity));
         Raise(nameof(BoardCapacityText));
         Raise(nameof(WaterProofPortText));
+        RaiseHomeEquipmentPresentation();
         Raise(nameof(ProbeReplacementThreshold));
         Raise(nameof(ProbeCycleText));
         Raise(nameof(ProbeMaintenanceDue));
@@ -13676,6 +13724,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 confirmedWiringFault &&
                 (_cycleActive || _sound.IsWiringFaultAlarmActive));
         }
+        else if (IsAwaitingDiscardAfterFullRemoval && !_sound.IsElectricalFaultAlarmHeld)
+        {
+            // The electrical product is already removed. Keep the discard
+            // interlock, but do not restart TESTPOINT from the latched FAIL.
+            _sound.SetWiringFaultAlarm(false);
+        }
         else if (!_productionSettings.WiringFaultConfirmationEnabled)
         {
             // A committed wiring FAIL keeps one continuous alarm until the
@@ -13748,13 +13802,24 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             empty ? Math.Min(2, Volatile.Read(ref _faultAlarmEmptyFrames) + 1) : 0);
     }
 
+    private bool IsAwaitingDiscardAfterFullRemoval =>
+        _model?.HasDiscardInterlock == true && _waitForFaultProductRemoval &&
+        Volatile.Read(ref _faultProductRemoved) != 0 &&
+        Volatile.Read(ref _discardRequiredForFault) != 0;
+
     private void TryReleaseElectricalFaultAlarmAfterRemoval()
     {
         if (!_sound.IsElectricalFaultAlarmHeld || Volatile.Read(ref _faultAlarmEmptyFrames) < 2 ||
             Volatile.Read(ref _faultAlarmFrameRuntimeGeneration) != Volatile.Read(ref _runtimeGeneration) ||
-            IsDeviceFault || IsPersistenceFault || IsProductRemovalPending ||
+            IsDeviceFault || IsPersistenceFault || Volatile.Read(ref _probeSessionActive) != 0) return;
+        if (IsAwaitingDiscardAfterFullRemoval)
+        {
+            _sound.ReleaseElectricalFaultAlarmAfterRemoval();
+            AddLog("TESTPOINT: đã xác nhận tháo hết sản phẩm lỗi; dừng cảnh báo điện, giữ khóa chờ cảm biến thùng NG.");
+            return;
+        }
+        if (IsProductRemovalPending ||
             _waitForProductRelease || _waitForFaultProductRemoval ||
-            Volatile.Read(ref _probeSessionActive) != 0 ||
             Volatile.Read(ref _discardRequiredForFault) != 0 ||
             Volatile.Read(ref _discardContactClosed) != 0) return;
         bool ready = ResultStatusText == "LẮP SẢN PHẨM" ||

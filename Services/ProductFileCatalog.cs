@@ -27,6 +27,8 @@ public static class ProductFileCatalog
                     ct.ThrowIfCancellationRequested();
                     if (!Path.GetExtension(path).Equals(".tht", StringComparison.OrdinalIgnoreCase))
                         continue;
+                    if (Path.GetFileName(path).StartsWith('.') && path.EndsWith(".tmp.tht", StringComparison.OrdinalIgnoreCase))
+                        continue;
                     string folder = Path.GetRelativePath(root, directory);
                     files.Add(new ProductFileEntry(Path.GetFileNameWithoutExtension(path),
                         folder == "." ? Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar)) : folder,
@@ -35,6 +37,8 @@ public static class ProductFileCatalog
                 foreach (string child in Directory.EnumerateDirectories(directory))
                 {
                     ct.ThrowIfCancellationRequested();
+                    if (Path.GetFileName(child).Equals("ThtBackups", StringComparison.OrdinalIgnoreCase))
+                        continue;
                     // Do not follow junctions/symlinks back into an ancestor or outside ITEM.
                     if ((File.GetAttributes(child) & FileAttributes.ReparsePoint) != 0)
                     {

@@ -20,6 +20,13 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-tht-discard-editor"])
+        {
+            TestThtDiscardEditor();
+            TestDiscardContactLearning();
+            Console.WriteLine("PASS: native THT discard editor, atomic backups, IO conflicts, repeat selection and CFG persistence");
+            return 0;
+        }
         if (args is ["--preview-combined-history", var historyPreviewPath])
         {
             ExportCombinedLeakHistoryPreview(historyPreviewPath);
@@ -195,6 +202,13 @@ internal static partial class Program
         {
             TestPersistentElectricalAlarm();
             Console.WriteLine("PASS: TESTPOINT survives operator actions until confirmed clean removal and ready state");
+            return 0;
+        }
+        if (args is ["--test-discard-confirmation-sound"])
+        {
+            TestDiscardConfirmationSound();
+            TestPersistentElectricalAlarm();
+            Console.WriteLine("PASS: full removal stops TESTPOINT before NG confirmation; sensor entry plays DRIP, release rearms safely");
             return 0;
         }
         if (args is ["--test-early-master-leak"])
@@ -516,6 +530,9 @@ internal static partial class Program
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
+            ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
+            ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
+            ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Diagnostic fault popup retains every physical IO detail", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
@@ -2318,7 +2335,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 19 &&
+        Assert(settingsButtons.Length == 21 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&

@@ -46,6 +46,7 @@ public sealed class HomeViewModel : ObservableObject
         : !ProductionConfigService.IsProductLabelPrintingEnabled(_main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model))
         ? "KHÔNG IN TEM"
         : ProductionConfigService.GetProductLabelTemplate(_main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model));
+    public string LabelTemplateDisplayName => LabelTemplateType.Replace('_', ' ');
 
     public HomeViewModel(MainViewModel main)
     {
@@ -186,6 +187,7 @@ public sealed class HomeViewModel : ObservableObject
         Raise(nameof(VehicleType));
         Raise(nameof(SourcePath));
         Raise(nameof(LabelTemplateType));
+        Raise(nameof(LabelTemplateDisplayName));
         Raise(nameof(IsLabelPrintingEnabled));
 
         StartCommand.RaiseCanExecuteChanged();

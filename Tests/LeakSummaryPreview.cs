@@ -32,10 +32,21 @@ internal static partial class Program
             model.PartNumber = "WH322444";
             vm.Model = model;
             vm.Home.Refresh();
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            void SetTest(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm.Test, value);
+            void Notify(string name) => typeof(TestViewModel).GetMethod("Raise", flags)!.Invoke(vm.Test, [name]);
+            void RefreshEquipment() => typeof(TestViewModel).GetMethod("RaiseHomeEquipmentPresentation", flags)!.Invoke(vm.Test, null);
+            // Projection only: no SetModel/database initialization or device startup.
+            var board = new FakeBoard();
+            typeof(FakeBoard).GetProperty(nameof(FakeBoard.IsConnected))!.SetValue(board, false);
+            SetTest("_board", board);
+            SetTest("_model", model);
             void Counters(long quantity, string lot)
             {
                 typeof(TestViewModel).GetProperty(nameof(TestViewModel.DailyTestCount))!.SetValue(vm.Test, quantity);
                 typeof(TestViewModel).GetProperty(nameof(TestViewModel.Lot))!.SetValue(vm.Test, lot);
+                vm.Test.Pass = (int)quantity - 2;
+                vm.Test.Fail = 2;
             }
             Counters(10, "2010");
             vm.Status = "ĐÃ NẠP MÃ HÀNG: DL3_LAM WH322444";
@@ -62,7 +73,7 @@ internal static partial class Program
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             root.UpdateLayout();
             Assert(Descendants(root).OfType<System.Windows.Controls.TextBlock>().Any(text =>
-                text.Text == "Loại tem: TEM_BE_QRCODE"), "The actual MainWindow view renders the selected label type");
+                text.Text == "Loại tem: TEM BE QRCODE"), "MainWindow displays a readable label name without changing its configuration key");
             var lotCard = (System.Windows.Controls.Border)window.FindName("CurrentLotCard");
             var quantityCard = (System.Windows.Controls.Border)window.FindName("ProductionQuantityCard");
             var lotText = (System.Windows.Controls.TextBlock)window.FindName("CurrentLotText");
@@ -70,23 +81,65 @@ internal static partial class Program
             Assert(lotCard.Visibility == Visibility.Visible && lotText.Text == "2010" && quantityText.Text == "10" &&
                    quantityText.FontSize >= 40 && lotText.FontSize >= 40,
                 "Main renders prominent saved quantity and current LOT for a product with label printing enabled");
+            var passText = (System.Windows.Controls.TextBlock)window.FindName("MainPassText");
+            var failText = (System.Windows.Controls.TextBlock)window.FindName("MainFailText");
+            var testerText = (System.Windows.Controls.TextBlock)window.FindName("MainTesterStatusText");
+            Assert(passText.Text == "8" && failText.Text == "2" && testerText.Text == TesterConnectionNotice.Message &&
+                vm.Test.HomeInspectionModeText == "ĐIỆN" && vm.Test.HomeLeakStatusText == "KHÔNG SỬ DỤNG" &&
+                vm.Test.HomePrinterStatusText == "CHƯA CẤU HÌNH COM",
+                "Main distinguishes today's PASS/FAIL, disconnected board, disabled Leak and missing printer COM");
+            typeof(FakeBoard).GetProperty(nameof(FakeBoard.IsConnected))!.SetValue(board, true);
+            Notify(nameof(TestViewModel.IsBoardConnected));
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            Assert(testerText.Text == "ĐÃ KẾT NỐI MÁY TEST", "Board connection updates the real Main status binding");
+            SetTest("_deviceFault", 1);
+            Notify(nameof(TestViewModel.IsDeviceFault));
+            await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+            Assert(testerText.Text == TesterConnectionNotice.Message, "A board fault cannot leave a connected green status");
+            SetTest("_deviceFault", 0);
+            typeof(FakeBoard).GetProperty(nameof(FakeBoard.IsConnected))!.SetValue(board, false);
+            Notify(nameof(TestViewModel.IsDeviceFault));
+            Notify(nameof(TestViewModel.IsBoardConnected));
+            var leakProfile = new WaterProofModelSettings { Enabled = true, Channel1Enabled = true, Channel2Enabled = false };
+            SetTest("_waterProofProfile", leakProfile);
+            RefreshEquipment();
+            Assert(vm.Test.HomeInspectionModeText == "ĐIỆN + LEAK" && vm.Test.HomeLeakStatusText == "CHƯA CẤU HÌNH COM",
+                "Enabled Leak with no COM is not displayed as unused or connected");
+            settings.WaterProofMachine.PortName = "COM9876";
+            RefreshEquipment();
+            Assert(vm.Test.HomeLeakStatusText == "CHƯA KẾT NỐI • COM9876", "A configured COM does not prove a live Leak connection");
+            settings.ResistanceChannels = [new() { Enabled = true, Name = "R1", Channel = 1, MinOhm = 1, MaxOhm = 10 }];
+            RefreshEquipment();
+            Assert(vm.Test.HomeInspectionModeText == "ĐIỆN + ĐIỆN TRỞ + LEAK", "Inspection mode follows enabled runtime stages");
+            settings.ResistanceChannels[0].Enabled = false;
+            leakProfile.Enabled = false;
+            RefreshEquipment();
             Counters(11, "2011");
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             Assert(lotText.Text == "2011" && quantityText.Text == "11",
                 "Main quantity and LOT update through live bindings without reopening the window");
+            Assert(passText.Text == "9" && failText.Text == "2", "Main PASS/FAIL counts also update live");
             string productKey = ProductionConfigService.GetLotProductKey(model);
             settings.LabelTemplateTypesByProduct[productKey] = ProductionConfigService.NoProductLabel;
             vm.Home.Refresh();
+            RefreshEquipment();
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             Assert(lotCard.Visibility == Visibility.Collapsed && System.Windows.Controls.Grid.GetColumnSpan(quantityCard) == 2,
                 "A product with printing disabled hides LOT and gives the quantity card the full width");
+            Assert(vm.Test.HomePrinterStatusText == "KHÔNG SỬ DỤNG", "Disabled printing cannot show an irrelevant printer error");
             settings.LabelTemplateTypesByProduct[productKey] = LabelSettings.SmallQrTemplate;
             vm.Model = null;
+            SetTest("_model", null!);
             vm.Home.Refresh();
+            RefreshEquipment();
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             Assert(lotCard.Visibility == Visibility.Collapsed, "No selected product cannot display a stale label LOT");
+            Assert(vm.Test.HomeInspectionModeText == "CHƯA CHỌN MÃ HÀNG" && vm.Test.HomeLeakStatusText == "CHƯA CHỌN MÃ HÀNG",
+                "Clearing the product clears stale inspection and peripheral descriptions");
             vm.Model = model;
+            SetTest("_model", model);
             vm.Home.Refresh();
+            RefreshEquipment();
             Counters(10, "2010");
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
             root.UpdateLayout();
@@ -109,6 +162,7 @@ internal static partial class Program
             var encoder = new PngBitmapEncoder();
             encoder.Frames.Add(BitmapFrame.Create(bitmap));
             encoder.Save(file);
+            Assert(board.Commands.Count == 0, "Main rendering never opens devices or sends hardware commands");
         });
     }
 

@@ -222,7 +222,7 @@
                                 <Border Margin="0,8,8,0" Padding="10,5" CornerRadius="5"
                                         Background="#E0F2FE" BorderBrush="#BAE6FD" BorderThickness="1"
                                         HorizontalAlignment="Left">
-                                    <TextBlock Text="{Binding Home.LabelTemplateType, StringFormat=Loại tem: {0}}"
+                                    <TextBlock Text="{Binding Home.LabelTemplateDisplayName, StringFormat=Loại tem: {0}}"
                                                FontSize="14" FontWeight="SemiBold" Foreground="#075985"
                                                TextWrapping="Wrap"/>
                                 </Border>
@@ -237,11 +237,46 @@
                         </Grid>
                         <Border Grid.Row="1" Height="1" Background="#DEE6F0" Margin="0,16,0,15"/>
                         <StackPanel Grid.Row="2">
-                            <TextBlock Text="TRẠNG THÁI KIỂM TRA" FontSize="12"
+                            <TextBlock Text="TRẠNG THÁI MÁY TEST" FontSize="12"
                                        FontWeight="Bold" Foreground="#64748B"/>
-                            <TextBlock Text="{Binding Status}" Margin="0,5,0,13"
-                                       FontSize="15" FontWeight="SemiBold" Foreground="#1E3278"
-                                       TextWrapping="Wrap"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,5,0,8">
+                                <Ellipse Width="11" Height="11" Margin="0,0,8,0">
+                                    <Ellipse.Style>
+                                        <Style TargetType="Ellipse">
+                                            <Setter Property="Fill" Value="#DC2626"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Test.IsBoardConnected}" Value="True"/>
+                                                        <Condition Binding="{Binding Test.IsDeviceFault}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Fill" Value="#16A34A"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Ellipse.Style>
+                                </Ellipse>
+                                <TextBlock x:Name="MainTesterStatusText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="CHƯA KẾT NỐI MÁY TEST!"/>
+                                            <Setter Property="Foreground" Value="#B91C1C"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Test.IsBoardConnected}" Value="True"/>
+                                                        <Condition Binding="{Binding Test.IsDeviceFault}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Text" Value="ĐÃ KẾT NỐI MÁY TEST"/>
+                                                    <Setter Property="Foreground" Value="#15803D"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                            <TextBlock x:Name="MainInspectionModeText" Text="{Binding Test.HomeInspectionModeText, StringFormat=KIỂM TRA: {0}}"
+                                       FontSize="13" FontWeight="SemiBold" Foreground="#334155" Margin="0,0,0,13" TextWrapping="Wrap"/>
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -261,11 +296,17 @@
                                         </Style>
                                     </Border.Style>
                                     <StackPanel>
-                                        <TextBlock Text="SẢN LƯỢNG MỚI NHẤT" FontSize="14" FontWeight="Bold" Foreground="#1E3A8A"/>
+                                        <TextBlock Text="TỔNG ĐÃ TEST HÔM NAY" FontSize="14" FontWeight="Bold" Foreground="#1E3A8A"/>
                                         <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
                                             <TextBlock x:Name="ProductionQuantityText" Text="{Binding Test.DailyTestCount, Mode=OneWay, StringFormat={}{0:N0}}"
                                                        FontSize="46" FontWeight="Bold" Foreground="#173B88"/>
                                         </Viewbox>
+                                        <WrapPanel Margin="0,2,0,5">
+                                            <TextBlock Text="ĐẠT: " FontWeight="SemiBold" Foreground="#15803D"/>
+                                            <TextBlock x:Name="MainPassText" Text="{Binding Test.Pass, StringFormat={}{0:N0}}" FontWeight="Bold" Foreground="#15803D" Margin="0,0,16,0"/>
+                                            <TextBlock Text="KHÔNG ĐẠT: " FontWeight="SemiBold" Foreground="#B91C1C"/>
+                                            <TextBlock x:Name="MainFailText" Text="{Binding Test.Fail, StringFormat={}{0:N0}}" FontWeight="Bold" Foreground="#B91C1C"/>
+                                        </WrapPanel>
                                         <TextBlock Text="PASS + FAIL trong ngày của mã hàng hiện tại" FontSize="12"
                                                    Foreground="#475569" TextWrapping="Wrap"/>
                                     </StackPanel>
@@ -282,12 +323,12 @@
                                         </Style>
                                     </Border.Style>
                                     <StackPanel>
-                                        <TextBlock Text="LOTNO:" FontSize="14" FontWeight="Bold" Foreground="#14532D"/>
+                                        <TextBlock Text="LOTNO ĐÃ GHI NHẬN" FontSize="14" FontWeight="Bold" Foreground="#14532D"/>
                                         <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
                                             <TextBlock x:Name="CurrentLotText" Text="{Binding Test.Lot, Mode=OneWay}"
                                                        FontSize="46" FontWeight="Bold" Foreground="#166534"/>
                                         </Viewbox>
-                                        <TextBlock Text="LOTNO của mã hàng đang bật in tem" FontSize="12" Foreground="#475569" TextWrapping="Wrap"/>
+                                        <TextBlock Text="LOT của PASS đã lưu; không xác nhận tem đã in" FontSize="12" Foreground="#475569" TextWrapping="Wrap"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -298,12 +339,12 @@
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Margin="0,0,12,0">
                                     <TextBlock Text="MÁY IN TEM" FontSize="11" FontWeight="Bold" Foreground="#64748B"/>
-                                    <TextBlock Text="{Binding Test.LabelStatusText}" Margin="0,4,0,0"
+                                    <TextBlock Text="{Binding Test.HomePrinterStatusText}" ToolTip="{Binding Test.LabelStatusText}" Margin="0,4,0,0"
                                                FontSize="12" Foreground="#334155" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Margin="12,0,0,0">
-                                    <TextBlock Text="CỔNG MÁY LEAK" FontSize="11" FontWeight="Bold" Foreground="#64748B"/>
-                                    <TextBlock Text="{Binding Test.WaterProofPortText}" Margin="0,4,0,0"
+                                    <TextBlock Text="MÁY LEAK" FontSize="11" FontWeight="Bold" Foreground="#64748B"/>
+                                    <TextBlock Text="{Binding Test.HomeLeakStatusText}" Margin="0,4,0,0"
                                                FontSize="12" Foreground="#334155" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Grid>

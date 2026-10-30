@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -10,6 +10,10 @@ namespace JBZUniversalTester.ViewModels;
 
 public sealed class ProductionSettingsViewModel : ObservableObject
 {
+    private string _discardContactIo1Text = string.Empty;
+    private string _discardContactIo2Text = string.Empty;
+    public string DiscardContactIo1Text { get => _discardContactIo1Text; set => Set(ref _discardContactIo1Text, value); }
+    public string DiscardContactIo2Text { get => _discardContactIo2Text; set => Set(ref _discardContactIo2Text, value); }
     private int _masterFaultRequiredCount;
     private MasterSampleSelection _masterSelectedFaultSamples = MasterSampleSelection.All;
     public MasterSampleSelection MasterSelectedFaultSamples => _masterSelectedFaultSamples;
@@ -70,7 +74,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private string CaptureDeniedEditors() => JsonSerializer.Serialize(new
     {
         Master = _accessSession.Allows(SettingsPermission.Io) ? null :
-            new { MasterFaultRequiredCount, MasterSelectedFaultSamples, MasterOpenFaultRequiredCount },
+            new { MasterFaultRequiredCount, MasterSelectedFaultSamples, MasterOpenFaultRequiredCount, DiscardContactIo1Text, DiscardContactIo2Text },
         Resistance = _accessSession.Allows(SettingsPermission.Resistance) ? null :
             ResistanceChannels.Select(editor => editor.ToSetting()).ToArray(),
         Leak = _accessSession.Allows(SettingsPermission.Leak) ? null : WaterProof
@@ -300,6 +304,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             Settings, _modelPath);
         _masterSelectedFaultSamples = ProductionConfigService.GetMasterSelectedFaultSamplesForPath(Settings, _modelPath);
         _masterOpenFaultRequiredCount = ProductionConfigService.GetMasterOpenFaultRequiredCountForPath(Settings, _modelPath);
+        _discardContactIo1Text = Settings.DiscardContactIo1 == 0 ? string.Empty : Settings.DiscardContactIo1.ToString();
+        _discardContactIo2Text = Settings.DiscardContactIo2 == 0 ? string.Empty : Settings.DiscardContactIo2.ToString();
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, true)),
@@ -806,6 +812,16 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                 Settings.ExpansionCardCount,
                 BoardCapacity.MaxExpansionCardCount - Settings.StartCardNumber + 1);
             Settings.CardCount = BoardCapacity.FromSettings(Settings).ScanCardCount;
+            int ParseDiscardIo(string text)
+            {
+                if (string.IsNullOrWhiteSpace(text)) return 0;
+                if (int.TryParse(text, out int value)) return value;
+                throw new InvalidOperationException("Chân IO thùng lỗi phải là số nguyên; nhập đủ hai IO hoặc để trống cả hai.");
+            }
+            int first = ParseDiscardIo(DiscardContactIo1Text), second = ParseDiscardIo(DiscardContactIo2Text);
+            ThtModelParser.ValidateDiscardContacts(first, second, BoardCapacity.FromSettings(Settings).TotalIoCapacity);
+            Settings.DiscardContactIo1 = first;
+            Settings.DiscardContactIo2 = second;
         }
         if (_accessSession.Allows(SettingsPermission.Resistance))
         {

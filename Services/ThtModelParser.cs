@@ -15,7 +15,7 @@ namespace JBZUniversalTester.Services;
 /// MFC CArchive/CString. Lớp này đọc đúng stream Contents, kiểm tra token,
 /// lấy model_text CP949, rồi ánh xạ bốn bảng Part/Connector/Pin/Wire.
 /// </summary>
-public sealed class ThtModelParser
+public sealed partial class ThtModelParser
 {
     private const uint ExpectedDocumentToken = 0x389DEFB9;
     private const int FieldRecordCount = 64;
@@ -1936,9 +1936,11 @@ public sealed class ThtModelParser
         private readonly List<DirectoryEntry> _directoryEntries;
         private readonly byte[] _rootMiniStream;
 
-        public CompoundFileReader(string path)
+        public CompoundFileReader(string path) : this(ReadAllBytesSharedWithRetry(path)) { }
+
+        public CompoundFileReader(byte[] file)
         {
-            _file = ReadAllBytesSharedWithRetry(path);
+            _file = file;
 
             if (_file.Length < 512 ||
                 !_file.AsSpan(0, 8).SequenceEqual(CompoundSignature))

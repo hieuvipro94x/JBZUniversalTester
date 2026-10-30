@@ -54,6 +54,9 @@ public sealed class AppSoundService : IDisposable
     private int _productStartPlaybackActive;
     private int _testOkPlaybackActive;
     private Task _testOkPlaybackTask = Task.CompletedTask;
+    private int _discardContactPlaybackActive;
+    private long _discardContactPlaybackCount;
+    private Task _discardContactPlaybackTask = Task.CompletedTask;
     private int _clickPlaybackQueued;
     private int _soundGeneration;
 
@@ -205,7 +208,8 @@ public sealed class AppSoundService : IDisposable
     public void PlayClick()
     {
         EnsureInitialized();
-        if (Volatile.Read(ref _startupPlaybackActive) != 0 ||
+        if (Volatile.Read(ref _discardContactPlaybackActive) != 0 ||
+            Volatile.Read(ref _startupPlaybackActive) != 0 ||
             Volatile.Read(ref _productStartPlaybackActive) != 0 ||
             Volatile.Read(ref _testOkPlaybackActive) != 0)
             return;
@@ -223,6 +227,7 @@ public sealed class AppSoundService : IDisposable
                 {
                     if (_disposed || generation != Volatile.Read(ref _soundGeneration) ||
                         _wiringFaultAlarmActive ||
+                        Volatile.Read(ref _discardContactPlaybackActive) != 0 ||
                         Volatile.Read(ref _startupPlaybackActive) != 0 ||
                         Volatile.Read(ref _productStartPlaybackActive) != 0 ||
                         Volatile.Read(ref _testOkPlaybackActive) != 0)
@@ -377,11 +382,30 @@ public sealed class AppSoundService : IDisposable
         EnsureInitialized();
         lock (_gate)
         {
-            if (_disposed || _wiringFaultAlarmActive ||
+            if (_disposed || _wiringFaultAlarmActive || Volatile.Read(ref _discardContactPlaybackActive) != 0 ||
                 Volatile.Read(ref _testOkPlaybackActive) != 0)
                 return;
-
+            if (_discardContactPlayer is null)
+            {
+                AsyncFileLogService.Current.Error("DISCARD_SOUND resource DRIP.wav is unavailable");
+                return;
+            }
+            int generation = Volatile.Read(ref _soundGeneration);
+            Interlocked.Exchange(ref _discardContactPlaybackActive, 1);
+            Interlocked.Increment(ref _discardContactPlaybackCount);
+            double durationMs = GetWaveDurationMs(_discardContactStream);
+            AsyncFileLogService.Current.Application("DISCARD_SOUND DRIP.wav PLAY_BEGIN");
             SafePlay(_discardContactPlayer);
+            _discardContactPlaybackTask = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, durationMs))).ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (_disposed || generation != Volatile.Read(ref _soundGeneration)) return;
+                    Interlocked.Exchange(ref _discardContactPlaybackActive, 0);
+                    AsyncFileLogService.Current.Application("DISCARD_SOUND DRIP.wav PLAY_END");
+                }
+            });
         }
     }
 
@@ -439,6 +463,7 @@ public sealed class AppSoundService : IDisposable
                 if (active)
                     _testPointContactPlayer?.PlayLooping();
                 else if (Volatile.Read(ref _startupPlaybackActive) == 0 &&
+                         Volatile.Read(ref _discardContactPlaybackActive) == 0 &&
                          !_wiringFaultAlarmActive)
                     _testPointContactPlayer?.Stop();
             }
@@ -517,7 +542,7 @@ public sealed class AppSoundService : IDisposable
                 return;
             }
 
-            if (_electricalFaultAlarmHeld && !force)
+            if ((_electricalFaultAlarmHeld || Volatile.Read(ref _discardContactPlaybackActive) != 0) && !force)
                 return;
             Interlocked.Increment(ref _soundGeneration);
             _electricalFaultAlarmHeld = false;
@@ -537,6 +562,7 @@ public sealed class AppSoundService : IDisposable
             Interlocked.Exchange(ref _startupPlaybackActive, 0);
             Interlocked.Exchange(ref _productStartPlaybackActive, 0);
             Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+            Interlocked.Exchange(ref _discardContactPlaybackActive, 0);
             _testOkPlaybackTask = Task.CompletedTask;
         }
     }

@@ -281,6 +281,7 @@
                                                 <RowDefinition Height="Auto"/>
                                                 <RowDefinition Height="Auto"/>
                                                 <RowDefinition Height="30"/>
+                                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                             </Grid.RowDefinitions>
                                             <TextBlock Text="Card mở rộng" Style="{StaticResource FieldLabelStyle}"/>
                                             <ComboBox x:Name="CardIoComboBox" Grid.Column="1" DisplayMemberPath="Display" SelectedValuePath="ExpansionCardCount" SelectedValue="{Binding Settings.ExpansionCardCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionChanged="CardIoComboBox_SelectionChanged" ToolTip="Số card mở rộng 64 IO; START_SCAN dùng cùng đơn vị"/>
@@ -321,6 +322,18 @@
                                             <CheckBox Grid.Row="18" Grid.ColumnSpan="2" Content="Xác nhận đứt dây / tuột tuýt" IsChecked="{Binding Settings.MissingConnectionConfirmationEnabled, Mode=TwoWay}" ToolTip="Chỉ khi đang kiểm tra thông mạch: cặp IO chưa nhận liên tục quá thời gian sẽ cảnh báo và yêu cầu xác nhận xử lý hàng lỗi."/>
                                             <TextBlock Grid.Row="19" Text="Thời gian chờ (giây)" Style="{StaticResource FieldLabelStyle}"/>
                                             <TextBox Grid.Row="19" Grid.Column="1" Text="{Binding Settings.MissingConnectionConfirmationSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding Settings.MissingConnectionConfirmationEnabled}" ToolTip="Nhập từ 1 đến 120 giây, ví dụ 5 hoặc 10."/>
+                                            <TextBlock Grid.Row="20" Text="IO thùng lỗi (1 / 2)" Style="{StaticResource FieldLabelStyle}"/>
+                                            <StackPanel Grid.Row="20" Grid.Column="1" Orientation="Horizontal" Margin="0,4">
+                                                <TextBox x:Name="DiscardContactIo1TextBox" Width="65" Margin="0,0,8,0" Text="{Binding DiscardContactIo1Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="IO thứ nhất được tự điền sau khi học cảm biến"/>
+                                                <TextBox x:Name="DiscardContactIo2TextBox" Width="65" Text="{Binding DiscardContactIo2Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="IO thứ hai được tự điền sau khi học cảm biến"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Row="21" Grid.ColumnSpan="2" Margin="0,4,0,8">
+                                                <WrapPanel>
+                                                    <Button x:Name="LearnDiscardIoButton" Content="TỰ NHẬN IO THÙNG LỖI" Style="{StaticResource SettingsActionButtonStyle}" Click="LearnDiscardIo_Click" Padding="10,5" Margin="0,0,8,4"/>
+                                                    <Button Content="XÓA CẶP IO" Style="{StaticResource SettingsPrimaryButtonStyle}" Click="ClearDiscardIo_Click" Padding="10,5" Margin="0,0,0,4"/>
+                                                </WrapPanel>
+                                                <TextBlock x:Name="DiscardLearningResultText" Text="Cắm cảm biến vào hai IO bất kỳ. Bấm TỰ NHẬN IO, đưa tay/vật qua cảm biến rồi lấy ra: phần mềm tự điền hai chân. Lưu Cài đặt và chọn lại THT để ghi _DISCARD; bản gốc được sao lưu trong ThtBackups. Để trống cả hai để giữ nguyên THT." TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
+                                            </StackPanel>
                                         </Grid>
                                         <StackPanel Margin="0,4,0,0">
                                             <StackPanel.Style>

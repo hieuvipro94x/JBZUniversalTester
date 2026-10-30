@@ -238,6 +238,39 @@ public partial class ProductionSettingsPage : UserControl
 
     private Window? HostWindow => Window.GetWindow(this) ?? Application.Current?.MainWindow;
 
+    private void LearnDiscardIo_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _accessSession.Demand(SettingsPermission.Io);
+            if (_main?.Test is not { } test || !test.IsBoardConnected || test.IsDeviceFault)
+            {
+                MessageBox.Show(HostWindow, TesterConnectionNotice.Message, "THÙNG HÀNG LỖI", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            var dialog = new DiscardContactLearningWindow(test, Math.Max(_vm.Settings.IoConfirm1, _vm.Settings.IoConfirmN));
+            if (HostWindow is { } owner) dialog.Owner = owner;
+            if (dialog.ShowDialog() == true && !IsReleased)
+            {
+                _vm.DiscardContactIo1Text = dialog.FirstIo.ToString(CultureInfo.InvariantCulture);
+                _vm.DiscardContactIo2Text = dialog.SecondIo.ToString(CultureInfo.InvariantCulture);
+                DiscardLearningResultText.Text = $"ĐÃ HỌC IO {dialog.FirstIo} / {dialog.SecondIo}. Lưu Cài đặt rồi chọn lại THT để ghi _DISCARD.";
+            }
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"DISCARD LEARN: {ex}");
+            MessageBox.Show(HostWindow, ex.Message, "CHƯA HỌC ĐƯỢC IO THÙNG LỖI", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ClearDiscardIo_Click(object sender, RoutedEventArgs e)
+    {
+        _accessSession.Demand(SettingsPermission.Io);
+        _vm.DiscardContactIo1Text = _vm.DiscardContactIo2Text = string.Empty;
+        DiscardLearningResultText.Text = "Đã xóa cặp IO trong Cài đặt. Các file THT hiện có được giữ nguyên.";
+    }
+
     private void LabelTemplateTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         string templateType =
