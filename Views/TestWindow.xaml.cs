@@ -65,6 +65,10 @@ public partial class TestWindow : Window
         TestAppVersionText.Text = AppVersion.DisplayVersion;
         DataContext = viewModel;
         TestViewLocalization.Apply(this, viewModel.TestViewLanguage);
+        foreach (var column in new[] { FaultIoColumn, FaultIoCnPnColumn })
+            System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
+                new System.Windows.Data.Binding(nameof(TestViewModel.ShowFaultIoColumns))
+                { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });
         // DataGridColumn is outside the visual tree; bind its visibility with
         // an explicit source so unused measurement columns collapse reliably.
         foreach (var column in new[] { ResistanceMinColumn, ResistanceValueColumn, ResistanceMaxColumn })

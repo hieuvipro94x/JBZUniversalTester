@@ -67,7 +67,7 @@ internal static class TestViewLocalization
     }
 
     private static bool IsDisplayPath(string? path) => path is
-        "ResultStatusText" or "CenterResultText" or "Status" or "FaultType" or "ResultText" or
+        "ResultStatusText" or "CenterResultText" or "Status" or "FaultType" or "OperatorStatus" or "OperatorFaultType" or "ResultText" or
         "ProbeMaintenanceStatus" or "Title" or "Name" or "Display" or "Channel1Text" or "Channel2Text" or "Channel3Text";
 
     private static Binding DisplayBinding(Binding original, DisplayConverter converter) => new(original.Path.Path)

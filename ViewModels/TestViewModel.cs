@@ -876,6 +876,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public int WiringFaultCount => WrongCount + ShortCount;
 
     public int CurrentFaultCount => OpenCount + WrongCount + ShortCount;
+    private bool _showFaultIoColumns = true;
+    public bool ShowFaultIoColumns => _showFaultIoColumns;
 
     public int PassedNetworkCount =>
         _engine.PassedNetCount;
@@ -13781,6 +13783,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // PASS changes to the product-removal presentation.
         if (IsFinalPassPresentation)
             desiredRows = desiredRows.Where(row => row.Kind == FaultKind.Probe).ToArray();
+        bool showIo = desiredRows.Count == 0 || desiredRows.Any(row => !row.IsWrongWiringGuide ||
+            string.IsNullOrWhiteSpace(row.Connector) || string.IsNullOrWhiteSpace(row.Pin));
+        if (_showFaultIoColumns != showIo)
+        {
+            _showFaultIoColumns = showIo;
+            Raise(nameof(ShowFaultIoColumns));
+        }
         UpdateCachedFaultCounts(desiredRows);
         try
         {

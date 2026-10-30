@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -39,8 +39,10 @@ internal static partial class Program
             Assert(complete == "핀 빠짐 / 단선 마스터 검사 완료" &&
                 TestViewText.Translate("KIỂM TRA MẪU ĐẠT\nĐANG TEST LEAK", "ko") == "정상 마스터 검사\n기밀 검사 중",
                 "Master completion and combined Master/Leak instructions are fully Korean");
+            Assert(TestViewText.Translate("CHỜ LẮP DÂY", "ko") == "전선 장착 대기",
+                "Initial wire-row status describes installation waiting rather than a disconnected tester");
             var watch = Stopwatch.StartNew();
-            for (int i = 0; i < 10000; i++) TestViewText.Translate("CHƯA KẾT NỐI", "ko");
+            for (int i = 0; i < 10000; i++) TestViewText.Translate("CHỜ LẮP DÂY", "ko");
             Assert(watch.ElapsedMilliseconds < 500, "Frequent row status translation uses the in-memory catalog without IO");
         }
         finally { Directory.Delete(root, true); }

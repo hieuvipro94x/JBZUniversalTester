@@ -8,6 +8,7 @@ using System.Windows.Media;
 namespace JBZUniversalTester.Models;
 
 public enum FaultKind { Start, Open, MissingConnection, WrongWiring, Short, Resistance, Info, Probe }
+public enum WrongWiringDisplayRole { None, Source, WrongTarget, ExpectedTarget }
 
 /// <summary>Chế độ giải mã cùng stream scan của bo.</summary>
 public enum BoardScanMode { Production, Probe }
@@ -41,6 +42,17 @@ public sealed class FaultRow : ObservableObject
     public ProductFaultType ProductFaultType { get; init; } = ProductFaultType.None;
     public string FaultCode => FaultTypeCatalog.Code(ProductFaultType);
     public string FaultType { get; init; } = "";
+    // Operator guidance only; preserve electrical classifications and saved faults.
+    public WrongWiringDisplayRole WiringDisplayRole { get; init; }
+    public bool IsWrongWiringGuide => WiringDisplayRole != WrongWiringDisplayRole.None;
+    public string OperatorFaultType => IsWrongWiringGuide ? IsNetworkStart ? "SAI DÂY" : string.Empty : FaultType;
+    public string OperatorStatus => WiringDisplayRole switch
+    {
+        WrongWiringDisplayRole.Source => "ĐẤU SAI DÂY",
+        WrongWiringDisplayRole.WrongTarget => "ĐANG CẮM NHẦM",
+        WrongWiringDisplayRole.ExpectedTarget => "DÂY ĐÚNG",
+        _ => Status
+    };
     public int Io { get; init; }
     public string IoTextOverride { get; init; } = "";
     public int? ExpectedSourceIo { get; init; }
@@ -97,7 +109,7 @@ public sealed class FaultRow : ObservableObject
     public string ProbeWireText => string.IsNullOrWhiteSpace(WireName) ? string.Empty : $"Tên dây {WireName}";
     public string ProbeColorText => string.IsNullOrWhiteSpace(ColorName) ? string.Empty : $"Màu {ColorName}";
     public string PresentationKey => _presentationKey ??=
-        $"{(int)Kind}|{(int)ProductFaultType}|{Io}|{IoTextOverride}|{Connector}|{Pin}|{WireName}|{Splice}|" +
+        $"{(int)Kind}|{(int)ProductFaultType}|{(int)WiringDisplayRole}|{Io}|{IoTextOverride}|{Connector}|{Pin}|{WireName}|{Splice}|" +
         $"{ExpectedSourceIo}|{ExpectedTargetIo}|{ActualSourceIo}|{ActualTargetIo}";
 
     public FaultDetail ToFaultDetail() => new()
@@ -121,7 +133,11 @@ public sealed class FaultRow : ObservableObject
         Message = Status
     };
 
-    public string Status { get => _status; set => Set(ref _status, value); }
+    public string Status
+    {
+        get => _status;
+        set { if (Set(ref _status, value)) Raise(nameof(OperatorStatus)); }
+    }
 
     private string BuildIoCnPnText() => !string.IsNullOrWhiteSpace(IoCnPnOverride)
         ? IoCnPnOverride

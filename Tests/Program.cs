@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -483,6 +483,7 @@ internal static partial class Program
             ("Keysight equipment faults preserve the app and await removal", TestRecoverableKeysightEquipmentFault),
             ("Final Leak table shows suction/hold/leak only after both PASS and clears on cycle exit", TestFinalLeakResultTable),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
+            ("Wrong-wire connector/pin repair guide and unchanged shorts", TestWrongWiringRepairGuide),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
             ("Authoritative production state and stale UI snapshot gate", TestAuthoritativeProductionState),
             ("Model-aware product evidence rejects raw single IO", TestModelAwareProductEvidence),
@@ -2443,7 +2444,7 @@ internal static partial class Program
         {
             Kind = FaultKind.MissingConnection,
             Io = 1,
-            Status = "CHƯA KẾT NỐI"
+            Status = "CHỜ LẮP DÂY"
         });
         MethodInfo reportDeviceFault = typeof(TestViewModel).GetMethod(
             "ReportDeviceFaultForTest",
@@ -4098,7 +4099,7 @@ internal static partial class Program
             Kind = FaultKind.MissingConnection,
             Io = 40,
             WireName = "RET1",
-            Status = "CHƯA KẾT NỐI"
+            Status = "CHỜ LẮP DÂY"
         });
         MethodInfo refreshLeakFaults = typeof(TestViewModel).GetMethod(
             "RefreshFaults",
@@ -5780,7 +5781,7 @@ internal static partial class Program
         Assert(initialPairRows.Count == 2 &&
                initialPairRows.Any(row => row.Io == 1 && row.Kind == FaultKind.MissingConnection && row.FaultType == "Đơn" && row.Pin == "1") &&
                initialPairRows.Any(row => row.Io == 18 && row.Kind == FaultKind.MissingConnection && row.FaultType == "Đơn" && row.Pin == "18") &&
-               initialPairRows.All(row => row.Status == "CHƯA KẾT NỐI") &&
+               initialPairRows.All(row => row.Status == "CHỜ LẮP DÂY") &&
                initialPairRows.All(row => !row.IoText.Contains("<->", StringComparison.Ordinal) &&
                                           !row.Pin.Contains("<->", StringComparison.Ordinal)),
             "Model load shows one Htdrv-style endpoint row per pin, not a merged IO/pin row");
@@ -5796,7 +5797,7 @@ internal static partial class Program
         engine.ProcessFrame(Frame((1, Array.Empty<int>())));
         IReadOnlyList<FaultRow> pairReleased = engine.BuildRows().Where(row => row.WireName == "PAIR").ToArray();
         Assert(pairReleased.Count == 2 &&
-               pairReleased.All(row => row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
+               pairReleased.All(row => row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY"),
             "Releasing/jig-open frame shows endpoint rows again");
 
         engine.SetModel(pair);
@@ -5889,7 +5890,7 @@ internal static partial class Program
                engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1 &&
                engine.BuildRows().Single(row => row.Kind == FaultKind.MissingConnection).Io == 33 &&
                engine.BuildRows().Where(row => row.WireName == "SPLICE")
-                   .All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI"),
+                   .All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY"),
             "Splice hides reached endpoints and keeps only the missing target as display-only, not production OPEN");
 
         engine.SetModel(splice);
@@ -5958,9 +5959,9 @@ internal static partial class Program
         Assert(initialRows.All(row =>
                    row.Kind == FaultKind.MissingConnection &&
                    row.FaultType == "Đơn" &&
-                   row.Status == "CHƯA KẾT NỐI") &&
+                   row.Status == "CHỜ LẮP DÂY") &&
                initialRows.All(row => row.FaultType != "KIỂM TRA" && row.Status != "CHỜ KẾT NỐI"),
-            "Pending point-to-point rows use only Đơn / CHƯA KẾT NỐI");
+            "Pending point-to-point rows use only Đơn / CHỜ LẮP DÂY");
 
         ScanFrame pairAPass = Frame((1, new[] { 3 }));
         engine.ProcessFrame(pairAPass);
@@ -5970,7 +5971,7 @@ internal static partial class Program
             .Where(row => row.WireName is "PAIR-A" or "PAIR-B")
             .ToArray();
         Assert(afterPairA.Select(row => row.Io).SequenceEqual([2, 4]) &&
-               afterPairA.All(row => row.Status == "CHƯA KẾT NỐI") &&
+               afterPairA.All(row => row.Status == "CHỜ LẮP DÂY") &&
                !engine.ContinuityPassed,
             "Passing PAIR-A hides only IO1/IO3 and leaves PAIR-B pending");
 
@@ -5987,7 +5988,7 @@ internal static partial class Program
         FaultRow[] restoredPairA = engine.BuildRows().Where(row => row.WireName == "PAIR-A").ToArray();
         Assert(restoredPairA.Select(row => row.Io).SequenceEqual([1, 3]) &&
                restoredPairA.All(row =>
-                   row.Status == "CHƯA KẾT NỐI" &&
+                   row.Status == "CHỜ LẮP DÂY" &&
                    row.DisplayOrder == initialDisplayOrder[row.Io]),
             "A lost completed pair reappears at its original DisplayOrder");
 
@@ -5995,7 +5996,7 @@ internal static partial class Program
         engine.SetModel(splice);
         FaultRow[] spliceRows = engine.BuildRows().Where(row => row.WireName == "SPLICE").ToArray();
         Assert(spliceRows.Length == 3 &&
-               spliceRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI"),
+               spliceRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY"),
             "A multi-endpoint network remains one splice topology presented as Nối chung");
 
         var common = new PinRecord("CLIP", "AO", 201, "AO", PinType: "AO", OriginalOrder: 1);
@@ -6014,13 +6015,13 @@ internal static partial class Program
         engine.SetModel(clipModel);
         FaultRow[] initialClipRows = engine.BuildRows().ToArray();
         Assert(initialClipRows.Length == 4 &&
-               initialClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI"),
-            "CLIP common and all unlatch branches use Nối chung / CHƯA KẾT NỐI");
+               initialClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY"),
+            "CLIP common and all unlatch branches use Nối chung / CHỜ LẮP DÂY");
 
         engine.ProcessFrame(Frame((201, new[] { 202 })));
         FaultRow[] remainingClipRows = engine.BuildRows().ToArray();
         Assert(remainingClipRows.Select(row => row.Io).Order().SequenceEqual([203, 204]) &&
-               remainingClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHƯA KẾT NỐI") &&
+               remainingClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY") &&
                !engine.HasWiringFault,
             "Latching CLIP a1 hides only common/a1 per existing common behavior; a2/a3 remain without false SHORT");
         FaultRow[] clipRemovalRows = engine.BuildRemovalRows().ToArray();
@@ -6060,7 +6061,7 @@ internal static partial class Program
         Assert(!vm.IsCenterResultVisible &&
                vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
                !vm.Faults.Any(row => row.WireName == "BG1") &&
-               vm.Faults.All(row => row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI"),
+               vm.Faults.All(row => row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY"),
             "First real product edge starts presentation and only the passed network disappears");
 
         TestViewModel removalPreviewVm = CreateTestViewModel(production, out FakeBoard removalPreviewBoard);
@@ -6178,7 +6179,7 @@ internal static partial class Program
         engine.ProcessFrame(FrameSeq(123));
         FaultRow[] repairedRows = engine.BuildRows().ToArray();
         Assert(!engine.HasWiringFault &&
-               repairedRows.All(row => row.Status == "CHƯA KẾT NỐI") &&
+               repairedRows.All(row => row.Status == "CHỜ LẮP DÂY") &&
                !repairedRows.Any(row => row.Status is "SAI DÂY" or "CHẬP MẠCH" or "HỞ MẠCH"),
             "Removing a confirmed physical fault immediately restores normal pending presentation");
 
@@ -6220,7 +6221,7 @@ internal static partial class Program
                 Kind = FaultKind.MissingConnection,
                 Io = io,
                 WireName = $"BG{io:000}",
-                Status = "CHƯA KẾT NỐI"
+                Status = "CHỜ LẮP DÂY"
             })
             .ToArray();
         int collectionEvents = 0;
@@ -6253,7 +6254,7 @@ internal static partial class Program
                 Kind = FaultKind.MissingConnection,
                 Io = io,
                 WireName = $"TEN{io:000}",
-                Status = "CHƯA KẾT NỐI"
+                Status = "CHỜ LẮP DÂY"
             })
             .ToArray();
         int tenCardEvents = 0;
@@ -7435,8 +7436,8 @@ internal static partial class Program
 
         FaultRow[] openRows = engine.BuildRows().Where(row => row.WireName == "1").ToArray();
         Assert(openRows.Length == 2 &&
-               openRows.Any(row => row.Io == 1 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI" && row.Connector == "1" && row.Pin == "1" && row.IoCnPnText == "1-1-1") &&
-               openRows.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHƯA KẾT NỐI" && row.Connector == "1" && row.Pin == "2" && row.IoCnPnText == "2-1-2") &&
+               openRows.Any(row => row.Io == 1 && row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY" && row.Connector == "1" && row.Pin == "1" && row.IoCnPnText == "1-1-1") &&
+               openRows.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY" && row.Connector == "1" && row.Pin == "2" && row.IoCnPnText == "2-1-2") &&
                openRows.All(row => !row.IoText.Contains("<->", StringComparison.Ordinal) && !row.Pin.Contains("<->", StringComparison.Ordinal)),
             "CASE A: Open display uses one endpoint row per pin with IO-CN-PN metadata");
 

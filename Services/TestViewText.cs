@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace JBZUniversalTester.Services;
 
@@ -34,9 +34,12 @@ public static class TestViewText
         ["CHỜ XÁC NHẬN THÙNG LỖI"] = "불량함 확인 대기", ["CHỜ THÁO SẢN PHẨM"] = "제품 탈거 대기",
         ["THÙNG LỖI ĐÃ KHÓA - CHỜ NHẢ CẢM BIẾN"] = "불량함 잠김 - 센서 해제 대기",
         ["ĐẠT"] = "정상", ["SAI DÂY"] = "오배선", ["CHẬP MẠCH"] = "합선", ["HỞ MẠCH"] = "단선",
+        ["ĐẤU SAI DÂY"] = "오배선된 전선",
+        ["ĐANG CẮM NHẦM"] = "현재 잘못 연결된 위치",
+        ["DÂY ĐÚNG"] = "올바른 전선 위치",
         ["TUỘT TUÝT / ĐỨT DÂY"] = "핀 빠짐 / 단선", ["TUỘT TUÝT/ĐỨT DÂY"] = "핀 빠짐 / 단선",
         ["Đơn"] = "단독", ["Nối chung"] = "공통 연결", ["ĐÃ KẾT NỐI"] = "연결 완료",
-        ["CHƯA KẾT NỐI"] = "미연결", ["CHƯA ĐỦ KẾT NỐI"] = "연결 부족", ["KẾT NỐI ĐÚNG"] = "정상 연결",
+        ["CHƯA KẾT NỐI"] = "미연결", ["CHỜ LẮP DÂY"] = "전선 장착 대기", ["CHƯA ĐỦ KẾT NỐI"] = "연결 부족", ["KẾT NỐI ĐÚNG"] = "정상 연결",
         ["SAI KẾT NỐI"] = "오접속", ["SAI VỊ TRÍ"] = "위치 오류", ["SAI MÀU DÂY"] = "색상 오류",
         ["TERMINAL SAI VỊ TRÍ"] = "단자 위치 오류", ["ĐẢO VỊ TRÍ TERMINAL"] = "단자 위치 뒤바뀜",
         ["ĐIỆN TRỞ KHÔNG ĐẠT"] = "저항 불량", ["KÍN NƯỚC KHÔNG ĐẠT"] = "기밀 불량",

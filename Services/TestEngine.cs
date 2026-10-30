@@ -1,4 +1,4 @@
-using JBZUniversalTester.Models;
+﻿using JBZUniversalTester.Models;
 
 using System.Diagnostics;
 using System.Globalization;
@@ -141,7 +141,7 @@ public sealed class TestEngine : IDisposable
         internal Dictionary<ClipBranch, string> ConfirmationKeyByClip { get; init; } = null!;
     }
     const int ClipDisplayOrderBase = -1_000_000;
-    const string PendingConnectionStatus = "CHƯA KẾT NỐI";
+    const string PendingConnectionStatus = "CHỜ LẮP DÂY";
     const string RemovalConnectionStatus = "CHỜ THÁO";
     public const int JigEjectRelay = 1;
     public const int MarkingRelay = 2;
@@ -2564,18 +2564,28 @@ public sealed class TestEngine : IDisposable
                     out int expectedSource,
                     out int expectedTarget))
             {
-                int wrongPeer = expectedSource == fault.SourceIo
+                bool wrongWiringGuide = fault.FaultType == ProductFaultType.WrongWiring;
+                // Start the repair guide at the endpoint actually present in
+                // the wrong connection, including a configured target-side contact.
+                int guideSource = wrongWiringGuide &&
+                    expectedSource != fault.SourceIo && expectedSource != fault.TargetIo
+                    ? expectedTarget : expectedSource;
+                int guideTarget = guideSource == expectedSource ? expectedTarget : expectedSource;
+                int wrongPeer = guideSource == fault.SourceIo
                     ? fault.TargetIo
                     : fault.SourceIo;
                 AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
-                    expectedSource, "SAI DÂY", FaultKind.WrongWiring,
-                    ProductFaultType.WrongWiring, relation, groupStartIndex);
+                    guideSource, "SAI DÂY", FaultKind.WrongWiring,
+                    ProductFaultType.WrongWiring, relation, groupStartIndex,
+                    wrongWiringGuide ? WrongWiringDisplayRole.Source : WrongWiringDisplayRole.None);
                 AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
                     wrongPeer, "CHẬP MẠCH", FaultKind.Short,
-                    ProductFaultType.ShortCircuit, relation, groupStartIndex);
+                    ProductFaultType.ShortCircuit, relation, groupStartIndex,
+                    wrongWiringGuide ? WrongWiringDisplayRole.WrongTarget : WrongWiringDisplayRole.None);
                 AddDiagnosticRow(rows, keys, diagnosticIos, model, fault,
-                    expectedTarget, "HỞ MẠCH", FaultKind.Open,
-                    ProductFaultType.OpenCircuit, relation, groupStartIndex);
+                    guideTarget, "HỞ MẠCH", FaultKind.Open,
+                    ProductFaultType.OpenCircuit, relation, groupStartIndex,
+                    wrongWiringGuide ? WrongWiringDisplayRole.ExpectedTarget : WrongWiringDisplayRole.None);
                 continue;
             }
 
@@ -2689,7 +2699,8 @@ public sealed class TestEngine : IDisposable
         FaultKind kind,
         ProductFaultType productFaultType,
         int[] relation,
-        int groupStartIndex)
+        int groupStartIndex,
+        WrongWiringDisplayRole wiringDisplayRole = WrongWiringDisplayRole.None)
     {
         if (io <= 0)
             return;
@@ -2705,6 +2716,7 @@ public sealed class TestEngine : IDisposable
         rows.Add(new FaultRow
         {
             Kind = kind,
+            WiringDisplayRole = wiringDisplayRole,
             ProductFaultType = productFaultType,
             FaultType = unused ? string.Empty : ResolveTopologyType(model, io),
             Io = io,
