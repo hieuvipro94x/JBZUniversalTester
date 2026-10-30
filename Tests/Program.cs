@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-discard-configuration-status"])
+        {
+            TestDiscardConfigurationStatus();
+            Console.WriteLine("PASS: configured/unconfigured/invalid discard notices and live MainWindow status");
+            return 0;
+        }
         if (args is ["--test-tht-discard-editor"])
         {
             TestThtDiscardEditor();
@@ -533,6 +539,7 @@ internal static partial class Program
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
+            ("Discard configuration notices and persistent MainWindow status", TestDiscardConfigurationStatus),
             ("Diagnostic fault popup retains every physical IO detail", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),

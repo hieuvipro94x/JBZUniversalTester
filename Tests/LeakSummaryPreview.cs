@@ -84,6 +84,9 @@ internal static partial class Program
             var passText = (System.Windows.Controls.TextBlock)window.FindName("MainPassText");
             var failText = (System.Windows.Controls.TextBlock)window.FindName("MainFailText");
             var testerText = (System.Windows.Controls.TextBlock)window.FindName("MainTesterStatusText");
+            Assert(((System.Windows.Controls.TextBlock)window.FindName("MainDiscardStatusText")).Text ==
+                "THÙNG LỖI: CHƯA CÓ XÁC NHẬN THÙNG LỖI",
+                "Main permanently displays an unconfigured model's discard status without inferring it from station IO settings");
             Assert(passText.Text == "8" && failText.Text == "2" && testerText.Text == TesterConnectionNotice.Message &&
                 vm.Test.HomeInspectionModeText == "ĐIỆN" && vm.Test.HomeLeakStatusText == "KHÔNG SỬ DỤNG" &&
                 vm.Test.HomePrinterStatusText == "CHƯA CẤU HÌNH COM",

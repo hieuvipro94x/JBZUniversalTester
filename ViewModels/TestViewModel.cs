@@ -487,6 +487,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     public string HomeInspectionModeText => _model is null ? "CHƯA CHỌN MÃ HÀNG" :
         "ĐIỆN" + (IsResistanceEnabledForModel(_model) ? " + ĐIỆN TRỞ" : string.Empty) +
         (IsWaterProofEnabledForCurrentModel() ? " + LEAK" : string.Empty);
+    public string HomeDiscardConfigurationText => DiscardConfigurationPresentation.For(_model).Summary;
+    public string HomeDiscardConfigurationColor => DiscardConfigurationPresentation.For(_model).Color;
     public string HomeLeakStatusText => _model is null ? "CHƯA CHỌN MÃ HÀNG" :
         !_waterProofProfile.Enabled ? "KHÔNG SỬ DỤNG" :
         _waterProofProfile.EnabledChannelCount == 0 ? "CHƯA CHỌN KÊNH LEAK" :
@@ -502,6 +504,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void RaiseHomeEquipmentPresentation()
     {
         Raise(nameof(HomeInspectionModeText));
+        Raise(nameof(HomeDiscardConfigurationText));
+        Raise(nameof(HomeDiscardConfigurationColor));
         Raise(nameof(HomeLeakStatusText));
         Raise(nameof(HomePrinterStatusText));
     }
@@ -2886,7 +2890,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         int discardFirst = _productionSettings.DiscardContactIo1;
         int discardSecond = _productionSettings.DiscardContactIo2;
         ThtModelParser.ValidateDiscardContacts(discardFirst, discardSecond, _board.Capacity.TotalIoCapacity);
-        bool discardInserted = false;
         ProductModel model;
         TestEngine.PreparedModelState preparedEngineModel;
         using (StartupPerformanceTrace.Measure("THT_MODEL_LOAD"))
@@ -2895,7 +2898,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             {
                 long parseStarted = Stopwatch.GetTimestamp();
                 string? discardBackup = _modelParser.EnsureDiscardContacts(fullPath, discardFirst, discardSecond);
-                discardInserted = discardBackup is not null;
                 if (discardBackup is not null)
                     AddLog($"[DISCARD-THT] Đã cập nhật IO {discardFirst}/{discardSecond}; bản gốc: {discardBackup}");
                 IReadOnlyList<ProductModel> parsed = _modelParser.LoadAll(fullPath);
@@ -2929,17 +2931,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 model = candidates[0];
             }
 
-            if (!discardInserted && model.HasDiscardInterlock)
-            {
-                AddLog($"[DISCARD-THT] ĐÃ CÓ XÁC NHẬN THÙNG LỖI: IO {string.Join('/', model.DiscardContactIo)}; giữ nguyên THT.");
-                if (Application.Current is not null)
-                {
-                    var notice = new JBZUniversalTester.Views.DiscardConfigurationNoticeWindow(model);
-                    if (ResolveOperatorDialogOwner() is { } noticeOwner) notice.Owner = noticeOwner;
-                    notice.ShowDialog();
-                }
-                if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
-            }
+            NotifyDiscardConfiguration(model, generation, deferred: false);
+            if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
             preparedEngineModel = await Task.Run(() =>
             {
                 ModelFileIdentityService.Capture(model, fullPath);
@@ -3078,6 +3071,27 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         await LoadSelectedModelFromPathAsync(path);
     }
 
+    private void NotifyDiscardConfiguration(ProductModel model, int generation, bool deferred)
+    {
+        AddLog("[DISCARD-THT] " + DiscardConfigurationPresentation.For(model).Summary);
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null) return;
+        void ShowNotice()
+        {
+            if (generation != Volatile.Read(ref _modelLoadGeneration) ||
+                Volatile.Read(ref _shutdownStarted) != 0 ||
+                (deferred && !ReferenceEquals(_model, model))) return;
+            var notice = new JBZUniversalTester.Views.DiscardConfigurationNoticeWindow(model);
+            if (ResolveOperatorDialogOwner() is { } owner) notice.Owner = owner;
+            notice.ShowDialog();
+        }
+        // Startup does not wait for a dialog before completing its first render.
+        // A newer user selection invalidates an older queued startup notice.
+        if (deferred || !dispatcher.CheckAccess())
+            dispatcher.BeginInvoke(ShowNotice, System.Windows.Threading.DispatcherPriority.Background);
+        else ShowNotice();
+    }
+
     private async Task LoadLastTestedModelAsync()
     {
         var savedPath = _productionSettings.LastThtPath;
@@ -3129,6 +3143,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 _productionSettings.LastThtPartKey =
                     JBZUniversalTester.Views.PartSelectionWindow.PartKey(startup.Model);
                 SetModel(startup.Model, startup.Prepared);
+                NotifyDiscardConfiguration(startup.Model, generation, deferred: true);
                 StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
                 AddLog($"Đã tự tải model gần nhất: {Path.GetFileName(fullPath)}");
             }

@@ -276,7 +276,10 @@
                                 </TextBlock>
                             </StackPanel>
                             <TextBlock x:Name="MainInspectionModeText" Text="{Binding Test.HomeInspectionModeText, StringFormat=KIỂM TRA: {0}}"
-                                       FontSize="13" FontWeight="SemiBold" Foreground="#334155" Margin="0,0,0,13" TextWrapping="Wrap"/>
+                                       FontSize="13" FontWeight="SemiBold" Foreground="#334155" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="MainDiscardStatusText" Text="{Binding Test.HomeDiscardConfigurationText}"
+                                       FontSize="13" FontWeight="SemiBold" Foreground="{Binding Test.HomeDiscardConfigurationColor}"
+                                       Margin="0,0,0,13" TextWrapping="Wrap"/>
                             <Grid Margin="0,0,0,16">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
