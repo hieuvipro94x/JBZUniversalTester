@@ -328,10 +328,13 @@
                                                 <TextBox x:Name="DiscardContactIo2TextBox" Width="65" Text="{Binding DiscardContactIo2Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="IO thứ hai được tự điền sau khi học cảm biến"/>
                                             </StackPanel>
                                             <StackPanel Grid.Row="21" Grid.ColumnSpan="2" Margin="0,4,0,8">
-                                                <WrapPanel>
-                                                    <Button x:Name="LearnDiscardIoButton" Content="TỰ NHẬN IO THÙNG LỖI" Style="{StaticResource SettingsActionButtonStyle}" Click="LearnDiscardIo_Click" Padding="10,5" Margin="0,0,8,4"/>
-                                                    <Button Content="XÓA CẶP IO" Style="{StaticResource SettingsPrimaryButtonStyle}" Click="ClearDiscardIo_Click" Padding="10,5" Margin="0,0,0,4"/>
-                                                </WrapPanel>
+                                                <Grid x:Name="DiscardIoActionsPanel" HorizontalAlignment="Left" Margin="0,2,0,8" UseLayoutRounding="True" SnapsToDevicePixels="True">
+                                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                                    <Button x:Name="LearnDiscardIoButton" Content="TỰ NHẬN IO THÙNG LỖI" Style="{StaticResource SettingsActionButtonStyle}" Click="LearnDiscardIo_Click"
+                                                            Height="34" MinWidth="220" FontSize="13" Padding="12,0" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
+                                                    <Button x:Name="ClearDiscardIoButton" Grid.Column="1" Content="XÓA CẶP IO" Style="{StaticResource SettingsPrimaryButtonStyle}" Click="ClearDiscardIo_Click"
+                                                            Height="34" MinWidth="112" FontSize="13" Padding="12,0" Margin="0" SnapsToDevicePixels="True"/>
+                                                </Grid>
                                                 <TextBlock x:Name="DiscardLearningResultText" Text="Cắm cảm biến vào hai IO bất kỳ. Bấm TỰ NHẬN IO, đưa tay/vật qua cảm biến rồi lấy ra: phần mềm tự điền hai chân. Lưu Cài đặt và chọn lại THT để ghi _DISCARD; bản gốc được sao lưu trong ThtBackups. Để trống cả hai để giữ nguyên THT." TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
                                             </StackPanel>
                                         </Grid>
