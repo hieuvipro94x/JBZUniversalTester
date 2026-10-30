@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-combined-history", var historyPreviewPath])
+        {
+            ExportCombinedLeakHistoryPreview(historyPreviewPath);
+            return 0;
+        }
         if (args is ["--test-seal-leak"])
         {
             TestSealLeakTrigger();
@@ -389,6 +394,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("Leak attempts merge into one Korean product history and full Excel export", TestCombinedLeakHistory),
             ("SEAL Leak trigger follows declared connector edges and preserves early/retry isolation", TestSealLeakTrigger),
             ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),
             ("History displays encoded barcodes with PASS-only LOT progression, including offline printers", TestHistoryBarcodeOnlyAndPassLot),
@@ -4125,17 +4131,17 @@ internal static partial class Program
             "private async Task RunWaterProofRetestOnlyAsync",
             StringComparison.Ordinal);
         int retestMethodEnd = testViewModelSource.IndexOf(
-            "private async Task<bool> SaveWaterProofRetestHistoryAsync",
+            "private void CaptureWaterProofAttemptHistory",
             retestMethodStart,
             StringComparison.Ordinal);
         string retestMethodSource = testViewModelSource[retestMethodStart..retestMethodEnd];
-        Assert(retestMethodSource.Contains("SaveWaterProofRetestHistoryAsync", StringComparison.Ordinal) &&
+        Assert(retestMethodSource.Contains("CaptureWaterProofAttemptHistory", StringComparison.Ordinal) &&
                retestMethodSource.Contains("Interlocked.Exchange(ref _postContinuityStarted, 0)", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
                !retestMethodSource.Contains("EjectFaultProductAsync", StringComparison.Ordinal),
-            "Every Leak-only retest writes its own history without finalizing/ejecting the production cycle");
+            "Every Leak-only retest is captured in the current product without finalizing/ejecting the production cycle");
 
         int processStart = testViewModelSource.IndexOf(
             "private void ProcessEngineChangedOnUi",
@@ -8344,7 +8350,7 @@ internal static partial class Program
                    leakRetestRequest.WaterProof.Count == 1 &&
                    !leakRetestRecord.IsProductionRecord &&
                    !leakRetestRecord.IsMasterRecord &&
-                   leakRetestRecord.InspectionTypeText == "LEAK RETEST" &&
+                   leakRetestRecord.InspectionTypeText == "기밀 검사 시작" &&
                    leakRetestRecord.ExportAcceptedLotNo is null &&
                    leakRetestRecord.ExportBarcodeText.Length == 0,
                 "Leak retest is a visible history type but never becomes a production LOT/barcode result");

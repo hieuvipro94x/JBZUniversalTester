@@ -66,6 +66,8 @@ internal static partial class Program
                 Assert(vm.WaterProofChannels.Any(row => row.Channel == 1 && row.ResultText == "FAIL" && row.Leak == 12) &&
                        vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
                     "The actual final channel failure remains displayed and may retry before continuity finishes");
+                Assert(store.Search(new HistorySearchCriteria(null, null, null, "", "ALL")).Count == 0,
+                    "A completed Leak attempt cannot create a separate history row before product completion");
                 Feed((40, [41])); Feed((40, [41]));
                 await Until(() => replies.Count == 2);
                 Feed((40, [41]), (50, [51]));
@@ -89,8 +91,20 @@ internal static partial class Program
                     connection.Open();
                     using var command = connection.CreateCommand();
                     command.CommandText = "SELECT COUNT(*) FROM WaterProofMeasurements";
-                    Assert(Convert.ToInt32(command.ExecuteScalar()) >= 3,
-                        "Both Leak attempts and the final product retain actual Leak measurements in durable history");
+                    Assert(Convert.ToInt32(command.ExecuteScalar()) == 1,
+                        "Only the final channel measurement is attached to the one product history row");
+                    command.CommandText = "SELECT COUNT(*) FROM Tests";
+                    Assert(Convert.ToInt32(command.ExecuteScalar()) == 1,
+                        "Two Leak attempts plus continuity create exactly one product row");
+                    command.CommandText = "PRAGMA integrity_check";
+                    Assert((string?)command.ExecuteScalar() == "ok", "Combined Leak history database integrity remains ok");
+                    var saved = store.Search(new HistorySearchCriteria(null, null, null, "", "ALL")).Single();
+                    Assert(saved.InspectionTypeText == "회로·기밀 검사" &&
+                           saved.HistoryTestLogText.Contains("회로검사:PASS", StringComparison.Ordinal) &&
+                           saved.HistoryTestLogText.Contains("기밀 검사 시작 #1", StringComparison.Ordinal) &&
+                           saved.HistoryTestLogText.Contains("기밀 검사 시작 #2", StringComparison.Ordinal) &&
+                           !saved.HistoryTestLogText.Contains("LEAK RETEST", StringComparison.Ordinal),
+                        "One saved row includes continuity PASS and both real Leak attempts in Korean");
                 }
                 Feed(); Feed();
                 Assert(!vm.IsProductRemovalPending && vm.ResultStatusText == "LẮP SẢN PHẨM" && vm.Fail == 1,

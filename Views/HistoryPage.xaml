@@ -399,7 +399,7 @@
                         <ComboBoxItem Content="PRODUCTION" Tag="PRODUCT"/>
                         <ComboBoxItem Content="정상 마스터" Tag="MASTER_GOOD"/>
                         <ComboBoxItem Content="불량 마스터" Tag="MASTER_BAD"/>
-                        <ComboBoxItem Content="LEAK RETEST" Tag="LEAK_RETEST"/>
+                        <ComboBoxItem Content="기밀 검사 시작" Tag="LEAK_RETEST"/>
                     </ComboBox>
                 </StackPanel>
             </Grid>

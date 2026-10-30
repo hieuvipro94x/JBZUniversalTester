@@ -101,7 +101,10 @@ public sealed class TestHistoryRecord
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
     public string InspectionTypeText => IsMasterRecord
         ? MasterHistoryPresentation.InspectionName(this)
-        : HistoryInspectionType.KoreanName(InspectionType);
+        : IsProductionRecord && (InspectionTrace.Contains("기밀검사", StringComparison.Ordinal) ||
+                                 InspectionTrace.Contains("기밀 검사", StringComparison.Ordinal))
+            ? "회로·기밀 검사"
+            : HistoryInspectionType.KoreanName(InspectionType);
     public string HistoryResultText => IsMasterRecord
         ? Passed ? "확인 합격" : "확인 불합격"
         : ExportResultText;
@@ -154,7 +157,8 @@ public sealed class TestHistoryRecord
                     .Append("초) ");
             }
 
-            string trace = InspectionTrace?.Trim() ?? string.Empty;
+            string trace = (InspectionTrace?.Trim() ?? string.Empty)
+                .Replace("LEAK RETEST", "기밀 검사 시작", StringComparison.OrdinalIgnoreCase);
             if (IsMasterRecord && trace.Length > 0)
                 trace = KoreanHistoryFormatter.FormatMasterTrace(trace);
             if (trace.Length == 0)
@@ -267,7 +271,7 @@ public static class HistoryInspectionType
     {
         MasterGood => "마스터 합격품",
         MasterBad => "마스터 불량품",
-        LeakRetest => "LEAK RETEST",
+        LeakRetest => "기밀 검사 시작",
         _ => "제품"
     };
 }

@@ -324,6 +324,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private DateTime? _cycleWaterProofStartedAt;
     private DateTime? _cycleWaterProofCompletedAt;
     private string _cycleWaterProofSummary = string.Empty;
+    private readonly List<string> _cycleWaterProofAttempts = [];
     private IReadOnlyList<WaterProofChannelMeasurement> _lastWaterProofMeasurements = [];
     private string _activeCycleId = Guid.NewGuid().ToString("N");
     private string _recordedHistoryCycleId = string.Empty;
@@ -4164,6 +4165,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _cycleWaterProofStartedAt = null;
         _cycleWaterProofCompletedAt = null;
         _cycleWaterProofSummary = string.Empty;
+        _cycleWaterProofAttempts.Clear();
         _lastWaterProofMeasurements = [];
     }
 
@@ -10868,22 +10870,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 ct);
             DateTime retestFinishedAt = DateTime.Now;
             await ApplyWaterProofFinalResultAsync(run);
-            if (!await SaveWaterProofRetestHistoryAsync(
-                cycleModel,
-                run,
-                retestAttempt,
-                retestStartedAt,
-                retestFinishedAt))
-            {
-                ArmWaterProofEquipmentErrorRemovalWait();
-                State = "LỖI LƯU LỊCH SỬ LEAK - CHỜ THÁO SẢN PHẨM";
-                restartProductionScan = true;
-                return;
-            }
             if (ct.IsCancellationRequested ||
                 !IsRuntimeContext(RuntimeMode.Production, generation) ||
                 !ReferenceEquals(_model, cycleModel))
                 return;
+            CaptureWaterProofAttemptHistory(run, retestAttempt, retestStartedAt, retestFinishedAt);
             RecordPassedWaterProofChannels(run);
             if (run.Passed && (Volatile.Read(ref _waterProofRemovedDuringRunMask) &
                 run.Channels.Where(item => item.Enabled).Aggregate(0, (mask, item) => mask | (1 << (item.Channel - 1)))) == 0)
@@ -10973,104 +10964,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
-    private async Task<bool> SaveWaterProofRetestHistoryAsync(
-        ProductModel model,
-        WaterProofRunResult run,
-        int attempt,
-        DateTime startedAt,
-        DateTime finishedAt)
+    // Leak attempts belong to the current product. Persist them with the final
+    // continuity verdict, never as extra Tests rows or extra production counts.
+    private void CaptureWaterProofAttemptHistory(
+        WaterProofRunResult run, int attempt, DateTime startedAt, DateTime finishedAt)
     {
-        FaultDetail[] faults = run.Channels
-            .Where(channel => channel.Enabled && !channel.Passed)
-            .Select(channel => new FaultDetail
-            {
-                Type = ProductFaultType.WaterProofLeak,
-                WireName = $"CH{channel.Channel} • {_waterProofProfile.ConnectorForChannel(channel.Channel)}".TrimEnd(),
-                Message = $"CH{channel.Channel}: áp giữ {channel.SecondPressure:0.###}; " +
-                          $"độ rò {channel.Leak:0.###}; yêu cầu áp >= {_waterProofProfile.PressMin:0.###}, " +
-                          $"độ sụt <= {_waterProofProfile.LeakLimit:0.###}"
-            })
-            .ToArray();
-        var completed = new CompletedTestResult
-        {
-            Started = startedAt,
-            Finished = finishedAt,
-            Passed = run.Passed,
-            ResultText = run.Passed ? "PASS" : "FAIL",
-            Faults = faults
-        };
-        string summary = BuildWaterProofHistorySummary(run);
-        string parentCycleId = string.IsNullOrWhiteSpace(_activeCycleId)
-            ? Guid.NewGuid().ToString("N")
-            : _activeCycleId;
-        var history = new TestHistoryRecord
-        {
-            Started = startedAt,
-            Finished = finishedAt,
-            TestStartedAt = startedAt,
-            ResultAt = finishedAt,
-            InspectionType = HistoryInspectionType.LeakRetest,
-            PartName = model.ProductName,
-            PartNumber = model.PartNumber,
-            VehicleType = model.VehicleType,
-            Eco = model.Eco,
-            Nco = model.Nco,
-            Alc = model.Alc,
-            LotNo = 0,
-            ProductionCounter = 0,
-            Result = completed.ResultText,
-            Passed = completed.Passed,
-            ModelName = model.ModelName,
-            ModelFile = model.SourcePath,
-            HtdrvName = ProgramIdentityService.BuildHtdrvName(),
-            LotText = _productionSettings.Lot,
-            InspectionTrace =
-                $"{startedAt:HH:mm:ss}~{finishedAt:HH:mm:ss} LEAK RETEST #{attempt} {summary}",
-            DeviceName = _productionSettings.DeviceName,
-            DeviceNumber = _productionSettings.DeviceNumber,
-            OperatorCompany = _productionSettings.OperatorCompany,
-            ProductionLine = _productionSettings.ProductionLine,
-            FaultType = run.Passed
-                ? string.Empty
-                : FaultTypeCatalog.DisplayName(ProductFaultType.WaterProofLeak),
-            FaultCode = run.Passed
-                ? string.Empty
-                : FaultTypeCatalog.Code(ProductFaultType.WaterProofLeak),
-            FaultDetailsJson = completed.FaultDetailsJson,
-            FaultSummary = summary,
-            CycleId = $"{parentCycleId}-leak-retest-{attempt:D4}",
-            PrintStatus = LabelPrintStatus.NotRequested.ToString()
-        };
-
-        try
-        {
-            ProductionResultCommitRequest request = ProductionResultCommitRequest.Capture(
-                history,
-                model,
-                _productionSettings,
-                faults,
-                [],
-                run.Channels,
-                ProgramIdentityService.VersionText);
-            ProductionCommitResult result = await ProductionPersistence.CommitTestResultAsync(
-                request,
-                _lifetimeCts.Token);
-            AddLog(
-                $"[WATERPROOF-RETEST] History id={result.TestId} cycle={history.CycleId}" +
-                (result.AlreadyCommitted ? " (đã tồn tại)." : " đã lưu."));
-            return true;
-        }
-        catch (Exception ex)
-        {
-            AddLog($"[WATERPROOF-RETEST] LỖI LƯU LỊCH SỬ: {ex.Message}");
-            await InvokeUiAsync(() => LocalizedMessageBox.Show(TestViewLanguage,
-                ResolveOperatorDialogOwner(),
-                $"Đã có kết quả Leak retest {completed.ResultText} nhưng chưa lưu được lịch sử.",
-                "CHƯA LƯU ĐƯỢC KẾT QUẢ",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error));
-            return false;
-        }
+        _cycleWaterProofStartedAt ??= startedAt;
+        _cycleWaterProofCompletedAt = finishedAt;
+        _cycleWaterProofAttempts.Add(
+            $"{startedAt:HH:mm:ss}~{finishedAt:HH:mm:ss} 기밀 검사 시작 #{attempt} {BuildWaterProofHistorySummary(run)}");
     }
 
     private static bool ShouldRestartAfterPass(
@@ -11194,14 +11096,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
 
             int attempt = Interlocked.Increment(ref _waterProofRetestAttempt);
-            if (!await SaveWaterProofRetestHistoryAsync(
-                    cycleModel, run, attempt, startedAt, DateTime.Now))
-            {
-                ArmWaterProofEquipmentErrorRemovalWait();
-                State = "LỖI LƯU LỊCH SỬ LEAK - CHỜ THÁO SẢN PHẨM";
-                restartScan = true;
-                return;
-            }
+            CaptureWaterProofAttemptHistory(run, attempt, startedAt, DateTime.Now);
             if (ct.IsCancellationRequested ||
                 !IsRuntimeContext(RuntimeMode.Production, generation) ||
                 !ReferenceEquals(_model, cycleModel))
@@ -12802,6 +12697,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     : $" {_cycleWaterProofSummary}"));
         }
 
+        stages.AddRange(_cycleWaterProofAttempts);
         return string.Join(' ', stages);
     }
 
