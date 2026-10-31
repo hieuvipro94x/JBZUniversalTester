@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-integrated-tht-editor", var previewModel, var previewImage, var previewPage])
+        {
+            RenderIntegratedEditorPreview(previewModel, previewImage, int.Parse(previewPage));
+            return 0;
+        }
         if (args is ["--test-integrated-tht-editor"])
         {
             TestIntegratedThtEditor();

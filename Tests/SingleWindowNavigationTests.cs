@@ -30,6 +30,24 @@ internal static partial class Program
             var actions = (Grid)main.FindName("MainActionBar");
             try
             {
+                var mainVm = (MainViewModel)typeof(MainWindow).GetField("_viewModel", flags)!.GetValue(main)!;
+                var noticeSettings = (JBZUniversalTester.Models.ProductionSettings)typeof(TestViewModel).GetField("_productionSettings", flags)!.GetValue(mainVm.Test)!;
+                object? originalModel = typeof(TestViewModel).GetField("_model", flags)!.GetValue(mainVm.Test);
+                var noticeModel = new JBZUniversalTester.Models.ProductModel { SourcePath = "NOTICE_ONLY.tht", DiscardContactIo = [41, 86] };
+                int loadGeneration = (int)typeof(TestViewModel).GetField("_modelLoadGeneration", flags)!.GetValue(mainVm.Test)!;
+                var notify = typeof(TestViewModel).GetMethod("NotifyDiscardConfiguration", flags)!;
+                noticeSettings.ShowDiscardConfigurationNotice = false;
+                notify.Invoke(mainVm.Test, [noticeModel, loadGeneration, false]);
+                Assert(application.Windows.Count == 1 && noticeModel.HasDiscardInterlock,
+                    "Disabling the popup does not construct a dialog or disable the discard interlock");
+                typeof(TestViewModel).GetField("_model", flags)!.SetValue(mainVm.Test, noticeModel);
+                noticeSettings.ShowDiscardConfigurationNotice = true;
+                notify.Invoke(mainVm.Test, [noticeModel, loadGeneration, true]);
+                noticeSettings.ShowDiscardConfigurationNotice = false;
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(application.Windows.Count == 1, "A notice queued before disabling the preference cannot appear later");
+                typeof(TestViewModel).GetField("_model", flags)!.SetValue(mainVm.Test, originalModel);
+                noticeSettings.ShowDiscardConfigurationNotice = true;
                 Task abandonedOpen = (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
                 await Dispatcher.Yield(DispatcherPriority.Input);
                 Assert(host.Content is null && host.Visibility == Visibility.Collapsed && actions.IsEnabled,

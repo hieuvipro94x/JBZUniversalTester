@@ -74,11 +74,20 @@ internal static partial class Program
             IntegratedThtStore.Save(created, newPath, null);
             Assert(parser.Load(newPath).Pins.Count == 2 && parser.Load(newPath).PartNumber == "NEW-THT",
                 "New native THT uses the bundled HarnProg template without an external program or another topology format");
+            byte[] newBytes = File.ReadAllBytes(newPath);
+            string archived = IntegratedThtStore.Archive(newPath, IntegratedThtStore.Fingerprint(newPath));
+            Assert(!File.Exists(newPath) && File.ReadAllBytes(archived).SequenceEqual(newBytes),
+                "The restored Delete action archives the exact THT instead of losing the original");
 
             OnSettingsDispatcher(async () =>
             {
                 var page = new ThtEditorPage();
                 await page.OpenPathAsync(path);
+                var canvas = (FrameworkElement)page.FindName("EditorCanvas");
+                Assert(canvas.Width == 1224 && canvas.Height == 900 &&
+                       Grid.GetColumn((FrameworkElement)((FrameworkElement)page.FindName("BaseNav")).Parent) == 0 &&
+                       Grid.GetColumn((FrameworkElement)((ContentControl)page.FindName("ContentHost")).Parent) == 2,
+                    "Editor retains ModelCreator's compact canvas, left navigation and right-hand editing panel");
                 Assert(!page.HasUnsavedChanges, "Opening the original file does not require a Save confirmation");
                 Assert(await page.ConfirmCloseAsync(), "Return immediately after Open does not show a Save dialog");
                 var basePage = (FrameworkElement)((ContentControl)page.FindName("ContentHost")).Content;
@@ -103,7 +112,9 @@ internal static partial class Program
                     "Reverting to saved values removes the Save confirmation requirement");
                 foreach (int index in Enumerable.Range(0, 5))
                 {
-                    typeof(ThtEditorPage).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [index]);
+                    var nav = (System.Windows.Controls.Primitives.ToggleButton)page.FindName(new[] { "BaseNav", "ConnectorNav", "PinNav", "LineNav", "ColorNav" }[index]);
+                    typeof(ThtEditorPage).GetMethod("Nav_Click", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [nav, new RoutedEventArgs()]);
+                    Assert(nav.IsChecked == true, "The original left navigation highlights the active page");
                     page.Measure(new Size(1366, 768)); page.Arrange(new Rect(0, 0, 1366, 768)); page.UpdateLayout();
                     Assert(((ContentControl)page.FindName("ContentHost")).Content is FrameworkElement { ActualWidth: > 0 },
                         "All five editor pages load their own resources inside the existing window");
@@ -119,12 +130,12 @@ internal static partial class Program
         }
     }
 
-    private static void RenderIntegratedEditorPreview(string path, string imagePath)
+    private static void RenderIntegratedEditorPreview(string path, string imagePath, int pageIndex = 3)
     {
         OnSettingsDispatcher(async () =>
         {
             var page = new ThtEditorPage(); await page.OpenPathAsync(path);
-            typeof(ThtEditorPage).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [3]);
+            typeof(ThtEditorPage).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [pageIndex]);
             using var source = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("THT editor preview")
                 { Width = 1600, Height = 900, WindowStyle = unchecked((int)0x80000000) });
             source.RootVisual = page;

@@ -25,6 +25,17 @@ or product identifiers. Hidden THT fields, label data, resistance fields, CLIP
 representation and OLE metadata use the source ModelCreator round-trip writer.
 The editor color catalog is isolated in LocalAppData/JBZUniversalTester/ModelEditor.
 
+V2026.09.354 restores ModelCreator's 1224-by-900 layout: path and New/Open/Save/Delete
+at the top, five navigation buttons at the left, editing panel at the right and
+Return at the bottom left. The canvas only scales down on smaller displays.
+Delete archives inactive THT files and their Leak sidecars under ThtBackups;
+the product currently loaded on the tester is protected from deletion.
+
+Settings contains ShowDiscardConfigurationNotice (default on), persisted in CFG.
+It controls only the product-load/startup configuration popup. Queued notices
+recheck the preference before displaying. Main status and the physical discard
+interlock remain active regardless of the popup preference.
+
 The editor asks about unsaved changes on navigation. When the user saves, an
 opened file is written back to its exact original path, including when its displayed
 model metadata is edited. Opening, switching unchanged tabs, returning after Save

@@ -3068,11 +3068,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void NotifyDiscardConfiguration(ProductModel model, int generation, bool deferred)
     {
         AddLog("[DISCARD-THT] " + DiscardConfigurationPresentation.For(model).Summary);
+        if (!_productionSettings.ShowDiscardConfigurationNotice) return;
         var dispatcher = Application.Current?.Dispatcher;
         if (dispatcher is null) return;
         void ShowNotice()
         {
-            if (generation != Volatile.Read(ref _modelLoadGeneration) ||
+            if (!_productionSettings.ShowDiscardConfigurationNotice ||
+                generation != Volatile.Read(ref _modelLoadGeneration) ||
                 Volatile.Read(ref _shutdownStarted) != 0 ||
                 (deferred && !ReferenceEquals(_model, model))) return;
             var notice = new JBZUniversalTester.Views.DiscardConfigurationNoticeWindow(model);

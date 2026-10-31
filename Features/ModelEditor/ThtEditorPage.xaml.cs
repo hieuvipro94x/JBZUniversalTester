@@ -2,6 +2,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Controls.Primitives;
 using Microsoft.Win32;
 using JBZUniversalTester.ModelEditor.Models;
 using JBZUniversalTester.ModelEditor.Pages;
@@ -25,6 +26,7 @@ public partial class ThtEditorPage : UserControl
     public HashSet<string> SavedPaths { get; } = new(StringComparer.OrdinalIgnoreCase);
     public event Func<Task>? RequestClose;
     public bool IsBusy => _busy;
+    public string? ProtectedModelPath { get; set; }
     public bool HasUnsavedChanges
     {
         get { Commit(); return _changes.HasChanges(_document); }
@@ -33,7 +35,7 @@ public partial class ThtEditorPage : UserControl
     public ThtEditorPage()
     {
         InitializeComponent();
-        void Changed(object? _, EventArgs e) { if (!_loading) StatusText.Text = "Đã thay đổi — bấm LƯU THT để lưu."; }
+        void Changed(object? _, EventArgs e) { if (!_loading) { SaveButton.Tag = null; StatusText.Text = "Đã thay đổi — bấm LƯU THT để lưu."; } }
         _base.Changed += Changed; _connectors.Changed += Changed; _pins.Changed += Changed; _lines.Changed += Changed;
         _lines.ConnectionsChanged += (_, _) => _rebuild = true;
         _pins.ConnectionsChanged += (_, _) => _rebuild = false;
@@ -69,6 +71,8 @@ public partial class ThtEditorPage : UserControl
         try
         {
             _page = page;
+            foreach (var nav in new[] { BaseNav, ConnectorNav, PinNav, LineNav, ColorNav })
+                nav.IsChecked = int.Parse((string)nav.Tag) == page;
             switch (page)
             {
                 case 0: _base.LoadData(_document.Base); ContentHost.Content = _base; break;
@@ -98,6 +102,7 @@ public partial class ThtEditorPage : UserControl
             _diskWork = loading;
             var loaded = await loading;
             _document = loaded.Doc; _hash = loaded.Hash; _rebuild = false;
+            SaveButton.Tag = null;
             _changes.MarkSaved(_document); PathText.Text = Path.GetFullPath(path); ShowPage(0);
             StatusText.Text = $"Đã mở {_document.Connectors.Count} connector, {_document.Pins.Count} chân. THT gốc được giữ nguyên đến khi Lưu.";
         }
@@ -137,6 +142,7 @@ public partial class ThtEditorPage : UserControl
                 SavedPaths.Add(Path.GetFullPath(target)); PathText.Text = target; ShowPage(_page);
             }
             StatusText.Text = "ĐÃ LƯU THT — bản gốc nằm trong ThtBackups.";
+            SaveButton.Tag = "Saved";
             return true;
         }
         catch (Exception ex) { ShowError("Chưa lưu được THT", ex); return false; }
@@ -169,8 +175,8 @@ public partial class ThtEditorPage : UserControl
     private void Nav_Click(object sender, RoutedEventArgs e)
     {
         if (_busy) return;
-        try { Commit(); ShowPage(int.Parse((string)((Button)sender).Tag)); }
-        catch (Exception ex) { ShowError("Dữ liệu chưa hợp lệ", ex); }
+        try { Commit(); ShowPage(int.Parse((string)((ToggleButton)sender).Tag)); }
+        catch (Exception ex) { ShowPage(_page); ShowError("Dữ liệu chưa hợp lệ", ex); }
     }
     private async void Open_Click(object sender, RoutedEventArgs e)
     {
@@ -184,5 +190,28 @@ public partial class ThtEditorPage : UserControl
         _hash = null; _rebuild = false; _changes.Reset(_document); ShowPage(0); PathText.Text = "THT mới";
     }
     private async void Save_Click(object sender, RoutedEventArgs e) => await SaveAsync();
+    private async void Delete_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || _document.SourcePath is not string path) return;
+        if (ProtectedModelPath is string active && string.Equals(Path.GetFullPath(active), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+        {
+            MessageBox.Show(Window.GetWindow(this), "Mã hàng này đang được nạp trên máy test. Hãy chọn mã hàng khác trước khi xóa.", "MÃ HÀNG ĐANG SỬ DỤNG", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(Window.GetWindow(this), $"Xóa mã hàng {Path.GetFileName(path)} khỏi thư mục hiện tại?\nBản gốc được giữ trong ThtBackups.", "XÁC NHẬN XÓA THT", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        _busy = true; IsEnabled = false;
+        try
+        {
+            string? hash = _hash;
+            var deleting = Task.Run(() => IntegratedThtStore.Archive(path, hash));
+            _diskWork = deleting; await deleting;
+            SavedPaths.Remove(path);
+            _document = new() { SourceFormat = "tht", Base = new() { Model = "NewModel" } };
+            _hash = null; _rebuild = false; _changes.Reset(_document); ShowPage(0); PathText.Text = "THT mới";
+            StatusText.Text = "Đã chuyển file vào ThtBackups.";
+        }
+        catch (Exception ex) { ShowError("Chưa xóa được THT", ex); }
+        finally { _busy = false; IsEnabled = true; }
+    }
     private async void Back_Click(object sender, RoutedEventArgs e) { if (RequestClose is { } close) await close(); }
 }

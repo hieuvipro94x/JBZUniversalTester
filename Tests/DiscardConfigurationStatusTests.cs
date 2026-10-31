@@ -14,6 +14,26 @@ internal static partial class Program
 {
     private static void TestDiscardConfigurationStatus()
     {
+        string configDirectory = Path.Combine(Path.GetTempPath(), "JBZ-DiscardNotice-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(configDirectory);
+        try
+        {
+            string cfg = Path.Combine(configDirectory, "settings.cfg");
+            var settings = new ProductionSettings();
+            Assert(settings.ShowDiscardConfigurationNotice, "Existing stations keep the notice enabled by default");
+            foreach (bool enabled in new[] { false, true })
+            {
+                settings.ShowDiscardConfigurationNotice = enabled;
+                ProductionConfigService.SaveLegacyCfg(settings, cfg);
+                Assert(ProductionConfigService.LoadSavedSettings(cfg).ShowDiscardConfigurationNotice == enabled,
+                    "The notice preference remains saved after reopening Settings");
+            }
+        }
+        finally
+        {
+            if (Path.GetFullPath(configDirectory).StartsWith(Path.Combine(Path.GetTempPath(), "JBZ-DiscardNotice-"), StringComparison.OrdinalIgnoreCase))
+                Directory.Delete(configDirectory, true);
+        }
         Assert(DiscardConfigurationPresentation.For(null).Summary.Contains("CHƯA CHỌN MÃ HÀNG"),
             "An empty selection cannot retain another product's discard status");
         OnSettingsDispatcher(async () =>

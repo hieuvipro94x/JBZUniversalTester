@@ -2305,6 +2305,7 @@ public partial class ProductionSettingsPage : UserControl
             }
             await ReleaseManualOutputsAsync(closing: false);
             var editor = new JBZUniversalTester.ModelEditor.ThtEditorPage();
+            editor.ProtectedModelPath = _main?.Test.CurrentModelPath;
             editor.RequestClose += CloseModelEditorAsync;
             _modelEditor = editor;
             ModelEditorHost.Content = editor; ModelEditorHost.Visibility = Visibility.Visible;

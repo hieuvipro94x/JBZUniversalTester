@@ -328,6 +328,7 @@
                                                 <TextBox x:Name="DiscardContactIo2TextBox" Width="65" Text="{Binding DiscardContactIo2Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="IO thứ hai được tự điền sau khi học cảm biến"/>
                                             </StackPanel>
                                             <StackPanel Grid.Row="21" Grid.ColumnSpan="2" Margin="0,4,0,8">
+                                                <CheckBox Content="HIỆN THÔNG BÁO CẤU HÌNH THÙNG LỖI KHI NẠP MÃ" IsChecked="{Binding Settings.ShowDiscardConfigurationNotice, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" FontSize="12" Margin="0,0,0,6"/>
                                                 <TextBlock Text="{Binding DiscardModelDisplay, StringFormat=Mã hàng cấu hình thùng lỗi: {0}}" FontWeight="SemiBold" TextWrapping="Wrap"/>
                                                 <Grid x:Name="DiscardIoActionsPanel" HorizontalAlignment="Left" Margin="0,2,0,8" UseLayoutRounding="True" SnapsToDevicePixels="True">
                                                     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

@@ -10,6 +10,24 @@ public static class IntegratedThtStore
     private static readonly object Gate = new();
     public static string Fingerprint(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
 
+    public static string Archive(string path, string? expectedHash)
+    {
+        lock (Gate)
+        {
+            path = Path.GetFullPath(path);
+            if (!path.EndsWith(".tht", StringComparison.OrdinalIgnoreCase) ||
+                expectedHash is null || Fingerprint(path) != expectedHash)
+                throw new IOException("THT đã thay đổi hoặc chưa được mở. Hãy mở lại file trước khi xóa.");
+            string backups = Path.Combine(Path.GetDirectoryName(path)!, "ThtBackups");
+            Directory.CreateDirectory(backups);
+            string archived = Path.Combine(backups, $"{Path.GetFileNameWithoutExtension(path)}.deleted.{DateTime.Now:yyyyMMdd_HHmmss_fff}.{Guid.NewGuid():N}.tht");
+            File.Move(path, archived);
+            try { if (File.Exists(path + ".leak.json")) File.Move(path + ".leak.json", archived + ".leak.json"); }
+            catch { File.Move(archived, path); throw; }
+            return archived;
+        }
+    }
+
     public static ModelDocument Save(ModelDocument document, string target, string? expectedHash)
     {
         lock (Gate)
