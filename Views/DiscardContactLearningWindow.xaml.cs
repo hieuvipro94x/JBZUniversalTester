@@ -99,6 +99,10 @@ public partial class DiscardContactLearningWindow : Window
         _test.PropertyChanged -= OnDeviceChanged;
         try
         {
+            // Let the canceled Closing event return before setting DialogResult.
+            // Scan restoration can complete synchronously; closing again from
+            // inside the first Closing event leaves the modal result unresolved.
+            await Dispatcher.Yield(DispatcherPriority.Background);
             await _startup;
             if (_ownsSession) await _test.StopTopologyLearningAsync();
         }

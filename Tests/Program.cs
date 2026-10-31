@@ -20,6 +20,13 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-discard-learning-dialog"])
+        {
+            TestDiscardLearningDialog();
+            TestDiscardSettingsSave();
+            Console.WriteLine("PASS: modal discard learning completion and Settings persistence");
+            return 0;
+        }
         if (args is ["--test-discard-configuration-status"])
         {
             TestDiscardConfigurationStatus();
@@ -538,6 +545,7 @@ internal static partial class Program
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
+            ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),
             ("Discard configuration notices and persistent MainWindow status", TestDiscardConfigurationStatus),
