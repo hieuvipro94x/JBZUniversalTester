@@ -180,8 +180,22 @@ public partial class ThtEditorPage : UserControl
     }
     private async void Open_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog { Filter = "HarnProg THT (*.tht)|*.tht", InitialDirectory = Directory.Exists(@"C:\ITEM") ? @"C:\ITEM" : null };
-        if (dialog.ShowDialog(Window.GetWindow(this)) == true && await ConfirmCloseAsync()) await OpenPathAsync(dialog.FileName);
+        if (_busy) return;
+        string? currentDirectory = Path.GetDirectoryName(_document.SourcePath);
+        string root = Directory.Exists(JBZUniversalTester.Services.RuntimePaths.ItemDirectory)
+            ? JBZUniversalTester.Services.RuntimePaths.ItemDirectory
+            : currentDirectory is not null && Directory.Exists(currentDirectory) ? currentDirectory : AppContext.BaseDirectory;
+        var owner = Window.GetWindow(this);
+        var picker = new JBZUniversalTester.Views.ProductPickerWindow(root) { Title = "Chọn mã hàng để sửa cấu hình THT" };
+        if (owner is not null) picker.Owner = owner;
+        string? selectedPath = null;
+        if (picker.ShowDialog() == true) selectedPath = picker.SelectedFilePath;
+        else if (picker.BrowseFileRequested)
+        {
+            var dialog = new OpenFileDialog { Filter = "HarnProg THT (*.tht)|*.tht", InitialDirectory = root };
+            if (dialog.ShowDialog(owner) == true) selectedPath = dialog.FileName;
+        }
+        if (selectedPath is not null && await ConfirmCloseAsync()) await OpenPathAsync(selectedPath);
     }
     private async void New_Click(object sender, RoutedEventArgs e)
     {

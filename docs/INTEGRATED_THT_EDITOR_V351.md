@@ -28,6 +28,10 @@ The editor color catalog is isolated in LocalAppData/JBZUniversalTester/ModelEdi
 V2026.09.354 restores ModelCreator's 1224-by-900 layout: path and New/Open/Save/Delete
 at the top, five navigation buttons at the left, editing panel at the right and
 Return at the bottom left. The canvas only scales down on smaller displays.
+The editor's Open action shares ProductPickerWindow with production selection,
+including recursive ITEM search, debounced filtering and recent tested products.
+Its browse action can open a THT outside ITEM. Selecting a file for editing does
+not select it for production or increment test history/counts.
 Delete archives inactive THT files and their Leak sidecars under ThtBackups;
 the product currently loaded on the tester is protected from deletion.
 
