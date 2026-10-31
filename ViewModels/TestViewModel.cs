@@ -301,12 +301,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private long _uiRequestCount;
     private long _uiDispatcherEnqueueCount;
     private long _uiRenderedCount;
-    private long _lastContinuousScanMetricsTick;
+    private readonly TestViewDiagnostics _diagnostics = new();
     private string _lastPassGateSignature = string.Empty;
     private string _lastFaultGateSignature = string.Empty;
     private string _lastFaultGateSuppressedSignature = string.Empty;
     private string _lastPassRemainingSignature = string.Empty;
-    private string _lastProductEvidenceSignature = string.Empty;
     private string _lastIoMappingSignature = string.Empty;
     // V12.10.3: TestEngine.Reset() phát Changed đồng bộ. Trong Master state machine,
     // reset nội bộ không được phép tái nhập OnEngineChanged trước khi state hoàn tất.
@@ -3641,9 +3640,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         TestEnginePresentationSnapshot rowsSnapshot)
     {
         long applyStarted = Stopwatch.GetTimestamp();
-        (string Key, string Status)[] rowsBefore = Faults
-            .Select(row => (RowKey(row), row.Status))
-            .ToArray();
+        var rowsBefore = _diagnostics.CaptureRenderedRows(Faults, RowKey);
         long generation = request.Generation;
         RefreshDailyMasterRequirement();
         if (!MasterApproved)
@@ -3668,26 +3665,16 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         double applyMs = Stopwatch.GetElapsedTime(applyStarted).TotalMilliseconds;
         double queueDelayMs = Stopwatch.GetElapsedTime(request.RequestedAt).TotalMilliseconds - applyMs;
-        (int removed, int added, int changed) = CalculateRenderedRowDelta(rowsBefore, Faults);
-        LogUiSnapshot(
-            rowsSnapshot.Electrical.FrameSequence,
-            rowsSnapshot.Electrical.ScanGeneration,
-            rowsSnapshot.Rows.Count,
-            "engine",
-            removed,
-            added,
-            changed);
-        AsyncFileLogService.Current.Performance(
-            $"UI_FRAME seq={rowsSnapshot.Electrical.FrameSequence} " +
-            $"generation={request.Generation}/{rowsSnapshot.Electrical.ScanGeneration} " +
-            $"product_state={CurrentProductionRuntimeState} " +
-            $"probe_state={CurrentProbePresentationState} " +
-            $"presentation={CurrentProductionPresentationMode} " +
-            $"rendered_rows={Faults.Count} added={added} removed={removed} changed={changed} " +
-            $"engine_compute_ms={rowsSnapshot.Electrical.EngineComputeMilliseconds:0.###} " +
-            $"row_diff_ms={rowsSnapshot.RowBuildMilliseconds:0.###} " +
-            $"queue_delay_ms={Math.Max(0, queueDelayMs):0.###} apply_ms={applyMs:0.###}");
+        if (rowsBefore is not null)
+            _diagnostics.LogEngineUiFrame(rowsBefore, Faults, RowKey,
+                rowsSnapshot, request.Generation, CaptureUiDiagnosticContext(),
+                applyMs, queueDelayMs);
     }
+
+    private TestViewUiDiagnosticContext CaptureUiDiagnosticContext() => new(
+        CurrentProductionRuntimeState.ToString(),
+        CurrentProbePresentationState.ToString(),
+        CurrentProductionPresentationMode.ToString(), Faults.Count);
 
     private void LogUiSnapshot(
         long frameSequence,
@@ -3698,13 +3685,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         int added = 0,
         int changed = 0)
     {
-        AsyncFileLogService.Current.Performance(
-            $"UI_SNAPSHOT seq={frameSequence} generation={scanGeneration} " +
-            $"product_state={CurrentProductionRuntimeState} " +
-            $"probe_state={CurrentProbePresentationState} " +
-            $"presentation_mode={CurrentProductionPresentationMode} " +
-            $"source_rows={sourceRows} rendered_rows={Faults.Count} " +
-            $"removed={removed} added={added} changed={changed} source={source}");
+        if (_diagnostics.Enabled)
+            _diagnostics.LogUiSnapshot(frameSequence, scanGeneration, sourceRows,
+                source, CaptureUiDiagnosticContext(), removed, added, changed);
     }
 
     private void ProcessMasterRemovalAfterReturningToMain(long generation)
@@ -4298,7 +4281,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _lastFaultGateSignature = string.Empty;
         _lastFaultGateSuppressedSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;
-        _lastProductEvidenceSignature = string.Empty;
+        _diagnostics.ResetProductEvidence();
         _activeCycleId = Guid.NewGuid().ToString("N");
         _cycleStartedAt = DateTime.Now;
         _cycleTestStartedAt = null;
@@ -4701,7 +4684,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                             else
                                 ClearInlineProbeDisplay();
 
-                            LogProbeLatency(frame, requestedAt, probeIos);
+                            TestViewDiagnostics.LogProbeLatency(frame, requestedAt, probeIos);
                         });
                     }
 
@@ -4847,7 +4830,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                                 displayedProbeIos,
                                 released: false,
                                 frame.Sequence);
-                            LogProbeLatency(frame, requestedAt, displayedProbeIos);
+                            TestViewDiagnostics.LogProbeLatency(frame, requestedAt, displayedProbeIos);
                         });
                     }
                 }
@@ -4909,7 +4892,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                                 Array.Empty<int>(),
                                 released: true,
                                 frame.Sequence);
-                            LogProbeLatency(frame, requestedAt, Array.Empty<int>());
+                            TestViewDiagnostics.LogProbeLatency(frame, requestedAt, Array.Empty<int>());
                         });
                     }
                 }
@@ -5999,32 +5982,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         State = "THÁO SẢN PHẨM";
     }
 
-    private static void LogProbeLatency(ScanFrame frame, DateTime uiRequestedAt, IReadOnlyList<int> ios)
-    {
-        DateTime renderedAt = DateTime.Now;
-        double rxToVmMs = Math.Max(0, (uiRequestedAt - frame.Timestamp).TotalMilliseconds);
-        double vmToUiMs = Math.Max(0, (renderedAt - uiRequestedAt).TotalMilliseconds);
-        string state = ios.Count == 0
-            ? "RELEASE"
-            : $"TOUCH {string.Join(", ", ios.Select(io => $"IO{io}"))}";
-
-        AsyncFileLogService.Current.Performance(
-            $"PROBE_LATENCY {state}; RX->VM={rxToVmMs:0.0} ms; VM->UI={vmToUiMs:0.0} ms; seq={frame.Sequence}",
-            AppLogLevel.Normal);
-    }
-
     private void LogContinuousScanMetricsIfDue()
     {
-        // Production mặc định tắt system log. Tránh đọc hàng loạt counter và
-        // dựng chuỗi metrics trên hot path khi writer chắc chắn sẽ bỏ bản ghi.
-        if (!AsyncFileLogService.Current.FileLoggingEnabled)
-            return;
-
-        long now = Environment.TickCount64;
-        long previous = Interlocked.Read(ref _lastContinuousScanMetricsTick);
-        if (previous != 0 && now - previous < 5000)
-            return;
-        if (Interlocked.CompareExchange(ref _lastContinuousScanMetricsTick, now, previous) != previous)
+        if (!_diagnostics.TryBeginScanMetrics())
             return;
 
         long received = Interlocked.Read(ref _productionFramesReceived);
@@ -6037,20 +5997,13 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         long uiRequests = Interlocked.Read(ref _uiRequestCount);
         long dispatcherEnqueued = Interlocked.Read(ref _uiDispatcherEnqueueCount);
         long pipelineRendered = Interlocked.Read(ref _uiRenderedCount);
-        long coalesced = Math.Max(0, uiRequests - pipelineRendered);
 
-        AsyncFileLogService.Current.Performance(
-            "CONTINUOUS_SCAN_METRICS " +
-            $"rx_production={received} engine_processed_by_vm={processed} " +
-            $"engine_processed_total={engineProcessed} dropped={dropped} probe_routed={probeRouted} " +
-            $"ui_scheduled={uiScheduled} ui_rendered={uiRendered} " +
-            $"scan_running={_board.IsScanning} mode={CurrentRuntimeMode}");
-        AsyncFileLogService.Current.Performance(
-            $"UI_PIPELINE requests={uiRequests} " +
-            $"dispatcher_enqueued={dispatcherEnqueued} " +
-            $"rendered={pipelineRendered} coalesced={coalesced} " +
-            $"frame_queue_depth={Interlocked.Read(ref _boardFrameQueueDepth)} " +
-            $"frame_queue_high={Interlocked.Read(ref _boardFrameQueueHighWatermark)}");
+        _diagnostics.LogScanMetrics(new TestViewScanMetrics(
+            received, processed, dropped, probeRouted, engineProcessed,
+            uiScheduled, uiRendered, uiRequests, dispatcherEnqueued, pipelineRendered,
+            _board.IsScanning, CurrentRuntimeMode.ToString(),
+            Interlocked.Read(ref _boardFrameQueueDepth),
+            Interlocked.Read(ref _boardFrameQueueHighWatermark)));
     }
 
     private void LogPassGateAfterProductionFrame(ScanFrame frame, double processMs)
@@ -6191,7 +6144,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private void LogProductEvidence(ScanFrame frame)
     {
         ProductEvidenceSnapshot evidence = _engine.GetProductEvidenceSnapshot();
-        WriteProductEvidenceLog(frame, evidence);
+        _diagnostics.WriteProductEvidenceLog(frame, evidence);
     }
 
     private void LogProbeProductEvidence(ScanFrame frame)
@@ -6210,34 +6163,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 ? "PROBE_WITH_EXISTING_PRODUCT"
                 : "PROBE_ONLY"
         };
-        WriteProductEvidenceLog(frame, probe);
-    }
-
-    private void WriteProductEvidenceLog(
-        ScanFrame frame,
-        ProductEvidenceSnapshot evidence)
-    {
-        string signature =
-            $"{evidence.RawActiveIoCount}|{evidence.ExpectedConnectedCount}|" +
-            $"{evidence.WrongCandidateCount}|{evidence.WrongConfirmedCount}|" +
-            $"{evidence.ShortCandidateCount}|{evidence.ShortConfirmedCount}|" +
-            $"{evidence.ProbeEvidence}|{evidence.ValidProductEvidence}|" +
-            $"{evidence.State}|{evidence.Reason}";
-        if (string.Equals(signature, _lastProductEvidenceSignature, StringComparison.Ordinal))
-            return;
-
-        _lastProductEvidenceSignature = signature;
-        AsyncFileLogService.Current.Performance(
-            $"PRODUCT_EVIDENCE seq={frame.Sequence} generation={frame.ScanGeneration} " +
-            $"raw_active_count={evidence.RawActiveIoCount} " +
-            $"expected_connected={evidence.ExpectedConnectedCount} " +
-            $"wrong_candidates={evidence.WrongCandidateCount} " +
-            $"wrong_confirmed={evidence.WrongConfirmedCount} " +
-            $"short_candidates={evidence.ShortCandidateCount} " +
-            $"short_confirmed={evidence.ShortConfirmedCount} " +
-            $"probe_evidence={evidence.ProbeEvidence} " +
-            $"valid_product_evidence={evidence.ValidProductEvidence} " +
-            $"state={evidence.State} reason={evidence.Reason}");
+        _diagnostics.WriteProductEvidenceLog(frame, probe);
     }
 
     private void LogPassLatencyMarkers(ScanFrame frame, PassGateDiagnostics gate, double processMs)
@@ -7581,10 +7507,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Interlocked.Exchange(ref _uiDispatcherEnqueueCount, 0);
         Interlocked.Exchange(ref _uiRenderedCount, 0);
         Interlocked.Exchange(ref _boardFrameQueueHighWatermark, Interlocked.Read(ref _boardFrameQueueDepth));
-        Interlocked.Exchange(ref _lastContinuousScanMetricsTick, 0);
+        _diagnostics.ResetScanMetrics();
         _lastPassGateSignature = string.Empty;
         _lastPassRemainingSignature = string.Empty;
-        _lastProductEvidenceSignature = string.Empty;
+        _diagnostics.ResetProductEvidence();
         _lastIoMappingSignature = string.Empty;
         _lastLiveTopologySnapshot = LiveTopologySnapshot.Empty();
         lock (_probePreviewGate)
@@ -14115,43 +14041,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     }
 
     private static string RowKey(FaultRow row) => row.PresentationKey;
-
-    private static (int Removed, int Added, int Changed) CalculateRenderedRowDelta(
-        IReadOnlyList<(string Key, string Status)> before,
-        IReadOnlyList<FaultRow> after)
-    {
-        Dictionary<string, List<string>> beforeByKey = before
-            .GroupBy(item => item.Key, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(item => item.Status).OrderBy(value => value, StringComparer.Ordinal).ToList(),
-                StringComparer.Ordinal);
-        Dictionary<string, List<string>> afterByKey = after
-            .GroupBy(RowKey, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(item => item.Status).OrderBy(value => value, StringComparer.Ordinal).ToList(),
-                StringComparer.Ordinal);
-
-        int removed = 0;
-        int added = 0;
-        int contentChanged = 0;
-        foreach (string key in beforeByKey.Keys.Union(afterByKey.Keys, StringComparer.Ordinal))
-        {
-            List<string> oldValues = beforeByKey.GetValueOrDefault(key) ?? [];
-            List<string> newValues = afterByKey.GetValueOrDefault(key) ?? [];
-            int shared = Math.Min(oldValues.Count, newValues.Count);
-            removed += oldValues.Count - shared;
-            added += newValues.Count - shared;
-            for (int index = 0; index < shared; index++)
-            {
-                if (!string.Equals(oldValues[index], newValues[index], StringComparison.Ordinal))
-                    contentChanged++;
-            }
-        }
-
-        return (removed, added, removed + added + contentChanged);
-    }
 
     private void UpdateCachedFaultCounts(IReadOnlyList<FaultRow> rows)
     {

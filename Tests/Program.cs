@@ -25,6 +25,12 @@ internal static partial class Program
             RenderIntegratedEditorPreview(previewModel, previewImage, int.Parse(previewPage));
             return 0;
         }
+        if (args is ["--test-testview-diagnostics"])
+        {
+            TestTestViewDiagnostics();
+            Console.WriteLine("PASS: TestView diagnostics preserve log semantics and skip disabled table work");
+            return 0;
+        }
         if (args is ["--test-integrated-tht-editor"])
         {
             TestIntegratedThtEditor();
@@ -453,6 +459,7 @@ internal static partial class Program
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
             ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
+            ("TestView diagnostics preserve logging, throttles and read-only snapshots", TestTestViewDiagnostics),
             ("D2XX native calls keep UI responsive and retain ownership through cancellation", TestD2xxNativeIoResponsiveness),
             ("BCW journal contention keeps UI responsive and persists send outcome", TestBcwJournalResponsiveness),
             ("Settings manual cancellation serializes cleanup and restores scanning", TestSettingsManualStop),
@@ -1629,9 +1636,12 @@ internal static partial class Program
                dispatcherInvoke > enqueueCounter &&
                dispatcherInvoke - enqueueCounter < 200,
             "Dispatcher enqueue counter increments only at the actual InvokeAsync call site");
-        Assert(pipelineSource.Contains("UI_PIPELINE requests=", StringComparison.Ordinal) &&
-               pipelineSource.Contains("dispatcher_enqueued=", StringComparison.Ordinal) &&
-               pipelineSource.Contains("rendered={pipelineRendered} coalesced={coalesced}", StringComparison.Ordinal),
+        string diagnosticsSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "TestViewDiagnostics.cs"));
+        Assert(pipelineSource.Contains("_diagnostics.LogScanMetrics(", StringComparison.Ordinal) &&
+               diagnosticsSource.Contains("UI_PIPELINE requests=", StringComparison.Ordinal) &&
+               diagnosticsSource.Contains("dispatcher_enqueued=", StringComparison.Ordinal) &&
+               diagnosticsSource.Contains("rendered={m.PipelineRendered} coalesced={coalesced}", StringComparison.Ordinal),
             "Periodic diagnostics expose separate request, Dispatcher enqueue, rendered and coalesced totals");
     }
 
