@@ -20,11 +20,18 @@ public sealed partial class ThtModelParser
             throw new InvalidOperationException($"Hai IO thùng lỗi phải khác nhau, trong khoảng 1–{capacity}. Để trống cả hai nếu muốn giữ nguyên file THT.");
     }
 
-    /// <summary>Only explicit product selection calls this writer; ordinary parsing stays read-only.</summary>
+    /// <summary>Legacy fill-if-absent helper. Product selection and ordinary parsing stay read-only.</summary>
     public string? EnsureDiscardContacts(string path, int first, int second)
+        => EditDiscardContacts(path, first, second, replaceExisting: false);
+
+    /// <summary>Explicit Settings save edits only the selected product's native THT.</summary>
+    public string? SaveDiscardContacts(string path, int first, int second)
+        => EditDiscardContacts(path, first, second, replaceExisting: true);
+
+    private string? EditDiscardContacts(string path, int first, int second, bool replaceExisting)
     {
         ValidateDiscardContacts(first, second);
-        if (first == 0 && second == 0) return null;
+        if (!replaceExisting && first == 0 && second == 0) return null;
         ValidatePath(path);
         if (!Path.GetExtension(path).Equals(".tht", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Chỉ cập nhật chân thùng lỗi trong file .tht.");
@@ -36,9 +43,16 @@ public sealed partial class ThtModelParser
             var existing = LoadAll(full);
             if (existing.Any(model => model.DiscardContactIo.Count > 0))
             {
-                if (existing.All(model => model.HasDiscardInterlock)) return null;
-                throw new InvalidDataException("THT đã có _DISCARD nhưng không đủ đúng hai IO. Giữ nguyên file; hãy kiểm tra cấu hình thùng lỗi.");
+                if (!existing.All(model => model.HasDiscardInterlock))
+                    throw new InvalidDataException("THT đã có _DISCARD nhưng không đủ đúng hai IO. Giữ nguyên file; hãy kiểm tra cấu hình thùng lỗi.");
+                if (!replaceExisting) return null;
             }
+            int[] expectedPair = first == 0 ? [] : new[] { first, second }.Order().ToArray();
+            if (existing.All(model => model.DiscardContactIo.Order().SequenceEqual(expectedPair))) return null;
+            string sidecar = full + ".leak.json";
+            byte[]? originalSidecar = File.Exists(sidecar) ? File.ReadAllBytes(sidecar) : null;
+            if (originalSidecar is not null)
+                _ = ModelLeakLayoutService.Apply(full, new WaterProofModelSettings());
             byte[] contents = new CompoundFileReader(originalFile).ReadStream("Contents");
             using var input = new BinaryReader(new MemoryStream(contents), Encoding.UTF8);
             EnsureRemaining(input, 16, "header Contents");
@@ -60,7 +74,7 @@ public sealed partial class ThtModelParser
             modelText += new string('\0', trailingNulls);
             ThtModelTables tables = ParseModelText(modelText);
             List<RawPin> pins = ParsePins(tables.Pins);
-            if (tables.Connectors.Rows.Any(row => row.Get("커넥터", "Connector").Equals("_DISCARD", StringComparison.OrdinalIgnoreCase)))
+            if (!replaceExisting && !existing.All(model => model.HasDiscardInterlock) && tables.Connectors.Rows.Any(row => row.Get("커넥터", "Connector").Equals("_DISCARD", StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidDataException("THT đã có connector _DISCARD nhưng chưa có đủ hai chân IO. Giữ nguyên file để kiểm tra.");
             foreach (RawPin pin in pins.Where(pin => pin.IoNumber == first || pin.IoNumber == second))
                 if (!pin.Connector.Equals("_DISCARD", StringComparison.OrdinalIgnoreCase) &&
@@ -90,7 +104,7 @@ public sealed partial class ThtModelParser
                     throw new InvalidDataException("Nội dung THT ghi lại không khớp; giữ nguyên file gốc.");
                 // Read back with the production parser before the original can be replaced.
                 var after = LoadAll(temporary);
-                if (before.Count != after.Count || after.Any(model => !model.DiscardContactIo.Order().SequenceEqual(new[] { first, second }.Order())) ||
+                if (before.Count != after.Count || after.Any(model => !model.DiscardContactIo.Order().SequenceEqual(expectedPair)) ||
                     before.Zip(after).Any(pair => !pair.First.Pins.Select(pin => pin with { OriginalOrder = 0 }).SequenceEqual(
                             pair.Second.Pins.Select(pin => pin with { OriginalOrder = 0 })) ||
                         pair.First.PartNumber != pair.Second.PartNumber || pair.First.Eco != pair.Second.Eco ||
@@ -104,7 +118,38 @@ public sealed partial class ThtModelParser
                 Directory.CreateDirectory(backups);
                 backup = Path.Combine(backups, $"{Path.GetFileNameWithoutExtension(full)}.{DateTime.Now:yyyyMMdd_HHmmss_fff}.{Guid.NewGuid():N}.tht");
                 // Windows atomically replaces the file and retains the original as the backup.
-                File.Replace(temporary, full, backup);
+                string? sidecarTemporary = null;
+                try
+                {
+                    if (originalSidecar is not null)
+                    {
+                        // Only rebind a sidecar validated against the original THT.
+                        // Preserve every channel, machine setting and unknown JSON field.
+                        var json = System.Text.Json.Nodes.JsonNode.Parse(originalSidecar)!;
+                        json["ModelSha256"] = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(temporary)));
+                        sidecarTemporary = sidecar + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                        File.WriteAllText(sidecarTemporary, json.ToJsonString());
+                        if (!File.ReadAllBytes(sidecar).SequenceEqual(originalSidecar))
+                            throw new IOException("Cấu hình Leak vừa thay đổi; giữ nguyên THT và thử lại.");
+                    }
+                    File.Replace(temporary, full, backup);
+                    try
+                    {
+                        if (sidecarTemporary is not null)
+                            File.Replace(sidecarTemporary, sidecar, backup + ".leak.json");
+                    }
+                    catch
+                    {
+                        // Restore the exact original THT if its matching sidecar cannot be committed.
+                        File.WriteAllBytes(temporary, originalFile);
+                        File.Replace(temporary, full, null);
+                        throw;
+                    }
+                }
+                finally
+                {
+                    if (sidecarTemporary is not null && File.Exists(sidecarTemporary)) File.Delete(sidecarTemporary);
+                }
                 return backup;
             }
             finally
@@ -152,8 +197,11 @@ public sealed partial class ThtModelParser
                 if (count >= 0) cells[count] = "2";
                 return string.Join('\t', cells) + ending;
             }
-            kept.Add(Row(first, 1));
-            if (isPins) kept.Add(Row(second, 2));
+            if (first != 0)
+            {
+                kept.Add(Row(first, 1));
+                if (isPins) kept.Add(Row(second, 2));
+            }
             lines.RemoveRange(start + 1, end - start - 1);
             lines.InsertRange(start + 1, kept);
             if (isPins) pinsDone = true; else connectorsDone = true;

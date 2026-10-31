@@ -2887,9 +2887,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         await WaitForLotConfigurationWritesAsync();
         if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
 
-        int discardFirst = _productionSettings.DiscardContactIo1;
-        int discardSecond = _productionSettings.DiscardContactIo2;
-        ThtModelParser.ValidateDiscardContacts(discardFirst, discardSecond, _board.Capacity.TotalIoCapacity);
         ProductModel model;
         TestEngine.PreparedModelState preparedEngineModel;
         using (StartupPerformanceTrace.Measure("THT_MODEL_LOAD"))
@@ -2897,9 +2894,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             IReadOnlyList<ProductModel> candidates = await Task.Run(() =>
             {
                 long parseStarted = Stopwatch.GetTimestamp();
-                string? discardBackup = _modelParser.EnsureDiscardContacts(fullPath, discardFirst, discardSecond);
-                if (discardBackup is not null)
-                    AddLog($"[DISCARD-THT] Đã cập nhật IO {discardFirst}/{discardSecond}; bản gốc: {discardBackup}");
                 IReadOnlyList<ProductModel> parsed = _modelParser.LoadAll(fullPath);
                 double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
@@ -12070,6 +12064,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         AddLog(
             $"Đã nạp lại cấu hình production: model max IO {maxIo}, LOTNO {Lot}; " +
             $"{_board.Capacity}.");
+    }
+
+    public async Task ApplySavedDiscardContactsAsync(string modelPath, int first, int second)
+    {
+        if (_model is null || string.IsNullOrWhiteSpace(_model.SourcePath) || !string.Equals(Path.GetFullPath(_model.SourcePath), Path.GetFullPath(modelPath), StringComparison.OrdinalIgnoreCase)) return;
+        _model.DiscardContactIo = first == 0 ? [] : [first, second];
+        RaiseHomeEquipmentPresentation();
+        await EnsureContinuousProductionScanAsync();
     }
 
     public void RefreshProductionSettingsOnly()

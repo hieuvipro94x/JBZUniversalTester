@@ -70,15 +70,43 @@ internal static partial class Program
             string cfg = Path.Combine(root, "station.cfg");
             ProductionConfigService.SaveLegacyCfg(settings, cfg);
             var loaded = ProductionConfigService.LoadSavedSettings(cfg);
-            Assert(loaded.DiscardContactIo1 == 97 && loaded.DiscardContactIo2 == 98,
-                "Discard IO settings persist with backward-compatible CFG keys");
+            Assert(loaded.DiscardContactIo1 == 0 && loaded.DiscardContactIo2 == 0 &&
+                   !File.ReadAllText(cfg).Contains("[DiscardContactIo", StringComparison.Ordinal),
+                "Global discard IO keys are no longer written to CFG");
+            parser.SaveDiscardContacts(path, 97, 98);
+            settings.LastThtPath = path;
             var vm = new ProductionSettingsViewModel(initialSettings: settings, saveSettings: _ => { });
-            Assert(vm.DiscardContactIo1Text == "97" && vm.DiscardContactIo2Text == "98", "Settings editor restores the two saved IO values");
+            Assert(vm.DiscardContactIo1Text == "97" && vm.DiscardContactIo2Text == "98", "Settings editor reads the pair from this product's THT");
             vm.DiscardContactIo1Text = "97";
             vm.DiscardContactIo2Text = string.Empty;
             bool partialRejected = false;
             try { vm.Save(); } catch (InvalidOperationException) { partialRejected = true; }
             Assert(partialRejected, "Settings cannot save only one discard IO");
+
+            string sidecar = path + ".leak.json";
+            var layout = System.Text.Json.JsonSerializer.SerializeToNode(new ModelLeakLayoutService.Layout(1,
+                [new(1, "CN1")], Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)))))!;
+            layout["CustomMachineSetting"] = "KEEP";
+            File.WriteAllText(sidecar, layout.ToJsonString());
+            parser.SaveDiscardContacts(path, 41, 86);
+            var rebound = ModelLeakLayoutService.Apply(path, new WaterProofModelSettings { PressMin = 42, LeakLimit = 7 });
+            Assert(parser.Load(path).DiscardContactIo.SequenceEqual([41, 86]) && rebound.Channel1Connector == "CN1" &&
+                   rebound.PressMin == 42 && rebound.LeakLimit == 7 && File.ReadAllText(sidecar).Contains("KEEP"),
+                "Changing this product's pair rebinds its validated Leak sidecar while retaining channel and machine settings");
+            byte[] thtBeforeFailure = File.ReadAllBytes(path), sidecarBeforeFailure = File.ReadAllBytes(sidecar);
+            using (var held = new FileStream(sidecar, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                bool blocked = false;
+                try { parser.SaveDiscardContacts(path, 43, 88); } catch (IOException) { blocked = true; }
+                Assert(blocked && File.ReadAllBytes(path).SequenceEqual(thtBeforeFailure) &&
+                       File.ReadAllBytes(sidecar).SequenceEqual(sidecarBeforeFailure),
+                    "A locked Leak sidecar rolls back the THT and preserves the exact original matching pair");
+            }
+            Assert(ModelLeakLayoutService.Apply(path, new()).Channel1Connector == "CN1",
+                "Rolled-back THT and sidecar remain valid together");
+            parser.SaveDiscardContacts(path, 0, 0);
+            Assert(parser.Load(path).DiscardContactIo.Count == 0 && ModelLeakLayoutService.Apply(path, new()).Channel1Connector == "CN1",
+                "Clearing only this product's DISCARD leaves its product and Leak topology usable");
         }
         finally
         {

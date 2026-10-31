@@ -1,0 +1,31 @@
+<UserControl x:Class="JBZUniversalTester.ModelEditor.ThtEditorPage"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#F1F5F9" FontFamily="Segoe UI">
+ <UserControl.Resources>
+  <ResourceDictionary>
+   <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="EditorResources.xaml"/></ResourceDictionary.MergedDictionaries>
+   <Style x:Key="EditorButton" TargetType="Button"><Setter Property="Padding" Value="14,8"/><Setter Property="Margin" Value="4"/><Setter Property="FontSize" Value="14"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Background" Value="White"/><Setter Property="BorderBrush" Value="#CBD5E1"/></Style>
+  </ResourceDictionary>
+ </UserControl.Resources>
+ <Grid Margin="12">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <DockPanel>
+   <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+    <Button Content="TẠO MỚI" Style="{StaticResource EditorButton}" Click="New_Click"/>
+    <Button Content="MỞ THT" Style="{StaticResource EditorButton}" Click="Open_Click"/>
+    <Button x:Name="SaveButton" Content="LƯU THT" Style="{StaticResource EditorButton}" Background="#0F766E" Foreground="White" Click="Save_Click"/>
+    <Button Content="TRỞ VỀ" Style="{StaticResource EditorButton}" Click="Back_Click"/>
+   </StackPanel>
+   <StackPanel><TextBlock Text="CHỈNH SỬA CẤU HÌNH THT" FontSize="23" FontWeight="Bold" Foreground="#173B88"/><TextBlock x:Name="PathText" Text="Chưa mở file" FontSize="13" TextTrimming="CharacterEllipsis"/></StackPanel>
+  </DockPanel>
+  <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10">
+   <Button Content="THÔNG TIN CƠ BẢN" Tag="0" Style="{StaticResource EditorButton}" Click="Nav_Click"/>
+   <Button Content="CONNECTOR / LEAK" Tag="1" Style="{StaticResource EditorButton}" Click="Nav_Click"/>
+   <Button Content="PIN / IO" Tag="2" Style="{StaticResource EditorButton}" Click="Nav_Click"/>
+   <Button Content="DÂY / KẾT NỐI" Tag="3" Style="{StaticResource EditorButton}" Click="Nav_Click"/>
+   <Button Content="MÀU DÂY" Tag="4" Style="{StaticResource EditorButton}" Click="Nav_Click"/>
+  </StackPanel>
+  <Border Grid.Row="2" Background="White" BorderBrush="#CBD5E1" BorderThickness="1"><ContentControl x:Name="ContentHost"/></Border>
+  <TextBlock x:Name="StatusText" Grid.Row="3" Text="Sửa trực tiếp THT. Bản gốc được sao lưu trong ThtBackups khi lưu." Margin="4,10" Foreground="#334155" TextWrapping="Wrap"/>
+ </Grid>
+</UserControl>

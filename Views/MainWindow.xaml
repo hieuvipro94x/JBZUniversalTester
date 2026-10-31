@@ -63,10 +63,11 @@
                                     IsHitTestVisible="False"
                                     Opacity="0"/>
 
+                            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="{TemplateBinding Padding}">
                             <ContentPresenter
                                 HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                Margin="{TemplateBinding Padding}"/>
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            </Viewbox>
                         </Grid>
 
                         <ControlTemplate.Triggers>
@@ -372,6 +373,7 @@
                 <ColumnDefinition Width="1.05*"/>
                 <ColumnDefinition Width="1.10*"/>
                 <ColumnDefinition Width="1.10*"/>
+                <ColumnDefinition Width="1.35*"/>
             </Grid.ColumnDefinitions>
 
             <Button x:Name="StartTestButton"
@@ -404,7 +406,11 @@
                     Style="{StaticResource TopologyButtonStyle}"
                     Content="QUÉT / HỌC MÃ"/>
 
-            <Button Grid.Column="5"
+            <Button x:Name="EditThtMainButton" Grid.Column="5"
+                    Click="OpenThtEditor_Click" Style="{StaticResource SettingsButtonStyle}"
+                    Content="SỬA CẤU HÌNH THT"/>
+
+            <Button Grid.Column="6"
                     Command="{Binding ExitCommand}"
                     Style="{StaticResource ExitButtonStyle}"
                     Content="THOÁT ỨNG DỤNG"/>

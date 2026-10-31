@@ -62,6 +62,16 @@ internal static partial class Program
                 await (Task)Call("CloseInternalPageAsync")!;
                 Assert(host.Visibility == Visibility.Collapsed && actions.IsEnabled && history.DataContext is null,
                     "History close fully restores Main without an extra window or stale page");
+                Assert(main.FindName("EditThtMainButton") is Button { Content: "SỬA CẤU HÌNH THT" },
+                    "MainWindow has a direct native THT editor action");
+                await (Task)Call("ShowSettingsPageCoreAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator, true)!;
+                var editing = (ProductionSettingsPage)host.Content!;
+                Assert(editing.IsThtEditorOpen && ((ContentControl)editing.FindName("ModelEditorHost")).Content is JBZUniversalTester.ModelEditor.ThtEditorPage &&
+                       application.Windows.Count == 1 && main.OwnedWindows.Count == 0 && !actions.IsEnabled,
+                    "Direct editor entry replaces Main in the existing window without showing a second settings/editor window");
+                await editing.TryLeaveAsync();
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(host.Content is null && actions.IsEnabled, "Leaving an unchanged editor restores Main directly");
             }
             finally
             {

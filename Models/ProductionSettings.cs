@@ -24,6 +24,7 @@ public sealed class ProductionSettings
 
     public int UsbDelay { get; set; } = 1;
     // 0/0 preserves existing THT configuration; a pair updates explicitly selected files.
+    // Legacy CFG read compatibility only. Runtime discard IO belongs to the product THT.
     public int DiscardContactIo1 { get; set; }
     public int DiscardContactIo2 { get; set; }
     /// <summary>

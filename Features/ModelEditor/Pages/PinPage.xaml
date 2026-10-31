@@ -1,0 +1,44 @@
+<UserControl x:Class="JBZUniversalTester.ModelEditor.Pages.PinPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"><UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="../EditorResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
+    <Grid Background="White" Margin="8">
+<!-- Bảng PIN dùng toàn bộ chiều rộng; thông tin kết nối nằm ở hai cột cuối. -->
+        <DataGrid x:Name="MainGrid"
+            Style="{StaticResource GridStyle}"
+            ItemsSource="{Binding Rows, RelativeSource={RelativeSource AncestorType=UserControl}}"
+            CanUserAddRows="False"
+            CanUserDeleteRows="False"
+            CanUserReorderColumns="False"
+            CanUserResizeColumns="False"
+            CanUserSortColumns="False"
+            CellEditEnding="MainGrid_CellEditEnding"
+            MouseDoubleClick="MainGrid_MouseDoubleClick">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="I/O"
+                                    Binding="{Binding Io, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="70"/>
+                <DataGridTextColumn Header="CONNECTOR"
+                                    Binding="{Binding Connector}"
+                                    IsReadOnly="True"
+                                    Width="140"/>
+                <DataGridTextColumn Header="PIN"
+                                    Binding="{Binding PinNo}"
+                                    IsReadOnly="True"
+                                    Width="70"/>
+                <DataGridTextColumn Header="LẦN KIỂM TRA"
+                                    Binding="{Binding TestNo, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="140"/>
+                <DataGridTextColumn Header="I/O CHÍNH"
+                                    Binding="{Binding MainIo, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="100"/>
+                <DataGridTextColumn Header="VAI TRÒ"
+                                    Binding="{Binding Role}"
+                                    IsReadOnly="True"
+                                    Width="90"/>
+                <DataGridTextColumn Header="DANH SÁCH NỐI" MinWidth="160"
+                                    Binding="{Binding CouplingText, UpdateSourceTrigger=PropertyChanged}"
+                                    Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

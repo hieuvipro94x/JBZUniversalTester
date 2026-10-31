@@ -14,6 +14,16 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private string _discardContactIo2Text = string.Empty;
     public string DiscardContactIo1Text { get => _discardContactIo1Text; set => Set(ref _discardContactIo1Text, value); }
     public string DiscardContactIo2Text { get => _discardContactIo2Text; set => Set(ref _discardContactIo2Text, value); }
+    private string _savedDiscardIo1 = string.Empty, _savedDiscardIo2 = string.Empty;
+    public string DiscardModelPath => _modelPath;
+    public string DiscardModelDisplay => string.IsNullOrWhiteSpace(_modelPath) ? "CHƯA CHỌN MÃ HÀNG" : Path.GetFileName(_modelPath);
+    private string? _discardReadError;
+    public void ValidateDiscardModel()
+    {
+        if (string.IsNullOrWhiteSpace(_modelPath) || !File.Exists(_modelPath))
+            throw new InvalidOperationException("Hãy chọn mã hàng có file THT trước khi tự nhận hoặc lưu IO thùng lỗi.");
+        if (_discardReadError is not null) throw new InvalidOperationException(_discardReadError);
+    }
     private int _masterFaultRequiredCount;
     private MasterSampleSelection _masterSelectedFaultSamples = MasterSampleSelection.All;
     public MasterSampleSelection MasterSelectedFaultSamples => _masterSelectedFaultSamples;
@@ -304,8 +314,27 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             Settings, _modelPath);
         _masterSelectedFaultSamples = ProductionConfigService.GetMasterSelectedFaultSamplesForPath(Settings, _modelPath);
         _masterOpenFaultRequiredCount = ProductionConfigService.GetMasterOpenFaultRequiredCountForPath(Settings, _modelPath);
-        _discardContactIo1Text = Settings.DiscardContactIo1 == 0 ? string.Empty : Settings.DiscardContactIo1.ToString();
-        _discardContactIo2Text = Settings.DiscardContactIo2 == 0 ? string.Empty : Settings.DiscardContactIo2.ToString();
+        if (File.Exists(_modelPath))
+        {
+            try
+            {
+                var model = new ThtModelParser().Load(_modelPath);
+                if (model.DiscardContactIo.Count > 0 && !model.HasDiscardInterlock)
+                    throw new InvalidDataException("THT có cấu hình thùng lỗi chưa hợp lệ; giữ nguyên file để kiểm tra.");
+                if (model.HasDiscardInterlock)
+                {
+                    _discardContactIo1Text = model.DiscardContactIo[0].ToString();
+                    _discardContactIo2Text = model.DiscardContactIo[1].ToString();
+                }
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                _discardReadError = "Chưa đọc được IO thùng lỗi của THT: " + ex.Message;
+                AsyncFileLogService.Current.Error(_discardReadError);
+            }
+        }
+        _savedDiscardIo1 = _discardContactIo1Text;
+        _savedDiscardIo2 = _discardContactIo2Text;
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, true)),
@@ -820,8 +849,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             }
             int first = ParseDiscardIo(DiscardContactIo1Text), second = ParseDiscardIo(DiscardContactIo2Text);
             ThtModelParser.ValidateDiscardContacts(first, second, BoardCapacity.FromSettings(Settings).TotalIoCapacity);
-            Settings.DiscardContactIo1 = first;
-            Settings.DiscardContactIo2 = second;
         }
         if (_accessSession.Allows(SettingsPermission.Resistance))
         {
@@ -857,18 +884,57 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public void Save()
     {
         PrepareSettingsForSave();
+        var discard = CaptureDiscardEdit();
+        SaveDiscardEdit(discard);
         _saveSettings(Settings);
+        Task applying = AcceptDiscardEditAsync(discard);
+        if (applying.IsCompleted) applying.GetAwaiter().GetResult();
+        else _ = ObserveDiscardApplyAsync(applying);
     }
 
     public async Task SaveAsync()
     {
         PrepareSettingsForSave();
+        var discard = CaptureDiscardEdit();
         // Freeze the editor DTO before the disk worker normalizes/writes it.
         // No WPF binding or shared runtime settings are accessed by that worker.
         ProductionSettings snapshot = JsonSerializer.Deserialize<ProductionSettings>(
             JsonSerializer.SerializeToUtf8Bytes(Settings))!;
-        await Task.Run(() => _saveSettings(snapshot));
+        await Task.Run(() => { SaveDiscardEdit(discard); _saveSettings(snapshot); });
         ProductionConfigService.CopyInto(Settings, snapshot);
+        await AcceptDiscardEditAsync(discard);
+    }
+
+    private (int First, int Second)? CaptureDiscardEdit()
+    {
+        if (!_accessSession.Allows(SettingsPermission.Io) ||
+            (DiscardContactIo1Text == _savedDiscardIo1 && DiscardContactIo2Text == _savedDiscardIo2)) return null;
+        ValidateDiscardModel();
+        return (string.IsNullOrWhiteSpace(DiscardContactIo1Text) ? 0 : int.Parse(DiscardContactIo1Text),
+            string.IsNullOrWhiteSpace(DiscardContactIo2Text) ? 0 : int.Parse(DiscardContactIo2Text));
+    }
+
+    private void SaveDiscardEdit((int First, int Second)? pair)
+    {
+        if (pair is { } value)
+        {
+            string? backup = new ThtModelParser().SaveDiscardContacts(_modelPath, value.First, value.Second);
+            if (backup is not null) AsyncFileLogService.Current.Application($"DISCARD saved to {_modelPath}; original backup: {backup}");
+        }
+    }
+
+    private async Task AcceptDiscardEditAsync((int First, int Second)? pair)
+    {
+        if (pair is not { } value) return;
+        _savedDiscardIo1 = DiscardContactIo1Text;
+        _savedDiscardIo2 = DiscardContactIo2Text;
+        if (_test is not null) await _test.ApplySavedDiscardContactsAsync(_modelPath, value.First, value.Second);
+    }
+
+    private static async Task ObserveDiscardApplyAsync(Task applying)
+    {
+        try { await applying.ConfigureAwait(false); }
+        catch (Exception ex) { AsyncFileLogService.Current.Error($"DISCARD background apply failed: {ex}"); }
     }
 
     private void RefreshManualCommands()

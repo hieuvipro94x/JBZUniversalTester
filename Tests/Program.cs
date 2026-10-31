@@ -20,6 +20,17 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-integrated-tht-editor"])
+        {
+            TestIntegratedThtEditor();
+            Console.WriteLine("PASS: integrated native THT editor, backup, validation, five pages and UI save");
+            return 0;
+        }
+        if (args is ["--preview-integrated-tht-editor", var editorModelPath, var editorImagePath])
+        {
+            RenderIntegratedEditorPreview(editorModelPath, editorImagePath);
+            return 0;
+        }
         if (args is ["--test-discard-learning-dialog"])
         {
             TestDiscardLearningDialog();
@@ -545,6 +556,7 @@ internal static partial class Program
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
+            ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),
@@ -2351,7 +2363,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 21 &&
+        Assert(settingsButtons.Length == 22 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
@@ -6567,7 +6579,7 @@ internal static partial class Program
                 System.Xml.Linq.XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "MainActionBar");
         System.Xml.Linq.XElement[] actionColumns = actionBar.Elements()
             .Single(element => element.Name.LocalName == "Grid.ColumnDefinitions").Elements().ToArray();
-        Assert(actionColumns.Length == 6 && actionColumns.All(column =>
+        Assert(actionColumns.Length == 7 && actionColumns.All(column =>
                    column.Attribute("Width")?.Value.EndsWith('*') == true) &&
                mainWindowXaml.Contains("x:Name=\"MainActionBar\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("UseLayoutRounding=\"True\"", StringComparison.Ordinal) &&

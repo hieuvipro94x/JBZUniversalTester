@@ -46,6 +46,7 @@ public partial class ProductionSettingsPage : UserControl
     private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
     private Task? _displayPreparationTask;
     private readonly bool _deferInitialLayout;
+    private JBZUniversalTester.ModelEditor.ThtEditorPage? _modelEditor;
 
     public event Func<object?, EventArgs, Task>? SettingsSaved;
     public event EventHandler? RequestClose;
@@ -68,6 +69,7 @@ public partial class ProductionSettingsPage : UserControl
         ChangeAdminPasswordButton.Visibility = ManageSettingsPermissionsButton.Visibility =
             access.IsAdmin ? Visibility.Visible : Visibility.Collapsed;
         SaveSettingsButton.IsEnabled = access.IsAdmin || access.Permissions != SettingsPermission.None;
+        EditThtButton.IsEnabled = access.IsAdmin;
     }
 
     private void ChangeAdminPassword_Click(object sender, RoutedEventArgs e)
@@ -243,6 +245,7 @@ public partial class ProductionSettingsPage : UserControl
         try
         {
             _accessSession.Demand(SettingsPermission.Io);
+            _vm.ValidateDiscardModel();
             if (_main?.Test is not { } test || !test.IsBoardConnected || test.IsDeviceFault)
             {
                 MessageBox.Show(HostWindow, TesterConnectionNotice.Message, "THÙNG HÀNG LỖI", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -254,7 +257,7 @@ public partial class ProductionSettingsPage : UserControl
             {
                 _vm.DiscardContactIo1Text = dialog.FirstIo.ToString(CultureInfo.InvariantCulture);
                 _vm.DiscardContactIo2Text = dialog.SecondIo.ToString(CultureInfo.InvariantCulture);
-                DiscardLearningResultText.Text = $"ĐÃ HỌC IO {dialog.FirstIo} / {dialog.SecondIo}. Lưu Cài đặt rồi chọn lại THT để ghi _DISCARD.";
+                DiscardLearningResultText.Text = $"ĐÃ HỌC IO {dialog.FirstIo} / {dialog.SecondIo} cho {_vm.DiscardModelDisplay}. Bấm Lưu để ghi vào THT của mã này.";
             }
         }
         catch (Exception ex)
@@ -268,7 +271,7 @@ public partial class ProductionSettingsPage : UserControl
     {
         _accessSession.Demand(SettingsPermission.Io);
         _vm.DiscardContactIo1Text = _vm.DiscardContactIo2Text = string.Empty;
-        DiscardLearningResultText.Text = "Đã xóa cặp IO trong Cài đặt. Các file THT hiện có được giữ nguyên.";
+        DiscardLearningResultText.Text = $"Bấm Lưu để xóa cặp IO thùng lỗi khỏi {_vm.DiscardModelDisplay}.";
     }
 
     private void LabelTemplateTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1988,6 +1991,7 @@ public partial class ProductionSettingsPage : UserControl
             _vm.RequestStopManualOperations(closing: true);
             // Shutdown must not terminate an in-flight durable config write.
             if (_saveCompletion is { } save) await save.Task;
+            if (_modelEditor is not null) await _modelEditor.DrainDiskWorkAsync();
         }
         Task cleanup = _manualCleanupTask is { IsCompleted: false } pending
             ? pending
@@ -2236,6 +2240,7 @@ public partial class ProductionSettingsPage : UserControl
 
     public async Task TryLeaveAsync()
     {
+        if (_modelEditor is not null) { await CloseModelEditorAsync(); return; }
         if (Volatile.Read(ref _batchPrintInProgress) != 0)
         {
             ShowMessage("Đang in hàng loạt. Vui lòng chờ in xong trước khi trở về.",
@@ -2270,6 +2275,64 @@ public partial class ProductionSettingsPage : UserControl
             return;
         }
 
+        RequestClose?.Invoke(this, EventArgs.Empty);
+    }
+
+    public bool IsThtEditorOpen => _modelEditor is not null;
+
+    private async void EditTht_Click(object sender, RoutedEventArgs e) => await OpenThtEditorAsync();
+
+    public async Task OpenThtEditorAsync()
+    {
+        if (IsReleased || _modelEditor is not null || _saveInProgress != 0 || _batchPrintInProgress != 0) return;
+        if (!_accessSession.IsAdmin)
+        {
+            ShowMessage("Chỉ quản trị viên được chỉnh sửa toàn bộ cấu hình THT.", "QUYỀN QUẢN TRỊ", MessageBoxImage.Information);
+            return;
+        }
+        if (_main?.Test.HasProductOnTestTable == true)
+        {
+            ShowMessage("VUI LÒNG THÁO SẢN PHẨM!!", "CHƯA THỂ SỬA THT", MessageBoxImage.Warning);
+            return;
+        }
+        try
+        {
+            CommitPendingEditorValues(); SyncCompatibilityFields();
+            if (!string.Equals(_savedSettingsSnapshot, CaptureEditableSettingsSnapshot(), StringComparison.Ordinal))
+            {
+                bool? save = ConfirmSaveBeforeLeaving();
+                if (save is null || save == true && !await PersistSettingsAsync()) return;
+            }
+            await ReleaseManualOutputsAsync(closing: false);
+            var editor = new JBZUniversalTester.ModelEditor.ThtEditorPage();
+            editor.RequestClose += CloseModelEditorAsync;
+            _modelEditor = editor;
+            ModelEditorHost.Content = editor; ModelEditorHost.Visibility = Visibility.Visible;
+            if (File.Exists(_vm.DiscardModelPath)) await editor.OpenPathAsync(_vm.DiscardModelPath);
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"THT EDIT open failed: {ex}");
+            ShowMessage("Chưa mở được trình sửa THT. Kiểm tra file mã hàng và thử lại.", "CHƯA MỞ ĐƯỢC TRÌNH SỬA THT", MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task CloseModelEditorAsync()
+    {
+        var editor = _modelEditor;
+        if (editor is null || !await editor.ConfirmCloseAsync()) return;
+        if (_main is not null && _main.Test.CurrentModelPath is string current && editor.SavedPaths.Contains(System.IO.Path.GetFullPath(current)))
+        {
+            try { await _main.Test.LoadSelectedModelFromPathAsync(current); }
+            catch (Exception ex)
+            {
+                AsyncFileLogService.Current.Error($"THT EDIT reload failed: {ex}");
+                ShowMessage("Chưa nạp lại được mã hàng sau khi sửa. Kiểm tra cấu hình THT và chọn lại mã hàng.", "CHƯA NẠP LẠI ĐƯỢC THT", MessageBoxImage.Warning);
+                return;
+            }
+        }
+        editor.RequestClose -= CloseModelEditorAsync;
+        _modelEditor = null; ModelEditorHost.Content = null; ModelEditorHost.Visibility = Visibility.Collapsed;
         RequestClose?.Invoke(this, EventArgs.Empty);
     }
 

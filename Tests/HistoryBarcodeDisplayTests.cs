@@ -111,6 +111,7 @@ internal static partial class Program
                 model.ModelName = "BARCODE-ITEM";
                 model.SourcePath = Path.Combine(root, "BARCODE-ITEM.tht");
                 var vm = CreateTestViewModel(settings, out FakeBoard board);
+                settings.Label.PrinterCom = string.Empty;
                 void Set(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
                 Set("_historyStore", store);
                 Set("_productionPersistence", persistence);
@@ -132,6 +133,16 @@ internal static partial class Program
                         .Invoke(vm, [passed, passed ? "PASS" : "FAIL", model, generation, CancellationToken.None,
                             passed ? null : new[] { new FaultDetail { Type = ProductFaultType.WrongWiring, ActualSourceIo = 1, ActualTargetIo = 3 } }, at])!;
                     Assert(committed, "Barcode fixture uses the actual production commit pipeline");
+                    if (passed)
+                    {
+                        // The production first-print worker runs independently of
+                        // the commit. Let its real offline outcome finish before
+                        // this fixture simulates explicit retry outcomes below.
+                        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                        while (store.Search(new HistorySearchCriteria(null, null, null, model.PartNumber, "ALL"))
+                                   .Single(item => item.CycleId == cycle).PrintStatus != LabelPrintStatus.Failed.ToString())
+                            await Task.Delay(5, deadline.Token);
+                    }
                     if (passed) passCount++;
                     long expectedLot = 2000 + passCount;
                     var row = store.Search(new HistorySearchCriteria(null, null, null, model.PartNumber, "ALL"))

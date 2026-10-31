@@ -131,8 +131,6 @@ public static class ProductionConfigService
         {
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
             $"[StartCardNumber]{settings.StartCardNumber}",
-            $"[DiscardContactIo1]{settings.DiscardContactIo1}",
-            $"[DiscardContactIo2]{settings.DiscardContactIo2}",
             $"[IoConfirm1]{settings.IoConfirm1}",
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",

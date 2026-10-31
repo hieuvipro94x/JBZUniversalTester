@@ -345,7 +345,11 @@ public partial class MainWindow : Window
     private int _settingsAccessPromptActive;
     private async void OpenSettings_Click(
         object sender,
-        RoutedEventArgs e)
+        RoutedEventArgs e) => await OpenSettingsCoreAsync(openEditor: false);
+
+    private async void OpenThtEditor_Click(object sender, RoutedEventArgs e) => await OpenSettingsCoreAsync(openEditor: true);
+
+    private async Task OpenSettingsCoreAsync(bool openEditor)
     {
         if (_settingsPage is not null || _historyPage is not null || _testWindow is not null ||
             Interlocked.CompareExchange(ref _settingsAccessPromptActive, 1, 0) != 0)
@@ -359,7 +363,13 @@ public partial class MainWindow : Window
             if (_shutdownStarted) return;
             SettingsAccessSession? access = SettingsSecurityDialogs.Login(this, accessService);
             if (access is null || _shutdownStarted) return;
-            await ShowSettingsPageAsync(access);
+            if (openEditor && !access.IsAdmin)
+            {
+                MessageBox.Show(this, "Chỉ quản trị viên được chỉnh sửa toàn bộ cấu hình THT.", "QUYỀN QUẢN TRỊ", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (openEditor) await ShowSettingsPageCoreAsync(access, openEditor: true);
+            else await ShowSettingsPageAsync(access);
         }
         catch (Exception ex)
         {
@@ -382,7 +392,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ShowSettingsPageAsync(SettingsAccessSession access)
+    private Task ShowSettingsPageAsync(SettingsAccessSession access) => ShowSettingsPageCoreAsync(access, openEditor: false);
+
+    private async Task ShowSettingsPageCoreAsync(SettingsAccessSession access, bool openEditor)
     {
         if (_settingsPage is not null || _historyPage is not null || _settingsPageCloseInProgress || _testWindow is not null)
         {
@@ -420,7 +432,12 @@ public partial class MainWindow : Window
                 Math.Max(1, ActualHeight > 0 ? ActualHeight : SystemParameters.WorkArea.Height));
             preparedPage.Measure(size);
             preparedPage.Arrange(new Rect(size));
-            await preparedPage.PrepareForDisplayAsync();
+            if (openEditor)
+            {
+                await preparedPage.OpenThtEditorAsync();
+                if (!preparedPage.IsThtEditorOpen) return;
+            }
+            else await preparedPage.PrepareForDisplayAsync();
             if (_shutdownStarted || navigationGeneration != Volatile.Read(ref _internalPageGeneration))
                 return;
 

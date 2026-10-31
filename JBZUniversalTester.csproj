@@ -87,6 +87,11 @@
 
   <!-- SQLite -->
   <ItemGroup>
+    <EmbeddedResource Include="Features\ModelEditor\Assets\*">
+      <LogicalName>JBZUniversalTester.ModelEditor.Assets.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.12" />
     <PackageReference Include="System.IO.Ports" Version="10.0.10" />
   </ItemGroup>
