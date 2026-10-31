@@ -1892,6 +1892,8 @@ public partial class ProductionSettingsPage : UserControl
         _vm.MasterFaultRequiredCount,
         _vm.MasterSelectedFaultSamples,
         _vm.MasterOpenFaultRequiredCount,
+        _vm.DiscardContactIo1Text,
+        _vm.DiscardContactIo2Text,
         ResistanceChannels = _vm.ResistanceChannels.Select(editor => editor.ToSetting()).ToArray(),
         _vm.WaterProof
     });

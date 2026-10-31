@@ -539,6 +539,7 @@ internal static partial class Program
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
+            ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),
             ("Discard configuration notices and persistent MainWindow status", TestDiscardConfigurationStatus),
             ("Diagnostic fault popup retains every physical IO detail", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
