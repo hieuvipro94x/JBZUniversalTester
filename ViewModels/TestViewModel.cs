@@ -244,6 +244,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private readonly bool _processBoardFramesInline;
     private long _boardFrameQueueDepth;
     private long _boardFrameQueueHighWatermark;
+    private long _boardFrameQueueWarningTimestamp;
     private const int ProductReleaseConfirmationFrames = 2;
     private long _engineUiUpdateRevision;
     private long _engineUiLastCompletedRevision;
@@ -4517,6 +4518,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             CurrentRuntimeMode,
             Volatile.Read(ref _runtimeGeneration)));
         long depth = Interlocked.Increment(ref _boardFrameQueueDepth);
+        WarnBoardFrameBacklogIfDue(depth);
         long previousHigh = Volatile.Read(ref _boardFrameQueueHighWatermark);
         while (depth > previousHigh &&
                Interlocked.CompareExchange(
@@ -4535,6 +4537,19 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             // Shutdown race: an event was already in flight when lifetime ended.
         }
+    }
+
+    private void WarnBoardFrameBacklogIfDue(long depth)
+    {
+        // Do not coalesce: every authoritative frame participates in removal
+        // confirmation and sequence/generation gates. Diagnose backlog only.
+        if (depth < 128) return;
+        long now = Stopwatch.GetTimestamp();
+        long previous = Volatile.Read(ref _boardFrameQueueWarningTimestamp);
+        if (previous != 0 && Stopwatch.GetElapsedTime(previous, now) < TimeSpan.FromSeconds(5)) return;
+        if (Interlocked.CompareExchange(ref _boardFrameQueueWarningTimestamp, now, previous) != previous) return;
+        AsyncFileLogService.Current.Error(
+            $"BOARD_FRAME_BACKLOG_WARNING depth={depth} generation={Volatile.Read(ref _runtimeGeneration)}; frames_preserved=true");
     }
 
     private async Task BoardFrameWorkerLoopAsync(CancellationToken ct)
