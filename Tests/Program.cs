@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-runtime-risk-review"])
+        {
+            TestCycleTokenCancellationRace();
+            Console.WriteLine("PASS: runtime risk review regressions");
+            return 0;
+        }
         if (args is ["--test-editor-native-file", var nativeEditorPath])
         {
             TestNativeEditorFileCopy(nativeEditorPath);
@@ -449,6 +455,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("A1 cycle token survives reentrant cancellation and CTS disposal", TestCycleTokenCancellationRace),
             ("Leak attempts merge into one Korean product history and full Excel export", TestCombinedLeakHistory),
             ("SEAL Leak trigger follows declared connector edges and preserves early/retry isolation", TestSealLeakTrigger),
             ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),

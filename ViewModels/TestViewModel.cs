@@ -2368,12 +2368,15 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private CancellationToken BeginCycleOperations()
     {
         CancellationTokenSource? old;
+        CancellationToken token;
 
         lock (_cycleTokenGate)
         {
             old = _cycleCts;
             _cycleCts = CancellationTokenSource.CreateLinkedTokenSource(
                 _lifetimeCts.Token);
+            // Cancellation callbacks may replace/dispose this CTS after the lock.
+            token = _cycleCts.Token;
         }
 
         if (old is not null)
@@ -2382,7 +2385,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             old.Dispose();
         }
 
-        return _cycleCts.Token;
+        return token;
     }
 
     private CancellationToken CurrentCycleToken()
