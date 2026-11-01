@@ -189,12 +189,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _total;
     private int _pass;
     private int _fail;
-    private bool _cycleActive;
-    private bool _waitForProductRelease;
+    private volatile bool _cycleActive;
+    private volatile bool _waitForProductRelease;
     private int _rearmAfterProductRemoval = 1;
     private int _productRemovalPending;
     private int _removalMonitoringFromMain;
-    private bool _waitForFaultProductRemoval;
+    private volatile bool _waitForFaultProductRemoval;
     private int _faultProductRemoved;
     // Fault/Leak FAIL removal is observed directly on every authoritative
     // Production frame. Do not depend on a UI Changed callback to count the
@@ -215,7 +215,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _discardRequiredForFault;
     private int _discardContactClosed;
     private int _discardStandaloneLocked;
-    private bool _waterProofEquipmentErrorAwaitingRemoval;
+    private volatile bool _waterProofEquipmentErrorAwaitingRemoval;
     private int _postContinuityStarted;
     private int _fullCycleResetInProgress;
     private int _wiringFaultHandlingStarted;
@@ -228,8 +228,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private Task? _hardwareMonitorTask;
     private int _selectedOperationTabIndex;
     private int _shutdownStarted;
-    private bool _productDetectedThisCycle;
-    private bool _presentationCycleStarted;
+    private volatile bool _productDetectedThisCycle;
+    private volatile bool _presentationCycleStarted;
     private int _productStartSoundPlayed;
     private int _probeSessionActive;
     private int _topologyLearningActive;
