@@ -12180,8 +12180,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (_model is not null)
             ProductionConfigService.ApplyProductLabelTemplate(_productionSettings, ProductionConfigService.GetLotProductKey(_model));
         RefreshProductionCounterPeriod();
-        lock (_historyStoreGate)
-            _historyStore = null;
+        // RuntimePaths.DatabaseFile is fixed for this process. Retain the same
+        // repository used by ProductionPersistence and recorded cycle contexts.
         UpdateDailyLotDisplay();
 
         // ALWAYS_PROBE_2026-09-05: nếu file cấu hình cũ còn UseTestPointer=false,

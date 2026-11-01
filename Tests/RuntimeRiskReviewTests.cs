@@ -33,4 +33,30 @@ internal static partial class Program
         }
         finally { vm.ShutdownAsync().GetAwaiter().GetResult(); }
     }
+
+    private static void TestHistoryRepositoryIdentity()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZ-risk-repository-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var vm = CreateRiskReviewVm();
+        var store = new TestHistoryStore(Path.Combine(root, "history.db"));
+        try
+        {
+            typeof(TestViewModel).GetField("_historyStore", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, store);
+            var persistence = (ProductionPersistenceService)typeof(TestViewModel)
+                .GetProperty("ProductionPersistence", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(vm)!;
+            persistence.Initialization.GetAwaiter().GetResult();
+            RiskInvoke(vm, "RefreshProductionUiSettings");
+            var repository = typeof(TestViewModel).GetProperty("HistoryStore", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(vm);
+            var writerRepository = typeof(ProductionPersistenceService).GetField("_repository", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(persistence);
+            Assert(ReferenceEquals(store, repository) && ReferenceEquals(repository, writerRepository),
+                "Refreshing settings must preserve the writer's single repository instance and temp database path");
+        }
+        finally
+        {
+            vm.ShutdownAsync().GetAwaiter().GetResult();
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(root, true);
+        }
+    }
 }

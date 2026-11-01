@@ -23,6 +23,7 @@ internal static partial class Program
         if (args is ["--test-runtime-risk-review"])
         {
             TestCycleTokenCancellationRace();
+            TestHistoryRepositoryIdentity();
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
@@ -456,6 +457,7 @@ internal static partial class Program
         (string Name, Action Run)[] tests =
         [
             ("A1 cycle token survives reentrant cancellation and CTS disposal", TestCycleTokenCancellationRace),
+            ("A2 settings refresh retains the production writer repository identity", TestHistoryRepositoryIdentity),
             ("Leak attempts merge into one Korean product history and full Excel export", TestCombinedLeakHistory),
             ("SEAL Leak trigger follows declared connector edges and preserves early/retry isolation", TestSealLeakTrigger),
             ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),
