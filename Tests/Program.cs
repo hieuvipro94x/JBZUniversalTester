@@ -794,7 +794,7 @@ internal static partial class Program
         discardBoard.Publish(FrameSeq(10, (12, new[] { 97 })));
         Assert(discardVm.IsProductRemovalPending &&
                discardVm.ProbeContacts.Select(row => row.WireName)
-                   .SequenceEqual(["_DISCARD IO(97)", "_DISCARD IO(98)"]),
+                   .SequenceEqual(["_Interlock IO(97)", "_Interlock IO(98)"]),
             "First _DISCARD activation locks TEST and temporarily shows both configured _DISCARD rows");
         discardBoard.Publish(FrameSeq(11));
         Assert(!discardVm.IsProductRemovalPending &&

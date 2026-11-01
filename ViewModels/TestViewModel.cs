@@ -634,7 +634,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             Raise(nameof(IsPassStatusLedHeld));
     }
 
-    // Sau khi FAIL đã xác nhận và model có _DISCARD, vùng chữ lớn giữa màn hình
+    // Sau khi FAIL đã xác nhận và model có _Interlock, vùng chữ lớn giữa màn hình
     // dành riêng cho hướng dẫn đưa hàng NG qua cảm biến. Ô trạng thái nhỏ vẫn
     // hiển thị CHỜ XÁC NHẬN THÙNG LỖI qua ResultStatusText.
     private bool IsDiscardFaultConfirmationPresentation =>
@@ -4322,7 +4322,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         SelectedOperationTabIndex = 0;
         ClearInlineProbeContactsState(clearLastSeen: true);
         // Preview can own Candidate without ever entering the debounced tracker
-        // (for example a frame intercepted by _DISCARD). Confirmed removal must
+        // (for example a frame intercepted by _Interlock). Confirmed removal must
         // release that presentation too and invalidate queued preview callbacks.
         lock (_probePreviewGate)
             _pendingProductionProbePreview = null;
@@ -4645,7 +4645,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     Interlocked.Exchange(ref _boardUnavailablePresentationApplied, 0) != 0;
             }
 
-            // _DISCARD là cặp tiếp điểm thùng hàng lỗi, không phải topology sản
+            // _Interlock là cặp tiếp điểm thùng hàng lỗi, không phải topology sản
             // phẩm. Quan sát frame raw để phát âm/UI/interlock, rồi loại hai I/O
             // cảm biến này trước mọi startup/probe/continuity/fault engine.
             bool discardBlocksProduction = false;
@@ -4663,7 +4663,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     discardModel.DiscardContactIo);
             }
 
-            // Một lần đưa hàng qua _DISCARD ngoài chu trình FAIL khóa scan logic
+            // Một lần đưa hàng qua _Interlock ngoài chu trình FAIL khóa scan logic
             // trong lúc cảm biến đang tác động. Khi cảm biến nhả, lượt 1/1 hoàn tất
             // và Production được mở khóa lại.
             ObserveHomeExitTableFrame(frame);
@@ -6722,7 +6722,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 Kind = FaultKind.Probe,
                 Io = io,
                 RelatedIos = [io],
-                WireName = $"_DISCARD IO({io})",
+                WireName = $"_Interlock IO({io})",
                 DisplayOrder = io
             })
             .ToArray();
@@ -7379,7 +7379,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 ? "THÙNG LỖI ĐÃ KHÓA - CHỜ NHẢ CẢM BIẾN"
                 : "THÁO SẢN PHẨM";
             AddLog(discardLocked
-                ? "START WAIT: _DISCARD đã nhận hàng; tự ARM sau khi cảm biến nhả và frame sạch được xác nhận."
+                ? "START WAIT: _Interlock đã nhận hàng; tự ARM sau khi cảm biến nhả và frame sạch được xác nhận."
                 : "START WAIT: còn khóa ProductRemoved; tự ARM ngay khi frame Production xác nhận đã tháo hoàn toàn sản phẩm.");
 
             // TestWindow auto-start chỉ được gọi một lần. Trước đây nếu cửa sổ mở
@@ -7703,7 +7703,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (_board.IsConnected && !_board.IsScanning)
                 await EnsureContinuousProductionScanAsync();
 
-            AddLog("Đã về màn hình chính nhưng vẫn giữ khóa _DISCARD và chờ cảm biến nhả để hoàn tất 1/1.");
+            AddLog("Đã về màn hình chính nhưng vẫn giữ khóa _Interlock và chờ cảm biến nhả để hoàn tất 1/1.");
             return;
         }
 
@@ -12415,7 +12415,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (model.HasDiscardInterlock)
         {
             AddLog(
-                $"Thùng hàng lỗi _DISCARD: IO({model.DiscardContactIo[0]})-" +
+                $"Thùng hàng lỗi _Interlock: IO({model.DiscardContactIo[0]})-" +
                 $"IO({model.DiscardContactIo[1]}), xác nhận 1 lần đưa hàng qua (THÔNG rồi NHẢ).");
         }
 

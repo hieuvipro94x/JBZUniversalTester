@@ -27,6 +27,27 @@ internal static partial class Program
             BinaryPrimitives.WriteUInt32LittleEndian(original.AsSpan(1024 + 76), 1);
             File.WriteAllBytes(path, original);
             var parser = new ThtModelParser();
+            Assert(ThtModelParser.IsDiscardConnector("_DISCARD") &&
+                   ThtModelParser.IsDiscardConnector("_Interlock") && ThtModelParser.IsDiscardConnector("_INTERLOCK") &&
+                   !ThtModelParser.IsDiscardConnector("Interlock"),
+                "Only reserved legacy and new interlock connector names are recognized case-insensitively");
+            string legacyPath = Path.Combine(root, "legacy.tht");
+            string legacyText = text.Replace("CN1\t2\n", "CN1\t2\n\t_DISCARD\t2\n")
+                .Replace("\n\n선이름", "\n_DISCARD\t\t97\t1\t\t\t\t\n_DISCARD\t\t98\t2\t\t\t\t\n\n선이름");
+            byte[] legacyBytes = BuildMinimalThtFile(legacyText);
+            BinaryPrimitives.WriteUInt32LittleEndian(legacyBytes.AsSpan(1024 + 76), 1);
+            File.WriteAllBytes(legacyPath, legacyBytes);
+            var legacyModel = parser.Load(legacyPath);
+            Assert(legacyModel.DiscardContactIo.SequenceEqual([97, 98]), "Legacy DISCARD files still load without modification");
+            string legacyBackup = parser.SaveDiscardContacts(legacyPath, 97, 98)!;
+            string migratedText = Encoding.ASCII.GetString(JBZUniversalTester.ModelEditor.Services.ThtFileService.ReadContentsForTest(legacyPath));
+            var migratedModel = parser.Load(legacyPath);
+            Assert(migratedText.Contains("_Interlock") && !migratedText.Contains("_DISCARD") &&
+                   migratedModel.DiscardContactIo.SequenceEqual([97, 98]) && migratedModel.Pins.SequenceEqual(legacyModel.Pins) &&
+                   File.ReadAllBytes(legacyBackup).SequenceEqual(legacyBytes),
+                "Explicit saving migrates both native tables to Interlock while preserving IO, product topology and backup");
+            File.Delete(legacyPath);
+            File.Delete(legacyBackup);
             foreach (int offset in new[] { 20, 32, 33 })
             {
                 string variantRoot = Path.Combine(root, "ThtBackups", $"header-{offset}");

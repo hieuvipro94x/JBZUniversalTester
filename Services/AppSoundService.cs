@@ -376,7 +376,7 @@ public sealed class AppSoundService : IDisposable
         }
     }
 
-    /// <summary>Phát DRIP.wav một lần khi tiếp điểm _DISCARD chuyển sang THÔNG.</summary>
+    /// <summary>Phát DRIP.wav một lần khi tiếp điểm _Interlock chuyển sang THÔNG.</summary>
     public void PlayDiscardContact()
     {
         EnsureInitialized();

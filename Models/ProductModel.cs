@@ -123,7 +123,7 @@ public sealed class ProductModel
     public List<ResistanceStep> ResistanceSteps { get; set; } = [];
 
     /// <summary>
-    /// Hai I/O được khai báo bằng Connector=_DISCARD trong THT. Đây là một
+    /// Hai I/O được khai báo bằng Connector=_Interlock trong THT. Đây là một
     /// cặp tiếp điểm thường mở của thùng hàng lỗi, không thuộc topology sản phẩm.
     /// </summary>
     public List<int> DiscardContactIo { get; set; } = [];

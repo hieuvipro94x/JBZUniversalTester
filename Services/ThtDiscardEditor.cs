@@ -44,11 +44,10 @@ public sealed partial class ThtModelParser
             if (existing.Any(model => model.DiscardContactIo.Count > 0))
             {
                 if (!existing.All(model => model.HasDiscardInterlock))
-                    throw new InvalidDataException("THT đã có _DISCARD nhưng không đủ đúng hai IO. Giữ nguyên file; hãy kiểm tra cấu hình thùng lỗi.");
+                    throw new InvalidDataException("THT đã có _Interlock nhưng không đủ đúng hai IO. Giữ nguyên file; hãy kiểm tra cấu hình thùng lỗi.");
                 if (!replaceExisting) return null;
             }
             int[] expectedPair = first == 0 ? [] : new[] { first, second }.Order().ToArray();
-            if (existing.All(model => model.DiscardContactIo.Order().SequenceEqual(expectedPair))) return null;
             string sidecar = full + ".leak.json";
             byte[]? originalSidecar = File.Exists(sidecar) ? File.ReadAllBytes(sidecar) : null;
             if (originalSidecar is not null)
@@ -76,10 +75,14 @@ public sealed partial class ThtModelParser
             modelText += new string('\0', trailingNulls);
             ThtModelTables tables = ParseModelText(modelText);
             List<RawPin> pins = ParsePins(tables.Pins);
-            if (!replaceExisting && !existing.All(model => model.HasDiscardInterlock) && tables.Connectors.Rows.Any(row => row.Get("커넥터", "Connector").Equals("_DISCARD", StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidDataException("THT đã có connector _DISCARD nhưng chưa có đủ hai chân IO. Giữ nguyên file để kiểm tra.");
+            bool hasLegacyName = pins.Any(pin => pin.Connector.Equals("_DISCARD", StringComparison.OrdinalIgnoreCase)) ||
+                tables.Connectors.Rows.Any(row => row.Get("커넥터", "Connector").Equals("_DISCARD", StringComparison.OrdinalIgnoreCase));
+            if (existing.All(model => model.DiscardContactIo.Order().SequenceEqual(expectedPair)) &&
+                (!replaceExisting || !hasLegacyName)) return null;
+            if (!replaceExisting && !existing.All(model => model.HasDiscardInterlock) && tables.Connectors.Rows.Any(row => IsDiscardConnector(row.Get("커넥터", "Connector"))))
+                throw new InvalidDataException("THT đã có connector _Interlock nhưng chưa có đủ hai chân IO. Giữ nguyên file để kiểm tra.");
             foreach (RawPin pin in pins.Where(pin => pin.IoNumber == first || pin.IoNumber == second))
-                if (!pin.Connector.Equals("_DISCARD", StringComparison.OrdinalIgnoreCase) &&
+                if (!IsDiscardConnector(pin.Connector) &&
                     new[] { pin.Connector, pin.WireName, pin.PinNumber, pin.PinType, pin.WireConnection }.Any(value => !string.IsNullOrWhiteSpace(value)))
                     throw new InvalidOperationException($"IO {pin.IoNumber} đã dùng cho Connector {pin.Connector}, chân {pin.PinNumber}, dây {pin.WireName}. Không sửa THT để tránh mất kết nối sản phẩm.");
             string updatedText = PatchDiscardTables(modelText, first, second);
@@ -186,7 +189,7 @@ public sealed partial class ThtModelParser
             {
                 string[] cells = SplitColumns(line.TrimEnd('\r', '\0'));
                 string Cell(int n) => n >= 0 && n < cells.Length ? cells[n].Trim() : string.Empty;
-                if (Cell(connector).Equals("_DISCARD", StringComparison.OrdinalIgnoreCase)) return false;
+                if (IsDiscardConnector(Cell(connector))) return false;
                 // An unused grid slot may contain only its IO number.
                 return !isPins || !int.TryParse(Cell(io), out int value) || (value != first && value != second) ||
                     cells.Where((_, index) => index != io).Any(cell => !string.IsNullOrWhiteSpace(cell));
@@ -195,7 +198,7 @@ public sealed partial class ThtModelParser
             {
                 var cells = new string[headers.Length];
                 Array.Fill(cells, string.Empty);
-                cells[connector] = "_DISCARD";
+                cells[connector] = DiscardConnectorName;
                 if (isPins) { cells[io] = ioValue.ToString(CultureInfo.InvariantCulture); cells[pin] = pinValue.ToString(CultureInfo.InvariantCulture); }
                 if (count >= 0) cells[count] = "2";
                 return string.Join('\t', cells) + ending;

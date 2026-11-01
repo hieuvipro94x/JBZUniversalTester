@@ -17,6 +17,12 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed partial class ThtModelParser
 {
+    public const string DiscardConnectorName = "_Interlock";
+
+    public static bool IsDiscardConnector(string? name) =>
+        string.Equals(name, DiscardConnectorName, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "_DISCARD", StringComparison.OrdinalIgnoreCase);
+
     private const uint ExpectedDocumentToken = 0x389DEFB9;
     private const int FieldRecordCount = 64;
     private const int FieldRecordSize = 48;
@@ -819,9 +825,7 @@ public sealed partial class ThtModelParser
             RawPin rawPin = rawPins[rawIndex];
             int originalOrder = rawIndex + 1;
 
-            if (rawPin.Connector.Equals(
-                    "_DISCARD",
-                    StringComparison.OrdinalIgnoreCase))
+            if (IsDiscardConnector(rawPin.Connector))
             {
                 if (!model.DiscardContactIo.Contains(rawPin.IoNumber))
                     model.DiscardContactIo.Add(rawPin.IoNumber);
@@ -1351,7 +1355,7 @@ public sealed partial class ThtModelParser
             // PinNo 1/2 của cảm biến cũng không được làm nó rơi vào nhánh kế thừa.
             if (!string.IsNullOrWhiteSpace(connector))
             {
-                if (!connector.Equals("_DISCARD", StringComparison.OrdinalIgnoreCase))
+                if (!IsDiscardConnector(connector))
                     lastConnector = connector;
             }
             else if (!IsSpecialA0Pin(pinType) &&

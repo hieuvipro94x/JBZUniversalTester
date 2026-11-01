@@ -76,7 +76,7 @@ public sealed class DiscardContactInterlock
         GetActiveContactIo(frame, contactIo).Count > 0;
 
     /// <summary>
-    /// Hai dòng _DISCARD là hai I/O cảm biến, không bắt buộc phải tạo đúng một
+    /// Hai dòng _Interlock là hai I/O cảm biến, không bắt buộc phải tạo đúng một
     /// cạnh trực tiếp IO-A &lt;-&gt; IO-B. Một I/O được xem là tác động khi xuất hiện
     /// ở ActiveIo, TargetHits, đầu nguồn có đích, hoặc làm đích của một nguồn.
     /// </summary>

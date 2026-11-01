@@ -31,3 +31,16 @@ The actual station file passed open, unchanged byte-exact save, and metadata edi
 with product/discard topology and the minus-32 header preserved, all on a temporary
 copy. The editor regression suite also covers both supported conventions and
 rejection of an unknown offset.
+
+## V2026.09.359 — connector name
+
+New discard-contact writes use `_Interlock` in both Connector and Pin tables.
+The production parser recognizes `_Interlock` and legacy `_DISCARD`, ignoring
+case, and excludes either from product continuity topology and inherited connector
+context. Operator descriptions and sensor rows use the new name.
+
+Existing files are not bulk rewritten when selected. An explicit discard write
+canonicalizes both tables to `_Interlock`, retaining the configured IO, topology,
+backup and Leak sidecar protections. Unchanged Settings saves keep their existing
+no-write behavior. Tests cover legacy loading, explicit same-pair migration,
+backup preservation and canonical writes.

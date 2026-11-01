@@ -9,7 +9,7 @@
         <Border x:Name="ConfiguredIoPanel" Background="#E8F7EF" BorderBrush="#A7DAB9" BorderThickness="1" CornerRadius="8" Padding="16">
             <TextBlock x:Name="ConfiguredIoText" Foreground="#166534" FontSize="30" FontWeight="Bold"/>
         </Border>
-        <TextBlock x:Name="ConfiguredDescriptionText" Text="File THT đã cấu hình _DISCARD. Giữ nguyên hai IO trong file; cặp IO vừa học không ghi đè cấu hình có sẵn."
+        <TextBlock x:Name="ConfiguredDescriptionText" Text="File THT đã cấu hình _Interlock. Giữ nguyên hai IO trong file; cặp IO vừa học không ghi đè cấu hình có sẵn."
                    FontSize="14" Foreground="#475569" TextWrapping="Wrap" Margin="0,14,0,18"/>
         <Button Content="TIẾP TỤC" Width="120" Height="36" HorizontalAlignment="Right" IsDefault="True" Click="Continue_Click"/>
     </StackPanel>
