@@ -11,6 +11,34 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestNativeEditorFileCopy(string source)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZ-NativeEditorFile-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        byte[] original = File.ReadAllBytes(source);
+        try
+        {
+            string copy = Path.Combine(root, Path.GetFileName(source));
+            File.WriteAllBytes(copy, original);
+            var doc = ThtFileService.Load(copy);
+            var before = new ThtModelParser().Load(copy);
+            IntegratedThtStore.Save(doc.Clone(), copy, IntegratedThtStore.Fingerprint(copy));
+            Assert(File.ReadAllBytes(copy).SequenceEqual(original), "Unchanged native THT remains byte-exact");
+            byte[] contents = ThtFileService.ReadContentsForTest(copy);
+            long offset = contents.Length - System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(contents.AsSpan(4));
+            doc.Base.Name = "EDITOR VERIFIED";
+            IntegratedThtStore.Save(doc, copy, IntegratedThtStore.Fingerprint(copy));
+            var after = new ThtModelParser().Load(copy);
+            contents = ThtFileService.ReadContentsForTest(copy);
+            Assert(after.ProductName == "EDITOR VERIFIED" && before.Pins.SequenceEqual(after.Pins) &&
+                   before.DiscardContactIo.SequenceEqual(after.DiscardContactIo) &&
+                   contents.Length - System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(contents.AsSpan(4)) == offset,
+                "Native file edit retains inner-header convention and product/discard topology");
+            Assert(File.ReadAllBytes(source).SequenceEqual(original), "Diagnostic never edits the original THT");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private static void TestIntegratedThtEditor()
     {
         string root = Path.Combine(Path.GetTempPath(), "JBZ-IntegratedEditor-" + Guid.NewGuid().ToString("N"));
@@ -19,6 +47,26 @@ internal static partial class Program
         {
             string path = Path.Combine(root, "EDIT-A.tht");
             File.Copy(Path.Combine(Environment.CurrentDirectory, "Features", "ModelEditor", "Assets", "harnprog_template_v1110.tht"), path);
+            foreach (int offset in new[] { 20, 32, 33 })
+            {
+                string variant = Path.Combine(root, $"HEADER-{offset}.tht");
+                File.Copy(path, variant);
+                byte[] variantContents = ThtFileService.ReadContentsForTest(variant);
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(variantContents.AsSpan(4),
+                    checked((uint)(variantContents.Length - offset)));
+                typeof(ThtModelParser).GetMethod("WriteDiscardContents", BindingFlags.Static | BindingFlags.NonPublic)!
+                    .Invoke(null, [variant, variantContents]);
+                if (offset == 33)
+                {
+                    byte[] invalidOriginal = File.ReadAllBytes(variant);
+                    bool refused = false;
+                    try { ThtFileService.Load(variant); }
+                    catch (JBZUniversalTester.ModelEditor.Models.ThtFormatException) { refused = true; }
+                    Assert(refused && File.ReadAllBytes(variant).SequenceEqual(invalidOriginal),
+                        "Editor still rejects unknown inner-length conventions without touching the source");
+                }
+                else TestNativeEditorFileCopy(variant);
+            }
             var parser = new ThtModelParser();
             parser.SaveDiscardContacts(path, 639, 640);
             Assert(parser.Load(path).DiscardContactIo.SequenceEqual([639, 640]),

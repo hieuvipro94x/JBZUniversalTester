@@ -747,7 +747,16 @@ public static class ThtFileService
         if (token != ThtToken) throw new ThtExportException($"Token THT không hỗ trợ: 0x{token:X8}");
         using var ms = new MemoryStream(); using var bw = new BinaryWriter(ms);
         bw.Write(0u); bw.Write(0u); bw.Write(0u); bw.Write(token); bw.Write(MfcCString(Encoding.ASCII.GetBytes(version))); bw.Write(MfcCString(textRaw)); bw.Write(tail);
-        var body = ms.ToArray(); BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(0, 4), (uint)(body.Length - 8)); BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4, 4), (uint)(body.Length - 20));
+        // Preserve the native inner-length convention of the opened file.
+        int innerOffset = 20;
+        if (state?.OriginalContents is { Length: >= 24 } original)
+        {
+            _ = ParseContents(original);
+            innerOffset = checked(original.Length - (int)U32(original, 4));
+        }
+        var body = ms.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(0, 4), checked((uint)(body.Length - 8)));
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4, 4), checked((uint)(body.Length - innerOffset)));
         return body;
     }
 
@@ -1455,7 +1464,7 @@ public static class ThtFileService
     private static ParsedContents ParseContents(byte[] contents)
     {
         if (contents.Length < 24) throw new ThtFormatException("Stream Contents quá ngắn."); var outer = U32(contents, 0); var inner = U32(contents, 4); var flags = U32(contents, 8); var token = U32(contents, 12);
-        if (outer != (uint)(contents.Length - 8)) throw new ThtFormatException("Contents outer size không đúng định dạng HarnProg."); if (inner != (uint)(contents.Length - 20)) throw new ThtFormatException("Contents inner size không đúng định dạng HarnProg."); if (flags != 0) throw new ThtFormatException($"Contents flags chưa hỗ trợ: 0x{flags:X8}");
+        if (outer != (uint)(contents.Length - 8)) throw new ThtFormatException("Contents outer size không đúng định dạng HarnProg."); if (inner != (uint)(contents.Length - 20) && inner != (uint)(contents.Length - 32)) throw new ThtFormatException("Contents inner size không đúng định dạng HarnProg."); if (flags != 0) throw new ThtFormatException($"Contents flags chưa hỗ trợ: 0x{flags:X8}");
         var (versionRaw, off) = ReadMfcCString(contents, 16); var (modelRaw, tailOff) = ReadMfcCString(contents, off); var version = Encoding.ASCII.GetString(versionRaw); if (version != ThtVersion) throw new ThtFormatException($"Phiên bản THT chưa hỗ trợ: {version}. Hiện hỗ trợ {ThtVersion}."); if (token != ThtToken) throw new ThtFormatException($"Token THT chưa hỗ trợ: 0x{token:X8}");
         string text; try { text = Encoding.GetEncoding(949, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback).GetString(modelRaw); } catch (DecoderFallbackException ex) { throw new ThtFormatException("Không giải mã được bảng model bằng CP949: " + ex.Message); }
         return new(version, token, text, contents[tailOff..]);

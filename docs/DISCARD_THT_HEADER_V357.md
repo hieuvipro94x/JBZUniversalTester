@@ -17,3 +17,17 @@ exact original backup, updating/clearing the pair, and the real Settings save
 pipeline with a minus-32 fixture. Saving IO 97/98 on the temporary copy of the
 station file succeeded after the fix. No hardware operation or production history
 mutation was performed by this reproduction.
+
+## V2026.09.358 — integrated editor
+
+The integrated editor had its own strict inner-size check, separate from the
+discard writer. Opening a temporary copy of the same `2.tht` reproduced
+`Contents inner size không đúng định dạng HarnProg.` before the fix.
+
+Its parser now accepts the observed minus-32 convention alongside minus-20.
+Its writer retains the opened file's convention using the original Contents
+header; new files continue using minus-20. Unknown offsets still fail validation.
+The actual station file passed open, unchanged byte-exact save, and metadata edit
+with product/discard topology and the minus-32 header preserved, all on a temporary
+copy. The editor regression suite also covers both supported conventions and
+rejection of an unknown offset.

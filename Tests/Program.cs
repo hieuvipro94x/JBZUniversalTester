@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-editor-native-file", var nativeEditorPath])
+        {
+            TestNativeEditorFileCopy(nativeEditorPath);
+            Console.WriteLine("PASS: native editor open/save on temporary copy; original preserved");
+            return 0;
+        }
         if (args is ["--preview-integrated-tht-editor", var previewModel, var previewImage, var previewPage])
         {
             RenderIntegratedEditorPreview(previewModel, previewImage, int.Parse(previewPage));
