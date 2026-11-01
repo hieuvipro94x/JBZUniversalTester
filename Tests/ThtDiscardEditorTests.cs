@@ -27,6 +27,35 @@ internal static partial class Program
             BinaryPrimitives.WriteUInt32LittleEndian(original.AsSpan(1024 + 76), 1);
             File.WriteAllBytes(path, original);
             var parser = new ThtModelParser();
+            foreach (int offset in new[] { 20, 32, 33 })
+            {
+                string variantRoot = Path.Combine(root, "ThtBackups", $"header-{offset}");
+                Directory.CreateDirectory(variantRoot);
+                string variant = CreateDiscardSettingsTht(variantRoot, "product", offset);
+                byte[] variantOriginal = File.ReadAllBytes(variant);
+                if (offset == 33)
+                {
+                    bool rejected = false;
+                    try { parser.SaveDiscardContacts(variant, 97, 98); }
+                    catch (InvalidDataException) { rejected = true; }
+                    Assert(rejected && File.ReadAllBytes(variant).SequenceEqual(variantOriginal),
+                        "Unknown inner header conventions remain rejected without changing the file");
+                    continue;
+                }
+                string variantBackup = parser.SaveDiscardContacts(variant, 97, 98)!;
+                var readerType = typeof(ThtModelParser).GetNestedType("CompoundFileReader", BindingFlags.NonPublic)!;
+                var reader = Activator.CreateInstance(readerType, new object[] { File.ReadAllBytes(variant) })!;
+                var contents = (byte[])readerType.GetMethod("ReadStream")!.Invoke(reader, ["Contents"])!;
+                Assert(parser.Load(variant).DiscardContactIo.SequenceEqual([97, 98]) &&
+                       File.ReadAllBytes(variantBackup).SequenceEqual(variantOriginal) &&
+                       BinaryPrimitives.ReadUInt32LittleEndian(contents) == contents.Length - 8 &&
+                       BinaryPrimitives.ReadUInt32LittleEndian(contents.AsSpan(4)) == contents.Length - offset,
+                    "Both native inner header conventions survive a verified discard write with exact backup");
+                parser.SaveDiscardContacts(variant, 41, 86);
+                parser.SaveDiscardContacts(variant, 0, 0);
+                Assert(parser.Load(variant).DiscardContactIo.Count == 0,
+                    "Native header variants support subsequent updates and clearing the pair");
+            }
             ProductModel before = parser.Load(path);
             string backup = parser.EnsureDiscardContacts(path, 97, 98)!;
             Assert(File.ReadAllBytes(backup).SequenceEqual(original), "THT update keeps an exact original backup before atomic replacement");

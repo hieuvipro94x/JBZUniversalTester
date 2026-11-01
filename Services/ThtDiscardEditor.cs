@@ -60,9 +60,11 @@ public sealed partial class ThtModelParser
             input.ReadUInt32();
             if (input.ReadUInt32() != ExpectedDocumentToken)
                 throw new InvalidDataException("File THT không đúng định dạng Htdrv đã hỗ trợ; giữ nguyên file.");
-            // These two length conventions are present in the station's original V1.110 files.
+            // Native V1.110 files use both 20-byte and 32-byte inner offsets
+            // (the latter is present in the station's original 2.tht).
             // Do not guess a different archive layout or rewrite its trailing metadata.
-            if ((outer != 0 && outer != contents.Length - 8) || (inner != 0 && inner != contents.Length - 20))
+            if ((outer != 0 && outer != contents.Length - 8) ||
+                (inner != 0 && inner != contents.Length - 20 && inner != contents.Length - 32))
                 throw new InvalidDataException("Header độ dài THT chưa được hỗ trợ để sửa; giữ nguyên file.");
             ReadMfcCString(input, Encoding.ASCII);
             int textStart = checked((int)input.BaseStream.Position);
@@ -90,7 +92,8 @@ public sealed partial class ThtModelParser
             updated.Write(contents, tailStart, contents.Length - tailStart);
             byte[] changedContents = updated.ToArray();
             if (outer != 0) BinaryPrimitives.WriteUInt32LittleEndian(changedContents, checked((uint)changedContents.Length - 8));
-            if (inner != 0) BinaryPrimitives.WriteUInt32LittleEndian(changedContents.AsSpan(4), checked((uint)changedContents.Length - 20));
+            if (inner != 0) BinaryPrimitives.WriteUInt32LittleEndian(changedContents.AsSpan(4),
+                checked((uint)(inner + changedContents.Length - contents.Length)));
 
             string directory = Path.GetDirectoryName(full)!;
             string temporary = Path.Combine(directory, $".{Path.GetFileName(full)}.{Guid.NewGuid():N}.tmp.tht");

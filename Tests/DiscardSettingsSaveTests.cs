@@ -8,7 +8,7 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
-    private static string CreateDiscardSettingsTht(string root, string name)
+    private static string CreateDiscardSettingsTht(string root, string name, int innerHeaderOffset = 0)
     {
         System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
         string text = "파트번호\t파트명\n" + name + "\tPRODUCT\n\n" +
@@ -17,6 +17,12 @@ internal static partial class Program
             "선이름\t선연결\t굵기\t색깔\nW01\t\t0.5\tR\n";
         byte[] bytes = BuildMinimalThtFile(text);
         System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(1024 + 76), 1);
+        if (innerHeaderOffset != 0)
+        {
+            // BuildMinimalThtFile allocates a 4096-byte Contents stream at 1536.
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(1536), 4096 - 8);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(1540), (uint)(4096 - innerHeaderOffset));
+        }
         string path = Path.Combine(root, name + ".tht");
         File.WriteAllBytes(path, bytes);
         return path;
@@ -33,7 +39,8 @@ internal static partial class Program
             {
                 string cfg = Path.Combine(root, "settings.cfg");
                 int writes = 0;
-                string product = CreateDiscardSettingsTht(root, "A");
+                // Match the native inner-header convention from the station's 2.tht.
+                string product = CreateDiscardSettingsTht(root, "A", innerHeaderOffset: 32);
                 string other = CreateDiscardSettingsTht(root, "B");
                 byte[] untouched = File.ReadAllBytes(other);
                 var parser = new ThtModelParser();
