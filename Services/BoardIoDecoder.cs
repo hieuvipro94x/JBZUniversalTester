@@ -8,13 +8,13 @@ namespace JBZUniversalTester.Services;
 /// QUAN TRỌNG: cùng byte 80/A0 có ý nghĩa khác nhau theo chế độ.
 ///
 /// Production continuity:
-///   80/81 nn = SOURCE đang được kích/quét
-///   A0/A1 nn = TARGET đang thông với SOURCE gần nhất
+///   80..8F nn = SOURCE đang được kích/quét
+///   A0..AF nn = TARGET đang thông với SOURCE gần nhất
 ///   C0 00/01 = kết thúc vòng quét (đã xác nhận bằng trace nhỏ/lớn)
 ///
 /// TestPin / đầu dò GND (xác nhận bằng trace 2026-08-07 14:55):
-///   80/81 nn = chính I/O nn đang NORMAL
-///   A0/A1 nn = chính I/O nn đang bị que GND chạm
+///   80..8F nn = chính I/O nn đang NORMAL
+///   A0..AF nn = chính I/O nn đang bị que GND chạm
 ///   C0 00    = kết thúc snapshot theo BoardCapacity (trace gốc: 256 I/O)
 /// Ví dụ: 80 00, A0 01, 80 02 ... => chỉ IO(2) đang chạm.
 /// </summary>
