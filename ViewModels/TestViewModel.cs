@@ -237,6 +237,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private int _productionPhase = (int)ProductionPhase.WaitingProduct;
     private long _runtimeGeneration;
     private int _enginePresentationWorkerRunning;
+    private int _enginePresentationRecoveryPending;
     private readonly ConcurrentQueue<BoardFrameWorkItem> _boardFrameQueue = new();
     private readonly SemaphoreSlim _boardFrameSignal = new(0);
     private readonly Task _boardFrameWorkerTask;
@@ -3401,6 +3402,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
     }
 
+    private static void ReportSoftwareObserverError(Exception ex, string source) =>
+        AsyncFileLogService.Current.Error($"SOFTWARE_OBSERVER_ERROR source={source}: {ex}");
+
     private void OnEngineChanged(object? sender, EventArgs e)
     {
         if (IsDeviceFault)
@@ -3427,7 +3431,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            EnterDeviceFault(ex, "EngineChanged");
+            ReportSoftwareObserverError(ex, "EngineChanged");
+            Interlocked.Exchange(ref _enginePresentationRecoveryPending, 1);
         }
     }
 
@@ -3483,6 +3488,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         _ = Task.Run(async () =>
         {
+            long processingRevision = 0;
             try
             {
                 while (!_lifetimeCts.IsCancellationRequested)
@@ -3494,6 +3500,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         return;
                     }
 
+                    processingRevision = request.Revision;
                     TestEnginePresentationSnapshot? rows = BuildEngineFaultRowsSnapshot();
                     if (Volatile.Read(ref _latestEngineUiUpdateRequest)?.Revision != request.Revision)
                         continue;
@@ -3547,7 +3554,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             }
             catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
             {
-                EnterDeviceFault(ex, "EnginePresentationWorker");
+                ReportSoftwareObserverError(ex, "EnginePresentationWorker");
+                Interlocked.Exchange(ref _enginePresentationRecoveryPending, 1);
+                // Retire only the failed request. A newer frame may rebuild the
+                // presentation, but the same broken snapshot must not spin.
+                MarkEngineUiRevisionCompleted(processingRevision);
             }
             finally
             {
@@ -4954,6 +4965,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     // phải dựng lại presentation kể cả topology vật lý không đổi.
                     OnEngineChanged(_engine, EventArgs.Empty);
                 }
+                // Retry a failed presentation on the next authoritative frame,
+                // even when its topology did not change. Never spin on the same request.
+                if (Interlocked.Exchange(ref _enginePresentationRecoveryPending, 0) != 0)
+                    OnEngineChanged(_engine, EventArgs.Empty);
                 PlayProductStartSoundOnce(generation, preserveProductionFaultsForProbe);
                 if (preserveProductionFaultsForProbe)
                     LogProbeProductEvidence(frame);
@@ -4977,7 +4992,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
         {
-            EnterDeviceFault(ex, "BoardFrameReceived");
+            // This synchronous observer evaluates snapshots/presentation, not
+            // D2XX I/O. Hardware operations have their own fault boundaries.
+            ReportSoftwareObserverError(ex, "BoardFrameReceived");
         }
         finally
         {

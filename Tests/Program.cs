@@ -24,6 +24,7 @@ internal static partial class Program
         {
             TestCycleTokenCancellationRace();
             TestHistoryRepositoryIdentity();
+            TestSoftwareObserverDoesNotFaultBoard();
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
@@ -458,6 +459,7 @@ internal static partial class Program
         [
             ("A1 cycle token survives reentrant cancellation and CTS disposal", TestCycleTokenCancellationRace),
             ("A2 settings refresh retains the production writer repository identity", TestHistoryRepositoryIdentity),
+            ("A3 software frame observer failure does not fault or restart D2XX", TestSoftwareObserverDoesNotFaultBoard),
             ("Leak attempts merge into one Korean product history and full Excel export", TestCombinedLeakHistory),
             ("SEAL Leak trigger follows declared connector edges and preserves early/retry isolation", TestSealLeakTrigger),
             ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),

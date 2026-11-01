@@ -59,4 +59,27 @@ internal static partial class Program
             Directory.Delete(root, true);
         }
     }
+
+    private static void TestSoftwareObserverDoesNotFaultBoard()
+    {
+        var vm = CreateRiskReviewVm();
+        try
+        {
+            Type runtimeMode = typeof(TestViewModel).GetNestedType("RuntimeMode", BindingFlags.NonPublic)!;
+            RiskInvoke(vm, "SwitchRuntimeMode", Enum.Parse(runtimeMode, "Probe"));
+            typeof(TestViewModel).GetField("_probeSessionActive", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(vm, 1);
+            int notifications = 0;
+            vm.ScanFrameReceived += (_, _) =>
+            {
+                if (++notifications == 1) throw new InvalidOperationException("Injected presentation subscriber failure");
+            };
+            var frame = new ScanFrame(DateTime.Now, 10, new HashSet<int>(), [], false, 0, 0, Mode: BoardScanMode.Probe);
+            RiskInvoke(vm, "ProcessBoardFrameReceived", frame);
+            Assert(!vm.IsDeviceFault && vm.DeviceFaultTransitionCount == 0,
+                "A software frame subscriber failure is logged without a board fault or restart request");
+            RiskInvoke(vm, "ProcessBoardFrameReceived", frame);
+            Assert(notifications == 2 && !vm.IsDeviceFault, "The next Probe event still reaches subscribers after an observer failure");
+        }
+        finally { vm.ShutdownAsync().GetAwaiter().GetResult(); }
+    }
 }
