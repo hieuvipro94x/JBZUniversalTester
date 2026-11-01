@@ -561,18 +561,25 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public string State
     {
-        get => _state;
+        get => Volatile.Read(ref _state);
         set
         {
-            if (Set(ref _state, value))
+            // Keep logical State synchronous for cycle gates, but WPF observers
+            // and the derived presentation must run on the UI thread.
+            bool changed = !string.Equals(Interlocked.Exchange(ref _state, value), value, StringComparison.Ordinal);
+            InvokeUi(() =>
             {
-                Raise(nameof(StateBackground));
-                Raise(nameof(StateForeground));
-                Raise(nameof(ResultStatusText));
-                RaiseCenterPresentation();
-                RaiseActiveFault();
-            }
-            TryReleaseElectricalFaultAlarmAfterRemoval();
+                if (changed)
+                {
+                    Raise(nameof(State));
+                    Raise(nameof(StateBackground));
+                    Raise(nameof(StateForeground));
+                    Raise(nameof(ResultStatusText));
+                    RaiseCenterPresentation();
+                    RaiseActiveFault();
+                }
+                TryReleaseElectricalFaultAlarmAfterRemoval();
+            });
         }
     }
 
@@ -2014,7 +2021,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         ArgumentNullException.ThrowIfNull(exception);
         if (exception is KeysightEquipmentException && _board.IsConnected)
         {
-            _ = HandleKeysightEquipmentErrorAsync(exception);
+            _ = ObserveDetachedTaskAsync(HandleKeysightEquipmentErrorAsync(exception), "HandleKeysightEquipmentErrorAsync");
             return;
         }
 
@@ -2560,6 +2567,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // Task.Yield lets the current model-selection command return first so the
         // TestWindow can be created/rendered before any capacity STOP/START work.
         _modelScanReconcileTask = ReconcileModelScanAsync(generation);
+        _ = ObserveDetachedTaskAsync(_modelScanReconcileTask, "ModelScanReconcile");
     }
 
     private async Task ReconcileModelScanAsync(int generation)
@@ -3553,7 +3561,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
             {
             }
-            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+            catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 ReportSoftwareObserverError(ex, "EnginePresentationWorker");
                 Interlocked.Exchange(ref _enginePresentationRecoveryPending, 1);
@@ -4014,8 +4022,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             AsyncFileLogService.Current.Performance(
                 $"AUTO_RESISTANCE_TRIGGER continuity_complete={_engine.ContinuityPassed} " +
                 $"resistance_enabled={IsResistanceEnabledForModel(_model)} scan_running={_board.IsScanning}");
-            _ = StartAutomaticPostContinuityAfterPresentationAsync(
-                generation, Volatile.Read(ref _productionUiCycleEpoch));
+            _ = ObserveDetachedTaskAsync(StartAutomaticPostContinuityAfterPresentationAsync(
+                generation, Volatile.Read(ref _productionUiCycleEpoch)), "StartAutomaticPostContinuityAfterPresentationAsync");
         }
     }
 
@@ -5890,7 +5898,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             State = "KIỂM TRA MASTER PASS";
             AddLog("STARTUP IO INTERLOCK: frame sạch, bắt đầu chuỗi MASTER.");
-            _ = StartAutomaticMasterSequenceAsync();
+            _ = ObserveDetachedTaskAsync(StartAutomaticMasterSequenceAsync(), "StartAutomaticMasterSequenceAsync");
         }
 
     }
@@ -7824,10 +7832,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             $"FrameId={_engine.LastFrameSequence} FaultType={faultType} FaultCount={faultCount} " +
             $"ResultCommitted={Volatile.Read(ref _resultRecordedThisCycle) != 0} Reason=ConfirmedProductFault");
 
-        _ = HandleWiringFaultAsync(
+        _ = ObserveDetachedTaskAsync(HandleWiringFaultAsync(
             generation,
             wiringFaults.ToArray(),
-            _engine.BuildRows().ToArray());
+            _engine.BuildRows().ToArray()), "HandleWiringFaultAsync");
         return true;
     }
 
@@ -7855,7 +7863,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             fault.ExpectedSourceIo!.Value, fault.ExpectedTargetIo!.Value,
             "ĐỨT DÂY / TUỘT TUÝT", ProductFaultType.OpenCircuit,
             fault.ExpectedSourceIo, fault.ExpectedTargetIo)).ToArray();
-        _ = HandleWiringFaultAsync(generation, pairs, _engine.BuildRows().ToArray(), confirmed);
+        _ = ObserveDetachedTaskAsync(HandleWiringFaultAsync(generation, pairs, _engine.BuildRows().ToArray(), confirmed), "HandleWiringFaultAsync");
     }
 
     private string? WrongWiringRemovalStatusText
@@ -7882,7 +7890,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         string cycleId = _activeCycleId;
         _wrongWiringStatusCycleId = cycleId;
         Interlocked.Exchange(ref _wrongWiringStatusStartedTimestamp, started);
-        _ = RefreshWrongWiringRemovalStatusAsync(generation, cycleId, started);
+        _ = ObserveDetachedTaskAsync(RefreshWrongWiringRemovalStatusAsync(generation, cycleId, started), "RefreshWrongWiringRemovalStatusAsync");
     }
 
     private async Task RefreshWrongWiringRemovalStatusAsync(long generation, string cycleId, long started)
@@ -8597,7 +8605,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
                 {
                     CaptureMasterTestStartedAt();
-                    _ = CompleteGoodMasterAsync(generation);
+                    _ = ObserveDetachedTaskAsync(CompleteGoodMasterAsync(generation), "CompleteGoodMasterAsync");
                 }
                 break;
 
@@ -8622,7 +8630,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                         ref _masterBadCollectNotBeforeUtcTicks,
                         DateTime.UtcNow.AddMilliseconds(MasterBadSettleMs).Ticks);
                     AddLog($"MASTER BAD START - cần {MasterRequiredFaultCount} fault dây duy nhất.");
-                    _ = CollectMasterFaultsAfterSettleAsync(generation);
+                    _ = ObserveDetachedTaskAsync(CollectMasterFaultsAfterSettleAsync(generation), "CollectMasterFaultsAfterSettleAsync");
                 }
                 break;
 
@@ -8740,7 +8748,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 _masterFaultCollectionLocked = true;
                 _masterBadVerified = true;
                 RaiseMasterState();
-                _ = CompleteBadMasterAsync(generation);
+                _ = ObserveDetachedTaskAsync(CompleteBadMasterAsync(generation), "CompleteBadMasterAsync");
             }
             return;
         }
@@ -8760,7 +8768,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             _masterFaultCollectionLocked = true;
             _masterBadVerified = true;
-            _ = CompleteBadMasterAsync(generation);
+            _ = ObserveDetachedTaskAsync(CompleteBadMasterAsync(generation), "CompleteBadMasterAsync");
         }
     }
 
@@ -9231,7 +9239,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         WaterProofModelSettings profile = WaterProofProfileForChannels(item => item == channel);
         CaptureMasterTestStartedAt();
         AddLog($"[MASTER GOOD-LEAK] CH{channel} connector={profile.ConnectorForChannel(channel)} đã lắp; chạy Leak trước khi thông mạch đầy đủ.");
-        _ = RunEarlyMasterWaterProofAsync(model, generation, _masterHistoryCycleId, profile);
+        _ = ObserveDetachedTaskAsync(RunEarlyMasterWaterProofAsync(model, generation, _masterHistoryCycleId, profile), "RunEarlyMasterWaterProofAsync");
         return true;
     }
 
@@ -10835,7 +10843,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             $"[WATERPROOF-RETEST] Connector {string.Join(", ", connectorIds)} đã lắp lại; " +
             "bắt đầu chu kỳ Leak-only; không yêu cầu tháo/lắp lại toàn bộ sản phẩm.");
         State = "ĐANG KIỂM TRA...";
-        _ = RunWaterProofRetestOnlyAsync(cycleModel, generation);
+        _ = ObserveDetachedTaskAsync(RunWaterProofRetestOnlyAsync(cycleModel, generation), "RunWaterProofRetestOnlyAsync");
     }
 
     private async Task RunWaterProofRetestOnlyAsync(
@@ -11066,7 +11074,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 }
 
                 string error = $"CH{channel}: connector '{connectorId}' không có RET/RT/SEAL hoặc cặp IO nối sang connector khác trong THT.";
-                _ = HandleWaterProofConfigurationErrorAsync(cycleModel, error);
+                _ = ObserveDetachedTaskAsync(HandleWaterProofConfigurationErrorAsync(cycleModel, error), "HandleWaterProofConfigurationErrorAsync");
                 return true;
             }
         }
@@ -12158,7 +12166,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 LastProductionConfigurationSyncMessage =
                     $"Đã gửi cấu hình {_board.Capacity.ScanCardCount} card; đang xác nhận frame nền.";
                 State = $"ĐANG ĐỒNG BỘ {_board.Capacity.ScanCardCount} CARD...";
-                _ = ConfirmProductionConfigurationFrameAsync(requestedActiveCapacity);
+                _ = ObserveDetachedTaskAsync(ConfirmProductionConfigurationFrameAsync(requestedActiveCapacity), "ConfirmProductionConfigurationFrameAsync");
             }
             else
             {
@@ -14191,18 +14199,47 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         });
     }
 
+    private async Task ObserveDetachedTaskAsync(Task task, string source)
+    {
+        long generation = Volatile.Read(ref _runtimeGeneration);
+        try { await task; }
+        catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ReportSoftwareObserverError(ex, source);
+            InvokeUi(() =>
+            {
+                // Do not arm, eject, commit a result or overwrite a final PASS.
+                // Existing lifecycle gates remain authoritative after a failed task.
+                if (!_lifetimeCts.IsCancellationRequested && generation == Volatile.Read(ref _runtimeGeneration) &&
+                    !IsDeviceFault && !IsPersistenceFault && !IsFinalPassPresentation)
+                    State = "LỖI XỬ LÝ PHẦN MỀM - HÃY KIỂM TRA VÀ THỬ LẠI";
+            });
+        }
+    }
+
     private static void InvokeUi(Action action)
     {
+        void RunObserver()
+        {
+            try { action(); }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or InvalidOperationException)
+            {
+                ReportSoftwareObserverError(ex, "InvokeUi");
+            }
+        }
         var dispatcher =
             Application.Current?.Dispatcher;
 
         if (dispatcher is null ||
             dispatcher.CheckAccess())
         {
-            action();
+            RunObserver();
             return;
         }
 
-        dispatcher.BeginInvoke(action);
+        if (dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
+        try { dispatcher.BeginInvoke(RunObserver); }
+        catch (InvalidOperationException ex) { ReportSoftwareObserverError(ex, "InvokeUi.Dispatch"); }
     }
 }

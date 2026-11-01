@@ -50,6 +50,7 @@ public static class TestViewText
         ["KIỂM TRA ĐIỆN TRỞ"] = "저항 검사 중", ["ĐANG CHUẨN BỊ ĐO ĐIỆN TRỞ"] = "저항 측정 준비 중",
         ["LỖI BO D2XX"] = "D2XX 보드 오류", ["KHỞI ĐỘNG LẠI PHẦN MỀM"] = "프로그램을 다시 시작하세요",
         ["LỖI LƯU DỮ LIỆU"] = "데이터 저장 오류", ["DỪNG KIỂM TRA"] = "검사를 중지하세요",
+        ["LỖI XỬ LÝ PHẦN MỀM - HÃY KIỂM TRA VÀ THỬ LẠI"] = "소프트웨어 처리 오류 - 확인 후 다시 시도하세요",
         ["LỖI THIẾT BỊ"] = "장비 오류", ["LỖI KẾT NỐI BO"] = "보드 연결 오류",
         ["LỖI THIẾT BỊ KÍN NƯỚC"] = "기밀 검사기 오류", ["LỖI THIẾT BỊ LEAK"] = "기밀 검사기 오류",
         ["LỖI KEYSIGHT"] = "KEYSIGHT 오류", ["KHÔNG KẾT NỐI KEYSIGHT 34461A"] = "KEYSIGHT 34461A 연결 안 됨",
