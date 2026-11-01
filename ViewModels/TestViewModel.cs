@@ -5934,7 +5934,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     string.Join(", ", pairs.Select(pair => $"IO{pair.FirstIo}<->IO{pair.SecondIo}")));
             }
 
-            State = "THÁO SẢN PHẨM";
+            InvokeUi(() =>
+            {
+                if (IsRuntimeContext(RuntimeMode.Background, generation) && IsProductRemovalPending)
+                    State = "THÁO SẢN PHẨM";
+            });
             return;
         }
 
@@ -5946,7 +5950,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         if (wasBlocked)
         {
-            State = ReadyStateForCurrentModel();
+            InvokeUi(() =>
+            {
+                if (IsRuntimeContext(RuntimeMode.Background, generation) && !IsProductRemovalPending)
+                    State = ReadyStateForCurrentModel();
+            });
             AddLog("MAIN IO INTERLOCK: frame sạch, đã mở khóa chọn mã và START.");
         }
     }

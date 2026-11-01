@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-background-state-dispatch"])
+        {
+            TestBackgroundStateDispatch();
+            Console.WriteLine("PASS: background State notifications use Dispatcher and reject old generations");
+            return 0;
+        }
         if (args is ["--test-runtime-risk-review"])
         {
             TestCycleTokenCancellationRace();

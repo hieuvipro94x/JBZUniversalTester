@@ -82,4 +82,37 @@ internal static partial class Program
         }
         finally { vm.ShutdownAsync().GetAwaiter().GetResult(); }
     }
+
+    private static void TestBackgroundStateDispatch()
+    {
+        OnSettingsDispatcher(async () =>
+        {
+            var app = new System.Windows.Application { ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown };
+            var vm = CreateRiskReviewVm();
+            int uiThread = Environment.CurrentManagedThreadId;
+            var stateThreads = new List<int>();
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(vm.State)) stateThreads.Add(Environment.CurrentManagedThreadId);
+            };
+            try
+            {
+                var frame = new ScanFrame(DateTime.Now, 10, new HashSet<int> { 1, 2 }, [], true, 0, 1,
+                    new Dictionary<int, IReadOnlySet<int>> { [1] = new HashSet<int> { 2 } });
+                // Worker can finish without waiting for the UI to process its notification.
+                Task.Run(() => RiskInvoke(vm, "HandleBackgroundProductRemovalInterlock", frame, 0L)).GetAwaiter().GetResult();
+                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                Assert(vm.State == "THÁO SẢN PHẨM" && stateThreads.Count > 0 && stateThreads.All(id => id == uiThread),
+                    "Background contact detection publishes State on the WPF Dispatcher");
+                Task.Run(() => RiskInvoke(vm, "HandleBackgroundProductRemovalInterlock", frame with
+                { ActiveIo = new HashSet<int>(), ConnectionsBySource = new Dictionary<int, IReadOnlySet<int>>(), Sequence = 2 }, 0L)).GetAwaiter().GetResult();
+                Type runtimeMode = typeof(TestViewModel).GetNestedType("RuntimeMode", BindingFlags.NonPublic)!;
+                RiskInvoke(vm, "SwitchRuntimeMode", Enum.Parse(runtimeMode, "Production"));
+                vm.State = "NEW CONTEXT";
+                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                Assert(vm.State == "NEW CONTEXT", "Old Background UI callback cannot overwrite a new runtime generation");
+            }
+            finally { await vm.ShutdownAsync(); app.Shutdown(); }
+        });
+    }
 }
