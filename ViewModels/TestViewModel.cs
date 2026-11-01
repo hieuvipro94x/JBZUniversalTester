@@ -155,6 +155,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private bool IsEquipmentErrorTableConfirmedClear => IsEquipmentErrorExit &&
         Volatile.Read(ref _homeExitClearFrames) >= ProductReleaseConfirmationFrames;
     private readonly CancellationTokenSource _lifetimeCts = new();
+    private readonly CancellationToken _lifetimeToken;
     private CancellationTokenSource? _cycleCts;
 
     private Task? _initializationTask;
@@ -1358,6 +1359,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Func<string, Task<bool>>? verifyProbeMaintenancePassword = null,
         Action<Exception, string, string?>? hardwareFaultReport = null)
     {
+        // Cache before scheduling workers: CTS.Token throws after CTS disposal.
+        _lifetimeToken = _lifetimeCts.Token;
         _main = main;
         _engine = engine;
         _board = board;
@@ -1371,7 +1374,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             ct.ThrowIfCancellationRequested();
             await Task.Run(() => _visa.ConnectAutomatic(_settings.Keysight.Resource));
-        }, _lifetimeCts.Token);
+        }, _lifetimeToken);
         _leakReconnect = new PeripheralReconnectWorker("Leak", async ct =>
         {
             WaterProofMachineSettings machine = Volatile.Read(ref _leakReconnectSettings)!;
@@ -1379,7 +1382,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 string.Equals(machine.PortName, LabelPrinterConnectedPort, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("Leak COM đang được máy in sử dụng.");
             await _waterProof.EnsureConnectedAsync(machine, ct);
-        }, _lifetimeCts.Token);
+        }, _lifetimeToken);
         _verifyProbeMaintenancePassword = verifyProbeMaintenancePassword ??
             (password => Task.Run(() => SettingsAccessService.Current.VerifyAdmin(password)));
         _writeHardwareFaultReport = hardwareFaultReport ?? ((exception, source, context) =>
@@ -1416,7 +1419,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _processBoardFramesInline = Application.Current?.Dispatcher is null;
         _boardFrameWorkerTask = _processBoardFramesInline
             ? Task.CompletedTask
-            : Task.Run(() => BoardFrameWorkerLoopAsync(_lifetimeCts.Token));
+            : Task.Run(() => BoardFrameWorkerLoopAsync(_lifetimeToken));
 
         _engine.Changed += OnEngineChanged;
         _engine.ResistanceChannelMeasurementStarted += OnResistanceChannelMeasurementStarted;
@@ -1444,7 +1447,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Relay1Command =
             new AsyncRelayCommand(async () =>
             {
-                await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+                await WaitForResistanceRecoveryAsync(_lifetimeToken);
                 if (!EnsureManualBoardReady("thử Relay 1", requireD2xxRelay: true))
                     return;
 
@@ -1457,7 +1460,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Relay2Command =
             new AsyncRelayCommand(async () =>
             {
-                await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+                await WaitForResistanceRecoveryAsync(_lifetimeToken);
                 if (!EnsureManualBoardReady("thử Relay 2", requireD2xxRelay: true))
                     return;
 
@@ -1470,7 +1473,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         RelaysOffCommand =
             new AsyncRelayCommand(async () =>
             {
-                await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+                await WaitForResistanceRecoveryAsync(_lifetimeToken);
                 if (!EnsureManualBoardReady("tắt relay", requireD2xxRelay: true))
                     return;
 
@@ -1497,7 +1500,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task EnterManualModeAsync()
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         if (!CanEnterManualMode)
             throw new InvalidOperationException(
                 "Không thể bật Manual khi đang kiểm tra. Hãy kết thúc chu kỳ trước.");
@@ -1633,7 +1636,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task ExitManualModeAsync(bool outputsAlreadyOff = false)
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         await _manualRelayGate.WaitAsync();
         try
         {
@@ -1664,7 +1667,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// </summary>
     public async Task<int> SetManualRelayAsync(int relay, bool turnOn)
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         if (IsDeviceFault)
             throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy thoát và mở lại ứng dụng.");
         if (relay is not 1 and not 2)
@@ -1729,7 +1732,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task ResetManualOutputsAsync()
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         if (IsDeviceFault)
             throw new InvalidOperationException("DeviceFault đang khóa lệnh Manual. Hãy thoát và mở lại ứng dụng.");
         if (!EnsureManualBoardReady("manual RESET", requireD2xxRelay: true))
@@ -2383,7 +2386,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             old = _cycleCts;
             _cycleCts = CancellationTokenSource.CreateLinkedTokenSource(
-                _lifetimeCts.Token);
+                _lifetimeToken);
             // Cancellation callbacks may replace/dispose this CTS after the lock.
             token = _cycleCts.Token;
         }
@@ -2451,7 +2454,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task EnsureContinuousProductionScanAsync()
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         if (IsDeviceFault || _lifetimeCts.IsCancellationRequested ||
             IsManualModeActive ||
             Volatile.Read(ref _probeSessionActive) != 0 ||
@@ -2464,7 +2467,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         try
         {
-            await _productionScanEnsureGate.WaitAsync(_lifetimeCts.Token);
+            await _productionScanEnsureGate.WaitAsync(_lifetimeToken);
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
@@ -2482,7 +2485,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             while (Volatile.Read(ref _hardwareReconfigurationActive) != 0 &&
                    !_lifetimeCts.IsCancellationRequested)
             {
-                await Task.Delay(20, _lifetimeCts.Token);
+                await Task.Delay(20, _lifetimeToken);
             }
 
             if (_lifetimeCts.IsCancellationRequested ||
@@ -2525,7 +2528,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             bool started = await _scanSupervisor.EnsureProductionScanAsync(
                 _model?.MaxIo ?? 0,
-                _lifetimeCts.Token);
+                _lifetimeToken);
 
             if (backgroundOnly)
                 State = ReadyStateForCurrentModel();
@@ -2599,7 +2602,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             if (!IsDeviceFault && !IsProductionScanReadyForArm())
             {
-                bool monitoring = await WaitForProductionScanReadyForArmAsync(_lifetimeCts.Token);
+                bool monitoring = await WaitForProductionScanReadyForArmAsync(_lifetimeToken);
                 completionReason = monitoring ? "Monitoring" : "MonitoringTimeout";
             }
             else
@@ -2685,7 +2688,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         bool recoveryGateEntered = false;
         try
         {
-            await _scanRecoveryGate.WaitAsync(_lifetimeCts.Token);
+            await _scanRecoveryGate.WaitAsync(_lifetimeToken);
             recoveryGateEntered = true;
             if (_scanSupervisor.HealthSnapshot.State == ScanHealthState.Monitoring &&
                 _board.IsConnected &&
@@ -2699,7 +2702,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (await _scanSupervisor.RecoverSoftAsync(
                     maxIo,
                     resumeMode,
-                    _lifetimeCts.Token))
+                    _lifetimeToken))
             {
                 InvokeUi(UpdateCardScanningState);
                 return true;
@@ -2714,7 +2717,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             bool reopened = await _scanSupervisor.RecoverReopenAsync(
                 maxIo,
                 resumeMode,
-                _lifetimeCts.Token);
+                _lifetimeToken);
             if (reopened)
             {
                 BoardConnectionMessage = string.Empty;
@@ -2864,7 +2867,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             await EnsureContinuousProductionScanAsync();
 
             // Watchdog chỉ khóa phiên khi mất bo/scan; không tự reconnect.
-            _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeCts.Token);
+            _hardwareMonitorTask ??= HardwareMonitorLoopAsync(_lifetimeToken);
             State = ReadyStateForCurrentModel();
             StartupPerformanceTrace.Mark("T12 STARTUP_READY");
             return;
@@ -3004,7 +3007,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (_productionSettings.LabelTemplateTypesByProduct.ContainsKey(key)) return true;
         int generation = Volatile.Read(ref _modelLoadGeneration);
         ProductionStatisticsSnapshot stats = await ProductionPersistence.GetStatisticsAsync(
-            PartIdentitySnapshot.Capture(model), DateTime.Now, _lifetimeCts.Token);
+            PartIdentitySnapshot.Capture(model), DateTime.Now, _lifetimeToken);
         if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested) return false;
         if (stats.LifetimeTotal > 0) return true;
         async Task Save(JBZUniversalTester.Views.ProductInitialPrintSetup setup)
@@ -4186,7 +4189,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             long timestamp = Stopwatch.GetTimestamp();
             bool updated = await ProductionPersistence.UpdateRemovalTimingAsync(
-                cycleId, removalStarted, removedAt, _lifetimeCts.Token);
+                cycleId, removalStarted, removedAt, _lifetimeToken);
             if (!updated)
                 return;
 
@@ -4245,7 +4248,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 model.SourcePath,
                 _cycleStartedAt,
                 stage,
-                _lifetimeCts.Token);
+                _lifetimeToken);
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested) { }
         catch (Exception ex)
@@ -5422,7 +5425,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             if (_lifetimeCts.IsCancellationRequested || IsDeviceFault || !ReferenceEquals(_model, model) ||
                 IsManualModeActive || CurrentRuntimeMode is not (RuntimeMode.Production or RuntimeMode.Background))
                 return;
-            bool ready = await StartProductionScanAndVerifyFrameAsync(_lifetimeCts.Token,
+            bool ready = await StartProductionScanAndVerifyFrameAsync(_lifetimeToken,
                 "RESISTANCE_RECOVERY_AFTER_REMOVAL", recoveryOwner: true);
             AddLog($"RESISTANCE_RECOVERY_AFTER_REMOVAL END cycle={cycleId} ready={ready}.");
         }
@@ -6869,7 +6872,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             State = "ĐANG KẾT NỐI BO";
             StartupPerformanceTrace.Mark("T4 D2XX open started");
 
-            var info = await _board.ConnectAsync(_lifetimeCts.Token);
+            var info = await _board.ConnectAsync(_lifetimeToken);
             StartupPerformanceTrace.Mark("T5 D2XX open completed");
             StartupPerformanceTrace.Mark("T6 Handshake completed");
 
@@ -6991,7 +6994,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         // Leaving an empty table must not truncate that result/history either.
         while (!IsEquipmentErrorExit && Volatile.Read(ref _waterProofRunning) != 0)
         {
-            await Task.Delay(20, _lifetimeCts.Token);
+            await Task.Delay(20, _lifetimeToken);
             if (HasProductOnTestTable) return false;
         }
 
@@ -7157,7 +7160,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         try
         {
-            await ConnectLabelPrinterAsync(_productionSettings.Label, _lifetimeCts.Token);
+            await ConnectLabelPrinterAsync(_productionSettings.Label, _lifetimeToken);
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
@@ -7183,7 +7186,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     public async Task StartProbeScanAsync()
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         if (!_board.IsConnected || IsDeviceFault)
         {
             ReportBoardUnavailableForOperatorAction("ProbeScan.NoBoard");
@@ -7197,7 +7200,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             bool started = await _scanSupervisor.EnsureProductionScanAsync(
                 _model?.MaxIo ?? 0,
-                _lifetimeCts.Token);
+                _lifetimeToken);
             if (started)
             {
                 InvokeUi(UpdateCardScanningState);
@@ -7232,7 +7235,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// </summary>
     public async Task StartTopologyLearningAsync()
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         if (IsDeviceFault || !_board.IsConnected)
         {
             ReportBoardUnavailableForOperatorAction("TopologyLearning.NoBoard");
@@ -7249,7 +7252,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         try
         {
             Volatile.Write(ref _topologyLearningActive, 1);
-            bool started = await _scanSupervisor.EnsureProductionScanAsync(0, _lifetimeCts.Token);
+            bool started = await _scanSupervisor.EnsureProductionScanAsync(0, _lifetimeToken);
             if (started)
                 InvokeUi(UpdateCardScanningState);
             AddLog("TOPOLOGY LEARNING ON - quét toàn bộ card đã cấu hình, không ARM Production.");
@@ -7339,7 +7342,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     private async Task StartTestAsync(CancellationToken cancellationToken = default)
     {
         using var startCts = CancellationTokenSource.CreateLinkedTokenSource(
-            _lifetimeCts.Token,
+            _lifetimeToken,
             cancellationToken);
         CancellationToken startToken = startCts.Token;
 
@@ -7897,7 +7900,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         try
         {
-            await Task.Delay(WrongWiringRemovalStatusDelay, _lifetimeCts.Token);
+            await Task.Delay(WrongWiringRemovalStatusDelay, _lifetimeToken);
             await InvokeUiAsync(() =>
             {
                 if (!IsRuntimeContext(RuntimeMode.Production, generation) ||
@@ -9785,7 +9788,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         try
         {
-            await ProductionPersistence.CommitTestResultAsync(request, _lifetimeCts.Token);
+            await ProductionPersistence.CommitTestResultAsync(request, _lifetimeToken);
             AddLog(
                 $"History: {inspectionType} cycle {cycleId} đã commit SQLite; " +
                 "không tăng LOT/sản lượng/Probe counter.");
@@ -9839,7 +9842,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         try
         {
             if (await ProductionPersistence.UpdateRemovalTimingAsync(
-                    cycleId, removalStarted, removedAt, _lifetimeCts.Token))
+                    cycleId, removalStarted, removedAt, _lifetimeToken))
             {
                 double durationMs = Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds;
                 AsyncFileLogService.Current.Performance(
@@ -9880,12 +9883,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ProbeCounterSnapshot counter = await ProductionPersistence.GetProbeCounterAsync(
                 PartIdentitySnapshot.Capture(model),
                 ProbeReplacementThreshold,
-                _lifetimeCts.Token);
+                _lifetimeToken);
             string path = await Task.Run(() => _legacyHistory.AppendMaster(
                 model,
                 DateTime.Now,
                 counter.Counter,
-                goodMaster), _lifetimeCts.Token);
+                goodMaster), _lifetimeToken);
             AddLog(
                 $"PHT HISTORY: {(goodMaster ? "MASTER GOOD" : "MASTER BAD")} " +
                 $"đã append sau SQLite commit vào {path}; counter không tăng.");
@@ -11840,7 +11843,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     await _engine.CompleteDeferredResistanceRecoveryAsync();
                     if (!_lifetimeCts.IsCancellationRequested && !IsDeviceFault &&
                         generation == Volatile.Read(ref _runtimeGeneration) && ReferenceEquals(_model, cycleModel))
-                        await StartProductionScanAndVerifyFrameAsync(_lifetimeCts.Token, "UNCOMMITTED_RESISTANCE_RECOVERY");
+                        await StartProductionScanAndVerifyFrameAsync(_lifetimeToken, "UNCOMMITTED_RESISTANCE_RECOVERY");
                 }
                 catch (Exception ex) { EnterDeviceFault(ex, "UncommittedResistanceRecovery"); }
             }
@@ -12079,7 +12082,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     /// </summary>
     public async Task RefreshProductionConfigurationAsync(bool forceNativeRestart = false)
     {
-        await WaitForResistanceRecoveryAsync(_lifetimeCts.Token);
+        await WaitForResistanceRecoveryAsync(_lifetimeToken);
         LastProductionConfigurationSyncSucceeded = false;
         LastProductionConfigurationSyncMessage = string.Empty;
         if (IsDeviceFault)
@@ -12144,11 +12147,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 {
                     await _scanSupervisor.EnsureProductionScanAsync(
                         maxIo,
-                        _lifetimeCts.Token);
+                        _lifetimeToken);
                 }
                 else
                 {
-                    await _board.StartScanAsync(resumeMode, _lifetimeCts.Token);
+                    await _board.StartScanAsync(resumeMode, _lifetimeToken);
                 }
             }
 
@@ -12197,7 +12200,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         bool ready;
         try
         {
-            ready = await WaitForProductionScanReadyForArmAsync(_lifetimeCts.Token);
+            ready = await WaitForProductionScanReadyForArmAsync(_lifetimeToken);
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
@@ -12536,7 +12539,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         try
         {
-            await _statisticsLoadGate.WaitAsync(_lifetimeCts.Token);
+            await _statisticsLoadGate.WaitAsync(_lifetimeToken);
         }
         catch (OperationCanceledException)
         {
@@ -12558,24 +12561,24 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             bool useDailyPassOffset = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId) &&
                 productLot.LastStartChangedDate == statisticsNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             Task<ProductionStatisticsSnapshot> statisticsTask =
-                ProductionPersistence.GetStatisticsAsync(part, statisticsNow, _lifetimeCts.Token);
+                ProductionPersistence.GetStatisticsAsync(part, statisticsNow, _lifetimeToken);
             Task<ProbeCounterSnapshot> probeTask = ProductionPersistence.GetProbeCounterAsync(
                 part,
                 _productionSettings.ProbeReplacementThreshold,
-                _lifetimeCts.Token);
+                _lifetimeToken);
             Task<TestHistoryRecord?> retryLabelTask = ProductionPersistence.GetLatestLabelForPartAsync(
-                part, [LabelPrintStatus.NotRequested, LabelPrintStatus.Failed], _lifetimeCts.Token);
+                part, [LabelPrintStatus.NotRequested, LabelPrintStatus.Failed], _lifetimeToken);
             Task<TestHistoryRecord?> pendingLabelTask = ProductionPersistence.GetLatestLabelForPartAsync(
-                part, [LabelPrintStatus.Pending], _lifetimeCts.Token);
+                part, [LabelPrintStatus.Pending], _lifetimeToken);
             Task<TestHistoryRecord?> sentLabelTask = ProductionPersistence.GetLatestLabelForPartAsync(
-                part, [LabelPrintStatus.Printed], _lifetimeCts.Token);
+                part, [LabelPrintStatus.Printed], _lifetimeToken);
             await Task.Run(() =>
             {
                 // Diagnostic topology có thể có hàng trăm network; dựng chuỗi/log ở
                 // worker thay vì giữ Dispatcher sau khi parse THT.
                 LogExpectedNetBuild(model);
                 LogModelTopology(model);
-            }, _lifetimeCts.Token);
+            }, _lifetimeToken);
             var snapshot = (
                 Stats: await statisticsTask,
                 PartCounter: await probeTask,
@@ -12618,7 +12621,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     "Phiên trước kết thúc khi đang gửi tem; trạng thái tem vật lý không xác định. Không tự động gửi lại.";
                 await ProductionPersistence.UpdateLabelPrintOutcomeAsync(
                     pending.Id, pending.CycleId, LabelPrintStatus.Unknown, null, pendingMessage,
-                    cancellationToken: _lifetimeCts.Token);
+                    cancellationToken: _lifetimeToken);
                 AddLog($"LABEL UNKNOWN RECOVERED: cycle {pending.CycleId}; LOT {pending.LotNo}; {pendingMessage}");
             }
 
@@ -13256,12 +13259,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ProbeCounterSnapshot counter = await ProductionPersistence.IncrementProbeCounterAsync(
                 PartIdentitySnapshot.Capture(model),
                 ProbeReplacementThreshold,
-                _lifetimeCts.Token);
+                _lifetimeToken);
             try
             {
                 await Task.Run(
                     () => PartCounterStore.Mirror(model, counter),
-                    _lifetimeCts.Token);
+                    _lifetimeToken);
             }
             catch (Exception ex)
             {
@@ -13306,7 +13309,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         {
             if (!await _verifyProbeMaintenancePassword(password))
                 return (false, "Mật khẩu đăng nhập Cài đặt không đúng.");
-            await _productionPersistenceGate.WaitAsync(_lifetimeCts.Token);
+            await _productionPersistenceGate.WaitAsync(_lifetimeToken);
             ownsGate = true;
             // Authentication is asynchronous. Recheck model/removal gates after it completes.
             if (!ReferenceEquals(_model, model) || generation != Volatile.Read(ref _runtimeGeneration))
@@ -13321,12 +13324,12 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 ProbeReplacementThreshold,
                 "PROBE_ADMIN",
                 _productionSettings.DeviceName,
-                _lifetimeCts.Token);
+                _lifetimeToken);
             try
             {
                 await Task.Run(
                     () => PartCounterStore.Mirror(model, reset),
-                    _lifetimeCts.Token);
+                    _lifetimeToken);
             }
             catch (Exception ex)
             {
@@ -13364,7 +13367,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         try
         {
             if (!await ProductionPersistence.TryBeginFirstPrintAsync(
-                    historyId, request.CycleId, _lifetimeCts.Token))
+                    historyId, request.CycleId, _lifetimeToken))
             {
                 AddLog($"LABEL DUPLICATE BLOCKED: cycle {request.CycleId} đã có first-print transaction.");
                 return;
@@ -13374,9 +13377,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // downstream độc lập: một tem lỗi không được giữ reservation cũ
             // rồi khóa toàn bộ LOT/tem của các sản phẩm PASS tiếp theo.
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
-                request, _lifetimeCts.Token,
+                request, _lifetimeToken,
                 explicitReprint: explicitBcwReprint,
-                beforeBcwSend: effective => ProductionPersistence.SaveBcwLabelSnapshotAsync(historyId, request.CycleId, effective, _lifetimeCts.Token),
+                beforeBcwSend: effective => ProductionPersistence.SaveBcwLabelSnapshotAsync(historyId, request.CycleId, effective, _lifetimeToken),
                 productionSnapshot: !explicitBcwReprint);
             request = result.EffectiveRequest ?? request;
 
@@ -13447,7 +13450,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         try
         {
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
-                context.Request, _lifetimeCts.Token, explicitReprint: true);
+                context.Request, _lifetimeToken, explicitReprint: true);
             if (!result.Printed)
             {
                 InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}");
@@ -13462,7 +13465,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 context.Request.CycleId,
                 DateTime.Now,
                 result.Message,
-                _lifetimeCts.Token);
+                _lifetimeToken);
             InvokeUi(() => LabelStatusText = $"TEM: ĐÃ GỬI LẠI LOT {context.Request.Data.LotNo}");
             AddLog($"LABEL REPRINT SENT: cycle {context.Request.CycleId}; LOT {context.Request.Data.LotNo}; không tăng LOT.");
         }
@@ -13543,7 +13546,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 printTimestamp,
                 message,
                 printedBarcode,
-                _lifetimeCts.Token);
+                _lifetimeToken);
         }
         catch (Exception ex)
         {

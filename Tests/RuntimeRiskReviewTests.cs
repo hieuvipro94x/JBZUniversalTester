@@ -151,4 +151,22 @@ internal static partial class Program
         }
         finally { vm.ShutdownAsync().GetAwaiter().GetResult(); }
     }
+
+    private static void TestLifetimeTokenAfterShutdown()
+    {
+        var vm = CreateRiskReviewVm();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lateObserver = (Task)RiskInvoke(vm, "ObserveDetachedTaskAsync", completion.Task, "LATE_SHUTDOWN")!;
+        vm.ShutdownAsync().GetAwaiter().GetResult();
+        string stoppedState = vm.State;
+        completion.SetException(new IOException("Completion after CTS disposal"));
+        lateObserver.GetAwaiter().GetResult();
+        var token = (CancellationToken)RiskInvoke(vm, "BeginCycleOperations")!;
+        try
+        {
+            Assert(token.IsCancellationRequested && vm.State == stoppedState,
+                "Late work uses an already-cancelled captured token instead of touching disposed CTS.Token or rewriting shutdown State");
+        }
+        finally { RiskInvoke(vm, "CancelCycleOperations"); }
+    }
 }
