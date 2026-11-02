@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using JBZUniversalTester.ModelEditor.Dialogs;
+using JBZUniversalTester.ModelEditor.Helpers;
 using JBZUniversalTester.ModelEditor.Models;
 using JBZUniversalTester.Models;
 
@@ -42,6 +43,7 @@ public partial class PinPage : System.Windows.Controls.UserControl
         MainGrid.CanUserReorderColumns = false;
         MainGrid.CanUserResizeColumns = false;
         MainGrid.CanUserSortColumns = false;
+        DataGridKeyboardEditHelper.Attach(MainGrid, 3);
 
     }
     public void LoadData(IEnumerable<Pin> pins, IReadOnlyList<List<string>>? nativePinRows = null)

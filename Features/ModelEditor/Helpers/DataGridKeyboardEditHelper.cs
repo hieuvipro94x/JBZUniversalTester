@@ -11,6 +11,30 @@ public static class DataGridKeyboardEditHelper
 {
     public static void Attach(DataGrid grid, int preferredEditableDisplayIndex)
     {
+        grid.PreviewMouseLeftButtonDown += (_, e) =>
+        {
+            var origin = e.OriginalSource as DependencyObject;
+            var cell = FindAncestor<DataGridCell>(origin);
+            if (grid.IsReadOnly || cell is null || cell.IsReadOnly || cell.IsEditing ||
+                !ReferenceEquals(FindAncestor<DataGrid>(cell), grid) ||
+                FindAncestor<ComboBox>(origin) is not null || FindAncestor<ButtonBase>(origin) is not null)
+                return;
+            if (!grid.CommitEdit(DataGridEditingUnit.Cell, true) || !grid.CommitEdit(DataGridEditingUnit.Row, true))
+            { e.Handled = true; return; }
+            grid.CurrentCell = new DataGridCellInfo(cell);
+            if (grid.SelectionUnit == DataGridSelectionUnit.Cell)
+            {
+                grid.SelectedCells.Clear();
+                grid.SelectedCells.Add(grid.CurrentCell);
+            }
+            else grid.SelectedItem = cell.DataContext;
+            cell.Focus();
+            if (grid.BeginEdit())
+            {
+                FocusEditor(grid, cell.DataContext, cell.Column);
+                e.Handled = true;
+            }
+        };
         grid.PreviewKeyDown += (_, e) =>
         {
             if (e.Key is Key.Delete or Key.Back &&
@@ -22,6 +46,7 @@ public static class DataGridKeyboardEditHelper
                 {
                     grid.Dispatcher.BeginInvoke(() =>
                     {
+                        if (!IsCurrentCell(grid, textItem, textColumn)) return;
                         FocusEditor(grid, textItem, textColumn);
                         if (FindAncestor<TextBox>(Keyboard.FocusedElement as DependencyObject) is { } editor)
                             editor.Clear();
@@ -47,7 +72,7 @@ public static class DataGridKeyboardEditHelper
         };
     }
 
-    private static bool MoveAndEdit(
+    internal static bool MoveAndEdit(
         DataGrid grid,
         Key key,
         int preferredEditableDisplayIndex)
@@ -73,8 +98,8 @@ public static class DataGridKeyboardEditHelper
                            ?? preferredEditableDisplayIndex;
 
         // Chốt dữ liệu vừa nhập trước khi điều hướng.
-        grid.CommitEdit(DataGridEditingUnit.Cell, true);
-        grid.CommitEdit(DataGridEditingUnit.Row, true);
+        if (!grid.CommitEdit(DataGridEditingUnit.Cell, true) || !grid.CommitEdit(DataGridEditingUnit.Row, true))
+            return true; // Keep invalid input in its cell; consume the arrow.
 
         var targetRow = rowIndex;
         var targetDisplayIndex = displayIndex;
@@ -131,12 +156,11 @@ public static class DataGridKeyboardEditHelper
         grid.Dispatcher.BeginInvoke(
             () =>
             {
+                if (!IsCurrentCell(grid, targetItem, targetColumn)) return;
                 if (!targetColumn.IsReadOnly)
                 {
                     grid.BeginEdit();
-                    grid.Dispatcher.BeginInvoke(
-                        () => FocusEditor(grid, targetItem, targetColumn),
-                        DispatcherPriority.Input);
+                    FocusEditor(grid, targetItem, targetColumn);
                 }
                 else
                 {
@@ -148,6 +172,9 @@ public static class DataGridKeyboardEditHelper
         return true;
     }
 
+    private static bool IsCurrentCell(DataGrid grid, object item, DataGridColumn column) =>
+        ReferenceEquals(grid.CurrentCell.Item, item) && ReferenceEquals(grid.CurrentCell.Column, column);
+
     private static void FocusEditor(
         DataGrid grid,
         object item,
@@ -155,6 +182,10 @@ public static class DataGridKeyboardEditHelper
     {
         var cell = GetCell(grid, item, column);
         if (cell is null) return;
+        // Template columns (for example the editable color ComboBox) may
+        // not have created their editor yet. Materialize just this cell's
+        // content instead of forcing another full-grid layout.
+        column.GetCellContent(item)?.ApplyTemplate();
 
         var textBox = FindVisualChild<TextBox>(cell);
         if (textBox is not null)
@@ -188,8 +219,16 @@ public static class DataGridKeyboardEditHelper
         object item,
         DataGridColumn column)
     {
+        var realized = GetRealizedCell(grid, item, column);
+        if (realized is not null) return realized;
         grid.ScrollIntoView(item, column);
         grid.UpdateLayout();
+
+        return GetRealizedCell(grid, item, column);
+    }
+
+    private static DataGridCell? GetRealizedCell(DataGrid grid, object item, DataGridColumn column)
+    {
 
         var row = grid.ItemContainerGenerator.ContainerFromItem(item)
                   as DataGridRow;
@@ -233,7 +272,9 @@ public static class DataGridKeyboardEditHelper
             if (child is T typed)
                 return typed;
 
-            child = VisualTreeHelper.GetParent(child);
+            child = child is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(child)
+                : child is FrameworkContentElement content ? content.Parent : LogicalTreeHelper.GetParent(child);
         }
 
         return null;

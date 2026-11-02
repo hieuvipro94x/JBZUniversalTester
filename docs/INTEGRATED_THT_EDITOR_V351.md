@@ -96,3 +96,22 @@ focus/caret from the search box; Enter or Find next still cycles through matches
 The query is retained when the Wire page reloads. Clear and page unload cancel
 pending search work. The box has an explicit centered 36-pixel height with zero
 vertical padding so text is not clipped by inherited control sizing.
+
+V2026.09.376 enables the same arrow/edit helper on the PIN page as on Wire and
+Connector. Up/Down from the Wire search box flush any pending search and explicitly
+transfer navigation into the grid without clearing the query. Loaded events do
+not restart an already-applied search and pull selection back after navigation.
+Deferred edit/focus callbacks check that their target cell is still current, so
+rapid arrows cannot focus an older target. Regression tests raise actual routed
+key events in hosted WPF controls, covering edited values, rapid keys, last-row
+bounds and pending search cancellation.
+
+Editable grid cells also enter edit mode on the first mouse click. Existing text
+editors keep normal caret placement; interactive color controls keep their own
+mouse behavior. Navigation checks edit validation before leaving a cell, so
+invalid numeric input remains available for correction. Realized cells reuse
+their existing visual containers without a forced layout, and arrow navigation
+uses one guarded deferred edit callback. Read-only Connector/Pin and color-preview
+columns retain their existing permissions. Hosted WPF regressions cover single
+clicks, typing and committing wire/add/thickness/IO values, 40 rapid Down presses
+into virtualized rows, and recovery from invalid numeric input.

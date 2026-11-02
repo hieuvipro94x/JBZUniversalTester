@@ -36,6 +36,12 @@ internal static partial class Program
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
+        if (args is ["--test-editor-arrow-navigation"])
+        {
+            TestEditorArrowNavigation();
+            Console.WriteLine("PASS: editor arrows navigate and retain edits/search text");
+            return 0;
+        }
         if (args is ["--test-editor-wire-search"])
         {
             TestEditorWireSearch();
@@ -623,6 +629,7 @@ internal static partial class Program
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
             ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),
             ("THT wire search locates all IO without changing rows or dirty state", TestEditorWireSearch),
+            ("Editor arrow navigation retains edits and leaves search safely", TestEditorArrowNavigation),
             ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),

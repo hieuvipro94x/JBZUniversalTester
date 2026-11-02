@@ -120,6 +120,18 @@ public partial class LinePage : UserControl
     {
         if (e.Key == Key.Enter) { FindWire_Click(sender, e); e.Handled = true; }
         else if (e.Key == Key.Escape) { ClearWireSearch_Click(sender, e); e.Handled = true; }
+        else if (e.Key is Key.Down or Key.Up)
+        {
+            // Leaving the search box with an arrow is an explicit navigation
+            // request. Flush the current query before moving in the real grid.
+            if (_wireSearchTimer.IsEnabled)
+            {
+                _wireSearchTimer.Stop();
+                FindWire(advance: false);
+            }
+            if (Grid.CurrentCell.IsValid)
+                e.Handled = DataGridKeyboardEditHelper.MoveAndEdit(Grid, e.Key, 3);
+        }
     }
 
     private void ClearWireSearch_Click(object sender, RoutedEventArgs e)
@@ -196,7 +208,12 @@ public partial class LinePage : UserControl
         DataGridKeyboardEditHelper.Attach(Grid, 3);
         _wireSearchTimer.Tick += WireSearchTimer_Tick;
         Unloaded += (_, _) => _wireSearchTimer.Stop();
-        Loaded += (_, _) => { if (!string.IsNullOrWhiteSpace(WireSearchBox.Text)) _wireSearchTimer.Start(); };
+        Loaded += (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(WireSearchBox.Text) &&
+                !string.Equals(_lastSearchQuery, WireSearchBox.Text.Trim(), StringComparison.OrdinalIgnoreCase))
+                _wireSearchTimer.Start();
+        };
     }
 
     public void SetColors(IEnumerable<WireColor> colors)
