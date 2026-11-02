@@ -77,7 +77,7 @@ public partial class ThtEditorPage : UserControl
             {
                 case 0: _base.LoadData(_document.Base); ContentHost.Content = _base; break;
                 case 1: _connectors.LoadData(_document); ContentHost.Content = _connectors; break;
-                case 2: _pins.LoadData(_document.Pins); ContentHost.Content = _pins; break;
+                case 2: _pins.LoadData(_document.Pins, _document.ThtState?.PinRows); ContentHost.Content = _pins; break;
                 case 3: _lines.SetColors(_colors.CurrentColors); _lines.LoadData(_document.Pins); ContentHost.Content = _lines; break;
                 case 4: _colors.Reload(); ContentHost.Content = _colors; break;
             }

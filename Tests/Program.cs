@@ -36,6 +36,12 @@ internal static partial class Program
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
+        if (args is ["--test-editor-pin-presentation"])
+        {
+            TestEditorPinPresentation();
+            Console.WriteLine("PASS: readable PIN contacts retain numeric edits and original data");
+            return 0;
+        }
         if (args is ["--test-editor-blank-clip"])
         {
             TestLegacyClipBlankPinTypes();
@@ -609,6 +615,7 @@ internal static partial class Program
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
+            ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),
             ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),

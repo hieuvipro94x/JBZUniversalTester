@@ -64,3 +64,15 @@ A/B discard pairs, replacement and clearing, global CFG exclusion, exact THT
 round trips, UI saves, all five pages, embedded-template new files, stale edits,
 CP949 rejection and sidecar rollback. Production databases and original ITEM files
 are not edited by tests or previews.
+
+V2026.09.373 updates the PIN page presentation. PIN TYPE replaces the misleading
+test-count header. Connection cells show IO, Connector and Pin labels with one
+target per line; -1 is displayed as a dash and roles distinguish an unlinked pin.
+The editing templates still bind to the original numeric MainIo and slash-delimited
+CouplingText, retaining the existing reciprocal-edit and IO-renumbering handlers.
+Unknown or duplicate IO does not receive a guessed connector mapping.
+
+For loaded CLIP rows the displayed PIN TYPE comes from the native PIN table,
+including empty legacy fields. An unedited display value returns the original
+editor-model value on ReadData, so merely visiting the PIN page cannot change
+CLIP metadata, make the document dirty or cause a rewrite.
