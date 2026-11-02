@@ -445,8 +445,9 @@ public static class ProductionConfigService
         Normalize(settings);
         string key = GetMasterModelKeyFromPath(path);
         bool hasSavedProfile = settings.WaterProofProfilesByModel.TryGetValue(key, out WaterProofModelSettings? profile);
-        var profileForModel = hasSavedProfile ? profile!.Clone() : new WaterProofModelSettings();
-        return ModelLeakLayoutService.Apply(path, profileForModel, preserveSavedSettings: hasSavedProfile);
+        // Automatic Leak has one source of truth: the profile saved in Settings
+        // for this product. THT flags/legacy sidecars must not enable channels.
+        return hasSavedProfile ? profile!.Clone() : new WaterProofModelSettings();
     }
 
     public static void SetWaterProofProfileForPath(

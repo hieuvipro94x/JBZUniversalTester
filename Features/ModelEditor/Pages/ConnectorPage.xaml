@@ -35,46 +35,6 @@
                 <DataGridTextColumn Header="TÊN CONNECTOR" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                 <DataGridTextColumn Header="SỐ PIN" Binding="{Binding PinCount, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                 <DataGridTextColumn Header="I/O BẮT ĐẦU" Binding="{Binding StartIo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
-                <DataGridCheckBoxColumn Header="KIỂM TRA KÍN NƯỚC" Binding="{Binding Waterproof, UpdateSourceTrigger=PropertyChanged}" Width="*">
-                    <DataGridCheckBoxColumn.ElementStyle>
-                        <Style TargetType="CheckBox">
-                            <Setter Property="HorizontalAlignment" Value="Center"/>
-                            <Setter Property="VerticalAlignment" Value="Center"/>
-                            <Setter Property="IsHitTestVisible" Value="False"/>
-                            <Setter Property="Focusable" Value="False"/>
-                        </Style>
-                    </DataGridCheckBoxColumn.ElementStyle>
-                    <DataGridCheckBoxColumn.EditingElementStyle>
-                        <Style TargetType="CheckBox">
-                            <Setter Property="HorizontalAlignment" Value="Center"/>
-                            <Setter Property="VerticalAlignment" Value="Center"/>
-                        </Style>
-                    </DataGridCheckBoxColumn.EditingElementStyle>
-                </DataGridCheckBoxColumn>
-                <DataGridTemplateColumn Header="KÊNH LEAK" Width="100">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <ComboBox IsEnabled="{Binding Waterproof}" SelectedValuePath="Tag"
-                                      SelectedValue="{Binding LeakChannel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      VerticalAlignment="Center" FontSize="15">
-                                <ComboBox.Style>
-                                    <Style TargetType="ComboBox">
-                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding Waterproof}" Value="True">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </ComboBox.Style>
-                                <ComboBoxItem Content="Chọn kênh" Tag="0"/>
-                                <ComboBoxItem Content="CH1" Tag="1"/>
-                                <ComboBoxItem Content="CH2" Tag="2"/>
-                                <ComboBoxItem Content="CH3" Tag="3"/>
-                            </ComboBox>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
             </DataGrid.Columns>
         </DataGrid>
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">

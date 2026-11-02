@@ -22,7 +22,7 @@ internal static partial class Program
             var settings = new ProductionSettings();
             ProductionConfigService.SetWaterProofProfileForPath(settings, path,
                 new WaterProofModelSettings { Enabled = true, Channel1Enabled = true, Channel2Enabled = false,
-                    Channel3Enabled = true, PressMin = 42, LeakLimit = 7, PressTimeMs = 2300, WaitTimeMs = 600 });
+                    Channel3Enabled = true, Channel1Connector = "B", Channel3Connector = "A", PressMin = 42, LeakLimit = 7, PressTimeMs = 2300, WaitTimeMs = 600 });
             void Write(params ModelLeakLayoutService.Channel[] channels) => File.WriteAllText(sidecar,
                 JsonSerializer.Serialize(new ModelLeakLayoutService.Layout(1, channels.ToList(),
                     Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))))));
@@ -31,10 +31,10 @@ internal static partial class Program
             Assert(result.Enabled && result.Channel3Connector == "A" && result.Channel1Connector == "B" &&
                 !result.Channel2Enabled && result.PressMin == 42 && result.LeakLimit == 7 &&
                 result.PressTimeMs == 2300 && result.WaitTimeMs == 600,
-                "ModelCreator assignments load automatically without changing pressure/timing");
+                "Settings retain the explicitly saved channels, connectors, pressure and timing");
             var fresh = ProductionConfigService.GetWaterProofProfileForPath(new ProductionSettings(), path);
-            Assert(fresh.Enabled && fresh.Channel1Enabled && fresh.Channel3Enabled && !fresh.Channel2Enabled,
-                "A new product still imports the ModelCreator Leak defaults");
+            Assert(!fresh.Enabled && string.IsNullOrEmpty(fresh.Channel1Connector) && string.IsNullOrEmpty(fresh.Channel3Connector),
+                "A product without a Settings profile cannot import or auto-enable Leak from a THT sidecar");
             result.Enabled = false;
             result.Channel3Enabled = false;
             ProductionConfigService.SetWaterProofProfileForPath(settings, path, result);
@@ -63,7 +63,7 @@ internal static partial class Program
             File.WriteAllText(sidecar, JsonSerializer.Serialize(new ModelLeakLayoutService.Layout(1,
                 [new(1, "A")], "WRONG-HASH")));
             bool mismatchRejected = false;
-            try { ProductionConfigService.GetWaterProofProfileForPath(settings, path); }
+            try { ModelLeakLayoutService.Apply(path, new WaterProofModelSettings()); }
             catch (InvalidDataException) { mismatchRejected = true; }
             Assert(mismatchRejected, "Mismatched model/config pair is rejected before applying channels");
             foreach (var channels in new[]
@@ -75,10 +75,27 @@ internal static partial class Program
             {
                 Write(channels);
                 bool rejected = false;
-                try { ProductionConfigService.GetWaterProofProfileForPath(settings, path); }
+                try { ModelLeakLayoutService.Apply(path, new WaterProofModelSettings()); }
                 catch (InvalidDataException) { rejected = true; }
                 Assert(rejected, "Invalid channel/connector assignments are rejected");
             }
+            // Invalid legacy metadata cannot change or block the active Settings profile.
+            File.WriteAllText(sidecar, "{broken");
+            Assert(!ProductionConfigService.GetWaterProofProfileForPath(settings, path).Enabled,
+                "Runtime ignores invalid legacy Leak metadata");
+            string other = Path.Combine(directory, "other.tht");
+            ProductionConfigService.SetWaterProofProfileForPath(settings, other, new WaterProofModelSettings
+            { Enabled = true, Channel1Enabled = false, Channel2Enabled = true, Channel3Enabled = false,
+                Channel2Connector = "OTHER-CN", PressMin = 60, LeakLimit = 3 });
+            ProductionConfigService.SaveLegacyCfg(settings, cfgPath);
+            var roundTrip = ProductionConfigService.LoadSavedSettings(cfgPath);
+            var profileA = ProductionConfigService.GetWaterProofProfileForPath(roundTrip, path);
+            var profileB = ProductionConfigService.GetWaterProofProfileForPath(roundTrip, other);
+            Assert(!profileA.Enabled && profileA.Channel1Connector == "B" && profileA.PressMin == 42 &&
+                   profileB.Enabled && profileB.Channel2Enabled && profileB.Channel2Connector == "OTHER-CN" &&
+                   profileB.PressMin == 60 && profileB.LeakLimit == 3,
+                "Different products retain separate Settings-only Leak profiles after a CFG save and reload");
+            File.Delete(cfgPath);
             File.Delete(sidecar);
             Assert(!ProductionConfigService.GetWaterProofProfileForPath(settings, path).Enabled,
                 "Legacy models retain their saved profile when no sidecar exists");
@@ -93,10 +110,10 @@ internal static partial class Program
 
     private static void TestModelCreatorLeakFile(string path)
     {
-        var result = ProductionConfigService.GetWaterProofProfileForPath(new ProductionSettings(), path);
+        var result = ModelLeakLayoutService.Apply(path, new WaterProofModelSettings());
         Assert(result.Enabled && result.Channel1Connector == "B" && result.Channel3Connector == "A" &&
             result.Channel1Enabled && !result.Channel2Enabled && result.Channel3Enabled,
-            "Real ModelCreator export loads CH1=B and CH3=A in tester");
-        Console.WriteLine("PASS: ModelCreator THT + leak layout → tester profile");
+            "Legacy layout validation reads CH1=B and CH3=A without enabling a production Settings profile");
+        Console.WriteLine("PASS: legacy ModelCreator layout validation (automatic Leak uses Settings only)");
     }
 }

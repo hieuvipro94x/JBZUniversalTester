@@ -166,6 +166,14 @@ internal static partial class Program
                     page.Measure(new Size(1366, 768)); page.Arrange(new Rect(0, 0, 1366, 768)); page.UpdateLayout();
                     Assert(((ContentControl)page.FindName("ContentHost")).Content is FrameworkElement { ActualWidth: > 0 },
                         "All five editor pages load their own resources inside the existing window");
+                    if (index == 1)
+                    {
+                        var connectorPage = (FrameworkElement)((ContentControl)page.FindName("ContentHost")).Content;
+                        var grid = (DataGrid)connectorPage.FindName("Grid");
+                        Assert(grid.Columns.Select(column => column.Header?.ToString()).SequenceEqual(
+                            ["STT", "TÊN CONNECTOR", "SỐ PIN", "I/O BẮT ĐẦU"]),
+                            "THT editor exposes topology only; Leak enable/channel controls belong exclusively to Settings");
+                    }
                     Assert(!page.HasUnsavedChanges, $"Unedited page {index} cannot trigger a false Save prompt");
                 }
                 Assert(await page.ConfirmCloseAsync(), "Switching unchanged editor pages does not create false unsaved changes");

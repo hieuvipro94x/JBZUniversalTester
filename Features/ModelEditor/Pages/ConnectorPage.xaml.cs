@@ -60,7 +60,8 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
         // STT là thứ tự C1, C2... thực tế khi ghi MODEL/THT, không còn chỉ là cột hiển thị.
         var ordered = Rows.OrderBy(r => r.Index).ToList();
         var result = ordered.Select(r => new Connector { Name = r.Name.Trim(), PinCount = r.PinCount, StartIo = r.StartIo, Waterproof = r.Waterproof, LeakChannel = r.LeakChannel }).ToList();
-        LeakLayoutService.Validate(result);
+        // Legacy THT metadata is retained, but Leak is configured in Settings.
+        // Hidden legacy flags without a channel must not block topology edits.
         return result;
     }
     private void Grid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)

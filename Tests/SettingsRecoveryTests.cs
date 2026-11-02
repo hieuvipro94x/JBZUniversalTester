@@ -30,26 +30,27 @@ internal static partial class Program
                 {
                     File.WriteAllText(path + ".leak.json", invalidSidecar);
                     var settings = new ProductionSettings { LastThtPath = path, MasterFaultRequiredCount = 0 };
+                    settings.WaterProofMachine.PortName = "COM9876"; // Validation only; no device is opened.
                     ProductionConfigService.SetWaterProofProfileForPath(settings, path, new WaterProofModelSettings
                         { Enabled = true, Channel1Enabled = true, Channel2Enabled = false, Channel3Enabled = false,
                             Channel1Connector = "A", PressMin = 42, LeakLimit = 7 });
                     string originalProfile = JsonSerializer.Serialize(settings.WaterProofProfilesByModel);
                     int saves = 0;
                     var vm = new ProductionSettingsViewModel(saveSettings: _ => saves++, initialSettings: settings);
-                    Assert(vm.HasWaterProofConfigurationError && vm.WaterProof.Enabled && vm.WaterProof.PressMin == 42,
-                        "Settings opens with an explicit Leak warning and retains the saved profile when the companion file is stale or malformed");
+                    Assert(!vm.HasWaterProofConfigurationError && vm.WaterProof.Enabled && vm.WaterProof.PressMin == 42,
+                        "Settings loads its saved Leak profile independently of stale or malformed legacy companion files");
                     var page = new ProductionSettingsPage(null, vm, deferInitialLayout: true);
                     page.SetAccessSession(SettingsAccessSession.Administrator);
                     await page.PrepareForDisplayAsync();
-                    Assert(!((UIElement)page.FindName("WaterProofConfigurationBody")).IsEnabled &&
+                    Assert(((UIElement)page.FindName("WaterProofConfigurationBody")).IsEnabled &&
                         ((UIElement)page.FindName("IoGeneralConfiguration")).IsEnabled &&
                         ((UIElement)page.FindName("LabelSettingsPanel")).IsEnabled &&
                         !vm.ManualWaterProofTestCommand.CanExecute(null),
-                        "Untrusted Leak editing/manual execution is blocked while other settings remain available");
+                        "Settings Leak editing remains available; Manual remains subject to its normal hardware gate");
                     object?[] validation = [string.Empty];
                     bool valid = (bool)typeof(ProductionSettingsPage).GetMethod("ValidateSettings", BindingFlags.Instance | BindingFlags.NonPublic)!
                         .Invoke(page, validation)!;
-                    Assert(valid, $"Invalid Leak metadata cannot block validation of other groups: {validation[0]}");
+                    Assert(valid, $"An unused legacy sidecar cannot block a valid Settings Leak profile: {validation[0]}");
                     vm.Settings.DeviceName = "allowed station edit";
                     await vm.SaveAsync();
                     Assert(saves == 1 && JsonSerializer.Serialize(settings.WaterProofProfilesByModel) == originalProfile &&
@@ -58,12 +59,16 @@ internal static partial class Program
                     bool rejected = false;
                     try { ProductionConfigService.GetWaterProofProfileForPath(settings, path); }
                     catch (InvalidDataException) { rejected = true; }
-                    Assert(rejected, "Production still rejects the mismatched/malformed THT-Leak pair");
+                    Assert(!rejected && ProductionConfigService.GetWaterProofProfileForPath(settings, path).Channel1Connector == "A",
+                        "Production uses the saved Settings profile without consulting unused legacy metadata");
                     vm.WaterProof.PressMin++;
                     bool editBlocked = false;
                     try { vm.Save(); }
                     catch (InvalidOperationException) { editBlocked = true; }
-                    Assert(editBlocked && saves == 1, "The recovery editor cannot silently persist changed Leak assignments");
+                    Assert(!editBlocked && saves == 2 &&
+                           ProductionConfigService.GetWaterProofProfileForPath(settings, path).PressMin == 43 &&
+                           File.ReadAllText(path + ".leak.json") == invalidSidecar,
+                        "Editing and saving this product's Leak parameters works independently of legacy metadata");
                     page.ReleasePageResources();
                 }
             }

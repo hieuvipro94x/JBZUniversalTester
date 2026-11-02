@@ -11,11 +11,21 @@ the sidecar rolls the THT back. The current runtime model is updated after Save.
 
 Administrators can open SỬA CẤU HÌNH THT directly from MainWindow, using the existing
 Settings login, or CHỈNH SỬA THT from Settings. The editor occupies the same
-window and exposes Basic information, Connector/Leak, Pin/IO, Wire/connections and
+window and exposes Basic information, Connector, Pin/IO, Wire/connections and
 Color pages adapted from the user-provided ModelCreator V1.4 source at
 `C:/Users/user/Desktop/Nam/ModelCreator 1.4/ModelCreator V1.4`.
 Only native HarnProg V1.110 THT is supported. MODEL conversion, packet compilation,
 external application startup and hardware ownership are not included.
+
+Since V2026.09.371, Connector shows only order, name, pin count and start IO.
+The waterproof checkbox and Leak channel selector are removed. Automatic Leak
+uses only the per-product profile saved in Production Settings, including its
+enable flag, CH1/CH2/CH3 connector assignments, pressure limits and timing. A
+product without a saved profile defaults to Leak OFF. Legacy THT flags and
+`.tht.leak.json` files cannot auto-enable, override or block the runtime profile.
+Existing saved CFG profiles remain unchanged. Legacy metadata is retained by
+the native editor's compatibility writer; no source THT, sidecar or history is
+bulk rewritten or deleted by this change.
 
 Opening and saving run disk/parsing work off the Dispatcher. Save snapshots the
 document, stages and validates THT and Leak output, checks for stale external
