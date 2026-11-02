@@ -76,6 +76,16 @@ internal static partial class Program
                 text.Text == "Loại tem: TEM BE QRCODE"), "MainWindow displays a readable label name without changing its configuration key");
             var lotCard = (System.Windows.Controls.Border)window.FindName("CurrentLotCard");
             var quantityCard = (System.Windows.Controls.Border)window.FindName("ProductionQuantityCard");
+            var summaryCard = (FrameworkElement)window.FindName("ModelSummaryCard");
+            Rect Bounds(FrameworkElement element) => new(element.TranslatePoint(new Point(), root), element.RenderSize);
+            Rect initialQuantityBounds = Bounds(quantityCard), initialLotBounds = Bounds(lotCard), initialSummaryBounds = Bounds(summaryCard);
+            void AssertStableSummaryGeometry()
+            {
+                root.UpdateLayout();
+                Assert(Bounds(quantityCard) == initialQuantityBounds && Bounds(lotCard) == initialLotBounds &&
+                       Bounds(summaryCard) == initialSummaryBounds,
+                    "Startup/product printing transitions retain the measured positions and sizes of the summary and both cards");
+            }
             var lotText = (System.Windows.Controls.TextBlock)window.FindName("CurrentLotText");
             var quantityText = (System.Windows.Controls.TextBlock)window.FindName("ProductionQuantityText");
             Assert(lotCard.Visibility == Visibility.Visible && lotText.Text == "2010" && quantityText.Text == "10" &&
@@ -127,8 +137,9 @@ internal static partial class Program
             vm.Home.Refresh();
             RefreshEquipment();
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-            Assert(lotCard.Visibility == Visibility.Collapsed && System.Windows.Controls.Grid.GetColumnSpan(quantityCard) == 2,
-                "A product with printing disabled hides LOT and gives the quantity card the full width");
+            Assert(lotCard.Visibility == Visibility.Hidden && System.Windows.Controls.Grid.GetColumnSpan(quantityCard) == 1,
+                "A product with printing disabled hides LOT content while retaining both fixed layout slots");
+            AssertStableSummaryGeometry();
             Assert(vm.Test.HomePrinterStatusText == "KHÔNG SỬ DỤNG", "Disabled printing cannot show an irrelevant printer error");
             settings.LabelTemplateTypesByProduct[productKey] = LabelSettings.SmallQrTemplate;
             vm.Model = null;
@@ -136,7 +147,8 @@ internal static partial class Program
             vm.Home.Refresh();
             RefreshEquipment();
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-            Assert(lotCard.Visibility == Visibility.Collapsed, "No selected product cannot display a stale label LOT");
+            Assert(lotCard.Visibility == Visibility.Hidden, "No selected product cannot display a stale label LOT or collapse its layout slot");
+            AssertStableSummaryGeometry();
             Assert(vm.Test.HomeInspectionModeText == "CHƯA CHỌN MÃ HÀNG" && vm.Test.HomeLeakStatusText == "CHƯA CHỌN MÃ HÀNG",
                 "Clearing the product clears stale inspection and peripheral descriptions");
             vm.Model = model;
@@ -148,6 +160,7 @@ internal static partial class Program
             root.UpdateLayout();
             Assert(lotCard.Visibility == Visibility.Visible && System.Windows.Controls.Grid.GetColumnSpan(quantityCard) == 1,
                 "Re-enabling product printing restores the separate quantity and LOT cards");
+            AssertStableSummaryGeometry();
             var summary = (FrameworkElement)window.FindName("ModelSummaryCard");
             foreach (var size in new[] { new Size(1366, 768), new Size(1920, 1080) })
             {

@@ -286,19 +286,8 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <Border x:Name="ProductionQuantityCard" Padding="16,12" CornerRadius="8"
+                                <Border x:Name="ProductionQuantityCard" Grid.Column="0" Margin="0,0,8,0" Padding="16,12" CornerRadius="8"
                                         Background="#EAF1FF" BorderBrush="#BDD0F4" BorderThickness="1">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Grid.ColumnSpan" Value="2"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Home.IsLabelPrintingEnabled}" Value="True">
-                                                    <Setter Property="Grid.ColumnSpan" Value="1"/>
-                                                    <Setter Property="Margin" Value="0,0,8,0"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
                                     <StackPanel>
                                         <TextBlock Text="TỔNG ĐÃ TEST HÔM NAY" FontSize="14" FontWeight="Bold" Foreground="#1E3A8A"/>
                                         <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
@@ -321,7 +310,8 @@
                                         <Style TargetType="Border">
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding Home.IsLabelPrintingEnabled}" Value="False">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <!-- Reserve the LOT slot before the model is loaded. -->
+                                                    <Setter Property="Visibility" Value="Hidden"/>
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
