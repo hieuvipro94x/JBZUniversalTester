@@ -76,3 +76,16 @@ For loaded CLIP rows the displayed PIN TYPE comes from the native PIN table,
 including empty legacy fields. An unedited display value returns the original
 editor-model value on ReadData, so merely visiting the PIN page cannot change
 CLIP metadata, make the document dirty or cause a rewrite.
+
+V2026.09.374 aligns the connection cells with TestView's canonical IO-CN-PN:
+IO175 displays as 175-6-15 (32 IO per physical connector), independently of
+the product endpoint's Connector/Pin labels. Both main and target references use
+this display only; stored IO values and edit syntax remain unchanged. Regression
+checks compare editor output against TestEngine's formatter at connector boundaries.
+
+The Wire page adds search/next and clear controls, with Enter/Escape shortcuts.
+A number or IO prefix locates an exact IO; CN and PN prefixes locate connector
+and pin matches; other text searches connector, wire name and added-wire fields.
+Search cycles through matches in the complete existing grid without filtering,
+reordering, inserting or removing rows. This preserves structural-edit indexes,
+all model rows and the unsaved-change state even for large THTs.

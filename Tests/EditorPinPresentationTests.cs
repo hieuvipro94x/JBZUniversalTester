@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.Json;
 using System.Windows.Controls;
 using JBZUniversalTester.ModelEditor.Models;
@@ -30,12 +30,23 @@ internal static partial class Program
             var isolated = page.Rows.Single(row => row.Io == 200);
             var unnamed = page.Rows.Single(row => row.Io == 197);
             Assert(source.MainContactDisplay == "—" && source.Role == "CHÂN CHÍNH" &&
-                   source.CouplingDisplay == "IO175 · CN5 · PN3" + Environment.NewLine + "IO14 · CN2 · PN6" &&
-                   target.MainContactDisplay == "IO4 · CN1 · PN4" && target.Role == "CHÂN NỐI VỀ" &&
+                   source.CouplingDisplay == "175-6-15" + Environment.NewLine + "14-1-14" &&
+                   target.MainContactDisplay == "4-1-4" && target.Role == "CHÂN NỐI VỀ" &&
                    isolated.Role == "CHƯA CÓ LIÊN KẾT",
-                "Editor resolves source/target contacts to IO, Connector and Pin without exposing sentinel -1");
-            Assert(unnamed.TestNo == "" && unnamed.MainContactDisplay == "IO196 · CLIP · AO" &&
-                   page.Rows.Single(row => row.Io == 196).CouplingDisplay == "IO197 · CLIP · PIN2" &&
+                "Editor uses the TestView physical 32-IO connector mapping instead of the product connector labels");
+            var referenceModel = Model(("PAIR", new[] { 1, 175 }));
+            foreach (int io in new[] { 1, 32, 33, 64, 65, 122, 175, 640 })
+            {
+                var pin = referenceModel.Pins[0] with { IoNumber = io };
+                var testViewText = typeof(JBZUniversalTester.Services.TestEngine)
+                    .GetMethod("BuildCanonicalIoCnPn", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .Invoke(null, [referenceModel, pin]);
+                var editorText = typeof(PinPage).GetMethod("FormatContact", BindingFlags.NonPublic | BindingFlags.Static)!
+                    .Invoke(null, [io]);
+                Assert(Equals(testViewText, editorText), $"IO{io} must match the actual TestView IO-CN-PN formatter");
+            }
+            Assert(unnamed.TestNo == "" && unnamed.MainContactDisplay == "196-7-4" &&
+                   page.Rows.Single(row => row.Io == 196).CouplingDisplay == "197-7-5" &&
                    JsonSerializer.Serialize(page.ReadData()) == original &&
                    JsonSerializer.Serialize(pins.OrderBy(pin => pin.Io)) == original,
                 "Native blank PIN TYPE is displayed blank without changing the original editable model or CLIP metadata");
@@ -59,7 +70,7 @@ internal static partial class Program
             source.Io = 7;
             typeof(PinPage).GetMethod("SynchronizeIoChange", BindingFlags.Instance | BindingFlags.NonPublic)!
                 .Invoke(page, [source]);
-            Assert(page.Rows.Single(row => row.Io == 14).MainContactDisplay == "IO7 · CN1 · PN4",
+            Assert(page.Rows.Single(row => row.Io == 14).MainContactDisplay == "7-1-7",
                 "Renumbering IO refreshes formatted references instead of retaining stale labels");
             source.CouplingText = "999";
             Assert(source.CouplingDisplay == "IO999 (chưa xác định chân)", "Unknown IO must remain visible without guessing a connector");

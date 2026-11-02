@@ -103,6 +103,61 @@ public partial class LinePage : UserControl
     private Dictionary<string, WireColor> _map = new(StringComparer.Ordinal);
     private bool _loading, _applyingAutomaticColors;
     private LineRow? _selectedRow;
+    private string _lastSearchQuery = "";
+
+    private void WireSearch_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _lastSearchQuery = "";
+        if (WireSearchStatus is not null) WireSearchStatus.Text = "";
+    }
+
+    private void WireSearch_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { FindWire_Click(sender, e); e.Handled = true; }
+        else if (e.Key == Key.Escape) { ClearWireSearch_Click(sender, e); e.Handled = true; }
+    }
+
+    private void ClearWireSearch_Click(object sender, RoutedEventArgs e)
+    {
+        WireSearchBox.Clear();
+        WireSearchBox.Focus();
+    }
+
+    private void FindWire_Click(object sender, RoutedEventArgs e)
+    {
+        string query = WireSearchBox.Text.Trim();
+        if (query.Length == 0) { WireSearchStatus.Text = "Nhập từ khóa"; return; }
+        if (!Grid.CommitEdit(DataGridEditingUnit.Cell, true) || !Grid.CommitEdit(DataGridEditingUnit.Row, true))
+        { WireSearchStatus.Text = "Kiểm tra ô đang sửa"; return; }
+        var matches = Rows.Where(row => MatchesWireSearch(row, query)).ToList();
+        if (matches.Count == 0) { WireSearchStatus.Text = "Không tìm thấy"; _lastSearchQuery = query; return; }
+        int current = string.Equals(query, _lastSearchQuery, StringComparison.OrdinalIgnoreCase) && _selectedRow is not null
+            ? matches.IndexOf(_selectedRow) : -1;
+        int next = (current + 1) % matches.Count;
+        var target = matches[next];
+        Grid.SelectedCells.Clear();
+        Grid.CurrentCell = new DataGridCellInfo(target, Grid.Columns[0]);
+        Grid.SelectedCells.Add(Grid.CurrentCell);
+        Grid.ScrollIntoView(target, Grid.Columns[0]);
+        _selectedRow = target;
+        _lastSearchQuery = query;
+        WireSearchStatus.Text = $"{next + 1}/{matches.Count} kết quả";
+    }
+
+    private static bool MatchesWireSearch(LineRow row, string query)
+    {
+        if (int.TryParse(query, out int io)) return row.Io == io;
+        if (query.StartsWith("IO", StringComparison.OrdinalIgnoreCase) && int.TryParse(query[2..].Trim(), out io))
+            return row.Io == io;
+        if (query.StartsWith("PN", StringComparison.OrdinalIgnoreCase) && int.TryParse(query[2..].Trim(), out int pin))
+            return row.PinNo == pin;
+        if (query.StartsWith("CN", StringComparison.OrdinalIgnoreCase))
+            return row.Connector.Equals(query, StringComparison.OrdinalIgnoreCase) ||
+                ("CN" + row.Connector).Equals(query, StringComparison.OrdinalIgnoreCase);
+        return row.Connector.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            row.Line.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            row.Add.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
 
     public LinePage()
     {
@@ -147,6 +202,8 @@ public partial class LinePage : UserControl
         {
             HasStructuralChanges = false;
             _selectedRow = null;
+            _lastSearchQuery = "";
+            WireSearchBox.Clear();
             Rows.Clear();
             foreach (var p in pins.OrderBy(p => p.Io))
             {

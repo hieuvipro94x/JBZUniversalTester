@@ -1,9 +1,10 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using JBZUniversalTester.ModelEditor.Dialogs;
 using JBZUniversalTester.ModelEditor.Models;
+using JBZUniversalTester.Models;
 
 namespace JBZUniversalTester.ModelEditor.Pages;
 
@@ -25,12 +26,10 @@ public sealed class PinRow : ObservableObject
             .Select(token => int.TryParse(token, out int io) ? Contact(io) : token));
     private string Contact(int io) => ResolveContact?.Invoke(io) ?? $"IO{io}";
     public string CouplingText { get => _coupling; set { if (SetField(ref _coupling, value)) { Raise(nameof(CouplingDisplay)); Raise(nameof(Role)); } } }
-    internal void RefreshContactDisplay() { Raise(nameof(MainContactDisplay)); Raise(nameof(CouplingDisplay)); }
 }
 public partial class PinPage : System.Windows.Controls.UserControl
 {
     public ObservableCollection<PinRow> Rows { get; } = []; public event EventHandler? Changed; public event EventHandler? ConnectionsChanged; public event EventHandler? IoChanged; private bool _loading, _synchronizing;
-    private Dictionary<int, PinRow> _contacts = [];
     public PinPage()
     {
         InitializeComponent();
@@ -48,7 +47,6 @@ public partial class PinPage : System.Windows.Controls.UserControl
     public void LoadData(IEnumerable<Pin> pins, IReadOnlyList<List<string>>? nativePinRows = null)
     {
         _loading = true;
-        foreach (var row in Rows) row.PropertyChanged -= ContactPropertyChanged;
         Rows.Clear();
         var nativeTypes = (nativePinRows ?? []).Where(row => row.Count > 4 && int.TryParse(row[2], out _))
             .GroupBy(row => int.Parse(row[2])).Where(group => group.Count() == 1)
@@ -60,31 +58,19 @@ public partial class PinPage : System.Windows.Controls.UserControl
             var row = new PinRow { Original = p.Clone(), Io = p.Io, TestNo = displayedType,
                 InitialTestNo = displayedType, MainIo = p.MainIo, CouplingText = string.Join('/', p.Coupling),
                 ResolveContact = FormatContact };
-            row.PropertyChanged += ContactPropertyChanged;
             Rows.Add(row);
         }
-        RefreshContactDisplays();
         MainGrid.UnselectAll();
         _loading = false;
     }
-    private string FormatContact(int io)
+    private static string FormatContact(int io)
     {
-        if (!_contacts.TryGetValue(io, out var row)) return $"IO{io} (chưa xác định chân)";
-        if (row.Connector.Equals("CLIP", StringComparison.OrdinalIgnoreCase))
-            return $"IO{io} · CLIP · {(string.IsNullOrWhiteSpace(row.TestNo) ? $"PIN{row.PinNo}" : row.TestNo)}";
-        string connector = row.Connector.StartsWith("CN", StringComparison.OrdinalIgnoreCase)
-            ? row.Connector : "CN" + row.Connector;
-        return $"IO{io} · {connector} · PN{row.PinNo}";
-    }
-    private void ContactPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (!_loading && e.PropertyName is nameof(PinRow.Io) or nameof(PinRow.TestNo)) RefreshContactDisplays();
-    }
-    private void RefreshContactDisplays()
-    {
-        _contacts = Rows.GroupBy(row => row.Io).Where(group => group.Count() == 1)
-            .ToDictionary(group => group.Key, group => group.Single());
-        foreach (var row in Rows) row.RefreshContactDisplay();
+        if (io < 1 || io > BoardCapacity.MaxGlobalIo) return $"IO{io} (chưa xác định chân)";
+        // Match TestEngine.BuildCanonicalIoCnPn: physical 32-IO connector,
+        // independent of product Connector/Pin labels in the THT.
+        int zeroBased = io - 1;
+        return string.Join("-", io, zeroBased / BoardCapacity.IoPerPort + 1,
+            zeroBased % BoardCapacity.IoPerPort + 1);
     }
     public List<Pin> ReadData() { MainGrid.CommitEdit(DataGridEditingUnit.Cell, true); MainGrid.CommitEdit(DataGridEditingUnit.Row, true); var list = new List<Pin>(); foreach (var r in Rows) { var p = r.Original.Clone(); p.Io = r.Io; p.TestNo = r.TestNo == r.InitialTestNo ? r.Original.TestNo : r.TestNo.Trim(); p.MainIo = r.MainIo == p.Io ? -1 : r.MainIo; p.Coupling = ParseCoupling(r.CouplingText); list.Add(p); } return list; }
     private static List<int> ParseCoupling(string text) { var result = new List<int>(); foreach (var s in text.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) { if (!int.TryParse(s, out var v)) throw new ValidationException($"I/O nối không phải số nguyên: {s}"); result.Add(v); } return result; }

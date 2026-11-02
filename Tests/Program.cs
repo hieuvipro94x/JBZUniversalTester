@@ -36,6 +36,12 @@ internal static partial class Program
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
+        if (args is ["--test-editor-wire-search"])
+        {
+            TestEditorWireSearch();
+            Console.WriteLine("PASS: wire search finds all IO without altering model data");
+            return 0;
+        }
         if (args is ["--test-editor-pin-presentation"])
         {
             TestEditorPinPresentation();
@@ -616,6 +622,7 @@ internal static partial class Program
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
             ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),
+            ("THT wire search locates all IO without changing rows or dirty state", TestEditorWireSearch),
             ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),

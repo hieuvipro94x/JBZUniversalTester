@@ -7,13 +7,26 @@
     <Grid Background="White" Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
             <Button x:Name="InsertRowButton" Style="{StaticResource ActionButton}" Content="THÊM DÒNG SAU DÒNG CHỌN" Padding="12,5" Margin="0,0,8,0" Click="InsertRow_Click"/>
             <Button x:Name="DeleteRowButton" Style="{StaticResource ActionButton}" Content="XÓA DÒNG ĐANG CHỌN" Padding="12,5" Click="DeleteRow_Click"/>
         </StackPanel>
-        <DataGrid x:Name="Grid" Grid.Row="1"
+        <DockPanel Grid.Row="1" Margin="0,0,0,8" LastChildFill="True">
+            <TextBlock DockPanel.Dock="Left" Text="TÌM DÂY / IO" FontWeight="SemiBold" Margin="0,0,10,0" VerticalAlignment="Center"/>
+            <Button x:Name="FindWireButton" DockPanel.Dock="Right" Style="{StaticResource ActionButton}"
+                    Content="TÌM TIẾP" Margin="8,0,0,0" Click="FindWire_Click"/>
+            <Button DockPanel.Dock="Right" Style="{StaticResource ActionButton}"
+                    Content="XÓA TÌM" Margin="8,0,0,0" Click="ClearWireSearch_Click"/>
+            <TextBlock x:Name="WireSearchStatus" DockPanel.Dock="Right" MinWidth="110" Margin="10,0,0,0"
+                       VerticalAlignment="Center" TextAlignment="Right"/>
+            <TextBox x:Name="WireSearchBox" FontSize="17" Padding="7,5"
+                     ToolTip="Tìm IO (175 hoặc IO175), Connector (CN12), Pin (PN3), tên dây hoặc dây nối. Enter: tìm tiếp; Esc: xóa tìm."
+                     TextChanged="WireSearch_TextChanged" PreviewKeyDown="WireSearch_KeyDown"/>
+        </DockPanel>
+        <DataGrid x:Name="Grid" Grid.Row="2"
             Style="{StaticResource GridStyle}"
             ItemsSource="{Binding Rows, RelativeSource={RelativeSource AncestorType=UserControl}}"
             HorizontalScrollBarVisibility="Auto"
