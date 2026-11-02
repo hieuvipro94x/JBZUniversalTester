@@ -89,3 +89,10 @@ and pin matches; other text searches connector, wire name and added-wire fields.
 Search cycles through matches in the complete existing grid without filtering,
 reordering, inserting or removing rows. This preserves structural-edit indexes,
 all model rows and the unsaved-change state even for large THTs.
+
+V2026.09.375 searches automatically after 180 ms of typing inactivity. Search
+selects the first matching row without replacing query text or taking keyboard
+focus/caret from the search box; Enter or Find next still cycles through matches.
+The query is retained when the Wire page reloads. Clear and page unload cancel
+pending search work. The box has an explicit centered 36-pixel height with zero
+vertical padding so text is not clipped by inherited control sizing.

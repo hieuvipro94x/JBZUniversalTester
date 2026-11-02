@@ -104,11 +104,16 @@ public partial class LinePage : UserControl
     private bool _loading, _applyingAutomaticColors;
     private LineRow? _selectedRow;
     private string _lastSearchQuery = "";
+    private readonly System.Windows.Threading.DispatcherTimer _wireSearchTimer = new(
+        System.Windows.Threading.DispatcherPriority.Background)
+        { Interval = TimeSpan.FromMilliseconds(180) };
 
     private void WireSearch_TextChanged(object sender, TextChangedEventArgs e)
     {
+        _wireSearchTimer.Stop();
         _lastSearchQuery = "";
         if (WireSearchStatus is not null) WireSearchStatus.Text = "";
+        if (!_loading && !string.IsNullOrWhiteSpace(WireSearchBox.Text)) _wireSearchTimer.Start();
     }
 
     private void WireSearch_KeyDown(object sender, KeyEventArgs e)
@@ -125,16 +130,30 @@ public partial class LinePage : UserControl
 
     private void FindWire_Click(object sender, RoutedEventArgs e)
     {
+        _wireSearchTimer.Stop();
+        FindWire(advance: true);
+    }
+
+    private void WireSearchTimer_Tick(object? sender, EventArgs e)
+    {
+        _wireSearchTimer.Stop();
+        if (!_loading) FindWire(advance: false);
+    }
+
+    private void FindWire(bool advance)
+    {
         string query = WireSearchBox.Text.Trim();
         if (query.Length == 0) { WireSearchStatus.Text = "Nhập từ khóa"; return; }
         if (!Grid.CommitEdit(DataGridEditingUnit.Cell, true) || !Grid.CommitEdit(DataGridEditingUnit.Row, true))
         { WireSearchStatus.Text = "Kiểm tra ô đang sửa"; return; }
         var matches = Rows.Where(row => MatchesWireSearch(row, query)).ToList();
         if (matches.Count == 0) { WireSearchStatus.Text = "Không tìm thấy"; _lastSearchQuery = query; return; }
-        int current = string.Equals(query, _lastSearchQuery, StringComparison.OrdinalIgnoreCase) && _selectedRow is not null
+        int current = advance && string.Equals(query, _lastSearchQuery, StringComparison.OrdinalIgnoreCase) && _selectedRow is not null
             ? matches.IndexOf(_selectedRow) : -1;
         int next = (current + 1) % matches.Count;
         var target = matches[next];
+        bool keepSearchFocus = WireSearchBox.IsKeyboardFocusWithin;
+        int selectionStart = WireSearchBox.SelectionStart, selectionLength = WireSearchBox.SelectionLength;
         Grid.SelectedCells.Clear();
         Grid.CurrentCell = new DataGridCellInfo(target, Grid.Columns[0]);
         Grid.SelectedCells.Add(Grid.CurrentCell);
@@ -142,6 +161,11 @@ public partial class LinePage : UserControl
         _selectedRow = target;
         _lastSearchQuery = query;
         WireSearchStatus.Text = $"{next + 1}/{matches.Count} kết quả";
+        if (keepSearchFocus)
+        {
+            WireSearchBox.Focus();
+            WireSearchBox.Select(selectionStart, selectionLength);
+        }
     }
 
     private static bool MatchesWireSearch(LineRow row, string query)
@@ -170,6 +194,9 @@ public partial class LinePage : UserControl
         Grid.CanUserResizeColumns = false;
         Grid.CanUserSortColumns = false;
         DataGridKeyboardEditHelper.Attach(Grid, 3);
+        _wireSearchTimer.Tick += WireSearchTimer_Tick;
+        Unloaded += (_, _) => _wireSearchTimer.Stop();
+        Loaded += (_, _) => { if (!string.IsNullOrWhiteSpace(WireSearchBox.Text)) _wireSearchTimer.Start(); };
     }
 
     public void SetColors(IEnumerable<WireColor> colors)
@@ -203,7 +230,8 @@ public partial class LinePage : UserControl
             HasStructuralChanges = false;
             _selectedRow = null;
             _lastSearchQuery = "";
-            WireSearchBox.Clear();
+            _wireSearchTimer.Stop();
+            WireSearchStatus.Text = "";
             Rows.Clear();
             foreach (var p in pins.OrderBy(p => p.Io))
             {
@@ -241,6 +269,7 @@ public partial class LinePage : UserControl
         {
             _loading = false;
         }
+        if (!string.IsNullOrWhiteSpace(WireSearchBox.Text)) _wireSearchTimer.Start();
     }
 
     public List<Pin> ReadData()

@@ -16,7 +16,7 @@ internal static partial class Program
             var pins = Enumerable.Range(1, 640).Select(io => new Pin
             {
                 Io = io, Connector = ((io - 1) / 32 + 1).ToString(), PinNo = (io - 1) % 32 + 1,
-                Line = io is 511 or 512 ? "SHARED-WIRE" : "", Add = io == 600 ? "BRANCH-TARGET" : ""
+                Line = io is 12 or 620 ? "M8C0" : io is 511 or 512 ? "SHARED-WIRE" : "", Add = io == 600 ? "BRANCH-TARGET" : ""
             }).ToList();
             var page = new LinePage();
             page.LoadData(pins);
@@ -58,6 +58,37 @@ internal static partial class Program
             Assert(box.Text == "" && status.Text == "" && page.Rows.SequenceEqual(originalRows) &&
                    JsonSerializer.Serialize(page.ReadData()) == before && changes == 0 && !page.HasStructuralChanges,
                 "Search/clear must preserve all rows, order, values and dirty/structural state");
+            box.Text = "M";
+            await Task.Delay(60);
+            box.Text = "M8";
+            await Task.Delay(60);
+            box.Text = "M8C0";
+            box.CaretIndex = box.Text.Length;
+            await Task.Delay(300);
+            Assert(SelectedIo() == 12 && box.Text == "M8C0" && box.CaretIndex == 4 && status.Text == "1/2 kết quả",
+                "Typing a wire name automatically selects its first match without clearing text or moving the caret");
+            Find("M8C0");
+            Assert(SelectedIo() == 620 && status.Text == "2/2 kết quả", "Explicit next still advances after automatic search");
+            box.Text = "1";
+            await Task.Delay(60);
+            box.Text = "12";
+            await Task.Delay(300);
+            Assert(SelectedIo() == 12 && box.Text == "12" && status.Text == "1/1 kết quả",
+                "Typing a bare IO number automatically selects the exact IO without a button press");
+            page.LoadData(pins);
+            await Task.Delay(300);
+            Assert(box.Text == "12" && SelectedIo() == 12 && changes == 0 &&
+                   JsonSerializer.Serialize(page.ReadData()) == before,
+                "Reloading a page preserves the entered query and model data while restarting automatic search");
+            page.Measure(new Size(1000, 650)); page.Arrange(new Rect(0, 0, 1000, 650)); page.UpdateLayout();
+            Assert(box.Height == 36 && box.Padding.Top == 0 && box.Padding.Bottom == 0 &&
+                   box.VerticalContentAlignment == VerticalAlignment.Center && box.ActualHeight >= 36,
+                "The search box reserves enough centered height so typed characters are not clipped");
+            box.Text = "M8C0";
+            typeof(LinePage).GetMethod("ClearWireSearch_Click", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(page, [page, new RoutedEventArgs()]);
+            await Task.Delay(300);
+            Assert(box.Text == "" && status.Text == "", "Clear cancels a pending automatic search without restoring stale text/results");
             await System.Windows.Threading.Dispatcher.Yield();
         });
     }
