@@ -36,6 +36,18 @@ internal static partial class Program
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
+        if (args is ["--test-editor-blank-clip"])
+        {
+            TestLegacyClipBlankPinTypes();
+            Console.WriteLine("PASS: legacy blank CLIP branches remain blank");
+            return 0;
+        }
+        if (args is ["--test-editor-blank-clip", var blankClipSource])
+        {
+            VerifyLegacyClipBlankFile(blankClipSource);
+            Console.WriteLine("PASS: blank CLIP preservation on temporary copy; original unchanged");
+            return 0;
+        }
         if (args is ["--test-editor-native-file", var nativeEditorPath])
         {
             TestNativeEditorFileCopy(nativeEditorPath);
@@ -596,6 +608,7 @@ internal static partial class Program
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
+            ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
             ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),

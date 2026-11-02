@@ -1206,6 +1206,15 @@ public static class ThtFileService
             IsClipCommonLabel(PinTypeLabelFromPin(pin)))
             ?? specialPins[0];
         var commonIo = common.Io;
+        var originalRows = document.ThtState?.PinRows ?? [];
+        var originalClip = ClipRows(originalRows);
+        bool sameOriginalCommon = originalClip.Any(pair =>
+            pair.Value == commonIo && IsClipCommonLabel(Fit(originalRows[pair.Key], PinHeaders.Length)[4]));
+        var originalBlankBranches = originalClip
+            .Where(pair => pair.Value != commonIo &&
+                string.IsNullOrWhiteSpace(Fit(originalRows[pair.Key], PinHeaders.Length)[4]))
+            .Select(pair => pair.Value)
+            .ToHashSet();
         var isReference17 =
             specialPins.Count == 17 &&
             specialPins.Select(pin => pin.Io)
@@ -1236,7 +1245,11 @@ public static class ThtFileService
             if (!string.Equals(
                     row[4].Trim(),
                     expectedPinType,
-                    StringComparison.OrdinalIgnoreCase))
+                    StringComparison.OrdinalIgnoreCase) &&
+                // MergePins deliberately preserves unnamed legacy branches. Do not
+                // invent an aN branch when validating an otherwise unchanged CLIP.
+                !(sameOriginalCommon && originalBlankBranches.Contains(pin.Io) &&
+                  string.IsNullOrWhiteSpace(row[4])))
             {
                 throw new ThtExportException(
                     $"IO{pin.Io}: PIN TYPE (핀종류) phải là '{expectedPinType}', nhưng đang là '{row[4]}'.");

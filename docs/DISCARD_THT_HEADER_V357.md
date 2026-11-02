@@ -44,3 +44,19 @@ canonicalizes both tables to `_Interlock`, retaining the configured IO, topology
 backup and Leak sidecar protections. Unchanged Settings saves keep their existing
 no-write behavior. Tests cover legacy loading, explicit same-pair migration,
 backup preservation and canonical writes.
+
+## V2026.09.372 — preserve unnamed legacy CLIP branches
+
+Existing THTs can contain an empty PIN TYPE within their AO/aN range, including
+IO197 of W321798.tht. MergePins already retains that empty value, but the export
+validator previously required a generated aN label and rejected the save.
+Validation now accepts a retained blank only for an originally blank CLIP branch
+at the same IO with the original AO common. Named branches and newly created
+CLIP rows retain their existing validation. The runtime parser is unchanged;
+an unnamed branch does not become an active aN branch after an unrelated edit.
+
+Regression coverage saves a six-pin fixture with two unnamed branches, verifies
+raw PIN rows and runtime CLIP semantics through metadata edits, checks exact
+backups, and rejects accidental blanking of an originally named branch. The
+dedicated CLI can check supplied files using temporary copies only. This fix
+does not change wire-catalog normalization or promise byte-exact whole-file saves.
