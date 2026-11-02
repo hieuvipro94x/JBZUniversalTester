@@ -24,7 +24,21 @@
                 </Trigger>
             </Style.Triggers>
         </Style>
+        <Style TargetType="DataGridCell" x:Key="EditorCellStyle">
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#E5E7EB"/>
+                    <Setter Property="Foreground" Value="Black"/>
+                    <Setter Property="BorderBrush" Value="#9CA3AF"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <Style TargetType="DataGrid" x:Key="GridStyle">
+            <Setter Property="CellStyle" Value="{StaticResource EditorCellStyle}"/>
             <Setter Property="Background" Value="White"/>
             <Setter Property="RowBackground" Value="White"/>
             <Setter Property="AlternatingRowBackground" Value="White"/>

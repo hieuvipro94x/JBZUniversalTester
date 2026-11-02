@@ -15,21 +15,6 @@
             SelectionMode="Single"
             SelectionUnit="Cell"
             CellEditEnding="Grid_CellEditEnding">
-            <DataGrid.CellStyle>
-                <Style TargetType="DataGridCell">
-                    <Setter Property="Background" Value="White"/>
-                    <Setter Property="Foreground" Value="Black"/>
-                    <Setter Property="BorderBrush" Value="Transparent"/>
-                    <Setter Property="BorderThickness" Value="1"/>
-                    <Style.Triggers>
-                        <Trigger Property="IsSelected" Value="True">
-                            <Setter Property="Background" Value="White"/>
-                            <Setter Property="Foreground" Value="Black"/>
-                            <Setter Property="BorderBrush" Value="#2563A6"/>
-                        </Trigger>
-                    </Style.Triggers>
-                </Style>
-            </DataGrid.CellStyle>
             <DataGrid.Columns>
                 <DataGridTextColumn Header="STT" Binding="{Binding Index, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
                 <DataGridTextColumn Header="TÊN CONNECTOR" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="*"/>

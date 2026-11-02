@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Threading;
 using JBZUniversalTester.ModelEditor.Models;
 using JBZUniversalTester.ModelEditor.Pages;
@@ -19,132 +20,110 @@ internal static partial class Program
             var page = new PinPage(); page.LoadData(pins);
             using var pinHost = Host(page);
             var grid = (DataGrid)page.FindName("MainGrid");
-            grid.CurrentCell = new DataGridCellInfo(page.Rows[0], grid.Columns[3]);
-            Assert(Press(grid, pinHost, Key.Down), "PIN page handles Down while using an editable column");
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[1]), "Down moves to the next PIN row");
-            var editor = grid.Columns[3].GetCellContent(page.Rows[1]) as TextBox;
-            Assert(editor is not null, "PIN arrow navigation opens the next cell for editing");
-            editor!.Text = "KEEP-TYPE";
-            editor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+            Click(grid, page.Rows[0], 3);
+            AssertGray(grid, page.Rows[0], 3);
+            Assert(grid.Columns[3].GetCellContent(page.Rows[0]) is TextBlock,
+                "Excel-style single click selects PIN cell instead of trapping arrows inside its text editor");
             Press(grid, pinHost, Key.Down);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[1]), "Down after a mouse click moves to the next PIN row");
+            Type(grid, "KEEP-TYPE");
+            Assert(grid.Columns[3].GetCellContent(page.Rows[1]) is TextBox, "Typing starts the selected PIN editor immediately");
+            Press(grid, pinHost, Key.Down); // Event originates in the actual TextBox, not in the grid.
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[2]) && page.ReadData()[1].TestNo == "KEEP-TYPE",
-                "Down commits entered data before leaving the edited PIN cell");
+                "Down routed from a clicked/typed editor commits its value and leaves that cell");
             Press(grid, pinHost, Key.Up);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[1]), "Up returns to the previous PIN row");
-            Press(grid, pinHost, Key.Down); Press(grid, pinHost, Key.Down); Press(grid, pinHost, Key.Down);
+            Press(grid, pinHost, Key.F2);
+            var directEditor = Input(grid)!;
+            Assert(directEditor is not null, "F2 explicitly enables character editing");
+            Press(grid, pinHost, Key.Left);
+            Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[1]), "F2 keeps arrows inside the text instead of moving grid cells");
+            directEditor!.Text = "CANCEL-ME";
+            directEditor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+            Press(grid, pinHost, Key.Escape);
+            Assert(page.ReadData()[1].TestNo == "KEEP-TYPE", "Escape restores the value captured before F2 editing");
+            for (int index = 0; index < 3; index++) Press(grid, pinHost, Key.Down);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[4]),
-                "Rapid arrows cannot let a stale deferred editor focus move the current cell backward");
-            grid.CommitEdit();
-            grid.CurrentCell = new DataGridCellInfo(page.Rows[^1], grid.Columns[3]);
+            Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[4]), "Rapid arrows do not focus stale cells");
+            Click(grid, page.Rows[0], 0);
+            Press(grid, pinHost, Key.Right);
+            Assert(grid.CurrentCell.Column == grid.Columns[1], "Arrow selection includes read-only cells like Excel");
+            string connector = page.Rows[0].Connector;
+            Type(grid, "MUST-NOT-EDIT");
+            Assert(page.Rows[0].Connector == connector, "Selecting read-only Connector never permits data entry");
+            Click(grid, page.Rows[^1], 3);
             Press(grid, pinHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[^1]), "Down at the last row cannot wrap or add a PIN");
+            Assert(ReferenceEquals(grid.CurrentCell.Item, page.Rows[^1]), "Down at the last row cannot add or wrap a PIN");
 
             var lines = new LinePage(); lines.LoadData(pins);
             using var lineHost = Host(lines);
             var lineGrid = (DataGrid)lines.FindName("Grid");
             var search = (TextBox)lines.FindName("WireSearchBox");
             search.Text = "12";
-            Assert(Press(search, lineHost, Key.Down), "Down leaves the search box and navigates the matching grid");
+            PressElement(search, lineHost, Key.Down);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 13 && search.Text == "12",
-                "Down flushes a pending IO search then moves one row without deleting the query");
+            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 13 && search.Text == "12", "Down leaves pending search without losing query text");
             await Task.Delay(250);
-            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 13,
-                "A pending automatic search cannot jump back after explicit arrow navigation");
-            Press(lineGrid, lineHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 14 && lines.Rows.Count == pins.Count && !lines.HasStructuralChanges,
-                "Further Down presses navigate Wire rows without structural edits");
-            // Click the visible text content, as a real mouse click would route
-            // through the cell into the shared grid helper.
-            lineGrid.CommitEdit();
-            var wireText = lineGrid.Columns[3].GetCellContent(lines.Rows[13]);
-            Assert(wireText is not null, "Wire cell is realized for single-click input");
-            var click = new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                { RoutedEvent = Mouse.PreviewMouseDownEvent };
-            wireText!.RaiseEvent(click);
-            var wireEditor = lineGrid.Columns[3].GetCellContent(lines.Rows[13]) as TextBox;
-            Assert(click.Handled && wireEditor is not null,
-                $"One click must open its editor without a second click or F2; handled={click.Handled}, editor={wireEditor is not null}");
-            wireEditor!.Text = "WIRE-EDITED";
-            wireEditor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 13, "Search cannot pull explicit navigation back to the result");
+            Click(lineGrid, lines.Rows[13], 3);
+            AssertGray(lineGrid, lines.Rows[13], 3);
+            Type(lineGrid, "WIRE-EDITED");
             Press(lineGrid, lineHost, Key.Right);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             Assert(lineGrid.CurrentCell.Column == lineGrid.Columns[4] && lines.Rows[13].Line == "WIRE-EDITED",
-                "Right arrow commits the wire name and opens the Add cell");
-            var addEditor = lineGrid.Columns[4].GetCellContent(lines.Rows[13]) as TextBox;
-            Assert(addEditor is not null, "The destination Add cell is ready for immediate typing");
-            addEditor!.Text = "ADD-EDITED";
-            addEditor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
-            Press(lineGrid, lineHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                "Right from the actual text editor commits the wire name and selects Add");
+            Type(lineGrid, "ADD-EDITED");
+            Press(lineGrid, lineHost, Key.Enter);
             Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 15 && lines.Rows[13].Add == "ADD-EDITED",
-                "Down retains entered Add data and moves vertically in the same column");
+                "Enter commits Add and selects the next row");
             Press(lineGrid, lineHost, Key.Left);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(lineGrid.CurrentCell.Column == lineGrid.Columns[3], "Left arrow returns to the wire-name column");
             for (int index = 0; index < 40; index++) Press(lineGrid, lineHost, Key.Down);
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 55 && lines.ReadData()[13].Line == "WIRE-EDITED" &&
-                   lines.ReadData()[13].Add == "ADD-EDITED" && lines.Rows.Count == pins.Count,
-                "Repeated Down navigation reaches virtualized rows without losing prior edits or adding rows");
-            lineGrid.CommitEdit();
-            var thicknessText = lineGrid.Columns[5].GetCellContent(lines.Rows[54]);
-            thicknessText!.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                { RoutedEvent = Mouse.PreviewMouseDownEvent });
-            var thicknessEditor = lineGrid.Columns[5].GetCellContent(lines.Rows[54]) as TextBox;
-            Assert(thicknessEditor is not null, "Thickness also supports immediate single-click typing");
-            thicknessEditor!.Text = "0.5";
-            thicknessEditor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+                lines.ReadData()[13].Add == "ADD-EDITED" && lines.Rows.Count == pins.Count,
+                "Rapid navigation through virtualized rows preserves prior edits and row count");
+            Click(lineGrid, lines.Rows[54], 5); Type(lineGrid, "0.5");
             Press(lineGrid, lineHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(lines.ReadData()[54].Thickness == "0.5", "Thickness input survives arrow navigation");
-            lineGrid.CommitEdit();
-            var ioText = lineGrid.Columns[0].GetCellContent(lines.Rows[55]);
-            ioText!.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                { RoutedEvent = Mouse.PreviewMouseDownEvent });
-            var ioEditor = lineGrid.Columns[0].GetCellContent(lines.Rows[55]) as TextBox;
-            Assert(ioEditor is not null, "The IO cell supports single-click numeric entry");
-            ioEditor!.Text = "156";
-            ioEditor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+            Assert(lines.Rows[54].Thickness == "0.5", "Thickness typing survives Down");
+            Click(lineGrid, lines.Rows[55], 0); Type(lineGrid, "156");
             Press(lineGrid, lineHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(lines.ReadData()[55].Io == 156 && ((LineRow)lineGrid.CurrentCell.Item).Io == 57,
-                "IO entry is committed before moving to the next actual row");
-            lineGrid.UpdateLayout();
-            lineGrid.Columns[0].GetCellContent(lines.Rows[56]).RaiseEvent(
-                new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
-                { RoutedEvent = Mouse.PreviewMouseDownEvent });
-            var invalidIoEditor = (TextBox)lineGrid.Columns[0].GetCellContent(lines.Rows[56]);
-            invalidIoEditor.Text = "INVALID-IO";
-            invalidIoEditor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+            Assert(lines.Rows[55].Io == 156 && ((LineRow)lineGrid.CurrentCell.Item).Io == 57, "Numeric IO commits before Down");
+            Type(lineGrid, "INVALID-IO"); Press(lineGrid, lineHost, Key.Down);
+            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 57 && Input(lineGrid)?.Text == "INVALID-IO",
+                "Invalid numeric input remains in its editor instead of being discarded");
+            Press(lineGrid, lineHost, Key.Escape);
+            Assert(lines.Rows[56].Io == 57, "Escape restores a valid numeric IO");
+            Click(lineGrid, lines.Rows[57], 6); Type(lineGrid, "R");
             Press(lineGrid, lineHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 57 && invalidIoEditor.Text == "INVALID-IO",
-                "An invalid numeric IO must stay editable instead of losing input during navigation");
-            invalidIoEditor.Text = "57";
-            invalidIoEditor.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
-            Press(lineGrid, lineHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 58, "Navigation resumes after correcting invalid numeric input");
-            lineGrid.CommitEdit();
-            lineGrid.CurrentCell = new DataGridCellInfo(lines.Rows[57], lineGrid.Columns[5]);
-            Press(lineGrid, lineHost, Key.Right);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            var colorContent = lineGrid.Columns[6].GetCellContent(lines.Rows[57]);
-            var color = FindCombo(colorContent);
-            Assert(color is { IsEditable: true }, "Right into Color materializes an editable ComboBox");
-            color!.Text = "R";
-            color.GetBindingExpression(ComboBox.TextProperty)!.UpdateSource();
-            Press(lineGrid, lineHost, Key.Down);
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Assert(((LineRow)lineGrid.CurrentCell.Item).Io == 59 && lines.Rows[57].Color == "R",
-                "Color entry survives Down navigation in the same column");
+            Assert(lines.Rows[57].Color == "R" && ((LineRow)lineGrid.CurrentCell.Item).Io == 59,
+                "Color typing and vertical navigation retain the chosen code");
+            Click(lineGrid, lines.Rows[0], 6); Press(lineGrid, lineHost, Key.Tab);
+            Assert(ReferenceEquals(lineGrid.CurrentCell.Item, lines.Rows[1]) && lineGrid.CurrentCell.Column == lineGrid.Columns[0],
+                "Tab skips read-only preview columns and wraps to the next editable row");
+
+            var connectors = new ConnectorPage();
+            connectors.LoadData(new ModelDocument { Connectors = [new() { Name = "A", PinCount = 1, StartIo = 1 }, new() { Name = "B", PinCount = 1, StartIo = 2 }] });
+            using var connectorHost = Host(connectors);
+            var connectorGrid = (DataGrid)connectors.FindName("Grid");
+            Click(connectorGrid, connectors.Rows[0], 1); Type(connectorGrid, "CN-EDIT");
+            Press(connectorGrid, connectorHost, Key.Down);
+            Assert(ReferenceEquals(connectorGrid.CurrentCell.Item, connectors.Rows[1]) && connectors.Rows[0].Name == "CN-EDIT",
+                "Connector supports the same click/type/arrow workflow");
+            AssertGray(connectorGrid, connectors.Rows[1], 1);
+
+            var colors = new ColorPage(); colors.Colors.Clear();
+            colors.Colors.Add(new WireColor { Code = "R", Name = "Red", Value = "#FF0000" });
+            colors.Colors.Add(new WireColor { Code = "G", Name = "Green", Value = "#00FF00" });
+            using var colorHost = Host(colors);
+            var colorGrid = (DataGrid)colors.FindName("Grid");
+            Click(colorGrid, colors.Colors[0], 0); Press(colorGrid, colorHost, Key.Down);
+            Assert(ReferenceEquals(colorGrid.CurrentCell.Item, colors.Colors[1]) && ReferenceEquals(colorGrid.SelectedItem, colors.Colors[1]),
+                "Read-only color table navigation also updates the selected palette row");
+            AssertGray(colorGrid, colors.Colors[1], 0);
+            Type(colorGrid, "MUST-NOT-EDIT");
+            Assert(colors.Colors[1].Code == "G", "Color-table navigation cannot bypass its read-only editing policy");
         });
 
         static HwndSource Host(FrameworkElement root)
@@ -155,22 +134,58 @@ internal static partial class Program
             root.Measure(new Size(1100, 650)); root.Arrange(new Rect(0, 0, 1100, 650)); root.UpdateLayout();
             return host;
         }
-        static bool Press(UIElement element, HwndSource host, Key key)
+        static DataGridCell Cell(DataGrid grid, object item, int column)
+        {
+            grid.ScrollIntoView(item, grid.Columns[column]); grid.UpdateLayout();
+            DependencyObject? child = grid.Columns[column].GetCellContent(item);
+            while (child is not null && child is not DataGridCell) child = VisualTreeHelper.GetParent(child);
+            return (DataGridCell)(child ?? throw new InvalidOperationException("Cell was not realized"));
+        }
+        static void Click(DataGrid grid, object item, int column)
+        {
+            Cell(grid, item, column).RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left)
+                { RoutedEvent = Mouse.PreviewMouseDownEvent });
+        }
+        static void AssertGray(DataGrid grid, object item, int column)
+        {
+            var cell = Cell(grid, item, column);
+            Assert(cell.Background is SolidColorBrush brush && brush.Color == Color.FromRgb(0xE5, 0xE7, 0xEB) &&
+                   cell.Foreground is SolidColorBrush foreground && foreground.Color == Colors.Black,
+                "Selected cells use light gray and black text consistently across editor pages");
+        }
+        static TextBox? Input(DataGrid grid) => FindText(grid.CurrentCell.Column.GetCellContent(grid.CurrentCell.Item));
+        static TextBox? FindText(DependencyObject? root)
+        {
+            if (root is null) return null;
+            if (root is TextBox box) return box;
+            for (int index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            {
+                var found = FindText(VisualTreeHelper.GetChild(root, index)); if (found is not null) return found;
+            }
+            return null;
+        }
+        static void Type(DataGrid grid, string text)
+        {
+            UIElement source = (UIElement?)Input(grid) ?? Cell(grid, grid.CurrentCell.Item, grid.CurrentCell.Column.DisplayIndex);
+            var composition = new TextComposition(InputManager.Current, source, text);
+            var preview = new TextCompositionEventArgs(Keyboard.PrimaryDevice, composition)
+                { RoutedEvent = TextCompositionManager.PreviewTextInputEvent };
+            source.RaiseEvent(preview);
+            if (!preview.Handled) source.RaiseEvent(new TextCompositionEventArgs(Keyboard.PrimaryDevice, composition)
+                { RoutedEvent = TextCompositionManager.TextInputEvent });
+        }
+        static void Press(DataGrid grid, HwndSource host, Key key)
+        {
+            UIElement source = (UIElement?)Input(grid) ?? Cell(grid, grid.CurrentCell.Item, grid.CurrentCell.Column.DisplayIndex);
+            PressElement(source, host, key);
+        }
+        static void PressElement(UIElement source, HwndSource host, Key key)
         {
             var args = new KeyEventArgs(Keyboard.PrimaryDevice, host, Environment.TickCount, key)
                 { RoutedEvent = Keyboard.PreviewKeyDownEvent };
-            element.RaiseEvent(args);
-            return args.Handled;
-        }
-        static ComboBox? FindCombo(DependencyObject root)
-        {
-            if (root is ComboBox combo) return combo;
-            for (int index = 0; index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); index++)
-            {
-                var found = FindCombo(System.Windows.Media.VisualTreeHelper.GetChild(root, index));
-                if (found is not null) return found;
-            }
-            return null;
+            source.RaiseEvent(args);
+            if (!args.Handled) source.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, host, Environment.TickCount, key)
+                { RoutedEvent = Keyboard.KeyDownEvent });
         }
     }
 }

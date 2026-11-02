@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -9,210 +10,220 @@ namespace JBZUniversalTester.ModelEditor.Helpers;
 
 public static class DataGridKeyboardEditHelper
 {
+    private sealed class InputState
+    {
+        public object? Item;
+        public DataGridColumn? Column;
+        public string? OriginalText;
+        public bool DirectTextEdit;
+        public void Reset() { Item = null; Column = null; OriginalText = null; DirectTextEdit = false; }
+    }
+    private static readonly ConditionalWeakTable<DataGrid, InputState> States = new();
+
     public static void Attach(DataGrid grid, int preferredEditableDisplayIndex)
     {
+        if (States.TryGetValue(grid, out _)) return;
+        var state = new InputState();
+        States.Add(grid, state);
         grid.PreviewMouseLeftButtonDown += (_, e) =>
         {
             var origin = e.OriginalSource as DependencyObject;
             var cell = FindAncestor<DataGridCell>(origin);
-            if (grid.IsReadOnly || cell is null || cell.IsReadOnly || cell.IsEditing ||
-                !ReferenceEquals(FindAncestor<DataGrid>(cell), grid) ||
-                FindAncestor<ComboBox>(origin) is not null || FindAncestor<ButtonBase>(origin) is not null)
-                return;
-            if (!grid.CommitEdit(DataGridEditingUnit.Cell, true) || !grid.CommitEdit(DataGridEditingUnit.Row, true))
-            { e.Handled = true; return; }
-            grid.CurrentCell = new DataGridCellInfo(cell);
-            if (grid.SelectionUnit == DataGridSelectionUnit.Cell)
+            if (cell is null || !ReferenceEquals(FindAncestor<DataGrid>(cell), grid) ||
+                FindAncestor<ButtonBase>(origin) is not null) return;
+            if (e.ClickCount >= 2 && !cell.IsReadOnly)
             {
-                grid.SelectedCells.Clear();
-                grid.SelectedCells.Add(grid.CurrentCell);
+                SelectCell(grid, cell.DataContext, cell.Column);
+                BeginInput(grid, state, direct: true);
+                e.Handled = true;
+                return;
             }
-            else grid.SelectedItem = cell.DataContext;
+            if (!CommitInput(grid, state)) { e.Handled = true; return; }
+            SelectCell(grid, cell.DataContext, cell.Column);
             cell.Focus();
-            if (grid.BeginEdit())
-            {
-                FocusEditor(grid, cell.DataContext, cell.Column);
-                e.Handled = true;
-            }
+            e.Handled = true;
         };
-        grid.PreviewKeyDown += (_, e) =>
+        grid.AddHandler(TextCompositionManager.PreviewTextInputEvent,
+            new TextCompositionEventHandler((_, e) =>
+            {
+                if (string.IsNullOrEmpty(e.Text) || e.Text.All(char.IsControl) || grid.IsReadOnly ||
+                    grid.CurrentCell.Column is null || grid.CurrentCell.Column.IsReadOnly) return;
+                var cell = GetRealizedCell(grid, grid.CurrentCell.Item, grid.CurrentCell.Column);
+                if (cell?.IsEditing == true) return; // Native TextBox input appends/edits normally.
+                var editor = BeginInput(grid, state, direct: false);
+                if (editor is null) return;
+                editor.SelectAll();
+                editor.SelectedText = e.Text;
+                editor.CaretIndex = editor.Text.Length;
+                UpdateEditorSource(editor);
+                e.Handled = true;
+            }), true);
+        grid.AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler((_, e) =>
         {
-            if (e.Key is Key.Delete or Key.Back &&
-                FindAncestor<TextBox>(Keyboard.FocusedElement as DependencyObject) is null &&
-                grid.CurrentCell.Column is DataGridTextColumn { IsReadOnly: false } textColumn &&
-                grid.CurrentCell.Item is { } textItem)
+            var origin = e.OriginalSource as DependencyObject;
+            var combo = FindAncestor<ComboBox>(origin) ?? FindAncestor<ComboBox>(Keyboard.FocusedElement as DependencyObject);
+            if (combo?.IsDropDownOpen == true && e.Key is Key.Up or Key.Down or Key.Enter or Key.Escape)
+                return;
+            if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) != 0) return;
+            if (e.Key == Key.F2)
             {
-                if (grid.BeginEdit())
-                {
-                    grid.Dispatcher.BeginInvoke(() =>
-                    {
-                        if (!IsCurrentCell(grid, textItem, textColumn)) return;
-                        FocusEditor(grid, textItem, textColumn);
-                        if (FindAncestor<TextBox>(Keyboard.FocusedElement as DependencyObject) is { } editor)
-                            editor.Clear();
-                    }, DispatcherPriority.Input);
-                    e.Handled = true;
-                }
+                e.Handled = BeginInput(grid, state, direct: true) is not null;
                 return;
             }
-            if (e.Key is not (Key.Up or Key.Down or Key.Left or Key.Right))
-                return;
-
-            var focused = Keyboard.FocusedElement as DependencyObject;
-            var combo = FindAncestor<ComboBox>(focused);
-
-            // Nếu ComboBox màu đang xổ xuống thì ↑/↓ vẫn dùng để chọn màu.
-            if (combo is not null &&
-                combo.IsDropDownOpen &&
-                e.Key is Key.Up or Key.Down)
-                return;
-
-            if (MoveAndEdit(grid, e.Key, preferredEditableDisplayIndex))
+            if (e.Key == Key.Escape)
+            {
+                if (state.OriginalText is not null && state.Item is not null && state.Column is not null &&
+                    IsCurrentCell(grid, state.Item, state.Column))
+                {
+                    var editor = GetInputEditor(grid, state.Item, state.Column);
+                    if (editor is not null) { editor.Text = state.OriginalText; UpdateEditorSource(editor); }
+                }
+                grid.CancelEdit(DataGridEditingUnit.Cell);
+                grid.CancelEdit(DataGridEditingUnit.Row);
+                state.Reset();
+                FocusSelection(grid);
                 e.Handled = true;
-        };
+                return;
+            }
+            if (e.Key is Key.Delete or Key.Back)
+            {
+                var current = grid.CurrentCell;
+                if (!current.IsValid || GetRealizedCell(grid, current.Item, current.Column)?.IsEditing == true)
+                    return; // Native Delete/Backspace while typing.
+                var editor = BeginInput(grid, state, direct: false);
+                if (editor is null) return;
+                editor.Clear(); UpdateEditorSource(editor);
+                if (e.Key == Key.Delete && CommitInput(grid, state)) FocusSelection(grid);
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.Tab)
+            {
+                e.Handled = MoveTab(grid, state, (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? -1 : 1);
+                return;
+            }
+            if (e.Key == Key.Enter)
+            {
+                e.Handled = MoveAndEdit(grid, (Keyboard.Modifiers & ModifierKeys.Shift) != 0 ? Key.Up : Key.Down,
+                    preferredEditableDisplayIndex);
+                return;
+            }
+            if (e.Key is not (Key.Up or Key.Down or Key.Left or Key.Right)) return;
+            if (state.DirectTextEdit && state.Item is not null && state.Column is not null &&
+                IsCurrentCell(grid, state.Item, state.Column) && GetRealizedCell(grid, state.Item, state.Column)?.IsEditing == true)
+                return; // F2/double-click deliberately edits characters, like Excel.
+            e.Handled = MoveAndEdit(grid, e.Key, preferredEditableDisplayIndex);
+        }), true);
     }
 
-    internal static bool MoveAndEdit(
-        DataGrid grid,
-        Key key,
-        int preferredEditableDisplayIndex)
+    private static TextBox? BeginInput(DataGrid grid, InputState state, bool direct)
     {
-        if (grid.Items.Count == 0 || grid.Columns.Count == 0)
-            return false;
-
-        var currentItem = grid.CurrentItem;
-        var currentColumn = grid.CurrentCell.Column;
-
-        var rowIndex = currentItem is null
-            ? -1
-            : grid.Items.IndexOf(currentItem);
-
-        if (rowIndex < 0)
+        var current = grid.CurrentCell;
+        if (!current.IsValid || grid.IsReadOnly || current.Column.IsReadOnly) return null;
+        bool alreadyEditing = GetRealizedCell(grid, current.Item, current.Column)?.IsEditing == true;
+        if (!alreadyEditing && !grid.BeginEdit()) return null;
+        var editor = GetInputEditor(grid, current.Item, current.Column);
+        if (editor is null) return null;
+        if (!alreadyEditing || !ReferenceEquals(state.Item, current.Item) || !ReferenceEquals(state.Column, current.Column))
         {
-            rowIndex = grid.SelectedIndex;
-            if (rowIndex < 0 || rowIndex >= grid.Items.Count)
-                rowIndex = 0;
+            state.Item = current.Item; state.Column = current.Column; state.OriginalText = editor.Text;
         }
+        state.DirectTextEdit = direct;
+        editor.Focus();
+        if (direct) editor.CaretIndex = editor.Text.Length;
+        else editor.SelectAll();
+        return editor;
+    }
 
-        var displayIndex = currentColumn?.DisplayIndex
-                           ?? preferredEditableDisplayIndex;
+    private static TextBox? GetInputEditor(DataGrid grid, object item, DataGridColumn column)
+    {
+        var cell = GetCell(grid, item, column);
+        if (cell is null) return null;
+        column.GetCellContent(item)?.ApplyTemplate();
+        var combo = FindVisualChild<ComboBox>(cell);
+        combo?.ApplyTemplate();
+        return FindVisualChild<TextBox>(cell);
+    }
 
-        // Chốt dữ liệu vừa nhập trước khi điều hướng.
-        if (!grid.CommitEdit(DataGridEditingUnit.Cell, true) || !grid.CommitEdit(DataGridEditingUnit.Row, true))
-            return true; // Keep invalid input in its cell; consume the arrow.
+    private static void UpdateEditorSource(TextBox editor)
+    {
+        editor.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+        FindAncestor<ComboBox>(editor)?.GetBindingExpression(ComboBox.TextProperty)?.UpdateSource();
+    }
 
-        var targetRow = rowIndex;
-        var targetDisplayIndex = displayIndex;
+    private static bool CommitInput(DataGrid grid, InputState? state)
+    {
+        if (!grid.CommitEdit(DataGridEditingUnit.Cell, true) || !grid.CommitEdit(DataGridEditingUnit.Row, true)) return false;
+        state?.Reset();
+        return true;
+    }
 
-        switch (key)
-        {
-            case Key.Up:
-                targetRow--;
-                break;
-            case Key.Down:
-                targetRow++;
-                break;
-            case Key.Left:
-                targetDisplayIndex--;
-                break;
-            case Key.Right:
-                targetDisplayIndex++;
-                break;
-        }
-
-        if (key is Key.Left or Key.Right)
-        {
-            var step = key == Key.Left ? -1 : 1;
-            while (targetDisplayIndex >= 0 && targetDisplayIndex < grid.Columns.Count)
-            {
-                var candidate = grid.Columns.FirstOrDefault(column => column.DisplayIndex == targetDisplayIndex);
-                if (candidate is { IsReadOnly: false }) break;
-                targetDisplayIndex += step;
-            }
-        }
-
-        if (targetRow < 0 ||
-            targetRow >= grid.Items.Count ||
-            targetDisplayIndex < 0 ||
-            targetDisplayIndex >= grid.Columns.Count)
-            return false;
-
-        var targetItem = grid.Items[targetRow];
-        var targetColumn = grid.Columns
-            .FirstOrDefault(c => c.DisplayIndex == targetDisplayIndex);
-
-        if (targetColumn is null)
-            return false;
-
-        grid.CurrentCell = new DataGridCellInfo(targetItem, targetColumn);
+    private static void SelectCell(DataGrid grid, object item, DataGridColumn column)
+    {
+        grid.CurrentCell = new DataGridCellInfo(item, column);
         if (grid.SelectionUnit == DataGridSelectionUnit.Cell)
         {
-            grid.SelectedCells.Clear();
-            grid.SelectedCells.Add(grid.CurrentCell);
+            grid.SelectedCells.Clear(); grid.SelectedCells.Add(grid.CurrentCell);
         }
-        grid.ScrollIntoView(targetItem, targetColumn);
-        grid.Focus();
+        else grid.SelectedItem = item;
+    }
 
-        grid.Dispatcher.BeginInvoke(
-            () =>
+    private static void FocusSelection(DataGrid grid)
+    {
+        var target = grid.CurrentCell;
+        if (!target.IsValid) return;
+        grid.ScrollIntoView(target.Item, target.Column);
+        var cell = GetRealizedCell(grid, target.Item, target.Column);
+        if (cell is not null) cell.Focus();
+        else grid.Dispatcher.BeginInvoke(() =>
+        {
+            if (IsCurrentCell(grid, target.Item, target.Column)) GetCell(grid, target.Item, target.Column)?.Focus();
+        }, DispatcherPriority.Input);
+    }
+
+    internal static bool MoveAndEdit(DataGrid grid, Key key, int preferredEditableDisplayIndex)
+    {
+        if (grid.Items.Count == 0 || grid.Columns.Count == 0) return false;
+        var current = grid.CurrentCell;
+        int row = current.IsValid ? grid.Items.IndexOf(current.Item) : Math.Max(0, grid.SelectedIndex);
+        int column = current.Column?.DisplayIndex ?? preferredEditableDisplayIndex;
+        States.TryGetValue(grid, out var state);
+        if (!CommitInput(grid, state)) return true;
+        if (key == Key.Up) row--; else if (key == Key.Down) row++;
+        else if (key == Key.Left) column--; else if (key == Key.Right) column++;
+        if (row < 0 || row >= grid.Items.Count) return true;
+        int step = key == Key.Left ? -1 : 1;
+        while (column >= 0 && column < grid.Columns.Count)
+        {
+            var candidate = grid.Columns.FirstOrDefault(c => c.DisplayIndex == column && c.Visibility == Visibility.Visible);
+            if (candidate is not null)
             {
-                if (!IsCurrentCell(grid, targetItem, targetColumn)) return;
-                if (!targetColumn.IsReadOnly)
-                {
-                    grid.BeginEdit();
-                    FocusEditor(grid, targetItem, targetColumn);
-                }
-                else
-                {
-                    GetCell(grid, targetItem, targetColumn)?.Focus();
-                }
-            },
-            DispatcherPriority.Input);
-
+                SelectCell(grid, grid.Items[row], candidate); FocusSelection(grid); return true;
+            }
+            column += step;
+        }
         return true;
+    }
+
+    private static bool MoveTab(DataGrid grid, InputState state, int direction)
+    {
+        var current = grid.CurrentCell;
+        if (!current.IsValid || grid.Items.Count == 0 || grid.Columns.Count == 0) return false;
+        if (!CommitInput(grid, state)) return true;
+        int flat = grid.Items.IndexOf(current.Item) * grid.Columns.Count + current.Column.DisplayIndex;
+        for (flat += direction; flat >= 0 && flat < grid.Items.Count * grid.Columns.Count; flat += direction)
+        {
+            int columnIndex = flat % grid.Columns.Count;
+            var column = grid.Columns.FirstOrDefault(c => c.DisplayIndex == columnIndex &&
+                c.Visibility == Visibility.Visible && !c.IsReadOnly && !grid.IsReadOnly);
+            if (column is null) continue;
+            SelectCell(grid, grid.Items[flat / grid.Columns.Count], column); FocusSelection(grid); return true;
+        }
+        return false;
     }
 
     private static bool IsCurrentCell(DataGrid grid, object item, DataGridColumn column) =>
         ReferenceEquals(grid.CurrentCell.Item, item) && ReferenceEquals(grid.CurrentCell.Column, column);
-
-    private static void FocusEditor(
-        DataGrid grid,
-        object item,
-        DataGridColumn column)
-    {
-        var cell = GetCell(grid, item, column);
-        if (cell is null) return;
-        // Template columns (for example the editable color ComboBox) may
-        // not have created their editor yet. Materialize just this cell's
-        // content instead of forcing another full-grid layout.
-        column.GetCellContent(item)?.ApplyTemplate();
-
-        var textBox = FindVisualChild<TextBox>(cell);
-        if (textBox is not null)
-        {
-            textBox.Focus();
-            textBox.SelectAll();
-            return;
-        }
-
-        var combo = FindVisualChild<ComboBox>(cell);
-        if (combo is not null)
-        {
-            combo.Focus();
-
-            if (combo.IsEditable)
-            {
-                combo.ApplyTemplate();
-                if (combo.Template.FindName(
-                        "PART_EditableTextBox",
-                        combo) is TextBox editor)
-                {
-                    editor.Focus();
-                    editor.SelectAll();
-                }
-            }
-        }
-    }
 
     private static DataGridCell? GetCell(
         DataGrid grid,

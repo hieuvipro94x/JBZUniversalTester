@@ -1,4 +1,4 @@
-﻿<UserControl x:Class="JBZUniversalTester.ModelEditor.Pages.PinPage"
+<UserControl x:Class="JBZUniversalTester.ModelEditor.Pages.PinPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"><UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="../EditorResources.xaml"/></ResourceDictionary.MergedDictionaries></ResourceDictionary></UserControl.Resources>
     <Grid Background="White" Margin="8">
@@ -7,6 +7,7 @@
             Style="{StaticResource GridStyle}"
             ItemsSource="{Binding Rows, RelativeSource={RelativeSource AncestorType=UserControl}}"
             RowHeight="NaN" MinRowHeight="32" ColumnHeaderHeight="36"
+            SelectionUnit="Cell" SelectionMode="Single"
             CanUserAddRows="False"
             CanUserDeleteRows="False"
             CanUserReorderColumns="False"

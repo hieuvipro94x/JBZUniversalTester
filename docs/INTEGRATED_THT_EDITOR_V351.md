@@ -115,3 +115,20 @@ uses one guarded deferred edit callback. Read-only Connector/Pin and color-previ
 columns retain their existing permissions. Hosted WPF regressions cover single
 clicks, typing and committing wire/add/thickness/IO values, 40 rapid Down presses
 into virtualized rows, and recovery from invalid numeric input.
+
+V2026.09.377 adopts Excel-style selection instead of forcing every mouse click
+into a text editor. A single click selects a cell; typing replaces its value.
+Arrows commit normal entry and move the selection, Enter moves vertically, and
+Tab advances through editable cells with row wrapping. F2/double-click explicitly
+edits characters inside a cell; Escape restores the pre-edit text. Invalid
+numeric input remains available for correction. Events are handled from their
+actual editor origin, including already-handled preview events, and navigation
+uses CurrentCell rather than the collection-view current item. Connector, PIN,
+Wire and the read-only Color table share the same navigation helper. Palette
+editing permissions, model logic and all hardware lifecycles are unchanged.
+
+Selected cells use light gray (#E5E7EB), black text and a gray border consistently
+across those tables. Actual wire-color swatches retain their configured colors.
+The keyboard regression now routes text and keys from cell/TextBox controls and
+covers selection after clicking, typed values, F2/Escape, read-only cells, Enter,
+Tab row wrapping, virtualized rows and the selected-cell brushes on all tables.
