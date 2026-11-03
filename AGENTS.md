@@ -249,6 +249,23 @@ Do not include hidden reasoning, long explanations, command-by-command narration
 
 # Detailed Technical Reference
 
+## Standing user authorization: mobile delivery workflow
+
+The user works through Codex mobile and explicitly requests automatic delivery
+after every completed source-code change. Once the required build and applicable
+tests pass, run `BUILD_ONE_FILE.cmd`, complete its build/commit/push confirmations,
+and copy the entire resulting version folder from `PublishSingle` to
+`\\192.168.10.150\public\NAM\<version-folder>`. No repeated user confirmation is
+needed for these steps. Verify the pushed branch/commit and SHA256 hashes of all
+copied files, and report the version, branch/commit and destination.
+
+Preserve unrelated local changes and any runtime data already at the destination.
+Do not overwrite an existing release folder containing production CFG/history
+without first preserving those contents. If build, tests, push or network copy
+fails, report the failed step clearly and never claim complete delivery. Read-only
+reviews do not trigger build/publish delivery. A later explicit user instruction
+can override this workflow.
+
 Primary deep reference:
 
 `docs/BAO_CAO_TONG_HOP_CODEX_REVIEW_V15_0_0.md`
