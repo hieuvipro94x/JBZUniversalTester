@@ -338,7 +338,7 @@
                                                     <Button x:Name="ClearDiscardIoButton" Grid.Column="1" Content="XÓA CẶP IO" Style="{StaticResource SettingsPrimaryButtonStyle}" Click="ClearDiscardIo_Click"
                                                             Height="34" MinWidth="112" FontSize="13" Padding="12,0" Margin="0" SnapsToDevicePixels="True"/>
                                                 </Grid>
-                                                <TextBlock x:Name="DiscardLearningResultText" Text="Bấm TỰ NHẬN IO, đưa tay/vật qua cảm biến rồi lấy ra. Bấm Lưu để ghi cặp IO vào THT của mã hàng trên; bản gốc được sao lưu trong ThtBackups. Xóa cả hai ô và Lưu để bỏ cấu hình thùng lỗi của mã này." TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
+                                                <TextBlock x:Name="DiscardLearningResultText" Height="64" VerticalAlignment="Top" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Text="Bấm TỰ NHẬN IO, đưa tay/vật qua cảm biến rồi lấy ra. Bấm Lưu để ghi cặp IO vào THT của mã hàng trên; bản gốc được sao lưu trong ThtBackups. Xóa cả hai ô và Lưu để bỏ cấu hình thùng lỗi của mã này." TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
                                             </StackPanel>
                                         </Grid>
 

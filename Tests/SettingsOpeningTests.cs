@@ -64,6 +64,24 @@ internal static partial class Program
                     var scroll = (ScrollViewer)page.FindName("SettingsScrollViewer");
                     Assert(scroll.ScrollableHeight < 1 && scroll.ScrollableWidth < 1,
                         "Settings has no scrolling at supported production resolutions");
+                    var resultText = (TextBlock)page.FindName("DiscardLearningResultText");
+                    Rect PanelBounds(Border panel) => new(panel.TranslatePoint(new Point(), page),
+                        panel.TranslatePoint(new Point(panel.ActualWidth, panel.ActualHeight), page));
+                    Rect[] originalBounds = panels.Select(PanelBounds).ToArray();
+                    string originalMessage = resultText.Text;
+                    foreach (string message in new[]
+                    {
+                        "ĐÃ HỌC IO 97 / 98 cho 2.tht. Bấm Lưu để ghi vào THT của mã này.",
+                        "Bấm Lưu để xóa cặp IO thùng lỗi khỏi 2.tht.",
+                        "ĐÃ HỌC IO 639 / 640 cho " + new string('W', 160) + ".tht. Bấm Lưu để ghi vào THT của mã này.",
+                        originalMessage
+                    })
+                    {
+                        resultText.Text = message;
+                        page.UpdateLayout();
+                        Assert(panels.Select(PanelBounds).SequenceEqual(originalBounds),
+                            "Learning completion/clear messages cannot resize or rescale any Settings panel after the dialog closes");
+                    }
                     foreach (Border panel in panels)
                     {
                         Point top = panel.TranslatePoint(new Point(), page);
