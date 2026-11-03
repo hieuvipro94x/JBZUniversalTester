@@ -225,11 +225,12 @@
                 <TextBlock Text="CÀI ĐẶT PRODUCTION" FontSize="21" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Grid>
         </Border>
-        <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="1" Margin="12,4"
-                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+        <Viewbox x:Name="SettingsFitViewbox" Grid.Row="1" Margin="12,4" Stretch="Uniform" StretchDirection="DownOnly" VerticalAlignment="Top">
+        <ScrollViewer x:Name="SettingsScrollViewer" Width="1800"
+                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"
                       HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top"
                       CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged">
-            <Grid x:Name="SettingsPanelsHost" MinWidth="540" Width="{Binding ViewportWidth, ElementName=SettingsScrollViewer}">
+            <Grid x:Name="SettingsPanelsHost" Width="1800">
                 <Grid x:Name="UnifiedSettingsGrid" Margin="4" HorizontalAlignment="Stretch"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                                 <Border x:Name="IoSettingsPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="0" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Stretch">
                                     <StackPanel>
@@ -340,42 +341,7 @@
                                                 <TextBlock x:Name="DiscardLearningResultText" Text="Bấm TỰ NHẬN IO, đưa tay/vật qua cảm biến rồi lấy ra. Bấm Lưu để ghi cặp IO vào THT của mã hàng trên; bản gốc được sao lưu trong ThtBackups. Xóa cả hai ô và Lưu để bỏ cấu hình thùng lỗi của mã này." TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
                                             </StackPanel>
                                         </Grid>
-                                        <StackPanel Margin="0,4,0,0">
-                                            <StackPanel.Style>
-                                                <Style TargetType="StackPanel">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsManualPanelVisible}" Value="True">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </StackPanel.Style>
-                                            <TextBlock Text="MANUAL RELAY" Style="{StaticResource SectionTitleStyle}"/>
-                                            <Grid x:Name="ManualRelayControlsGrid" HorizontalAlignment="Stretch">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="64"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="48"/>
-                                                </Grid.ColumnDefinitions>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="30"/>
-                                                    <RowDefinition Height="30"/>
-                                                    <RowDefinition Height="30"/>
-                                                    <RowDefinition Height="30"/>
-                                                </Grid.RowDefinitions>
-                                                <TextBlock Text="Relay 1" Style="{StaticResource FieldLabelStyle}"/>
-                                                <Button Margin="3,2,3,2" Grid.Column="1" Grid.ColumnSpan="2" Content="BẬT R1" Command="{Binding ManualRelay1OnCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                                <TextBlock Grid.Column="3" Text="{Binding ManualRelay1Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                                <TextBlock Grid.Row="1" Text="Relay 2" Style="{StaticResource FieldLabelStyle}"/>
-                                                <Button Margin="3,2,3,2" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="BẬT R2" Command="{Binding ManualRelay2OnCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                                <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                                <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="1" Content="TẮT TẤT CẢ" Command="{Binding ManualRelay1OffCommand}" Style="{StaticResource SettingsExitButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                                <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="2" Content="RESET" Command="{Binding ManualResetCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                                <TextBlock Grid.Row="3" Grid.ColumnSpan="4" Text="{Binding ManualStatus}" Foreground="{StaticResource TextMuted}" FontSize="14"/>
-                                            </Grid>
-                                        </StackPanel>
+
                                     </StackPanel>
                                 </Border>
                                 <Border x:Name="RelayLeakMainPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Stretch"><StackPanel x:Name="RelayLeakSettingsColumn" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="0">
@@ -524,7 +490,43 @@
                                             </StackPanel>
                                         </StackPanel>
                                     </Border>
-                                </StackPanel>
+                                <StackPanel Margin="0,4,0,0">
+                                            <StackPanel.Style>
+                                                <Style TargetType="StackPanel">
+                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsManualPanelVisible}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </StackPanel.Style>
+                                            <TextBlock Text="MANUAL RELAY" Style="{StaticResource SectionTitleStyle}"/>
+                                            <Grid x:Name="ManualRelayControlsGrid" HorizontalAlignment="Stretch">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="64"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="48"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="30"/>
+                                                    <RowDefinition Height="30"/>
+                                                    <RowDefinition Height="30"/>
+                                                    <RowDefinition Height="30"/>
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Relay 1" Style="{StaticResource FieldLabelStyle}"/>
+                                                <Button Margin="3,2,3,2" Grid.Column="1" Grid.ColumnSpan="2" Content="BẬT R1" Command="{Binding ManualRelay1OnCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <TextBlock Grid.Column="3" Text="{Binding ManualRelay1Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                                <TextBlock Grid.Row="1" Text="Relay 2" Style="{StaticResource FieldLabelStyle}"/>
+                                                <Button Margin="3,2,3,2" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="BẬT R2" Command="{Binding ManualRelay2OnCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
+                                                <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="1" Content="TẮT TẤT CẢ" Command="{Binding ManualRelay1OffCommand}" Style="{StaticResource SettingsExitButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="2" Content="RESET" Command="{Binding ManualResetCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <TextBlock Grid.Row="3" Grid.ColumnSpan="4" Text="{Binding ManualStatus}" Foreground="{StaticResource TextMuted}" FontSize="14"/>
+                                            </Grid>
+                                        </StackPanel>
+                                    </StackPanel>
                             </Border><Border x:Name="LabelSettingsPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="2" Grid.Row="0" Margin="8" VerticalAlignment="Top">
                                     <Grid>
                                         <Grid.RowDefinitions>
@@ -762,7 +764,7 @@
                                         </Border>
                                     </Grid>
                                 </Border>
-                </Grid></Grid></ScrollViewer>
+                </Grid></Grid></ScrollViewer></Viewbox>
         <Border Grid.Row="2" Background="Transparent" BorderThickness="0">
             <Grid Margin="16,4">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

@@ -10,7 +10,9 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
-    private static void TestSettingsOpeningResponsiveness()
+    private static void TestSettingsOpeningResponsiveness() => TestSettingsOpeningResponsiveness(null);
+
+    private static void TestSettingsOpeningResponsiveness(string? previewDirectory)
     {
         OnSettingsDispatcher(async () =>
         {
@@ -56,6 +58,31 @@ internal static partial class Program
                     "Prepared editors are ready for direct navigation without a loading overlay");
                 Assert(vm.ResistanceChannels.Count == 10 && ReferenceEquals(page.DataContext, vm),
                     "Deferred layout retains every resistance editor and its original configuration bindings");
+                foreach (Size size in new[] { new Size(1366, 768), new Size(1920, 1080) })
+                {
+                    page.Measure(size); page.Arrange(new Rect(size)); page.UpdateLayout();
+                    var scroll = (ScrollViewer)page.FindName("SettingsScrollViewer");
+                    Assert(scroll.ScrollableHeight < 1 && scroll.ScrollableWidth < 1,
+                        "Settings has no scrolling at supported production resolutions");
+                    foreach (Border panel in panels)
+                    {
+                        Point top = panel.TranslatePoint(new Point(), page);
+                        Point bottom = panel.TranslatePoint(new Point(panel.ActualWidth, panel.ActualHeight), page);
+                        Assert(top.X >= 0 && top.Y >= 40 && bottom.X <= size.Width + 1 && bottom.Y <= size.Height - 47,
+                            $"All of {panel.Name} remains visible above the action bar at {size}");
+                    }
+                    if (previewDirectory is not null && width == 1920)
+                    {
+                        System.IO.Directory.CreateDirectory(previewDirectory);
+                        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)size.Width, (int)size.Height,
+                            96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                        bitmap.Render(page);
+                        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                        using var file = System.IO.File.Create(System.IO.Path.Combine(previewDirectory, $"settings-fit-{size.Width}.png"));
+                        encoder.Save(file);
+                    }
+                }
                 Console.WriteLine($"SETTINGS_OPEN_TEST width={width} staged_total_ms={clock.Elapsed.TotalMilliseconds:0.###} batches_ms={string.Join("/", batches.Select(value => value.ToString("0.###")))}");
                 page.ReleasePageResources();
             }

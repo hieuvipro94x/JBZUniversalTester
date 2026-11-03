@@ -20,6 +20,11 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-settings-fit", var settingsPreviewDirectory])
+        {
+            TestSettingsOpeningResponsiveness(settingsPreviewDirectory);
+            return 0;
+        }
         if (args is ["--test-background-state-dispatch"])
         {
             TestBackgroundStateDispatch();
@@ -2409,13 +2414,13 @@ internal static partial class Program
                xaml.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto\"", StringComparison.Ordinal) &&
                xaml.Contains("MinWidth=\"125\"", StringComparison.Ordinal),
             "TestView scales its fixed header and preserves table text at 1024/1368 widths");
-        Assert(settingsXaml.Contains("<ScrollViewer x:Name=\"SettingsScrollViewer\" Grid.Row=\"1\"", StringComparison.Ordinal) &&
+        Assert(settingsXaml.Contains("<ScrollViewer x:Name=\"SettingsScrollViewer\" Width=\"1800\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
-            "Production settings wraps panels and scrolls instead of clipping at 1024x768");
+            "Production settings preserves all panels in a fixed canvas that fits the screen");
         Assert(settingsSource.Contains("e.ViewportWidth / MinimumSettingsColumnWidth", StringComparison.Ordinal) &&
                settingsXaml.Contains("ScrollChanged=\"SettingsScrollViewer_ScrollChanged\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Width=\"{Binding ViewportWidth, ElementName=SettingsScrollViewer}\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"SettingsFitViewbox\"", StringComparison.Ordinal) &&
                settingsSource.Contains("GridUnitType.Star", StringComparison.Ordinal) &&
                settingsSource.Contains("Grid.SetColumn(panels[index], column);", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"UnifiedSettingsGrid\" Margin=\"4\" HorizontalAlignment=\"Stretch\"", StringComparison.Ordinal) &&
