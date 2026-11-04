@@ -19,7 +19,7 @@ public static class TestViewText
         ["XÁC NHẬN ĐÃ LẮP XONG MẪU"] = "샘플 장착 완료 확인",
         ["Mã sản phẩm"] = "품번", ["Tên sản phẩm"] = "품명", ["Loại xe"] = "차종", ["Mã khách hàng"] = "고객 코드",
         ["Tổng số"] = "전체", ["Số đạt"] = "합격", ["Tỷ lệ"] = "합격률",
-        ["CHU KỲ THAY PIN:"] = "검사 핀 교체 주기:", ["Loại"] = "종류", ["LOẠI"] = "종류",
+        ["CHU KỲ THAY PIN:"] = "검사핀사용횟수:", ["Loại"] = "종류", ["LOẠI"] = "종류",
         ["Connector"] = "커넥터", ["Chân Pin"] = "핀", ["Mã Dây"] = "선",
         ["Màu"] = "색상", ["Tiết Diện"] = "굵기", ["Trạng thái"] = "상태",
         ["KÊNH"] = "채널", ["MIN Ω"] = "최소 Ω", ["MAX Ω"] = "최대 Ω", ["ĐIỆN TRỞ"] = "저항",
