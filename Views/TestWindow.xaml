@@ -734,7 +734,7 @@
                     <Border Grid.Row="2" Grid.Column="1" Style="{StaticResource PiCounterValueBorderStyle}">
                         <TextBlock Text="{Binding WrongCountText, Mode=OneWay}" Foreground="{StaticResource PiFailBrush}" Style="{StaticResource PiCounterTextStyle}"/>
                     </Border>
-                    <TextBlock Grid.Row="3" Text="S&#7889; l&#7895;i" Style="{StaticResource IndustrialCounterLabelStyle}"/>
+                    <TextBlock x:Name="DetectedFaultCountLabel" Grid.Row="3" Text="S&#7889; l&#7895;i" Style="{StaticResource IndustrialCounterLabelStyle}"/>
                     <Border x:Name="FaultCountValueBorder" Grid.Row="3" Grid.Column="1">
                         <Border.Style>
                             <Style TargetType="Border" BasedOn="{StaticResource PiCounterValueBorderStyle}">
@@ -965,7 +965,7 @@
                     <Border Grid.Row="2" Grid.Column="2" Width="118" Style="{StaticResource PiCounterValueBorderStyle}">
                         <TextBlock Text="{Binding Pass, Mode=OneWay}" Foreground="{StaticResource PiPassBrush}" Style="{StaticResource PiCounterTextStyle}"/>
                     </Border>
-                    <TextBlock Grid.Row="4" Text="S&#7889; l&#7895;i" Style="{StaticResource IndustrialCounterLabelStyle}"/>
+                    <TextBlock x:Name="FailedProductCountLabel" Tag="FailedProductCount" Grid.Row="4" Text="S&#7889; l&#7895;i" Style="{StaticResource IndustrialCounterLabelStyle}"/>
                     <Border Grid.Row="4" Grid.Column="2" Width="118" Style="{StaticResource PiCounterValueBorderStyle}">
                         <TextBlock Text="{Binding Fail, Mode=OneWay}" Foreground="{StaticResource PiFailBrush}" Style="{StaticResource PiCounterTextStyle}"/>
                     </Border>

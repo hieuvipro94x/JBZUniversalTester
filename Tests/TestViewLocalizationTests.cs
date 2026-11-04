@@ -89,6 +89,12 @@ internal static partial class Program
             var grid = (DataGrid)window.FindName("FaultGrid");
             Assert((string)grid.Columns[0].Header == "종류" && (string)grid.Columns[2].Header == "커넥터",
                 "Korean TestView translates actual table headers");
+            Assert((string)grid.Columns[3].Header == "핀" && (string)grid.Columns[4].Header == "선" &&
+                   (string)grid.Columns[6].Header == "굵기",
+                "Korean wire headers match the original tester terminology");
+            Assert(((TextBlock)window.FindName("DetectedFaultCountLabel")).Text == "검출 오류 수" &&
+                   ((TextBlock)window.FindName("FailedProductCountLabel")).Text == "불량",
+                "Detected electrical faults and failed products have distinct Korean labels");
             var statusBinding = (Binding)((DataGridBoundColumn)grid.Columns[7]).Binding;
             Assert((string)statusBinding.Converter.Convert("SAI DÂY", typeof(string), statusBinding.ConverterParameter, System.Globalization.CultureInfo.InvariantCulture) == "오배선",
                 "Dynamically created/virtualized fault cells use Korean display converters");

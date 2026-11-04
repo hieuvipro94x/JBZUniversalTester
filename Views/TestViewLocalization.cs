@@ -35,6 +35,11 @@ internal static class TestViewLocalization
         if (node is TextBlock block)
         {
             if (block.Tag is "KeepProductData") return;
+            if (block.Tag is "FailedProductCount")
+            {
+                block.SetCurrentValue(TextBlock.TextProperty, TestViewText.Translate("Số sản phẩm lỗi", converter.Language));
+                return;
+            }
             if (block.Inlines.Any(inline => inline is not Run))
             {
                 foreach (Inline inline in block.Inlines.ToArray()) Visit(inline, converter, visited);
