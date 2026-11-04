@@ -92,6 +92,7 @@ public sealed class ThtState
     // Save sẽ vá đúng stream Contents vào container này thay vì dựng OLE mới.
     public byte[] OriginalFileBytes { get; set; } = [];
     public byte[] OriginalContents { get; set; } = [];
+    public string? OriginalEditableText { get; set; }
 
     public ThtState Clone() => new()
     {
@@ -104,7 +105,8 @@ public sealed class ThtState
         Tail = [.. Tail],
         SummaryInformation = [.. SummaryInformation],
         OriginalFileBytes = [.. OriginalFileBytes],
-        OriginalContents = [.. OriginalContents]
+        OriginalContents = [.. OriginalContents],
+        OriginalEditableText = OriginalEditableText
     };
 }
 

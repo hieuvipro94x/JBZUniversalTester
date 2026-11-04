@@ -47,7 +47,7 @@ internal static partial class Program
         {
             string path = Path.Combine(root, "EDIT-A.tht");
             File.Copy(Path.Combine(Environment.CurrentDirectory, "Features", "ModelEditor", "Assets", "harnprog_template_v1110.tht"), path);
-            foreach (int offset in new[] { 20, 32, 33 })
+            foreach (int offset in new[] { 16, 20, 32, 33, 102, 512 })
             {
                 string variant = Path.Combine(root, $"HEADER-{offset}.tht");
                 File.Copy(path, variant);
@@ -56,18 +56,53 @@ internal static partial class Program
                     checked((uint)(variantContents.Length - offset)));
                 typeof(ThtModelParser).GetMethod("WriteDiscardContents", BindingFlags.Static | BindingFlags.NonPublic)!
                     .Invoke(null, [variant, variantContents]);
-                if (offset == 33)
-                {
-                    byte[] invalidOriginal = File.ReadAllBytes(variant);
-                    bool refused = false;
-                    try { ThtFileService.Load(variant); }
-                    catch (JBZUniversalTester.ModelEditor.Models.ThtFormatException) { refused = true; }
-                    Assert(refused && File.ReadAllBytes(variant).SequenceEqual(invalidOriginal),
-                        "Editor still rejects unknown inner-length conventions without touching the source");
-                }
-                else TestNativeEditorFileCopy(variant);
+                TestNativeEditorFileCopy(variant);
+            }
+            foreach (uint invalidSize in new[] { 0u, uint.MaxValue })
+            {
+                string variant = Path.Combine(root, $"INVALID-HEADER-{invalidSize}.tht");
+                File.Copy(path, variant);
+                byte[] contents = ThtFileService.ReadContentsForTest(variant);
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(contents.AsSpan(4), invalidSize);
+                typeof(ThtModelParser).GetMethod("WriteDiscardContents", BindingFlags.Static | BindingFlags.NonPublic)!
+                    .Invoke(null, [variant, contents]);
+                byte[] originalVariant = File.ReadAllBytes(variant);
+                bool refused = false;
+                try { ThtFileService.Load(variant); }
+                catch (JBZUniversalTester.ModelEditor.Models.ThtFormatException) { refused = true; }
+                Assert(refused && File.ReadAllBytes(variant).SequenceEqual(originalVariant),
+                    "Impossible inner lengths remain rejected without modifying the source");
             }
             var parser = new ThtModelParser();
+            // Legacy files may have special CLIP pins without catalog wire rows.
+            // Loading derives those rows for editing; an untouched Save must not
+            // insert them into the native file merely because it was opened.
+            string sparsePath = Path.Combine(root, "SPARSE-CLIP.tht");
+            string sparseText = "검사\t파트번호\tＥＣＯ\tＡＬＣ\t파트명\n\tSPARSE\t\t\tPRODUCT\n\n" +
+                "번 호\t커넥터\t핀 수\n1\tCN1\t1\n2\tCN2\t1\n\n" +
+                "커넥터\t선이름\tＩ／Ｏ\t핀번호\t핀종류\t핀차수\t핀옵션\t비 고\n" +
+                "CN1\tW01\t1\t1\t\t\t\t\nCN2\tW01\t2\t1\t\t\t\t\n\t\t3\t\tAO\t\t\t\n\t\t4\t\ta1\t\t\t\n\n" +
+                "선이름\t선연결\t굵기\t색깔\nW01\t\t0.5\tR\n";
+            byte[] sparse = BuildMinimalThtFile(sparseText);
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(sparse.AsSpan(1024 + 76), 1);
+            using (var body = new MemoryStream())
+            {
+                using (var writer = new BinaryWriter(body, System.Text.Encoding.UTF8, leaveOpen: true))
+                {
+                    writer.Write(4096u - 8); writer.Write(4096u - 102);
+                    writer.Write(0u); writer.Write(ThtFileService.ThtToken);
+                    foreach (byte[] raw in new[] { System.Text.Encoding.ASCII.GetBytes(ThtFileService.ThtVersion),
+                                 System.Text.Encoding.GetEncoding(949).GetBytes(sparseText) })
+                    {
+                        if (raw.Length < 255) writer.Write((byte)raw.Length);
+                        else { writer.Write((byte)255); writer.Write(checked((ushort)raw.Length)); }
+                        writer.Write(raw);
+                    }
+                }
+                body.ToArray().CopyTo(sparse, 1536);
+            }
+            File.WriteAllBytes(sparsePath, sparse);
+            TestNativeEditorFileCopy(sparsePath);
             parser.SaveDiscardContacts(path, 639, 640);
             Assert(parser.Load(path).DiscardContactIo.SequenceEqual([639, 640]),
                 "Explicit per-product Save fills a native THT's unused DISCARD connector without replacing product pins");

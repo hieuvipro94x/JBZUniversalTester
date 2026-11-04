@@ -131,7 +131,7 @@ public static class ThtFileService
             OriginalFileBytes = [.. sourceBytes],
             OriginalContents = [.. contents]
         };
-        return new ModelDocument
+        var document = new ModelDocument
         {
             Base = new BaseInfo { Model = Path.GetFileNameWithoutExtension(source), Number = tables.Product[1], Name = tables.Product[4], Kind = tables.Product[2], EoNo = tables.Product[5], Customer = tables.Product[3] },
             Connectors = connectors,
@@ -140,6 +140,10 @@ public static class ThtFileService
             SourceFormat = "tht",
             ThtState = state
         };
+        // Native tables can omit derived CLIP catalog rows. Compare editable
+        // data with its loaded representation, not native text formatting.
+        state.OriginalEditableText = ModelToThtText(document);
+        return document;
     }
 
     public static string Export(ModelDocument document, string path) => Write(document, path, false);
@@ -740,7 +744,14 @@ public static class ThtFileService
     private static byte[] BuildContents(ModelDocument document)
     {
         var cp949 = Encoding.GetEncoding(949, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback);
-        var textRaw = EncodeHarnProgText(ModelToThtText(document), cp949);
+        string editableText = ModelToThtText(document);
+        if (document.ThtState is { OriginalEditableText: not null, OriginalContents.Length: > 0 } unchanged &&
+            string.Equals(editableText, unchanged.OriginalEditableText, StringComparison.Ordinal))
+        {
+            _ = ParseContents(unchanged.OriginalContents);
+            return [.. unchanged.OriginalContents];
+        }
+        var textRaw = EncodeHarnProgText(editableText, cp949);
         var state = document.ThtState; var version = state?.Version ?? ThtVersion; var token = state?.Token ?? ThtToken;
         var tail = state is { Tail.Length: > 0 } ? state.Tail : Asset("template_tail_v1110.bin");
         if (version != ThtVersion) throw new ThtExportException($"Không thể ghi phiên bản THT {version}; chỉ hỗ trợ {ThtVersion}.");
@@ -1477,7 +1488,16 @@ public static class ThtFileService
     private static ParsedContents ParseContents(byte[] contents)
     {
         if (contents.Length < 24) throw new ThtFormatException("Stream Contents quá ngắn."); var outer = U32(contents, 0); var inner = U32(contents, 4); var flags = U32(contents, 8); var token = U32(contents, 12);
-        if (outer != (uint)(contents.Length - 8)) throw new ThtFormatException("Contents outer size không đúng định dạng HarnProg."); if (inner != (uint)(contents.Length - 20) && inner != (uint)(contents.Length - 32)) throw new ThtFormatException("Contents inner size không đúng định dạng HarnProg."); if (flags != 0) throw new ThtFormatException($"Contents flags chưa hỗ trợ: 0x{flags:X8}");
+        if (outer != (uint)(contents.Length - 8))
+            throw new ThtFormatException("Contents outer size không đúng định dạng HarnProg.");
+        // Native HarnProg files use different inner-length conventions (including
+        // stream length - 102 in WH322695). It is not a fixed header size or the
+        // boundary of the model CString. Validate its bounds instead of a whitelist;
+        // bounded CStrings, version/token and the model tables validate the payload.
+        // BuildContents preserves the source convention when the model is edited.
+        if (inner == 0 || inner > (uint)(contents.Length - 16))
+            throw new ThtFormatException("Contents inner size vượt phạm vi stream HarnProg.");
+        if (flags != 0) throw new ThtFormatException($"Contents flags chưa hỗ trợ: 0x{flags:X8}");
         var (versionRaw, off) = ReadMfcCString(contents, 16); var (modelRaw, tailOff) = ReadMfcCString(contents, off); var version = Encoding.ASCII.GetString(versionRaw); if (version != ThtVersion) throw new ThtFormatException($"Phiên bản THT chưa hỗ trợ: {version}. Hiện hỗ trợ {ThtVersion}."); if (token != ThtToken) throw new ThtFormatException($"Token THT chưa hỗ trợ: 0x{token:X8}");
         string text; try { text = Encoding.GetEncoding(949, EncoderFallback.ExceptionFallback, DecoderFallback.ExceptionFallback).GetString(modelRaw); } catch (DecoderFallbackException ex) { throw new ThtFormatException("Không giải mã được bảng model bằng CP949: " + ex.Message); }
         return new(version, token, text, contents[tailOff..]);
