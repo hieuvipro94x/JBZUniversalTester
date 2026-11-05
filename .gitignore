@@ -1,0 +1,17 @@
+# Build outputs and local state
+bin/
+obj/
+Publish/
+.vs/
+*.user
+*.log
+*.tmp
+*.pfx
+*.p12
+*.pem
+*.key
+*.jbzvault
+issuer.dat
+activation.dat
+installation.dat
+PrivateVault/
