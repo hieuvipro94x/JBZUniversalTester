@@ -41,11 +41,18 @@ internal static class IssuerTests
   Check(Encoding.UTF8.GetString(IssuerStore.Decrypt(encrypted,"test-password-2026"))=="private-test-payload","encrypted workspace roundtrip");
   Reject(()=>IssuerStore.Decrypt(encrypted,"wrong-password-2026"),"incorrect workspace password");
   encrypted[^1]^=1;Reject(()=>IssuerStore.Decrypt(encrypted,"test-password-2026"),"workspace authentication");
+  var portable=new Vault{PrivateKey=Convert.ToBase64String(key.ExportPkcs8PrivateKey()),Records=new(){new Issuance(grant.LicenseId,"TEST-PC","Test","S1","note",req,code,grant.IssuedAtUtc)}};
+  byte[] portableBytes=IssuerStore.EncodeWorkspace(portable);
+  var restored=IssuerStore.DecodeWorkspace(portableBytes);
+  Check(restored.PrivateKey==portable.PrivateKey&&restored.Records.SequenceEqual(portable.Records),"password-free workspace preserves key and records");
+  using(var restoredSigner=IssuerStore.Import(restored)){string restoredCode=IssuerStore.Sign(request,restoredSigner,"Test","S1",out var restoredGrant);Check(LicenseProtocol.Verify(restoredCode,request,pub)==restoredGrant,"password-free export retains signing identity");}
+  Reject(()=>IssuerStore.DecodeWorkspace(encrypted),"legacy encrypted workspace requires old tool");
+  Reject(()=>IssuerStore.DecodeWorkspace(IssuerStore.EncodeWorkspace(new Vault{Version=99})),"unsupported password-free workspace version");
   string excel=Path.ChangeExtension(output,".xlsx");
   ExcelExport.Save(excel,new[]{new Issuance(grant.LicenseId,"TEST-PC","=HYPERLINK(\"example\")","Station","한국어 / Tiếng Việt",req,code,grant.IssuedAtUtc)});
   using(var zip=ZipFile.OpenRead(excel))foreach(var entry in zip.Entries){using var stream=entry.Open();XDocument.Load(stream);}
   using(var zip=ZipFile.OpenRead(excel)){using var stream=zip.GetEntry("xl/worksheets/sheet1.xml")!.Open();var xml=XDocument.Load(stream);Check(!xml.Descendants().Any(e=>e.Name.LocalName=="f"),"Excel strings cannot become formulas");}
-  File.WriteAllText(output,"PASS: 13 issuer/protocol/encryption/XLSX checks. No production key or vault used.");
+  File.WriteAllText(output,"PASS: 17 issuer/protocol/password-free export/legacy encryption/XLSX checks. No production key or vault used.");
  }
  private static void Check(bool ok,string name){if(!ok)throw new Exception(name);}
  private static void Reject(Action action,string name){try{action();}catch(Exception ex)when(ex is CryptographicException or FormatException or System.Text.Json.JsonException){return;}throw new Exception("Accepted "+name);}

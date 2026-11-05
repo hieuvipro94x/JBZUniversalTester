@@ -7,7 +7,7 @@ public partial class MainWindow:Window
  private IssuerStore? _store;
  private bool _busy;
  public MainWindow(){InitializeComponent();Loaded+=async(_,_)=>await Run(async()=>{_store=await Task.Run(IssuerStore.Open);Refresh();});}
- private void Refresh(){HistoryGrid.ItemsSource=_store?.Records.OrderByDescending(r=>r.IssuedAtUtc).ToList();IssueButton.IsEnabled=_store is not null;StatusText.Text=_store is null?"Chưa có bộ cấp phép. Nhập bộ cấp phép đã mã hóa của quản trị viên để sử dụng.":$"Đã nạp {_store.Records.Count} hồ sơ. Trạng thái kích hoạt do quản trị viên xác nhận thủ công; tool không nhận tín hiệu từ máy khách.";}
+ private void Refresh(){HistoryGrid.ItemsSource=_store?.Records.OrderByDescending(r=>r.IssuedAtUtc).ToList();IssueButton.IsEnabled=_store is not null;StatusText.Text=_store is null?"Chưa có bộ cấp phép. Nhập bộ cấp phép của quản trị viên để sử dụng.":$"Đã nạp {_store.Records.Count} hồ sơ. Trạng thái kích hoạt do quản trị viên xác nhận thủ công; tool không nhận tín hiệu từ máy khách.";}
  private async Task Run(Func<Task> action)
  {
   if(_busy)return;_busy=true;IsEnabled=false;
@@ -29,14 +29,12 @@ public partial class MainWindow:Window
  private async void Backup_Click(object sender,RoutedEventArgs e)
  {
   if(_store is null){StatusText.Text="Chưa có bộ cấp phép để xuất.";return;}
-  var dialog=new SaveFileDialog{Filter="Bộ cấp phép mã hóa (*.jbzvault)|*.jbzvault",FileName="JBZ-cap-phep-"+DateTime.Today.ToString("yyyyMMdd")+".jbzvault"};if(dialog.ShowDialog(this)!=true)return;
-  var password=new VaultPasswordWindow(true){Owner=this};if(password.ShowDialog()!=true)return;string secret=password.Value;
-  await Run(async()=>{await Task.Run(()=>_store.ExportWorkspace(dialog.FileName,secret));StatusText.Text="Đã xuất bộ cấp phép mã hóa. Chuyển tệp này và mật khẩu riêng sang máy quản trị còn lại.";});
+  var dialog=new SaveFileDialog{Filter="Bộ cấp phép không mật khẩu (*.jbzvault)|*.jbzvault",FileName="JBZ-cap-phep-"+DateTime.Today.ToString("yyyyMMdd")+"-khong-mat-khau.jbzvault"};if(dialog.ShowDialog(this)!=true)return;
+  await Run(async()=>{await Task.Run(()=>_store.ExportWorkspace(dialog.FileName));StatusText.Text="Đã xuất bộ cấp phép không mật khẩu. File chứa khóa cấp mã; giữ riêng để nhập trên máy quản trị còn lại.";});
  }
  private async void Import_Click(object sender,RoutedEventArgs e)
  {
-  var dialog=new OpenFileDialog{Filter="Bộ cấp phép mã hóa (*.jbzvault)|*.jbzvault"};if(dialog.ShowDialog(this)!=true)return;
-  var password=new VaultPasswordWindow(false){Owner=this};if(password.ShowDialog()!=true)return;string secret=password.Value;
-  await Run(async()=>{_store=await Task.Run(()=>IssuerStore.ImportWorkspace(dialog.FileName,secret));Refresh();});
+  var dialog=new OpenFileDialog{Filter="Bộ cấp phép (*.jbzvault)|*.jbzvault"};if(dialog.ShowDialog(this)!=true)return;
+  await Run(async()=>{_store=await Task.Run(()=>IssuerStore.ImportWorkspace(dialog.FileName));Refresh();});
  }
 }

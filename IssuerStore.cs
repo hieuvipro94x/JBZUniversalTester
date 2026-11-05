@@ -56,18 +56,31 @@ public sealed class IssuerStore
  {
   var next=new Vault{PrivateKey=_vault.PrivateKey,Records=_vault.Records.Select(r=>r.LicenseId==id?r with{ConfirmedAtUtc=DateTimeOffset.UtcNow}:r).ToList()};Persist(next);_vault=next;
  }
- public void ExportWorkspace(string path,string password)=>WriteAtomic(path,Encrypt(JsonSerializer.SerializeToUtf8Bytes(_vault),password));
- public static IssuerStore ImportWorkspace(string path,string password)
+ public void ExportWorkspace(string path)
  {
-  byte[] plain=Decrypt(ReadBounded(path),password);
+  byte[] data=EncodeWorkspace(_vault);
+  try{WriteAtomic(path,data);}finally{CryptographicOperations.ZeroMemory(data);}
+ }
+ public static IssuerStore ImportWorkspace(string path)
+ {
+  byte[] plain=ReadBounded(path);
   try
   {
-   var vault=JsonSerializer.Deserialize<Vault>(plain)??throw new FormatException("Bộ cấp phép trống.");ValidateKey(vault);
+   var vault=DecodeWorkspace(plain);ValidateKey(vault);
    var current=Open();
    if(current is not null)vault.Records=vault.Records.Concat(current.Records).GroupBy(r=>r.LicenseId).Select(g=>g.OrderByDescending(r=>r.ConfirmedAtUtc).First()).ToList();
    Persist(vault);return new(vault);
   }
   finally{CryptographicOperations.ZeroMemory(plain);}
+ }
+ internal static byte[] EncodeWorkspace(Vault vault)=>Encoding.ASCII.GetBytes("JBZVAULT2\n").Concat(JsonSerializer.SerializeToUtf8Bytes(vault)).ToArray();
+ internal static Vault DecodeWorkspace(byte[] data)
+ {
+  if(data.AsSpan().StartsWith("JBZVAULT1"u8))throw new FormatException("Đây là bản sao cũ có mật khẩu. Mở bằng tool 1.0.1 để nhập, rồi dùng tool mới xuất lại không mật khẩu.");
+  if(!data.AsSpan().StartsWith("JBZVAULT2\n"u8))throw new FormatException("Không đúng định dạng bộ cấp phép không mật khẩu.");
+  var vault=JsonSerializer.Deserialize<Vault>(data.AsSpan(10))??throw new FormatException("Bộ cấp phép trống.");
+  if(vault.Version!=1||vault.Records is null)throw new FormatException("Phiên bản kho không hỗ trợ.");
+  return vault;
  }
  internal static byte[] Encrypt(byte[] plain,string password)
  {

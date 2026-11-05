@@ -1,4 +1,4 @@
-﻿# UniversalTester License Issuer
+# UniversalTester License Issuer
 
 Nhà phát triển: Vũ Tuấn Nam. .NET 8 Desktop Runtime x86 / Windows.
 
@@ -16,7 +16,7 @@ git clone --branch tools/license-issuer --single-branch https://github.com/hieuv
 4. Chọn hồ sơ và **XÁC NHẬN ĐÃ KÍCH HOẠT** khi đã kiểm tra thực tế. Đây là xác nhận thủ công; chế độ offline không báo trạng thái máy khách về tool.
 5. **XUẤT EXCEL** tạo `.xlsx` gồm máy, đơn vị, vị trí, ngày cấp, ngày xác nhận, ghi chú. Không xuất khóa bí mật hoặc mã kích hoạt vào Excel.
 
-## Làm việc ở nhà và công ty
+## Làm việc ở nhà và công ty (các bản 1.0.0–1.0.1)
 
 Khóa ký ECDSA P-256 đầu tiên đã được tạo trên máy quản trị triển khai. Kho nằm tại `%LOCALAPPDATA%\JBZLicenseIssuer\PrivateVault\issuer.dat`, được Windows DPAPI CurrentUser mã hóa. Không sao chép trực tiếp kho DPAPI sang tài khoản/Windows khác.
 
@@ -43,3 +43,7 @@ Self-test dùng khóa tạm trong bộ nhớ, không đọc hoặc sửa kho th�
 ## Bộ cấp phép mới 05/11/2026 — tool 1.0.1
 
 Theo yêu cầu người dùng, tool 1.0.1 dùng khóa mới đồng bộ UniversalTester V2026.09.389. Kho mới được tạo cục bộ trên máy quản trị ở nhà, bảo vệ bằng DPAPI CurrentUser. Mở tool 1.0.1 và XUẤT BỘ CẤP PHÉP để tự đặt mật khẩu ít nhất 12 ký tự. Bản xuất trong Backups là khóa cũ, chỉ dùng cho V388; không dùng để nhập vào tool mới. Không đưa khóa rõ hoặc mật khẩu lên Git.
+
+## Tool 1.0.2 — xuất/nhập không mật khẩu
+
+Theo yêu cầu người dùng, XUẤT BỘ CẤP PHÉP chỉ chọn nơi lưu, NHẬP BỘ CẤP PHÉP chỉ chọn file; không có hộp mật khẩu. Bản xuất JBZVAULT2 chứa khóa ký và hồ sơ không mã hóa, dùng để chuyển giữa các máy quản trị. Không đưa file này lên Git hoặc LAN public. Kho đang dùng trên máy vẫn được DPAPI CurrentUser bảo vệ. Khóa công khai giữ nguyên như 1.0.1, dùng với UniversalTester V389; không cần build lại phần mềm test. Bản xuất JBZVAULT1 cũ cần nhập bằng tool 1.0.1 với mật khẩu cũ trước, rồi mở tool 1.0.2 trên cùng máy/tài khoản để xuất lại. Không thay hoặc xóa kho cũ khi nhập thất bại.
