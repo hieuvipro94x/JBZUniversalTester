@@ -20,6 +20,14 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-offline-activation"])
+        {
+            TestOfflineActivation(); Console.WriteLine("PASS: offline activation, encrypted receipt, installation/disk binding and concurrency"); return 0;
+        }
+        if (args is ["--preview-activation", var activationPreview])
+        {
+            RenderActivationPreview(activationPreview); return 0;
+        }
         if (args is ["--preview-settings-fit", var settingsPreviewDirectory])
         {
             TestSettingsOpeningResponsiveness(settingsPreviewDirectory);
@@ -632,6 +640,7 @@ internal static partial class Program
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
+            ("Offline licensing binds signed activation to Windows installation and OS disk", TestOfflineActivation),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
             ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),
