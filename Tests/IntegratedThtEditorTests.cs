@@ -165,6 +165,9 @@ internal static partial class Program
             OnSettingsDispatcher(async () =>
             {
                 var page = new ThtEditorPage();
+                Assert(new[] { "_connectors", "_pins", "_lines", "_colors" }.All(name =>
+                        typeof(ThtEditorPage).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page) is null),
+                    "Opening the base editor does not construct unused grid pages");
                 await page.OpenPathAsync(path);
                 var canvas = (FrameworkElement)page.FindName("EditorCanvas");
                 Assert(canvas.Width == 1224 && canvas.Height == 900 &&
@@ -212,6 +215,22 @@ internal static partial class Program
                     Assert(!page.HasUnsavedChanges, $"Unedited page {index} cannot trigger a false Save prompt");
                 }
                 Assert(await page.ConfirmCloseAsync(), "Switching unchanged editor pages does not create false unsaved changes");
+                var showPage = typeof(ThtEditorPage).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                showPage.Invoke(page, [3]);
+                var lines = (JBZUniversalTester.ModelEditor.Pages.LinePage)((ContentControl)page.FindName("ContentHost")).Content;
+                var firstRow = lines.Rows[0];
+                int collectionChanges = 0;
+                lines.Rows.CollectionChanged += (_, _) => collectionChanges++;
+                firstRow.Thickness = firstRow.Thickness == "0.5" ? "0.75" : "0.5";
+                Assert(await page.SaveAsync() && !page.HasUnsavedChanges && collectionChanges == 0 &&
+                       ReferenceEquals(firstRow, lines.Rows[0]),
+                    "Saving a wire edit keeps the row instances and avoids rebuilding the visible grid");
+                var savedPin = parser.Load(path).Pins.First(pin => pin.IoNumber == firstRow.Io);
+                Assert(savedPin.Section == firstRow.Original.Thickness,
+                    "Reused wire rows rebase their original pin data to the actual saved file");
+                showPage.Invoke(page, [0]); showPage.Invoke(page, [3]);
+                Assert(collectionChanges == 0 && ReferenceEquals(firstRow, lines.Rows[0]) && !page.HasUnsavedChanges,
+                    "Returning to the unchanged wire tab reuses rows without a false dirty state");
             });
         }
         finally

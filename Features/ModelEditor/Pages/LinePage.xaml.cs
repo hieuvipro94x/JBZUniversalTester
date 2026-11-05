@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -16,7 +17,7 @@ public sealed class LineRow : ObservableObject
     private IReadOnlyDictionary<string, WireColor> _map =
         new Dictionary<string, WireColor>(StringComparer.Ordinal);
 
-    public Pin Original { get; init; } = new();
+    public Pin Original { get; set; } = new();
     public int Io { get => _io; set => SetField(ref _io, value); }
     public string Connector => Original.Connector;
     public int PinNo => Original.PinNo;
@@ -94,7 +95,21 @@ public sealed class LineRow : ObservableObject
 
 public partial class LinePage : UserControl
 {
-    public ObservableCollection<LineRow> Rows { get; } = [];
+    private readonly RowCollection _rows = new();
+    public ObservableCollection<LineRow> Rows => _rows;
+    private sealed class RowCollection : ObservableCollection<LineRow>
+    {
+        public void ReplaceAll(IReadOnlyList<LineRow> rows)
+        {
+            CheckReentrancy();
+            Items.Clear();
+            foreach (var row in rows) Items.Add(row);
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+            OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+            OnCollectionChanged(new System.Collections.Specialized.NotifyCollectionChangedEventArgs(
+                System.Collections.Specialized.NotifyCollectionChangedAction.Reset));
+        }
+    }
     public ObservableCollection<string> ColorCodes { get; } = [];
     public event EventHandler? Changed;
     public event EventHandler? ConnectionsChanged;
@@ -219,6 +234,9 @@ public partial class LinePage : UserControl
     public void SetColors(IEnumerable<WireColor> colors)
     {
         var list = colors.Select(c => c.Clone()).ToList();
+        if (ColorCodes.SequenceEqual(list.Select(c => c.Code)) && list.All(c =>
+                _map.TryGetValue(c.Code, out var existing) && existing.Name == c.Name && existing.Value == c.Value))
+            return;
         _map = list
             .Where(c => !string.IsNullOrWhiteSpace(c.Code))
             .GroupBy(c => c.Code, StringComparer.Ordinal)
@@ -241,16 +259,33 @@ public partial class LinePage : UserControl
 
     public void LoadData(IEnumerable<Pin> pins)
     {
+        Pin[] ordered = pins.OrderBy(p => p.Io).ToArray();
         _loading = true;
         try
         {
             HasStructuralChanges = false;
+            // Preserve row containers, selection and scroll after Save/tab return.
+            // Rebase Original too: later IO remapping must use the saved topology.
+            if (Rows.Count == ordered.Length && Rows.Zip(ordered).All(pair =>
+                    pair.First.Io == pair.Second.Io && pair.First.Connector == pair.Second.Connector &&
+                    pair.First.PinNo == pair.Second.PinNo))
+            {
+                for (int i = 0; i < ordered.Length; i++)
+                {
+                    var row = Rows[i]; var pin = ordered[i];
+                    row.Original = pin.Clone();
+                    row.Line = pin.Line; row.Add = pin.Add;
+                    row.Thickness = pin.Thickness; row.Color = pin.Color;
+                }
+                RefreshConnectionIndicators();
+                return;
+            }
             _selectedRow = null;
             _lastSearchQuery = "";
             _wireSearchTimer.Stop();
             WireSearchStatus.Text = "";
-            Rows.Clear();
-            foreach (var p in pins.OrderBy(p => p.Io))
+            var newRows = new List<LineRow>(ordered.Length);
+            foreach (var p in ordered)
             {
                 var row = new LineRow
                 {
@@ -277,9 +312,9 @@ public partial class LinePage : UserControl
                     if (e.PropertyName is nameof(LineRow.Io) or nameof(LineRow.Line) or nameof(LineRow.Add))
                         ConnectionsChanged?.Invoke(this, EventArgs.Empty);
                 };
-                Rows.Add(row);
+                newRows.Add(row);
             }
-
+            _rows.ReplaceAll(newRows);
             RefreshConnectionIndicators();
         }
         finally

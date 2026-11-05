@@ -15,10 +15,10 @@ public partial class ThtEditorPage : UserControl
     private ModelDocument _document = new() { SourceFormat = "tht", Base = new() { Model = "NewModel" } };
     private readonly DocumentChangeTracker _changes = new();
     private readonly BasePage _base = new();
-    private readonly ConnectorPage _connectors = new();
-    private readonly PinPage _pins = new();
-    private readonly LinePage _lines = new();
-    private readonly ColorPage _colors = new();
+    private ConnectorPage _connectors = null!;
+    private PinPage _pins = null!;
+    private LinePage _lines = null!;
+    private ColorPage _colors = null!;
     private int _page;
     private bool _loading, _busy, _rebuild;
     private string? _hash;
@@ -35,15 +35,39 @@ public partial class ThtEditorPage : UserControl
     public ThtEditorPage()
     {
         InitializeComponent();
-        void Changed(object? _, EventArgs e) { if (!_loading) { SaveButton.Tag = null; StatusText.Text = "Đã thay đổi — bấm LƯU THT để lưu."; } }
-        _base.Changed += Changed; _connectors.Changed += Changed; _pins.Changed += Changed; _lines.Changed += Changed;
-        _lines.ConnectionsChanged += (_, _) => _rebuild = true;
-        _pins.ConnectionsChanged += (_, _) => _rebuild = false;
-        _pins.IoChanged += (_, _) => _rebuild = true;
-        _colors.ColorsChanged += (_, _) => _lines.SetColors(_colors.CurrentColors);
+        _base.Changed += DocumentChanged;
         _changes.Reset(_document); ShowPage(0);
         CommandBindings.Add(new CommandBinding(ApplicationCommands.Save, async (_, _) => await SaveAsync()));
         InputBindings.Add(new KeyBinding(ApplicationCommands.Save, Key.S, ModifierKeys.Control));
+    }
+
+    private void DocumentChanged(object? sender, EventArgs e)
+    {
+        if (!_loading) { SaveButton.Tag = null; StatusText.Text = "Đã thay đổi — bấm LƯU THT để lưu."; }
+    }
+
+    private void EnsurePage(int page)
+    {
+        if (page == 1 && _connectors is null)
+        {
+            _connectors = new(); _connectors.Changed += DocumentChanged;
+        }
+        if (page == 2 && _pins is null)
+        {
+            _pins = new(); _pins.Changed += DocumentChanged;
+            _pins.ConnectionsChanged += (_, _) => _rebuild = false;
+            _pins.IoChanged += (_, _) => _rebuild = true;
+        }
+        if (page == 3 && _lines is null)
+        {
+            _lines = new(); _lines.Changed += DocumentChanged;
+            _lines.ConnectionsChanged += (_, _) => _rebuild = true;
+        }
+        if (page == 4 && _colors is null)
+        {
+            _colors = new();
+            _colors.ColorsChanged += (_, _) => _lines?.SetColors(_colors.CurrentColors);
+        }
     }
 
     private void Commit()
@@ -70,6 +94,7 @@ public partial class ThtEditorPage : UserControl
         _loading = true;
         try
         {
+            EnsurePage(page);
             _page = page;
             foreach (var nav in new[] { BaseNav, ConnectorNav, PinNav, LineNav, ColorNav })
                 nav.IsChecked = int.Parse((string)nav.Tag) == page;
@@ -78,7 +103,7 @@ public partial class ThtEditorPage : UserControl
                 case 0: _base.LoadData(_document.Base); ContentHost.Content = _base; break;
                 case 1: _connectors.LoadData(_document); ContentHost.Content = _connectors; break;
                 case 2: _pins.LoadData(_document.Pins, _document.ThtState?.PinRows); ContentHost.Content = _pins; break;
-                case 3: _lines.SetColors(_colors.CurrentColors); _lines.LoadData(_document.Pins); ContentHost.Content = _lines; break;
+                case 3: _lines.SetColors(_colors?.CurrentColors ?? new ColorStore().Load()); _lines.LoadData(_document.Pins); ContentHost.Content = _lines; break;
                 case 4: _colors.Reload(); ContentHost.Content = _colors; break;
             }
         }
@@ -116,10 +141,20 @@ public partial class ThtEditorPage : UserControl
         try
         {
             Commit();
-            ModelLogic.ValidatePinsForEditing(_document.Connectors, _document.Pins);
-            if (_rebuild) { ModelLogic.RebuildConnections(_document.Pins); _rebuild = false; }
-            ModelLogic.NormalizeHarnProgClip(_document.Pins);
-            ModelLogic.ValidatePins(_document.Connectors, _document.Pins);
+            _busy = true; IsEnabled = false; StatusText.Text = "Đang kiểm tra cấu hình THT...";
+            var preparingDocument = _document.Clone();
+            bool rebuild = _rebuild;
+            var preparing = Task.Run(() =>
+            {
+                ModelLogic.ValidatePinsForEditing(preparingDocument.Connectors, preparingDocument.Pins);
+                if (rebuild) ModelLogic.RebuildConnections(preparingDocument.Pins);
+                ModelLogic.NormalizeHarnProgClip(preparingDocument.Pins);
+                ModelLogic.ValidatePins(preparingDocument.Connectors, preparingDocument.Pins);
+                return preparingDocument;
+            });
+            _diskWork = preparing;
+            _document = await preparing;
+            _rebuild = false;
             string? target = _document.SourcePath;
             if (target is null)
             {

@@ -44,7 +44,14 @@
             CellEditEnding="Grid_CellEditEnding">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="I/O" Binding="{Binding Io, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
-                <DataGridTextColumn Header="CONNECTOR" Binding="{Binding Connector}" IsReadOnly="True" Width="SizeToCells" MinWidth="140"/>
+                <DataGridTextColumn Header="CONNECTOR" Binding="{Binding Connector}" IsReadOnly="True" Width="140">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                            <Setter Property="ToolTip" Value="{Binding Connector}"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
                 <DataGridTextColumn Header="PIN" Binding="{Binding PinNo}" IsReadOnly="True" Width="55"/>
                 <DataGridTextColumn Header="TÊN DÂY" Binding="{Binding Line, UpdateSourceTrigger=PropertyChanged}" Width="*" MinWidth="150">
                     <DataGridTextColumn.ElementStyle>
