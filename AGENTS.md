@@ -259,10 +259,17 @@ and copy the entire resulting version folder from `PublishSingle` to
 needed for these steps. Verify the pushed branch/commit and SHA256 hashes of all
 copied files, and report the version, branch/commit and destination.
 
+When working from home or otherwise outside the company LAN, continue automatic
+build/commit/push. If the company share is unreachable, skip the LAN copy without
+asking for confirmation or treating it as a delivery failure. Report explicitly
+that LAN copying was skipped because the share was unavailable; do not claim the
+files were copied. Do not change network settings or credentials to reach it.
+
 Preserve unrelated local changes and any runtime data already at the destination.
 Do not overwrite an existing release folder containing production CFG/history
-without first preserving those contents. If build, tests, push or network copy
-fails, report the failed step clearly and never claim complete delivery. Read-only
+without first preserving those contents. If build, tests, push or an attempted
+copy to a reachable share fails, report the failed step clearly and never claim
+complete delivery. The unavailable-LAN exception above is an allowed skip. Read-only
 reviews do not trigger build/publish delivery. A later explicit user instruction
 can override this workflow.
 

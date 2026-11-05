@@ -1,4 +1,4 @@
-﻿# Kích hoạt UniversalTester (V2026.09.388)
+# Kích hoạt UniversalTester (V2026.09.389)
 
 Nhà phát triển hiển thị: **Vũ Tuấn Nam**.
 
@@ -13,3 +13,7 @@ Tool cấp phép là project riêng `C:\Users\user\Desktop\Nam\JBZLicenseIssuer`
 Chữ ký ECDSA P-256/SHA-256 ngăn tự tạo license hợp lệ nếu không có khóa ký. Không cam kết EXE .NET không thể bị vá bởi người kiểm soát máy. Bảo vệ bản sao bộ cấp phép và mật khẩu ngoài Git/LAN public.
 
 Kiểm thử: `JBZUniversalTester.SelfTests.exe --test-offline-activation`. Dùng thư mục tạm và khóa kiểm thử, không kích hoạt máy thật hoặc đọc/sửa dữ liệu sản xuất. Bộ kiểm thử đầy đủ bao gồm cả kiểm thử này.
+
+## Thay bộ cấp phép ngày 05/11/2026
+
+Theo yêu cầu người dùng, V389 dùng khóa mới tương ứng tool JBZLicenseIssuer 1.0.1 trên máy quản trị ở nhà. Mã đã ký bằng khóa V388 không được V389 chấp nhận; cần cấp lại khi nâng cấp. Kho/bản sao cũ được giữ nguyên. Mở tool mới và XUẤT BỘ CẤP PHÉP để tự đặt mật khẩu cho bản xuất mới. Bản xuất cũ trên Git không dùng cho khóa mới.

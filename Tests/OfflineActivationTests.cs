@@ -27,6 +27,9 @@ internal static partial class Program
    Assert(service.IsActivatedAsync().GetAwaiter().GetResult(),"Valid signed activation persists");
    Assert(!Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(root,"activation.dat"))).Contains("JBZL1"),"Receipt does not store plaintext activation");
    var reopened=new ActivationService(root,()=>"TEST-WINDOWS|TEST-DISK",pub);Assert(reopened.IsActivatedAsync().GetAwaiter().GetResult(),"Version/folder change reuses activation");
+   using var replacementSigner=ECDsa.Create(ECCurve.NamedCurves.nistP256);
+   var rotated=new ActivationService(root,()=>"TEST-WINDOWS|TEST-DISK",Convert.ToBase64String(replacementSigner.ExportSubjectPublicKeyInfo()));
+   Assert(!rotated.IsActivatedAsync().GetAwaiter().GetResult()&&reopened.IsActivatedAsync().GetAwaiter().GetResult(),"Key rotation rejects the old receipt without deleting the original activation");
    var replacedDisk=new ActivationService(root,()=>"TEST-WINDOWS|REPLACED-DISK",pub);Assert(!replacedDisk.IsActivatedAsync().GetAwaiter().GetResult(),"Disk change requires new activation");
    bool rejected=false;try{service.ActivateAsync(code[..^8]+"AAAAAAAA").GetAwaiter().GetResult();}catch(CryptographicException){rejected=true;}
    Assert(rejected&&service.IsActivatedAsync().GetAwaiter().GetResult(),"Invalid input cannot overwrite valid receipt");
