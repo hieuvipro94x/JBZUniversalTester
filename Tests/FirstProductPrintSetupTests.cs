@@ -30,6 +30,8 @@ internal static partial class Program
             {
                 var fresh = Model(("PAIR", new[] { 1, 2 })); fresh.PartNumber = "NEW-FIRST-ITEM";
                 var tested = Model(("PAIR", new[] { 1, 2 })); tested.PartNumber = "TESTED-BEFORE";
+                fresh.ModelName = fresh.PartNumber; fresh.SourcePath = Path.Combine(root, fresh.ModelName + ".tht");
+                tested.ModelName = tested.PartNumber; tested.SourcePath = Path.Combine(root, tested.ModelName + ".tht");
                 DateTime now = DateTime.Now;
                 store.CommitResult(ProductionResultCommitRequest.Capture(new TestHistoryRecord
                 {

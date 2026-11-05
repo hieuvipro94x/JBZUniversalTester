@@ -3006,8 +3006,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         string key = ProductionConfigService.GetLotProductKey(model);
         if (_productionSettings.LabelTemplateTypesByProduct.ContainsKey(key)) return true;
         int generation = Volatile.Read(ref _modelLoadGeneration);
-        ProductionStatisticsSnapshot stats = await ProductionPersistence.GetStatisticsAsync(
-            PartIdentitySnapshot.Capture(model), DateTime.Now, _lifetimeToken);
+        ProductionStatisticsSnapshot stats = await ProductionPersistence.GetFileStatisticsAsync(
+            TestHistoryStore.ThtStatisticsFileName(model.SourcePath, model.ModelName), DateTime.Now, _lifetimeToken);
         if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested) return false;
         if (stats.LifetimeTotal > 0) return true;
         async Task Save(JBZUniversalTester.Views.ProductInitialPrintSetup setup)
@@ -12528,6 +12528,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         long generation = Interlocked.Increment(ref _statisticsLoadGeneration);
         _statisticsBatchKey = _lotSequence.HistoryBatchKey;
         StartupPerformanceTrace.Mark("T11 STATS_BACKGROUND");
+        Total = Pass = Fail = 0;
+        DailyTestCount = MonthlyTestCount = LifetimeTestCount = 0;
 
         // Giữ reference task để exception luôn được observe trong method bên dưới.
         // Gate serializes fast model changes so stale SQLite queries cannot
@@ -12561,7 +12563,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             bool useDailyPassOffset = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId) &&
                 productLot.LastStartChangedDate == statisticsNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             Task<ProductionStatisticsSnapshot> statisticsTask =
-                ProductionPersistence.GetStatisticsAsync(part, statisticsNow, _lifetimeToken);
+                ProductionPersistence.GetFileStatisticsAsync(
+                    TestHistoryStore.ThtStatisticsFileName(model.SourcePath, model.ModelName), statisticsNow, _lifetimeToken);
             Task<ProbeCounterSnapshot> probeTask = ProductionPersistence.GetProbeCounterAsync(
                 part,
                 _productionSettings.ProbeReplacementThreshold,
@@ -12963,9 +12966,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 if (databaseResult.AlreadyCommitted)
                 {
                     _lotSequence.ReleaseReservation(cycleId);
-                    var reconciled = databaseResult.Statistics.DailyTotal > 0
+                    var reconciled = (databaseResult.FileStatistics ?? databaseResult.Statistics).DailyTotal > 0
                         ? await PersistLotWithoutBlockingUiAsync(() => _lotSequence.ReconcileCommittedLotAsync(
-                            databaseResult.Statistics.LastLotNo, history.ProductionBatchKey))
+                            (databaseResult.FileStatistics ?? databaseResult.Statistics).LastLotNo, history.ProductionBatchKey))
                         : (Success: true, Error: string.Empty);
                     if (!reconciled.Success)
                     {
@@ -13006,7 +13009,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                     RefreshProductionCounterPeriod();
                     return;
                 }
-                ApplyProductionStatistics(databaseResult.Statistics);
+                ApplyProductionStatistics(databaseResult.FileStatistics ?? databaseResult.Statistics);
                 ApplyPartCounter(databaseResult.ProbeCounter);
             });
             AsyncFileLogService.Current.Performance(

@@ -285,7 +285,8 @@ public sealed record ProductionCommitResult(
     long TestId,
     bool AlreadyCommitted,
     ProductionStatisticsSnapshot Statistics,
-    ProbeCounterSnapshot ProbeCounter);
+    ProbeCounterSnapshot ProbeCounter,
+    ProductionStatisticsSnapshot? FileStatistics = null);
 
 public sealed record ProductionStatisticsSnapshot(
     long DailyTotal,

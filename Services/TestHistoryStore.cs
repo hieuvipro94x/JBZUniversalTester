@@ -13,7 +13,7 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public sealed class TestHistoryStore
 {
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
     private const int LegacyMigrationBatchSize = 500;
     private static readonly object SchemaGate = new();
     private readonly string _path;
@@ -101,6 +101,8 @@ public sealed class TestHistoryStore
             ? MigrateLegacyHistory(connection, transaction)
             : ReadMigrationReport(connection, transaction);
         EnsurePartModelRelations(connection, transaction);
+        if (existingVersion < 9)
+            BackfillThtFileNames(connection, transaction);
         if (existingVersion < CurrentSchemaVersion)
             ReplaceRedundantIndexes(connection, transaction);
         WriteSchemaInfo(connection, transaction, report);
@@ -432,6 +434,14 @@ public sealed class TestHistoryStore
                 Details TEXT NOT NULL DEFAULT ''
             );
 
+            CREATE TABLE IF NOT EXISTS ThtFileCounters
+            (
+                FileName TEXT PRIMARY KEY,
+                TotalTests INTEGER NOT NULL DEFAULT 0,
+                TotalPass INTEGER NOT NULL DEFAULT 0,
+                TotalFail INTEGER NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS ActiveTestCycles
             (
                 CycleId TEXT PRIMARY KEY,
@@ -462,7 +472,8 @@ public sealed class TestHistoryStore
             ("ResultAt", "TEXT NULL"),
             ("RemovalStartedAt", "TEXT NULL"),
             ("RemovedAt", "TEXT NULL"),
-            ("ProductionBatchKey", "TEXT NOT NULL DEFAULT ''")
+            ("ProductionBatchKey", "TEXT NOT NULL DEFAULT ''"),
+            ("ThtFileName", "TEXT NOT NULL DEFAULT ''")
         ];
 
         var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -505,6 +516,8 @@ public sealed class TestHistoryStore
                 ON Tests(PartId, InspectionType, ResultAt DESC, Id DESC);
             CREATE INDEX IF NOT EXISTS IX_Tests_ModelId_ResultAt_Id
                 ON Tests(ModelId, ResultAt DESC, Id DESC);
+            CREATE INDEX IF NOT EXISTS IX_Tests_ThtFile_Inspection_Result
+                ON Tests(ThtFileName, InspectionType, ResultAt, Passed, Lot);
             CREATE INDEX IF NOT EXISTS IX_Tests_HistoryAt_Id
                 ON Tests(COALESCE(TestStartedAt, StartedAt), Id);
             CREATE INDEX IF NOT EXISTS IX_Tests_Part_Inspection_HistoryAt_Id
@@ -1008,6 +1021,18 @@ public sealed class TestHistoryStore
             aggregate.Parameters.AddWithValue("$UsedAt", usedAt.ToString("O", CultureInfo.InvariantCulture));
             aggregate.Parameters.AddWithValue("$PartId", partId);
             aggregate.ExecuteNonQuery();
+            using var fileAggregate = connection.CreateCommand();
+            fileAggregate.Transaction = transaction;
+            fileAggregate.CommandText = """
+                INSERT INTO ThtFileCounters(FileName,TotalTests,TotalPass,TotalFail)
+                VALUES($File,1,$Pass,$Fail)
+                ON CONFLICT(FileName) DO UPDATE SET TotalTests=TotalTests+1,
+                    TotalPass=TotalPass+excluded.TotalPass,TotalFail=TotalFail+excluded.TotalFail;
+                """;
+            fileAggregate.Parameters.AddWithValue("$File", ThtStatisticsFileName(request.Model.FileName, request.Model.ModelName));
+            fileAggregate.Parameters.AddWithValue("$Pass", request.History.Passed ? 1 : 0);
+            fileAggregate.Parameters.AddWithValue("$Fail", request.History.Passed ? 0 : 1);
+            fileAggregate.ExecuteNonQuery();
         }
 
         DeleteActiveCycle(connection, transaction, request.History.CycleId);
@@ -1263,18 +1288,19 @@ public sealed class TestHistoryStore
              OperatorCompany,ProductionLine,AppVersion,HtdrvName,LotText,InspectionTrace,
              OpenCount,WrongCount,ShortCount,FaultType,FaultSummary,FaultDetailsJson,
              LabelProfile,LabelTemplateType,LabelPayload,PrintStatus,PrintTimestamp,
-             Printer,LabelCopies,ReprintCount,PrintMessage,CreatedAt,ProductionBatchKey)
+             Printer,LabelCopies,ReprintCount,PrintMessage,CreatedAt,ProductionBatchKey,ThtFileName)
             VALUES
             ($Legacy,$Cycle,$Run,$Part,$Model,$Config,$Inspection,$Lot,$Counter,$Started,
              $Install,$TestStarted,$ResultAt,$RemovalStarted,$Removed,$Finished,$Passed,
              $Result,$ResultCode,$Barcode,$LabelSerial,$Resistance,'',$DeviceName,$DeviceNumber,
              $Company,$Line,$App,$Htdrv,$LotText,$Trace,$Open,$Wrong,$Short,$FaultType,
              $FaultSummary,$FaultJson,$LabelProfile,$Template,$Payload,$PrintStatus,$PrintAt,
-             $Printer,$Copies,$Reprints,$PrintMessage,$CreatedAt,$ProductionBatch);
+             $Printer,$Copies,$Reprints,$PrintMessage,$CreatedAt,$ProductionBatch,$ThtFileName);
             SELECT last_insert_rowid();
             """;
         AddNullable(command, "$Legacy", legacyHistoryId);
         command.Parameters.AddWithValue("$Cycle", h.CycleId);
+        command.Parameters.AddWithValue("$ThtFileName", ThtStatisticsFileName(request.Model.FileName, request.Model.ModelName));
         AddNullable(command, "$Run", runId);
         command.Parameters.AddWithValue("$Part", partId);
         command.Parameters.AddWithValue("$Model", modelId);
@@ -1467,7 +1493,99 @@ public sealed class TestHistoryStore
         ProductionStatisticsSnapshot statistics = QueryStatistics(
             connection, transaction, partId, history.ResultAt ?? history.Finished);
         ProbeCounterSnapshot probe = QueryProbeCounter(connection, transaction, partId);
-        return new(testId, duplicate, statistics, probe);
+        using SqliteCommand file = connection.CreateCommand();
+        file.Transaction = transaction;
+        file.CommandText = "SELECT ThtFileName FROM Tests WHERE Id=$Id;";
+        file.Parameters.AddWithValue("$Id", testId);
+        string name = Convert.ToString(file.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
+        return new(testId, duplicate, statistics, probe, QueryFileStatistics(connection, transaction, name, history.ResultAt ?? history.Finished));
+    }
+
+    // File name is the operator's product identity, independent of part number,
+    // file content hashes and the directory where the THT is selected.
+    public static string ThtStatisticsFileName(string? path, string? modelName = null)
+    {
+        string name = Path.GetFileName((path ?? string.Empty).Replace('\\', '/')).Trim();
+        if (name.Length == 0)
+        {
+            name = (modelName ?? string.Empty).Trim();
+            if (name.Length > 0 && !Path.HasExtension(name)) name += ".tht";
+        }
+        return name.ToUpperInvariant();
+    }
+
+    private static void BackfillThtFileNames(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        // Existing test rows/IDs/relationships stay intact. Use the model metadata
+        // available in the old schema; new rows capture the filename immutably.
+        var names = new List<(long Id, string Name)>();
+        using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT Id,FileName,ModelName FROM Models;";
+            using var reader = read.ExecuteReader();
+            while (reader.Read()) names.Add((reader.GetInt64(0), ThtStatisticsFileName(reader.GetString(1), reader.GetString(2))));
+        }
+        using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = "UPDATE Tests SET ThtFileName=$Name WHERE ModelId=$Id AND ThtFileName='';";
+        update.Parameters.AddWithValue("$Name", ""); update.Parameters.AddWithValue("$Id", 0L);
+        foreach (var item in names)
+        {
+            update.Parameters["$Name"].Value = item.Name; update.Parameters["$Id"].Value = item.Id;
+            update.ExecuteNonQuery();
+        }
+        using var totals = connection.CreateCommand(); totals.Transaction = transaction;
+        totals.CommandText = """
+            INSERT INTO ThtFileCounters(FileName,TotalTests,TotalPass,TotalFail)
+            SELECT ThtFileName,COUNT(*),SUM(Passed=1),SUM(Passed=0) FROM Tests
+            WHERE InspectionType='PRODUCT' GROUP BY ThtFileName
+            ON CONFLICT(FileName) DO UPDATE SET TotalTests=excluded.TotalTests,
+                TotalPass=excluded.TotalPass,TotalFail=excluded.TotalFail;
+            """;
+        totals.ExecuteNonQuery();
+    }
+
+    public ProductionStatisticsSnapshot GetFileStatistics(string fileName, DateTime now)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var result = QueryFileStatistics(connection, transaction, ThtStatisticsFileName(fileName), now);
+        transaction.Commit(); return result;
+    }
+
+    private static ProductionStatisticsSnapshot QueryFileStatistics(
+        SqliteConnection connection, SqliteTransaction transaction, string fileName, DateTime now)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = """
+            SELECT
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                    AND ResultAt >= $Day AND ResultAt < $NextDay),
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT' AND Passed=1
+                    AND ResultAt >= $Day AND ResultAt < $NextDay),
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT' AND Passed=0
+                    AND ResultAt >= $Day AND ResultAt < $NextDay),
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                    AND ResultAt >= $Month AND ResultAt < $NextMonth),
+                TotalTests,TotalPass,TotalFail,
+                COALESCE((SELECT Lot FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                    AND Passed=1 AND ResultAt >= $Day AND ResultAt < $NextDay
+                    ORDER BY ResultAt DESC,Id DESC LIMIT 1),0),
+                COALESCE((SELECT Result FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                    ORDER BY ResultAt DESC,Id DESC LIMIT 1),'')
+            FROM ThtFileCounters WHERE FileName=$File;
+            """;
+        command.Parameters.AddWithValue("$File", fileName);
+        command.Parameters.AddWithValue("$Day", now.Date.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$NextDay", now.Date.AddDays(1).ToString("O", CultureInfo.InvariantCulture));
+        DateTime month = new(now.Year, now.Month, 1);
+        command.Parameters.AddWithValue("$Month", month.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$NextMonth", month.AddMonths(1).ToString("O", CultureInfo.InvariantCulture));
+        using var row = command.ExecuteReader();
+        if (!row.Read()) return new(0,0,0,0,0,0,0,0,string.Empty);
+        return new(row.GetInt64(0),row.GetInt64(1),row.GetInt64(2),row.GetInt64(3),row.GetInt64(4),
+            row.GetInt64(5),row.GetInt64(6),row.GetInt64(7),row.GetString(8));
     }
 
     public long? GetLatestCommittedLotForBatch(PartIdentitySnapshot part, DateTime now, string batchKey)

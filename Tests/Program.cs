@@ -160,6 +160,7 @@ internal static partial class Program
         if (args is ["--test-main-daily-quantity"])
         {
             TestMainDailyQuantityByProduct();
+            TestThtFileStatisticsMigration();
             Console.WriteLine("PASS: MainWindow daily product quantity, live updates and date/product isolation");
             return 0;
         }
@@ -510,6 +511,7 @@ internal static partial class Program
             ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),
             ("History displays encoded barcodes with PASS-only LOT progression, including offline printers", TestHistoryBarcodeOnlyAndPassLot),
             ("MainWindow quantity follows selected product and day instead of lifetime totals", TestMainDailyQuantityByProduct),
+            ("THT filename statistics migrate without losing history", TestThtFileStatisticsMigration),
             ("Wire table keeps headers and color boundaries stable as rows arrive and recycle", TestWireColorCellFillsBounds),
             ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),
             ("Every PASS retains its printer command offline with clean History", TestAlwaysPrintHistory),
