@@ -20,9 +20,9 @@ git clone --branch tools/license-issuer --single-branch https://github.com/hieuv
 
 Khóa ký ECDSA P-256 đầu tiên đã được tạo trên máy quản trị triển khai. Kho nằm tại `%LOCALAPPDATA%\JBZLicenseIssuer\PrivateVault\issuer.dat`, được Windows DPAPI CurrentUser mã hóa. Không sao chép trực tiếp kho DPAPI sang tài khoản/Windows khác.
 
-**Ngay lần đầu dùng tool trên máy quản trị hiện tại, bấm XUẤT BỘ CẤP PHÉP**, đặt mật khẩu ít nhất 12 ký tự. Tệp `.jbzvault` chứa khóa ký và danh sách máy, được PBKDF2-SHA256 (210.000 vòng) + AES-256-GCM bảo vệ. Giữ ít nhất một bản sao an toàn ngoài ổ Windows. Ở máy quản trị thứ hai bấm **NHẬP BỘ CẤP PHÉP**, nhập mật khẩu. Nhập lại sẽ gộp hồ sơ theo mã giấy phép. Muốn đồng bộ hai nơi, xuất bộ mới nhất rồi nhập bên còn lại. Git chỉ chuyển mã nguồn, không chuyển khóa hoặc lịch sử máy.
+**Ngay lần đầu dùng tool trên máy quản trị hiện tại, bấm XUẤT BỘ CẤP PHÉP**, đặt mật khẩu ít nhất 12 ký tự. Tệp `.jbzvault` chứa khóa ký và danh sách máy, được PBKDF2-SHA256 (210.000 vòng) + AES-256-GCM bảo vệ. Giữ ít nhất một bản sao an toàn ngoài ổ Windows. Ở máy quản trị thứ hai bấm **NHẬP BỘ CẤP PHÉP**, nhập mật khẩu. Nhập lại sẽ gộp hồ sơ theo mã giấy phép. Muốn đồng bộ hai nơi, xuất bộ mới nhất rồi nhập bên còn lại. Git chuyển mã nguồn. Theo yêu cầu riêng ngày 05/11/2026, bản xuất mã hóa `Backups/JBZ-cap-phep-20261105.jbzvault` cũng được lưu trên nhánh này để nhập ở máy còn lại; mật khẩu được giữ riêng ngoài Git.
 
-Không đưa `.jbzvault`, `issuer.dat`, mật khẩu bảo vệ hay khóa PKCS8 lên Git hoặc thư mục public LAN. Mất cả kho và bản xuất sẽ không cấp tiếp được giấy phép cho EXE hiện tại; phải thay khóa công khai và phát hành EXE mới. Tool không tự tạo khóa thay thế khi thiếu kho.
+Không đưa `issuer.dat`, mật khẩu bảo vệ hay khóa PKCS8 dạng rõ lên Git hoặc thư mục public LAN. Chỉ bản xuất mã hóa trong `Backups/` được chỉ định rõ mới được đưa lên Git; các tệp `.jbzvault` khác vẫn bị `.gitignore` chặn. Mất cả kho và bản xuất sẽ không cấp tiếp được giấy phép cho EXE hiện tại; phải thay khóa công khai và phát hành EXE mới. Tool không tự tạo khóa thay thế khi thiếu kho.
 
 ## Bảo mật và giới hạn
 
