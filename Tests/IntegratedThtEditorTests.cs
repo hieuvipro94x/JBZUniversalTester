@@ -168,7 +168,24 @@ internal static partial class Program
                 Assert(new[] { "_connectors", "_pins", "_lines", "_colors" }.All(name =>
                         typeof(ThtEditorPage).GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(page) is null),
                     "Opening the base editor does not construct unused grid pages");
+                var blankBase = (JBZUniversalTester.ModelEditor.Pages.BasePage)((ContentControl)page.FindName("ContentHost")).Content;
+                var kindBox = (TextBox)blankBase.FindName("KindBox");
+                var kindHint = (TextBlock)blankBase.FindName("KindHint");
+                Assert(kindBox.Text == "" && kindHint.Text == "DL3 PE" && kindHint.Visibility == Visibility.Visible &&
+                       blankBase.ReadData().Kind == "" && blankBase.ReadData().Model == "" && !page.HasUnsavedChanges,
+                    "New THT examples are visual hints, never real input or unsaved data");
+                kindBox.RaiseEvent(new System.Windows.Input.KeyboardFocusChangedEventArgs(
+                    System.Windows.Input.Keyboard.PrimaryDevice, 0, null, kindBox)
+                    { RoutedEvent = System.Windows.Input.Keyboard.GotKeyboardFocusEvent });
+                Assert(kindHint.Visibility == Visibility.Collapsed, "Entering an empty field hides its sample hint");
+                kindBox.Text = "REAL VEHICLE";
+                Assert(kindHint.Visibility == Visibility.Collapsed && blankBase.ReadData().Kind == "REAL VEHICLE",
+                    "Typed values are read independently of the hint");
+                kindBox.Clear();
+                Assert(kindHint.Visibility == Visibility.Visible && blankBase.ReadData().Kind == "" && !page.HasUnsavedChanges,
+                    "Deleting input restores the hint immediately without storing the sample");
                 await page.OpenPathAsync(path);
+                Assert(kindHint.Visibility == Visibility.Collapsed, "Loaded THT fields keep their actual values without new-file hints");
                 var canvas = (FrameworkElement)page.FindName("EditorCanvas");
                 Assert(canvas.Width == 1224 && canvas.Height == 900 &&
                        Grid.GetColumn((FrameworkElement)((FrameworkElement)page.FindName("BaseNav")).Parent) == 0 &&
@@ -244,8 +261,9 @@ internal static partial class Program
     {
         OnSettingsDispatcher(async () =>
         {
-            var page = new ThtEditorPage(); await page.OpenPathAsync(path);
-            typeof(ThtEditorPage).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [pageIndex]);
+            var page = new ThtEditorPage();
+            if (pageIndex >= 0) await page.OpenPathAsync(path);
+            typeof(ThtEditorPage).GetMethod("ShowPage", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, [Math.Max(0, pageIndex)]);
             using var source = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("THT editor preview")
                 { Width = 1600, Height = 900, WindowStyle = unchecked((int)0x80000000) });
             source.RootVisual = page;

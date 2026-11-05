@@ -12,7 +12,7 @@ namespace JBZUniversalTester.ModelEditor;
 
 public partial class ThtEditorPage : UserControl
 {
-    private ModelDocument _document = new() { SourceFormat = "tht", Base = new() { Model = "NewModel" } };
+    private ModelDocument _document = new() { SourceFormat = "tht", Base = new() };
     private readonly DocumentChangeTracker _changes = new();
     private readonly BasePage _base = new();
     private ConnectorPage _connectors = null!;
@@ -100,7 +100,7 @@ public partial class ThtEditorPage : UserControl
                 nav.IsChecked = int.Parse((string)nav.Tag) == page;
             switch (page)
             {
-                case 0: _base.LoadData(_document.Base); ContentHost.Content = _base; break;
+                case 0: _base.LoadData(_document.Base, showHints: _document.SourcePath is null); ContentHost.Content = _base; break;
                 case 1: _connectors.LoadData(_document); ContentHost.Content = _connectors; break;
                 case 2: _pins.LoadData(_document.Pins, _document.ThtState?.PinRows); ContentHost.Content = _pins; break;
                 case 3: _lines.SetColors(_colors?.CurrentColors ?? new ColorStore().Load()); _lines.LoadData(_document.Pins); ContentHost.Content = _lines; break;
@@ -235,7 +235,7 @@ public partial class ThtEditorPage : UserControl
     private async void New_Click(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmCloseAsync()) return;
-        _document = new() { SourceFormat = "tht", Base = new() { Model = "NewModel" } };
+        _document = new() { SourceFormat = "tht", Base = new() };
         _hash = null; _rebuild = false; _changes.Reset(_document); ShowPage(0); PathText.Text = "THT mới";
     }
     private async void Save_Click(object sender, RoutedEventArgs e) => await SaveAsync();
@@ -255,7 +255,7 @@ public partial class ThtEditorPage : UserControl
             var deleting = Task.Run(() => IntegratedThtStore.Archive(path, hash));
             _diskWork = deleting; await deleting;
             SavedPaths.Remove(path);
-            _document = new() { SourceFormat = "tht", Base = new() { Model = "NewModel" } };
+            _document = new() { SourceFormat = "tht", Base = new() };
             _hash = null; _rebuild = false; _changes.Reset(_document); ShowPage(0); PathText.Text = "THT mới";
             StatusText.Text = "Đã chuyển file vào ThtBackups.";
         }
