@@ -16,5 +16,59 @@
    <TextBlock Grid.Row="5" Text="ALC" FontSize="24" VerticalAlignment="Center"/><TextBox x:Name="CustomerBox" Grid.Row="5" Grid.Column="1" FontSize="24" Height="42" VerticalContentAlignment="Center" Width="230" HorizontalAlignment="Left"/>
    <TextBlock Grid.Row="6" Text="CHẾ ĐỘ M/H" FontSize="22" VerticalAlignment="Center"/><ComboBox x:Name="ModeBox" Grid.Row="6" Grid.Column="1" FontSize="20" Height="42" VerticalContentAlignment="Center"/>
   </Grid>
+  <Border x:Name="BasicInfoExampleGuide" Margin="40,438,22,16" Padding="14,10"
+          VerticalAlignment="Top" Background="#F5F8FC" BorderBrush="#CCD7E5" BorderThickness="1" CornerRadius="6">
+   <StackPanel>
+    <TextBlock Text="VÍ DỤ THEO PHẦN MỀM GỐC / 원본 프로그램 기준 입력 예시"
+               FontSize="14" FontWeight="Bold" Foreground="#173B68" Margin="0,0,0,8"/>
+    <Border Background="White" BorderBrush="#D7E0EB" BorderThickness="1" Padding="8,4">
+     <Grid>
+      <Grid.Resources>
+       <Style TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="#24364B"/>
+       </Style>
+      </Grid.Resources>
+      <Grid.ColumnDefinitions>
+       <ColumnDefinition Width="238"/><ColumnDefinition Width="146"/><ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+       <RowDefinition Height="27"/><RowDefinition Height="28"/><RowDefinition Height="28"/>
+       <RowDefinition Height="28"/><RowDefinition Height="28"/><RowDefinition Height="28"/>
+       <RowDefinition Height="28"/><RowDefinition Height="28"/>
+      </Grid.RowDefinitions>
+      <TextBlock Text="Ô NHẬP / 입력 항목" FontWeight="Bold"/>
+      <TextBlock Grid.Column="1" Text="CỘT GỐC / 원본 항목" FontWeight="Bold"/>
+      <TextBlock Grid.Column="2" Text="VÍ DỤ / 입력 예" FontWeight="Bold"/>
+      <TextBlock Grid.Row="1" Text="TÊN MODEL / 모델명"/>
+      <TextBlock Grid.Row="1" Grid.Column="1" Text="Tên file / 파일명"/>
+      <TextBlock Grid.Row="1" Grid.Column="2" Text="K32000-22401R-260224"/>
+      <TextBlock Grid.Row="2" Text="MÃ HÀNG / 파트번호"/>
+      <TextBlock Grid.Row="2" Grid.Column="1" Text="파트번호"/>
+      <TextBlock Grid.Row="2" Grid.Column="2" Text="K32000-22402"/>
+      <TextBlock Grid.Row="3" Text="TÊN HÀNG / 파트명"/>
+      <TextBlock Grid.Row="3" Grid.Column="1" Text="파트명"/>
+      <TextBlock Grid.Row="3" Grid.Column="2" Text="WIRING ASSY-MAIN"/>
+      <TextBlock Grid.Row="4" Text="LOẠI XE / 차종"/>
+      <TextBlock Grid.Row="4" Grid.Column="1" Text="ECO"/>
+      <TextBlock Grid.Row="4" Grid.Column="2" Text="HE EV"/>
+      <TextBlock Grid.Row="5" Text="EO NO / EO 번호"/>
+      <TextBlock Grid.Row="5" Grid.Column="1" Text="—"/>
+      <TextBlock Grid.Row="5" Grid.Column="2" Text="Trống nếu không có / 없으면 공란"/>
+      <TextBlock Grid.Row="6" Text="ALC / ALC 코드"/>
+      <TextBlock Grid.Row="6" Grid.Column="1" Text="ALC"/>
+      <TextBlock Grid.Row="6" Grid.Column="2" Text="HE EV"/>
+      <TextBlock Grid.Row="7" Text="CHẾ ĐỘ M/H / 품번 모드"/>
+      <TextBlock Grid.Row="7" Grid.Column="1" Text="—"/>
+      <TextBlock Grid.Row="7" Grid.Column="2" Text="Mã hàng nội bộ / 내부 품번 사용"/>
+     </Grid>
+    </Border>
+    <TextBlock Text="TÊN MODEL khác MÃ HÀNG. Ví dụ chỉ để tham khảo, không tự điền.&#10;모델명과 파트번호는 다릅니다. 예시는 참고용이며 자동 입력되지 않습니다."
+               FontSize="12" Foreground="#475569" TextWrapping="Wrap" Margin="0,8,0,0"/>
+    <TextBlock Text="Đổi TÊN MODEL không đổi tên file đã mở. / 모델명을 수정해도 열린 파일명은 바뀌지 않습니다."
+               FontSize="12" Foreground="#475569" TextWrapping="Wrap" Margin="0,4,0,0"/>
+   </StackPanel>
+  </Border>
  </Grid>
 </UserControl>
