@@ -174,6 +174,18 @@ internal static partial class Program
                 Assert(kindBox.Text == "" && kindHint.Text == "DL3 PE" && kindHint.Visibility == Visibility.Visible &&
                        blankBase.ReadData().Kind == "" && blankBase.ReadData().Model == "" && !page.HasUnsavedChanges,
                     "New THT examples are visual hints, never real input or unsaved data");
+                // Reproduce the application-wide compact TextBox style which
+                // previously shrank the editor fields despite their tall hosts.
+                var compactInput = new Style(typeof(TextBox));
+                compactInput.Setters.Add(new Setter(FrameworkElement.HeightProperty, 26d));
+                blankBase.Resources[typeof(TextBox)] = compactInput;
+                blankBase.Measure(new Size(978, 822)); blankBase.Arrange(new Rect(0, 0, 978, 822));
+                blankBase.UpdateLayout();
+                var formInputs = new[] { "ModelBox", "NumberBox", "NameBox", "KindBox", "EoBox", "CustomerBox" }
+                    .Select(name => (TextBox)blankBase.FindName(name)).ToArray();
+                Assert(formInputs.All(input => Math.Abs(input.ActualHeight - 44) < 0.1 && input.ActualWidth > 600) &&
+                       formInputs.All(input => Math.Abs(input.ActualWidth - formInputs[0].ActualWidth) < 0.1),
+                    "Basic fields stay wide, equally sized and readable under compact application styles");
                 kindBox.RaiseEvent(new System.Windows.Input.KeyboardFocusChangedEventArgs(
                     System.Windows.Input.Keyboard.PrimaryDevice, 0, null, kindBox)
                     { RoutedEvent = System.Windows.Input.Keyboard.GotKeyboardFocusEvent });
