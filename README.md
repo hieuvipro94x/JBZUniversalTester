@@ -39,3 +39,7 @@ dotnet build -c Release
 ```
 
 Self-test dùng khóa tạm trong bộ nhớ, không đọc hoặc sửa kho thật. Public key trong `Common/LicenseProtocol.cs` phải khớp UniversalTester. Không thay khóa khi cập nhật giao diện.
+
+## Bộ cấp phép mới 05/11/2026 — tool 1.0.1
+
+Theo yêu cầu người dùng, tool 1.0.1 dùng khóa mới đồng bộ UniversalTester V2026.09.389. Kho mới được tạo cục bộ trên máy quản trị ở nhà, bảo vệ bằng DPAPI CurrentUser. Mở tool 1.0.1 và XUẤT BỘ CẤP PHÉP để tự đặt mật khẩu ít nhất 12 ký tự. Bản xuất trong Backups là khóa cũ, chỉ dùng cho V388; không dùng để nhập vào tool mới. Không đưa khóa rõ hoặc mật khẩu lên Git.

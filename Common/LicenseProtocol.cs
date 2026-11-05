@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -13,7 +13,7 @@ public static class LicenseProtocol
 {
     public const string Product = "JBZUniversalTester";
     public const string Developer = "Vũ Tuấn Nam";
-    public const string PublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEgFEDlxBsXVY/Orwl/mISNksfof2ZwCNSmHuml816pVs75WPydellRbuy80e2eyphxW96ga4YEDDm7SmtIKxuew==";
+    public const string PublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE/I6naSmtIzBKFYUCbjS/5D4OUVQbT1FKnVVuciS0LOWYR1B2m4/uPryUKu+B1WlsgZZHM0HtDt1M78fZrfjc3Q==";
     public const int MaximumCodeLength = 8192;
     public static string NormalizeCode(string value)
     {
