@@ -41,6 +41,12 @@ internal static partial class Program
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
+        if (args is ["--test-connector-auto-io"])
+        {
+            TestConnectorAutomaticStartIo();
+            Console.WriteLine("PASS: Connector PIN edits update automatic IO ranges and preserve explicit anchors");
+            return 0;
+        }
         if (args is ["--test-editor-arrow-navigation"])
         {
             TestEditorArrowNavigation();
@@ -632,6 +638,7 @@ internal static partial class Program
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
+            ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
             ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),

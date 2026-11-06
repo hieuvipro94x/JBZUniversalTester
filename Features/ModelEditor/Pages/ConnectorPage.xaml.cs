@@ -1,8 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Threading;
-using Microsoft.Win32;
 using JBZUniversalTester.ModelEditor.Helpers;
 using JBZUniversalTester.ModelEditor.Models;
 using JBZUniversalTester.ModelEditor.Services;
@@ -26,6 +24,8 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
     public ObservableCollection<ConnectorRow> Rows { get; } = [];
     public event EventHandler? Changed;
     private bool _loading;
+    private bool _updatingStartIos;
+    private readonly HashSet<ConnectorRow> _automaticStarts = [];
     public ConnectorPage()
     {
         InitializeComponent();
@@ -35,7 +35,11 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
         Rows.CollectionChanged += (_, e) =>
         {
             if (e.OldItems is not null)
-                foreach (ConnectorRow row in e.OldItems) row.PropertyChanged -= RowChanged;
+                foreach (ConnectorRow row in e.OldItems)
+                {
+                    row.PropertyChanged -= RowChanged;
+                    _automaticStarts.Remove(row);
+                }
             if (e.NewItems is not null)
                 foreach (ConnectorRow row in e.NewItems) row.PropertyChanged += RowChanged;
             if (!_loading)
@@ -44,11 +48,57 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
     }
     private void RowChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (!_loading) Changed?.Invoke(this, EventArgs.Empty);
+        if (_loading || _updatingStartIos) return;
+        if (sender is ConnectorRow row && e.PropertyName == nameof(ConnectorRow.StartIo))
+            _automaticStarts.Remove(row);
+        if (e.PropertyName is nameof(ConnectorRow.PinCount) or nameof(ConnectorRow.StartIo))
+            UpdateAutomaticStartIos();
+        Changed?.Invoke(this, EventArgs.Empty);
     }
     public void LoadData(ModelDocument doc)
     {
-        _loading = true; Rows.Clear(); var i = 1; foreach (var c in doc.Connectors) Rows.Add(new ConnectorRow { Index = i++, Name = c.Name, PinCount = c.PinCount, StartIo = c.StartIo, Waterproof = c.Waterproof, LeakChannel = c.LeakChannel }); _loading = false;
+        _loading = true;
+        try
+        {
+            foreach (var row in Rows) row.PropertyChanged -= RowChanged;
+            _automaticStarts.Clear();
+            Rows.Clear();
+            long nextIo = 1;
+            foreach (var connector in doc.Connectors)
+            {
+                var row = new ConnectorRow
+                {
+                    Index = Rows.Count + 1,
+                    Name = connector.Name,
+                    PinCount = connector.PinCount,
+                    StartIo = connector.StartIo,
+                    Waterproof = connector.Waterproof,
+                    LeakChannel = connector.LeakChannel
+                };
+                // Consecutive addresses follow the preceding connector. A gap
+                // is an explicit anchor, including reserved IO ranges and CLIP.
+                if (row.StartIo <= 0 || row.StartIo == nextIo)
+                    _automaticStarts.Add(row);
+                Rows.Add(row);
+                nextIo = (long)row.StartIo + Math.Max(1, row.PinCount);
+            }
+        }
+        finally { _loading = false; }
+    }
+    private void UpdateAutomaticStartIos()
+    {
+        _updatingStartIos = true;
+        try
+        {
+            long nextIo = 1;
+            foreach (var row in Rows.OrderBy(row => row.Index))
+            {
+                if (_automaticStarts.Contains(row))
+                    row.StartIo = nextIo is > 0 and <= int.MaxValue ? (int)nextIo : 0;
+                nextIo = (long)row.StartIo + Math.Max(1, row.PinCount);
+            }
+        }
+        finally { _updatingStartIos = false; }
     }
     public List<Connector> ReadData()
     {
@@ -66,9 +116,8 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
     }
     private void Grid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
     {
-        // I/O BẮT ĐẦU là dữ liệu người dùng được phép nhập tay.
-        // Không tự tính lại sau khi sửa SỐ PIN hoặc I/O vì việc đó sẽ ghi đè
-        // giá trị vừa nhập. Validation khi lưu sẽ kiểm tra giá trị hợp lệ.
+        // Numeric bindings update immediately while typing. RowChanged handles
+        // automatic addresses; an explicit StartIo edit establishes an anchor.
         if (!_loading) Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -79,6 +128,7 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
         for (var i = 0; i < Rows.Count; i++)
             Rows[i].Index = i + 1;
         _loading = false;
+        UpdateAutomaticStartIos();
         Changed?.Invoke(this, EventArgs.Empty);
     }
     private void Insert_Click(object sender, RoutedEventArgs e)
@@ -99,7 +149,8 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
         {
             var previousIndex = Math.Min(insertIndex - 1, Rows.Count - 1);
             var previous = Rows[previousIndex];
-            startIo = previous.StartIo + Math.Max(1, previous.PinCount);
+            var nextIo = (long)previous.StartIo + Math.Max(1, previous.PinCount);
+            startIo = nextIo is > 0 and <= int.MaxValue ? (int)nextIo : 0;
         }
 
         var newRow = new ConnectorRow
@@ -111,6 +162,7 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
             Waterproof = false
         };
 
+        _automaticStarts.Add(newRow);
         Rows.Insert(insertIndex, newRow);
         RefreshIndexes();
 
