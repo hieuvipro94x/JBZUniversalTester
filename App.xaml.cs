@@ -36,17 +36,6 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        // Licensing completes before configuration, view models or hardware ownership.
-        var activation = new Licensing.ActivationService();
-        bool activated;
-        try { activated = await activation.IsActivatedAsync(); }
-        catch (Exception) { activated = false; } // The activation window provides retry and a readable diagnostic.
-        if (!activated && new Licensing.ActivationWindow(activation).ShowDialog() != true)
-        {
-            Shutdown(0);
-            return;
-        }
-
         Models.ProductionSettings productionSettings;
         AppSettings settings;
         try
