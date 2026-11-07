@@ -3,15 +3,15 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="JBZ Universal Tester — Khởi động" Width="720" Height="400"
         WindowStyle="None" ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
-        Background="#101E33" Foreground="#F1F5F9" FontFamily="Segoe UI"
+        Background="#FFFFFF" Foreground="#24364B" FontFamily="Segoe UI"
         UseLayoutRounding="True" SnapsToDevicePixels="True" ShowInTaskbar="True">
-    <Border BorderBrush="#314660" BorderThickness="1" Background="#101E33">
+    <Border BorderBrush="#CBD5E1" BorderThickness="1" Background="#FFFFFF">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="5"/><RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/><RowDefinition Height="56"/>
             </Grid.RowDefinitions>
-            <Border Background="#42BCEB"/>
+            <Border Background="#1687C9"/>
             <Grid Grid.Row="1" Margin="36,28,36,18">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                 <Grid>
@@ -20,26 +20,26 @@
                             <Image x:Name="LogoImage" Source="pack://application:,,,/JBZUniversalTester;component/Assets/mainlogo.gif" Width="190" Height="56" Stretch="Uniform"/>
                         </Border>
                         <StackPanel Margin="18,0,0,0" VerticalAlignment="Center">
-                            <TextBlock Text="JBZ PRODUCTION SYSTEM" Foreground="#8BA6C7" FontSize="11" FontWeight="SemiBold"/>
-                            <TextBlock Text="PRECISION · QUALITY · RELIABILITY" Foreground="#BCD0E5" FontSize="10" Margin="0,6,0,0"/>
+                            <TextBlock Text="JBZ PRODUCTION SYSTEM" Foreground="#64748B" FontSize="11" FontWeight="SemiBold"/>
+                            <TextBlock Text="PRECISION · QUALITY · RELIABILITY" Foreground="#64748B" FontSize="10" Margin="0,6,0,0"/>
                         </StackPanel>
                     </StackPanel>
                 </Grid>
                 <StackPanel Grid.Row="1" VerticalAlignment="Bottom">
-                    <TextBlock Text="UNIVERSAL TESTER" FontSize="34" FontWeight="Bold" Foreground="White"/>
-                    <TextBlock Text="HỆ THỐNG KIỂM TRA DÂY ĐIỆN" FontSize="14" Foreground="#C4D5E8" Margin="1,8,0,0"/>
-                    <TextBlock Text="WIRE HARNESS TEST SYSTEM" FontSize="11" Foreground="#7997B8" Margin="1,4,0,0"/>
+                    <TextBlock Text="UNIVERSAL TESTER" FontSize="34" FontWeight="Bold" Foreground="#183B61"/>
+                    <TextBlock Text="HỆ THỐNG KIỂM TRA DÂY ĐIỆN" FontSize="14" Foreground="#334155" Margin="1,8,0,0"/>
+                    <TextBlock Text="WIRE HARNESS TEST SYSTEM" FontSize="11" Foreground="#64748B" Margin="1,4,0,0"/>
                 </StackPanel>
             </Grid>
             <Grid Grid.Row="2" Margin="36,0,36,23">
                 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="6"/></Grid.RowDefinitions>
                 <Grid Margin="0,0,0,12">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="48"/></Grid.ColumnDefinitions>
-                    <TextBlock x:Name="StageText" Text="Đang khởi động hệ thống…" FontSize="13" Foreground="#DCE8F6" TextWrapping="Wrap"/>
-                    <TextBlock x:Name="ProgressText" Grid.Column="1" Text="0%" FontSize="13" Foreground="#67D2F5" TextAlignment="Right"/>
+                    <TextBlock x:Name="StageText" Text="Đang khởi động hệ thống…" FontSize="13" Foreground="#334155" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ProgressText" Grid.Column="1" Text="0%" FontSize="13" Foreground="#1677AD" TextAlignment="Right"/>
                 </Grid>
                 <ProgressBar x:Name="StartupProgressBar" Grid.Row="1" Height="6" Minimum="0" Maximum="100"
-                             IsIndeterminate="False" BorderThickness="0" Background="#263A53" Foreground="#42BCEB">
+                             IsIndeterminate="False" BorderThickness="0" Background="#E2E8F0" Foreground="#1687C9">
                     <ProgressBar.Template>
                         <ControlTemplate TargetType="ProgressBar">
                             <Grid ClipToBounds="True">
@@ -50,10 +50,10 @@
                     </ProgressBar.Template>
                 </ProgressBar>
             </Grid>
-            <Border Grid.Row="3" Background="#0C1728" BorderBrush="#24364D" BorderThickness="0,1,0,0">
+            <Border Grid.Row="3" Background="#F1F5F9" BorderBrush="#DCE4ED" BorderThickness="0,1,0,0">
                 <Grid Margin="36,0">
-                    <TextBlock x:Name="VersionText" Foreground="#8BA6C7" FontSize="11" VerticalAlignment="Center"/>
-                    <TextBlock Text="Phát triển bởi Vũ Tuấn Nam" Foreground="#8BA6C7" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                    <TextBlock x:Name="VersionText" Foreground="#64748B" FontSize="11" VerticalAlignment="Center"/>
+                    <TextBlock Text="Phát triển bởi Vũ Tuấn Nam" Foreground="#64748B" FontSize="11" VerticalAlignment="Center" HorizontalAlignment="Right"/>
                 </Grid>
             </Border>
         </Grid>
