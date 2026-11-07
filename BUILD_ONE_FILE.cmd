@@ -304,6 +304,51 @@ if errorlevel 1 (
 echo.
 
 rem ============================================================
+rem B2B - COPY TOAN BO THU MUC VERSION LEN MANG LAN
+rem Chi thuc hien sau khi build thanh cong va xac minh chu ky EXE.
+rem Copy truoc buoc GitHub: van copy neu nguoi dung huy commit/push.
+rem ============================================================
+set "LOCAL_VERSION_DIR=%ROOT%PublishSingle\V%NEW_VERSION%"
+set "LAN_RELEASE_ROOT=\\192.168.10.150\public\NAM"
+set "LAN_VERSION_DIR=%LAN_RELEASE_ROOT%\V%NEW_VERSION%"
+
+echo ============================================================
+echo BUOC 2B - SAO CHEP TOAN BO V%NEW_VERSION% LEN LAN
+echo ============================================================
+echo [LAN] Nguon : %LOCAL_VERSION_DIR%
+echo [LAN] Dich  : %LAN_VERSION_DIR%
+echo.
+
+if not exist "%LOCAL_VERSION_DIR%\" (
+    echo [LOI LAN] Khong tim thay thu muc version sau khi build.
+    goto :FAIL
+)
+
+rem /E: copy tat ca file, thu muc con va ca thu muc rong.
+rem /COPY:DAT va /DCOPY:DAT: giu nguyen du lieu, thuoc tinh, thoi gian.
+rem /XJ: khong lan theo junction, tranh sao chep vong lap.
+rem /R:2 /W:2: gioi han so lan thu lai khi mang LAN co loi.
+rem KHONG dung /MIR: tranh xoa nham du lieu san co tren LAN.
+robocopy "%LOCAL_VERSION_DIR%" "%LAN_VERSION_DIR%" /E /COPY:DAT /DCOPY:DAT /XJ /R:2 /W:2 /NP
+set "LAN_COPY_EXIT=%ERRORLEVEL%"
+
+rem Robocopy: exit code 0..7 la thanh cong; 8 tro len la loi.
+if %LAN_COPY_EXIT% GEQ 8 (
+    echo [LOI LAN] Robocopy that bai, ma loi: %LAN_COPY_EXIT%.
+    echo [LAN] Ban build tren may van giu nguyen tai: %LOCAL_VERSION_DIR%
+    goto :FAIL
+)
+
+if not exist "%LAN_VERSION_DIR%\JBZUniversalTester.exe" (
+    echo [LOI LAN] Khong tim thay JBZUniversalTester.exe tai thu muc LAN.
+    goto :FAIL
+)
+
+echo [LAN] DA SAO CHEP THANH CONG TOAN BO THU MUC V%NEW_VERSION%.
+echo [LAN] %LAN_VERSION_DIR%
+echo.
+
+rem ============================================================
 rem B3 - GIT
 rem ============================================================
 echo ============================================================
@@ -398,6 +443,7 @@ echo ============================================================
 echo HOÀN TẤT THÀNH CÔNG
 echo Version : V%NEW_VERSION%
 echo GitHub  : %TARGET_REPO_URL%
+echo LAN     : %LAN_VERSION_DIR%
 echo ============================================================
 git status -sb
 set "FINAL_EXIT=0"
