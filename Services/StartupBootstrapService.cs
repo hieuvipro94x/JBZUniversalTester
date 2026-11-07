@@ -30,7 +30,7 @@ public static class StartupBootstrapService
         }
     }
 
-    public static Task EnsureDeferredProductionFiles()
+    public static Task EnsureDeferredProductionFiles(bool failOnError = false)
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
@@ -65,6 +65,7 @@ public static class StartupBootstrapService
         catch (Exception ex)
         {
             log.Error($"Deferred startup bootstrap error: {ex}");
+            if (failOnError) throw;
         }
 
         return Task.CompletedTask;

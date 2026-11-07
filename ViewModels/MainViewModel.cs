@@ -83,8 +83,12 @@ public sealed class MainViewModel : ObservableObject
 
     public MainViewModel() : this(AppSettings.Load(), ProductionConfigService.Load()) { }
 
-    public MainViewModel(AppSettings settings, ProductionSettings productionSettings)
+    private readonly bool _productionDataPrepared;
+    public event Action<int, string>? StartupProgress;
+
+    public MainViewModel(AppSettings settings, ProductionSettings productionSettings, bool productionDataPrepared = false)
     {
+        _productionDataPrepared = productionDataPrepared;
         _settings = settings;
         _productionSettings = productionSettings;
         _board = new UnifiedBoardTransport(
@@ -112,9 +116,8 @@ public sealed class MainViewModel : ObservableObject
             requireStartupIoClear: false
         );
 
-        // Việc tự nạp mã + tự kết nối bo được bắt đầu tại MainWindow.Loaded.
-        // Không dùng fire-and-forget trong constructor để tránh race giữa WPF
-        // StartupUri/ShowDialog và lần khởi tạo D2XX duy nhất của phiên.
+        // App starts initialization after the splash paints. Constructors never
+        // start device work; MainWindow retains a guarded standalone fallback.
         _page = Home;
 
         ShowHomeCommand = new RelayCommand(
@@ -149,13 +152,17 @@ public sealed class MainViewModel : ObservableObject
         // DB migration/import counter và nhận dạng FTDI độc lập. Chỉ kết nối
         // hardware song song; nạp model/statistics chờ bootstrap xong để DB cũ
         // luôn được chuyển sang canonical path trước khi repository có thể tạo DB.
-        Task productionDataTask = Task.Run(StartupBootstrapService.EnsureDeferredProductionFiles);
+        StartupProgress?.Invoke(62, "Đang chuẩn bị dữ liệu và kết nối thiết bị…");
+        Task productionDataTask = _productionDataPrepared
+            ? Task.CompletedTask
+            : Task.Run(() => StartupBootstrapService.EnsureDeferredProductionFiles());
 
         Task printerConnectionTask = Test.AutoConnectLabelPrinterAsync();
         _ = ObservePrinterStartupAsync(printerConnectionTask);
 
         Task boardInitializationTask = Test.InitializeHardwareAsync();
         await Task.WhenAll(productionDataTask, boardInitializationTask);
+        StartupProgress?.Invoke(80, "Đang nạp mã hàng gần nhất và sản lượng…");
 
         // Sau khi canonical DB đã sẵn sàng mới nạp model và lịch sử sản lượng.
         // InitializeAsync reuse kết nối vừa hoàn tất, không mở bo lần hai.
@@ -163,6 +170,7 @@ public sealed class MainViewModel : ObservableObject
         StartupPerformanceTrace.Mark("T3 SETTINGS_READY");
 
         Home.Refresh();
+        StartupProgress?.Invoke(92, "Đang chuẩn bị giao diện vận hành…");
         Raise(nameof(CurrentBoardCapacity));
         Raise(nameof(RequiredCardCount));
         Raise(nameof(ConfiguredCardCount));

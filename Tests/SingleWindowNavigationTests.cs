@@ -46,6 +46,19 @@ internal static partial class Program
                 noticeSettings.ShowDiscardConfigurationNotice = false;
                 await Dispatcher.Yield(DispatcherPriority.Background);
                 Assert(application.Windows.Count == 1, "A notice queued before disabling the preference cannot appear later");
+                var splash = new StartupWindow();
+                application.MainWindow = splash;
+                noticeSettings.ShowDiscardConfigurationNotice = true;
+                notify.Invoke(mainVm.Test, [noticeModel, loadGeneration, true]);
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(application.Windows.Count == 2 && main.OwnedWindows.Count == 0,
+                    "Remembered-model notice waits for splash handoff instead of opening a modal startup dialog");
+                noticeSettings.ShowDiscardConfigurationNotice = false;
+                application.MainWindow = main;
+                splash.Complete();
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(application.Windows.Count == 1,
+                    "Startup notice rechecks its preference after splash completion");
                 typeof(TestViewModel).GetField("_model", flags)!.SetValue(mainVm.Test, originalModel);
                 noticeSettings.ShowDiscardConfigurationNotice = true;
                 Task abandonedOpen = (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;

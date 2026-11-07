@@ -49,9 +49,8 @@ public partial class MainWindow : Window
         LogMemory("MEM STARTUP");
         _uiStallWatchdog = new UiStallWatchdog(Dispatcher);
 
-        // Quan trọng: không khởi tạo FTDI/model/printer trong Loaded.
-        // ContentRendered đảm bảo WPF đã vẽ frame đầu tiên; Task.Yield trả
-        // quyền cho Dispatcher xử lý input/paint trước khi bắt đầu startup I/O.
+        // Normal startup is prepared behind the splash. Keep this fallback for
+        // callers that construct/show MainWindow without the App startup flow.
         await Task.Yield();
         await InitializeApplicationAfterFirstRenderAsync();
     }
@@ -66,11 +65,20 @@ public partial class MainWindow : Window
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        if (_startupStarted)
+        {
+            UpdateProductRemovalGate();
+            return;
+        }
         // Loaded có thể xảy ra trước ContentRendered. Chỉ khóa các nút phụ thuộc
         // hardware ở đây; tuyệt đối không chạy FTDI/model/printer trước frame đầu.
         StartTestButton.IsEnabled = false;
         SelectModelButton.IsEnabled = false;
     }
+
+    // Called by App only after the splash has painted; later ContentRendered
+    // reuses the startup guard instead of opening devices a second time.
+    public Task PrepareStartupAsync() => InitializeApplicationAfterFirstRenderAsync();
 
     private async Task InitializeApplicationAfterFirstRenderAsync()
     {
@@ -81,9 +89,8 @@ public partial class MainWindow : Window
 
         try
         {
-            // Tự nạp mã gần nhất và kết nối bo một lần sau khi cửa sổ đã
-            // render. Các API bên dưới vẫn await bình thường nên Dispatcher
-            // không bị giữ trong thời gian handshake/delay phần cứng.
+            // Splash (or the standalone MainWindow fallback) has rendered.
+            // Preserve the existing one-owner initialization and timeout.
             Task initialization = _viewModel.InitializeApplicationAsync();
             Task completed = await Task.WhenAny(
                 initialization,
@@ -115,7 +122,7 @@ public partial class MainWindow : Window
             // kỹ thuật lên giao diện vận hành.
             AsyncFileLogService.Current.Error($"MainWindow startup failed: {ex}");
             MessageBox.Show(
-                this,
+                IsVisible ? this : Application.Current.MainWindow,
                 "Phần mềm chưa sẵn sàng. Vui lòng khởi động lại.",
                 "CHƯA SẴN SÀNG",
                 MessageBoxButton.OK,

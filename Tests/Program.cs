@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--preview-startup", var startupImage])
+        {
+            TestStartupWindow(startupImage);
+            Console.WriteLine("PASS: startup progress, layout and window lifetime");
+            return 0;
+        }
         if (args is ["--preview-settings-fit", var settingsPreviewDirectory])
         {
             TestSettingsOpeningResponsiveness(settingsPreviewDirectory);
@@ -563,6 +569,7 @@ internal static partial class Program
             ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
+            ("Startup splash progress, layout and lifetime", () => TestStartupWindow()),
             ("Optional missing-pair confirmation waits 5/10 seconds and resets safely", TestMissingConnectionConfirmationTimeout),
             ("Disconnected D2XX operator actions never enter fatal device fault", TestDisconnectedBoardOperatorActions),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),

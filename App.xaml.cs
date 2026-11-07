@@ -36,33 +36,78 @@ public partial class App : Application
 
         base.OnStartup(e);
 
-        Models.ProductionSettings productionSettings;
-        AppSettings settings;
+        var splash = new StartupWindow();
+        MainWindow = splash;
+        splash.Show();
+        // Paint the lightweight splash before any configuration or database I/O.
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        string startupStage = "Đọc cài đặt";
+        MainViewModel? viewModel = null;
         try
         {
-            (settings, productionSettings) = await Task.Run(() =>
+            splash.Report(10, "Đang đọc cài đặt và ngôn ngữ…");
+            (AppSettings settings, Models.ProductionSettings productionSettings) = await Task.Run(() =>
             {
                 StartupBootstrapService.EnsureFastConfiguration();
-                AppSoundService.Current.PreloadResources();
                 return (AppSettings.Load(), ProductionConfigService.Load());
             });
+            AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
+            AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
+
+            startupStage = "Chuẩn bị database";
+            splash.Report(30, "Đang kiểm tra cấu trúc database và chuẩn bị dữ liệu…");
+            await Task.Run(() => StartupBootstrapService.EnsureDeferredProductionFiles(failOnError: true));
+
+            startupStage = "Chuẩn bị tài nguyên";
+            splash.Report(50, "Đang chuẩn bị tài nguyên hệ thống…");
+            await Task.Run(() => AppSoundService.Current.PreloadResources());
+            StartupPerformanceTrace.Mark("T0 App.OnStartup READY");
+
+            startupStage = "Nạp mã hàng và chuẩn bị giao diện";
+            viewModel = new MainViewModel(settings, productionSettings, productionDataPrepared: true);
+            viewModel.StartupProgress += splash.Report;
+            var mainWindow = new MainWindow(viewModel);
+            try
+            {
+                await mainWindow.PrepareStartupAsync();
+            }
+            finally
+            {
+                viewModel.StartupProgress -= splash.Report;
+            }
+            splash.Report(98, "Đang mở màn hình chính…");
+            await Dispatcher.Yield(DispatcherPriority.Background);
+
+            // Keep the splash until the populated MainWindow has painted once.
+            void FinishStartup(object? sender, EventArgs args)
+            {
+                mainWindow.ContentRendered -= FinishStartup;
+                splash.Report(100, "Đã hoàn tất khởi động");
+                splash.Complete();
+            }
+            mainWindow.ContentRendered += FinishStartup;
+            MainWindow = mainWindow;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            mainWindow.Show();
         }
         catch (Exception ex)
         {
-            WriteCrashDiagnostics(ex, "Startup.Configuration");
-            MessageBox.Show("Không thể nạp cấu hình. Vui lòng kiểm tra dữ liệu và mở lại phần mềm.",
+            WriteCrashDiagnostics(ex, $"Startup.{startupStage}");
+            MessageBox.Show(splash, $"Không thể khởi động ở bước: {startupStage}.\n{ex.Message}\n\nVui lòng kiểm tra dữ liệu và mở lại phần mềm.",
                 "KHÔNG THỂ KHỞI ĐỘNG", MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown(1);
+            splash.Complete();
+            try
+            {
+                if (viewModel is not null)
+                    await viewModel.ShutdownAsync();
+            }
+            catch (Exception cleanupException)
+            {
+                WriteCrashDiagnostics(cleanupException, "Startup.Cleanup");
+            }
+            finally { Shutdown(1); }
             return;
         }
-        AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
-        AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
-        StartupPerformanceTrace.Mark("T0 App.OnStartup READY");
-
-        var mainWindow = new MainWindow(new MainViewModel(settings, productionSettings));
-        MainWindow = mainWindow;
-        ShutdownMode = ShutdownMode.OnMainWindowClose;
-        mainWindow.Show();
 
         // Defer audio I/O until MainWindow has rendered.
         _ = Dispatcher.BeginInvoke(

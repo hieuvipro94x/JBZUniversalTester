@@ -3092,6 +3092,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 generation != Volatile.Read(ref _modelLoadGeneration) ||
                 Volatile.Read(ref _shutdownStarted) != 0 ||
                 (deferred && !ReferenceEquals(_model, model))) return;
+            // A remembered-model notice belongs to the operating screen. Do not
+            // open a modal dialog over startup or keep the splash waiting on it.
+            if (deferred && Application.Current?.MainWindow is JBZUniversalTester.Views.StartupWindow splash)
+            {
+                void AfterStartup(object? sender, EventArgs args)
+                {
+                    splash.Closed -= AfterStartup;
+                    dispatcher.BeginInvoke(ShowNotice, System.Windows.Threading.DispatcherPriority.Background);
+                }
+                splash.Closed += AfterStartup;
+                return;
+            }
             var notice = new JBZUniversalTester.Views.DiscardConfigurationNoticeWindow(model);
             if (ResolveOperatorDialogOwner() is { } owner) notice.Owner = owner;
             notice.ShowDialog();
