@@ -39,6 +39,7 @@
             SelectionUnit="Cell"
             SelectionMode="Single"
             IsReadOnly="False"
+            BeginningEdit="Grid_BeginningEdit"
             SelectedCellsChanged="Grid_SelectedCellsChanged"
             CurrentCellChanged="Grid_CurrentCellChanged"
             CellEditEnding="Grid_CellEditEnding">
@@ -52,7 +53,7 @@
                         </Style>
                     </DataGridTextColumn.ElementStyle>
                 </DataGridTextColumn>
-                <DataGridTextColumn Header="PIN" Binding="{Binding PinNo}" IsReadOnly="True" Width="55"/>
+                <DataGridTextColumn Header="PIN" Binding="{Binding PinNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
                 <DataGridTextColumn Header="TÊN DÂY" Binding="{Binding Line, UpdateSourceTrigger=PropertyChanged}" Width="*" MinWidth="150">
                     <DataGridTextColumn.ElementStyle>
                         <Style TargetType="TextBlock">

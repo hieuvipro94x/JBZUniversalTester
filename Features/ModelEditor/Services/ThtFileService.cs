@@ -72,14 +72,17 @@ public static class ThtFileService
         var clipPins = new List<Pin>();
         if (clipStart.HasValue && clipEnd.HasValue)
         {
-            var byIo = clipRowMap.ToDictionary(kv => kv.Value, kv => Fit(tables.PinRows[kv.Key], PinHeaders.Length));
-            for (var io = clipStart.Value; io <= clipEnd.Value; io++)
+            var byIo = clipRowMap.ToDictionary(pair => pair.Value, pair => pair.Key);
+            for (var index = 0; index < clipIos.Count; index++)
             {
-                var raw = byIo[io];
-                var localPin = io - clipStart.Value + 1;
+                var io = clipIos[index];
+                var sourceRow = byIo[io];
+                var raw = Fit(tables.PinRows[sourceRow], PinHeaders.Length);
+                var localPin = index + 1;
                 var rawLabel = raw[4].Trim();
                 var displayLabel = rawLabel.Length > 0 ? rawLabel : (localPin == 1 ? "AO" : $"a{localPin - 1}");
-                clipPins.Add(new Pin { Io = io, Connector = "CLIP", PinNo = localPin, Line = displayLabel, TestNo = displayLabel });
+                clipPins.Add(new Pin { Io = io, Connector = "CLIP", PinNo = localPin, Line = displayLabel, TestNo = displayLabel,
+                    SourceThtRowIndex = sourceRow });
             }
             pins.AddRange(clipPins);
         }
@@ -114,7 +117,7 @@ public static class ThtFileService
             connectors.Add(new Connector { Name = displayName[pair.Key], PinCount = pair.Value.Count, StartIo = pair.Value.Min() });
         }
         if (clipStart.HasValue && clipEnd.HasValue)
-            connectors.Add(new Connector { Name = "CLIP", PinCount = clipEnd.Value - clipStart.Value + 1, StartIo = clipStart.Value });
+            connectors.Add(new Connector { Name = "CLIP", PinCount = clipPins.Count, StartIo = clipStart.Value });
         connectors = connectors.OrderBy(c => c.StartIo).ToList();
 
         LeakLayoutService.Load(source, connectors);
@@ -151,13 +154,14 @@ public static class ThtFileService
     {
         var target = Write(document, path, true);
         var reopened = Load(target);
-        var reopenedByIdentity = reopened.Pins.ToDictionary(
-            pin => $"{pin.Connector.ToUpperInvariant()}\u0001{pin.PinNo}");
+        static (string Connector, int Io, int PinNo) Identity(Pin pin) =>
+            (pin.Connector.ToUpperInvariant(), pin.Io, IsClipConnector(pin.Connector) ? 0 : pin.PinNo);
+        var reopenedByIdentity = reopened.Pins.GroupBy(Identity)
+            .ToDictionary(group => group.Key, group => new Queue<Pin>(group));
         foreach (var pin in document.Pins)
         {
-            var identity = $"{pin.Connector.ToUpperInvariant()}\u0001{pin.PinNo}";
-            if (reopenedByIdentity.TryGetValue(identity, out var savedPin))
-                pin.SourceThtRowIndex = savedPin.SourceThtRowIndex;
+            if (reopenedByIdentity.TryGetValue(Identity(pin), out var savedPins) && savedPins.Count > 0)
+                pin.SourceThtRowIndex = savedPins.Dequeue().SourceThtRowIndex;
         }
         document.ThtState = reopened.ThtState;
         document.SourcePath = target;
@@ -964,9 +968,9 @@ public static class ThtFileService
             .ToDictionary(g => g.Key, g => g.First().i);
         var byIdentity = current
             .Select((p, i) => (p, i))
-            .ToDictionary(
-                x => $"{x.p.Connector.ToUpperInvariant()}\u0001{x.p.PinNo}",
-                x => x.i);
+            .GroupBy(x => $"{x.p.Connector.ToUpperInvariant()}\u0001{x.p.PinNo}")
+            .Where(group => group.Count() == 1)
+            .ToDictionary(group => group.Key, group => group.Single().i);
         var bySourceRow = current
             .Select((p, i) => (p, i))
             .Where(x => x.p.SourceThtRowIndex >= 0)
@@ -985,8 +989,13 @@ public static class ThtFileService
             if (clipIndices.Contains(originalIndex))
             {
                 var oldIo = originalClip[originalIndex];
-                if (!byIo.TryGetValue(oldIo, out var candidate) ||
-                    used.Contains(candidate) ||
+                int candidate;
+                if (bySourceRow.TryGetValue(originalIndex, out var trackedClip) &&
+                    specialIos.Contains(current[trackedClip].Io))
+                    candidate = trackedClip;
+                else if (!byIo.TryGetValue(oldIo, out candidate))
+                    continue;
+                if (used.Contains(candidate) ||
                     !specialIos.Contains(current[candidate].Io))
                 {
                     continue;
@@ -1085,12 +1094,10 @@ public static class ThtFileService
 
                 specialEmitted = true;
                 foreach (var specialRow in BuildNewClipRows(specialPins, commonIo))
-                    output.Add(specialRow);
-
-                foreach (var special in specialPins)
                 {
-                    if (byIo.TryGetValue(special.Io, out var specialIndex))
-                        used.Add(specialIndex);
+                    var io = int.Parse(specialRow[2], CultureInfo.InvariantCulture);
+                    if (byIo.TryGetValue(io, out var specialIndex) && used.Add(specialIndex))
+                        output.Add(specialRow);
                 }
 
                 continue;
@@ -1412,7 +1419,12 @@ public static class ThtFileService
         if (direct.Count == 0 || !hasCommon) return new Dictionary<int, int>();
         var min = direct.Min(x => x.io); var max = direct.Max(x => x.io); var result = new Dictionary<int, int>();
         for (var i = 0; i < pinRows.Count; i++) { var row = Fit(pinRows[i], PinHeaders.Length); if (!string.IsNullOrWhiteSpace(row[0]) || !int.TryParse(row[2].Trim(), out var io) || io < min || io > max || (row[3].Trim() != "" && row[3].Trim() != "0")) continue; var label = row[4].Trim(); if (label.Length > 0 && !IsClipLabel(label)) continue; result[i] = io; }
-        var ios = result.Values.Distinct().OrderBy(x => x).ToList(); if (ios.Count == 0 || !ios.SequenceEqual(Enumerable.Range(ios[0], ios[^1] - ios[0] + 1))) return new Dictionary<int, int>(); return result;
+        // Native HarnProg allows unused IO addresses between AO/aN rows.
+        // Each actual PIN row is retained, including unnamed legacy branches.
+        var duplicate = result.Values.GroupBy(io => io).FirstOrDefault(group => group.Count() > 1);
+        if (duplicate is not null)
+            throw new ThtFormatException($"Bảng PIN có nhiều dòng AO/aN cùng IO{duplicate.Key}. Kiểm tra lại địa chỉ CLIP trong file THT.");
+        return result;
     }
     private static List<Pin> HarnProgSpecialPins(IReadOnlyList<Pin> pins)
     {
@@ -1436,7 +1448,8 @@ public static class ThtFileService
             return pins
                 .Where(pin =>
                     IsClipLabel(pin.Line) ||
-                    IsClipLabel(pin.TestNo))
+                    IsClipLabel(pin.TestNo) ||
+                    IsClipConnector(pin.Connector))
                 .OrderBy(pin => pin.Io)
                 .ToList();
         }

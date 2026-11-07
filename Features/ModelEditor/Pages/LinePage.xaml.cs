@@ -12,6 +12,7 @@ namespace JBZUniversalTester.ModelEditor.Pages;
 public sealed class LineRow : ObservableObject
 {
     private int _io;
+    private int _pinNo;
     private string _line = "", _add = "", _thickness = "", _color = "";
     private bool _isWireUnconnected;
     private IReadOnlyDictionary<string, WireColor> _map =
@@ -20,7 +21,7 @@ public sealed class LineRow : ObservableObject
     public Pin Original { get; set; } = new();
     public int Io { get => _io; set => SetField(ref _io, value); }
     public string Connector => Original.Connector;
-    public int PinNo => Original.PinNo;
+    public int PinNo { get => _pinNo; set => SetField(ref _pinNo, value); }
 
     public string Line { get => _line; set => SetField(ref _line, value); }
     public string Add { get => _add; set => SetField(ref _add, value); }
@@ -274,6 +275,7 @@ public partial class LinePage : UserControl
                 {
                     var row = Rows[i]; var pin = ordered[i];
                     row.Original = pin.Clone();
+                    row.PinNo = pin.PinNo;
                     row.Line = pin.Line; row.Add = pin.Add;
                     row.Thickness = pin.Thickness; row.Color = pin.Color;
                 }
@@ -291,6 +293,7 @@ public partial class LinePage : UserControl
                 {
                     Original = p.Clone(),
                     Io = p.Io,
+                    PinNo = p.PinNo,
                     Line = p.Line,
                     Add = p.Add,
                     Thickness = p.Thickness,
@@ -300,7 +303,7 @@ public partial class LinePage : UserControl
                 row.PropertyChanged += (_, e) =>
                 {
                     if (_loading || _applyingAutomaticColors || e.PropertyName is not
-                        (nameof(LineRow.Io) or nameof(LineRow.Line) or nameof(LineRow.Add) or nameof(LineRow.Thickness) or nameof(LineRow.Color)))
+                        (nameof(LineRow.Io) or nameof(LineRow.PinNo) or nameof(LineRow.Line) or nameof(LineRow.Add) or nameof(LineRow.Thickness) or nameof(LineRow.Color)))
                         return;
 
                     if (e.PropertyName is nameof(LineRow.Io) or nameof(LineRow.Line) or nameof(LineRow.Add))
@@ -326,8 +329,8 @@ public partial class LinePage : UserControl
 
     public List<Pin> ReadData()
     {
-        Grid.CommitEdit(DataGridEditingUnit.Cell, true);
-        Grid.CommitEdit(DataGridEditingUnit.Row, true);
+        if (!Grid.CommitEdit(DataGridEditingUnit.Cell, true) || !Grid.CommitEdit(DataGridEditingUnit.Row, true))
+            throw new ValidationException("Kiểm tra ô đang sửa trong bảng Dây. I/O và PIN phải là số nguyên hợp lệ.");
 
         foreach (var row in Rows)
             row.Color = WireColorInput.Normalize(row.Color, _map.Keys);
@@ -344,6 +347,7 @@ public partial class LinePage : UserControl
         {
             var pin = row.Original.Clone();
             pin.Io = row.Io;
+            pin.PinNo = row.PinNo;
             pin.Line = row.Line.Trim();
             pin.Add = row.Add.Trim();
             pin.Thickness = row.Thickness.Trim();
@@ -356,6 +360,17 @@ public partial class LinePage : UserControl
                 .ToList();
             return pin;
         }).ToList();
+    }
+
+    private void Grid_BeginningEdit(object sender, DataGridBeginningEditEventArgs e)
+    {
+        // AO/aN rows have no physical PIN number in the native HarnProg table.
+        if (e.Column == Grid.Columns[2] && e.Row.Item is LineRow row &&
+            row.Connector.Equals("CLIP", StringComparison.OrdinalIgnoreCase))
+        {
+            e.Cancel = true;
+            WireSearchStatus.Text = "AO/aN: chỉnh địa chỉ tại cột I/O";
+        }
     }
 
     private void CommitColor(ComboBox combo)

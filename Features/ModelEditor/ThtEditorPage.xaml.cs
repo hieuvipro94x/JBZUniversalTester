@@ -149,7 +149,7 @@ public partial class ThtEditorPage : UserControl
                 ModelLogic.ValidatePinsForEditing(preparingDocument.Connectors, preparingDocument.Pins);
                 if (rebuild) ModelLogic.RebuildConnections(preparingDocument.Pins);
                 ModelLogic.NormalizeHarnProgClip(preparingDocument.Pins);
-                ModelLogic.ValidatePins(preparingDocument.Connectors, preparingDocument.Pins);
+                ModelLogic.ValidatePinsForSave(preparingDocument.Connectors, preparingDocument.Pins);
                 return preparingDocument;
             });
             _diskWork = preparing;

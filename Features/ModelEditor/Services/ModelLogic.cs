@@ -212,7 +212,8 @@ public static class ModelLogic
             specialPins = pins
                 .Where(pin =>
                     TryNormalizeHarnProgPinTypeLabel(pin.Line, out _) ||
-                    TryNormalizeHarnProgPinTypeLabel(pin.TestNo, out _))
+                    TryNormalizeHarnProgPinTypeLabel(pin.TestNo, out _) ||
+                    pin.Connector.Trim().Equals("CLIP", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(pin => pin.Io)
                 .ToList();
         }
@@ -324,8 +325,15 @@ public static class ModelLogic
             .GroupBy(p => $"{p.Connector.ToUpperInvariant()}\u0001{p.PinNo}")
             .ToDictionary(g => g.Key, g => g.Last());
         var byIo = existing.GroupBy(p => p.Io).ToDictionary(g => g.Key, g => g.First());
+        var retainedPinCounts = connectors.ToDictionary(connector => connector.Name.Trim(),
+            connector => connector.PinCount, StringComparer.OrdinalIgnoreCase);
+        var usedOriginalPins = new HashSet<Pin>();
         var result = new List<Pin>();
-        var validIos = new HashSet<int>();
+        // Reserve the addresses of retained physical PINs before allocating new
+        // rows. Native files may intentionally contain repeated IO addresses.
+        var validIos = existing.Where(pin => pin.Io > 0 && pin.PinNo > 0 &&
+                retainedPinCounts.TryGetValue(pin.Connector.Trim(), out var count) && pin.PinNo <= count)
+            .Select(pin => pin.Io).ToHashSet();
 
         static int PreferredIo(Connector connector, int localPin)
         {
@@ -353,7 +361,14 @@ public static class ModelLogic
             {
                 var preferred = PreferredIo(connector, localPin);
                 byIdentity.TryGetValue($"{connector.Name.ToUpperInvariant()}\u0001{localPin}", out var old);
-                old ??= byIo.GetValueOrDefault(preferred);
+                // An added PIN must not copy the source row of a different PIN
+                // which is still present in the connector layout.
+                if (old is null && byIo.TryGetValue(preferred, out var atIo) &&
+                    (!retainedPinCounts.TryGetValue(atIo.Connector.Trim(), out var retainedCount) ||
+                     atIo.PinNo <= 0 || atIo.PinNo > retainedCount))
+                    old = atIo;
+                if (old is not null && !usedOriginalPins.Add(old))
+                    old = null;
 
                 if (old is null)
                 {
@@ -364,7 +379,7 @@ public static class ModelLogic
                 else
                 {
                     var copy = old.Clone();
-                    var io = old.Io > 0 && !validIos.Contains(old.Io) ? old.Io : NextFreeIo(preferred);
+                    var io = old.Io > 0 ? old.Io : NextFreeIo(preferred);
                     validIos.Add(io);
                     copy.Io = io;
                     copy.Connector = connector.Name;

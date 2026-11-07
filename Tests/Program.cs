@@ -41,6 +41,24 @@ internal static partial class Program
             Console.WriteLine("PASS: runtime risk review regressions");
             return 0;
         }
+        if (args is ["--preview-editor-colors", var colorPickerImage])
+        {
+            TestColorPickerLayout(colorPickerImage);
+            Console.WriteLine("PASS: aligned color picker with complete borders");
+            return 0;
+        }
+        if (args is ["--test-native-clip-save"])
+        {
+            TestSparseNativeClipSave();
+            Console.WriteLine("PASS: Native sparse CLIP edits, repeated saves, IO aliases and Wire PIN editing");
+            return 0;
+        }
+        if (args is ["--test-native-clip-save", var nativeClipSource])
+        {
+            VerifyNativeClipSaveCopy(nativeClipSource);
+            Console.WriteLine("PASS: Actual native THT saved on temporary copies; original unchanged");
+            return 0;
+        }
         if (args is ["--test-connector-auto-io"])
         {
             TestConnectorAutomaticStartIo();
@@ -638,6 +656,8 @@ internal static partial class Program
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
+            ("Color picker borders fit the form and stay aligned under application styles", () => TestColorPickerLayout()),
+            ("Native sparse CLIP edits and Wire PIN changes round-trip through Save", TestSparseNativeClipSave),
             ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
