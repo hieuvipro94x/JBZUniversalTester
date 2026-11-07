@@ -110,8 +110,9 @@ internal static partial class Program
                     "Inserting between connectors updates the following automatic range");
                 grid.CurrentCell = new DataGridCellInfo(page.Rows[1], grid.Columns[1]);
                 delete.Invoke(page, [page, new RoutedEventArgs()]);
-                Assert(page.Rows.Select(row => row.StartIo).SequenceEqual([1, 5]),
-                    "Deleting a connector closes the automatic IO gap");
+                Assert(page.Rows.Select(row => row.StartIo).SequenceEqual([1, 5]) &&
+                       page.Rows.Select(row => row.Name).SequenceEqual(["A", "INSERTED"]),
+                    "Deleting from the end preserves the inserted connector and its automatic IO range");
 
                 page.LoadData(new ModelDocument { Connectors =
                 [

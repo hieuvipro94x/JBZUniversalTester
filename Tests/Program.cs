@@ -59,6 +59,12 @@ internal static partial class Program
             Console.WriteLine("PASS: Actual native THT saved on temporary copies; original unchanged");
             return 0;
         }
+        if (args is ["--test-connector-delete"])
+        {
+            TestConnectorDeleteLastRow();
+            Console.WriteLine("PASS: Connector deletion removes only the last row, handles edits and persists to THT");
+            return 0;
+        }
         if (args is ["--test-connector-auto-io"])
         {
             TestConnectorAutomaticStartIo();
@@ -658,6 +664,7 @@ internal static partial class Program
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
             ("Color picker borders fit the form and stay aligned under application styles", () => TestColorPickerLayout()),
             ("Native sparse CLIP edits and Wire PIN changes round-trip through Save", TestSparseNativeClipSave),
+            ("Connector Delete works from the final row upward and preserves retained edits", TestConnectorDeleteLastRow),
             ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),

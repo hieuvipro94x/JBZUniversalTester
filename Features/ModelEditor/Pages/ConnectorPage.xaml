@@ -24,7 +24,7 @@
         </DataGrid>
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button Content="THÊM" ToolTip="Thêm connector sau dòng đang chọn" Style="{StaticResource ActionButton}" Margin="0,0,8,0" Click="Insert_Click"/>
-            <Button Content="XÓA" ToolTip="Xóa connector đang chọn" Style="{StaticResource ActionButton}" Click="Delete_Click"/>
+            <Button x:Name="DeleteConnectorButton" Content="XÓA" ToolTip="Xóa connector cuối cùng, lần lượt từ dưới lên" IsEnabled="False" Style="{StaticResource ActionButton}" Click="Delete_Click"/>
         </StackPanel>
     </Grid>
 </UserControl>

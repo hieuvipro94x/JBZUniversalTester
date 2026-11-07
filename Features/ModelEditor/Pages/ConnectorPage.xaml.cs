@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using JBZUniversalTester.ModelEditor.Helpers;
@@ -42,6 +43,7 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
                 }
             if (e.NewItems is not null)
                 foreach (ConnectorRow row in e.NewItems) row.PropertyChanged += RowChanged;
+            DeleteConnectorButton.IsEnabled = Rows.Count > 0;
             if (!_loading)
                 Changed?.Invoke(this, EventArgs.Empty);
         };
@@ -58,6 +60,7 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
     public void LoadData(ModelDocument doc)
     {
         _loading = true;
+        DeleteConnectorButton.IsEnabled = false;
         try
         {
             foreach (var row in Rows) row.PropertyChanged -= RowChanged;
@@ -174,14 +177,34 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
-        var index = Grid.CurrentCell.Item is ConnectorRow selectedRow ? Rows.IndexOf(selectedRow) : -1;
-        if (index < 0 || index >= Rows.Count)
-            return;
+        if (Rows.Count == 0) return;
+        var index = Rows.Count - 1;
+        var last = Rows[index];
 
+        // Discard edits only on the row being removed. Edits to another row
+        // must commit successfully before the final connector can be deleted.
+        if (Grid.Items is IEditableCollectionView view && view.IsEditingItem &&
+            !ReferenceEquals(view.CurrentEditItem, last))
+        {
+            if (!Grid.CommitEdit(DataGridEditingUnit.Cell, true) || !Grid.CommitEdit(DataGridEditingUnit.Row, true))
+                return;
+        }
+        else
+        {
+            Grid.CancelEdit(DataGridEditingUnit.Cell);
+            Grid.CancelEdit(DataGridEditingUnit.Row);
+        }
         Rows.RemoveAt(index);
         RefreshIndexes();
 
+        Grid.SelectedCells.Clear();
         if (Rows.Count > 0)
-            Grid.CurrentCell = new DataGridCellInfo(Rows[Math.Min(index, Rows.Count - 1)], Grid.Columns[1]);
+        {
+            var next = Rows[^1];
+            Grid.CurrentCell = new DataGridCellInfo(next, Grid.Columns[1]);
+            Grid.SelectedCells.Add(Grid.CurrentCell);
+            Grid.ScrollIntoView(next);
+        }
+        DeleteConnectorButton.IsEnabled = Rows.Count > 0;
     }
 }
