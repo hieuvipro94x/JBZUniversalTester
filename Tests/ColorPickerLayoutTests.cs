@@ -32,7 +32,6 @@ internal static partial class Program
             var button = (Button)page.FindName("ColorButton");
             button.ApplyTemplate();
             var border = (Border)button.Template.FindName("PickerBorder", button);
-            var label = (TextBlock)button.Content;
             var input = (TextBox)page.FindName("CodeBox");
             var buttonOrigin = button.TranslatePoint(new Point(), page);
             var inputOrigin = input.TranslatePoint(new Point(), page);
@@ -42,11 +41,11 @@ internal static partial class Program
                 "Color swatch aligns with the inputs and leaves a visible gap above the table");
             Assert(Math.Abs(border.ActualWidth - button.ActualWidth) < 0.1 &&
                    Math.Abs(border.ActualHeight - button.ActualHeight) < 0.1 && border.BorderThickness == new Thickness(1) &&
-                   label.ActualWidth < border.ActualWidth && label.ActualHeight < border.ActualHeight,
-                "All four swatch borders and its HEX label fit inside the allocated button");
-            Assert(page.SelectedHex == "#FFA500" && label.Text == "#FFA500" &&
+                   button.Content is null && border.Child is null,
+                "All four swatch borders fit and the swatch displays only color without a HEX label");
+            Assert(page.SelectedHex == "#FFA500" &&
                    border.Background is SolidColorBrush brush && brush.Color == Color.FromRgb(255, 165, 0),
-                "Selecting a palette row updates the swatch and HEX label");
+                "Selecting a palette row updates the color-only swatch");
             if (imagePath is not null)
             {
                 var bitmap = new RenderTargetBitmap(978, 822, 96, 96, PixelFormats.Pbgra32);

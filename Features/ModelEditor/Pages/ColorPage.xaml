@@ -10,23 +10,19 @@
    <TextBlock Grid.Row="2" Text="MÀU" FontSize="25" VerticalAlignment="Center"/>
    <Button x:Name="ColorButton" Grid.Row="2" Grid.Column="1" Width="250" Height="44" MinHeight="44"
            Margin="0" Padding="0" HorizontalAlignment="Left" VerticalAlignment="Center"
-           BorderBrush="#64748B" BorderThickness="1" Click="ChooseColor_Click"
+           BorderBrush="#64748B" BorderThickness="1" Click="ChooseColor_Click" AutomationProperties.Name="Chọn màu"
            Background="{Binding SelectedHex, Converter={StaticResource HexBrush}, RelativeSource={RelativeSource AncestorType=UserControl}}">
     <Button.Template>
      <ControlTemplate TargetType="Button">
       <Border x:Name="PickerBorder" Background="{TemplateBinding Background}"
               BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
-              CornerRadius="2" SnapsToDevicePixels="True">
-       <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-      </Border>
+              CornerRadius="2" SnapsToDevicePixels="True"/>
       <ControlTemplate.Triggers>
        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="PickerBorder" Property="BorderBrush" Value="#2563A6"/></Trigger>
        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="PickerBorder" Property="BorderBrush" Value="#2563A6"/></Trigger>
       </ControlTemplate.Triggers>
      </ControlTemplate>
     </Button.Template>
-    <TextBlock Text="{Binding SelectedHex, RelativeSource={RelativeSource AncestorType=UserControl}}"
-               Foreground="#111827" Background="#E6FFFFFF" Padding="8,3" FontSize="16" FontWeight="SemiBold"/>
    </Button>
   </Grid>
   <DataGrid x:Name="Grid" Grid.Row="1" Style="{StaticResource GridStyle}" ItemsSource="{Binding Colors, RelativeSource={RelativeSource AncestorType=UserControl}}" IsReadOnly="True" SelectionChanged="Grid_SelectionChanged">
