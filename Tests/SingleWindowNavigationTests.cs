@@ -82,11 +82,11 @@ internal static partial class Program
                     "History close fully restores Main without an extra window or stale page");
                 Assert(main.FindName("EditThtMainButton") is Button { Content: "SỬA CẤU HÌNH THT" },
                     "MainWindow has a direct native THT editor action");
-                await (Task)Call("ShowSettingsPageCoreAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator, true)!;
+                await (Task)Call("OpenSettingsCoreAsync", true)!;
                 var editing = (ProductionSettingsPage)host.Content!;
                 Assert(editing.IsThtEditorOpen && ((ContentControl)editing.FindName("ModelEditorHost")).Content is JBZUniversalTester.ModelEditor.ThtEditorPage &&
                        application.Windows.Count == 1 && main.OwnedWindows.Count == 0 && !actions.IsEnabled,
-                    "Direct editor entry replaces Main in the existing window without showing a second settings/editor window");
+                    "Direct editor entry completes without a password dialog and opens in the existing window");
                 await editing.TryLeaveAsync();
                 await Dispatcher.Yield(DispatcherPriority.Background);
                 Assert(host.Content is null && actions.IsEnabled, "Leaving an unchanged editor restores Main directly");

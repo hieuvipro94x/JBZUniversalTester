@@ -357,19 +357,20 @@ public partial class MainWindow : Window
         try
         {
             MainActionBar.IsEnabled = false;
+            // Direct THT editing is available without a settings login. Closing
+            // the editor returns to Main; settings still use their own login.
+            if (openEditor)
+            {
+                await ShowSettingsPageCoreAsync(SettingsAccessSession.Administrator, openEditor: true);
+                return;
+            }
             long accessStarted = Stopwatch.GetTimestamp();
             SettingsAccessService accessService = await Task.Run(() => SettingsAccessService.Current);
             AsyncFileLogService.Current.Performance($"AUTH_PERF phase=ACCESS_LOAD elapsed_ms={Stopwatch.GetElapsedTime(accessStarted).TotalMilliseconds:0.###}");
             if (_shutdownStarted) return;
             SettingsAccessSession? access = SettingsSecurityDialogs.Login(this, accessService);
             if (access is null || _shutdownStarted) return;
-            if (openEditor && !access.IsAdmin)
-            {
-                MessageBox.Show(this, "Chỉ quản trị viên được chỉnh sửa toàn bộ cấu hình THT.", "QUYỀN QUẢN TRỊ", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-            if (openEditor) await ShowSettingsPageCoreAsync(access, openEditor: true);
-            else await ShowSettingsPageAsync(access);
+            await ShowSettingsPageAsync(access);
         }
         catch (Exception ex)
         {
