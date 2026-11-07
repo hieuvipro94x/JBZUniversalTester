@@ -27,35 +27,30 @@ public static class ProductionDataUpgradeService
 
     public static IReadOnlyList<string> MigrateForCurrentVersion()
     {
-        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        return MigrateMissingProductionData(
-            targetDirectory,
-            FindPreviousVersionDirectories(targetDirectory));
+        return MigrateCurrentVersionFiles(ProductionFiles);
     }
 
     public static void MigrateBcwForCurrentVersion()
     {
-        string directory = Path.GetFullPath(AppContext.BaseDirectory);
-        MigrateMissingProductionData(directory, FindPreviousVersionDirectories(directory),
-            [Path.Combine("Data", "BCW-labels.db")]);
+        MigrateCurrentVersionFiles([Path.Combine("Data", "BCW-labels.db")]);
     }
 
     public static IReadOnlyList<string> MigrateFastConfigurationForCurrentVersion()
     {
-        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        return MigrateMissingProductionData(
-            targetDirectory,
-            FindPreviousVersionDirectories(targetDirectory),
-            FastConfigurationFiles);
+        return MigrateCurrentVersionFiles(FastConfigurationFiles);
     }
 
     public static IReadOnlyList<string> MigrateDeferredProductionDataForCurrentVersion()
     {
-        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        return MigrateMissingProductionData(
-            targetDirectory,
-            FindPreviousVersionDirectories(targetDirectory),
-            ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase));
+        return MigrateCurrentVersionFiles(ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyList<string> MigrateCurrentVersionFiles(IEnumerable<string> relativePaths)
+    {
+        string target = Path.GetFullPath(AppContext.BaseDirectory);
+        string[] missing = relativePaths.Where(path => !File.Exists(Path.Combine(target, path))).ToArray();
+        // Warm launches need no sibling-directory enumeration or source probing.
+        return missing.Length == 0 ? [] : MigrateMissingProductionData(target, FindPreviousVersionDirectories(target), missing);
     }
 
     public static IReadOnlyList<string> MigrateMissingProductionData(
@@ -72,6 +67,8 @@ public static class ProductionDataUpgradeService
         ArgumentNullException.ThrowIfNull(candidateDirectories);
 
         string targetRoot = Path.GetFullPath(targetDirectory);
+        string[] missing = relativePaths.Where(path => !File.Exists(Path.Combine(targetRoot, path))).ToArray();
+        if (missing.Length == 0) return [];
         string[] sources = candidateDirectories
             .Select(Path.GetFullPath)
             .Where(path => !string.Equals(path, targetRoot, StringComparison.OrdinalIgnoreCase))
@@ -80,7 +77,7 @@ public static class ProductionDataUpgradeService
             .ToArray();
 
         var migrated = new List<string>();
-        foreach (string relativePath in relativePaths)
+        foreach (string relativePath in missing)
         {
             string targetPath = Path.Combine(targetRoot, relativePath);
             if (File.Exists(targetPath))

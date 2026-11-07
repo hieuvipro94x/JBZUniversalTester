@@ -3115,38 +3115,47 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         else ShowNotice();
     }
 
-    private async Task LoadLastTestedModelAsync()
+    private sealed record PreparedStartupModel(ProductModel Model, TestEngine.PreparedModelState Prepared,
+        string FullPath, int Generation);
+    private Task<PreparedStartupModel?>? _startupModelPreparationTask;
+
+    // Parsing/building immutable topology is safe during board handshake. Only
+    // LoadLastTestedModelAsync commits it, after InitializeHardwareAsync finishes.
+    public Task PrepareStartupModelAsync() => GetStartupModelPreparation();
+
+    private Task<PreparedStartupModel?> GetStartupModelPreparation()
     {
-        var savedPath = _productionSettings.LastThtPath;
-
-        if (string.IsNullOrWhiteSpace(savedPath))
+        lock (_initializationGate)
         {
-            AddLog("Chưa có file model được kiểm tra gần nhất.");
-            return;
+            return _startupModelPreparationTask ??= PrepareStartupModelCoreAsync();
         }
+    }
 
-        var fullPath = ResolveModelPath(savedPath);
-        if (!File.Exists(fullPath))
-        {
-            AddLog($"File model gần nhất không còn tồn tại: {fullPath}");
-            return;
-        }
-
+    private async Task<PreparedStartupModel?> PrepareStartupModelCoreAsync()
+    {
         try
         {
-            State = "ĐANG TẢI MODEL GẦN NHẤT";
-
-            // Startup model chỉ là lựa chọn dự phòng. Nếu người vận hành chọn
-            // file mới trong lúc parse đang chạy, generation đổi và kết quả
-            // startup này bị bỏ ngay, tuyệt đối không ghi đè model mới.
-            int generation = Volatile.Read(ref _modelLoadGeneration);
-            (ProductModel Model, TestEngine.PreparedModelState Prepared) startup = await Task.Run(() =>
+            string savedPath = _productionSettings.LastThtPath;
+            if (string.IsNullOrWhiteSpace(savedPath))
             {
+                AddLog("Chưa có file model được kiểm tra gần nhất.");
+                return null;
+            }
+            string fullPath = ResolveModelPath(savedPath);
+            string partKey = _productionSettings.LastThtPartKey;
+            int generation = Volatile.Read(ref _modelLoadGeneration);
+            return await Task.Run(() =>
+            {
+                if (!File.Exists(fullPath))
+                {
+                    AddLog($"File model gần nhất không còn tồn tại: {fullPath}");
+                    return null;
+                }
                 long parseStarted = Stopwatch.GetTimestamp();
                 IReadOnlyList<ProductModel> candidates = _modelParser.LoadAll(fullPath);
                 ProductModel parsed = candidates.FirstOrDefault(candidate =>
                         JBZUniversalTester.Views.PartSelectionWindow.PartKey(candidate)
-                            .Equals(_productionSettings.LastThtPartKey, StringComparison.OrdinalIgnoreCase))
+                            .Equals(partKey, StringComparison.OrdinalIgnoreCase))
                     ?? candidates[0];
                 ModelFileIdentityService.Capture(parsed, fullPath);
                 double parseMs = Stopwatch.GetElapsedTime(parseStarted).TotalMilliseconds;
@@ -3158,9 +3167,25 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 AsyncFileLogService.Current.Performance(
                     $"MODEL_LOAD_PERF phase=ENGINE_MODEL_BUILD model={parsed.ModelName} duration_ms={Stopwatch.GetElapsedTime(engineStarted).TotalMilliseconds:0.###}");
                 StartupPerformanceTrace.Mark("T9 MODEL_LOGIC_READY");
-                return (parsed, prepared);
+                return new PreparedStartupModel(parsed, prepared, fullPath, generation);
             });
+        }
+        catch (Exception ex)
+        {
+            AddLog($"Không thể tải model gần nhất: {ex.Message}");
+            AsyncFileLogService.Current.Error($"STARTUP_MODEL_PREPARE failed: {ex}");
+            return null;
+        }
+    }
 
+    private async Task LoadLastTestedModelAsync()
+    {
+        try
+        {
+            State = "ĐANG TẢI MODEL GẦN NHẤT";
+            PreparedStartupModel? startup = await GetStartupModelPreparation();
+            if (startup is null || Volatile.Read(ref _shutdownStarted) != 0) return;
+            int generation = startup.Generation;
             if (generation == Volatile.Read(ref _modelLoadGeneration) && _model is null)
             {
                 _productionSettings.LastThtPartKey =
@@ -3168,11 +3193,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 SetModel(startup.Model, startup.Prepared);
                 NotifyDiscardConfiguration(startup.Model, generation, deferred: true);
                 StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
-                AddLog($"Đã tự tải model gần nhất: {Path.GetFileName(fullPath)}");
+                AddLog($"Đã tự tải model gần nhất: {Path.GetFileName(startup.FullPath)}");
             }
             else
             {
-                AddLog($"Bỏ model startup {Path.GetFileName(fullPath)} vì người vận hành đã chọn model mới.");
+                AddLog($"Bỏ model startup {Path.GetFileName(startup.FullPath)} vì người vận hành đã chọn model mới.");
             }
 
             State = _board.IsConnected && !IsDeviceFault

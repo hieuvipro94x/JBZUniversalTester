@@ -20,6 +20,13 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-startup-optimization"])
+        {
+            TestStartupModelPreparation();
+            TestStartupUpgradeFastPath();
+            Console.WriteLine("PASS: parallel startup preparation, stale guards and data preservation");
+            return 0;
+        }
         if (args is ["--preview-startup", var startupImage])
         {
             TestStartupWindow(startupImage);
@@ -570,6 +577,8 @@ internal static partial class Program
             ("Board capacity/address boundaries", TestBoardCapacity),
             ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
             ("Startup splash progress, layout and lifetime", () => TestStartupWindow()),
+            ("Startup model preparation overlaps handshake without committing early", TestStartupModelPreparation),
+            ("Warm startup bypasses source probing and preserves SQLite history", TestStartupUpgradeFastPath),
             ("Optional missing-pair confirmation waits 5/10 seconds and resets safely", TestMissingConnectionConfirmationTimeout),
             ("Disconnected D2XX operator actions never enter fatal device fault", TestDisconnectedBoardOperatorActions),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
@@ -6734,7 +6743,7 @@ internal static partial class Program
         string mainViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
         Assert(mainViewModelSource.Contains(
-                   "Task.WhenAll(productionDataTask, boardInitializationTask)",
+                   "Task.WhenAll(productionDataTask, boardInitializationTask, modelPreparationTask)",
                    StringComparison.Ordinal) &&
                mainViewModelSource.Contains(
                    "await Test.InitializeAsync();",
@@ -10737,6 +10746,7 @@ internal static partial class Program
         public bool ThrowOnConnect { get; set; }
         public int StartFailuresRemaining { get; set; }
         public int ConnectAttempts { get; private set; }
+        public TaskCompletionSource<BoardConnectionInfo>? PendingConnection { get; set; }
         public bool IsConnected { get; private set; } = true;
         public bool IsScanning { get; private set; } = true;
         public BoardScanMode CurrentScanMode { get; private set; } = BoardScanMode.Production;
@@ -10789,6 +10799,7 @@ internal static partial class Program
         public Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default)
         {
             ConnectAttempts++;
+            if (PendingConnection is not null) return PendingConnection.Task;
             if (ThrowOnConnect)
                 throw new InvalidOperationException("Simulated board connection failure");
             IsConnected = true;

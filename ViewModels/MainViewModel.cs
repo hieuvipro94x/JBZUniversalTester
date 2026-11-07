@@ -83,12 +83,13 @@ public sealed class MainViewModel : ObservableObject
 
     public MainViewModel() : this(AppSettings.Load(), ProductionConfigService.Load()) { }
 
-    private readonly bool _productionDataPrepared;
+    private readonly Task? _productionDataPreparation;
     public event Action<int, string>? StartupProgress;
+    public Task StartupHardwareTask { get; private set; } = Task.CompletedTask;
 
-    public MainViewModel(AppSettings settings, ProductionSettings productionSettings, bool productionDataPrepared = false)
+    public MainViewModel(AppSettings settings, ProductionSettings productionSettings, Task? productionDataPreparation = null)
     {
-        _productionDataPrepared = productionDataPrepared;
+        _productionDataPreparation = productionDataPreparation;
         _settings = settings;
         _productionSettings = productionSettings;
         _board = new UnifiedBoardTransport(
@@ -153,15 +154,16 @@ public sealed class MainViewModel : ObservableObject
         // hardware song song; nạp model/statistics chờ bootstrap xong để DB cũ
         // luôn được chuyển sang canonical path trước khi repository có thể tạo DB.
         StartupProgress?.Invoke(62, "Đang chuẩn bị dữ liệu và kết nối thiết bị…");
-        Task productionDataTask = _productionDataPrepared
-            ? Task.CompletedTask
-            : Task.Run(() => StartupBootstrapService.EnsureDeferredProductionFiles());
+        Task productionDataTask = _productionDataPreparation
+            ?? Task.Run(() => StartupBootstrapService.EnsureDeferredProductionFiles());
 
         Task printerConnectionTask = Test.AutoConnectLabelPrinterAsync();
         _ = ObservePrinterStartupAsync(printerConnectionTask);
 
         Task boardInitializationTask = Test.InitializeHardwareAsync();
-        await Task.WhenAll(productionDataTask, boardInitializationTask);
+        StartupHardwareTask = boardInitializationTask;
+        Task modelPreparationTask = PrepareModelAfterDataAsync(productionDataTask);
+        await Task.WhenAll(productionDataTask, boardInitializationTask, modelPreparationTask);
         StartupProgress?.Invoke(80, "Đang nạp mã hàng gần nhất và sản lượng…");
 
         // Sau khi canonical DB đã sẵn sàng mới nạp model và lịch sử sản lượng.
@@ -188,6 +190,13 @@ public sealed class MainViewModel : ObservableObject
             Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName}";
         else
             Status = "CHƯA CHỌN MÃ HÀNG";
+    }
+
+    private async Task PrepareModelAfterDataAsync(Task productionDataTask)
+    {
+        await productionDataTask;
+        StartupProgress?.Invoke(70, "Đang chuẩn bị mã hàng và chờ thiết bị sẵn sàng…");
+        await Test.PrepareStartupModelAsync();
     }
 
     private async Task ObservePrinterStartupAsync(Task printerConnectionTask)

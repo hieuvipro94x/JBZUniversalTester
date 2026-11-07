@@ -78,9 +78,9 @@ public partial class MainWindow : Window
 
     // Called by App only after the splash has painted; later ContentRendered
     // reuses the startup guard instead of opening devices a second time.
-    public Task PrepareStartupAsync() => InitializeApplicationAfterFirstRenderAsync();
+    public Task PrepareStartupAsync(Task? initialization = null) => InitializeApplicationAfterFirstRenderAsync(initialization);
 
-    private async Task InitializeApplicationAfterFirstRenderAsync()
+    private async Task InitializeApplicationAfterFirstRenderAsync(Task? initialization = null)
     {
         if (_startupStarted)
             return;
@@ -91,12 +91,12 @@ public partial class MainWindow : Window
         {
             // Splash (or the standalone MainWindow fallback) has rendered.
             // Preserve the existing one-owner initialization and timeout.
-            Task initialization = _viewModel.InitializeApplicationAsync();
+            initialization ??= _viewModel.InitializeApplicationAsync();
             Task completed = await Task.WhenAny(
-                initialization,
+                _viewModel.StartupHardwareTask,
                 Task.Delay(StartupControlUnlockTimeout));
 
-            if (completed != initialization)
+            if (completed != _viewModel.StartupHardwareTask)
             {
                 // Driver/D2XX giữ lời gọi mở quá lâu được xem là lỗi phần cứng
                 // của phiên. Task muộn chỉ được quan sát để cleanup, không được
@@ -115,6 +115,8 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (!IsVisible && Application.Current?.MainWindow is StartupWindow)
+                throw;
             if (_viewModel.Test.IsDeviceFault)
                 return;
 
@@ -122,7 +124,7 @@ public partial class MainWindow : Window
             // kỹ thuật lên giao diện vận hành.
             AsyncFileLogService.Current.Error($"MainWindow startup failed: {ex}");
             MessageBox.Show(
-                IsVisible ? this : Application.Current.MainWindow,
+                IsVisible ? this : Application.Current?.MainWindow ?? this,
                 "Phần mềm chưa sẵn sàng. Vui lòng khởi động lại.",
                 "CHƯA SẴN SÀNG",
                 MessageBoxButton.OK,

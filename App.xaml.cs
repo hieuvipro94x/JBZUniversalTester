@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using JBZUniversalTester.Services;
@@ -15,6 +16,7 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        StartupPerformanceTrace.Begin();
         _singleInstanceMutex = new Mutex(
             initiallyOwned: true,
             name: @"Local\JBZUniversalTester.Production",
@@ -46,6 +48,7 @@ public partial class App : Application
         try
         {
             splash.Report(10, "Đang đọc cài đặt và ngôn ngữ…");
+            long configurationStarted = Stopwatch.GetTimestamp();
             (AppSettings settings, Models.ProductionSettings productionSettings) = await Task.Run(() =>
             {
                 StartupBootstrapService.EnsureFastConfiguration();
@@ -53,23 +56,35 @@ public partial class App : Application
             });
             AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
             AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
+            StartupPerformanceTrace.Stage("CONFIG_READY", configurationStarted);
 
             startupStage = "Chuẩn bị database";
             splash.Report(30, "Đang kiểm tra cấu trúc database và chuẩn bị dữ liệu…");
-            await Task.Run(() => StartupBootstrapService.EnsureDeferredProductionFiles(failOnError: true));
-
-            startupStage = "Chuẩn bị tài nguyên";
-            splash.Report(50, "Đang chuẩn bị tài nguyên hệ thống…");
-            await Task.Run(() => AppSoundService.Current.PreloadResources());
-            StartupPerformanceTrace.Mark("T0 App.OnStartup READY");
+            Task databasePreparation = Task.Run(async () =>
+            {
+                using var scope = StartupPerformanceTrace.Measure("DATABASE_PREPARE");
+                await StartupBootstrapService.EnsureDeferredProductionFiles(failOnError: true);
+            });
+            Task resourcePreparation = Task.Run(() =>
+            {
+                using var scope = StartupPerformanceTrace.Measure("RESOURCE_PREPARE");
+                AppSoundService.Current.PreloadResources();
+            });
+            Task dataPreparation = Task.WhenAll(databasePreparation, resourcePreparation);
+            StartupPerformanceTrace.Mark("T0 App.OnStartup PREPARING");
 
             startupStage = "Nạp mã hàng và chuẩn bị giao diện";
-            viewModel = new MainViewModel(settings, productionSettings, productionDataPrepared: true);
+            viewModel = new MainViewModel(settings, productionSettings, productionDataPreparation: dataPreparation);
             viewModel.StartupProgress += splash.Report;
+            // Driver handshake waits overlap with MainWindow BAML/layout work.
+            Task applicationInitialization = viewModel.InitializeApplicationAsync();
             var mainWindow = new MainWindow(viewModel);
             try
             {
-                await mainWindow.PrepareStartupAsync();
+                await mainWindow.PrepareStartupAsync(applicationInitialization);
+                // A hardware timeout may unlock Main, but data failures must
+                // still reach the startup error path before showing the app.
+                await dataPreparation;
             }
             finally
             {
@@ -82,6 +97,7 @@ public partial class App : Application
             void FinishStartup(object? sender, EventArgs args)
             {
                 mainWindow.ContentRendered -= FinishStartup;
+                StartupPerformanceTrace.Mark("SPLASH_HANDOFF_COMPLETE");
                 splash.Report(100, "Đã hoàn tất khởi động");
                 splash.Complete();
             }
