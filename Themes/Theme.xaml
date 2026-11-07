@@ -1,0 +1,69 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ===================================================================== -->
+    <!-- JBZ UNIVERSAL TESTER - BẢNG MÀU DÙNG CHUNG                            -->
+    <!-- Navy (thương hiệu) + Xanh dương (nhấn) + trung tính xanh xám.         -->
+    <!-- Chỉ dùng thêm xanh lá / đỏ / cam cho trạng thái PASS / FAIL / CẢNH BÁO -->
+    <!-- ===================================================================== -->
+
+    <!-- Nền & bề mặt -->
+    <SolidColorBrush x:Key="PageBackground"   Color="#F4F7FA"/>
+    <SolidColorBrush x:Key="PanelBackground"  Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="FieldBackground"  Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="HeaderBackground" Color="#EAF1F8"/>
+    <SolidColorBrush x:Key="SurfaceAlt"       Color="#F8FAFC"/>
+    <SolidColorBrush x:Key="NeutralFill"      Color="#EEF2F7"/>
+
+    <!-- Viền -->
+    <SolidColorBrush x:Key="BorderColor"  Color="#CBD5E1"/>
+    <SolidColorBrush x:Key="InputBorder"  Color="#A9B8CA"/>
+    <SolidColorBrush x:Key="DividerColor" Color="#E2E8F0"/>
+
+    <!-- Chữ -->
+    <SolidColorBrush x:Key="TextPrimary"   Color="#1E293B"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#475569"/>
+    <SolidColorBrush x:Key="TextMuted"     Color="#64748B"/>
+    <SolidColorBrush x:Key="OnDarkMuted"   Color="#B9D3EA"/>
+
+    <!-- Thương hiệu -->
+    <SolidColorBrush x:Key="BrandDark"       Color="#0F2A47"/>
+    <SolidColorBrush x:Key="BrandBlue"       Color="#183B61"/>
+    <SolidColorBrush x:Key="AccentBlue"      Color="#1687C9"/>
+    <SolidColorBrush x:Key="AccentBlueDark"  Color="#1677AD"/>
+    <SolidColorBrush x:Key="AccentTint"      Color="#EAF4FB"/>
+    <SolidColorBrush x:Key="AccentTintBorder" Color="#BCD9EE"/>
+
+    <!-- Khối thông tin -->
+    <SolidColorBrush x:Key="InfoPanelBackground" Color="#F3F7FC"/>
+    <SolidColorBrush x:Key="InfoPanelBorder"     Color="#C9D8EA"/>
+    <SolidColorBrush x:Key="InfoBadgeBackground" Color="#E8F3FB"/>
+    <SolidColorBrush x:Key="InfoBadgeBorder"     Color="#BFDDF1"/>
+    <SolidColorBrush x:Key="InfoBadgeForeground" Color="#0F5F8F"/>
+
+    <!-- Trạng thái -->
+    <SolidColorBrush x:Key="PassGreen"      Color="#16A34A"/>
+    <SolidColorBrush x:Key="PassText"       Color="#15803D"/>
+    <SolidColorBrush x:Key="PassTint"       Color="#E8F6EE"/>
+    <SolidColorBrush x:Key="PassTintBorder" Color="#A9D8BC"/>
+    <SolidColorBrush x:Key="FailRed"        Color="#DC2626"/>
+    <SolidColorBrush x:Key="FailText"       Color="#B91C1C"/>
+    <SolidColorBrush x:Key="PendingAmber"   Color="#D97706"/>
+    <SolidColorBrush x:Key="WarningText"    Color="#B45309"/>
+
+    <!-- Nút -->
+    <SolidColorBrush x:Key="ButtonNeutralBackground" Color="#EEF2F7"/>
+    <SolidColorBrush x:Key="ButtonNeutralForeground" Color="#334155"/>
+    <SolidColorBrush x:Key="ButtonNeutralBorder"     Color="#CBD5E1"/>
+    <SolidColorBrush x:Key="ButtonInfoBackground"    Color="#E6F0F9"/>
+    <SolidColorBrush x:Key="ButtonInfoBorder"        Color="#B7CBE0"/>
+    <SolidColorBrush x:Key="ButtonWarningBackground" Color="#FFF4E0"/>
+    <SolidColorBrush x:Key="ButtonWarningForeground" Color="#8A4B08"/>
+    <SolidColorBrush x:Key="ButtonWarningBorder"     Color="#E2B35A"/>
+    <SolidColorBrush x:Key="ButtonExitBackground"    Color="#FEF0F0"/>
+    <SolidColorBrush x:Key="ButtonExitForeground"    Color="#A61B1B"/>
+    <SolidColorBrush x:Key="ButtonExitBorder"        Color="#E39A9A"/>
+    <SolidColorBrush x:Key="ExitSolidBackground"     Color="#B91C1C"/>
+    <SolidColorBrush x:Key="ExitSolidBorder"         Color="#991B1B"/>
+
+</ResourceDictionary>
