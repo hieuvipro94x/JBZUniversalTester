@@ -220,7 +220,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="48"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="52"/>
+            <RowDefinition Height="Auto" MinHeight="52"/>
         </Grid.RowDefinitions>
 
         <!-- HEADER -->
@@ -233,12 +233,12 @@
             </Grid>
         </Border>
 
-        <Viewbox x:Name="SettingsFitViewbox" Grid.Row="1" Margin="12,8" Stretch="Uniform" StretchDirection="DownOnly" VerticalAlignment="Top">
-            <ScrollViewer x:Name="SettingsScrollViewer" Width="1800"
-                      HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"
+        <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="1" Margin="12,8"
+                      HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                       HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top"
                       CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged">
-                <Grid x:Name="SettingsPanelsHost" Width="1800">
+                <Grid x:Name="SettingsPanelsHost" MinWidth="540"
+                      Width="{Binding ViewportWidth, ElementName=SettingsScrollViewer, Mode=OneWay}">
                     <Grid x:Name="UnifiedSettingsGrid" Margin="4" HorizontalAlignment="Stretch">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -823,8 +823,7 @@
                         </Border>
                     </Grid>
                 </Grid>
-            </ScrollViewer>
-        </Viewbox>
+        </ScrollViewer>
 
         <!-- FOOTER -->
         <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0">
@@ -833,7 +832,9 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Viewbox HorizontalAlignment="Left" Stretch="Uniform" StretchDirection="DownOnly" Margin="0,0,12,0">
+                <ScrollViewer x:Name="SettingsFooterScrollViewer" Margin="0,0,12,0"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                              VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="EditThtButton" Content="CHỈNH SỬA THT" Style="{StaticResource SettingsActionButtonStyle}" Click="EditTht_Click" Margin="0,0,16,0" Padding="12,4" Height="32"/>
                         <TextBlock Text="NGÔN NGỮ" Foreground="{StaticResource TextMuted}" FontWeight="SemiBold" FontSize="14" Margin="0,0,8,0"/>
@@ -845,7 +846,7 @@
                         <Button x:Name="ChangeAdminPasswordButton" Content="ĐỔI MẬT KHẨU" Click="ChangeAdminPassword_Click" Height="36" Width="142" FontSize="13" Margin="0,0,8,0" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
                         <Button x:Name="ManageSettingsPermissionsButton" Content="PHÂN QUYỀN" Click="ManageSettingsPermissions_Click" Height="36" Width="132" FontSize="13" Style="{StaticResource SettingsPrimaryButtonStyle}"/>
                     </StackPanel>
-                </Viewbox>
+                </ScrollViewer>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
                     <TextBlock x:Name="SettingsSavedStatusText"
                                Text="Đã lưu cài đặt"

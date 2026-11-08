@@ -155,7 +155,7 @@
                     BorderBrush="#DCE4ED" BorderThickness="0,1,0,0">
                 <Grid Margin="30,0">
                     <TextBlock x:Name="VersionText" Foreground="#64748B" FontSize="11" VerticalAlignment="Center"/>
-                    <TextBlock Text="Phát triển bởi Vũ Tuấn Nam" Foreground="#64748B" FontSize="11"
+                    <TextBlock Text="Phát triển bởi Tuấn Nam" Foreground="#64748B" FontSize="11"
                                VerticalAlignment="Center" HorizontalAlignment="Right"/>
                 </Grid>
             </Border>

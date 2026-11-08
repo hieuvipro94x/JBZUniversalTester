@@ -2470,13 +2470,13 @@ internal static partial class Program
                xaml.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto\"", StringComparison.Ordinal) &&
                xaml.Contains("MinWidth=\"125\"", StringComparison.Ordinal),
             "TestView scales its fixed header and preserves table text at 1024/1368 widths");
-        Assert(settingsXaml.Contains("<ScrollViewer x:Name=\"SettingsScrollViewer\" Width=\"1800\"", StringComparison.Ordinal) &&
+        Assert(settingsXaml.Contains("<ScrollViewer x:Name=\"SettingsScrollViewer\" Grid.Row=\"1\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
-            "Production settings preserves all panels in a fixed canvas that fits the screen");
+            "Production settings preserves all panels in a scrollable responsive layout");
         Assert(settingsSource.Contains("e.ViewportWidth / MinimumSettingsColumnWidth", StringComparison.Ordinal) &&
                settingsXaml.Contains("ScrollChanged=\"SettingsScrollViewer_ScrollChanged\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("x:Name=\"SettingsFitViewbox\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("<Viewbox", StringComparison.Ordinal) &&
                settingsSource.Contains("GridUnitType.Star", StringComparison.Ordinal) &&
                settingsSource.Contains("Grid.SetColumn(panels[index], column);", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"UnifiedSettingsGrid\" Margin=\"4\" HorizontalAlignment=\"Stretch\"", StringComparison.Ordinal) &&

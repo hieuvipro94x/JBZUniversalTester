@@ -311,6 +311,7 @@ rem ============================================================
 set "LOCAL_VERSION_DIR=%ROOT%PublishSingle\V%NEW_VERSION%"
 set "LAN_RELEASE_ROOT=\\192.168.10.150\public\NAM"
 set "LAN_VERSION_DIR=%LAN_RELEASE_ROOT%\V%NEW_VERSION%"
+set "LAN_COPY_STATUS=BO QUA"
 
 echo ============================================================
 echo BUOC 2B - SAO CHEP TOAN BO V%NEW_VERSION% LEN LAN
@@ -324,31 +325,42 @@ if not exist "%LOCAL_VERSION_DIR%\" (
     goto :FAIL
 )
 
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%ROOT%Scripts\Test-LanReleasePath.ps1" -Path "%LAN_RELEASE_ROOT%" -TimeoutSeconds 5
+if errorlevel 1 (
+    echo [CANH BAO LAN] Khong truy cap duoc LAN trong 5 giay. Bo qua sao chep, tiep tuc Git.
+    goto :GIT_RELEASE
+)
+
 rem /E: copy tat ca file, thu muc con va ca thu muc rong.
 rem /COPY:DAT va /DCOPY:DAT: giu nguyen du lieu, thuoc tinh, thoi gian.
 rem /XJ: khong lan theo junction, tranh sao chep vong lap.
-rem /R:2 /W:2: gioi han so lan thu lai khi mang LAN co loi.
+rem /R:0 /W:0: khong thu lai khi mang LAN co loi; tiep tuc Git.
 rem KHONG dung /MIR: tranh xoa nham du lieu san co tren LAN.
-robocopy "%LOCAL_VERSION_DIR%" "%LAN_VERSION_DIR%" /E /COPY:DAT /DCOPY:DAT /XJ /R:2 /W:2 /NP
+robocopy "%LOCAL_VERSION_DIR%" "%LAN_VERSION_DIR%" /E /COPY:DAT /DCOPY:DAT /XJ /R:0 /W:0 /NP
 set "LAN_COPY_EXIT=%ERRORLEVEL%"
 
 rem Robocopy: exit code 0..7 la thanh cong; 8 tro len la loi.
 if %LAN_COPY_EXIT% GEQ 8 (
     echo [LOI LAN] Robocopy that bai, ma loi: %LAN_COPY_EXIT%.
     echo [LAN] Ban build tren may van giu nguyen tai: %LOCAL_VERSION_DIR%
-    goto :FAIL
+    goto :GIT_RELEASE
 )
 
-if not exist "%LAN_VERSION_DIR%\JBZUniversalTester.exe" (
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%ROOT%Scripts\Test-LanReleasePath.ps1" -Path "%LAN_VERSION_DIR%\JBZUniversalTester.exe" -PathType Leaf -TimeoutSeconds 5
+if errorlevel 1 (
     echo [LOI LAN] Khong tim thay JBZUniversalTester.exe tai thu muc LAN.
-    goto :FAIL
+    goto :GIT_RELEASE
 )
 
+set "LAN_COPY_STATUS=DA SAO CHEP"
 echo [LAN] DA SAO CHEP THANH CONG TOAN BO THU MUC V%NEW_VERSION%.
 echo [LAN] %LAN_VERSION_DIR%
 echo.
 
 rem ============================================================
+:GIT_RELEASE
 rem B3 - GIT
 rem ============================================================
 echo ============================================================
@@ -443,7 +455,7 @@ echo ============================================================
 echo HOÀN TẤT THÀNH CÔNG
 echo Version : V%NEW_VERSION%
 echo GitHub  : %TARGET_REPO_URL%
-echo LAN     : %LAN_VERSION_DIR%
+echo LAN     : %LAN_COPY_STATUS% - %LAN_VERSION_DIR%
 echo ============================================================
 git status -sb
 set "FINAL_EXIT=0"

@@ -58,12 +58,32 @@ internal static partial class Program
                     "Prepared editors are ready for direct navigation without a loading overlay");
                 Assert(vm.ResistanceChannels.Count == 10 && ReferenceEquals(page.DataContext, vm),
                     "Deferred layout retains every resistance editor and its original configuration bindings");
-                foreach (Size size in new[] { new Size(1366, 768), new Size(1920, 1080) })
+                foreach (Size size in new[] { new Size(800, 600), new Size(1024, 768), new Size(1366, 768), new Size(1920, 1080), new Size(800, 600) })
                 {
-                    page.Measure(size); page.Arrange(new Rect(size)); page.UpdateLayout();
+                    for (int pass = 0; pass < 4; pass++)
+                    {
+                        page.Measure(size); page.Arrange(new Rect(size)); page.UpdateLayout();
+                        await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                    }
                     var scroll = (ScrollViewer)page.FindName("SettingsScrollViewer");
-                    Assert(scroll.ScrollableHeight < 1 && scroll.ScrollableWidth < 1,
-                        "Settings has no scrolling at supported production resolutions");
+                    Assert(scroll.ScrollableWidth < 1,
+                        "Settings columns fit the viewport without horizontal scrolling at supported widths");
+                    var grid = (Grid)page.FindName("UnifiedSettingsGrid");
+                    Assert(grid.ColumnDefinitions.Count == (size.Width >= 1800 ? 3 : size.Width >= 1100 ? 2 : 1),
+                        $"Settings reflows into readable columns at {size}");
+                    var language = (ComboBox)page.FindName("TestLanguageComboBox");
+                    foreach (FrameworkElement control in new FrameworkElement[] { panels[0], language, save })
+                    {
+                        var transform = control.TransformToAncestor(page);
+                        Point origin = transform.Transform(new Point());
+                        Point unit = transform.Transform(new Point(1, 1));
+                        Assert(Math.Abs(unit.X - origin.X - 1) < 0.001 && Math.Abs(unit.Y - origin.Y - 1) < 0.001,
+                            $"Settings content and footer retain their original text scale at {size}");
+                    }
+                    Assert(language.FontSize == 16 && save.FontSize == 16,
+                        "Settings editor and save button keep the configured font size");
+                    if (size.Height <= 768)
+                        Assert(scroll.ScrollableHeight > 0, "Small screens provide scrolling instead of shrinking settings");
                     var resultText = (TextBlock)page.FindName("DiscardLearningResultText");
                     Rect PanelBounds(Border panel) => new(panel.TranslatePoint(new Point(), page),
                         panel.TranslatePoint(new Point(panel.ActualWidth, panel.ActualHeight), page));
@@ -86,8 +106,15 @@ internal static partial class Program
                     {
                         Point top = panel.TranslatePoint(new Point(), page);
                         Point bottom = panel.TranslatePoint(new Point(panel.ActualWidth, panel.ActualHeight), page);
-                        Assert(top.X >= 0 && top.Y >= 40 && bottom.X <= size.Width + 1 && bottom.Y <= size.Height - 47,
-                            $"All of {panel.Name} remains visible above the action bar at {size}");
+                        Assert(top.X >= 0 && bottom.X <= size.Width + 1,
+                            $"{panel.Name} fits the viewport horizontally at {size}");
+                        scroll.ScrollToVerticalOffset(scroll.ScrollableHeight);
+                        page.UpdateLayout();
+                        bottom = panel.TranslatePoint(new Point(panel.ActualWidth, panel.ActualHeight), page);
+                        Assert(bottom.Y <= scroll.TranslatePoint(new Point(0, scroll.ActualHeight), page).Y + 1,
+                            $"The bottom of {panel.Name} is reachable by scrolling at {size}");
+                        scroll.ScrollToTop();
+                        page.UpdateLayout();
                     }
                     if (previewDirectory is not null && width == 1920)
                     {
