@@ -811,12 +811,6 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                     <Button Grid.Column="0"
-                            Content="TH&#7916; L&#7840;I IN TEM"
-                            Command="{Binding RetryLabelCommand}"
-                            Style="{StaticResource LabelRetryButtonStyle}"
-                            Height="30"
-                            FontSize="11.5"/>
-                    <Button Grid.Column="2"
                             Content="IN TH&#202;M B&#7842;N SAO"
                             Command="{Binding ReprintLabelCommand}"
                             Style="{StaticResource LabelReprintButtonStyle}"
@@ -1000,7 +994,7 @@
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="1"
-                                   Text="CHU KỲ THAY PIN:"
+                                   Text="BỘ ĐẾM PIN:"
                                    Margin="0,0,8,0"
                                    VerticalAlignment="Center"
                                    HorizontalAlignment="Right"

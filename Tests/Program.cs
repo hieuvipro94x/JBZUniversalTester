@@ -2307,14 +2307,13 @@ internal static partial class Program
         Assert(xaml.Contains("x:Key=\"OperatorWireNameTextStyle\"", StringComparison.Ordinal) &&
                xaml.Contains("Binding=\"{Binding IsWireNameMissing}\" Value=\"True\"", StringComparison.Ordinal),
             "Missing wire codes use the red FAIL brush only in the wire-name column");
-        Assert(xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
-               xaml.Contains("Style=\"{StaticResource LabelRetryButtonStyle}\"", StringComparison.Ordinal) &&
+        Assert(!xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
                xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource LabelReprintButtonStyle}\"", StringComparison.Ordinal) &&
-               xaml.Contains("Command=\"{Binding RetryLabelCommand}\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Command=\"{Binding RetryLabelCommand}\"", StringComparison.Ordinal) &&
                xaml.Contains("Command=\"{Binding ReprintLabelCommand}\"", StringComparison.Ordinal) &&
                !xaml.Contains("Text=\"{Binding LabelStatusText}\"", StringComparison.Ordinal),
-            "TestView clearly separates failed first-print retry from audited duplicate printing without showing LabelStatusText");
+            "TestView exposes audited duplicate printing without a failed first-print retry button or LabelStatusText");
         Assert(xaml.Contains("Click=\"BackToMain_Click\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource TestExitButtonStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"TestExitBackground\" Color=\"#F1F5F9\"", StringComparison.Ordinal) &&
