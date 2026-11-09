@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
@@ -10,6 +11,9 @@ internal static partial class Program
 {
     private static void TestWireColorCellFillsBounds()
     {
+        var elapsed = Stopwatch.StartNew();
+        int cases = 0;
+        int hosts = 0;
         OnSettingsDispatcher(async () =>
         {
             XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
@@ -30,139 +34,168 @@ internal static partial class Program
                 (string?)element.Attribute(XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml")) == "FaultGrid");
             foreach (double scale in new[] { 1d, 1.25, 1.5, 1.75 })
             foreach (double width in new[] { 1904d, 1536d, 1281d })
-            foreach (SolidColorBrush tone in new[] { Brushes.Blue, Brushes.Red, Brushes.Yellow })
             {
-                var grid = new DataGrid
-                {
-                    Resources = resources,
-                    Style = (Style)resources["FaultOperationGridStyle"],
-                    Visibility = Visibility.Visible,
-                    UseLayoutRounding = true,
-                    SnapsToDevicePixels = true,
-                    ColumnHeaderStyle = (Style)resources["HtdrvGridHeaderStyle"],
-                    ItemsSource = new[] { new { WireColorText = "R", WireColorBrush = tone,
-                        WireNameDisplay = "MC1", IsNetworkStart = true, KindName = "Open",
-                        RowBackgroundBrush = Brushes.White, RowForegroundBrush = Brushes.Black } }
-                };
-                foreach (XElement column in faultGrid.Element(ns + "DataGrid.Columns")!.Elements())
-                {
-                    string styleKey = column.Attribute("CellStyle")!.Value.Replace("{StaticResource ", "").TrimEnd('}');
-                    DataGridColumn actual = column.Name.LocalName == "DataGridTemplateColumn"
-                        ? new DataGridTemplateColumn { CellStyle = (Style)resources[colorStyle], CellTemplate = (DataTemplate)resources["WireColorCellTemplate"] }
-                        : new DataGridTextColumn { CellStyle = (Style)resources[styleKey] };
-                    actual.Width = (DataGridLength)new DataGridLengthConverter().ConvertFromInvariantString(column.Attribute("Width")!.Value)!;
-                    actual.MinWidth = double.Parse(column.Attribute("MinWidth")!.Value, System.Globalization.CultureInfo.InvariantCulture);
-                    actual.Header = (string?)column.Attribute("Header");
-                    if (actual is DataGridTextColumn textColumn && column.Attribute("Binding") is { } textBinding)
-                        textColumn.Binding = new System.Windows.Data.Binding(textBinding.Value.Replace("{Binding ", "").TrimEnd('}'));
-                    if (column.Attribute("HeaderStyle") is { } headerStyle)
-                        actual.HeaderStyle = (Style)resources[headerStyle.Value.Replace("{StaticResource ", "").TrimEnd('}')];
-                    grid.Columns.Add(actual);
-                }
+                // Creating/destroying a compositor host and bitmap for every
+                // color made native render synchronization dominate this test.
+                // Reuse them only while dimensions/DPI match; every color still
+                // gets a fresh grid and the complete original lifecycle checks.
+                hosts++;
                 using var source = new System.Windows.Interop.HwndSource(new System.Windows.Interop.HwndSourceParameters("WireColorLayoutTest")
                 { Width = (int)width, Height = 160, WindowStyle = unchecked((int)0x80000000) });
-                source.RootVisual = grid;
-                VisualTreeHelper.SetRootDpi(grid, new DpiScale(scale, scale));
-                grid.Measure(new Size(width, 160));
-                grid.Arrange(new Rect(0, 0, width, 160));
-                grid.UpdateLayout();
-                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                grid.UpdateLayout();
-                Border color = Descendants(grid).OfType<Border>().First(border => border.Background is SolidColorBrush brush && brush.Color == tone.Color);
-                DependencyObject ancestor = color;
-                while (ancestor is not DataGridCell) ancestor = VisualTreeHelper.GetParent(ancestor);
-                var cell = (DataGridCell)ancestor;
-                var header = Descendants(grid).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
-                    .First(item => item.Column == cell.Column);
-                double headerLeft = header.TranslatePoint(new Point(), grid).X;
-                double cellLeft = cell.TranslatePoint(new Point(), grid).X;
-                Assert(Math.Abs(headerLeft - cellLeft) * scale <= 0.01,
-                    $"Header and wire-color cells must align: width={width}, dpi={scale}, header={headerLeft}, cell={cellLeft}");
-                Point offset = color.TranslatePoint(new Point(), cell);
-                Assert(grid.GridLinesVisibility == DataGridGridLinesVisibility.Horizontal &&
-                       cell.BorderThickness.Left == 1 && HasNoWireNameRightDivider(grid) &&
-                       color.ActualWidth > 80 && Math.Abs(offset.X) < 0.01 && Math.Abs(offset.Y) < 0.01 &&
-                       Math.Abs(color.ActualWidth - cell.ActualWidth) <= 2.01,
-                    $"Wire color must reach cell edges: width={width}, offset={offset}, color={color.ActualWidth}, cell={cell.ActualWidth}");
                 var image = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(width * scale), (int)Math.Ceiling(160 * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
-                image.Render(grid);
-                if (scale == 1 && width == 1904 && tone == Brushes.Red)
+                foreach (SolidColorBrush tone in new[] { Brushes.Blue, Brushes.Red, Brushes.Yellow })
                 {
-                    var preview = new System.Windows.Media.Imaging.PngBitmapEncoder();
-                    double wireLeft = Descendants(grid).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
-                        .First(item => item.Column?.DisplayIndex == 4).TranslatePoint(new Point(), grid).X;
-                    preview.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(
-                        new System.Windows.Media.Imaging.CroppedBitmap(image, new Int32Rect((int)wireLeft - 2, 0, 440, 100))));
-                    using var output = System.IO.File.Create(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "jbz-v331-wire-divider.png"));
-                    preview.Save(output);
-                }
-                Point origin = cell.TranslatePoint(new Point(0, 3), grid);
-                Point headerOrigin = header.TranslatePoint(new Point(0, 3), grid);
-                int boundary = (int)Math.Round(origin.X * scale);
-                int[] HeaderDividerPixels() => DividerPixels((int)Math.Round(headerOrigin.Y * scale));
-                int[] DividerPixels(int y) => Enumerable.Range(boundary - 3, 7).Where(x =>
-                {
-                    byte[] sample = new byte[4];
-                    image.CopyPixels(new Int32Rect(x, y, 1, 1), sample, 4, 0);
-                    return sample[0] == 0xD6 && sample[1] == 0xD6 && sample[2] == 0xD6;
-                }).ToArray();
-                Assert(HeaderDividerPixels().Length > 0 && HeaderDividerPixels().SequenceEqual(DividerPixels((int)Math.Ceiling(origin.Y * scale))),
-                    $"Rendered header/body divider must occupy identical device pixels: width={width}, dpi={scale}, header={string.Join(',', HeaderDividerPixels())}, body={string.Join(',', DividerPixels((int)Math.Ceiling(origin.Y * scale)))}");
-                var previous = Descendants(grid).OfType<DataGridCell>().First(item => item.Column.DisplayIndex == 4);
-                Point previousRight = previous.TranslatePoint(new Point(previous.ActualWidth, 3), grid);
-                // At a fractional boundary, the pixel before the nearest device
-                // edge still belongs to the white wire-name cell.
-                int first = (int)Math.Round(previousRight.X * scale);
-                int last = (int)Math.Ceiling(origin.X * scale) + 1;
-                for (int x = first; x <= last; x++)
-                {
-                    byte[] pixel = new byte[4];
-                    image.CopyPixels(new Int32Rect(x, (int)Math.Ceiling(origin.Y * scale), 1, 1), pixel, 4, 0);
-                    Assert(!(pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 255),
-                        $"No white pixel may separate wire-name edge and color: width={width}, dpi={scale}, x={x}, previous={previousRight.X}, color={origin.X}");
-                }
-                object firstRow = grid.Items[0];
-                double[] headerPositions = grid.Columns.Select(column => Descendants(grid)
-                    .OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
-                    .First(item => item.Column == column).TranslatePoint(new Point(), grid).X).ToArray();
-                double[] columnWidths = grid.Columns.Select(column => column.ActualWidth).ToArray();
-                grid.ItemsSource = Enumerable.Repeat(firstRow, 50).ToArray();
-                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                grid.UpdateLayout();
-                double populatedLeft = header.TranslatePoint(new Point(), grid).X;
-                Assert(Math.Abs(populatedLeft - headerLeft) * scale <= 0.01,
-                    $"Wire columns must not jump when installation populates the grid: width={width}, dpi={scale}, before={headerLeft}, after={populatedLeft}");
-                AssertStableColumns();
-                var scrollViewer = Descendants(grid).OfType<ScrollViewer>().First();
-                scrollViewer.ScrollToEnd();
-                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                grid.UpdateLayout();
-                AssertStableColumns();
-                grid.ItemsSource = Array.Empty<object>();
-                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                grid.UpdateLayout();
-                AssertStableColumns();
-                grid.ItemsSource = new[] { firstRow };
-                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-                grid.UpdateLayout();
-                AssertStableColumns();
-
-                void AssertStableColumns()
-                {
-                    foreach (var currentHeader in Descendants(grid).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
-                                 .Where(item => item.Column is not null))
+                    var grid = new DataGrid
                     {
-                        int index = currentHeader.Column.DisplayIndex;
-                        Assert(Math.Abs(currentHeader.TranslatePoint(new Point(), grid).X - headerPositions[index]) * scale <= 0.01 &&
-                               Math.Abs(currentHeader.Column.ActualWidth - columnWidths[index]) * scale <= 0.01,
-                            $"Header/column must remain fixed through empty/populated/recycled rows: width={width}, dpi={scale}, column={index}");
+                        Resources = resources,
+                        Style = (Style)resources["FaultOperationGridStyle"],
+                        Visibility = Visibility.Visible,
+                        UseLayoutRounding = true,
+                        SnapsToDevicePixels = true,
+                        ColumnHeaderStyle = (Style)resources["HtdrvGridHeaderStyle"],
+                        ItemsSource = new[] { new { WireColorText = "R", WireColorBrush = tone,
+                            WireNameDisplay = "MC1", IsNetworkStart = true, KindName = "Open",
+                            RowBackgroundBrush = Brushes.White, RowForegroundBrush = Brushes.Black } }
+                    };
+                    foreach (XElement column in faultGrid.Element(ns + "DataGrid.Columns")!.Elements())
+                    {
+                        string styleKey = column.Attribute("CellStyle")!.Value.Replace("{StaticResource ", "").TrimEnd('}');
+                        DataGridColumn actual = column.Name.LocalName == "DataGridTemplateColumn"
+                            ? new DataGridTemplateColumn { CellStyle = (Style)resources[colorStyle], CellTemplate = (DataTemplate)resources["WireColorCellTemplate"] }
+                            : new DataGridTextColumn { CellStyle = (Style)resources[styleKey] };
+                        actual.Width = (DataGridLength)new DataGridLengthConverter().ConvertFromInvariantString(column.Attribute("Width")!.Value)!;
+                        actual.MinWidth = double.Parse(column.Attribute("MinWidth")!.Value, System.Globalization.CultureInfo.InvariantCulture);
+                        actual.Header = (string?)column.Attribute("Header");
+                        if (actual is DataGridTextColumn textColumn && column.Attribute("Binding") is { } textBinding)
+                            textColumn.Binding = new System.Windows.Data.Binding(textBinding.Value.Replace("{Binding ", "").TrimEnd('}'));
+                        if (column.Attribute("HeaderStyle") is { } headerStyle)
+                            actual.HeaderStyle = (Style)resources[headerStyle.Value.Replace("{StaticResource ", "").TrimEnd('}')];
+                        grid.Columns.Add(actual);
                     }
-                    foreach (var currentCell in Descendants(grid).OfType<DataGridCell>())
-                        Assert(Math.Abs(currentCell.TranslatePoint(new Point(), grid).X - headerPositions[currentCell.Column.DisplayIndex]) * scale <= 0.01,
-                            $"Recycled cell must stay aligned with header: width={width}, dpi={scale}, column={currentCell.Column.DisplayIndex}");
+                    source.RootVisual = grid;
+                    VisualTreeHelper.SetRootDpi(grid, new DpiScale(scale, scale));
+                    grid.Measure(new Size(width, 160));
+                    grid.Arrange(new Rect(0, 0, width, 160));
+                    grid.UpdateLayout();
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    grid.UpdateLayout();
+                    Border color = Descendants(grid).OfType<Border>().First(border => border.Background is SolidColorBrush brush && brush.Color == tone.Color);
+                    DependencyObject ancestor = color;
+                    while (ancestor is not DataGridCell) ancestor = VisualTreeHelper.GetParent(ancestor);
+                    var cell = (DataGridCell)ancestor;
+                    var header = Descendants(grid).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
+                        .First(item => item.Column == cell.Column);
+                    double headerLeft = header.TranslatePoint(new Point(), grid).X;
+                    double cellLeft = cell.TranslatePoint(new Point(), grid).X;
+                    Assert(Math.Abs(headerLeft - cellLeft) * scale <= 0.01,
+                        $"Header and wire-color cells must align: width={width}, dpi={scale}, header={headerLeft}, cell={cellLeft}");
+                    Point offset = color.TranslatePoint(new Point(), cell);
+                    Assert(grid.GridLinesVisibility == DataGridGridLinesVisibility.Horizontal &&
+                           cell.BorderThickness.Left == 1 && HasNoWireNameRightDivider(grid) &&
+                           color.ActualWidth > 80 && Math.Abs(offset.X) < 0.01 && Math.Abs(offset.Y) < 0.01 &&
+                           Math.Abs(color.ActualWidth - cell.ActualWidth) <= 2.01,
+                        $"Wire color must reach cell edges: width={width}, offset={offset}, color={color.ActualWidth}, cell={cell.ActualWidth}");
+                    image.Clear();
+                    image.Render(grid);
+                    // A reused bitmap must contain this color, never stale pixels
+                    // from the previous grid. Sample away from the centered text.
+                    Point fillPoint = color.TranslatePoint(new Point(color.ActualWidth / 2, 3), grid);
+                    byte[] fillPixel = new byte[4];
+                    image.CopyPixels(new Int32Rect((int)Math.Floor(fillPoint.X * scale),
+                        (int)Math.Ceiling(fillPoint.Y * scale), 1, 1), fillPixel, 4, 0);
+                    Assert(fillPixel[0] == tone.Color.B && fillPixel[1] == tone.Color.G &&
+                           fillPixel[2] == tone.Color.R && fillPixel[3] == tone.Color.A,
+                        $"Rendered color must match the current grid: width={width}, dpi={scale}, tone={tone}");
+                    if (scale == 1 && width == 1904 && tone == Brushes.Red)
+                    {
+                        var preview = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                        double wireLeft = Descendants(grid).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
+                            .First(item => item.Column?.DisplayIndex == 4).TranslatePoint(new Point(), grid).X;
+                        preview.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(
+                            new System.Windows.Media.Imaging.CroppedBitmap(image, new Int32Rect((int)wireLeft - 2, 0, 440, 100))));
+                        using var output = System.IO.File.Create(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "jbz-v331-wire-divider.png"));
+                        preview.Save(output);
+                    }
+                    Point origin = cell.TranslatePoint(new Point(0, 3), grid);
+                    Point headerOrigin = header.TranslatePoint(new Point(0, 3), grid);
+                    int boundary = (int)Math.Round(origin.X * scale);
+                    int[] HeaderDividerPixels() => DividerPixels((int)Math.Round(headerOrigin.Y * scale));
+                    int[] DividerPixels(int y) => Enumerable.Range(boundary - 3, 7).Where(x =>
+                    {
+                        byte[] sample = new byte[4];
+                        image.CopyPixels(new Int32Rect(x, y, 1, 1), sample, 4, 0);
+                        return sample[0] == 0xD6 && sample[1] == 0xD6 && sample[2] == 0xD6;
+                    }).ToArray();
+                    Assert(HeaderDividerPixels().Length > 0 && HeaderDividerPixels().SequenceEqual(DividerPixels((int)Math.Ceiling(origin.Y * scale))),
+                        $"Rendered header/body divider must occupy identical device pixels: width={width}, dpi={scale}, header={string.Join(',', HeaderDividerPixels())}, body={string.Join(',', DividerPixels((int)Math.Ceiling(origin.Y * scale)))}");
+                    var previous = Descendants(grid).OfType<DataGridCell>().First(item => item.Column.DisplayIndex == 4);
+                    Point previousRight = previous.TranslatePoint(new Point(previous.ActualWidth, 3), grid);
+                    // At a fractional boundary, the pixel before the nearest device
+                    // edge still belongs to the white wire-name cell.
+                    int first = (int)Math.Round(previousRight.X * scale);
+                    int last = (int)Math.Ceiling(origin.X * scale) + 1;
+                    for (int x = first; x <= last; x++)
+                    {
+                        byte[] pixel = new byte[4];
+                        image.CopyPixels(new Int32Rect(x, (int)Math.Ceiling(origin.Y * scale), 1, 1), pixel, 4, 0);
+                        Assert(!(pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 255),
+                            $"No white pixel may separate wire-name edge and color: width={width}, dpi={scale}, x={x}, previous={previousRight.X}, color={origin.X}");
+                    }
+                    object firstRow = grid.Items[0];
+                    double[] headerPositions = grid.Columns.Select(column => Descendants(grid)
+                        .OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
+                        .First(item => item.Column == column).TranslatePoint(new Point(), grid).X).ToArray();
+                    double[] columnWidths = grid.Columns.Select(column => column.ActualWidth).ToArray();
+                    grid.ItemsSource = Enumerable.Repeat(firstRow, 50).ToArray();
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    grid.UpdateLayout();
+                    Assert(grid.Items.Count == 50 && Descendants(grid).OfType<DataGridRow>().Any(),
+                        "Populated rows must be realized before checking column stability");
+                    double populatedLeft = header.TranslatePoint(new Point(), grid).X;
+                    Assert(Math.Abs(populatedLeft - headerLeft) * scale <= 0.01,
+                        $"Wire columns must not jump when installation populates the grid: width={width}, dpi={scale}, before={headerLeft}, after={populatedLeft}");
+                    AssertStableColumns();
+                    var scrollViewer = Descendants(grid).OfType<ScrollViewer>().First();
+                    scrollViewer.ScrollToEnd();
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    grid.UpdateLayout();
+                    Assert(Descendants(grid).OfType<DataGridRow>().Any(row => row.GetIndex() == 49),
+                        "Scroll-to-end must realize the last row before checking recycled cells");
+                    AssertStableColumns();
+                    grid.ItemsSource = Array.Empty<object>();
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    grid.UpdateLayout();
+                    Assert(!Descendants(grid).OfType<DataGridRow>().Any(),
+                        "Clearing rows must finish before checking the empty grid");
+                    AssertStableColumns();
+                    grid.ItemsSource = new[] { firstRow };
+                    await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                    grid.UpdateLayout();
+                    Assert(Descendants(grid).OfType<DataGridRow>().Count() == 1,
+                        "Restoring one row must finish before checking column stability");
+                    AssertStableColumns();
+
+                    void AssertStableColumns()
+                    {
+                        foreach (var currentHeader in Descendants(grid).OfType<System.Windows.Controls.Primitives.DataGridColumnHeader>()
+                                     .Where(item => item.Column is not null))
+                        {
+                            int index = currentHeader.Column.DisplayIndex;
+                            Assert(Math.Abs(currentHeader.TranslatePoint(new Point(), grid).X - headerPositions[index]) * scale <= 0.01 &&
+                                   Math.Abs(currentHeader.Column.ActualWidth - columnWidths[index]) * scale <= 0.01,
+                                $"Header/column must remain fixed through empty/populated/recycled rows: width={width}, dpi={scale}, column={index}");
+                        }
+                        foreach (var currentCell in Descendants(grid).OfType<DataGridCell>())
+                            Assert(Math.Abs(currentCell.TranslatePoint(new Point(), grid).X - headerPositions[currentCell.Column.DisplayIndex]) * scale <= 0.01,
+                                $"Recycled cell must stay aligned with header: width={width}, dpi={scale}, column={currentCell.Column.DisplayIndex}");
+                    }
+                    source.RootVisual = null;
+                    cases++;
                 }
             }
         });
+        Assert(cases == 36, "All DPI/width/color combinations must complete within the unchanged dispatcher timeout");
+        Console.WriteLine($"WIRE_LAYOUT_PERF cases={cases} hosts={hosts} elapsed_ms={elapsed.ElapsedMilliseconds}");
     }
 
     private static bool HasNoWireNameRightDivider(DataGrid grid) =>
