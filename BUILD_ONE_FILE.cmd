@@ -8,6 +8,7 @@ set "PS_SCRIPT=%ROOT%Scripts\Publish-OneFile.ps1"
 set "SIGN_VERIFY_SCRIPT=%ROOT%Scripts\Verify-JBZSignature.ps1"
 set "VERSION_RESOLVER=%ROOT%Scripts\Resolve-BuildVersion.ps1"
 set "DAILY_BRANCH_SCRIPT=%ROOT%Scripts\Set-DailyBuildBranch.ps1"
+set "SOURCE_SYNC_SCRIPT=%ROOT%Scripts\Sync-BuildSource.ps1"
 set "VERSION_FILE=%ROOT%Version.props"
 set "PROJECT_NAME=JBZUniversalTester"
 set "PROJECT_FILE_NAME=JBZUniversalTester.csproj"
@@ -66,6 +67,12 @@ if not exist "%VERSION_RESOLVER%" (
 if not exist "%DAILY_BRANCH_SCRIPT%" (
     echo [LOI] Khong tim thay script dat ten nhanh theo ngay:
     echo %DAILY_BRANCH_SCRIPT%
+    goto :FAIL
+)
+
+if not exist "%SOURCE_SYNC_SCRIPT%" (
+    echo [LỖI] Không tìm thấy script kiểm tra và lấy code mới:
+    echo %SOURCE_SYNC_SCRIPT%
     goto :FAIL
 )
 
@@ -135,13 +142,22 @@ rem ============================================================
 rem B0 - DONG BO SOURCE TRUOC KHI GAN VERSION VA BUILD
 rem ============================================================
 echo ============================================================
-echo BƯỚC 0/3 - ĐỒNG BỘ %BUILD_REMOTE%/%CURRENT_BRANCH%
+echo BƯỚC 0/3 - KIỂM TRA VERSION MỚI NHẤT VÀ LẤY CODE
 echo ============================================================
 
-git -c core.longpaths=true fetch "%BUILD_REMOTE%"
-if errorlevel 1 (
-    echo [LỖI GIT] Không fetch được repository đích. Dừng build để tránh trùng version.
-    goto :FAIL
+rem CMD parses this entire block before Git can replace this running file.
+rem Exit 10 means source changed: run the updated launcher, never stale code.
+(
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+      -File "%SOURCE_SYNC_SCRIPT%" -RepositoryPath "%ROOT%." -Remote "%BUILD_REMOTE%" ^
+      -ExpectedRepositoryUrl "%TARGET_REPO_URL%"
+    if errorlevel 11 goto :FAIL
+    if errorlevel 10 (
+        call "%ROOT%BUILD_ONE_FILE.cmd"
+        if errorlevel 1 (exit /b 1)
+        exit /b 0
+    )
+    if errorlevel 1 goto :FAIL
 )
 
 rem Doi ten nhanh hien tai theo ngay local, giu nguyen commit va thay doi dang lam.
@@ -369,9 +385,11 @@ echo ============================================================
 
 rem Remote co the thay doi trong vai phut build. Neu co, dung lai de EXE
 rem khong bi lech source/version so voi commit sap push.
-git -c core.longpaths=true fetch "%BUILD_REMOTE%"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%SOURCE_SYNC_SCRIPT%" -RepositoryPath "%ROOT%." -Remote "%BUILD_REMOTE%" ^
+  -ExpectedRepositoryUrl "%TARGET_REPO_URL%" -VerifyCurrent
 if errorlevel 1 (
-    echo [LỖI GIT] Không fetch được repository đích sau build.
+    echo [LỖI GIT] Chưa xác minh được source mới nhất sau build. Dừng commit/push.
     goto :FAIL
 )
 
