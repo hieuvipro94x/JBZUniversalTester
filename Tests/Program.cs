@@ -6699,15 +6699,30 @@ internal static partial class Program
                !d2xxTransportSource.Contains("waitForRxNotification", StringComparison.Ordinal) &&
                !d2xxTransportSource.Contains("attempt <= 6", StringComparison.Ordinal),
             "D2XX watchdog keeps recovery safety while the reader drains queued bytes before waiting for RX events");
-        Assert(mainWindowXaml.Contains("Color=\"#1E3A5F\"", StringComparison.Ordinal) &&
-               mainWindowXaml.Contains("Color=\"#2563EB\"", StringComparison.Ordinal) &&
-               mainWindowXaml.Contains("Color=\"#F1F5F9\"", StringComparison.Ordinal) &&
+        // V399 moved the palette to Theme.xaml. Verify resource resolution
+        // and button roles rather than obsolete inline color literals.
+        var themeBrushes = System.Xml.Linq.XDocument.Load(
+                Path.Combine(Environment.CurrentDirectory, "Themes", "Theme.xaml"))
+            .Descendants().Where(element => element.Name.LocalName == "SolidColorBrush")
+            .Select(element => element.Attribute(System.Xml.Linq.XName.Get(
+                "Key", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value).ToHashSet();
+        Assert(new[] { "BrandBlue", "BrandDark", "AccentBlue", "AccentBlueDark",
+                   "ButtonNeutralBackground", "ButtonNeutralForeground", "ButtonNeutralBorder",
+                   "ExitSolidBackground", "ExitSolidBorder" }.All(themeBrushes.Contains) &&
+               mainWindowXaml.Contains("component/Themes/Theme.xaml", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource BrandBlue}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource AccentBlue}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource ButtonNeutralBackground}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource ExitSolidBackground}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource HistoryButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource SettingsButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource ModelButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource TopologyButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource ExitButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Background=\"{TemplateBinding Background}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("TargetName=\"InteractionOverlay\" Property=\"Opacity\" Value=\"0.08\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("TargetName=\"InteractionOverlay\" Property=\"Opacity\" Value=\"0.16\"", StringComparison.Ordinal) &&
                !mainWindowXaml.Contains("Value=\"#DDDDDA\"", StringComparison.Ordinal) &&
                !mainWindowXaml.Contains("Value=\"#CBCBC8\"", StringComparison.Ordinal),
             "MainWindow buttons use semantic colors and preserve them through shared hover feedback");
@@ -8402,15 +8417,15 @@ internal static partial class Program
                 Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
             string[] sampleHeaders =
             [
-                "Ngày", "Thời gian", "File", "Loại kiểm tra", "Tên sản phẩm", "Mã hàng", "Eco", "Nco", "Alc", "LOT",
-                "Tiến độ", "Kết quả", "Số đếm PASS", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
+                "Ngày", "Thời gian", "Mã hàng", "Kết quả", "File", "Loại kiểm tra", "Tên sản phẩm", "Eco", "Nco", "Alc", "LOT",
+                "Tiến độ", "Số đếm PASS", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
                 "Đo lường", "Chương trình", "Nội dung", "Ghi chú"
             ];
             int previousHeader = -1;
             foreach (string header in sampleHeaders)
             {
                 int headerIndex = historyXaml.IndexOf($"Header=\"{header}\"", previousHeader + 1, StringComparison.Ordinal);
-                Assert(headerIndex > previousHeader, $"History UI follows original columns and retains inspection type: {header}");
+                Assert(headerIndex > previousHeader, $"History UI follows V403 frozen identity/result columns and retains inspection type: {header}");
                 previousHeader = headerIndex;
             }
             Assert(!historyXaml.Contains("Header=\"Số thứ tự\"", StringComparison.Ordinal),
@@ -8421,7 +8436,10 @@ internal static partial class Program
                    historyXaml.Contains("CanUserReorderColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("CanUserSortColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Visible\"", StringComparison.Ordinal) &&
-                   historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"1200\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("FrozenColumnCount=\"4\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"420\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Text=\"{Binding HistoryTestLogSingleLineText}\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"ToolTip\" Value=\"{Binding HistoryTestLogText}\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("x:Name=\"LoadMoreButton\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("x:Key=\"HistoryLoadMoreButtonStyle\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Content=\"XEM THÊM LỊCH SỬ\"", StringComparison.Ordinal) &&
@@ -8429,8 +8447,9 @@ internal static partial class Program
                    historyXaml.Contains("BorderThickness\" Value=\"1\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Property=\"Width\" Value=\"180\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Property=\"HorizontalAlignment\" Value=\"Center\"", StringComparison.Ordinal) &&
-                   historyXaml.Contains("Property=\"Height\" Value=\"32\"", StringComparison.Ordinal),
-                "History UI locks column layout and keeps the inspection record widest with horizontal scrolling");
+                   historyXaml.Contains("Property=\"Height\" Value=\"36\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"MinHeight\" Value=\"36\"", StringComparison.Ordinal),
+                "History UI locks columns, retains full log tooltips and fits compact controls without clipping");
 
             var failed = new TestHistoryRecord
             {

@@ -35,12 +35,33 @@ internal static partial class Program
                 splash.Report(30, "Đang hoàn tất chuẩn bị dữ liệu…");
                 Assert(bar.Value == 80 && percent.Text == "80%",
                     "Startup progress never moves backwards between concurrent preparation steps");
-                splash.Report(98, "Đang mở màn hình chính…");
-                splash.UpdateLayout();
-                Assert(stage.ActualWidth >= stage.DesiredSize.Width - 1 &&
-                       stage.ActualHeight >= stage.DesiredSize.Height - 1 &&
-                       bar.ActualWidth > 600 && bar.ActualHeight == 6,
-                    "Startup status and progress fit inside the industrial splash without clipping");
+                // V399 moved progress into the right column. Check rendered
+                // bounds and wrapping instead of the old full-window width.
+                var progressPanel = (FrameworkElement)bar.Parent;
+                foreach (string message in new[]
+                {
+                    "Đang mở màn hình chính…",
+                    "Đang nạp mã hàng gần nhất và sản lượng…",
+                    "Đang kiểm tra cấu trúc database và chuẩn bị dữ liệu…"
+                })
+                {
+                    splash.Report(98, message);
+                    splash.UpdateLayout();
+                    Point stageOrigin = stage.TranslatePoint(new Point(), progressPanel);
+                    Point percentOrigin = percent.TranslatePoint(new Point(), progressPanel);
+                    Point barOrigin = bar.TranslatePoint(new Point(), progressPanel);
+                    Assert(stage.ActualWidth > 0 && stage.ActualHeight > 0 &&
+                           stage.ActualWidth >= stage.DesiredSize.Width - 1 &&
+                           stage.ActualHeight >= stage.DesiredSize.Height - 1 &&
+                           stageOrigin.X >= 0 && stageOrigin.Y >= 0 &&
+                           stageOrigin.X + stage.ActualWidth <= percentOrigin.X + 1 &&
+                           stageOrigin.Y + stage.ActualHeight <= barOrigin.Y + 1 &&
+                           percentOrigin.X + percent.ActualWidth <= progressPanel.ActualWidth + 1 &&
+                           bar.ActualWidth > 0 && bar.ActualHeight == 6 &&
+                           Math.Abs(bar.ActualWidth - progressPanel.ActualWidth) <= 1 &&
+                           barOrigin.Y + bar.ActualHeight <= progressPanel.ActualHeight + 1,
+                        "Startup status, percent and progress fit the right column without clipping: " + message);
+                }
                 splash.Close();
                 Assert(!closed && splash.IsVisible,
                     "Closing the splash cannot orphan initialization before the app completes handoff");
