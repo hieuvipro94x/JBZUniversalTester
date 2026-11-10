@@ -25,7 +25,21 @@ if ($current -ne $target) {
 
     & git -C $RepositoryPath show-ref --verify --quiet "refs/heads/$target"
     if ($LASTEXITCODE -eq 0) {
-        throw "Branch $target already exists. No branch was overwritten or switched."
+        $headCommit = & git -C $RepositoryPath rev-parse HEAD
+        if ($LASTEXITCODE -ne 0) { throw "Cannot read current commit." }
+        $targetCommit = & git -C $RepositoryPath rev-parse "refs/heads/$target"
+        if ($LASTEXITCODE -ne 0) { throw "Cannot read daily branch commit." }
+        if ($headCommit -ne $targetCommit) {
+            throw "Branch $target exists at a different commit. Sync both branches first; no commits or local edits were changed."
+        }
+        # Identical trees let Git carry staged/unstaged/untracked work across.
+        # Git also rejects a branch owned by another worktree; never bypass it.
+        & git -C $RepositoryPath switch --quiet $target
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cannot switch to $target. Check whether another worktree owns it; no branch was overwritten."
+        }
+        Write-Output $target
+        exit 0
     }
 
     & git -C $RepositoryPath branch -m $target
