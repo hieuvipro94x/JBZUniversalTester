@@ -18,11 +18,10 @@ internal static partial class Program
         {
             XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
             var doc = XDocument.Load(Path.Combine(Environment.CurrentDirectory, "App.xaml"));
-            var xml = new XElement(ns + "ResourceDictionary", new XAttribute("xmlns", ns.NamespaceName),
-                new XAttribute(XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml"),
-                doc.Root!.Element(ns + "Application.Resources")!.Elements());
             var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            application.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(xml.ToString());
+            application.Resources = new ResourceDictionary { Source = new Uri(
+                doc.Root!.Element(ns + "Application.Resources")!.Element(ns + "ResourceDictionary")!.Attribute("Source")!.Value,
+                UriKind.Relative) };
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
             var main = new MainWindow(new MainViewModel());
             object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, flags)!.Invoke(main, args);

@@ -8,9 +8,10 @@
         SizeToContent="Height"
         WindowStartupLocation="Manual"
         ResizeMode="NoResize"
-        Background="#F3F4F6"
+        Background="{DynamicResource PageBackground}"
         FontFamily="Arial"
-        ShowInTaskbar="False">
+        ShowInTaskbar="False" Foreground="{DynamicResource TextPrimary}">
+    <Window.Resources><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="56"/>
@@ -18,16 +19,16 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Background="#C62828">
+        <Border Background="{StaticResource FailRed}">
             <StackPanel Orientation="Horizontal"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                 <Border Width="28" Height="28"
                         Margin="0,0,10,0"
                         CornerRadius="14"
-                        Background="White">
+                        Background="{StaticResource PanelBackground}">
                     <TextBlock Text="!"
-                               Foreground="#C62828"
+                               Foreground="{StaticResource FailRed}"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
                                FontSize="20"
@@ -35,7 +36,7 @@
                 </Border>
                 <TextBlock x:Name="WindowHeaderText"
                            Text="SẢN PHẨM KHÔNG ĐẠT"
-                           Foreground="White"
+                           Foreground="{StaticResource PanelBackground}"
                            VerticalAlignment="Center"
                            FontSize="21"
                            FontWeight="Bold"/>
@@ -45,8 +46,8 @@
         <Border Grid.Row="1"
                 Margin="14,12,14,10"
                 Padding="12"
-                Background="White"
-                BorderBrush="#E1E4E8"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource BorderColor}"
                 BorderThickness="1"
                 CornerRadius="7">
             <ScrollViewer MaxHeight="420"
@@ -57,13 +58,13 @@
                         <DataTemplate>
                             <Border Margin="0,0,0,8"
                                     Padding="12,10"
-                                    Background="White"
-                                    BorderBrush="#E7A7A7"
+                                    Background="{StaticResource PanelBackground}"
+                                    BorderBrush="{StaticResource FailTint}"
                                     BorderThickness="1"
                                     CornerRadius="6">
                                 <StackPanel>
                                     <TextBlock Text="{Binding Title}"
-                                               Foreground="#B91C1C"
+                                               Foreground="{StaticResource FailText}"
                                                FontSize="20"
                                                FontWeight="Bold"
                                                HorizontalAlignment="Center"
@@ -71,7 +72,7 @@
                                                TextWrapping="Wrap"/>
                                     <TextBlock Loaded="FaultSummary_Loaded"
                                                Margin="0,7,0,0"
-                                               Foreground="#111827"
+                                               Foreground="{StaticResource TextPrimary}"
                                                FontSize="17"
                                                FontWeight="SemiBold"
                                                HorizontalAlignment="Center"
@@ -86,8 +87,8 @@
         </Border>
 
         <Border Grid.Row="2"
-                Background="#E9EBEF"
-                BorderBrush="#D7DADE"
+                Background="{StaticResource ButtonNeutralBackground}"
+                BorderBrush="{StaticResource BorderColor}"
                 BorderThickness="0,1,0,0"
                 Padding="14,10">
             <Grid>
@@ -106,19 +107,19 @@
                             Margin="0,0,0,8"
                             Visibility="Collapsed">
                     <TextBlock Text="NHẬP MẬT KHẨU XỬ LÝ HÀNG LỖI"
-                               FontWeight="Bold" Foreground="#991B1B"/>
+                               FontWeight="Bold" Foreground="{StaticResource FailText}"/>
                     <PasswordBox x:Name="DiscardPasswordBox"
                                  Height="36" Margin="0,5,0,0"
                                  Padding="7,3" FontSize="16"/>
                     <TextBlock x:Name="DiscardPasswordErrorText"
-                               Margin="0,4,0,0" Foreground="#B91C1C"
+                               Margin="0,4,0,0" Foreground="{StaticResource FailText}"
                                FontWeight="SemiBold" Visibility="Collapsed"/>
                 </StackPanel>
 
                 <TextBlock x:Name="FooterText"
                            Grid.Row="1"
                            Margin="0,0,14,0"
-                           Foreground="#4B5563"
+                           Foreground="{StaticResource TextSecondary}"
                            VerticalAlignment="Center"
                            TextWrapping="Wrap"
                            FontSize="13"
@@ -133,9 +134,9 @@
                         FontSize="14"
                         FontWeight="Bold"
                         IsDefault="True"
-                        Background="#C62828"
-                        Foreground="White"
-                        BorderBrush="#9F1F1F"
+                        Background="{StaticResource FailRed}"
+                        Foreground="{StaticResource PanelBackground}"
+                        BorderBrush="{StaticResource FailText}"
                         BorderThickness="1"
                         Cursor="Hand"
                         Click="Confirm_Click"/>

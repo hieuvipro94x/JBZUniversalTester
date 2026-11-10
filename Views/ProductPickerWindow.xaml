@@ -3,16 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Chọn mã hàng" Width="850" Height="770" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
-        Background="#F3F6FA" Foreground="#172B40" FontFamily="Segoe UI" FontSize="14">
+        Background="{DynamicResource PageBackground}" Foreground="{DynamicResource TextPrimary}" FontFamily="Segoe UI" FontSize="14">
     <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></ResourceDictionary.MergedDictionaries>
         <Style x:Key="PickerButton" TargetType="Button">
             <Setter Property="Height" Value="36"/>
             <Setter Property="Padding" Value="14,0"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="Foreground" Value="#34485D"/>
-            <Setter Property="BorderBrush" Value="#D6DFE8"/>
+            <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
@@ -27,17 +29,17 @@
                 </Setter.Value>
             </Setter>
             <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#EAF2F8"/></Trigger>
-                <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="#176B87"/></Trigger>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource AccentTint}"/></Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True"><Setter Property="BorderBrush" Value="{StaticResource AccentBlueDark}"/></Trigger>
                 <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5"/></Trigger>
             </Style.Triggers>
         </Style>
         <Style x:Key="PickerPrimaryButton" TargetType="Button" BasedOn="{StaticResource PickerButton}">
-            <Setter Property="Background" Value="#176B87"/>
-            <Setter Property="BorderBrush" Value="#176B87"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource AccentBlueDark}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBlueDark}"/>
+            <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
             <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#125970"/></Trigger>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource AccentBlueDark}"/></Trigger>
             </Style.Triggers>
         </Style>
         <Style x:Key="PickerCellText" TargetType="TextBlock">
@@ -45,6 +47,7 @@
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
         </Style>
+            </ResourceDictionary>
     </Window.Resources>
     <Grid Margin="20,16,20,18">
         <Grid.RowDefinitions>
@@ -56,20 +59,20 @@
         </Grid.RowDefinitions>
         <StackPanel Margin="0,0,0,14">
             <TextBlock Text="Chọn mã hàng" FontSize="23" FontWeight="SemiBold"/>
-            <TextBlock x:Name="RootText" Margin="0,4,0,0" FontSize="12" Foreground="#64748B"
+            <TextBlock x:Name="RootText" Margin="0,4,0,0" FontSize="12" Foreground="{StaticResource TextMuted}"
                        TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
         </StackPanel>
         <StackPanel Grid.Row="1" Margin="0,0,0,12">
-            <Border Background="White" BorderBrush="#BFCFDD" BorderThickness="1" CornerRadius="7" Padding="12,8">
+            <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource AccentTintBorder}" BorderThickness="1" CornerRadius="7" Padding="12,8">
                 <Grid>
                     <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                    <Path Data="M 10,1 A 9,9 0 1 1 9.99,1 M 16,17 L 23,24" Stroke="#617B91" StrokeThickness="1.8"
+                    <Path Data="M 10,1 A 9,9 0 1 1 9.99,1 M 16,17 L 23,24" Stroke="{StaticResource TextMuted}" StrokeThickness="1.8"
                           Width="18" Height="18" Stretch="Uniform" VerticalAlignment="Center"/>
-                    <TextBox x:Name="SearchBox" Grid.Column="1" BorderThickness="0" Background="White"
-                             Foreground="Black" CaretBrush="Black"
+                    <TextBox x:Name="SearchBox" Grid.Column="1" BorderThickness="0" Background="{StaticResource PanelBackground}"
+                             Foreground="{StaticResource InkBlack}" CaretBrush="{StaticResource InkBlack}"
                              FontSize="18" Padding="2,0" VerticalContentAlignment="Center"
                              TextChanged="SearchBox_TextChanged" PreviewKeyDown="SearchBox_PreviewKeyDown"/>
-                    <TextBlock Grid.Column="1" Text="Nhập tên hoặc một phần mã hàng..." Foreground="Black"
+                    <TextBlock Grid.Column="1" Text="Nhập tên hoặc một phần mã hàng..." Foreground="{StaticResource InkBlack}"
                                FontSize="16" Margin="4,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
                         <TextBlock.Style>
                             <Style TargetType="TextBlock">
@@ -85,26 +88,26 @@
                 </Grid>
             </Border>
             <TextBlock Text="Ví dụ: 285 hoặc WH322 · Tìm ở đầu, giữa hoặc cuối tên" FontSize="12"
-                       Foreground="#64748B" Margin="2,6,0,0"/>
+                       Foreground="{StaticResource TextMuted}" Margin="2,6,0,0"/>
         </StackPanel>
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="240"/>
             </Grid.ColumnDefinitions>
-        <Border Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7" Padding="1">
+        <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderColor}" BorderThickness="1" CornerRadius="7" Padding="1">
             <DataGrid x:Name="ProductGrid" AutoGenerateColumns="False" IsReadOnly="True"
                       CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="False" CanUserSortColumns="False"
                       SelectionMode="Single" SelectionUnit="FullRow" RowHeight="NaN" MinRowHeight="38" ColumnHeaderHeight="32"
                       CanUserResizeRows="False"
                       EnableRowVirtualization="True" EnableColumnVirtualization="True" HeadersVisibility="Column"
-                      GridLinesVisibility="None" BorderThickness="0" Background="White"
+                      GridLinesVisibility="None" BorderThickness="0" Background="{StaticResource PanelBackground}"
                       HorizontalScrollBarVisibility="Disabled"
                       SelectionChanged="ProductGrid_SelectionChanged" MouseDoubleClick="ProductGrid_MouseDoubleClick"
                       PreviewKeyDown="ProductGrid_PreviewKeyDown">
                 <DataGrid.ColumnHeaderStyle>
                     <Style TargetType="DataGridColumnHeader">
-                        <Setter Property="Background" Value="#EDF2F7"/>
-                        <Setter Property="Foreground" Value="#62758A"/>
+                        <Setter Property="Background" Value="{StaticResource SurfaceAlt}"/>
+                        <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
                         <Setter Property="FontSize" Value="11"/>
                         <Setter Property="FontWeight" Value="SemiBold"/>
                         <Setter Property="Padding" Value="12,0"/>
@@ -120,7 +123,7 @@
                         <Style.Triggers>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter Property="Background" Value="Transparent"/>
-                                <Setter Property="Foreground" Value="#145570"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBlueDark}"/>
                             </Trigger>
                         </Style.Triggers>
                     </Style>
@@ -142,30 +145,30 @@
                 </DataGrid.Columns>
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
-                        <Setter Property="Background" Value="White"/>
+                        <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
                         <Setter Property="ToolTip" Value="{Binding FullPath}"/>
                         <Setter Property="BorderThickness" Value="3,0,0,0"/>
                         <Setter Property="BorderBrush" Value="Transparent"/>
                         <Style.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#F0F6FA"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource SurfaceAlt}"/></Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter Property="Background" Value="#E5F2F8"/>
-                                <Setter Property="BorderBrush" Value="#176B87"/>
-                                <Setter Property="Foreground" Value="#145570"/>
+                                <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource AccentBlueDark}"/>
+                                <Setter Property="Foreground" Value="{StaticResource AccentBlueDark}"/>
                             </Trigger>
                         </Style.Triggers>
                     </Style>
                 </DataGrid.RowStyle>
             </DataGrid>
         </Border>
-            <Border Grid.Column="2" Background="White" BorderBrush="#DCE4EC" BorderThickness="1" CornerRadius="7">
+            <Border Grid.Column="2" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderColor}" BorderThickness="1" CornerRadius="7">
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                     <StackPanel Margin="12,12,12,10">
-                        <TextBlock Text="MÃ ĐÃ TEST GẦN ĐÂY" FontSize="13" FontWeight="SemiBold" Foreground="#176B87"/>
-                        <TextBlock Text="10 mã gần nhất · Mới nhất trước" FontSize="11" Foreground="#64748B" Margin="0,4,0,0"/>
+                        <TextBlock Text="MÃ HÀNG GẦN ĐÂY" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource AccentBlueDark}"/>
+                        <TextBlock Text="10 mã gần nhất · Mới nhất trước" FontSize="11" Foreground="{StaticResource TextMuted}" Margin="0,4,0,0"/>
                     </StackPanel>
-                    <ListBox x:Name="RecentProductsList" Grid.Row="1" BorderThickness="0" Background="White"
+                    <ListBox x:Name="RecentProductsList" Grid.Row="1" BorderThickness="0" Background="{StaticResource PanelBackground}"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True"
                              SelectionChanged="RecentProducts_SelectionChanged"
@@ -181,21 +184,21 @@
                             <DataTemplate>
                                 <StackPanel>
                                     <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                    <TextBlock Text="{Binding File.Folder}" FontSize="11" Foreground="#64748B" TextWrapping="Wrap" Margin="0,3,0,0"/>
-                                    <TextBlock Text="{Binding TestedAtText}" FontSize="11" Foreground="#64748B" Margin="0,3,0,0"/>
+                                    <TextBlock Text="{Binding File.Folder}" FontSize="11" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                                    <TextBlock Text="{Binding TestedAtText}" FontSize="11" Foreground="{StaticResource TextMuted}" Margin="0,3,0,0"/>
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>
                     <TextBlock x:Name="RecentEmptyText" Grid.Row="1" Text="Chưa có mã hàng đã test trong thư mục này."
-                               Margin="12" Foreground="#64748B" FontSize="12" TextWrapping="Wrap" IsHitTestVisible="False"/>
+                               Margin="12" Foreground="{StaticResource TextMuted}" FontSize="12" TextWrapping="Wrap" IsHitTestVisible="False"/>
                 </Grid>
             </Border>
         </Grid>
         <Grid Grid.Row="3" Margin="2,9,2,12">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <TextBlock x:Name="StatusText" FontSize="12" Foreground="#64748B" TextWrapping="Wrap"/>
-            <TextBlock Grid.Column="1" Text="Enter để chọn · Esc để hủy" FontSize="11" Foreground="#8A9AAA" Margin="12,0,0,0"/>
+            <TextBlock x:Name="StatusText" FontSize="12" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
+            <TextBlock Grid.Column="1" Text="Enter để chọn · Esc để hủy" FontSize="11" Foreground="{StaticResource InputBorder}" Margin="12,0,0,0"/>
         </Grid>
         <Grid Grid.Row="4">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

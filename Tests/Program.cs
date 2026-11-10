@@ -20,6 +20,23 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--activation-child", var activationRole, var activationName])
+            return RunActivationChild(activationRole, activationName);
+        if (args is ["--test-shared-theme"])
+        {
+            TestSharedUiTheme();
+            return 0;
+        }
+        if (args is ["--preview-shared-theme", var themePreviewDirectory])
+        {
+            VerifySharedUiTheme(themePreviewDirectory);
+            return 0;
+        }
+        if (args is ["--test-instance-activation"])
+        {
+            TestSingleInstanceActivation();
+            return 0;
+        }
         if (args is ["--single-instance-child", var instanceName])
             return RunSingleInstanceChild(instanceName);
         if (args is ["--test-single-instance"])
@@ -552,6 +569,8 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("Shared theme covers all WPF surfaces and code-created dialogs without changing wire colors", TestSharedUiTheme),
+            ("Repeated launches activate the owner across slow startup and restore its owned window", TestSingleInstanceActivation),
             ("Concurrent launches reject duplicates before slow startup and permit restart after exit", TestSingleInstanceStartup),
             ("A1 cycle token survives reentrant cancellation and CTS disposal", TestCycleTokenCancellationRace),
             ("A2 settings refresh retains the production writer repository identity", TestHistoryRepositoryIdentity),
@@ -2274,8 +2293,8 @@ internal static partial class Program
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
                !xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
                xaml.Contains("views:OutlinedTextBlock Text=\"{Binding WireColorText}\"", StringComparison.Ordinal) &&
-               xaml.Contains("Foreground=\"White\"", StringComparison.Ordinal) &&
-               xaml.Contains("Stroke=\"#111111\"", StringComparison.Ordinal) &&
+               xaml.Contains("Foreground=\"{StaticResource PanelBackground}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Stroke=\"{StaticResource WireOutline}\"", StringComparison.Ordinal) &&
                xaml.Contains("StrokeThickness=\"1\"", StringComparison.Ordinal) &&
                xaml.Contains("FontFamily=\"Malgun Gothic\"", StringComparison.Ordinal) &&
                xaml.Contains("FontSize=\"22\"", StringComparison.Ordinal) &&
@@ -2298,9 +2317,9 @@ internal static partial class Program
             "TestView renders full-cell wire colors with outlined readable codes and no #1..#4 columns");
         Assert(xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"Open\">", StringComparison.Ordinal) &&
                xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"MissingConnection\">", StringComparison.Ordinal) &&
-               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#91B6D0\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"{StaticResource AccentTintBorder}\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,10,0,0\"/>", StringComparison.Ordinal) &&
-               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"#C62828\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"{StaticResource FailRed}\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"WrongWiring\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"Short\"/>", StringComparison.Ordinal),
             "TestView uses 10px blue separators for normal networks and red separators for confirmed wiring fault groups");
@@ -2325,8 +2344,8 @@ internal static partial class Program
             "TestView exposes audited duplicate printing without a failed first-print retry button or LabelStatusText");
         Assert(xaml.Contains("Click=\"BackToMain_Click\"", StringComparison.Ordinal) &&
                xaml.Contains("Style=\"{StaticResource TestExitButtonStyle}\"", StringComparison.Ordinal) &&
-               xaml.Contains("x:Key=\"TestExitBackground\" Color=\"#F1F5F9\"", StringComparison.Ordinal) &&
-               xaml.Contains("x:Key=\"TestExitForeground\" Color=\"#334155\"", StringComparison.Ordinal),
+               xaml.Contains("x:Key=\"TestExitBackground\" Color=\"{StaticResource SurfaceAltValue}\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"TestExitForeground\" Color=\"{StaticResource TextSecondaryValue}\"", StringComparison.Ordinal),
             "TestView back navigation uses neutral navigation colors");
         Assert(xaml.Contains("x:Name=\"HeaderNavigationRow\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Name=\"StatusLedPanel\"", StringComparison.Ordinal) &&

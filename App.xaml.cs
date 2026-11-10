@@ -13,19 +13,28 @@ public partial class App : Application
 {
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
+    private SingleInstanceActivation? _instanceActivation;
+    private bool _activationPending;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        _instanceActivation = new SingleInstanceActivation(@"Local\JBZUniversalTester.Production");
         _ownsSingleInstanceMutex = SingleInstanceGate.TryAcquire(
             @"Local\JBZUniversalTester.Production", out _singleInstanceMutex);
         if (!_ownsSingleInstanceMutex)
         {
+            _instanceActivation.RequestActivation();
             // No modal dialog: it would keep a second process alive on each
             // extra click while the first process is still starting slowly.
             Shutdown(2);
             return;
         }
 
+        _instanceActivation.StartListening(() =>
+        {
+            if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+                _ = Dispatcher.BeginInvoke(new Action(ActivateExistingWindow));
+        });
         StartupPerformanceTrace.Begin();
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
@@ -36,6 +45,7 @@ public partial class App : Application
         var splash = new StartupWindow();
         MainWindow = splash;
         splash.Show();
+        if (_activationPending) ActivateExistingWindow();
         // Paint the lightweight splash before any configuration or database I/O.
         await Dispatcher.Yield(DispatcherPriority.Background);
         string startupStage = "Đọc cài đặt";
@@ -100,6 +110,7 @@ public partial class App : Application
             MainWindow = mainWindow;
             ShutdownMode = ShutdownMode.OnMainWindowClose;
             mainWindow.Show();
+            if (_activationPending) ActivateExistingWindow();
         }
         catch (Exception ex)
         {
@@ -204,6 +215,8 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _instanceActivation?.Dispose();
+        _instanceActivation = null;
         if (!_ownsSingleInstanceMutex)
         {
             // A rejected launch never initialized runtime services.
@@ -230,6 +243,12 @@ public partial class App : Application
             _ownsSingleInstanceMutex = false;
             base.OnExit(e);
         }
+    }
+
+    private void ActivateExistingWindow()
+    {
+        if (!_ownsSingleInstanceMutex || Dispatcher.HasShutdownStarted) return;
+        _activationPending = !RunningWindowActivator.Activate(this);
     }
 
     private static string BuildRuntimeContext()

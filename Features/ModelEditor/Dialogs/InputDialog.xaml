@@ -4,31 +4,32 @@
         Title="Nhập giá trị" SizeToContent="WidthAndHeight"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         WindowStyle="SingleBorderWindow" ShowInTaskbar="False"
-        FontFamily="Segoe UI" FontSize="14" Background="#F5F7FA"
-        UseLayoutRounding="True" SnapsToDevicePixels="True">
-    <Border Margin="12" Padding="16" Background="White"
-            BorderBrush="#CBD2DC" BorderThickness="1" CornerRadius="6">
+        FontFamily="Segoe UI" FontSize="14" Background="{DynamicResource PageBackground}"
+        UseLayoutRounding="True" SnapsToDevicePixels="True" Foreground="{DynamicResource TextPrimary}">
+    <Window.Resources><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></Window.Resources>
+    <Border Margin="12" Padding="16" Background="{StaticResource PanelBackground}"
+            BorderBrush="{StaticResource BorderColor}" BorderThickness="1" CornerRadius="6">
         <Grid Width="300">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock x:Name="PromptText" Foreground="#253247" FontWeight="SemiBold"
+            <TextBlock x:Name="PromptText" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"
                        TextWrapping="Wrap" Margin="0,0,0,8"/>
             <TextBox x:Name="ValueBox" Grid.Row="1" MinHeight="36" Padding="8,5"
-                     FontSize="16" Background="White" Foreground="#182230"
-                     BorderBrush="#8996A8" BorderThickness="1"
+                     FontSize="16" Background="{StaticResource PanelBackground}" Foreground="{StaticResource TextPrimary}"
+                     BorderBrush="{StaticResource InputBorder}" BorderThickness="1"
                      VerticalContentAlignment="Center"/>
             <StackPanel Grid.Row="2" Orientation="Horizontal"
                         HorizontalAlignment="Right" Margin="0,16,0,0">
                 <Button Content="OK" MinWidth="80" Height="34" Padding="12,4"
-                        Margin="0,0,8,0" Background="#E7F1FC" Foreground="#174A7A"
-                        BorderBrush="#568BC1" BorderThickness="1"
+                        Margin="0,0,8,0" Background="{StaticResource AccentTint}" Foreground="{StaticResource AccentBlueDark}"
+                        BorderBrush="{StaticResource AccentTintBorder}" BorderThickness="1"
                         IsDefault="True" Click="Ok_Click"/>
                 <Button Content="Hủy" MinWidth="80" Height="34" Padding="12,4"
-                        Background="#F7F8FA" Foreground="#253247"
-                        BorderBrush="#AAB4C2" BorderThickness="1" IsCancel="True"/>
+                        Background="{StaticResource SurfaceAlt}" Foreground="{StaticResource TextPrimary}"
+                        BorderBrush="{StaticResource InputBorder}" BorderThickness="1" IsCancel="True"/>
             </StackPanel>
         </Grid>
     </Border>

@@ -15,16 +15,17 @@ internal static class LocalizedMessageBox
             buttons == MessageBoxButton.YesNo ? MessageBoxResult.No : MessageBoxResult.Cancel;
         var panel = new StackPanel { Margin = new Thickness(22) };
         panel.Children.Add(new TextBlock { Text = TestViewText.Translate(text, language), TextWrapping = TextWrapping.Wrap,
-            FontSize = 16, Foreground = Brushes.Black, MaxWidth = 560 });
+            FontSize = 16, Foreground = ThemePalette.Brush("TextPrimary"), MaxWidth = 560 });
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(0, 20, 0, 0) };
         panel.Children.Add(actions);
         var window = new Window { Title = TestViewText.Translate(caption, language), Owner = owner, Width = 620,
             SizeToContent = SizeToContent.Height, MaxHeight = SystemParameters.WorkArea.Height,
-            ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Background = Brushes.White,
+            ResizeMode = ResizeMode.NoResize, ShowInTaskbar = false, Background = ThemePalette.Brush("PageBackground"),
             FontFamily = new FontFamily("Malgun Gothic"),
             WindowStartupLocation = owner is null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner,
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        ThemePalette.Apply(window);
         void Add(string label, MessageBoxResult value, bool isDefault = false, bool isCancel = false)
         {
             var button = new Button { Content = label, MinWidth = 90, Height = 36, Margin = new Thickness(8, 0, 0, 0),

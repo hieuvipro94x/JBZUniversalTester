@@ -1,5 +1,5 @@
-﻿<?xml version='1.0' encoding='UTF-8'?>
-<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"  x:Class="JBZUniversalTester.Views.ProductionSettingsPage" Background="{DynamicResource PageBackground}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" FontSize="16">
+<?xml version='1.0' encoding='UTF-8'?>
+<UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"  x:Class="JBZUniversalTester.Views.ProductionSettingsPage" Background="{DynamicResource PageBackground}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" FontSize="16" Foreground="{DynamicResource TextPrimary}">
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -85,10 +85,10 @@
                                     <ColumnDefinition Width="18"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <Border x:Name="CheckBorder" Width="18" Height="18" VerticalAlignment="Center" Background="White" BorderBrush="{StaticResource InputBorder}" BorderThickness="1.5" CornerRadius="3">
+                                <Border x:Name="CheckBorder" Width="18" Height="18" VerticalAlignment="Center" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource InputBorder}" BorderThickness="1.5" CornerRadius="3">
                                     <Grid>
-                                        <Path x:Name="CheckMark" Data="M 2,7 L 6,11 L 13,3" Stroke="White" StrokeThickness="2" Visibility="Collapsed"/>
-                                        <Rectangle x:Name="MixedMark" Width="10" Height="3" Fill="White" Visibility="Collapsed"/>
+                                        <Path x:Name="CheckMark" Data="M 2,7 L 6,11 L 13,3" Stroke="{StaticResource PanelBackground}" StrokeThickness="2" Visibility="Collapsed"/>
+                                        <Rectangle x:Name="MixedMark" Width="10" Height="3" Fill="{StaticResource PanelBackground}" Visibility="Collapsed"/>
                                     </Grid>
                                 </Border>
                                 <ContentPresenter Grid.Column="1" Margin="6,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True" IsHitTestVisible="False"/>
@@ -141,7 +141,7 @@
                         <ControlTemplate TargetType="Button">
                             <Grid>
                                 <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4"/>
-                                <Border x:Name="InteractionOverlay" Background="#000000" CornerRadius="4" IsHitTestVisible="False" Opacity="0"/>
+                                <Border x:Name="InteractionOverlay" Background="{StaticResource InkBlack}" CornerRadius="4" IsHitTestVisible="False" Opacity="0"/>
                                 <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" Margin="{TemplateBinding Padding}"/>
                             </Grid>
                             <ControlTemplate.Triggers>
@@ -163,9 +163,9 @@
                                     <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource AccentBlue}"/>
                                 </Trigger>
                                 <Trigger Property="IsEnabled" Value="False">
-                                    <Setter TargetName="ButtonBorder" Property="Background" Value="#E5E9EF"/>
+                                    <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
                                     <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource BorderColor}"/>
-                                    <Setter Property="Foreground" Value="#9CA3AF"/>
+                                    <Setter Property="Foreground" Value="{StaticResource InputBorder}"/>
                                     <Setter Property="Cursor" Value="Arrow"/>
                                 </Trigger>
                             </ControlTemplate.Triggers>
@@ -176,7 +176,7 @@
             <Style TargetType="Button" BasedOn="{StaticResource SettingsButtonBase}"/>
             <Style x:Key="SettingsPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsButtonBase}">
                 <Setter Property="Background" Value="{StaticResource BrandBlue}"/>
-                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 <Setter Property="BorderBrush" Value="{StaticResource BrandDark}"/>
                 <Setter Property="FontWeight" Value="Bold"/>
             </Style>
@@ -187,7 +187,7 @@
             </Style>
             <Style x:Key="SettingsActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsButtonBase}">
                 <Setter Property="Background" Value="{StaticResource AccentBlue}"/>
-                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 <Setter Property="BorderBrush" Value="{StaticResource AccentBlueDark}"/>
             </Style>
             <Style x:Key="SettingsWarningButtonStyle" TargetType="Button" BasedOn="{StaticResource SettingsButtonBase}">
@@ -228,7 +228,7 @@
             <Grid Margin="20,0">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <Rectangle Width="4" Height="24" Fill="{StaticResource AccentBlue}" RadiusX="2" RadiusY="2" Margin="0,0,12,0"/>
-                    <TextBlock Text="CÀI ĐẶT PRODUCTION" FontSize="20" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="CÀI ĐẶT PRODUCTION" FontSize="20" FontWeight="Bold" Foreground="{StaticResource PanelBackground}"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -608,7 +608,7 @@
                                             <ColumnDefinition Width="80"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="Mã hàng in thử" ToolTip="Chỉ dùng cho xem trước, in thử và in hàng loạt. In tự động lấy mã hàng đang test." VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
-                                        <ComboBox x:Name="LabelPrintModelComboBox" Grid.Column="1" Height="26" Margin="0,2,6,2" Background="White" Foreground="Black" IsTextSearchEnabled="True" TextSearch.TextPath="Name" MaxDropDownHeight="320" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" SelectionChanged="LabelPrintModelComboBox_SelectionChanged">
+                                        <ComboBox x:Name="LabelPrintModelComboBox" Grid.Column="1" Height="26" Margin="0,2,6,2" Background="{StaticResource PanelBackground}" Foreground="{StaticResource InkBlack}" IsTextSearchEnabled="True" TextSearch.TextPath="Name" MaxDropDownHeight="320" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" SelectionChanged="LabelPrintModelComboBox_SelectionChanged">
                                             <ComboBox.ItemsPanel>
                                                 <ItemsPanelTemplate>
                                                     <VirtualizingStackPanel/>
@@ -617,8 +617,8 @@
                                             <ComboBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <StackPanel ToolTip="{Binding FullPath}">
-                                                        <TextBlock Text="{Binding Name}" Foreground="Black"/>
-                                                        <TextBlock Text="{Binding Folder}" Foreground="Gray" FontSize="11"/>
+                                                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource InkBlack}"/>
+                                                        <TextBlock Text="{Binding Folder}" Foreground="{StaticResource TextMuted}" FontSize="11"/>
                                                     </StackPanel>
                                                 </DataTemplate>
                                             </ComboBox.ItemTemplate>
@@ -826,7 +826,7 @@
         </ScrollViewer>
 
         <!-- FOOTER -->
-        <Border Grid.Row="2" Background="White" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="2" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0">
             <Grid Margin="16,4">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>

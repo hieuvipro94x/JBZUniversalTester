@@ -18,12 +18,10 @@ internal static partial class Program
         {
             System.Xml.Linq.XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
             var appDocument = System.Xml.Linq.XDocument.Load(Path.Combine(Environment.CurrentDirectory, "App.xaml"));
-            var resourceXml = new System.Xml.Linq.XElement(ns + "ResourceDictionary",
-                new System.Xml.Linq.XAttribute("xmlns", ns.NamespaceName),
-                new System.Xml.Linq.XAttribute(System.Xml.Linq.XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml"),
-                appDocument.Root!.Element(ns + "Application.Resources")!.Elements());
             var application = Application.Current ?? new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
-            application.Resources = (ResourceDictionary)System.Windows.Markup.XamlReader.Parse(resourceXml.ToString());
+            application.Resources = new ResourceDictionary { Source = new Uri(
+                appDocument.Root!.Element(ns + "Application.Resources")!.Element(ns + "ResourceDictionary")!.Attribute("Source")!.Value,
+                UriKind.Relative) };
             var settings = new ProductionSettings { MasterFaultRequiredCount = 0 };
             settings.Label.TemplateType = LabelSettings.SmallQrTemplate;
             var vm = new MainViewModel(new AppSettings(), settings);

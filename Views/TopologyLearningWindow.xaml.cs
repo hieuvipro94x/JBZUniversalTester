@@ -315,7 +315,7 @@ public sealed class ActiveIoDiagnosticRow : INotifyPropertyChanged
     public string IoText => $"IO({Io})";
     public string StatusText => "KẸT / CHƯA THÁO";
     public string RelatedText { get => _relatedText; set => Set(ref _relatedText, value); }
-    public Brush StatusBrush => Brushes.Firebrick;
+    public Brush StatusBrush => ThemePalette.Brush("FailText");
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

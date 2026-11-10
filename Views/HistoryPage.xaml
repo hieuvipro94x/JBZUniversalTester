@@ -1,28 +1,30 @@
-﻿<UserControl x:Class="JBZUniversalTester.Views.HistoryPage"
+<UserControl x:Class="JBZUniversalTester.Views.HistoryPage"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Background="#EEF1F4"
+        Background="{DynamicResource PageBackground}"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
-    PreviewKeyDown="Page_PreviewKeyDown">
+    PreviewKeyDown="Page_PreviewKeyDown" Foreground="{DynamicResource TextPrimary}">
 
     <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></ResourceDictionary.MergedDictionaries>
         <!-- ===== Màu dùng chung ===== -->
-        <SolidColorBrush x:Key="HistoryBrandBlue" Color="#273F91"/>
-        <SolidColorBrush x:Key="HistoryNeutralBackground" Color="#ECEFF1"/>
-        <SolidColorBrush x:Key="HistoryNeutralForeground" Color="#455A64"/>
-        <SolidColorBrush x:Key="HistoryNeutralBorder" Color="#B0BEC5"/>
-        <SolidColorBrush x:Key="HistoryExportLightBackground" Color="#E5F5F3"/>
-        <SolidColorBrush x:Key="HistoryExportAction" Color="#0F766E"/>
-        <SolidColorBrush x:Key="HistoryExitBackground" Color="#ECEFF1"/>
-        <SolidColorBrush x:Key="HistoryExitForeground" Color="#455A64"/>
-        <SolidColorBrush x:Key="HistoryExitBorder" Color="#B0BEC5"/>
-        <SolidColorBrush x:Key="HistoryPanelBorder" Color="#B8C2CC"/>
-        <SolidColorBrush x:Key="HistoryTitleText" Color="#243447"/>
-        <SolidColorBrush x:Key="HistoryMutedText" Color="#66717C"/>
-        <SolidColorBrush x:Key="HistoryPassText" Color="#166B34"/>
-        <SolidColorBrush x:Key="HistoryPassSoft" Color="#DDF3E4"/>
-        <SolidColorBrush x:Key="HistoryFailSolid" Color="#C62828"/>
+        <SolidColorBrush x:Key="HistoryBrandBlue" Color="{StaticResource BrandBlueValue}"/>
+        <SolidColorBrush x:Key="HistoryNeutralBackground" Color="{StaticResource ButtonNeutralBackgroundValue}"/>
+        <SolidColorBrush x:Key="HistoryNeutralForeground" Color="{StaticResource TextSecondaryValue}"/>
+        <SolidColorBrush x:Key="HistoryNeutralBorder" Color="{StaticResource InputBorderValue}"/>
+        <SolidColorBrush x:Key="HistoryExportLightBackground" Color="{StaticResource AccentTintValue}"/>
+        <SolidColorBrush x:Key="HistoryExportAction" Color="{StaticResource AccentBlueDarkValue}"/>
+        <SolidColorBrush x:Key="HistoryExitBackground" Color="{StaticResource ButtonNeutralBackgroundValue}"/>
+        <SolidColorBrush x:Key="HistoryExitForeground" Color="{StaticResource TextSecondaryValue}"/>
+        <SolidColorBrush x:Key="HistoryExitBorder" Color="{StaticResource InputBorderValue}"/>
+        <SolidColorBrush x:Key="HistoryPanelBorder" Color="{StaticResource BorderColorValue}"/>
+        <SolidColorBrush x:Key="HistoryTitleText" Color="{StaticResource TextPrimaryValue}"/>
+        <SolidColorBrush x:Key="HistoryMutedText" Color="{StaticResource TextMutedValue}"/>
+        <SolidColorBrush x:Key="HistoryPassText" Color="{StaticResource PassTextValue}"/>
+        <SolidColorBrush x:Key="HistoryPassSoft" Color="{StaticResource PassTintValue}"/>
+        <SolidColorBrush x:Key="HistoryFailSolid" Color="{StaticResource FailRedValue}"/>
 
         <!-- Nút gọn. Đặt MinHeight rõ ràng vì style Button toàn cục có MinHeight 46,
              nếu không đặt thì Height bị bỏ qua. -->
@@ -53,7 +55,7 @@
                                     BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="4"/>
                             <Border x:Name="InteractionOverlay"
-                                    Background="#000000"
+                                    Background="{StaticResource InkBlack}"
                                     CornerRadius="4"
                                     IsHitTestVisible="False"
                                     Opacity="0"/>
@@ -78,9 +80,9 @@
                                 <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.16"/>
                             </MultiTrigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#E5E7EB"/>
-                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#CBD5E1"/>
-                                <Setter Property="Foreground" Value="#9CA3AF"/>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+                                <Setter Property="Foreground" Value="{StaticResource InputBorder}"/>
                                 <Setter Property="Cursor" Value="Arrow"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -94,32 +96,32 @@
                BasedOn="{StaticResource CompactButton}">
             <Setter Property="Background" Value="{StaticResource HistoryExportLightBackground}"/>
             <Setter Property="Foreground" Value="{StaticResource HistoryExportAction}"/>
-            <Setter Property="BorderBrush" Value="#86C8C1"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentTintBorder}"/>
         </Style>
 
         <Style x:Key="HistoryExcelButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource CompactButton}">
             <Setter Property="Background" Value="{StaticResource HistoryExportAction}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#0B5F59"/>
+            <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBlueDark}"/>
         </Style>
 
         <Style x:Key="HistorySearchButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource CompactButton}">
             <Setter Property="Background" Value="{StaticResource HistoryBrandBlue}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderBrush" Value="#1E3278"/>
+            <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BrandBlue}"/>
             <Setter Property="FontWeight" Value="Bold"/>
         </Style>
 
         <Style x:Key="HistoryLoadMoreButtonStyle"
                TargetType="Button"
                BasedOn="{StaticResource CompactButton}">
-            <Setter Property="Background" Value="#E8EDF5"/>
-            <Setter Property="Foreground" Value="#23449B"/>
-            <Setter Property="BorderBrush" Value="#AEBBD2"/>
+            <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+            <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource InputBorder}"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Height" Value="36"/>
             <Setter Property="MinHeight" Value="36"/>
@@ -132,7 +134,7 @@
             <Setter Property="BorderThickness" Value="1"/>
             <Style.Triggers>
                 <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Foreground" Value="#64748B"/>
+                    <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -187,7 +189,7 @@
 
         <Style x:Key="FilterLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="#5B6470"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
             <Setter Property="Margin" Value="1,0,0,3"/>
         </Style>
 
@@ -195,13 +197,13 @@
             <!-- MinWidth phải <= độ rộng cột nhỏ nhất (85), nếu lớn hơn thì header lấn sang
                  cột bên cạnh và che mất vạch ngăn. -->
             <Setter Property="MinWidth" Value="0"/>
-            <Setter Property="Background" Value="#E8EDF3"/>
-            <Setter Property="Foreground" Value="#293241"/>
+            <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="BorderBrush" Value="#C8D0D9"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
             <Setter Property="Padding" Value="6,4"/>
             <!-- Template riêng: viền được snap theo pixel thiết bị nên vạch ngăn giữa
@@ -253,8 +255,8 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#DCEBFA"/>
-                    <Setter Property="Foreground" Value="#172B3A"/>
+                    <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+                    <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -282,30 +284,31 @@
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HistoryResultText}" Value="FAIL">
                     <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HistoryResultText}" Value="NG LEAK">
                     <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HistoryResultText}" Value="DÂY CHƯA KẾT NỐI">
                     <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HistoryResultText}" Value="ĐẤU SAI">
                     <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HistoryResultText}" Value="CHẬP MẠCH">
                     <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 </DataTrigger>
                 <DataTrigger Binding="{Binding HistoryResultText}" Value="ĐIỆN TRỞ KHÔNG ĐẠT">
                     <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+            </ResourceDictionary>
     </UserControl.Resources>
 
     <Grid Margin="6">
@@ -318,7 +321,7 @@
 
         <!-- Header -->
         <Border Grid.Row="0"
-                Background="White"
+                Background="{StaticResource PanelBackground}"
                 BorderBrush="{StaticResource HistoryPanelBorder}"
                 BorderThickness="1"
                 CornerRadius="3"
@@ -341,27 +344,27 @@
                                Foreground="{StaticResource HistoryTitleText}"/>
                     <TextBlock Text="Tra cứu nhanh, xem dữ liệu tem và xuất Excel theo mẫu chuẩn"
                                FontSize="11.5"
-                               Foreground="#7A8490"
+                               Foreground="{StaticResource TextMuted}"
                                Margin="0,1,0,0"/>
                 </StackPanel>
 
-                <Border Grid.Column="1" Background="#F2F5F8" CornerRadius="3" Margin="3,0" Padding="7,3">
+                <Border Grid.Column="1" Background="{StaticResource SurfaceAlt}" CornerRadius="3" Margin="3,0" Padding="7,3">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="TỔNG" FontSize="10.5" Foreground="#69737D" HorizontalAlignment="Center"/>
-                        <TextBlock x:Name="TotalCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="#22313F" HorizontalAlignment="Center"/>
+                        <TextBlock Text="TỔNG" FontSize="10.5" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="TotalCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="2" Background="#EEF8F1" CornerRadius="3" Margin="3,0" Padding="7,3">
+                <Border Grid.Column="2" Background="{StaticResource PassTint}" CornerRadius="3" Margin="3,0" Padding="7,3">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="PASS" FontSize="10.5" Foreground="#3E6D4D" HorizontalAlignment="Center"/>
-                        <TextBlock x:Name="PassCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="#16813A" HorizontalAlignment="Center"/>
+                        <TextBlock Text="PASS" FontSize="10.5" Foreground="{StaticResource PassText}" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="PassCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="{StaticResource PassText}" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="3" Background="#FFF0F0" CornerRadius="3" Margin="3,0" Padding="7,3">
+                <Border Grid.Column="3" Background="{StaticResource FailTint}" CornerRadius="3" Margin="3,0" Padding="7,3">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="FAIL" FontSize="10.5" Foreground="#8A4B4B" HorizontalAlignment="Center"/>
+                        <TextBlock Text="FAIL" FontSize="10.5" Foreground="{StaticResource FailText}" HorizontalAlignment="Center"/>
                         <TextBlock x:Name="FailCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="{StaticResource HistoryFailSolid}" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
@@ -391,7 +394,7 @@
         <!-- Bộ lọc: WrapPanel tự xuống dòng khi màn hình hẹp, không còn cuộn ngang.
              Thứ tự: thời gian → đối tượng → loại/kết quả → nút hành động. -->
         <Border Grid.Row="1"
-                Background="White"
+                Background="{StaticResource PanelBackground}"
                 BorderBrush="{StaticResource HistoryPanelBorder}"
                 BorderThickness="1"
                 CornerRadius="3"
@@ -473,8 +476,8 @@
 
         <!-- Bảng lịch sử -->
         <Border Grid.Row="2"
-                Background="White"
-                BorderBrush="#C8D0D9"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource BorderColor}"
                 BorderThickness="1"
                 CornerRadius="2">
             <!-- 4 cột đóng băng: Ngày, Thời gian, Mã hàng, Kết quả (~500px) -->
@@ -493,12 +496,12 @@
                       RowHeight="32"
                       ColumnHeaderHeight="40"
                       FontSize="13"
-                      Background="White"
+                      Background="{StaticResource PanelBackground}"
                       BorderThickness="0"
                       SelectionMode="Extended"
                       SelectionUnit="FullRow"
-                      AlternatingRowBackground="#F8FAFC"
-                      RowBackground="White"
+                      AlternatingRowBackground="{StaticResource SurfaceAlt}"
+                      RowBackground="{StaticResource PanelBackground}"
                       FrozenColumnCount="4"
                       CellStyle="{StaticResource HistoryCellStyle}"
                       ColumnHeaderStyle="{StaticResource HistoryHeaderStyle}"
@@ -508,7 +511,7 @@
                       VirtualizingPanel.VirtualizationMode="Recycling">
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
-                        <Setter Property="BorderBrush" Value="#E1E6EB"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
                         <Setter Property="BorderThickness" Value="0,0,0,1"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
                         <Setter Property="Height" Value="32"/>
@@ -616,7 +619,7 @@
             <TextBlock Grid.Column="2"
                        Text="Enter: tìm kiếm  •  Rê chuột vào dòng để xem hồ sơ"
                        VerticalAlignment="Center"
-                       Foreground="#7A838D"
+                       Foreground="{StaticResource TextMuted}"
                        FontSize="11.5"
                        Margin="12,0,2,0"/>
         </Grid>

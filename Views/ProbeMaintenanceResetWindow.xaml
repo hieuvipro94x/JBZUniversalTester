@@ -6,11 +6,13 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        Background="#F3F6FA" FontFamily="Segoe UI">
+        Background="{DynamicResource PageBackground}" FontFamily="Segoe UI" Foreground="{DynamicResource TextPrimary}">
     <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></ResourceDictionary.MergedDictionaries>
         <Style x:Key="CardStyle" TargetType="Border">
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="BorderBrush" Value="#DCE4EE"/>
+            <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="8"/>
             <Setter Property="Padding" Value="16"/>
@@ -18,7 +20,7 @@
         <Style x:Key="CaptionStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="#64748B"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
         </Style>
         <Style x:Key="DialogButtonStyle" TargetType="Button">
             <Setter Property="Height" Value="38"/>
@@ -27,8 +29,9 @@
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="BorderThickness" Value="0"/>
         </Style>
+            </ResourceDictionary>
     </Window.Resources>
-    <Border BorderBrush="#94A3B8" BorderThickness="2" Background="#F3F6FA">
+    <Border BorderBrush="{StaticResource InputBorder}" BorderThickness="2" Background="{StaticResource PageBackground}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
     <Grid Margin="20">
         <Grid.RowDefinitions>
@@ -41,19 +44,19 @@
         </Grid.RowDefinitions>
 
         <StackPanel Margin="0,0,0,16">
-            <TextBlock Text="BẢO TRÌ PROBE PIN" Style="{StaticResource CaptionStyle}" Foreground="#1D4ED8"/>
+            <TextBlock Text="BẢO TRÌ PROBE PIN" Style="{StaticResource CaptionStyle}" Foreground="{StaticResource AccentBlue}"/>
             <TextBlock Text="Xác nhận đã thay pin" Margin="0,4,0,0"
-                       FontSize="23" FontWeight="Bold" Foreground="#172554"/>
+                       FontSize="23" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
             <TextBlock Text="Kiểm tra đúng mã hàng và số lượt trước khi đặt lại bộ đếm."
-                       Margin="0,5,0,0" Foreground="#64748B" TextWrapping="Wrap"/>
+                       Margin="0,5,0,0" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
         </StackPanel>
 
         <Border Grid.Row="1" Style="{StaticResource CardStyle}" Margin="0,0,0,12">
             <StackPanel>
                 <TextBlock Text="THIẾT BỊ ĐANG BẢO TRÌ" Style="{StaticResource CaptionStyle}"/>
                 <TextBlock x:Name="ModelText" Margin="0,7,0,0" FontSize="16"
-                           FontWeight="SemiBold" Foreground="#0F172A" TextWrapping="Wrap"/>
-                <Border Height="1" Background="#E8EDF4" Margin="0,13,0,12"/>
+                           FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" TextWrapping="Wrap"/>
+                <Border Height="1" Background="{StaticResource ButtonNeutralBackground}" Margin="0,13,0,12"/>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
@@ -63,30 +66,30 @@
                     <StackPanel>
                         <TextBlock Text="SỐ LƯỢT HIỆN TẠI" Style="{StaticResource CaptionStyle}"/>
                         <TextBlock x:Name="CurrentCyclesText" Margin="0,4,0,0" FontSize="22"
-                                   FontWeight="Bold" Foreground="#B45309"/>
+                                   FontWeight="Bold" Foreground="{StaticResource WarningText}"/>
                     </StackPanel>
-                    <Border Grid.Column="1" Background="#E8EDF4"/>
+                    <Border Grid.Column="1" Background="{StaticResource ButtonNeutralBackground}"/>
                     <StackPanel Grid.Column="2" Margin="16,0,0,0">
                         <TextBlock Text="NGƯỠNG THAY PIN" Style="{StaticResource CaptionStyle}"/>
                         <TextBlock x:Name="ThresholdText" Margin="0,4,0,0" FontSize="22"
-                                   FontWeight="Bold" Foreground="#172554"/>
+                                   FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
                     </StackPanel>
                 </Grid>
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="2" Background="#FFF7ED" BorderBrush="#FCD9A8"
+        <Border Grid.Row="2" Background="{StaticResource ButtonWarningBackground}" BorderBrush="{StaticResource ButtonWarningBackground}"
                 BorderThickness="1" CornerRadius="7" Padding="12" Margin="0,0,0,15">
             <TextBlock Text="Hoàn tất kiểm tra, tháo hết sản phẩm và thay PIN thực tế. Nhập mật khẩu đăng nhập Cài đặt để xác nhận; bộ đếm sẽ về 0 và ghi lịch sử bảo trì."
-                       Foreground="#92400E" FontSize="13" TextWrapping="Wrap"/>
+                       Foreground="{StaticResource WarningText}" FontSize="13" TextWrapping="Wrap"/>
         </Border>
 
         <StackPanel Grid.Row="3">
             <TextBlock Text="MẬT KHẨU ĐĂNG NHẬP CÀI ĐẶT" Style="{StaticResource CaptionStyle}"/>
             <PasswordBox x:Name="AdminPasswordBox" Height="40" Margin="0,6,0,0"
-                         FontSize="16" Padding="9,4" BorderBrush="#CBD5E1"
+                         FontSize="16" Padding="9,4" BorderBrush="{StaticResource BorderColor}"
                          KeyDown="AdminPasswordBox_KeyDown"/>
-            <TextBlock x:Name="ValidationMessageText" TextWrapping="Wrap" Foreground="#B91C1C" FontSize="13" Margin="0,6,0,0"/>
+            <TextBlock x:Name="ValidationMessageText" TextWrapping="Wrap" Foreground="{StaticResource FailText}" FontSize="13" Margin="0,6,0,0"/>
         </StackPanel>
 
         <Grid Grid.Row="5" Margin="0,18,0,0">
@@ -96,10 +99,10 @@
                 <ColumnDefinition Width="156"/>
             </Grid.ColumnDefinitions>
             <Button x:Name="CancelResetButton" Grid.Column="1" Margin="0,0,8,0" Content="HỦY" IsCancel="True"
-                    Style="{StaticResource DialogButtonStyle}" Background="#E2E8F0" Foreground="#334155"/>
+                    Style="{StaticResource DialogButtonStyle}" Background="{StaticResource DividerColor}" Foreground="{StaticResource TextSecondary}"/>
             <Button x:Name="ConfirmResetButton" Grid.Column="2" Content="XÁC NHẬN" IsDefault="True"
-                    Style="{StaticResource DialogButtonStyle}" Background="#B45309"
-                    Foreground="White" Click="Confirm_Click"/>
+                    Style="{StaticResource DialogButtonStyle}" Background="{StaticResource WarningText}"
+                    Foreground="{StaticResource PanelBackground}" Click="Confirm_Click"/>
         </Grid>
     </Grid>
     </ScrollViewer>

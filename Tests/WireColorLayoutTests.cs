@@ -23,7 +23,7 @@ internal static partial class Program
                 new XAttribute(XNamespace.Xmlns + "x", "http://schemas.microsoft.com/winfx/2006/xaml"),
                 new XAttribute(XNamespace.Xmlns + "sys", "clr-namespace:System;assembly=System.Runtime"),
                 new XAttribute(XNamespace.Xmlns + "views", "clr-namespace:JBZUniversalTester.Views;assembly=JBZUniversalTester"),
-                document.Root!.Element(ns + "Window.Resources")!.Elements());
+                document.Root!.Element(ns + "Window.Resources")!.Element(ns + "ResourceDictionary")!.Elements());
             foreach (XElement element in dictionary.Descendants().Where(element => element.Name.NamespaceName == "clr-namespace:JBZUniversalTester.Views"))
                 element.Name = XName.Get(element.Name.LocalName, "clr-namespace:JBZUniversalTester.Views;assembly=JBZUniversalTester");
             ResourceDictionary resources = (ResourceDictionary)XamlReader.Parse(dictionary.ToString());

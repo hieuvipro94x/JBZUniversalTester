@@ -6,17 +6,19 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip"
         ShowInTaskbar="False"
-        Background="#F7F7F5"
+        Background="{DynamicResource PageBackground}"
         FontFamily="Segoe UI, Malgun Gothic"
         UseLayoutRounding="True"
-        TextOptions.TextFormattingMode="Display">
+        TextOptions.TextFormattingMode="Display" Foreground="{DynamicResource TextPrimary}">
 
     <Window.Resources>
-        <SolidColorBrush x:Key="AccentBrush" Color="#2F5BEA"/>
-        <SolidColorBrush x:Key="AccentSoftBrush" Color="#EAF0FF"/>
-        <SolidColorBrush x:Key="BorderBrushSoft" Color="#D6D6D6"/>
-        <SolidColorBrush x:Key="TextStrongBrush" Color="#222222"/>
-        <SolidColorBrush x:Key="TextMutedBrush" Color="#6B7280"/>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></ResourceDictionary.MergedDictionaries>
+        <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentBlueValue}"/>
+        <SolidColorBrush x:Key="AccentSoftBrush" Color="{StaticResource AccentTintValue}"/>
+        <SolidColorBrush x:Key="BorderBrushSoft" Color="{StaticResource GridLineValue}"/>
+        <SolidColorBrush x:Key="TextStrongBrush" Color="{StaticResource TextPrimaryValue}"/>
+        <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedValue}"/>
 
         <!-- Nút cơ bản: bo góc, hover / pressed / disabled -->
         <Style x:Key="DialogButton" TargetType="Button">
@@ -24,9 +26,9 @@
             <Setter Property="FontSize" Value="15"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Foreground" Value="#334155"/>
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="BorderBrush" Value="#CBD5E1"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+            <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Template">
@@ -38,7 +40,7 @@
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
                                     CornerRadius="6"/>
-                            <Border x:Name="Overlay" Background="#000000" CornerRadius="6"
+                            <Border x:Name="Overlay" Background="{StaticResource InkBlack}" CornerRadius="6"
                                     Opacity="0" IsHitTestVisible="False"/>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Grid>
@@ -50,9 +52,9 @@
                                 <Setter TargetName="Overlay" Property="Opacity" Value="0.15"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="Bd" Property="Background" Value="#E5E7EB"/>
-                                <Setter TargetName="Bd" Property="BorderBrush" Value="#CBD5E1"/>
-                                <Setter Property="Foreground" Value="#9CA3AF"/>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+                                <Setter Property="Foreground" Value="{StaticResource InputBorder}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -63,7 +65,7 @@
         <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource DialogButton}">
             <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
             <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
         </Style>
 
         <!-- Thẻ part: viền mảnh, thanh nhấn bên trái khi chọn -->
@@ -75,7 +77,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
                         <Border x:Name="Card"
-                                Background="White"
+                                Background="{StaticResource PanelBackground}"
                                 BorderBrush="{StaticResource BorderBrushSoft}"
                                 BorderThickness="1"
                                 CornerRadius="8"
@@ -97,8 +99,8 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Card" Property="Background" Value="#F5F8FF"/>
-                                <Setter TargetName="Card" Property="BorderBrush" Value="#9DB4F5"/>
+                                <Setter TargetName="Card" Property="Background" Value="{StaticResource SurfaceAlt}"/>
+                                <Setter TargetName="Card" Property="BorderBrush" Value="{StaticResource AccentTintBorder}"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Card" Property="Background" Value="{StaticResource AccentSoftBrush}"/>
@@ -111,6 +113,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
+            </ResourceDictionary>
     </Window.Resources>
 
     <Grid>
@@ -121,7 +124,7 @@
         </Grid.RowDefinitions>
 
         <!-- Tiêu đề -->
-        <Border Grid.Row="0" Background="White"
+        <Border Grid.Row="0" Background="{StaticResource PanelBackground}"
                 BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,0,0,1"
                 Padding="24,18">
             <StackPanel>
@@ -164,7 +167,7 @@
         </ListBox>
 
         <!-- Thanh nút -->
-        <Border Grid.Row="2" Background="White"
+        <Border Grid.Row="2" Background="{StaticResource PanelBackground}"
                 BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,1,0,0"
                 Padding="24,14">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">

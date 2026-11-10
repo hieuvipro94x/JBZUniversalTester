@@ -119,18 +119,19 @@ internal static class SettingsSecurityDialogs
     {
         var panel = new StackPanel { Margin = new Thickness(22) };
         panel.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromRgb(35, 68, 155)), Margin = new Thickness(0, 0, 0, 12) });
+            Foreground = ThemePalette.Brush("BrandBlue"), Margin = new Thickness(0, 0, 0, 12) });
         var window = new Window { Title = title, Owner = owner, Width = 490, SizeToContent = SizeToContent.Height,
             MaxHeight = SystemParameters.WorkArea.Height, ResizeMode = ResizeMode.NoResize,
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
-            Background = Brushes.White, FontFamily = new FontFamily("Segoe UI"),
+            Background = ThemePalette.Brush("PanelBackground"), FontFamily = new FontFamily("Segoe UI"),
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        ThemePalette.Apply(window);
         window.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) window.Close(); };
-        return (window, panel, new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap,
+        return (window, panel, new TextBlock { Foreground = ThemePalette.Brush("FailText"), TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 10, 0, 4) });
     }
     private static TextBlock Label(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap,
-        FontSize = 14, Margin = new Thickness(0, 6, 0, 5), Foreground = Brushes.DarkSlateGray };
+        FontSize = 14, Margin = new Thickness(0, 6, 0, 5), Foreground = ThemePalette.Brush("TextSecondary") };
     private static PasswordBox Password(StackPanel panel, string label)
     {
         panel.Children.Add(Label(label));
@@ -141,6 +142,6 @@ internal static class SettingsSecurityDialogs
     private static Button Button(string label, bool primary = false) => new() { Content = label,
         Height = 38, Padding = new Thickness(12, 0, 12, 0), Margin = new Thickness(0, 8, 8, 0),
         FontSize = 13, FontWeight = FontWeights.SemiBold,
-        Background = primary ? new SolidColorBrush(Color.FromRgb(15, 118, 110)) : Brushes.WhiteSmoke,
-        Foreground = primary ? Brushes.White : Brushes.DarkSlateGray };
+        Background = primary ? ThemePalette.Brush("AccentBlueDark") : ThemePalette.Brush("ButtonNeutralBackground"),
+        Foreground = primary ? ThemePalette.Brush("PanelBackground") : ThemePalette.Brush("TextSecondary") };
 }

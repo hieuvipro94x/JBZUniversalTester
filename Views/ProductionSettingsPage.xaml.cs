@@ -469,6 +469,7 @@ public partial class ProductionSettingsPage : UserControl
             ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner
         };
+        ThemePalette.Apply(editor);
         var layout = new Grid { Margin = new Thickness(12) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -594,6 +595,7 @@ public partial class ProductionSettingsPage : UserControl
             Background = Brushes.White
         };
 
+        ThemePalette.Apply(previewWindow);
         var root = new Grid { Margin = new Thickness(14) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -609,7 +611,7 @@ public partial class ProductionSettingsPage : UserControl
             Text = $"{request.Profile.Id}  •  LOT {request.Data.LotNo}",
             FontSize = 18,
             FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromRgb(31, 67, 145))
+            Foreground = ThemePalette.Brush("BrandBlue")
         });
         title.Children.Add(new TextBlock
         {
@@ -617,15 +619,15 @@ public partial class ProductionSettingsPage : UserControl
                    $"Payload: {LabelProfileResolver.DetectLanguage(request.Payload)}  •  " +
                    $"Máy in: {(string.IsNullOrWhiteSpace(request.Printer) ? "CHƯA CHỌN" : request.Printer)}",
             Margin = new Thickness(0, 3, 0, 0),
-            Foreground = Brushes.DimGray,
+            Foreground = ThemePalette.Brush("TextMuted"),
             FontSize = 12
         });
         header.Children.Add(title);
 
         var fidelity = new Border
         {
-            Background = new SolidColorBrush(Color.FromRgb(238, 245, 255)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(164, 188, 224)),
+            Background = ThemePalette.Brush("AccentTint"),
+            BorderBrush = ThemePalette.Brush("AccentTintBorder"),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(10, 6, 10, 6),
@@ -634,7 +636,7 @@ public partial class ProductionSettingsPage : UserControl
                 Text = "CÙNG PAYLOAD VỚI ĐƯỜNG IN",
                 FontSize = 11,
                 FontWeight = FontWeights.Bold,
-                Foreground = new SolidColorBrush(Color.FromRgb(31, 67, 145))
+                Foreground = ThemePalette.Brush("BrandBlue")
             }
         };
         Grid.SetColumn(fidelity, 1);
@@ -648,7 +650,7 @@ public partial class ProductionSettingsPage : UserControl
 
         var visualHost = new Grid
         {
-            Background = new SolidColorBrush(Color.FromRgb(239, 242, 247)),
+            Background = ThemePalette.Brush("ButtonNeutralBackground"),
             Margin = new Thickness(2)
         };
         visualHost.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -674,7 +676,7 @@ public partial class ProductionSettingsPage : UserControl
                    "TEM_BE_QRCODE được hiển thị dưới dạng QR Code (3 finder ở ba góc), không phải Data Matrix. " +
                    "Font raster/module cuối cùng có thể chênh nhẹ vì do firmware máy in tạo; dùng ‘IN THỬ ĐÚNG BẢN NÀY’ để kiểm chứng vật lý.",
             TextWrapping = TextWrapping.Wrap,
-            Foreground = Brushes.DimGray,
+            Foreground = ThemePalette.Brush("TextMuted"),
             FontSize = 11.5
         };
         Grid.SetRow(note, 1);
@@ -709,7 +711,7 @@ public partial class ProductionSettingsPage : UserControl
         {
             Text = $"Part: {request.Data.PartNumber}   •   Barcode: {request.Data.Barcode}",
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = Brushes.DimGray,
+            Foreground = ThemePalette.Brush("TextMuted"),
             FontSize = 11.5,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
@@ -2353,6 +2355,7 @@ public partial class ProductionSettingsPage : UserControl
                 ? WindowStartupLocation.CenterScreen
                 : WindowStartupLocation.CenterOwner
         };
+        ThemePalette.Apply(dialog);
         var layout = new Grid { Margin = new Thickness(24) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2362,7 +2365,7 @@ public partial class ProductionSettingsPage : UserControl
             Text = "Bạn có muốn lưu thay đổi?",
             FontSize = 22,
             FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(17, 24, 39)),
+            Foreground = ThemePalette.Brush("TextPrimary"),
             TextWrapping = TextWrapping.Wrap
         });
         var description = new TextBlock
@@ -2371,7 +2374,7 @@ public partial class ProductionSettingsPage : UserControl
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 12, 0, 22),
             FontSize = 16,
-            Foreground = new SolidColorBrush(Color.FromRgb(75, 85, 99))
+            Foreground = ThemePalette.Brush("TextSecondary")
         };
         Grid.SetRow(description, 1);
         layout.Children.Add(description);

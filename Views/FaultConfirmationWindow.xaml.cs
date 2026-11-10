@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -208,7 +208,7 @@ public partial class FaultConfirmationWindow : Window
     {
         text.Inlines.Add(new Run(string.IsNullOrWhiteSpace(wireName) ? T("Mã dây chưa xác định") : wireName)
         {
-            Foreground = Brushes.Red
+            Foreground = ThemePalette.Brush("FailRed")
         });
         if (!string.IsNullOrWhiteSpace(color))
         {
@@ -226,7 +226,7 @@ public partial class FaultConfirmationWindow : Window
         if (code.Equals("W", StringComparison.OrdinalIgnoreCase) ||
             code.Equals("WH", StringComparison.OrdinalIgnoreCase) ||
             code.Equals("WHITE", StringComparison.OrdinalIgnoreCase))
-            run.Background = Brushes.DimGray;
+            run.Background = ThemePalette.Brush("TextSecondary");
         text.Inlines.Add(run);
     }
 

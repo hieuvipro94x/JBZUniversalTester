@@ -8,14 +8,15 @@
         WindowStartupLocation="Manual"
         WindowStyle="None"
         AllowsTransparency="True"
-        Background="#F3F4F6"
+        Background="{DynamicResource PageBackground}"
         ShowActivated="False"
         Focusable="False"
         UseLayoutRounding="True"
-        SnapsToDevicePixels="True">
-    <UniformGrid Columns="3" Background="#F3F4F6">
+        SnapsToDevicePixels="True" Foreground="{DynamicResource InkBlack}">
+    <Window.Resources><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></Window.Resources>
+    <UniformGrid Columns="3" Background="{StaticResource PageBackground}">
         <Border Margin="0,0,1,0"
-                BorderBrush="#9CA3AF"
+                BorderBrush="{StaticResource InputBorder}"
                 BorderThickness="1"
                 CornerRadius="2"
                 ToolTip="Kênh Leak 1">
@@ -24,7 +25,7 @@
                     <Setter Property="Background" Value="{Binding Channel1Background}"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsRunning}" Value="True">
-                            <Setter Property="Background" Value="#F3F4F6"/>
+                            <Setter Property="Background" Value="{StaticResource PageBackground}"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
@@ -33,7 +34,7 @@
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Border>
         <Border Margin="0.5,0"
-                BorderBrush="#9CA3AF"
+                BorderBrush="{StaticResource InputBorder}"
                 BorderThickness="1"
                 CornerRadius="2"
                 ToolTip="Kênh Leak 2">
@@ -42,7 +43,7 @@
                     <Setter Property="Background" Value="{Binding Channel2Background}"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsRunning}" Value="True">
-                            <Setter Property="Background" Value="#F3F4F6"/>
+                            <Setter Property="Background" Value="{StaticResource PageBackground}"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
@@ -51,7 +52,7 @@
                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
         </Border>
         <Border Margin="1,0,0,0"
-                BorderBrush="#9CA3AF"
+                BorderBrush="{StaticResource InputBorder}"
                 BorderThickness="1"
                 CornerRadius="2"
                 ToolTip="Kênh Leak 3">
@@ -60,7 +61,7 @@
                     <Setter Property="Background" Value="{Binding Channel3Background}"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsRunning}" Value="True">
-                            <Setter Property="Background" Value="#F3F4F6"/>
+                            <Setter Property="Background" Value="{StaticResource PageBackground}"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
