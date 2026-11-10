@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="JBZ Universal Tester — Khởi động" Width="720" Height="400"
         WindowStyle="None" ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
-        Background="#FFFFFF" Foreground="#24364B" FontFamily="Segoe UI"
+        AllowsTransparency="True" Background="Transparent" Foreground="#24364B" FontFamily="Segoe UI"
         UseLayoutRounding="True" SnapsToDevicePixels="True" ShowInTaskbar="True">
 
     <Window.Resources>
@@ -22,7 +22,9 @@
         </LinearGradientBrush>
     </Window.Resources>
 
-    <Border x:Name="RootBorder" BorderBrush="#B8C7D9" BorderThickness="1" Background="#FFFFFF">
+    <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
+    <Border x:Name="RootBorder" Width="720" Height="400"
+            CornerRadius="10" BorderBrush="#B8C7D9" BorderThickness="1" Background="#FFFFFF">
         <Border.Triggers>
             <EventTrigger RoutedEvent="Border.Loaded">
                 <BeginStoryboard>
@@ -35,6 +37,9 @@
         </Border.Triggers>
 
         <Grid>
+            <Grid.Clip>
+                <RectangleGeometry Rect="0,0,718,398" RadiusX="9" RadiusY="9"/>
+            </Grid.Clip>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="44"/>
@@ -108,11 +113,11 @@
                     </Border>
 
                     <!-- title -->
-                    <StackPanel Grid.Row="1" VerticalAlignment="Center">
+                    <StackPanel x:Name="TitlePanel" Grid.Row="1" VerticalAlignment="Center">
                         <TextBlock Text="UNIVERSAL" FontSize="38" FontWeight="Bold" Foreground="#183B61" LineHeight="40"/>
                         <TextBlock Text="TESTER" FontSize="38" FontWeight="Bold" Foreground="#1687C9" LineHeight="40"/>
                         <Rectangle Height="3" Width="56" Fill="#1687C9" HorizontalAlignment="Left" Margin="2,14,0,0"/>
-                        <TextBlock Text="HỆ THỐNG KIỂM TRA DÂY ĐIỆN" FontSize="14" FontWeight="SemiBold"
+                        <TextBlock x:Name="SubtitleText" Text="HỆ THỐNG KIỂM TRA DÂY ĐIỆN" FontSize="14" FontWeight="SemiBold"
                                    Foreground="#334155" Margin="2,14,0,0"/>
                     </StackPanel>
 
@@ -161,4 +166,5 @@
             </Border>
         </Grid>
     </Border>
+    </Viewbox>
 </Window>

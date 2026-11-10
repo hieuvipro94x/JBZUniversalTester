@@ -16,22 +16,17 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
-        StartupPerformanceTrace.Begin();
-        _singleInstanceMutex = new Mutex(
-            initiallyOwned: true,
-            name: @"Local\JBZUniversalTester.Production",
-            createdNew: out _ownsSingleInstanceMutex);
+        _ownsSingleInstanceMutex = SingleInstanceGate.TryAcquire(
+            @"Local\JBZUniversalTester.Production", out _singleInstanceMutex);
         if (!_ownsSingleInstanceMutex)
         {
-            MessageBox.Show(
-                "JBZ Universal Tester đang chạy. Không thể mở thêm phiên thứ hai vì bo và dữ liệu sản xuất chỉ được phép có một chủ sở hữu.",
-                "JBZ Universal Tester",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            // No modal dialog: it would keep a second process alive on each
+            // extra click while the first process is still starting slowly.
             Shutdown(2);
             return;
         }
 
+        StartupPerformanceTrace.Begin();
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
@@ -209,19 +204,32 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        AsyncFileLogService.Current.Application($"SHUTDOWN exitCode={e.ApplicationExitCode}");
-        AppSoundService.Current.Dispose();
+        if (!_ownsSingleInstanceMutex)
+        {
+            // A rejected launch never initialized runtime services.
+            base.OnExit(e);
+            return;
+        }
 
-        DispatcherUnhandledException -= OnDispatcherUnhandledException;
-        AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
-        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+        try
+        {
+            AsyncFileLogService.Current.Application($"SHUTDOWN exitCode={e.ApplicationExitCode}");
+            AppSoundService.Current.Dispose();
 
-        AsyncFileLogService.Current.Dispose();
-        if (_ownsSingleInstanceMutex)
+            DispatcherUnhandledException -= OnDispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+            TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+
+            AsyncFileLogService.Current.Dispose();
+        }
+        finally
+        {
             _singleInstanceMutex?.ReleaseMutex();
-        _singleInstanceMutex?.Dispose();
-        _singleInstanceMutex = null;
-        base.OnExit(e);
+            _singleInstanceMutex?.Dispose();
+            _singleInstanceMutex = null;
+            _ownsSingleInstanceMutex = false;
+            base.OnExit(e);
+        }
     }
 
     private static string BuildRuntimeContext()

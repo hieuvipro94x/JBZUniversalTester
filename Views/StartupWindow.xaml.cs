@@ -12,9 +12,13 @@ public partial class StartupWindow : Window
     {
         InitializeComponent();
         VersionText.Text = AppVersion.DisplayVersion;
-        // Fit smaller work areas without a render-time resize.
-        Width = Math.Min(Width, SystemParameters.WorkArea.Width);
-        Height = Math.Min(Height, SystemParameters.WorkArea.Height);
+        // Keep the design's aspect ratio on small/high-DPI work areas. The
+        // Viewbox scales the entire layout instead of squeezing fixed columns.
+        double scale = Math.Min(1, Math.Min(
+            SystemParameters.WorkArea.Width / Width,
+            SystemParameters.WorkArea.Height / Height));
+        Width *= scale;
+        Height *= scale;
     }
 
     public void Report(int percent, string stage)

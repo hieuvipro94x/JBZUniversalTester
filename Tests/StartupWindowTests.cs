@@ -62,6 +62,42 @@ internal static partial class Program
                            barOrigin.Y + bar.ActualHeight <= progressPanel.ActualHeight + 1,
                         "Startup status, percent and progress fit the right column without clipping: " + message);
                 }
+                var viewport = (Viewbox)splash.Content;
+                var design = (Border)splash.FindName("RootBorder");
+                var title = (FrameworkElement)splash.FindName("TitlePanel");
+                var subtitle = (TextBlock)splash.FindName("SubtitleText");
+                var version = (TextBlock)splash.FindName("VersionText");
+                foreach (Size size in new[] { new Size(720, 400), new Size(630, 350), new Size(540, 300), new Size(450, 250) })
+                {
+                    splash.Width = size.Width; splash.Height = size.Height;
+                    splash.UpdateLayout();
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    splash.UpdateLayout();
+                    foreach (FrameworkElement element in new FrameworkElement[] { design, title, subtitle, stage, percent, bar, version })
+                    {
+                        Rect bounds = element.TransformToAncestor(viewport).TransformBounds(
+                            new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+                        Assert(bounds.Width > 0 && bounds.Height > 0 && bounds.Left >= -1 && bounds.Top >= -1 &&
+                               bounds.Right <= viewport.ActualWidth + 1 && bounds.Bottom <= viewport.ActualHeight + 1,
+                            $"Splash content remains inside the window at {size}: {element.Name}, {bounds}");
+                    }
+                    Point titleBottom = title.TranslatePoint(new Point(0, title.ActualHeight), design);
+                    Point stageTop = stage.TranslatePoint(new Point(), design);
+                    Assert(titleBottom.Y <= stageTop.Y && subtitle.ActualWidth >= subtitle.DesiredSize.Width - 1,
+                        $"Splash title, subtitle and progress stay separate on small/high-DPI work areas: {size}");
+                }
+                splash.Width = 720; splash.Height = 400;
+                splash.UpdateLayout();
+                var cornerImage = new RenderTargetBitmap(720, 400, 96, 96, PixelFormats.Pbgra32);
+                cornerImage.Render(viewport);
+                foreach (Point corner in new[] { new Point(0, 0), new Point(719, 0), new Point(0, 399), new Point(719, 399) })
+                {
+                    byte[] pixel = new byte[4];
+                    cornerImage.CopyPixels(new Int32Rect((int)corner.X, (int)corner.Y, 1, 1), pixel, 4, 0);
+                    Assert(pixel[3] == 0, "Rounded splash corners remain transparent without a square window background");
+                }
+                Assert(splash.AllowsTransparency && design.CornerRadius.TopLeft == 10 && design.Child.Clip is RectangleGeometry,
+                    "Splash applies a subtle rounded outer border and clips child backgrounds to the same shape");
                 splash.Close();
                 Assert(!closed && splash.IsVisible,
                     "Closing the splash cannot orphan initialization before the app completes handoff");

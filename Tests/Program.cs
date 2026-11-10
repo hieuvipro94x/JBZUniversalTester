@@ -20,6 +20,14 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--single-instance-child", var instanceName])
+            return RunSingleInstanceChild(instanceName);
+        if (args is ["--test-single-instance"])
+        {
+            TestSingleInstanceStartup();
+            Console.WriteLine("PASS: concurrent launches reject duplicates throughout slow startup and release ownership on exit");
+            return 0;
+        }
         if (args is ["--test-startup-optimization"])
         {
             TestStartupModelPreparation();
@@ -544,6 +552,7 @@ internal static partial class Program
 
         (string Name, Action Run)[] tests =
         [
+            ("Concurrent launches reject duplicates before slow startup and permit restart after exit", TestSingleInstanceStartup),
             ("A1 cycle token survives reentrant cancellation and CTS disposal", TestCycleTokenCancellationRace),
             ("A2 settings refresh retains the production writer repository identity", TestHistoryRepositoryIdentity),
             ("A3 software frame observer failure does not fault or restart D2XX", TestSoftwareObserverDoesNotFaultBoard),
