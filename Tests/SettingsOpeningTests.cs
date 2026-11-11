@@ -58,7 +58,22 @@ internal static partial class Program
                     "Prepared editors are ready for direct navigation without a loading overlay");
                 Assert(vm.ResistanceChannels.Count == 10 && ReferenceEquals(page.DataContext, vm),
                     "Deferred layout retains every resistance editor and its original configuration bindings");
-                foreach (Size size in new[] { new Size(800, 600), new Size(1024, 768), new Size(1366, 768), new Size(1920, 1080), new Size(800, 600) })
+                foreach (var (property, name, idle) in new[]
+                {
+                    ("ManualStatus", "ManualRelayStatusText", "Sẵn sàng thao tác tay - không cần lưu cài đặt"),
+                    ("ManualWaterProofStatus", "ManualLeakStatusText", "Chọn COM và bấm CHẠY TEST"),
+                    ("ManualResistanceStatus", "ManualResistanceStatusText", "Chọn TẤT CẢ hoặc một CH để đo")
+                })
+                {
+                    var status = (TextBlock)page.FindName(name);
+                    Assert(status.Visibility == Visibility.Collapsed, "Idle manual hints do not consume Settings height");
+                    typeof(ProductionSettingsViewModel).GetProperty(property)!.SetValue(vm, "LỖI KẾT NỐI THIẾT BỊ");
+                    page.UpdateLayout();
+                    Assert(status.Visibility == Visibility.Visible && status.Text == "LỖI KẾT NỐI THIẾT BỊ",
+                        "Manual device errors remain visible when idle hints are hidden");
+                    typeof(ProductionSettingsViewModel).GetProperty(property)!.SetValue(vm, idle);
+                }
+                foreach (Size size in new[] { new Size(800, 600), new Size(1024, 768), new Size(1366, 768), new Size(1920, 1040), new Size(1920, 1080), new Size(1980, 1080), new Size(800, 600) })
                 {
                     for (int pass = 0; pass < 4; pass++)
                     {
@@ -84,6 +99,9 @@ internal static partial class Program
                         "Settings editor and save button keep the configured font size");
                     if (size.Height <= 768)
                         Assert(scroll.ScrollableHeight > 0, "Small screens provide scrolling instead of shrinking settings");
+                    if (size.Width >= 1920 && size.Height >= 1040)
+                        Assert(scroll.ScrollableHeight < 1,
+                            $"All Settings controls fit without vertical scrolling at {size}; overflow={scroll.ScrollableHeight:0.##}");
                     var resultText = (TextBlock)page.FindName("DiscardLearningResultText");
                     Rect PanelBounds(Border panel) => new(panel.TranslatePoint(new Point(), page),
                         panel.TranslatePoint(new Point(panel.ActualWidth, panel.ActualHeight), page));

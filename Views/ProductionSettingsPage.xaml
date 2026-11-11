@@ -233,7 +233,7 @@
             </Grid>
         </Border>
 
-        <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="1" Margin="12,8"
+        <ScrollViewer x:Name="SettingsScrollViewer" Grid.Row="1" Margin="12,4"
                       HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                       HorizontalContentAlignment="Stretch" VerticalContentAlignment="Top"
                       CanContentScroll="False" ScrollChanged="SettingsScrollViewer_ScrollChanged">
@@ -337,7 +337,6 @@
                                     <CheckBox Grid.Row="15" Grid.Column="1" IsChecked="{Binding Settings.EnableSystemLogs, Mode=TwoWay}" ToolTip="Tắt: không ghi Data/Logs và Data/ErrorLogs. Data/History vẫn luôn được lưu."/>
                                     <TextBlock Grid.Row="16" Text="Model gần nhất" Style="{StaticResource FieldLabelStyle}"/>
                                     <TextBox Grid.Row="16" Grid.Column="1" Text="{Binding Settings.LastThtPath, Mode=OneWay}" ToolTip="{Binding Settings.LastThtPath, Mode=OneWay}" IsReadOnly="True"/>
-                                    <TextBlock Grid.Row="17" Grid.ColumnSpan="2" Text="Relay tay dùng trực tiếp • không cần bật hoặc lưu Manual Mode" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,4,0,2"/>
                                     <CheckBox Grid.Row="18" Grid.ColumnSpan="2" Content="Xác nhận đứt dây / tuột tuýt" IsChecked="{Binding Settings.MissingConnectionConfirmationEnabled, Mode=TwoWay}" ToolTip="Chỉ khi đang kiểm tra thông mạch: cặp IO chưa nhận liên tục quá thời gian sẽ cảnh báo và yêu cầu xác nhận xử lý hàng lỗi."/>
                                     <TextBlock Grid.Row="19" Text="Thời gian chờ (giây)" Style="{StaticResource FieldLabelStyle}"/>
                                     <TextBox Grid.Row="19" Grid.Column="1" Text="{Binding Settings.MissingConnectionConfirmationSeconds, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding Settings.MissingConnectionConfirmationEnabled}" ToolTip="Nhập từ 1 đến 120 giây, ví dụ 5 hoặc 10."/>
@@ -355,11 +354,12 @@
                                                 <ColumnDefinition Width="Auto"/>
                                             </Grid.ColumnDefinitions>
                                             <Button x:Name="LearnDiscardIoButton" Content="TỰ NHẬN IO THÙNG LỖI" Style="{StaticResource SettingsActionButtonStyle}" Click="LearnDiscardIo_Click"
-                                                Height="34" MinWidth="220" FontSize="13" Padding="12,0" Margin="0,0,8,0" SnapsToDevicePixels="True"/>
+                                                Height="34" MinWidth="220" FontSize="13" Padding="12,0" Margin="0,0,8,0" SnapsToDevicePixels="True"
+                                                ToolTip="Đưa tay/vật qua cảm biến rồi lấy ra để tự nhận IO. Bấm Lưu để ghi vào THT của mã hàng đang chọn; bản gốc được sao lưu trong ThtBackups."/>
                                             <Button x:Name="ClearDiscardIoButton" Grid.Column="1" Content="XÓA CẶP IO" Style="{StaticResource SettingsPrimaryButtonStyle}" Click="ClearDiscardIo_Click"
                                                 Height="34" MinWidth="112" FontSize="13" Padding="12,0" Margin="0" SnapsToDevicePixels="True"/>
                                         </Grid>
-                                        <TextBlock x:Name="DiscardLearningResultText" Height="64" VerticalAlignment="Top" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" Text="Bấm TỰ NHẬN IO, đưa tay/vật qua cảm biến rồi lấy ra. Bấm Lưu để ghi cặp IO vào THT của mã hàng trên; bản gốc được sao lưu trong ThtBackups. Xóa cả hai ô và Lưu để bỏ cấu hình thùng lỗi của mã này." TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
+                                        <TextBlock x:Name="DiscardLearningResultText" Height="26" VerticalAlignment="Top" TextTrimming="CharacterEllipsis" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" TextWrapping="NoWrap" Foreground="{StaticResource TextMuted}" FontSize="12"/>
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
@@ -486,7 +486,17 @@
                                                     <TextBox Height="26" Text="{Binding WaterProof.PressTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                                     <TextBox Grid.Column="2" Height="26" Text="{Binding WaterProof.WaitTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                                 </Grid>
-                                                <TextBlock Grid.Row="6" Grid.ColumnSpan="3" Margin="0,5,0,1" Text="{Binding ManualWaterProofStatus}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource BrandBlue}" TextWrapping="Wrap"/>
+                                                <TextBlock x:Name="ManualLeakStatusText" Grid.Row="6" Grid.ColumnSpan="3" Margin="0,5,0,1" Text="{Binding ManualWaterProofStatus}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource BrandBlue}" TextWrapping="Wrap">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding ManualWaterProofStatus}" Value="Chọn COM và bấm CHẠY TEST">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                                 <ItemsControl Grid.Row="7" Grid.ColumnSpan="3" Margin="0,4,0,0" ItemsSource="{Binding ManualWaterProofResults}">
                                                     <ItemsControl.ItemsPanel>
                                                         <ItemsPanelTemplate>
@@ -540,7 +550,7 @@
                                             <RowDefinition Height="30"/>
                                             <RowDefinition Height="30"/>
                                             <RowDefinition Height="30"/>
-                                            <RowDefinition Height="30"/>
+                                            <RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
                                         <TextBlock Text="Relay 1" Style="{StaticResource FieldLabelStyle}"/>
                                         <Button Margin="3,2,3,2" Grid.Column="1" Grid.ColumnSpan="2" Content="BẬT R1" Command="{Binding ManualRelay1OnCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
@@ -550,7 +560,17 @@
                                         <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
                                         <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="1" Content="TẮT TẤT CẢ" Command="{Binding ManualRelay1OffCommand}" Style="{StaticResource SettingsExitButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                         <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="2" Content="RESET" Command="{Binding ManualResetCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                        <TextBlock Grid.Row="3" Grid.ColumnSpan="4" Text="{Binding ManualStatus}" Foreground="{StaticResource TextMuted}" FontSize="14"/>
+                                        <TextBlock x:Name="ManualRelayStatusText" Grid.Row="3" Grid.ColumnSpan="4" Text="{Binding ManualStatus}" Foreground="{StaticResource TextMuted}" FontSize="14">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding ManualStatus}" Value="Sẵn sàng thao tác tay - không cần lưu cài đặt">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </Grid>
                                 </StackPanel>
                             </StackPanel>
@@ -762,11 +782,14 @@
                                             <ComboBox ItemsSource="{Binding ManualResistanceOptions}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding SelectedManualResistanceChannel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="TẤT CẢ đo các dòng R đang tích BẬT; chọn CH để đo riêng kênh vật lý đó."/>
                                             <Button Grid.Column="1" Height="26" Margin="7,2,0,2" Padding="4,0" FontSize="14" Content="CHẠY ĐO" Command="{Binding ManualMeasureResistanceCommand}" Style="{StaticResource SettingsActionButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                         </Grid>
-                                        <TextBlock Grid.Row="2" Text="{Binding ManualResistanceStatus}" MinHeight="26" Margin="0,2" FontSize="16" FontWeight="Bold" TextWrapping="Wrap">
+                                        <TextBlock x:Name="ManualResistanceStatusText" Grid.Row="2" Text="{Binding ManualResistanceStatus}" MinHeight="26" Margin="0,2" FontSize="16" FontWeight="Bold" TextWrapping="Wrap">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
                                                     <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding ManualResistanceStatus}" Value="Chọn TẤT CẢ hoặc một CH để đo">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
                                                         <DataTrigger Binding="{Binding ManualResistanceStatus}" Value="KHÔNG KẾT NỐI ĐƯỢC KEYSIGHT 34461A">
                                                             <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
                                                         </DataTrigger>
