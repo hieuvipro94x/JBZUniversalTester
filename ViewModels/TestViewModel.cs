@@ -2498,6 +2498,20 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return;
             }
 
+            // A model/card-count mismatch is a correctable configuration error,
+            // not a failed FTDI handle. In particular Manual Leak/Keysight cleanup
+            // must not turn its original peripheral error into reopen/DeviceFault.
+            // Configure first and retain the mismatch so a partial model can never PASS.
+            _board.ConfigureActiveScanRange(_model?.MaxIo ?? 0);
+            if (!_board.ScanCapacity.IsModelWithinInstalledCapacity)
+            {
+                _engine.SetFrameProcessingEnabled(false);
+                _scanSupervisor.Suspend("model-capacity-mismatch");
+                State = _board.ScanCapacity.CapacityErrorMessage;
+                AddLog($"MODEL_CAPACITY_BLOCKED - BOARD PRESERVED: {State}");
+                return;
+            }
+
             // Model may have changed while this caller was waiting. Always read
             // the current requested/applied capacity at the last responsible
             // moment so a stale model task cannot restore the old range.

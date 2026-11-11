@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-peripheral-capacity-isolation"])
+        {
+            TestManualPeripheralCapacityIsolation();
+            Console.WriteLine("PASS: peripheral/manual failures and invalid model capacity never reconnect or fault a connected board");
+            return 0;
+        }
         if (args is ["--test-editor-ordering"])
         {
             TestEditorConnectorPinOrdering();
@@ -714,6 +720,7 @@ internal static partial class Program
             ("Production resistance recovery waits for full removal after immediate PASS relays", TestDeferredResistanceRecovery),
             ("Leak run finishes after unplug and final NG commits one failed product", TestLeakRunCompletionAndProductFailure),
             ("Equipment errors permit Main only after physical full removal", TestEquipmentErrorReturnToMain),
+            ("Manual peripheral cleanup isolates model capacity from connected board faults", TestManualPeripheralCapacityIsolation),
             ("Peripheral recovery cancellation never becomes a board fault", TestPeripheralEquipmentRecoveryCancellation),
             ("Peripheral USB reconnect is automatic, serialized and independent", TestPeripheralAutomaticReconnect),
             ("Product label choices and LOT base edits apply immediately without rewriting history", TestProductLabelAndImmediateLotSettings),
@@ -10881,9 +10888,17 @@ internal static partial class Program
         public Task DisconnectAsync() { IsConnected = false; IsScanning = false; return Task.CompletedTask; }
         public Task HandshakeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ResetClearAsync(CancellationToken ct = default) { Commands.Add("RESET"); return Task.CompletedTask; }
-        public void ConfigureActiveScanRange(int maxIo) { }
+        public ProductionSettings? CapacityValidationSettings { get; set; }
+        public void ConfigureActiveScanRange(int maxIo)
+        {
+            if (CapacityValidationSettings is null) return;
+            ScanCapacity = BoardScanCapacity.Create(CapacityValidationSettings, maxIo);
+            InstalledCapacity = ScanCapacity.Installed; Capacity = ScanCapacity.Active;
+        }
         public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default)
         {
+            if (CapacityValidationSettings is not null && mode == BoardScanMode.Production && !ScanCapacity.IsModelWithinInstalledCapacity)
+                throw new InvalidOperationException(ScanCapacity.CapacityErrorMessage);
             if (StartFailuresRemaining > 0)
             {
                 StartFailuresRemaining--;

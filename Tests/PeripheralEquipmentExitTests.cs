@@ -7,6 +7,53 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestManualPeripheralCapacityIsolation()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        foreach (string operation in new[] { "Leak", "Keysight", "Manual" })
+        {
+            int faultReports = 0;
+            var visa = new FakeKeysightVisaService(connected: true, measurement: 10) { ThrowOnMeasure = true };
+            var settings = new ProductionSettings { ExpansionCardCount = 2, MasterFaultRequiredCount = 0 };
+            var vm = CreateTestViewModel(settings, out FakeBoard board, visa: visa,
+                waterProofRun: (_, _) => Task.FromException<WaterProofRunResult>(new FileNotFoundException("Missing Leak COM7")),
+                hardwareFaultReport: (_, _, _) => faultReports++);
+            board.CapacityValidationSettings = settings;
+            // Exact V414 log case: 219 populated rows, highest IO224, but only 128 installed IO.
+            typeof(TestViewModel).GetField("_model", flags)!.SetValue(vm, Model(("PAIR", new[] { 1, 224 })));
+            board.ConfigureActiveScanRange(224); board.SetAppliedScanCapacityForTest(2);
+            Exception? error = null;
+            try
+            {
+                Task work = operation == "Leak"
+                    ? vm.TestManualWaterProofAsync(new WaterProofMachineSettings { PortName = "COM7" },
+                        new WaterProofModelSettings { Channel1Enabled = true, Channel2Enabled = false, Channel3Enabled = false })
+                    : operation == "Keysight"
+                        ? vm.MeasureManualResistanceAsync([new ResistanceStep("R1", 1, 0, 100)])
+                        : RunManual();
+                work.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+                async Task RunManual() { await vm.EnterManualModeAsync(); await vm.ExitManualModeAsync(); }
+            }
+            catch (Exception ex) { error = ex; }
+            Assert(!vm.IsDeviceFault && vm.DeviceFaultDialogCount == 0 && faultReports == 0 &&
+                   board.IsConnected && board.ConnectAttempts == 0 && !vm.IsManualModeActive,
+                $"{operation}: invalid model capacity must not reopen/disconnect the connected board or request application exit");
+            Assert(!board.ScanCapacity.IsModelWithinInstalledCapacity && !board.Commands.Contains("START") &&
+                   !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                $"{operation}: undersized hardware cannot start model testing or fire a result relay");
+            Assert(operation == "Manual" ? error is null : operation == "Leak" ? error is FileNotFoundException :
+                   error?.GetType().Name == "ManualResistanceKeysightException",
+                $"{operation}: cleanup retains the original peripheral error and allows the operator to correct settings");
+            settings.ExpansionCardCount = 4;
+            board.StartScanCallback = current => current.Publish(FrameSeq(300));
+            ((Task)typeof(TestViewModel).GetMethod("EnsureContinuousProductionScanAsync", flags)!.Invoke(vm, null)!)
+                .WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            Assert(board.IsConnected && board.IsScanning && board.ScanCapacity.IsModelWithinInstalledCapacity &&
+                   board.ConnectAttempts == 0 && !vm.IsDeviceFault && faultReports == 0 && vm.Pass == 0 && vm.Fail == 0,
+                $"{operation}: correcting card configuration resumes scanning in place without app restart or production counts");
+        }
+    }
+
     private static void TestPeripheralEquipmentRecoveryCancellation()
     {
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
