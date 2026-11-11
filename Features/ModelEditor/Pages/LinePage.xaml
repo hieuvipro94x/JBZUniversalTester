@@ -81,12 +81,17 @@
                 <DataGridTemplateColumn Header="MÀU" Width="110">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
+                            <TextBlock Text="{Binding Color}" FontSize="17" Padding="3,0" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                    <DataGridTemplateColumn.CellEditingTemplate>
+                        <DataTemplate>
                             <ComboBox Background="{Binding Background, RelativeSource={RelativeSource AncestorType=DataGridCell}}" IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
                  LostKeyboardFocus="Color_LostKeyboardFocus" PreviewKeyDown="Color_PreviewKeyDown"
                  ItemsSource="{Binding DataContext.ColorCodes, RelativeSource={RelativeSource AncestorType=UserControl}}"
                  Text="{Binding Color, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" FontSize="17" BorderThickness="0" Padding="3,0"/>
                         </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn.CellEditingTemplate>
                 </DataGridTemplateColumn>
                 <DataGridTemplateColumn Header="#1" Width="40" IsReadOnly="True">
                     <DataGridTemplateColumn.CellTemplate>

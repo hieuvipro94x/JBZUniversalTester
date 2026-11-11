@@ -733,6 +733,7 @@ internal static partial class Program
             ("Color picker borders fit the form and stay aligned under application styles", () => TestColorPickerLayout()),
             ("Native sparse CLIP edits and Wire PIN changes round-trip through Save", TestSparseNativeClipSave),
             ("Sparse physical connector PINs survive native editing and layout changes", TestSparseConnectorPins),
+            ("THT editor reuses rows, defers color editors and isolates teardown bindings", TestEditorResponsiveReload),
             ("Editor sorts connector/PIN labels naturally without changing native addresses", TestEditorConnectorPinOrdering),
             ("Connector Delete works from the final row upward and preserves retained edits", TestConnectorDeleteLastRow),
             ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),

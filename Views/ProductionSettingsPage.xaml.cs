@@ -167,7 +167,7 @@ public partial class ProductionSettingsPage : UserControl
         Loaded -= ProductionSettingsPage_Loaded;
         await System.Windows.Threading.Dispatcher.Yield(
             System.Windows.Threading.DispatcherPriority.ContextIdle);
-        if (IsReleased)
+        if (IsReleased || _modelEditor is not null)
             return;
 
         await PrepareForDisplayAsync();
@@ -194,7 +194,7 @@ public partial class ProductionSettingsPage : UserControl
             // MainWindow prepares this disconnected page before attaching it.
             // Input/render work can run between batches without showing reflow.
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
-            if (IsReleased) return;
+            if (IsReleased || _modelEditor is not null) return;
             long panelStarted = Stopwatch.GetTimestamp();
             panel.Visibility = Visibility.Visible;
             UpdateLayout();
@@ -231,6 +231,9 @@ public partial class ProductionSettingsPage : UserControl
         Interlocked.Increment(ref _printerConnectionGeneration);
         Interlocked.Increment(ref _labelModelLoadGeneration);
         Loaded -= ProductionSettingsPage_Loaded;
+        // Detach the self-bound editor before clearing inherited Settings bindings.
+        ModelEditorHost.Content = null;
+        _modelEditor = null;
         DataContext = null;
         SettingsSaved = null;
         RequestClose = null;
@@ -2310,11 +2313,15 @@ public partial class ProductionSettingsPage : UserControl
             editor.ProtectedModelPath = _main?.Test.CurrentModelPath;
             editor.RequestClose += CloseModelEditorAsync;
             _modelEditor = editor;
+            // Covered settings controls must not perform layout/background initialization.
+            SettingsScrollViewer.Visibility = Visibility.Collapsed;
             ModelEditorHost.Content = editor; ModelEditorHost.Visibility = Visibility.Visible;
             if (File.Exists(_vm.DiscardModelPath)) await editor.OpenPathAsync(_vm.DiscardModelPath);
         }
         catch (Exception ex)
         {
+            ModelEditorHost.Content = null; ModelEditorHost.Visibility = Visibility.Collapsed;
+            _modelEditor = null; SettingsScrollViewer.Visibility = Visibility.Visible;
             AsyncFileLogService.Current.Error($"THT EDIT open failed: {ex}");
             ShowMessage("Chưa mở được trình sửa THT. Kiểm tra file mã hàng và thử lại.", "CHƯA MỞ ĐƯỢC TRÌNH SỬA THT", MessageBoxImage.Warning);
         }

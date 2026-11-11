@@ -64,11 +64,22 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
         DeleteConnectorButton.IsEnabled = false;
         try
         {
+            var ordered = EditorDisplayOrder.Connectors(doc.Connectors).ToArray();
+            if (Rows.Count == ordered.Length && Rows.Select((row, index) => row.Index == index + 1).All(valid => valid) &&
+                Rows.Zip(ordered).All(pair =>
+                    pair.First.Name == pair.Second.Name && pair.First.PinCount == pair.Second.PinCount &&
+                    pair.First.StartIo == pair.Second.StartIo && pair.First.Waterproof == pair.Second.Waterproof &&
+                    pair.First.LeakChannel == pair.Second.LeakChannel))
+            {
+                foreach (var existing in Rows) existing.OriginalName = existing.Name;
+                DeleteConnectorButton.IsEnabled = Rows.Count > 0;
+                return;
+            }
             foreach (var row in Rows) row.PropertyChanged -= RowChanged;
             _automaticStarts.Clear();
             Rows.Clear();
             long nextIo = 1;
-            foreach (var connector in EditorDisplayOrder.Connectors(doc.Connectors))
+            foreach (var connector in ordered)
             {
                 var row = new ConnectorRow
                 {

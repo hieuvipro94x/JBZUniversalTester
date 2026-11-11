@@ -435,6 +435,14 @@ public partial class LinePage : UserControl
 
     private void Grid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
     {
+        // The color editor is now transient. Commit its normalized value before
+        // DataGrid removes the template (including keyboard/tab navigation).
+        if (!_loading && e.EditAction == DataGridEditAction.Commit &&
+            e.Column == Grid.Columns[6] && e.Row.Item is LineRow row)
+        {
+            row.Color = WireColorInput.Normalize(row.Color, _map.Keys);
+            ApplyAutomaticColors(row, false);
+        }
         if (!_loading)
             Changed?.Invoke(this, EventArgs.Empty);
     }

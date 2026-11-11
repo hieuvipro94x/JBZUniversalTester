@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -20,6 +21,7 @@ public partial class ThtEditorPage : UserControl
     private LinePage _lines = null!;
     private ColorPage _colors = null!;
     private int _page;
+    private long _tabGeneration;
     private bool _loading, _busy, _rebuild;
     private string? _hash;
     private Task _diskWork = Task.CompletedTask;
@@ -35,6 +37,8 @@ public partial class ThtEditorPage : UserControl
     public ThtEditorPage()
     {
         InitializeComponent();
+        // The editor owns its bindings; closing Settings must not rebind its entire tree.
+        DataContext = this;
         _base.Changed += DocumentChanged;
         _changes.Reset(_document); ShowPage(0);
         CommandBindings.Add(new CommandBinding(ApplicationCommands.Save, async (_, _) => await SaveAsync()));
@@ -91,6 +95,8 @@ public partial class ThtEditorPage : UserControl
 
     private void ShowPage(int page)
     {
+        long started = Stopwatch.GetTimestamp();
+        long generation = ++_tabGeneration;
         _loading = true;
         try
         {
@@ -107,12 +113,25 @@ public partial class ThtEditorPage : UserControl
                 case 4: _colors.Reload(); ContentHost.Content = _colors; break;
             }
         }
-        finally { _loading = false; }
+        finally
+        {
+            _loading = false;
+            JBZUniversalTester.Services.AsyncFileLogService.Current.Performance(
+                $"THT_PERF phase=TAB_DATA tab={page} pins={_document.Pins.Count} elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
+            if (IsLoaded)
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ContextIdle, new Action(() =>
+                {
+                    if (IsLoaded && generation == _tabGeneration)
+                        JBZUniversalTester.Services.AsyncFileLogService.Current.Performance(
+                            $"THT_PERF phase=TAB_READY tab={page} elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
+                }));
+        }
     }
 
     public async Task OpenPathAsync(string path)
     {
         if (_busy) return;
+        long started = Stopwatch.GetTimestamp();
         _busy = true; IsEnabled = false; StatusText.Text = "Đang đọc THT...";
         try
         {
@@ -132,7 +151,12 @@ public partial class ThtEditorPage : UserControl
             StatusText.Text = $"Đã mở {_document.Connectors.Count} connector, {_document.Pins.Count} chân. THT gốc được giữ nguyên đến khi Lưu.";
         }
         catch (Exception ex) { ShowError("Chưa mở được THT", ex); }
-        finally { _busy = false; IsEnabled = true; }
+        finally
+        {
+            _busy = false; IsEnabled = true;
+            JBZUniversalTester.Services.AsyncFileLogService.Current.Performance(
+                $"THT_PERF phase=OPEN elapsed_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
+        }
     }
 
     public async Task<bool> SaveAsync()

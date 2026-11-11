@@ -13,8 +13,8 @@ namespace JBZUniversalTester.ModelEditor.Pages;
 public sealed class PinRow : ObservableObject
 {
     private int _io; private string _testNo = ""; private int _mainIo = -1; private string _coupling = "";
-    public Pin Original { get; init; } = new();
-    internal string InitialTestNo { get; init; } = "";
+    public Pin Original { get; set; } = new();
+    internal string InitialTestNo { get; set; } = "";
     internal Func<int, string>? ResolveContact { get; set; }
     public int Io { get => _io; set => SetField(ref _io, value); }
     public string Connector => Original.Connector; public int PinNo => Original.PinNo;
@@ -50,20 +50,28 @@ public partial class PinPage : System.Windows.Controls.UserControl
     public void LoadData(IEnumerable<Pin> pins, IReadOnlyList<List<string>>? nativePinRows = null)
     {
         _loading = true;
-        Rows.Clear();
+        var ordered = EditorDisplayOrder.Pins(pins).ToArray();
+        bool reuse = Rows.Count == ordered.Length && Rows.Zip(ordered).All(pair =>
+            pair.First.Io == pair.Second.Io && pair.First.Connector == pair.Second.Connector &&
+            pair.First.PinNo == pair.Second.PinNo && pair.First.Original.SourceThtRowIndex == pair.Second.SourceThtRowIndex);
+        if (!reuse) Rows.Clear();
         var nativeTypes = (nativePinRows ?? []).Where(row => row.Count > 4 && int.TryParse(row[2], out _))
             .GroupBy(row => int.Parse(row[2])).Where(group => group.Count() == 1)
             .ToDictionary(group => group.Key, group => group.Single()[4]);
-        foreach (var p in EditorDisplayOrder.Pins(pins))
+        int index = 0;
+        foreach (var p in ordered)
         {
             string displayedType = p.Connector.Equals("CLIP", StringComparison.OrdinalIgnoreCase) &&
                 nativeTypes.TryGetValue(p.Io, out string? nativeType) ? nativeType : p.TestNo;
-            var row = new PinRow { Original = p.Clone(), Io = p.Io, TestNo = displayedType,
-                InitialTestNo = displayedType, MainIo = p.MainIo, CouplingText = string.Join('/', p.Coupling),
-                ResolveContact = FormatContact };
-            Rows.Add(row);
+            var row = reuse ? Rows[index] : new PinRow();
+            // Rebase hidden native fields too, so later Save cannot restore stale wire data.
+            row.Original = p.Clone(); row.InitialTestNo = displayedType;
+            row.Io = p.Io; row.TestNo = displayedType; row.MainIo = p.MainIo;
+            row.CouplingText = string.Join('/', p.Coupling); row.ResolveContact = FormatContact;
+            if (!reuse) Rows.Add(row);
+            index++;
         }
-        MainGrid.UnselectAll();
+        if (!reuse) MainGrid.UnselectAll();
         _loading = false;
     }
     private static string FormatContact(int io)
