@@ -21,6 +21,15 @@ public static class ModelLogic
         if (selectedIndex < 0 || selectedIndex >= pins.Count)
             throw new ValidationException("Hãy chọn dòng cần chèn thêm chân.");
         var selected = pins[selectedIndex];
+        if (PreservePhysicalNumbers(pins))
+        {
+            int io = FirstUnused(pins.Select(pin => pin.Io), selected.Io == int.MaxValue ? 1 : selected.Io + 1);
+            int number = FirstUnused(pins.Where(pin => pin.Connector.Equals(selected.Connector, StringComparison.OrdinalIgnoreCase))
+                .Select(pin => pin.PinNo), 1);
+            pins.Insert(selectedIndex + 1, new Pin { Connector = selected.Connector, Io = io, PinNo = number });
+            RebuildConnections(pins);
+            return;
+        }
         pins.Insert(selectedIndex + 1, new Pin { Connector = selected.Connector });
         RenumberPinRows(pins);
     }
@@ -31,8 +40,31 @@ public static class ModelLogic
             throw new ValidationException("Hãy chọn dòng cần xóa.");
         if (pins.Count == 1)
             throw new ValidationException("Model phải còn ít nhất một PIN.");
+        bool preserve = PreservePhysicalNumbers(pins);
         pins.RemoveAt(selectedIndex);
-        RenumberPinRows(pins);
+        if (preserve) RebuildConnections(pins);
+        else RenumberPinRows(pins);
+    }
+
+    private static bool PreservePhysicalNumbers(IReadOnlyList<Pin> pins)
+    {
+        if (pins.Any(pin => pin.SourceThtRowIndex >= 0)) return true;
+        int firstIo = pins.Select(pin => pin.Io).DefaultIfEmpty(1).Min();
+        return pins.Select(pin => pin.Io).OrderBy(io => io).Where((io, index) => (long)io != (long)firstIo + index).Any() ||
+            pins.GroupBy(pin => pin.Connector, StringComparer.OrdinalIgnoreCase)
+                .Any(group => group.Select(pin => pin.PinNo).OrderBy(number => number).Where((number, index) => number != index + 1).Any());
+    }
+
+    private static int FirstUnused(IEnumerable<int> values, int start)
+    {
+        var used = values.ToHashSet();
+        int candidate = Math.Max(1, start);
+        while (used.Contains(candidate))
+        {
+            if (candidate == int.MaxValue) throw new ValidationException("Không còn số trống để thêm chân.");
+            candidate++;
+        }
+        return candidate;
     }
 
     private static void RenumberPinRows(List<Pin> pins)
@@ -318,86 +350,86 @@ public static class ModelLogic
         }
     }
 
-    public static List<Pin> RegeneratePins(IReadOnlyList<Connector> connectors, IReadOnlyList<Pin> existing)
+    public static List<Pin> RegeneratePins(IReadOnlyList<Connector> connectors, IReadOnlyList<Pin> existing,
+        IReadOnlyDictionary<string, string>? originalNames = null)
     {
         ValidateConnectors(connectors);
-        var byIdentity = existing
-            .GroupBy(p => $"{p.Connector.ToUpperInvariant()}\u0001{p.PinNo}")
-            .ToDictionary(g => g.Key, g => g.Last());
-        var byIo = existing.GroupBy(p => p.Io).ToDictionary(g => g.Key, g => g.First());
-        var retainedPinCounts = connectors.ToDictionary(connector => connector.Name.Trim(),
-            connector => connector.PinCount, StringComparer.OrdinalIgnoreCase);
+        var groups = existing.GroupBy(p => p.Connector.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.OrderBy(p => p.PinNo).ThenBy(p => p.Io).ToList(), StringComparer.OrdinalIgnoreCase);
+        var names = connectors.Select(c => c.Name.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var plans = connectors.Select(connector =>
+        {
+            string sourceName = originalNames is not null && originalNames.TryGetValue(connector.Name.Trim(), out var original)
+                ? original : connector.Name.Trim();
+            if (!groups.TryGetValue(sourceName, out var members))
+            {
+                // Fallback for callers without UI row identities: only an
+                // unambiguous renamed group at the same start address qualifies.
+                var matches = groups.Where(pair => !names.Contains(pair.Key) && pair.Value.Count > 0 &&
+                    pair.Value.Min(pin => pin.Io) == connector.StartIo).Select(pair => pair.Value).ToList();
+                members = matches.Count == 1 ? matches[0] : [];
+            }
+            return (Connector: connector, Retained: members.Take(connector.PinCount).ToList());
+        }).ToList();
+        var retained = plans.SelectMany(plan => plan.Retained).ToHashSet();
+        var validIos = retained.Where(pin => pin.Io > 0).Select(pin => pin.Io).ToHashSet();
+        var byIo = existing.GroupBy(pin => pin.Io).ToDictionary(group => group.Key, group => group.First());
         var usedOriginalPins = new HashSet<Pin>();
         var result = new List<Pin>();
-        // Reserve the addresses of retained physical PINs before allocating new
-        // rows. Native files may intentionally contain repeated IO addresses.
-        var validIos = existing.Where(pin => pin.Io > 0 && pin.PinNo > 0 &&
-                retainedPinCounts.TryGetValue(pin.Connector.Trim(), out var count) && pin.PinNo <= count)
-            .Select(pin => pin.Io).ToHashSet();
 
-        static int PreferredIo(Connector connector, int localPin)
+        static int PreferredIo(Connector connector, int number)
         {
-            var value = (long)connector.StartIo + localPin - 1;
+            long value = (long)connector.StartIo + number - 1;
             if (value <= 0 || value > int.MaxValue)
                 throw new ValidationException($"Connector {connector.Name}: I/O sinh tự động vượt phạm vi hợp lệ.");
             return (int)value;
         }
-
         int NextFreeIo(int preferred)
         {
-            var candidate = Math.Max(1, preferred);
+            int candidate = Math.Max(1, preferred);
             while (validIos.Contains(candidate))
             {
-                if (candidate == int.MaxValue)
-                    throw new ValidationException("Không còn I/O trống để tạo pin mới.");
+                if (candidate == int.MaxValue) throw new ValidationException("Không còn I/O trống để tạo pin mới.");
                 candidate++;
             }
             return candidate;
         }
-
-        foreach (var connector in connectors)
+        foreach (var plan in plans)
         {
-            for (var localPin = 1; localPin <= connector.PinCount; localPin++)
+            var numbers = plan.Retained.Select(pin => pin.PinNo).ToHashSet();
+            int nextNumber = 1;
+            for (int index = 0; index < plan.Connector.PinCount; index++)
             {
-                var preferred = PreferredIo(connector, localPin);
-                byIdentity.TryGetValue($"{connector.Name.ToUpperInvariant()}\u0001{localPin}", out var old);
-                // An added PIN must not copy the source row of a different PIN
-                // which is still present in the connector layout.
-                if (old is null && byIo.TryGetValue(preferred, out var atIo) &&
-                    (!retainedPinCounts.TryGetValue(atIo.Connector.Trim(), out var retainedCount) ||
-                     atIo.PinNo <= 0 || atIo.PinNo > retainedCount))
-                    old = atIo;
-                if (old is not null && !usedOriginalPins.Add(old))
-                    old = null;
-
-                if (old is null)
-                {
-                    var io = NextFreeIo(preferred);
-                    validIos.Add(io);
-                    result.Add(new Pin { Io = io, Connector = connector.Name, PinNo = localPin });
-                }
+                Pin? old = index < plan.Retained.Count ? plan.Retained[index] : null;
+                int number;
+                if (old is not null) number = old.PinNo;
                 else
                 {
-                    var copy = old.Clone();
-                    var io = old.Io > 0 ? old.Io : NextFreeIo(preferred);
-                    validIos.Add(io);
-                    copy.Io = io;
-                    copy.Connector = connector.Name;
-                    copy.PinNo = localPin;
-                    result.Add(copy);
+                    while (numbers.Contains(nextNumber)) nextNumber = checked(nextNumber + 1);
+                    number = nextNumber;
+                    numbers.Add(number);
                 }
+                int preferred = old?.Io > 0 ? old.Io : PreferredIo(plan.Connector, number);
+                if (old is null && byIo.TryGetValue(preferred, out var candidate) && !retained.Contains(candidate))
+                    old = candidate;
+                if (old is not null && !usedOriginalPins.Add(old)) old = null;
+                var copy = old?.Clone() ?? new Pin();
+                copy.Io = old?.Io > 0 ? old.Io : NextFreeIo(preferred);
+                validIos.Add(copy.Io);
+                copy.Connector = plan.Connector.Name;
+                copy.PinNo = number;
+                result.Add(copy);
             }
         }
         foreach (var pin in result)
         {
-            pin.Coupling = pin.Coupling.Distinct().Where(v => validIos.Contains(v) && v != pin.Io).ToList();
+            pin.Coupling = pin.Coupling.Distinct().Where(io => validIos.Contains(io) && io != pin.Io).ToList();
             if (!validIos.Contains(pin.MainIo) || pin.MainIo == pin.Io) pin.MainIo = -1;
         }
-        result = result.OrderBy(p => p.Io).ToList();
+        result = result.OrderBy(pin => pin.Io).ToList();
         NormalizeHarnProgClip(result);
         return result;
     }
-
     public static void RebuildConnections(IList<Pin> pins)
     {
         foreach (var p in pins) { p.MainIo = -1; p.Coupling.Clear(); }
@@ -438,15 +470,22 @@ public static class ModelLogic
         if (pins.Count != expected) throw new ValidationException($"Tổng pin connector={expected} nhưng bảng pin có {pins.Count} dòng.");
 
         var connectorByName = connectors.ToDictionary(c => c.Name.Trim(), StringComparer.OrdinalIgnoreCase);
+        var counts = pins.GroupBy(pin => pin.Connector.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        foreach (var connector in connectors)
+            if (counts.GetValueOrDefault(connector.Name.Trim()) != connector.PinCount)
+                throw new ValidationException($"Connector {connector.Name}: số dòng PIN không khớp số chân đang dùng ({connector.PinCount}).");
         foreach (var pin in pins)
         {
             if (pin.Io <= 0)
                 throw new ValidationException($"I/O phải lớn hơn 0: {pin.Io}.");
             if (!connectorByName.TryGetValue(pin.Connector.Trim(), out var connector))
                 throw new ValidationException($"Pin I/O {pin.Io} dùng connector không tồn tại: {pin.Connector}");
-            if (pin.PinNo <= 0 || pin.PinNo > connector.PinCount)
+            // PinCount is the number of populated rows, not the largest
+            // physical PIN label. Native THT may omit unused pin positions.
+            if (pin.PinNo <= 0)
                 throw new ValidationException(
-                    $"Pin I/O {pin.Io} có số PIN {pin.PinNo} ngoài phạm vi connector {connector.Name} (1..{connector.PinCount}).");
+                    $"Pin I/O {pin.Io} của connector {connector.Name}: số PIN phải lớn hơn 0 ({pin.PinNo}).");
         }
     }
 

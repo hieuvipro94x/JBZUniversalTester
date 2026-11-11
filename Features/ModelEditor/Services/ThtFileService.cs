@@ -904,14 +904,22 @@ public static class ThtFileService
             row[1] = Safe(c.Name);
             var originalCount =
                 originalPinIos.TryGetValue(oldName, out var oi) ? oi.Count : 0;
-            var currentCount = document.Pins.Count(p =>
+            var currentPins = document.Pins.Where(p =>
                 string.Equals(
                     p.Connector.Trim(),
                     c.Name.Trim(),
-                    StringComparison.OrdinalIgnoreCase));
+                    StringComparison.OrdinalIgnoreCase)).ToArray();
+            var currentCount = currentPins.Length;
+            bool physicalNumbersChanged = currentPins.Any(pin =>
+                pin.SourceThtRowIndex < 0 || pin.SourceThtRowIndex >= statePinRows.Count ||
+                !int.TryParse(statePinRows[pin.SourceThtRowIndex][3], out var originalNumber) || originalNumber != pin.PinNo);
 
-            if (originalCount == 0 || currentCount != originalCount)
-                row[2] = c.PinCount.ToString();
+            if (originalCount == 0 || currentCount != originalCount || physicalNumbersChanged)
+            {
+                int.TryParse(old[2], out int declared);
+                row[2] = Math.Max(declared, Math.Max(c.PinCount,
+                    currentPins.Select(pin => pin.PinNo).DefaultIfEmpty(0).Max())).ToString();
+            }
 
             row[8] = c.Waterproof ? "1" : "";
             output.Add(row);
@@ -933,7 +941,8 @@ public static class ThtFileService
             output.Add([
                 "",
                 Safe(current[i].Name),
-                current[i].PinCount.ToString(),
+                Math.Max(current[i].PinCount, document.Pins.Where(pin => pin.Connector.Trim().Equals(
+                    current[i].Name.Trim(), StringComparison.OrdinalIgnoreCase)).Select(pin => pin.PinNo).DefaultIfEmpty(0).Max()).ToString(),
                 "",
                 "",
                 "",

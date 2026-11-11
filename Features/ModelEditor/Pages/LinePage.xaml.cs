@@ -447,7 +447,12 @@ public partial class LinePage : UserControl
             return;
         }
         var pins = ReadData();
-        ModelLogic.InsertPinAfter(pins, index);
+        try { ModelLogic.InsertPinAfter(pins, index); }
+        catch (ValidationException ex)
+        {
+            MessageBox.Show(ex.Message, "Không thể thêm dòng", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
         LoadData(pins);
         HasStructuralChanges = true;
         Grid.CurrentCell = new DataGridCellInfo(Rows[index + 1], Grid.Columns[3]);

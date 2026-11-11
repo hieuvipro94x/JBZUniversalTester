@@ -79,7 +79,7 @@ public partial class ThtEditorPage : UserControl
                 var connectors = _connectors.ReadData(); ModelLogic.ValidateConnectors(connectors);
                 bool changed = System.Text.Json.JsonSerializer.Serialize(connectors) != System.Text.Json.JsonSerializer.Serialize(_document.Connectors);
                 _document.Connectors = connectors;
-                if (changed) _document.Pins = ModelLogic.RegeneratePins(connectors, _document.Pins);
+                if (changed) _document.Pins = ModelLogic.RegeneratePins(connectors, _document.Pins, _connectors.OriginalNames);
                 break;
             case 2: _document.Pins = _pins.ReadData(); break;
             case 3:

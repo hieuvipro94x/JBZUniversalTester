@@ -10,6 +10,7 @@ namespace JBZUniversalTester.ModelEditor.Pages;
 
 public sealed class ConnectorRow : ObservableObject
 {
+    public string OriginalName { get; set; } = "";
     private int _index; private string _name = ""; private int _pinCount; private int _startIo; private bool _waterproof;
     public int Index { get => _index; set => SetField(ref _index, value); }
     public string Name { get => _name; set => SetField(ref _name, value); }
@@ -73,6 +74,7 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
                 {
                     Index = Rows.Count + 1,
                     Name = connector.Name,
+                    OriginalName = connector.Name,
                     PinCount = connector.PinCount,
                     StartIo = connector.StartIo,
                     Waterproof = connector.Waterproof,
@@ -117,6 +119,9 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
         // Hidden legacy flags without a channel must not block topology edits.
         return result;
     }
+    public IReadOnlyDictionary<string, string> OriginalNames => Rows
+        .Where(row => !string.IsNullOrWhiteSpace(row.OriginalName))
+        .ToDictionary(row => row.Name.Trim(), row => row.OriginalName.Trim(), StringComparer.OrdinalIgnoreCase);
     private void Grid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
     {
         // Numeric bindings update immediately while typing. RowChanged handles

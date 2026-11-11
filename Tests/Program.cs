@@ -20,6 +20,18 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-sparse-connector-pins"])
+        {
+            TestSparseConnectorPins();
+            Console.WriteLine("PASS: sparse physical connector PINs survive open/edit/save and layout changes");
+            return 0;
+        }
+        if (args is ["--test-sparse-connector-pins", var nativeSparseSource])
+        {
+            TestSparseConnectorNativeCopy(nativeSparseSource);
+            Console.WriteLine("PASS: actual sparse native THT editor round-trip on a temporary copy; source unchanged");
+            return 0;
+        }
         if (args is ["--activation-child", var activationRole, var activationName])
             return RunActivationChild(activationRole, activationName);
         if (args is ["--test-shared-theme"])
@@ -708,6 +720,7 @@ internal static partial class Program
             ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
             ("Color picker borders fit the form and stay aligned under application styles", () => TestColorPickerLayout()),
             ("Native sparse CLIP edits and Wire PIN changes round-trip through Save", TestSparseNativeClipSave),
+            ("Sparse physical connector PINs survive native editing and layout changes", TestSparseConnectorPins),
             ("Connector Delete works from the final row upward and preserves retained edits", TestConnectorDeleteLastRow),
             ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
