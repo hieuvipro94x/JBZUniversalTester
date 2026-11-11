@@ -47,7 +47,7 @@ internal static partial class Program
             }
             Assert(unnamed.TestNo == "" && unnamed.MainContactDisplay == "196-7-4" &&
                    page.Rows.Single(row => row.Io == 196).CouplingDisplay == "197-7-5" &&
-                   JsonSerializer.Serialize(page.ReadData()) == original &&
+                   JsonSerializer.Serialize(page.ReadData().OrderBy(pin => pin.Io)) == original &&
                    JsonSerializer.Serialize(pins.OrderBy(pin => pin.Io)) == original,
                 "Native blank PIN TYPE is displayed blank without changing the original editable model or CLIP metadata");
             var grid = (DataGrid)page.FindName("MainGrid");
@@ -75,7 +75,7 @@ internal static partial class Program
             source.CouplingText = "999";
             Assert(source.CouplingDisplay == "IO999 (chưa xác định chân)", "Unknown IO must remain visible without guessing a connector");
             page.LoadData(pins, rawRows);
-            Assert(JsonSerializer.Serialize(page.ReadData()) == original, "Reloading the page cannot retain presentation edits or stale contact mappings");
+            Assert(JsonSerializer.Serialize(page.ReadData().OrderBy(pin => pin.Io)) == original, "Reloading the page cannot retain presentation edits or stale contact mappings");
         });
     }
 }

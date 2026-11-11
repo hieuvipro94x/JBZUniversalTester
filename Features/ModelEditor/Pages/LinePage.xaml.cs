@@ -260,7 +260,7 @@ public partial class LinePage : UserControl
 
     public void LoadData(IEnumerable<Pin> pins)
     {
-        Pin[] ordered = pins.OrderBy(p => p.Io).ToArray();
+        Pin[] ordered = EditorDisplayOrder.Pins(pins).ToArray();
         _loading = true;
         try
         {
@@ -282,13 +282,45 @@ public partial class LinePage : UserControl
                 RefreshConnectionIndicators();
                 return;
             }
+            var selectedRow = Grid.CurrentCell.Item as LineRow ?? _selectedRow;
+            var selectedColumn = Grid.CurrentCell.Column;
             _selectedRow = null;
             _lastSearchQuery = "";
             _wireSearchTimer.Stop();
             WireSearchStatus.Text = "";
+            var bySource = Rows.Where(row => row.Original.SourceThtRowIndex >= 0)
+                .GroupBy(row => (row.Original.SourceThtRowIndex, row.Io, row.Connector))
+                .ToDictionary(group => group.Key, group => new Queue<LineRow>(group));
+            var byIdentity = Rows.GroupBy(row => (row.Io, row.Connector, row.PinNo))
+                .ToDictionary(group => group.Key, group => new Queue<LineRow>(group));
+            var reused = new HashSet<LineRow>();
+            LineRow? Take(Queue<LineRow>? queue)
+            {
+                while (queue is { Count: > 0 })
+                {
+                    var row = queue.Dequeue();
+                    if (reused.Add(row)) return row;
+                }
+                return null;
+            }
             var newRows = new List<LineRow>(ordered.Length);
             foreach (var p in ordered)
             {
+                bySource.TryGetValue((p.SourceThtRowIndex, p.Io, p.Connector), out var sourceRows);
+                var retained = Take(sourceRows);
+                if (retained is null)
+                {
+                    byIdentity.TryGetValue((p.Io, p.Connector, p.PinNo), out var identityRows);
+                    retained = Take(identityRows);
+                }
+                if (retained is not null)
+                {
+                    retained.Original = p.Clone(); retained.PinNo = p.PinNo;
+                    retained.Line = p.Line; retained.Add = p.Add;
+                    retained.Thickness = p.Thickness; retained.Color = p.Color;
+                    newRows.Add(retained);
+                    continue;
+                }
                 var row = new LineRow
                 {
                     Original = p.Clone(),
@@ -318,6 +350,13 @@ public partial class LinePage : UserControl
                 newRows.Add(row);
             }
             _rows.ReplaceAll(newRows);
+            if (selectedRow is not null && reused.Contains(selectedRow))
+            {
+                _selectedRow = selectedRow;
+                Grid.CurrentCell = new DataGridCellInfo(selectedRow, selectedColumn ?? Grid.Columns[3]);
+                Grid.SelectedCells.Clear(); Grid.SelectedCells.Add(Grid.CurrentCell);
+                if (Grid.IsLoaded) Grid.ScrollIntoView(selectedRow, Grid.CurrentCell.Column);
+            }
             RefreshConnectionIndicators();
         }
         finally
@@ -453,10 +492,12 @@ public partial class LinePage : UserControl
             MessageBox.Show(ex.Message, "Không thể thêm dòng", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
+        var added = pins[index + 1];
         LoadData(pins);
         HasStructuralChanges = true;
-        Grid.CurrentCell = new DataGridCellInfo(Rows[index + 1], Grid.Columns[3]);
-        Grid.ScrollIntoView(Rows[index + 1]);
+        var addedRow = Rows.First(row => row.Io == added.Io && row.PinNo == added.PinNo && row.Connector == added.Connector);
+        Grid.CurrentCell = new DataGridCellInfo(addedRow, Grid.Columns[3]);
+        Grid.ScrollIntoView(addedRow);
         Changed?.Invoke(this, EventArgs.Empty);
         ConnectionsChanged?.Invoke(this, EventArgs.Empty);
     }

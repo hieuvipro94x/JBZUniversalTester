@@ -68,7 +68,7 @@ public partial class ConnectorPage : System.Windows.Controls.UserControl
             _automaticStarts.Clear();
             Rows.Clear();
             long nextIo = 1;
-            foreach (var connector in doc.Connectors)
+            foreach (var connector in EditorDisplayOrder.Connectors(doc.Connectors))
             {
                 var row = new ConnectorRow
                 {

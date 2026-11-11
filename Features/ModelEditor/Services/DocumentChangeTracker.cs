@@ -31,7 +31,7 @@ public sealed class DocumentChangeTracker
         document.UseImage,
         document.ImageFile,
         document.Connectors,
-        Pins = document.Pins.OrderBy(pin => pin.Io).Select(pin => new
+        Pins = EditorDisplayOrder.StorageIdentity(document.Pins).Select(pin => new
         {
             pin.Io,
             pin.Connector,

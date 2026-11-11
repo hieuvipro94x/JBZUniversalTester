@@ -89,12 +89,13 @@ internal static partial class Program
                     new() { Name = "CLIP", PinCount = 2, StartIo = 201 },
                     new() { Name = "2", PinCount = 1, StartIo = 203 }
                 ] });
-                Assert(changes == 0 && page.ReadData().Select(connector => connector.StartIo).SequenceEqual([1, 201, 203]),
-                    "Opening an existing noncontiguous layout retains its actual IO addresses without edits");
+                Assert(changes == 0 && page.ReadData().Select(connector => (connector.Name, connector.StartIo))
+                        .SequenceEqual([("1", 1), ("2", 203), ("CLIP", 201)]),
+                    "Opening a noncontiguous layout sorts connector names and retains each actual IO address without edits");
                 oldRow.PinCount++;
                 Assert(changes == 0, "Rows from the previous document cannot change the active editor");
                 page.Rows[0].PinCount = 4;
-                Assert(changes == 1 && page.Rows.Select(row => row.StartIo).SequenceEqual([1, 201, 203]),
+                Assert(changes == 1 && page.Rows.Select(row => row.StartIo).SequenceEqual([1, 203, 201]),
                     "Reserved CLIP ranges remain stable with one change notification");
 
                 page.LoadData(new ModelDocument { Connectors =

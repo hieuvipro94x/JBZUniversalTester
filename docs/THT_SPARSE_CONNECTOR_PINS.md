@@ -22,3 +22,11 @@ copy via `--test-sparse-connector-pins PATH`. Tests exercise actual editor Open,
 no-op byte-exact Save, metadata Save, connector rename, row growth/insertion/
 deletion, preservation of native tables and runtime PIN/IO/CLIP topology.
 The WH320853 LAN source was read only; all editing used temporary copies.
+
+The editor displays connectors in natural numeric order (1, 2, 10), followed by
+CLIP and interlock connectors. PIN and wire tables sort physical PIN numbers
+within each connector. This display ordering preserves source row identities,
+IO addresses and missing PIN numbers. Saving a changed PIN keeps the selected
+wire row selected at its new sorted position. Ordering alone does not mark the
+document as edited. `--test-editor-ordering PATH` verifies this on a temporary
+copy, including byte-exact no-op Save and unchanged runtime topology.

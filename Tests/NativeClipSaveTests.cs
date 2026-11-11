@@ -141,8 +141,10 @@ internal static partial class Program
                 wires.Rows[1].PinNo = 1;
                 Assert(first.PinNo == 2 && first.Original.PinNo == 1 && editor.HasUnsavedChanges,
                     "Wire PIN edits track unsaved changes independently from the saved original");
-                Assert(await editor.SaveAsync() && ReferenceEquals(first, wires.Rows[0]) && !editor.HasUnsavedChanges,
-                    "Saving PIN edits retains the rendered row and clears the dirty state");
+                Assert(await editor.SaveAsync() && wires.Rows.Any(row => ReferenceEquals(first, row)) &&
+                       wires.Rows[0].PinNo == 1 && wires.Rows[1].PinNo == 2 &&
+                       ReferenceEquals(grid.CurrentCell.Item, first) && !editor.HasUnsavedChanges,
+                    "Saving PIN edits retains row identity at its sorted position and clears the dirty state");
                 var saved = ThtFileService.Load(path);
                 Assert(saved.Pins[0].Io == io && saved.Pins[0].PinNo == 2 && saved.Pins[1].PinNo == 1,
                     "Wire PIN changes persist in the native THT and preserve IO addresses");

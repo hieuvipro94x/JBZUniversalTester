@@ -118,7 +118,7 @@ public static class ThtFileService
         }
         if (clipStart.HasValue && clipEnd.HasValue)
             connectors.Add(new Connector { Name = "CLIP", PinCount = clipPins.Count, StartIo = clipStart.Value });
-        connectors = connectors.OrderBy(c => c.StartIo).ToList();
+        connectors = EditorDisplayOrder.Connectors(connectors).ToList();
 
         LeakLayoutService.Load(source, connectors);
         var state = new ThtState

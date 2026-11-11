@@ -20,6 +20,18 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-editor-ordering"])
+        {
+            TestEditorConnectorPinOrdering();
+            Console.WriteLine("PASS: natural connector/PIN ordering, unchanged topology and no false dirty prompts");
+            return 0;
+        }
+        if (args is ["--test-editor-ordering", var nativeOrderSource])
+        {
+            TestEditorOrderedNativeCopy(nativeOrderSource);
+            Console.WriteLine("PASS: actual native editor sorting/open/edit/save on a temporary copy; source unchanged");
+            return 0;
+        }
         if (args is ["--test-sparse-connector-pins"])
         {
             TestSparseConnectorPins();
@@ -721,6 +733,7 @@ internal static partial class Program
             ("Color picker borders fit the form and stay aligned under application styles", () => TestColorPickerLayout()),
             ("Native sparse CLIP edits and Wire PIN changes round-trip through Save", TestSparseNativeClipSave),
             ("Sparse physical connector PINs survive native editing and layout changes", TestSparseConnectorPins),
+            ("Editor sorts connector/PIN labels naturally without changing native addresses", TestEditorConnectorPinOrdering),
             ("Connector Delete works from the final row upward and preserves retained edits", TestConnectorDeleteLastRow),
             ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),

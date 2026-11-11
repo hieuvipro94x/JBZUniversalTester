@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using JBZUniversalTester.ModelEditor.Dialogs;
 using JBZUniversalTester.ModelEditor.Helpers;
+using JBZUniversalTester.ModelEditor.Services;
 using JBZUniversalTester.ModelEditor.Models;
 using JBZUniversalTester.Models;
 
@@ -53,7 +54,7 @@ public partial class PinPage : System.Windows.Controls.UserControl
         var nativeTypes = (nativePinRows ?? []).Where(row => row.Count > 4 && int.TryParse(row[2], out _))
             .GroupBy(row => int.Parse(row[2])).Where(group => group.Count() == 1)
             .ToDictionary(group => group.Key, group => group.Single()[4]);
-        foreach (var p in pins.OrderBy(p => p.Io))
+        foreach (var p in EditorDisplayOrder.Pins(pins))
         {
             string displayedType = p.Connector.Equals("CLIP", StringComparison.OrdinalIgnoreCase) &&
                 nativeTypes.TryGetValue(p.Io, out string? nativeType) ? nativeType : p.TestNo;
