@@ -74,8 +74,8 @@ internal static partial class Program
                         var request = requests[index];
                         request.Reply.SetResult(new WaterProofRunResult(Enumerable.Range(1, 3)
                             .Select(channel => new WaterProofChannelMeasurement(channel,
-                                request.Profile.IsChannelEnabled(channel), 80, passed ? 79 : 60,
-                                passed ? 1 : 20, passed)).ToArray(), passed, "SELFTEST"));
+                                request.Profile.IsChannelEnabled(channel), 80, passed || channel == 2 ? 79 : 60,
+                                passed || channel == 2 ? 1 : 20, passed || channel == 2)).ToArray(), passed, "SELFTEST"));
                     }
 
                     Feed((43, [44]));
@@ -91,11 +91,13 @@ internal static partial class Program
                     Set("_masterSequenceState", initialFailure ? MasterSequenceState.TestingGoodMaster : MasterSequenceState.WaitingGoodMaster);
                     if (initialFailure) Feed((40, [41]), (43, [44]));
                     else Feed((40, [41])); // The Leak connector itself must also wake the waiting Master.
-                    Assert(requests.Count == 1 && requests[0].Profile.Channel1Enabled && !requests[0].Profile.Channel2Enabled &&
-                        !engine.ContinuityPassed && Get("_masterPostStarted") == 0 && !vm.MasterApproved,
-                        "Good Master CH1 starts on its local shared-RET edge before the other Leak connector and final wire are fitted");
+                    Assert(requests.Count == 0, "Fitting only CH1 cannot start a two-channel Master Leak");
                     Feed((40, [41, 42]), (43, [44]));
-                    Assert(requests.Count == 1, "Master Leak channels serialize on the existing single COM owner");
+                    Assert(requests.Count == 1 && requests[0].Profile.Channel1Enabled && requests[0].Profile.Channel2Enabled &&
+                        !engine.ContinuityPassed && Get("_masterPostStarted") == 0 && !vm.MasterApproved,
+                        "All Leak connectors start one grouped Master run before unrelated continuity completes");
+                    Feed((40, [41, 42]), (43, [44]));
+                    Assert(requests.Count == 1, "Repeated fitted frames cannot overlap the active grouped COM run");
                     Reply(0, !initialFailure);
                     if (initialFailure)
                     {
@@ -107,16 +109,11 @@ internal static partial class Program
                         await Until(() => vm.MasterStatus.Contains("LẮP LẠI CONNECTOR LEAK"));
                         Feed((40, [41, 42]), (43, [44]));
                         await Until(() => requests.Count == 2);
-                        Assert(requests[1].Profile.Channel1Enabled && !requests[1].Profile.Channel2Enabled,
-                            "A failed CH1 retries by unplugging/reconnecting CH1 alone, without requiring full sample removal");
+                        Assert(requests[1].Profile.Channel1Enabled && requests[1].Profile.Channel2Enabled,
+                            "Refitting failed CH1 repeats both CH1 and CH2 without full sample removal");
                         Reply(1, true);
                     }
-                    int secondChannel = initialFailure ? 2 : 1;
-                    await Until(() => requests.Count == secondChannel + 1);
-                    Assert(Get("_masterWaterProofPassedChannelsMask") == 1 && requests[secondChannel].Profile.Channel2Enabled &&
-                        !requests[secondChannel].Profile.Channel1Enabled && !engine.ContinuityPassed,
-                        "After CH1 passes, an already fitted CH2 runs alone while incomplete continuity keeps Master locked");
-                    Reply(secondChannel, true);
+                    int secondChannel = initialFailure ? 1 : 0; // Last grouped attempt, not a channel-specific run.
                     await Until(() => Get("_masterWaterProofPassedChannelsMask") == 3 && Get("_masterWaterProofSequenceActive") == 0);
                     Feed((40, [41, 42]), (43, [44]));
                     Assert(requests.Count == secondChannel + 1 && !vm.MasterApproved && Get("_masterPostStarted") == 0,
@@ -141,12 +138,12 @@ internal static partial class Program
                         continue;
                     }
                     Feed((42, [41]), (43, [44]));
-                    Assert(Get("_masterWaterProofPassedChannelsMask") == 2, "Removing CH1 invalidates only CH1 before Master approval");
+                    Assert(Get("_masterWaterProofPassedChannelsMask") == 0, "Removing CH1 invalidates the whole grouped Master Leak qualification");
                     Feed((40, [41, 42]), (43, [44]));
                     await Until(() => requests.Count == secondChannel + 2);
                     int reconnect = secondChannel + 1;
-                    Assert(requests[reconnect].Profile.Channel1Enabled && !requests[reconnect].Profile.Channel2Enabled,
-                        "Reconnecting a passed channel requires another Leak run, preserving the other channel PASS");
+                    Assert(requests[reconnect].Profile.Channel1Enabled && requests[reconnect].Profile.Channel2Enabled,
+                        "Reconnecting a passed connector requires a new full-group Leak run");
                     Set("_masterHistoryCycleId", "NEW-MASTER-SAMPLE");
                     Set("_lastWaterProofMeasurements", Array.Empty<WaterProofChannelMeasurement>());
                     Set("_masterWaterProofPassedChannelsMask", 0);

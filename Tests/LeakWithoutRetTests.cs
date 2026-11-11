@@ -66,8 +66,8 @@ internal static partial class Program
         var vmEngine = (TestEngine)typeof(TestViewModel).GetField("_engine", flags)!.GetValue(vm)!;
         vmEngine.SetFrameProcessingEnabled(true);
         vmEngine.ProcessFrame(FrameSeq(8, (49, new[] { 50 })), false);
-        Assert((int)typeof(TestViewModel).GetMethod("SelectReadyWaterProofChannel", flags)!.Invoke(vm, null)! == 2,
-            "Runtime selects CH2 through a no-RET peer while CH1 waits for RET");
+        Assert((int)typeof(TestViewModel).GetMethod("SelectReadyWaterProofChannel", flags)!.Invoke(vm, null)! == 0,
+            "A fitted no-RET CH2 still waits for the configured CH1 connector");
         MethodInfo gate = typeof(TestViewModel).GetMethod("TryValidateWaterProofConnectorGate", flags)!;
         object?[] args = [model, null, new WaterProofModelSettings
         {

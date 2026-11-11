@@ -72,7 +72,7 @@ internal static partial class Program
             "Removing only connector 1 accepts the retry edge while the rest of the product remains fitted");
         engine.ProcessFrame(FrameSeq(103, (40, new[] { 41 }), (42, new[] { 43 }), (44, new[] { 45 })), false);
         Assert(engine.TryGetLeakConnectorTriggerState("1", out bool reconnected, out _) && reconnected &&
-               failedProfile.IsChannelEnabled(1) && !failedProfile.IsChannelEnabled(2),
-            "Refitting connector 1 reopens the retry gate for CH1 alone without repeating CH2 or removing the product");
+               fullProfile.IsChannelEnabled(1) && fullProfile.IsChannelEnabled(2),
+            "Refitting connector 1 reopens the retry gate; the full profile still requires CH1 and CH2");
     }
 }

@@ -26,8 +26,8 @@ internal static partial class Program
             engine.ProcessFrame(FrameSeq(100, (13, new[] { 14 })), false);
             Assert(Ready() == 0, $"{seal}: normal wires cannot bypass a declared SEAL trigger");
             engine.ProcessFrame(FrameSeq(101, (10, new[] { 11 })), false);
-            Assert(Ready() == 1 && !engine.ContinuityPassed && !engine.HasConnectedRetWire("LEAK-1"),
-                $"{seal}: a local declared SEAL edge starts the fitted channel before the entire shared net/harness");
+            Assert(Ready() == 0 && !engine.ContinuityPassed && !engine.HasConnectedRetWire("LEAK-1"),
+                $"{seal}: a local SEAL edge still waits for the other configured Leak connector");
             Assert(engine.TryGetLeakConnectorTriggerState("LEAK-2", out bool connected, out _) && !connected,
                 "SEAL activity elsewhere cannot trigger an unfitted connector");
             object?[] gate = [model, null, new WaterProofModelSettings { Enabled = true,
@@ -44,7 +44,7 @@ internal static partial class Program
             Assert(engine.HasConnectedRetWire("LEAK-1") && !engine.IsRetWireDisconnected("LEAK-1"),
                 "Complete SEAL topology is recognized by the shared trigger helpers");
             typeof(TestViewModel).GetField("_waterProofPassedChannelsMask", flags)!.SetValue(vm, 1);
-            Assert(Ready() == 2, "A passed SEAL channel is skipped while another fitted channel remains eligible");
+            Assert(Ready() == 1, "All SEAL connectors qualify one grouped run, ignoring an old partial PASS");
             engine.ProcessFrame(FrameSeq(104, (10, new[] { 11 })), false);
             Assert(engine.TryGetLeakConnectorTriggerState("LEAK-1", out connected, out removed) && connected && !removed,
                 "Removing another shared SEAL endpoint cannot re-arm the still fitted connector");

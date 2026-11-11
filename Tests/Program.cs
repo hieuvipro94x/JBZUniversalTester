@@ -20,6 +20,12 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        if (args is ["--test-grouped-leak"])
+        {
+            TestGroupedLeakCycle(); TestEarlyGoodMasterLeak(); TestLeakFailureSummary();
+            TestEarlyLeakSharedRet(); TestPassedLeakReconnect(); TestLeakWithoutRetTrigger(); TestSealLeakTrigger();
+            Console.WriteLine("PASS: grouped Leak start/retry, Master, sparse channels and topology gates"); return 0;
+        }
         if (args is ["--test-peripheral-capacity-isolation"])
         {
             TestManualPeripheralCapacityIsolation();
@@ -405,7 +411,7 @@ internal static partial class Program
         if (args is ["--test-early-master-leak"])
         {
             TestEarlyGoodMasterLeak();
-            Console.WriteLine("PASS: Good Master Leak starts per connector before complete continuity, retry and stale-result guards");
+            Console.WriteLine("PASS: Good Master Leak waits for all enabled connectors and retries the full group, retry and stale-result guards");
             return 0;
         }
         if (args is ["--test-single-window-navigation"])
@@ -607,6 +613,7 @@ internal static partial class Program
             ("A3 software frame observer failure does not fault or restart D2XX", TestSoftwareObserverDoesNotFaultBoard),
             ("B6 detached task failures are observed without hardware side effects", TestDetachedTaskObservation),
             ("B7 late completions tolerate disposed lifetime CTS", TestLifetimeTokenAfterShutdown),
+            ("All enabled Leak connectors start and retry as one group", TestGroupedLeakCycle),
             ("Leak attempts merge into one Korean product history and full Excel export", TestCombinedLeakHistory),
             ("SEAL Leak trigger follows declared connector edges and preserves early/retry isolation", TestSealLeakTrigger),
             ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),
@@ -730,7 +737,7 @@ internal static partial class Program
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
             ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
-            ("Good Master Leak starts per connector before complete continuity", TestEarlyGoodMasterLeak),
+            ("Good Master Leak waits for all enabled connectors and retries the full group", TestEarlyGoodMasterLeak),
             ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
@@ -767,9 +774,9 @@ internal static partial class Program
             ("Committed PASS rejects stale installation rows until actual removal", TestCommittedPassRejectsInstallationRows),
             ("Continuity PASS with Leak NG shows separate results and preserves connector retry", TestLeakFailureSummary),
             ("Passed Leak channel removal requires a new run on reconnect", TestPassedLeakReconnect),
-            ("Leak shared RET starts on the fitted connector before complete continuity", TestEarlyLeakSharedRet),
+            ("Leak shared RET waits for all enabled connector triggers", TestEarlyLeakSharedRet),
             ("Leak connector without RET uses only expected IO edges to another connector", TestLeakWithoutRetTrigger),
-            ("Leak keeps continuity rows live and retries only the failed connector", TestLeakIndependentContinuityPresentation),
+            ("Leak keeps continuity rows live and refits failed connectors for a grouped retry", TestLeakIndependentContinuityPresentation),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
@@ -2104,6 +2111,7 @@ internal static partial class Program
             out FakeBoard masterExitBoard);
         ProductModel masterExitModel = Model(("MASTER-PAIR", new[] { 1, 18 }), ("PENDING-PAIR", new[] { 2, 19 }));
         masterExitVm.LoadPreparedModelAsync(masterExitModel).GetAwaiter().GetResult();
+        AwaitModelReconcile(masterExitVm);
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(masterExitVm, 1);
         TestEngine masterExitEngine =
@@ -3926,13 +3934,13 @@ internal static partial class Program
             ?? throw new InvalidOperationException("Early Leak channel selector not found");
         earlyLeakEngine.ProcessFrame(FrameSeq(2, (40, new[] { 41 })));
         int firstReadyLeakChannel = (int)(selectReadyLeakChannel.Invoke(earlyLeakVm, null) ?? 0);
-        Assert(firstReadyLeakChannel == 1,
-            $"CH1 starts as soon as its RET connector is installed, before CH2 or full continuity (actual={firstReadyLeakChannel})");
+        Assert(firstReadyLeakChannel == 0,
+            $"CH1 waits until the other enabled Leak connector is fitted (actual={firstReadyLeakChannel})");
         typeof(TestViewModel).GetField("_waterProofPassedChannelsMask", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(earlyLeakVm, 1);
         earlyLeakEngine.ProcessFrame(FrameSeq(3, (40, new[] { 41 }), (42, new[] { 43 })));
-        Assert((int)(selectReadyLeakChannel.Invoke(earlyLeakVm, null) ?? 0) == 2,
-            "A completed CH1 is not repeated; CH2 starts when its own connector is installed");
+        Assert((int)(selectReadyLeakChannel.Invoke(earlyLeakVm, null) ?? 0) == 1,
+            "Both connectors trigger a grouped run; an old partial CH1 result cannot skip it");
         MethodInfo recordPassedLeakChannels = typeof(TestViewModel).GetMethod(
             "RecordPassedWaterProofChannels", BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Leak completion recorder not found");
@@ -3949,8 +3957,13 @@ internal static partial class Program
             "Product PASS remains gated while another configured Leak channel has not passed");
         recordPassedLeakChannels.Invoke(earlyLeakVm, [new WaterProofRunResult(
             [new WaterProofChannelMeasurement(2, true, 80, 79.6, 0.4, true)], true, "CH2_PASS")]);
+        Assert((int)(allLeakPassed.GetValue(earlyLeakVm) ?? 0) == 0,
+            "Separate single-channel PASS results cannot be accumulated into a grouped PASS");
+        recordPassedLeakChannels.Invoke(earlyLeakVm, [new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(1, true, 80, 79.5, 0.5, true),
+             new WaterProofChannelMeasurement(2, true, 80, 79.6, 0.4, true)], true, "GROUP_PASS")]);
         Assert((int)(allLeakPassed.GetValue(earlyLeakVm) ?? 0) == 1,
-            "Product PASS gate opens only after every configured Leak channel passes");
+            "Product PASS requires every configured Leak channel to pass in the same run");
 
         var sequentialLeakWindow = new WaterProofTestViewModel("TWO-CHANNEL", new WaterProofModelSettings
         {

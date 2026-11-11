@@ -70,13 +70,13 @@ internal static partial class Program
         Call("ProcessEngineChangedOnUi", generation, null);
         Assert(vm.SelectedOperationTabIndex == 0 && Get("_waterProofRetestConnectorState") == 2 &&
                failedProfile.IsChannelEnabled(2) && !failedProfile.IsChannelEnabled(1) &&
-               Get("_waterProofPassedChannelsMask") == 1,
-            "Removing only failed CH2 hides the summary and arms CH2 reconnect while CH1 stays passed");
+               Get("_waterProofPassedChannelsMask") == 0,
+            "Removing only failed CH2 hides the summary and arms CH2 reconnect while the entire group must be remeasured");
         Set("_runtimeMode", 0);
         engine.ProcessFrame(FrameSeq(103, (40, new[] { 41 }), (42, new[] { 43 }), (44, new[] { 45 })), false);
         Assert(engine.TryGetLeakConnectorTriggerState("LEAK-2", out bool reconnected, out _) && reconnected,
             "Refitting only CH2 supplies the retry trigger without removing the rest of the product");
-        var retryPass = new WaterProofRunResult([new WaterProofChannelMeasurement(2, true, 81, 80, 1, true)], true, "PASS");
+        var retryPass = new WaterProofRunResult([new WaterProofChannelMeasurement(1, true, 81, 80, 1, true), new WaterProofChannelMeasurement(2, true, 81, 80, 1, true)], true, "PASS");
         ((Task)Call("ApplyWaterProofFinalResultAsync", retryPass, true)!).GetAwaiter().GetResult();
         Call("RecordPassedWaterProofChannels", retryPass);
         Set("_productionPhase", Phase("Continuity"));

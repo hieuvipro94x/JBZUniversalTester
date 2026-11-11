@@ -43,7 +43,7 @@ internal static partial class Program
                 $"{operation}: undersized hardware cannot start model testing or fire a result relay");
             Assert(operation == "Manual" ? error is null : operation == "Leak" ? error is FileNotFoundException :
                    error?.GetType().Name == "ManualResistanceKeysightException",
-                $"{operation}: cleanup retains the original peripheral error and allows the operator to correct settings");
+                $"{operation}: cleanup retains the original peripheral error and allows the operator to correct settings; actual={error}");
             settings.ExpansionCardCount = 4;
             board.StartScanCallback = current => current.Publish(FrameSeq(300));
             ((Task)typeof(TestViewModel).GetMethod("EnsureContinuousProductionScanAsync", flags)!.Invoke(vm, null)!)

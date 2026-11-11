@@ -30,8 +30,8 @@ internal static partial class Program
         engine.ProcessFrame(FrameSeq(100, (43, new[] { 44 })), false);
         Assert(Ready() == 0, "Normal wiring cannot replace the configured RET trigger");
         engine.ProcessFrame(FrameSeq(101, (40, new[] { 41 })), false);
-        Assert(Ready() == 1 && !engine.ContinuityPassed && !engine.HasConnectedRetWire("LEAK-1"),
-            "CH1 is ready on its own expected RET edge while shared RET and other wires remain incomplete");
+        Assert(Ready() == 0 && !engine.ContinuityPassed && !engine.HasConnectedRetWire("LEAK-1"),
+            "CH1 alone does not start the configured two-channel group");
         Assert(engine.TryGetLeakConnectorTriggerState("LEAK-2", out bool connected, out _) && !connected,
             "A RET edge between other connectors cannot trigger the unfitted connector");
         object?[] gateArgs = [model, null, new WaterProofModelSettings
@@ -46,8 +46,8 @@ internal static partial class Program
         engine.ClearProbeEvidenceExclusions();
         engine.ProcessFrame(FrameSeq(102, (40, new[] { 41, 42 })), false);
         typeof(TestViewModel).GetField("_waterProofPassedChannelsMask", flags)!.SetValue(vm, 1);
-        Assert(Ready() == 2 && !engine.ContinuityPassed,
-            "The next fitted channel starts independently and a passed channel is not repeated");
+        Assert(Ready() == 1 && !engine.ContinuityPassed,
+            "Both fitted channels enable a full-group run even if an old partial PASS exists");
         engine.ProcessFrame(FrameSeq(103, (40, new[] { 41 })), false);
         Assert(engine.TryGetLeakConnectorTriggerState("LEAK-1", out connected, out removed) && connected && !removed,
             "Unplugging another RET endpoint cannot re-arm the still fitted connector");

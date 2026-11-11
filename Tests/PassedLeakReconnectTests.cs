@@ -53,23 +53,23 @@ internal static partial class Program
         Assert(Get("_waterProofPassedChannelsMask") == 3, "Probe cannot invalidate production Leak PASS");
         Set("_probeSessionActive", 0);
         Observe();
-        Assert(Get("_waterProofPassedChannelsMask") == 2 && Get("_preContinuityWaterProofPassed") == 0 && Ready() == 0,
-            "Removing CH1 invalidates only CH1 and blocks final product PASS without starting an unplugged channel");
+        Assert(Get("_waterProofPassedChannelsMask") == 0 && Get("_preContinuityWaterProofPassed") == 0 && Ready() == 0,
+            "Removing CH1 invalidates the whole Leak group and blocks final product PASS without starting an unplugged channel");
         Feed(FrameSeq(103, (40, new[] { 41 }), (43, new[] { 44 }), (45, new[] { 46 })));
-        Assert(Ready() == 1 && Get("_waterProofPassedChannelsMask") == 2,
-            "Reconnecting CH1 selects it for another Leak run and preserves CH2 PASS");
+        Assert(Ready() == 1 && Get("_waterProofPassedChannelsMask") == 0,
+            "Reconnecting CH1 selects it for another Leak run and requires CH2 to be measured again PASS");
         typeof(TestViewModel).GetMethod("RecordPassedWaterProofChannels", flags)!.Invoke(vm,
-            [new WaterProofRunResult([new WaterProofChannelMeasurement(1, true, 80, 78, 2, true)], true, "PASS")]);
+            [new WaterProofRunResult([new WaterProofChannelMeasurement(1, true, 80, 78, 2, true), new WaterProofChannelMeasurement(2, true, 80, 78, 2, true)], true, "PASS")]);
         Assert(Get("_waterProofPassedChannelsMask") == 3 && Get("_preContinuityWaterProofPassed") == 1 && Ready() == 0,
-            "A new CH1 PASS restores the full Leak gate without repeating other passed channels");
+            "A new full-group PASS restores the Leak gate");
         Set("_productionPhase", Phase("WaterProof"));
         Set("_waterProofRunning", 1);
         Feed(FrameSeq(104, (40, new[] { 41 }), (45, new[] { 46 })));
-        Assert(Get("_waterProofPassedChannelsMask") == 1 && Get("_preContinuityWaterProofPassed") == 0,
+        Assert(Get("_waterProofPassedChannelsMask") == 0 && Get("_preContinuityWaterProofPassed") == 0,
             "A previously passed channel is invalidated even while another Leak run owns COM");
         Set("_waterProofRunning", 0);
         Feed(FrameSeq(105, (40, new[] { 41 }), (43, new[] { 44 }), (45, new[] { 46 })));
-        Assert(Ready() == 2, "CH2 reconnect selects CH2 alone for the next serialized run");
+        Assert(Ready() == 1, "CH2 reconnect selects the full group for the next run");
         Set("_waterProofPassedChannelsMask", 3);
         Set("_preContinuityWaterProofPassed", 1);
         Set("_waitForProductRelease", true);
