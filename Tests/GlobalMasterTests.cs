@@ -432,7 +432,7 @@ internal static partial class Program
                    vm.StateBackground == "#83CCEB" && vm.StateForeground == "#222222",
                 "A delayed generic testing message cannot replace the confirmed idle state after Master completion");
             SetField("_presentationCycleStarted", true);
-            Assert(vm.ResultStatusText == "ĐANG KIỂM TRA" && vm.StateBackground == "#DCEBFF" && vm.StateForeground == "#173B88",
+            Assert(vm.ResultStatusText == "ĐANG KIỂM TRA" && vm.StateBackground == "#173B88" && vm.StateForeground == "#FFFFFF",
                 "A new product installation after Master still shows active testing");
             SetField("_presentationCycleStarted", false);
             vm.State = "LẮP SẢN PHẨM";

@@ -255,7 +255,7 @@ internal static partial class Program
             var heading = new System.Windows.Controls.TextBlock
             {
                 Text = "MÀU TRẠNG THÁI · " + JBZUniversalTester.Versioning.AppVersion.DisplayVersion +
-                    "\nĐANG KIỂM TRA: nền #DCEBFF · chữ #173B88 | Màu và nội dung lấy từ trạng thái thực của phần mềm",
+                    "\nĐANG KIỂM TRA: nền #173B88 · chữ #FFFFFF | Màu và nội dung lấy từ trạng thái thực của phần mềm",
                 FontSize = 25, FontWeight = FontWeights.Bold, Margin = new Thickness(24, 20, 24, 18),
                 Foreground = BrushOf("#0F172A"), FontFamily = new FontFamily("Malgun Gothic")
             };
