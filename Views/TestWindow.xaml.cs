@@ -202,6 +202,7 @@ public partial class TestWindow : Window
 
         Resources["TestGridBaseFontSize"] = ResponsiveValue(18, scale);
         Resources["TestFaultGridFontSize"] = ResponsiveValue(20, scale);
+        Resources["TestIdentityFontSize"] = ResponsiveValue(24, scale);
         Resources["TestGridHeaderFontSize"] = ResponsiveValue(18, scale);
         Resources["TestFaultGridHeaderFontSize"] = ResponsiveValue(20, scale);
         Resources["TestGridRowHeight"] = ResponsiveValue(34, scale);

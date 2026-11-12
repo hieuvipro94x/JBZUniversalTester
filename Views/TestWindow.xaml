@@ -52,6 +52,7 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
         <sys:Double x:Key="TestGridBaseFontSize">18</sys:Double>
         <sys:Double x:Key="TestFaultGridFontSize">22</sys:Double>
+        <sys:Double x:Key="TestIdentityFontSize">24</sys:Double>
         <sys:Double x:Key="TestGridHeaderFontSize">18</sys:Double>
         <sys:Double x:Key="TestFaultGridHeaderFontSize">20</sys:Double>
         <sys:Double x:Key="TestGridRowHeight">34</sys:Double>
@@ -298,7 +299,7 @@
         <Style x:Key="OperatorWireTextStyle"
                TargetType="TextBlock"
                BasedOn="{StaticResource HtdrvGridCenterTextStyle}">
-            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontSize" Value="{DynamicResource TestIdentityFontSize}"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Foreground" Value="{StaticResource PiBlueTextBrush}"/>
             <Style.Triggers>
@@ -314,7 +315,7 @@
         <Style x:Key="OperatorConnectorTextStyle"
                TargetType="TextBlock"
                BasedOn="{StaticResource OperatorWireTextStyle}">
-            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontSize" Value="{DynamicResource TestIdentityFontSize}"/>
         </Style>
 
         <Style x:Key="OperatorWireNameTextStyle"
