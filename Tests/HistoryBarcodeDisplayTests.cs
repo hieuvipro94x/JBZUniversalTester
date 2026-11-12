@@ -144,12 +144,12 @@ internal static partial class Program
                             await Task.Delay(5, deadline.Token);
                     }
                     if (passed) passCount++;
-                    long expectedLot = 2000 + passCount;
+                    long expectedLot = passCount; // Untested daily production starts at LOT0.
                     var row = store.Search(new HistorySearchCriteria(null, null, null, model.PartNumber, "ALL"))
                         .Single(item => item.CycleId == cycle);
-                    string expectedBarcode = passed ? model.PartNumber + at.ToString("yyMMdd") + expectedLot : string.Empty;
+                    string expectedBarcode = passed ? model.PartNumber + at.ToString("yyMMdd") + expectedLot.ToString("D4", System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
                     Assert(row.LotNo == expectedLot && row.BarcodeValue == expectedBarcode && vm.Lot == expectedLot.ToString(),
-                        "PASS advances LOT once; FAIL keeps the last LOT and has no output barcode");
+                        $"PASS advances LOT once; FAIL keeps the last LOT and has no output barcode: expected={expectedLot}/{expectedBarcode}, actual={row.LotNo}/{row.BarcodeValue}, UI={vm.Lot}");
                     if (passed)
                     {
                         store.UpdateLabelPrintOutcome(row.Id, cycle, LabelPrintStatus.Failed, null, "");
@@ -175,7 +175,7 @@ internal static partial class Program
                             "Successful sends display only the immutable barcode, never printer commands");
                     }
                 }
-                Assert(vm.Pass == 3 && vm.Fail == 1 && vm.Lot == "2003" &&
+                Assert(vm.Pass == 3 && vm.Fail == 1 && vm.Lot == "3" &&
                        !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
                     "Barcode presentation cannot fire relays or alter PASS/FAIL quantities");
 

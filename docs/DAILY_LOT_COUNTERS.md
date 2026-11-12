@@ -2,7 +2,7 @@
 
 Từ V2026.09.200, sản lượng trên màn hình test và khôi phục LOT từ SQLite dùng đúng `PartId` và ngày kết quả được chọn. Truy vấn bao gồm các đợt LOT của cùng mã hàng trong ngày đó để không bỏ sót sản lượng cũ. LOT lấy đúng PASS cuối cùng của ngày; FAIL không tăng LOT. Số lượng tháng và tích lũy vẫn giữ toàn bộ dữ liệu tương ứng.
 
-Khi ngày Windows thay đổi (tự động qua ngày, chỉnh ngày tiến hoặc lùi), màn hình nạp sản lượng và LOT đã lưu của mã hàng trong ngày được chọn, kể cả khi chuyển mã hàng hoặc mở lại ứng dụng. Không tạo một `HistoryBatchId` mới chỉ vì đổi ngày. Nếu mã hàng chưa có kết quả trong ngày đó thì Tổng/PASS/FAIL về 0, LOT về `StartLotNo`; ví dụ mức bắt đầu 2000 thì PASS đầu là 2001. Đổi mức LOT bắt đầu trong cài đặt vẫn tạo đợt History mới nhưng không xóa hay che sản lượng đã kiểm tra của ngày đó.
+Khi ngày Windows thay đổi (tự động qua ngày, chỉnh ngày tiến hoặc lùi), màn hình nạp sản lượng và LOT đã lưu của mã hàng trong ngày được chọn, kể cả khi chuyển mã hàng hoặc mở lại ứng dụng. Không tạo một `HistoryBatchId` mới chỉ vì đổi ngày. Nếu mã hàng chưa có kết quả trong ngày đó thì Tổng/PASS/FAIL về 0, LOT đang chạy về `0`; PASS đầu tiên trong ngày mới là `1` (quy tắc từ V2026.09.423). Đổi mức LOT bắt đầu trong cài đặt vẫn tạo đợt History mới nhưng không xóa hay che sản lượng đã kiểm tra của ngày đó.
 
 Màn hình test kiểm tra đổi ngày bằng timer đồng hồ hiện có; START cũng kiểm tra trước khi cho chu kỳ reserve LOT. Kết quả tải thống kê của ngày/đợt cũ không được ghi đè đợt mới. Reservation chưa commit giữ nguyên chu kỳ hiện tại; chuyển ngày sau khi reservation được giải quyết.
 
@@ -11,3 +11,22 @@ Reset chỉ đổi cấu hình/bộ đếm hiển thị và phạm vi truy vấn
 Từ V2026.09.420, sau khi operator sửa LOT bắt đầu của mã hàng, LOT hiện tại luôn bằng `StartLotNo + PASS` của ngày được chọn, kể cả khi ngày sửa cấu hình khác ngày đang xem. LOT bắt đầu được lưu riêng theo mã hàng; sang ngày chưa có sản lượng vẫn dùng mức bắt đầu đó, PASS đầu tiên cộng 1. Cấu hình cũ chưa có đợt sửa LOT vẫn khôi phục theo LOT lịch sử để giữ tương thích.
 
 Nút in bản sao trên TestView chờ nạp xong thống kê và dùng LOT hiện tại khi LOT đã đổi so với tem gửi thành công trước đó. Ví dụ sửa 2000 thành 5000 khi ngày đó đã có 101 PASS thì bản sao in 5101. Thao tác này không cộng PASS/LOT, không sửa payload hoặc LOT của bản ghi gốc; thông tin in lại ghi LOT bản sao. BCW tiếp tục dùng serial đã cấp cho tem gốc. In lại từ History và retry tem lỗi vẫn giữ snapshot gốc.
+
+
+## V2026.09.423: mã chưa test trong ngày bắt đầu LOT 0
+
+Khi chọn mã hàng, không kế thừa LOT chung. Trong lúc chờ đọc thống kê SQLite,
+TestView hiển thị LOT 0. Nếu đúng file/mã đang chọn chưa có kết quả trong ngày,
+runtime lưu LOT 0 và đánh dấu ngày bắt đầu từ 0; PASS đầu dùng LOT 1. Mã đã test
+vẫn khôi phục LOT của chính ngày/file đó, kể cả khi đổi mã, mở lại hoặc đổi ngày.
+
+Mức StartLotNo người vận hành đã cấu hình và BulkPrintLotNo được giữ nguyên.
+Cờ DailyLotStartsAtZero tách LOT của ngày khỏi mức cấu hình đó, tránh cộng lại
+base 123456 sau khi PASS đầu đã ghi LOT 1. Cờ được lưu ở field thứ 7 tùy chọn của
+ProductLot trong CFG; cấu hình 6 field cũ vẫn đọc được. Lưu thay đổi LOT bắt đầu
+mới một cách rõ ràng vẫn áp dụng cơ chế base + PASS cho ngày đã có sản lượng.
+
+Không có migration SQLite, không sửa/xóa history hoặc timestamp. Reset bị chặn
+khi còn reservation chưa commit. Kết quả thống kê cũ vẫn chịu guard mã/ngày/batch;
+lưu CFG thất bại hoàn tác cả LOT và cờ ngày. Kiểm thử dùng CFG/SQLite tạm và kiểm
+tra integrity_check cùng các LOT lịch sử trước/sau.

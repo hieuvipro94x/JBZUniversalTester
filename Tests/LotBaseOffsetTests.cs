@@ -128,13 +128,13 @@ internal static partial class Program
                 dateLots.SelectProduct(model.PartNumber, false);
                 ProductionConfigService.SetProductLot(settings, "OTHER-PART", 8000, now.ToString("yyyy-MM-dd"));
                 lotDate = now.AddDays(1);
-                Assert(dateLots.NextLot == 5000 && dateLots.StartLot == 5000,
-                    "Next production day retains this product's saved starting LOT");
+                Assert(dateLots.NextLot == 0 && dateLots.StartLot == 0 && settings.LotSettingsByProduct[model.PartNumber].StartLotNo == 5000,
+                    "New day starts at zero while preserving the separately saved starting LOT");
                 dateLots.SelectProduct("OTHER-PART", false);
-                Assert(dateLots.NextLot == 8000, "Another part retains its independent starting LOT across dates");
+                Assert(dateLots.NextLot == 0, "Another part independently starts at zero on a new date");
                 dateLots.SelectProduct(model.PartNumber, false);
-                Assert(dateLots.NextLot == 5000 && dateLots.ReserveForCycle("tomorrow") == 5001,
-                    "Switching back uses the same saved 5000 base and reserves 5001 for the first new-day PASS");
+                Assert(dateLots.NextLot == 0 && dateLots.ReserveForCycle("tomorrow") == 1,
+                    "Switching back retains the zero daily start and reserves LOT 1 for the first new-day PASS");
                 Assert(ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId LIKE 'old-%';") == 103 &&
                        ScalarInt(db, "SELECT SUM(Lot) FROM Tests WHERE CycleId LIKE 'old-%';") == 5350 &&
                        ScalarInt(db, "SELECT COUNT(*) FROM Tests;") == 104,

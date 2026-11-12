@@ -347,6 +347,12 @@ internal static partial class Program
             Console.WriteLine("PASS: Automatic peripheral reconnect, exclusive ownership, responsive UI, shutdown and removal gates");
             return 0;
         }
+        if (args is ["--test-untested-daily-lot"])
+        {
+            TestUntestedDailyLotStartsAtZero(); TestLotDailyCounterReset(); TestLotBaseRetainsDailyPassProgress();
+            TestThtLabelAndLotLifecycle(); TestHistoryBarcodeOnlyAndPassLot();
+            Console.WriteLine("PASS: untested product/day LOT starts at zero; configured bases and all history preserved"); return 0;
+        }
         if (args is ["--test-product-label-lot"])
         {
             TestProductLabelAndImmediateLotSettings();
@@ -738,6 +744,7 @@ internal static partial class Program
             ("Peripheral USB reconnect is automatic, serialized and independent", TestPeripheralAutomaticReconnect),
             ("Product label choices and LOT base edits apply immediately without rewriting history", TestProductLabelAndImmediateLotSettings),
             ("First untested product selection requires and retains LOT/template setup", TestFirstProductPrintSetup),
+            ("Untested products start daily LOT at zero without inheriting global settings", TestUntestedDailyLotStartsAtZero),
             ("LOT base edits retain the daily PASS count in display and printer output", TestLotBaseRetainsDailyPassProgress),
             ("Slow LOT configuration writes never block input or counter reads", TestLotPersistenceResponsiveness),
             ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
@@ -9167,10 +9174,10 @@ internal static partial class Program
             "Restart resumes from last successfully committed LOT");
 
         lotClock = lotClock.AddDays(1);
-        Assert(restarted.StartLot == 2044 &&
-               restarted.NextLot == 2044 &&
+        Assert(restarted.StartLot == 0 &&
+               restarted.NextLot == 0 &&
                restartedSettings.LotNoDate == "2026-08-30",
-            "New production day resets next LOT to the per-product starting LOT");
+            "New production day resets the current LOT to zero");
 
         var migratedSettings = new ProductionSettings { LotNo = 9876 };
         int migrationPersistCount = 0;
@@ -9210,8 +9217,8 @@ internal static partial class Program
         Assert(perProductLots.NextLot == 2001,
             "Switching back restores the previously advanced LOT for that product");
         lotClock = lotClock.AddDays(1);
-        Assert(perProductLots.NextLot == 2000,
-            "PART-2000 returns to its own starting LOT when the production date changes");
+        Assert(perProductLots.NextLot == 0,
+            "PART-2000 starts from zero when the production date changes");
 
         var zeroBasedSettings = new ProductionSettings { LotNo = 0, LotNoDate = "2026-08-30" };
         int zeroBasedPersistCount = 0;

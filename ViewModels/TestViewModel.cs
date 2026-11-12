@@ -12392,8 +12392,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Interlocked.Exchange(ref _passProductRemoved, 0);
         Interlocked.Exchange(ref _discardRequiredForFault, 0);
 
-        bool migrateLegacyLot = !_productionSettings.LotSettingsByProduct.Keys.Any(key =>
-            !string.Equals(key, "DEFAULT", StringComparison.OrdinalIgnoreCase));
+        // A newly selected product never inherits the machine-wide LOT.
+        bool migrateLegacyLot = false;
 
         _model = model ??
             throw new ArgumentNullException(nameof(model));
@@ -12402,6 +12402,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _lotSequence.SelectProduct(
             ProductionConfigService.GetLotProductKey(_model),
             migrateLegacyLot);
+        // Statistics owns restoration. Never flash a saved/global LOT while
+        // the selected product's daily history is still loading.
+        Lot = "0";
         ProductionConfigService.ApplyProductLabelTemplate(_productionSettings, ProductionConfigService.GetLotProductKey(_model));
         // Không để sản lượng mã trước còn hiện trong lúc SQLite đang tải mã mới.
         // Mỗi mã bắt đầu UI ở 0 rồi nhận đúng daily statistics theo PartNumber.
@@ -12471,8 +12474,8 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         Raise(nameof(Alc));
         Raise(nameof(IsIoMappingMode));
 
+        Lot = "0";
         ScheduleStatisticsLoadForModel(model);
-        UpdateDailyLotDisplay();
 
         // _engine.SetModel() -> Reset() đã phát Changed và dựng bảng một lần.
         // Không RefreshFaults() lần hai vì model lớn có hàng trăm pin sẽ làm
@@ -12666,14 +12669,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             // Editing the base retains every PASS already produced today.
             // Do not reset progress or derive it from an old printed LOT range.
-            long selectedDateLot = useDailyPassOffset
-                ? checked(_lotSequence.StartLot + snapshot.Stats.DailyPass)
-                : snapshot.Stats.DailyPass > 0 ? snapshot.Stats.LastLotNo : _lotSequence.StartLot;
-            if (selectedDateLot != _lotSequence.NextLot)
+            bool untestedDay = snapshot.Stats.DailyTotal == 0;
+            bool zeroStartDay = productLot?.DailyLotStartsAtZero == true;
+            long selectedDateLot = untestedDay ? 0
+                : useDailyPassOffset && !zeroStartDay
+                    ? checked(_lotSequence.StartLot + snapshot.Stats.DailyPass)
+                    : snapshot.Stats.DailyPass > 0 ? snapshot.Stats.LastLotNo : 0;
+            if (selectedDateLot != _lotSequence.NextLot || (untestedDay && !zeroStartDay))
             {
                 long previousLot = _lotSequence.NextLot;
                 var reconciled = await PersistLotWithoutBlockingUiAsync(() =>
-                    _lotSequence.ReconcileCommittedLotAsync(selectedDateLot, batchKey, restoreSelectedDate: true));
+                    _lotSequence.ReconcileCommittedLotAsync(selectedDateLot, batchKey, restoreSelectedDate: true, resetUntestedDay: untestedDay));
                 if (!reconciled.Success)
                 {
                     throw new InvalidOperationException(

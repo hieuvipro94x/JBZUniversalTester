@@ -43,21 +43,21 @@ internal static partial class Program
             now = now.AddDays(1);
             string today = lots.HistoryBatchKey;
             var empty = store.GetStatistics(part, now);
-            Assert(lots.NextLot == 2000 && empty.DailyTotal == 0 && empty.LastLotNo == 0,
-                "New day starts with zero production and base LOT without yesterday's LOT");
-            Assert(lots.TryReconcileCommittedLot(2106, out _, oldDay) && lots.NextLot == 2000,
+            Assert(lots.NextLot == 0 && empty.DailyTotal == 0 && empty.LastLotNo == 0,
+                "New day starts with zero production and zero LOT without changing the configured base");
+            Assert(lots.TryReconcileCommittedLot(2106, out _, oldDay) && lots.NextLot == 0,
                 "Stale SQLite recovery from the old day cannot raise the new day's LOT");
             Assert(store.GetStatistics(part, now).LastLotNo == 0,
                 "Even an unfiltered counter query never recovers yesterday's LOT");
 
             long first = lots.ReserveForCycle("today-pass");
             ProductionCommitResult committed = Commit("today-pass", first, true, today);
-            Assert(first == 2001 && lots.TryCommitSuccessfulPass("today-pass", first, out _) &&
+            Assert(first == 1 && lots.TryCommitSuccessfulPass("today-pass", first, out _) &&
                    committed.Statistics.DailyTotal == 1 && committed.Statistics.DailyPass == 1,
-                "First PASS after rollover is base plus one and counts only this period");
+                "First PASS after rollover uses LOT 1 and counts only this period");
             Commit("today-fail", 9999, false, today);
             var withFail = store.GetStatistics(part, now);
-            Assert(withFail.DailyTotal == 2 && withFail.DailyFail == 1 && withFail.LastLotNo == 2001,
+            Assert(withFail.DailyTotal == 2 && withFail.DailyFail == 1 && withFail.LastLotNo == 1,
                 "FAIL contributes to production but cannot advance the recovered LOT");
             Assert(Commit("today-pass", first, true, today).AlreadyCommitted &&
                    store.GetStatistics(part, now).DailyTotal == 2,
@@ -75,7 +75,7 @@ internal static partial class Program
             Assert(lots.HistoryBatchKey == today && selectedToday.DailyTotal == 2 &&
                    selectedToday.DailyPass == 1 && selectedToday.DailyFail == 1 &&
                    lots.TryReconcileCommittedLot(selectedToday.LastLotNo, out _, today) &&
-                   lots.NextLot == 2001,
+                   lots.NextLot == 1,
                 "Moving the date forward restores the selected day's saved counters and LOT");
 
             ProductionConfigService.SetProductLot(settings, "LOT-PART", 3000, "2026-10-07");
@@ -83,12 +83,12 @@ internal static partial class Program
             string manualBatch = lots.HistoryBatchKey;
             Assert(manualBatch != today && lots.NextLot == 3000 &&
                    store.GetStatistics(part, now).DailyTotal == 2 &&
-                   store.GetStatistics(part, now).LastLotNo == 2001,
+                   store.GetStatistics(part, now).LastLotNo == 1,
                 "Changing a LOT batch never hides the selected day's existing production");
             Assert(lots.TryReconcileCommittedLot(9999, out _, today) && lots.NextLot == 3000,
                 "Stale recovery cannot undo an operator's manual reset");
-            Assert(lots.TryReconcileCommittedLot(2001, out _, manualBatch, restoreSelectedDate: true) &&
-                   lots.NextLot == 2001,
+            Assert(lots.TryReconcileCommittedLot(1, out _, manualBatch, restoreSelectedDate: true) &&
+                   lots.NextLot == 1,
                 "Selected-day LOT restores its exact saved value even below the current configured base");
             ProductionConfigService.SetProductLot(settings, "LOT-PART", 3000, "2026-10-07");
             Assert(lots.HistoryBatchKey == manualBatch,
@@ -96,7 +96,7 @@ internal static partial class Program
 
             now = now.AddDays(-1);
             string back = lots.HistoryBatchKey;
-            Assert(back != oldDay && lots.NextLot == 3000 &&
+            Assert(back != oldDay && lots.NextLot == 0 &&
                    store.GetStatistics(part, now).DailyTotal == 1 &&
                    lots.TryReconcileCommittedLot(2106, out _, back, restoreSelectedDate: true) &&
                    lots.NextLot == 2106,
@@ -104,8 +104,8 @@ internal static partial class Program
             now = now.AddDays(1);
             Assert(lots.HistoryBatchKey == manualBatch &&
                    store.GetStatistics(part, now).DailyTotal == 2 &&
-                   lots.TryReconcileCommittedLot(2001, out _, manualBatch, restoreSelectedDate: true) &&
-                   lots.NextLot == 2001,
+                   lots.TryReconcileCommittedLot(1, out _, manualBatch, restoreSelectedDate: true) &&
+                   lots.NextLot == 1,
                 "Returning the Windows date restores that day's saved LOT and production");
             var savedModel = model;
             model = new ProductModel { PartNumber = "OTHER-PART", ModelName = "OTHER-MODEL" };
@@ -114,12 +114,12 @@ internal static partial class Program
             Assert(store.GetStatistics(otherPart, now).DailyTotal == 1 &&
                    store.GetStatistics(otherPart, now).LastLotNo == 7001 &&
                    store.GetStatistics(part, now).DailyTotal == 2 &&
-                   store.GetStatistics(part, now).LastLotNo == 2001,
+                   store.GetStatistics(part, now).LastLotNo == 1,
                 "Selecting another part reads only that part's saved counters for the selected date");
             model = savedModel;
             now = now.AddDays(1);
             var newDate = store.GetStatistics(part, now);
-            Assert(lots.NextLot == 3000 && newDate.DailyTotal == 0 && newDate.LastLotNo == 0,
+            Assert(lots.NextLot == 0 && newDate.DailyTotal == 0 && newDate.LastLotNo == 0,
                 "Only a date without saved results starts with zero production and the configured base LOT");
             ProductionConfigService.SetProductLot(settings, "LOT-PART", 3000, "2026-10-05");
             Assert(settings.LotSettingsByProduct["LOT-PART"].LotNoDate == "2026-10-05",

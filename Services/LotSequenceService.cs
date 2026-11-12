@@ -71,7 +71,10 @@ public sealed class LotSequenceService
         get
         {
             lock (_gate)
-                return Math.Max(0, ActiveLotLocked().StartLotNo);
+            {
+                EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
+                return ActiveLotLocked().DailyLotStartsAtZero ? 0 : Math.Max(0, ActiveLotLocked().StartLotNo);
+            }
         }
     }
 
@@ -164,7 +167,7 @@ public sealed class LotSequenceService
 
     public bool TryReconcileCommittedLot(
         long committedLot, out string error, string? productionBatchKey = null,
-        bool restoreSelectedDate = false)
+        bool restoreSelectedDate = false, bool resetUntestedDay = false)
     {
         lock (_gate)
         {
@@ -181,7 +184,13 @@ public sealed class LotSequenceService
             }
             long current = Math.Max(0, lot.LotNo);
             long authoritative = Math.Max(0, committedLot);
-            if (authoritative == current || (!restoreSelectedDate && authoritative < current))
+            if (resetUntestedDay && _reservations.Values.Any(item => IsActiveProduct(item.ProductKey)))
+            {
+                error = "Cannot reset LOT while a product reservation is active.";
+                return false;
+            }
+            bool previousZeroStart = lot.DailyLotStartsAtZero;
+            if ((authoritative == current && (!resetUntestedDay || previousZeroStart)) || (!restoreSelectedDate && authoritative < current))
             {
                 error = string.Empty;
                 return true;
@@ -190,6 +199,7 @@ public sealed class LotSequenceService
             try
             {
                 lot.LotNo = authoritative;
+                if (resetUntestedDay) lot.DailyLotStartsAtZero = true;
                 SyncCompatibilityFieldsLocked(lot);
                 _persist(_settings);
 
@@ -201,6 +211,7 @@ public sealed class LotSequenceService
             catch (Exception ex)
             {
                 lot.LotNo = current;
+                lot.DailyLotStartsAtZero = previousZeroStart;
                 SyncCompatibilityFieldsLocked(lot);
                 error = $"Cannot reconcile committed LOT {authoritative}: {ex.Message}";
                 return false;
@@ -219,10 +230,10 @@ public sealed class LotSequenceService
         });
 
     public Task<(bool Success, string Error)> ReconcileCommittedLotAsync(
-        long committedLot, string? batchKey = null, bool restoreSelectedDate = false) =>
+        long committedLot, string? batchKey = null, bool restoreSelectedDate = false, bool resetUntestedDay = false) =>
         PersistDetachedAsync(null, worker =>
         {
-            bool success = worker.TryReconcileCommittedLot(committedLot, out string error, batchKey, restoreSelectedDate);
+            bool success = worker.TryReconcileCommittedLot(committedLot, out string error, batchKey, restoreSelectedDate, resetUntestedDay);
             return (success, error);
         });
 
@@ -252,6 +263,7 @@ public sealed class LotSequenceService
                 snapshot.LotSettingsByProduct = _settings.LotSettingsByProduct.ToDictionary(
                     item => item.Key, item => new ProductLotSettings
                     {
+                        DailyLotStartsAtZero = item.Value.DailyLotStartsAtZero,
                         StartLotNo = item.Value.StartLotNo, LotNo = item.Value.LotNo,
                         LotNoDate = item.Value.LotNoDate, BulkPrintLotNo = item.Value.BulkPrintLotNo,
                         HistoryBatchId = item.Value.HistoryBatchId, LastStartChangedDate = item.Value.LastStartChangedDate
@@ -277,6 +289,7 @@ public sealed class LotSequenceService
                 ProductLotSettings live = GetLotLocked(productKey, false);
                 if (live.LotNo == previous && Revision(live) == revision)
                 {
+                    live.DailyLotStartsAtZero = outcome.Lot.DailyLotStartsAtZero;
                     live.LotNo = outcome.Lot.LotNo;
                     live.LotNoDate = outcome.Lot.LotNoDate;
                     if (IsActiveProduct(productKey)) SyncCompatibilityFieldsLocked(live);
@@ -293,7 +306,7 @@ public sealed class LotSequenceService
         finally { _asyncPersistenceGate.Release(); }
     }
 
-    private static string Revision(ProductLotSettings lot) => $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}";
+    private static string Revision(ProductLotSettings lot) => $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}:{lot.DailyLotStartsAtZero}";
 
     public bool IsCommitCandidate(string cycleId, long lotNo)
     {
@@ -370,14 +383,16 @@ public sealed class LotSequenceService
         }
 
         long previousLot = lot.LotNo;
+        bool previousZeroStart = lot.DailyLotStartsAtZero;
         string previousDate = lot.LotNoDate ?? string.Empty;
         if (DateOnly.TryParseExact(
                 storedDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out _))
         {
-            // Operator chỉ đặt LOTNO bắt đầu một lần cho từng mã hàng. Sang
-            // ngày sản xuất mới quay về base đó, không được làm mất thành 0.
-            lot.LotNo = Math.Max(0, lot.StartLotNo);
+            // A new date starts at zero. SQLite may restore that date's own
+            // committed LOT later; keep the saved configuration base untouched.
+            lot.LotNo = 0;
+            lot.DailyLotStartsAtZero = true;
             // Keep the configured batch identity so returning to a date can
             // recover that date's committed production counters and LOT.
         }
@@ -403,6 +418,7 @@ public sealed class LotSequenceService
         catch (Exception ex)
         {
             lot.LotNo = previousLot;
+            lot.DailyLotStartsAtZero = previousZeroStart;
             lot.LotNoDate = previousDate;
             if (IsActiveProduct(productKey))
                 SyncCompatibilityFieldsLocked(lot);

@@ -212,7 +212,7 @@ public static class ProductionConfigService
             string encodedKey = Uri.EscapeDataString(productKey);
             lines.Add(
                 $"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate};" +
-                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId};{lot.LastStartChangedDate}");
+                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId};{lot.LastStartChangedDate};{(lot.DailyLotStartsAtZero ? 1 : 0)}");
         }
 
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
@@ -363,6 +363,7 @@ public static class ProductionConfigService
         {
             // Giá trị nhập là số nền. Runtime sẽ cộng số PASS của ngày được
             // chọn; lưu các cài đặt độc lập không cộng lại tiến độ lần nữa.
+            lot.DailyLotStartsAtZero = false;
             lot.StartLotNo = normalizedStart;
             if (startChanged)
             {
@@ -619,6 +620,7 @@ public static class ProductionConfigService
             settings.LotSettingsByProduct[productKey] = new ProductLotSettings
             {
                 LotNo = Math.Max(0, lotNo),
+                DailyLotStartsAtZero = parts.Length > 6 && parts[6].Trim() == "1",
                 HistoryBatchId = parts.Length > 4 ? parts[4] : string.Empty,
                 LastStartChangedDate = parts.Length > 5 ? parts[5].Trim() : string.Empty,
                 LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty,
