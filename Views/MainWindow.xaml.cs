@@ -701,6 +701,7 @@ public partial class MainWindow : Window
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
             await _viewModel.ShutdownAsync();
             await ThtBackupCleanupService.Current.CleanupAsync();
+            await DatabaseBackupCleanupService.Current.CleanupAsync();
             AsyncFileLogService.Current.Application("SHUTDOWN cleanup complete");
             await AsyncFileLogService.Current.DisposeAsync();
         }

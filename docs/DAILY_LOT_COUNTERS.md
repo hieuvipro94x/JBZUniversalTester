@@ -52,3 +52,13 @@ kích hoạt base cũ. Base2000 + PASS20 = LOT2020; cột Số đếm PASS và C
 
 Cột Tiến độ đổi thành KẾT QUẢ, hiển thị PASS/NG trên History và CSV/XLSX.
 Trạng thái lưu trong database không đổi.
+
+
+## V2026.09.427: dọn backup migration khi thoát bình thường
+
+Sau khi production writer đóng xong, worker dọn các file pre-schema-v*.backup
+(tên cố định và có timestamp) cạnh database đã khởi tạo thành công trong phiên.
+Chỉ xóa khi database chính còn tồn tại, integrity_check đạt và schema hiện tại
+hợp lệ. Không xóa DB chính, WAL/SHM, backup thủ công, cấu hình hoặc lịch sử.
+Database lỗi/mất, đường dẫn liên kết hoặc file backup bị khóa được giữ lại và
+lỗi được ghi log. Không thay đổi đường dẫn RuntimePaths trong bản này.

@@ -29,6 +29,7 @@ public sealed class TestHistoryStore
 
         lock (SchemaGate)
             LastMigrationReport = Initialize();
+        DatabaseBackupCleanupService.Current.TrackInitializedDatabase(_path);
     }
 
     public string DatabasePath => _path;
