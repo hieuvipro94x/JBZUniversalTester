@@ -1,0 +1,195 @@
+Chỉ sửa duy nhất logic xác nhận IO8/product-present trước khi kết thúc chu kỳ test. Không sửa bất kỳ phần nào khác.
+
+Mục tiêu lấy theo trace phần mềm gốc Htdrv3:
+
+- Khi IO8 lần đầu xuất hiện, KHÔNG được lập tức STOP scan/kết thúc test.
+- Phải tiếp tục scan realtime như hiện tại.
+- IO8 phải duy trì ổn định liên tục qua nhiều frame trong khoảng ~0.59 giây rồi mới được coi là xác nhận hợp lệ.
+- Trace gốc Htdrv3 cho thấy từ lúc IO8 xuất hiện đến lúc gửi STOP thường khoảng:
+  - 603 ms
+  - 574 ms
+  - 587 ms
+  - 604 ms
+  - 589 ms
+  - 588 ms
+  - trung bình khoảng 591 ms.
+- Scan hiện tại khoảng 154 ms/frame, tương đương IO8 cần tồn tại ổn định khoảng 3–4 frame liên tiếp trước khi xác nhận.
+- Không làm chậm việc hiển thị realtime trên UI: IO8 vừa xuất hiện thì UI vẫn phải phản ánh ngay. Chỉ trì hoãn quyết định "product confirmed / complete test".
+
+Yêu cầu triển khai:
+
+1. Audit đúng nơi hiện tại JBZUniversalTester đang phát hiện IO8 và ngay lập tức chuyển sang complete/STOP.
+2. Chỉ thay đổi phần quyết định xác nhận IO8 tại đó.
+3. Khi IO8 chuyển từ OFF → ON:
+   - bắt đầu một stability window;
+   - ghi nhận timestamp bằng Stopwatch/monotonic elapsed time, không dùng DateTime để đo delay.
+4. Trong khi IO8 vẫn ON:
+   - tiếp tục nhận và xử lý frame bình thường;
+   - không block thread;
+   - không Thread.Sleep trong scan loop;
+   - không ngừng polling;
+   - không làm UI chậm.
+5. Chỉ xác nhận IO8 hợp lệ khi nó duy trì ON liên tục khoảng 590 ms.
+   - Target nên là khoảng 590 ms.
+   - Có thể dùng ngưỡng 575–600 ms nếu kiến trúc hiện tại cần khớp boundary frame.
+   - Ưu tiên elapsed-time thực tế thay vì hard-code chính xác số frame, vì cadence frame có jitter.
+6. Có thể kết hợp điều kiện:
+   - IO8 vẫn ON;
+   - đã thấy IO8 trong các frame liên tiếp;
+   - elapsed >= khoảng 590 ms.
+7. Nếu IO8 OFF trước khi đủ stability window:
+   - hủy candidate ngay;
+   - reset timer/count;
+   - tuyệt đối không complete test;
+   - chờ lần OFF → ON tiếp theo rồi đo lại từ đầu.
+8. Sau khi đủ điều kiện:
+   - chỉ phát sinh ProductConfirmed/TestComplete đúng 1 lần;
+   - sau đó giữ nguyên toàn bộ flow hiện tại của chương trình.
+9. Không tạo nhiều timer chạy song song.
+10. Phải chống race condition giữa scan thread, state machine và UI thread.
+11. Khi reset/new cycle/product removed/model change/disconnect thì phải reset toàn bộ IO8 stability state.
+
+RẤT QUAN TRỌNG – KHÔNG ĐƯỢC SỬA:
+
+- Không sửa FTDI/D2XX transport.
+- Không sửa command/protocol.
+- Không sửa `8C 00 02 00`.
+- Không sửa `8D 00 00 00`.
+- Không sửa `80 00 00 00`.
+- Không sửa `8E`.
+- Không sửa `90/91`.
+- Không sửa Relay order.
+- Không sửa Relay timing.
+- Không sửa automatic PASS Relay sequence.
+- Không sửa IO4.
+- Không sửa Master sample / Fault sample.
+- Không sửa Probe logic.
+- Không sửa detection realtime khi đang lắp sản phẩm.
+- Không sửa scan cadence hiện tại ~154 ms/frame.
+- Không tăng/giảm số D2XX read/queue call trong task này.
+- Không thay đổi UI/XAML.
+- Không thay đổi binding.
+- Không thay đổi database/history/printer.
+- Không refactor rộng các class không liên quan.
+- Không thay đổi version trừ khi project đang bắt buộc version bump cho mọi patch.
+
+Yêu cầu quan trọng về kiến trúc:
+
+UI realtime và xác nhận sản phẩm phải là hai khái niệm riêng:
+
+FRAME IO
+    ↓
+IO8 xuất hiện
+    ├── UI cập nhật ngay lập tức
+    │
+    └── Product confirmation candidate
+             ↓
+       IO8 vẫn ON liên tục
+             ↓
+          ~590 ms
+             ↓
+       ProductConfirmed
+             ↓
+       flow hiện tại tiếp tục
+
+Không được làm kiểu:
+
+IO8
+↓
+Sleep(590)
+↓
+Confirm
+
+vì sẽ làm mất realtime scan.
+
+Phải làm non-blocking:
+
+IO8 ON
+↓
+record candidateStart
+↓
+các frame tiếp tục chạy
+↓
+mỗi frame kiểm tra elapsed
+↓
+đủ ~590 ms và IO8 vẫn ON
+↓
+Confirm
+
+Hãy ưu tiên patch nhỏ nhất có thể.
+
+Logging:
+
+Chỉ thêm log tối thiểu nếu hệ thống hiện tại đã có logging tương ứng. Nên có dạng:
+
+IO8 candidate started
+IO8 candidate cancelled: signal lost after XXX ms
+IO8 stable confirmed: XXX ms, N consecutive frames
+
+Không spam log từng frame.
+
+Sau khi sửa phải tự kiểm tra các case:
+
+CASE A – IO8 ổn định:
+IO8 ON
+→ tiếp tục scan khoảng 590 ms
+→ confirm đúng 1 lần
+→ sau đó flow STOP hiện tại mới chạy.
+
+CASE B – IO8 chập chờn:
+IO8 ON 200 ms
+→ IO8 OFF
+→ không confirm.
+
+CASE C:
+IO8 ON 400 ms
+→ OFF
+→ ON lại
+→ timer phải bắt đầu lại từ 0.
+
+CASE D:
+IO8 ON liên tục >590 ms
+→ chỉ confirm 1 lần, không lặp event ở các frame sau.
+
+CASE E:
+disconnect/model reset/new test cycle
+→ candidate cũ phải bị xóa hoàn toàn.
+
+CASE F:
+IO8 xuất hiện
+→ UI vẫn phản hồi ngay ở frame đầu tiên, không phải đợi 590 ms.
+
+Sau patch, mục tiêu trace JBZ phải chuyển từ hiện tại:
+
+IO8 ACTIVE
+↓
+16–32 ms
+↓
+STOP
+
+thành gần giống Htdrv3:
+
+IO8 ACTIVE
+↓
+tiếp tục scan realtime
+↓
+IO8 stable khoảng 0.59 s
+↓
+STOP
+
+Target thực tế:
+IO8_FIRST_ACTIVE → STOP ≈ 575–610 ms trong điều kiện IO8 ổn định.
+
+Không cố làm đúng 590.000 ms tuyệt đối vì STOP chỉ có thể xảy ra sau khi state machine/frame hiện tại quan sát được điều kiện; điều quan trọng là behavior tương đương Htdrv3 và không xác nhận ngay frame đầu.
+
+Trước khi sửa, tìm chính xác code path hiện tại:
+IO8 detected → product confirmed/test complete → STOP.
+
+Sau đó patch đúng điểm này, không thay đổi các hệ thống xung quanh.
+
+Sau khi hoàn tất:
+- build project;
+- chạy các test liên quan;
+- báo chính xác file nào đã sửa;
+- giải thích ngắn logic cũ và logic mới;
+- xác nhận rõ rằng Relay, IO4, scan cadence, protocol và UI không bị thay đổi.

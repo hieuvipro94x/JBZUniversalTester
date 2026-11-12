@@ -5,14 +5,27 @@ namespace JBZUniversalTester.Services;
 
 public static class StartupBootstrapService
 {
+    private static bool _allowNewDatabase;
     public static void EnsureFastConfiguration()
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
         {
+            bool existed = File.Exists(RuntimePaths.ConfigFile);
             IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateFastConfigurationForCurrentVersion();
+            _allowNewDatabase = !existed && migrated.Count == 0;
             if (migrated.Count > 0)
                 log.Application($"Fast configuration inherited: {string.Join(", ", migrated)}");
+
+            bool canonicalExisted = File.Exists(RuntimePaths.ConfigFile);
+            ProductionSettings production = ProductionConfigService.Load();
+            if (!canonicalExisted)
+                ProductionConfigService.Save(production);
+            else
+                ProductionConfigService.EnsureSavedOnStartup(production);
+
+            if (!canonicalExisted)
+                log.Application($"CONFIG_MIGRATION old -> {RuntimePaths.ConfigFile}");
         }
         catch (Exception ex)
         {
@@ -20,38 +33,45 @@ public static class StartupBootstrapService
         }
     }
 
-    public static void EnsureDeferredProductionFiles()
+    public static Task EnsureDeferredProductionFiles(bool failOnError = false)
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
         {
+            StationDatabaseMigrationService.EnsureForCurrentInstallation(_allowNewDatabase);
             IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateDeferredProductionDataForCurrentVersion();
             if (migrated.Count > 0)
                 log.Application($"Deferred production data inherited: {string.Join(", ", migrated)}");
 
-            _ = AppSettings.Load();
-            log.Application($"appsettings.json ready: {AppSettings.SettingsPath}");
-
             ProductionSettings production = ProductionConfigService.Load();
             ProductionConfigService.EnsureSavedOnStartup(production);
-            log.Application($"production.settings.json ready: {ProductionConfigService.JsonPath}");
-            if (File.Exists(ProductionConfigService.LegacyCfgPath))
-                log.Application($"compatibility cfg loaded: {ProductionConfigService.LegacyCfgPath}");
+            log.Application($"configuration ready: {RuntimePaths.ConfigFile}");
 
-            string historyDirectory = string.IsNullOrWhiteSpace(production.HistoryDirectory)
-                ? "Data/History"
-                : production.HistoryDirectory.Trim();
-            if (!Path.IsPathRooted(historyDirectory))
-                historyDirectory = Path.Combine(AppContext.BaseDirectory, historyDirectory);
+            var repository = new TestHistoryStore(RuntimePaths.DatabaseFile);
+            log.Application($"database ready: {RuntimePaths.DatabaseFile}");
 
-            string historyPath = Path.Combine(historyDirectory, "test-history.db");
-            _ = new TestHistoryStore(historyPath);
-            log.Application($"history database ready: {historyPath}");
-            log.Application("Deferred filesystem bootstrap completed.");
+            var partCounter = new PartCounterStore(RuntimePaths.PartCounterFile);
+            IReadOnlyList<PartCounterEntry> legacyCounters = partCounter.ReadAll();
+            int importedCounters = repository.ImportPartCountersOnce(
+                legacyCounters,
+                RuntimePaths.PartCounterFile);
+            if (importedCounters > 0)
+                log.Application($"PARTCNT_IMPORT rows={importedCounters}");
+            partCounter.MirrorAll(repository.GetAllProbeCounters());
+
+            // C:\Pass_ và C:\Error_ trên máy cũ có thể chứa hàng trăm file.
+            // Import chúng không phải điều kiện để kết nối bo/chọn mã; chờ tại
+            // đây từng làm startup dừng trước T3 và khóa toàn bộ nút vận hành.
+            log.Application(
+                "Critical filesystem bootstrap completed. Legacy history import is available from the History page.");
         }
         catch (Exception ex)
         {
             log.Error($"Deferred startup bootstrap error: {ex}");
+            if (failOnError) throw;
         }
+
+        return Task.CompletedTask;
     }
+
 }

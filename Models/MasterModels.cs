@@ -3,6 +3,60 @@
 /// <summary>
 /// Chuỗi xác nhận master hoàn toàn tự động. Production chỉ được mở khi state=Completed.
 /// </summary>
+public enum MasterSampleType { WrongWiring = 0, ShortCircuit = 1, OpenCircuit = 2 }
+
+[Flags]
+public enum MasterSampleSelection
+{
+    None = 0, WrongWiring = 1, ShortCircuit = 2, OpenCircuit = 4,
+    All = WrongWiring | ShortCircuit | OpenCircuit
+}
+
+public static class MasterSampleCatalog
+{
+    public static IReadOnlyList<MasterSampleType> RequiredFaultSamples { get; } =
+        Array.AsReadOnly(new[] { MasterSampleType.WrongWiring, MasterSampleType.ShortCircuit, MasterSampleType.OpenCircuit });
+    public static MasterSampleSelection SelectionFlag(MasterSampleType type) => type switch
+    {
+        MasterSampleType.ShortCircuit => MasterSampleSelection.ShortCircuit,
+        MasterSampleType.OpenCircuit => MasterSampleSelection.OpenCircuit,
+        _ => MasterSampleSelection.WrongWiring
+    };
+    public static MasterSampleType[] SelectedFaultSamples(MasterSampleSelection selection) =>
+        RequiredFaultSamples.Where(type => (selection & SelectionFlag(type)) != 0).ToArray();
+
+    public static string StepText(MasterSampleSelection selection, MasterSampleType? type, bool waitingForRemoval)
+    {
+        MasterSampleType[] samples = SelectedFaultSamples(selection);
+        int step = type is null ? 1 : Array.IndexOf(samples, type.Value) + 2;
+        return $"KIỂM TRA MẪU {(type is null ? "ĐẠT" : Name(type.Value))} {step}/{samples.Length + 1}" +
+            (waitingForRemoval ? "\nOK - THÁO MẪU" : string.Empty);
+    }
+    public static DateOnly ProductionDay(DateTime localTime) => DateOnly.FromDateTime(localTime.AddHours(-7));
+
+    public static string AuditTrace(bool goodSample, MasterSampleType type, int required, int detected,
+        bool passed, DateOnly productionDay, string sessionId) =>
+        $"MASTER ĐẦU CA | Ngày sản xuất {productionDay:yyyy-MM-dd} | " +
+        $"Phiên {sessionId} | Mẫu {(goodSample ? "ĐẠT" : "NG - " + Name(type))} | " +
+        (goodSample ? string.Empty : $"Số điểm {detected}/{required} | ") +
+        $"Xác nhận {(passed ? "ĐẠT" : "KHÔNG ĐẠT")}";
+
+    public static string Name(MasterSampleType type) => type switch
+    {
+        MasterSampleType.ShortCircuit => "CHẬP MẠCH",
+        MasterSampleType.OpenCircuit => "TUỘT TUÝT / ĐỨT DÂY",
+        _ => "SAI DÂY"
+    };
+    public static ProductFaultType FaultType(MasterSampleType type) => type switch
+    {
+        MasterSampleType.ShortCircuit => ProductFaultType.ShortCircuit,
+        MasterSampleType.OpenCircuit => ProductFaultType.OpenCircuit,
+        _ => ProductFaultType.WrongWiring
+    };
+}
+
+public sealed record MasterSequenceStep(string Name, string Status, bool IsCurrent);
+
 public enum MasterSequenceState
 {
     Disabled = 0,

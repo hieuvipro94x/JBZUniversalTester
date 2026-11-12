@@ -2,32 +2,24 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using JBZUniversalTester.Models;
 
 namespace JBZUniversalTester.Services;
 
 public static class ProductionConfigService
 {
-    private static readonly string[] LegacyTimingKeys =
-    [
-        nameof(ProductionSettings.IoScanIntervalMs),
-        nameof(ProductionSettings.ShortCircuitConfirmMs),
-        nameof(ProductionSettings.WrongConnectionConfirmMs),
-        nameof(ProductionSettings.ProductSettleTimeMs),
-        nameof(ProductionSettings.JigContactUnstableWindowMs),
-        nameof(ProductionSettings.ShortConfirmMs)
-    ];
-
+    public const string NoProductLabel = "NONE";
+    private static readonly object AtomicWriteGate = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
 
-    public static string ConfigDirectory => AppContext.BaseDirectory;
-    public static string JsonPath => Path.Combine(ConfigDirectory, "production.settings.json");
-    public static string LegacyCfgPath => Path.Combine(ConfigDirectory, "UniversalTester.cfg");
+    public static string ConfigDirectory => RuntimePaths.AppDirectory;
+    public static string ConfigPath => RuntimePaths.ConfigFile;
+    public static string JsonPath => RuntimePaths.LegacyProductionJson;
+    public static string LegacyCfgPath => RuntimePaths.LegacyConfigFile;
 
     public static ProductionSettings Load()
     {
@@ -36,7 +28,11 @@ public static class ProductionConfigService
 
         try
         {
-            if (File.Exists(JsonPath))
+            if (File.Exists(ConfigPath))
+            {
+                settings = LoadEnglishCfg(ConfigPath);
+            }
+            else if (File.Exists(JsonPath))
             {
                 string json = File.ReadAllText(JsonPath, Encoding.UTF8);
                 settings = JsonSerializer.Deserialize<ProductionSettings>(json, JsonOptions)
@@ -91,7 +87,23 @@ public static class ProductionConfigService
     {
         ArgumentNullException.ThrowIfNull(target);
         ProductionSettings source = Load();
+        CopyInto(target, source);
+    }
 
+    public static ProductionSettings LoadSavedSettings(string? path = null)
+    {
+        string file = path ?? ConfigPath;
+        if (!File.Exists(file))
+            throw new FileNotFoundException("Không tìm thấy file cấu hình vừa lưu; giữ nguyên cấu hình đang chạy.", file);
+        ProductionSettings settings = LoadEnglishCfgCore(file, requireSavedFields: true);
+        Normalize(settings);
+        return settings;
+    }
+
+    public static void CopyInto(ProductionSettings target, ProductionSettings source)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(source);
         foreach (var property in typeof(ProductionSettings).GetProperties())
         {
             if (property.CanRead && property.CanWrite)
@@ -105,46 +117,28 @@ public static class ProductionConfigService
         Directory.CreateDirectory(ConfigDirectory);
         Normalize(settings);
 
-        string json = SerializeSettingsForSave(settings);
-        AtomicWrite(JsonPath, json);
-        // Preserve compatibility on upgraded machines without creating a
-        // duplicate configuration file on a fresh installation.
-        if (File.Exists(LegacyCfgPath))
-            SaveLegacyCfg(settings, LegacyCfgPath);
+        SaveLegacyCfg(settings, ConfigPath);
     }
 
-    private static string SerializeSettingsForSave(ProductionSettings settings)
-    {
-        JsonNode? node = JsonSerializer.SerializeToNode(settings, JsonOptions);
-        if (node is not JsonObject root)
-            return JsonSerializer.Serialize(settings, JsonOptions);
-
-        foreach (string key in LegacyTimingKeys)
-            root.Remove(key);
-
-        return root.ToJsonString(JsonOptions);
-    }
     /// <summary>
-    /// V12: UniversalTester.cfg dùng tên key tiếng Anh 100% và ghi ĐẦY ĐỦ
-    /// mọi trường trên màn Cài đặt. Tên method được giữ để code cũ vẫn gọi được.
+    /// Writes required runtime settings and nonempty label overrides. Legacy
+    /// readers/method names remain supported; obsolete aliases are read only.
     /// </summary>
     public static void SaveLegacyCfg(ProductionSettings settings, string path)
     {
         Normalize(settings);
         var lines = new List<string>
         {
-            $"[BoardMode]{settings.BoardMode}",
-            $"[CardCount]{settings.CardCount}",
             $"[ExpansionCardCount]{settings.ExpansionCardCount}",
+            $"[StartCardNumber]{settings.StartCardNumber}",
             $"[IoConfirm1]{settings.IoConfirm1}",
             $"[IoConfirmN]{settings.IoConfirmN}",
             $"[UsbDelay]{settings.UsbDelay}",
-            $"[StartCardNumber]{settings.StartCardNumber}",
-            $"[UseTestPointer]{Bool(settings.UseTestPointer)}",
-            $"[ManualModeEnabled]{Bool(settings.ManualModeEnabled)}",
-            $"[AutoMasterSequence]{Bool(settings.AutoMasterSequence)}",
+            $"[ShowDiscardConfigurationNotice]{Bool(settings.ShowDiscardConfigurationNotice)}",
             $"[MasterFaultRequiredCount]{settings.MasterFaultRequiredCount}",
-            $"[WaterproofSerialPort]{settings.WaterproofSerialPort}",
+            $"[MasterSelectedFaultSamples]{(int)settings.MasterSelectedFaultSamples}",
+            $"[MasterOpenFaultRequiredCount]{settings.MasterOpenFaultRequiredCount}",
+            $"[MasterSampleType]{(int)settings.MasterSampleType}",
             $"[WaterProofPortName]{settings.WaterProofMachine.PortName}",
             $"[WaterProofBaudRate]{settings.WaterProofMachine.BaudRate}",
             $"[WaterProofAutoConnect]{Bool(settings.WaterProofMachine.AutoConnect)}",
@@ -158,11 +152,13 @@ public static class ProductionConfigService
             $"[DeviceNumber]{settings.DeviceNumber}",
             $"[OperatorCompany]{settings.OperatorCompany}",
             $"[ProductionLine]{settings.ProductionLine}",
-            $"[TemperatureTolerance]{F(settings.TemperatureTolerance)}",
-            $"[MinimumErrorLogValue]{settings.MinimumErrorLogValue}",
             $"[AutoSaveErrors]{Bool(settings.AutoSaveErrors)}",
             $"[EnableSystemLogs]{Bool(settings.EnableSystemLogs)}",
+            $"[WiringFaultConfirmationEnabled]{Bool(settings.WiringFaultConfirmationEnabled)}",
+            $"[MissingConnectionConfirmationEnabled]{Bool(settings.MissingConnectionConfirmationEnabled)}",
+            $"[MissingConnectionConfirmationSeconds]{settings.MissingConnectionConfirmationSeconds}",
             $"[ProbeReplacementThreshold]{settings.ProbeReplacementThreshold}",
+            $"[TestViewLanguage]{TestViewText.NormalizeLanguage(settings.TestViewLanguage)}",
             $"[Relay1JigPulseMs]{settings.Relay1JigPulseMs}",
             $"[Relay2MarkingPulseMs]{settings.Relay2MarkingPulseMs}",
             $"[JigEjectRelayEnabled]{Bool(settings.JigEjectRelayEnabled)}",
@@ -171,12 +167,7 @@ public static class ProductionConfigService
             $"[RelayWiringMode]{settings.RelayWiringMode}",
             $"[FaultJigRelayNumber]{settings.FaultJigRelayNumber}",
             $"[PassMarkingToJigDelayMs]{settings.PassMarkingToJigDelayMs}",
-            $"[StampDelayMs]{settings.Relay1JigPulseMs},{settings.Relay2MarkingPulseMs}", // compatibility
-            $"[OversizeWaitSeconds]{settings.OversizeWaitSeconds}",
-            $"[ShieldDelayMs]{settings.ShieldDelay}",
             $"[ResistanceDelayMs]{settings.ResistanceDelayMs}",
-            $"[SettingsPassword]{settings.Password}",
-
             $"[ItemHeight]{settings.ItemHeight}",
             $"[ScrollDelayMs]{settings.ScrollDelay}",
             $"[PageDelayMs]{settings.PageDelay}",
@@ -184,9 +175,11 @@ public static class ProductionConfigService
             $"[ShowConnector]{Bool(settings.ShowConnector)}",
 
             $"[LastThtPath]{settings.LastThtPath}",
-            $"[AutoPrintLabelOnPass]{Bool(settings.AutoPrintLabelOnPass)}",
+            $"[LastThtPartKey]{settings.LastThtPartKey}",
             $"[HistoryDirectory]{settings.HistoryDirectory}",
 
+            $"[BcwVehicleCode]{settings.Label.BcwVehicleCode}",
+            $"[BcwPosition]{settings.Label.BcwPosition}",
             $"[LabelPrinterName]{settings.Label.PrinterName}",
             $"[LabelPrinterCom]{settings.Label.PrinterCom}",
             $"[LabelWidthMm]{settings.Label.WidthMm}",
@@ -197,6 +190,11 @@ public static class ProductionConfigService
             $"[LabelCopies]{settings.Label.Copies}",
             $"[LabelTemplateType]{settings.Label.TemplateType}",
             $"[LabelTemplatePath]{settings.Label.TemplatePath}",
+            $"[LabelTemplateTEMTOBase64]{settings.Label.LargeTemplateOverrideBase64}",
+            $"[LabelTemplateTEMTOSQDZBase64]{settings.Label.LargeSqdzTemplateOverrideBase64}",
+            $"[LabelTemplateTEMBEBase64]{settings.Label.SmallTemplateOverrideBase64}",
+            $"[LabelTemplateTEMBEQRBase64]{settings.Label.SmallQrTemplateOverrideBase64}",
+            $"[LabelTemplateBCWBase64]{settings.Label.BcwTemplateOverrideBase64}",
             $"[LabelEncodingName]{settings.Label.EncodingName}",
             $"[LabelRawDestination]{settings.Label.RawDestination}",
             $"[LabelExternalHelperPath]{settings.Label.ExternalHelperPath}",
@@ -204,18 +202,17 @@ public static class ProductionConfigService
             $"[LabelExternalPrintFile]{settings.Label.ExternalPrintFile}"
         };
 
-        foreach ((string modelKey, int requiredCount) in settings.MasterFaultCountsByModel
+        foreach ((string productKey, string template) in settings.LabelTemplateTypesByProduct
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
-        {
-            string encodedKey = Uri.EscapeDataString(modelKey);
-            lines.Add($"[MasterFault.{encodedKey}]{requiredCount}");
-        }
+            lines.Add($"[Label.Product.{Uri.EscapeDataString(productKey)}]{NormalizeProductLabel(template)}");
 
         foreach ((string productKey, ProductLotSettings lot) in settings.LotSettingsByProduct
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
         {
             string encodedKey = Uri.EscapeDataString(productKey);
-            lines.Add($"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate}");
+            lines.Add(
+                $"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate};" +
+                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId};{lot.LastStartChangedDate};{(lot.DailyLotStartsAtZero ? 1 : 0)};{(lot.UseConfiguredStartLot ? 1 : 0)}");
         }
 
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
@@ -232,6 +229,23 @@ public static class ProductionConfigService
                 $"{Uri.EscapeDataString(profile.Channel3Connector)}");
         }
 
+        foreach ((string modelKey, ResistanceChannelSetting[] profile) in settings.ResistanceProfilesByModel
+                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            string encodedKey = Uri.EscapeDataString(modelKey);
+            // R1 keeps the explicit profile present (including all-disabled).
+            // Missing default slots are restored by the existing R1-R10 reader.
+            foreach (ResistanceChannelSetting resistance in ResistanceMeasurementPlan.Normalize(profile)
+                         .Where((slot, index) => index == 0 || slot.Enabled || slot.Channel != index + 1 ||
+                                                slot.MinOhm != 0 || slot.MaxOhm != 0))
+            {
+                lines.Add(
+                    $"[Resistance.Model.{encodedKey}.{resistance.Name}]" +
+                    $"{Bool(resistance.Enabled)};{resistance.Channel};" +
+                    $"{F(resistance.MinOhm)};{F(resistance.MaxOhm)}");
+            }
+        }
+
         foreach (ResistanceChannelSetting resistance in settings.ResistanceChannels)
         {
             lines.Add(
@@ -244,6 +258,12 @@ public static class ProductionConfigService
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
 
+        // Missing optional strings load their existing empty defaults.
+        lines.RemoveAll(line =>
+        {
+            string key = ParseCfgLine(line).Key;
+            return line.EndsWith(']') && (key.StartsWith("Label", StringComparison.Ordinal) || key == "BcwVehicleCode");
+        });
         AtomicWrite(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
@@ -287,7 +307,9 @@ public static class ProductionConfigService
         {
             lot = new ProductLotSettings
             {
+                StartLotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
                 LotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
+                BulkPrintLotNo = migrateCurrentLot ? Math.Max(0, settings.LotNo) : 0,
                 LotNoDate = migrateCurrentLot ? settings.LotNoDate : string.Empty
             };
             settings.LotSettingsByProduct[key] = lot;
@@ -295,15 +317,64 @@ public static class ProductionConfigService
         return lot;
     }
 
+    public static string GetProductLabelTemplate(ProductionSettings settings, string productKey) =>
+        LabelProfileResolver.NormalizeTemplateType(
+            settings.LabelTemplateTypesByProduct.TryGetValue(productKey, out string? template)
+                ? template : settings.Label.TemplateType);
+
+    public static bool IsProductLabelPrintingEnabled(ProductionSettings settings, string productKey) =>
+        !settings.LabelTemplateTypesByProduct.TryGetValue(productKey, out string? value) ||
+        !string.Equals(value, NoProductLabel, StringComparison.OrdinalIgnoreCase);
+
+    private static string NormalizeProductLabel(string? value) =>
+        string.Equals(value, NoProductLabel, StringComparison.OrdinalIgnoreCase)
+            ? NoProductLabel : LabelProfileResolver.NormalizeTemplateType(value);
+
+    public static void ApplyProductLabelTemplate(ProductionSettings settings, string productKey)
+    {
+        LabelSettings label = settings.Label;
+        if (!IsProductLabelPrintingEnabled(settings, productKey))
+        {
+            label.PreferSelectedTemplate = false;
+            return;
+        }
+        label.PreferSelectedTemplate = settings.LabelTemplateTypesByProduct.ContainsKey(productKey);
+        label.TemplateType = GetProductLabelTemplate(settings, productKey);
+        if (!label.PreferSelectedTemplate) return; // Preserve legacy global/custom dimensions.
+        (label.WidthMm, label.HeightMm) = label.TemplateType switch
+        {
+            LabelSettings.SmallTemplate => (60, 25),
+            LabelSettings.SmallQrTemplate or LabelSettings.BcwTemplate => (60, 15),
+            _ => (90, 15)
+        };
+    }
+
     public static void SetProductLot(
         ProductionSettings settings,
         string productKey,
-        long lotNo,
+        long startLotNo,
         string lotNoDate)
     {
         ProductLotSettings lot = GetOrCreateProductLot(settings, productKey, migrateCurrentLot: false);
-        lot.LotNo = Math.Max(0, lotNo);
-        lot.LotNoDate = (lotNoDate ?? string.Empty).Trim();
+        long normalizedStart = Math.Max(0, startLotNo);
+        string normalizedDate = (lotNoDate ?? string.Empty).Trim();
+        bool startChanged = normalizedStart != lot.StartLotNo;
+        if (startChanged || !string.Equals(normalizedDate, lot.LotNoDate, StringComparison.Ordinal))
+        {
+            // Giá trị nhập là số nền. Runtime sẽ cộng số PASS của ngày được
+            // chọn; lưu các cài đặt độc lập không cộng lại tiến độ lần nữa.
+            lot.DailyLotStartsAtZero = false;
+            lot.StartLotNo = normalizedStart;
+            if (startChanged)
+            {
+                lot.UseConfiguredStartLot = true;
+                lot.HistoryBatchId = Guid.NewGuid().ToString("N");
+                lot.LastStartChangedDate = normalizedDate;
+            }
+            lot.LotNo = normalizedStart;
+            lot.BulkPrintLotNo = normalizedStart;
+            lot.LotNoDate = normalizedDate;
+        }
         settings.LotNo = lot.LotNo;
         settings.LotNoDate = lot.LotNoDate;
     }
@@ -322,41 +393,50 @@ public static class ProductionConfigService
         ArgumentNullException.ThrowIfNull(model);
         Normalize(settings);
 
-        string primaryKey = GetMasterModelKey(model);
-        if (settings.MasterFaultCountsByModel.TryGetValue(primaryKey, out int count))
-            return Math.Clamp(count, 0, 99);
-
-        string pathKey = GetMasterModelKeyFromPath(model.SourcePath);
-        if (settings.MasterFaultCountsByModel.TryGetValue(pathKey, out count))
-            return Math.Clamp(count, 0, 99);
-
-        if (!string.IsNullOrWhiteSpace(model.ModelName) &&
-            settings.MasterFaultCountsByModel.TryGetValue(model.ModelName.Trim(), out count))
-            return Math.Clamp(count, 0, 99);
-
         return settings.MasterFaultRequiredCount;
     }
+
+    // Path/model overloads remain compatible with old callers and configuration
+    // files; Master requirements now come from the shared application settings.
+    public static MasterSampleType GetMasterSampleTypeForPath(ProductionSettings settings, string? path) =>
+        settings.MasterSampleType;
+
+    public static MasterSampleType GetMasterSampleType(ProductionSettings settings, ProductModel model) =>
+        settings.MasterSampleType;
+
+    public static int GetMasterSampleRequiredCount(ProductionSettings settings, ProductModel model) =>
+        GetMasterFaultRequiredCount(settings, model);
+
+    public static MasterSampleSelection GetMasterSelectedFaultSamplesForPath(ProductionSettings settings, string? path) =>
+        settings.MasterSelectedFaultSamples & MasterSampleSelection.All;
+
+    public static MasterSampleSelection GetMasterSelectedFaultSamples(ProductionSettings settings, ProductModel model) =>
+        GetMasterSelectedFaultSamplesForPath(settings, model.SourcePath);
+
+    public static void SetMasterSelectedFaultSamplesForPath(ProductionSettings settings, string? path, MasterSampleSelection selected) =>
+        settings.MasterSelectedFaultSamples = selected & MasterSampleSelection.All;
+
+    public static int GetMasterOpenFaultRequiredCountForPath(ProductionSettings settings, string? path) =>
+        Math.Clamp(settings.MasterOpenFaultRequiredCount, 1, 99);
+
+    public static int GetMasterOpenFaultRequiredCount(ProductionSettings settings, ProductModel model) =>
+        GetMasterOpenFaultRequiredCountForPath(settings, model.SourcePath);
+
+    public static void SetMasterOpenFaultRequiredCountForPath(ProductionSettings settings, string? path, int count) =>
+        settings.MasterOpenFaultRequiredCount = Math.Clamp(count, 1, 99);
 
     public static int GetMasterFaultRequiredCountForPath(ProductionSettings settings, string? path)
     {
         ArgumentNullException.ThrowIfNull(settings);
         Normalize(settings);
-        string key = GetMasterModelKeyFromPath(path);
-        return settings.MasterFaultCountsByModel.TryGetValue(key, out int count)
-            ? Math.Clamp(count, 0, 99)
-            : settings.MasterFaultRequiredCount;
+        return settings.MasterFaultRequiredCount;
     }
 
     public static void SetMasterFaultRequiredCountForPath(ProductionSettings settings, string? path, int count)
     {
         ArgumentNullException.ThrowIfNull(settings);
         Normalize(settings);
-        int normalized = Math.Clamp(count, 0, 99);
-        string key = GetMasterModelKeyFromPath(path);
-        if (string.Equals(key, "DEFAULT", StringComparison.OrdinalIgnoreCase))
-            settings.MasterFaultRequiredCount = normalized;
-        else
-            settings.MasterFaultCountsByModel[key] = normalized;
+        settings.MasterFaultRequiredCount = Math.Clamp(count, 0, 99);
     }
 
     public static WaterProofModelSettings GetWaterProofProfileForPath(
@@ -366,9 +446,10 @@ public static class ProductionConfigService
         ArgumentNullException.ThrowIfNull(settings);
         Normalize(settings);
         string key = GetMasterModelKeyFromPath(path);
-        return settings.WaterProofProfilesByModel.TryGetValue(key, out WaterProofModelSettings? profile)
-            ? profile.Clone()
-            : new WaterProofModelSettings();
+        bool hasSavedProfile = settings.WaterProofProfilesByModel.TryGetValue(key, out WaterProofModelSettings? profile);
+        // Automatic Leak has one source of truth: the profile saved in Settings
+        // for this product. THT flags/legacy sidecars must not enable channels.
+        return hasSavedProfile ? profile!.Clone() : new WaterProofModelSettings();
     }
 
     public static void SetWaterProofProfileForPath(
@@ -383,23 +464,76 @@ public static class ProductionConfigService
         settings.WaterProofProfilesByModel[key] = NormalizeWaterProofProfile(profile.Clone());
     }
 
+    public static ResistanceChannelSetting[] GetResistanceProfileForPath(
+        ProductionSettings settings,
+        string? path)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Normalize(settings);
+        string key = GetMasterModelKeyFromPath(path);
+        ResistanceChannelSetting[] source = settings.ResistanceProfilesByModel.TryGetValue(key, out ResistanceChannelSetting[]? profile)
+            ? profile
+            : settings.ResistanceChannels;
+        return ResistanceMeasurementPlan.Normalize(source)
+            .Select(CloneResistanceChannel)
+            .ToArray();
+    }
+
+    public static void SetResistanceProfileForPath(
+        ProductionSettings settings,
+        string? path,
+        IEnumerable<ResistanceChannelSetting> profile)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(profile);
+        Normalize(settings);
+        string key = GetMasterModelKeyFromPath(path);
+        ResistanceChannelSetting[] normalized = ResistanceMeasurementPlan.Normalize(profile.ToArray())
+            .Select(CloneResistanceChannel)
+            .ToArray();
+        settings.ResistanceProfilesByModel[key] = normalized;
+        settings.ResistanceChannels = normalized.Select(CloneResistanceChannel).ToArray();
+    }
+
+    private static ResistanceChannelSetting CloneResistanceChannel(ResistanceChannelSetting item) => new()
+    {
+        Enabled = item.Enabled,
+        Name = item.Name,
+        Channel = item.Channel,
+        MinOhm = item.MinOhm,
+        MaxOhm = item.MaxOhm
+    };
+
     public static void EnsureSavedOnStartup(ProductionSettings settings)
     {
         try
         {
-            if (!File.Exists(JsonPath))
+            if (!File.Exists(ConfigPath) || File.ReadLines(ConfigPath, Encoding.UTF8)
+                    .Select(ParseCfgLine)
+                    .Any(item => IsInternalOnlyConfigKey(item.Key)))
+            {
                 Save(settings);
+            }
         }
-        catch { /* startup không được treo chỉ vì thư mục readonly */ }
+        catch (Exception ex)
+        {
+            // Không chặn startup khi thư mục chỉ đọc, nhưng vẫn phải lưu dấu vết lỗi.
+            AsyncFileLogService.Current.Error($"Sanitize production config failed: {ex.Message}");
+        }
     }
 
-    private static ProductionSettings LoadEnglishCfg(string path)
+    private static ProductionSettings LoadEnglishCfg(string path) => LoadEnglishCfgCore(path, requireSavedFields: false);
+
+    private static ProductionSettings LoadEnglishCfgCore(string path, bool requireSavedFields)
     {
         var settings = new ProductionSettings();
-        var map = File.ReadLines(path, Encoding.UTF8)
+        var map = ReadCfgLines(path)
             .Select(ParseCfgLine)
             .Where(x => x.Key.Length > 0)
             .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        if (requireSavedFields && (!map.ContainsKey("ExpansionCardCount") ||
+            !map.ContainsKey("StartCardNumber") || !map.ContainsKey("IoConfirm1") || !map.ContainsKey("IoConfirmN")))
+            throw new InvalidDataException("File cấu hình vừa lưu chưa đầy đủ; giữ nguyên cấu hình đang chạy.");
 
         // Migration từ CFG gốc Htdrv: đọc cả key tiếng Hàn đã thấy trong file cũ,
         // sau lần Save tiếp theo toàn bộ file sẽ được ghi lại bằng key tiếng Anh.
@@ -407,24 +541,37 @@ public static class ProductionConfigService
         // (trace command=4 -> diagnostic 256 I/O), không phải card vật lý 32 I/O.
         // Nếu file mới có ExpansionCardCount thì ưu tiên key mới; nếu không dùng
         // CardCount/카드 수 làm số scan-unit 64 I/O.
-        string boardModeText = S(map, "BoardMode", settings.BoardMode.ToString());
-        if (Enum.TryParse(boardModeText, true, out BoardMode parsedBoardMode))
-            settings.BoardMode = parsedBoardMode;
         int legacyScanCount = IAny(map, settings.CardCount, "CardCount", "카드 수");
         int expansionModules = I(map, "ExpansionCardCount", legacyScanCount);
         settings.ExpansionCardCount = Math.Clamp(
             expansionModules,
             1,
-            BoardCapacity.MaxExpansionModuleCount);
+            BoardCapacity.MaxExpansionCardCount);
         settings.CardCount = settings.ExpansionCardCount;
         settings.IoConfirm1 = IAny(map, settings.IoConfirm1, "IoConfirm1", "IO1 확인");
         settings.IoConfirmN = IAny(map, settings.IoConfirmN, "IoConfirmN", "IOn 확인");
         settings.UsbDelay = IAny(map, settings.UsbDelay, "UsbDelay", "USB 지연");
         settings.StartCardNumber = I(map, "StartCardNumber", settings.StartCardNumber);
-        settings.UseTestPointer = B(map, "UseTestPointer", settings.UseTestPointer);
-        settings.ManualModeEnabled = B(map, "ManualModeEnabled", settings.ManualModeEnabled);
-        settings.AutoMasterSequence = B(map, "AutoMasterSequence", settings.AutoMasterSequence);
         settings.MasterFaultRequiredCount = I(map, "MasterFaultRequiredCount", settings.MasterFaultRequiredCount);
+        settings.MasterSelectedFaultSamples = (MasterSampleSelection)I(map, "MasterSelectedFaultSamples", (int)settings.MasterSelectedFaultSamples);
+        foreach ((string key, string value) in map)
+            if (key.StartsWith("MasterSelected.", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out int mask))
+                settings.MasterSelectedFaultSamplesByModel[Uri.UnescapeDataString(key["MasterSelected.".Length..])] = (MasterSampleSelection)mask;
+        settings.MasterOpenFaultRequiredCount = I(map, "MasterOpenFaultRequiredCount", settings.MasterOpenFaultRequiredCount);
+        settings.DiscardContactIo1 = I(map, "DiscardContactIo1", settings.DiscardContactIo1);
+        settings.DiscardContactIo2 = I(map, "DiscardContactIo2", settings.DiscardContactIo2);
+        settings.ShowDiscardConfigurationNotice = B(map, "ShowDiscardConfigurationNotice", settings.ShowDiscardConfigurationNotice);
+        foreach ((string key, string value) in map)
+            if (key.StartsWith("MasterOpenFault.", StringComparison.OrdinalIgnoreCase) && int.TryParse(value, out int count))
+                settings.MasterOpenFaultCountsByModel[Uri.UnescapeDataString(key["MasterOpenFault.".Length..])] = count;
+        settings.MasterSampleType = (MasterSampleType)I(map, "MasterSampleType", (int)settings.MasterSampleType);
+        foreach ((string key, string value) in map)
+        {
+            const string prefix = "MasterSample.";
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(value, out int type) && Enum.IsDefined(typeof(MasterSampleType), type))
+                settings.MasterSampleTypesByModel[Uri.UnescapeDataString(key[prefix.Length..])] = (MasterSampleType)type;
+        }
         settings.WaterproofSerialPort = I(map, "WaterproofSerialPort", settings.WaterproofSerialPort);
         settings.WaterProofMachine.PortName = S(map, "WaterProofPortName", settings.WaterProofMachine.PortName);
         settings.WaterProofMachine.BaudRate = I(map, "WaterProofBaudRate", settings.WaterProofMachine.BaudRate);
@@ -448,6 +595,17 @@ public static class ProductionConfigService
 
         foreach ((string key, string value) in map)
         {
+            const string prefix = "Label.Product.";
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string productKey = Uri.UnescapeDataString(key[prefix.Length..]);
+                if (!string.IsNullOrWhiteSpace(productKey))
+                    settings.LabelTemplateTypesByProduct[productKey] = NormalizeProductLabel(value);
+            }
+        }
+
+        foreach ((string key, string value) in map)
+        {
             const string prefix = "ProductLot.";
             if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -463,7 +621,22 @@ public static class ProductionConfigService
             settings.LotSettingsByProduct[productKey] = new ProductLotSettings
             {
                 LotNo = Math.Max(0, lotNo),
-                LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty
+                DailyLotStartsAtZero = parts.Length > 6 && parts[6].Trim() == "1",
+                UseConfiguredStartLot = parts.Length > 7 && parts[7].Trim() == "1",
+                HistoryBatchId = parts.Length > 4 ? parts[4] : string.Empty,
+                LastStartChangedDate = parts.Length > 5 ? parts[5].Trim() : string.Empty,
+                LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty,
+                StartLotNo = parts.Length > 2 &&
+                             long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long startLotNo)
+                    ? Math.Max(0, startLotNo)
+                    : Math.Max(0, lotNo),
+                BulkPrintLotNo = parts.Length > 3 &&
+                                 long.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out long bulkPrintLotNo)
+                    ? Math.Max(0, bulkPrintLotNo)
+                    : parts.Length > 2 &&
+                      long.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out long legacyStartLotNo)
+                        ? Math.Max(0, legacyStartLotNo)
+                        : Math.Max(0, lotNo)
             };
         }
 
@@ -478,8 +651,14 @@ public static class ProductionConfigService
         settings.MinimumErrorLogValue = I(map, "MinimumErrorLogValue", settings.MinimumErrorLogValue);
         settings.AutoSaveErrors = B(map, "AutoSaveErrors", settings.AutoSaveErrors);
         settings.EnableSystemLogs = B(map, "EnableSystemLogs", settings.EnableSystemLogs);
+        settings.WiringFaultConfirmationEnabled = B(
+            map,
+            "WiringFaultConfirmationEnabled",
+            settings.WiringFaultConfirmationEnabled);
 
         settings.IoScanIntervalMs = I(map, "IoScanIntervalMs", settings.IoScanIntervalMs);
+        settings.MissingConnectionConfirmationEnabled = B(map, "MissingConnectionConfirmationEnabled", settings.MissingConnectionConfirmationEnabled);
+        settings.MissingConnectionConfirmationSeconds = I(map, "MissingConnectionConfirmationSeconds", settings.MissingConnectionConfirmationSeconds);
         settings.OpenCircuitConfirmMs = I(map, "OpenCircuitConfirmMs", settings.OpenCircuitConfirmMs);
         settings.ShortConfirmMs = I(map, "ShortConfirmMs", settings.ShortConfirmMs);
         settings.ShortCircuitConfirmMs = I(map, "ShortCircuitConfirmMs", settings.ShortCircuitConfirmMs);
@@ -487,6 +666,7 @@ public static class ProductionConfigService
         settings.ProductSettleTimeMs = I(map, "ProductSettleTimeMs", settings.ProductSettleTimeMs);
         settings.JigContactUnstableWindowMs = I(map, "JigContactUnstableWindowMs", settings.JigContactUnstableWindowMs);
         settings.ProbeReplacementThreshold = L(map, "ProbeReplacementThreshold", settings.ProbeReplacementThreshold);
+        settings.TestViewLanguage = TestViewText.NormalizeLanguage(SAny(map, "vi", "TestViewLanguage"));
         settings.StampDelay = SAny(map, settings.StampDelay, "StampDelayMs", "스탬프 지연(msec)");
         bool hasSplitRelay = map.ContainsKey("Relay1JigPulseMs") || map.ContainsKey("Relay2MarkingPulseMs");
         if (hasSplitRelay)
@@ -512,8 +692,6 @@ public static class ProductionConfigService
         settings.OversizeWaitSeconds = I(map, "OversizeWaitSeconds", settings.OversizeWaitSeconds);
         settings.ShieldDelay = I(map, "ShieldDelayMs", settings.ShieldDelay);
         settings.ResistanceDelayMs = I(map, "ResistanceDelayMs", settings.ResistanceDelayMs);
-        settings.Password = S(map, "SettingsPassword", settings.Password);
-
         settings.ItemHeight = I(map, "ItemHeight", settings.ItemHeight);
         settings.ScrollDelay = I(map, "ScrollDelayMs", settings.ScrollDelay);
         settings.PageDelay = I(map, "PageDelayMs", settings.PageDelay);
@@ -521,9 +699,12 @@ public static class ProductionConfigService
         settings.ShowConnector = B(map, "ShowConnector", settings.ShowConnector);
 
         settings.LastThtPath = S(map, "LastThtPath", settings.LastThtPath);
+        settings.LastThtPartKey = S(map, "LastThtPartKey", settings.LastThtPartKey);
         settings.AutoPrintLabelOnPass = B(map, "AutoPrintLabelOnPass", settings.AutoPrintLabelOnPass);
         settings.HistoryDirectory = S(map, "HistoryDirectory", settings.HistoryDirectory);
 
+        settings.Label.BcwVehicleCode = S(map, "BcwVehicleCode", settings.Label.BcwVehicleCode);
+        settings.Label.BcwPosition = S(map, "BcwPosition", settings.Label.BcwPosition);
         settings.Label.PrinterName = S(map, "LabelPrinterName", settings.Label.PrinterName);
         settings.Label.PrinterCom = S(map, "LabelPrinterCom", settings.Label.PrinterCom);
         settings.Label.WidthMm = I(map, "LabelWidthMm", settings.Label.WidthMm);
@@ -534,6 +715,11 @@ public static class ProductionConfigService
         settings.Label.Copies = I(map, "LabelCopies", settings.Label.Copies);
         settings.Label.TemplateType = S(map, "LabelTemplateType", settings.Label.TemplateType);
         settings.Label.TemplatePath = S(map, "LabelTemplatePath", settings.Label.TemplatePath);
+        settings.Label.LargeTemplateOverrideBase64 = S(map, "LabelTemplateTEMTOBase64", settings.Label.LargeTemplateOverrideBase64);
+        settings.Label.LargeSqdzTemplateOverrideBase64 = S(map, "LabelTemplateTEMTOSQDZBase64", settings.Label.LargeSqdzTemplateOverrideBase64);
+        settings.Label.SmallTemplateOverrideBase64 = S(map, "LabelTemplateTEMBEBase64", settings.Label.SmallTemplateOverrideBase64);
+        settings.Label.SmallQrTemplateOverrideBase64 = S(map, "LabelTemplateTEMBEQRBase64", settings.Label.SmallQrTemplateOverrideBase64);
+        settings.Label.BcwTemplateOverrideBase64 = S(map, "LabelTemplateBCWBase64", settings.Label.BcwTemplateOverrideBase64);
         settings.Label.EncodingName = S(map, "LabelEncodingName", settings.Label.EncodingName);
         settings.Label.RawDestination = S(map, "LabelRawDestination", settings.Label.RawDestination);
         settings.Label.ExternalHelperPath = S(map, "LabelExternalHelperPath", settings.Label.ExternalHelperPath);
@@ -581,11 +767,40 @@ public static class ProductionConfigService
             if (parts.Length > 3 && double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double max)) channel.MaxOhm = max;
         }
 
+        foreach ((string key, string value) in map)
+        {
+            const string prefix = "Resistance.Model.";
+            if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+            string remainder = key[prefix.Length..];
+            int separator = remainder.LastIndexOf('.');
+            if (separator <= 0 || separator >= remainder.Length - 1)
+                continue;
+            string modelKey = Uri.UnescapeDataString(remainder[..separator]);
+            string channelName = remainder[(separator + 1)..];
+            ResistanceChannelSetting[] profile = settings.ResistanceProfilesByModel.TryGetValue(modelKey, out ResistanceChannelSetting[]? existing)
+                ? existing
+                : ResistanceMeasurementPlan.Normalize([]);
+            ResistanceChannelSetting? channel = profile.FirstOrDefault(item =>
+                string.Equals(item.Name, channelName, StringComparison.OrdinalIgnoreCase));
+            if (channel is null)
+                continue;
+            string[] parts = value.Split(';');
+            if (parts.Length > 0) channel.Enabled = ParseBool(parts[0], channel.Enabled);
+            if (parts.Length > 1 && int.TryParse(parts[1], out int c)) channel.Channel = c;
+            if (parts.Length > 2 && double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out double min)) channel.MinOhm = min;
+            if (parts.Length > 3 && double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out double max)) channel.MaxOhm = max;
+            settings.ResistanceProfilesByModel[modelKey] = profile;
+        }
+
         return settings;
     }
 
     private static void Normalize(ProductionSettings settings)
     {
+        settings.TestViewLanguage = TestViewText.NormalizeLanguage(settings.TestViewLanguage);
+        settings.AutoPrintLabelOnPass = true;
+        settings.MissingConnectionConfirmationSeconds = Math.Clamp(settings.MissingConnectionConfirmationSeconds, 1, 120);
         if (!Enum.IsDefined(typeof(BoardMode), settings.BoardMode))
             settings.BoardMode = BoardMode.Auto;
 
@@ -593,8 +808,32 @@ public static class ProductionConfigService
         settings.ResistanceChannels ??= [];
         settings.WaterProofMachine ??= new WaterProofMachineSettings();
         settings.WaterProofProfilesByModel ??= new Dictionary<string, WaterProofModelSettings>(StringComparer.OrdinalIgnoreCase);
+        settings.ResistanceProfilesByModel ??= new Dictionary<string, ResistanceChannelSetting[]>(StringComparer.OrdinalIgnoreCase);
         settings.MasterFaultCountsByModel ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        settings.MasterSelectedFaultSamples &= MasterSampleSelection.All;
+        settings.MasterSelectedFaultSamplesByModel = new Dictionary<string, MasterSampleSelection>(settings.MasterSelectedFaultSamplesByModel ?? new(), StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settings.MasterSelectedFaultSamplesByModel.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key)) settings.MasterSelectedFaultSamplesByModel.Remove(key);
+            else settings.MasterSelectedFaultSamplesByModel[key] &= MasterSampleSelection.All;
+        settings.MasterOpenFaultRequiredCount = Math.Clamp(settings.MasterOpenFaultRequiredCount, 1, 99);
+        settings.MasterOpenFaultCountsByModel = new Dictionary<string, int>(settings.MasterOpenFaultCountsByModel ?? new(), StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settings.MasterOpenFaultCountsByModel.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key)) settings.MasterOpenFaultCountsByModel.Remove(key);
+            else settings.MasterOpenFaultCountsByModel[key] = Math.Clamp(settings.MasterOpenFaultCountsByModel[key], 1, 99);
+        settings.MasterSampleTypesByModel = new Dictionary<string, MasterSampleType>(
+            settings.MasterSampleTypesByModel ?? new(), StringComparer.OrdinalIgnoreCase);
+        if (!Enum.IsDefined(settings.MasterSampleType))
+            settings.MasterSampleType = MasterSampleType.WrongWiring;
+        foreach (string key in settings.MasterSampleTypesByModel.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key) || !Enum.IsDefined(settings.MasterSampleTypesByModel[key]))
+                settings.MasterSampleTypesByModel.Remove(key);
         settings.LotSettingsByProduct ??= new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase);
+        settings.LabelTemplateTypesByProduct ??= new(StringComparer.OrdinalIgnoreCase);
+        if (settings.LabelTemplateTypesByProduct.Comparer != StringComparer.OrdinalIgnoreCase)
+            settings.LabelTemplateTypesByProduct = new(settings.LabelTemplateTypesByProduct, StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settings.LabelTemplateTypesByProduct.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key)) settings.LabelTemplateTypesByProduct.Remove(key);
+            else settings.LabelTemplateTypesByProduct[key] = NormalizeProductLabel(settings.LabelTemplateTypesByProduct[key]);
         if (settings.MasterFaultCountsByModel.Comparer != StringComparer.OrdinalIgnoreCase)
         {
             settings.MasterFaultCountsByModel = new Dictionary<string, int>(
@@ -606,6 +845,9 @@ public static class ProductionConfigService
             settings.WaterProofProfilesByModel = new Dictionary<string, WaterProofModelSettings>(
                 settings.WaterProofProfilesByModel,
                 StringComparer.OrdinalIgnoreCase);
+        if (settings.ResistanceProfilesByModel.Comparer != StringComparer.OrdinalIgnoreCase)
+            settings.ResistanceProfilesByModel = new Dictionary<string, ResistanceChannelSetting[]>(
+                settings.ResistanceProfilesByModel, StringComparer.OrdinalIgnoreCase);
         }
         if (settings.LotSettingsByProduct.Comparer != StringComparer.OrdinalIgnoreCase)
         {
@@ -638,7 +880,13 @@ public static class ProductionConfigService
                 settings.LotSettingsByProduct.Remove(key);
                 continue;
             }
+            if (lot.StartLotNo < 0)
+                lot.StartLotNo = lot.LotNo;
+            lot.StartLotNo = Math.Max(0, lot.StartLotNo);
             lot.LotNo = Math.Max(0, lot.LotNo);
+            if (lot.BulkPrintLotNo < 0)
+                lot.BulkPrintLotNo = lot.StartLotNo;
+            lot.BulkPrintLotNo = Math.Max(0, lot.BulkPrintLotNo);
             lot.LotNoDate = (lot.LotNoDate ?? string.Empty).Trim();
         }
         ProductionTimingPolicy.Normalize(settings);
@@ -648,14 +896,15 @@ public static class ProductionConfigService
         settings.ExpansionCardCount = Math.Clamp(
             settings.ExpansionCardCount,
             1,
-            BoardCapacity.MaxExpansionModuleCount);
+            BoardCapacity.MaxExpansionCardCount);
 
-        int activePhysicalCards =
-            settings.ExpansionCardCount * BoardCapacity.PhysicalCardsPerExpansionModule;
-        int maxStartCard = Math.Max(
+        settings.StartCardNumber = Math.Clamp(
+            settings.StartCardNumber,
             1,
-            BoardCapacity.MaxPhysicalCardCount - activePhysicalCards + 1);
-        settings.StartCardNumber = Math.Clamp(settings.StartCardNumber, 1, maxStartCard);
+            BoardCapacity.MaxExpansionCardCount);
+        settings.ExpansionCardCount = Math.Min(
+            settings.ExpansionCardCount,
+            BoardCapacity.MaxExpansionCardCount - settings.StartCardNumber + 1);
 
         BoardCapacity capacity = BoardCapacity.FromSettings(settings);
         settings.CardCount = capacity.ScanCardCount;
@@ -663,7 +912,9 @@ public static class ProductionConfigService
         settings.WaterProofMachine.PortName = (settings.WaterProofMachine.PortName ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(settings.WaterProofMachine.PortName) && settings.WaterproofSerialPort > 0)
             settings.WaterProofMachine.PortName = $"COM{settings.WaterproofSerialPort}";
-        settings.WaterProofMachine.BaudRate = Math.Clamp(settings.WaterProofMachine.BaudRate, 1200, 921600);
+        // Máy Leak dùng giao thức cố định 115200 8N1; không cho cấu hình cũ
+        // hoặc dữ liệu nhập tay làm runtime mở sai tốc độ.
+        settings.WaterProofMachine.BaudRate = WaterProofMachineSettings.DefaultBaudRate;
         settings.WaterProofMachine.ReadTimeoutMs = Math.Clamp(settings.WaterProofMachine.ReadTimeoutMs, 100, 30_000);
         settings.WaterProofMachine.WriteTimeoutMs = Math.Clamp(settings.WaterProofMachine.WriteTimeoutMs, 100, 30_000);
         if (settings.WaterProofMachine.PortName.StartsWith("COM", StringComparison.OrdinalIgnoreCase) &&
@@ -702,7 +953,7 @@ public static class ProductionConfigService
         settings.MinimumErrorLogValue = Math.Max(0, settings.MinimumErrorLogValue);
 
         settings.HistoryDirectory = string.IsNullOrWhiteSpace(settings.HistoryDirectory)
-            ? "Data/History"
+            ? "Data"
             : settings.HistoryDirectory.Trim();
 
         settings.Label.WidthMm = Math.Clamp(settings.Label.WidthMm, 20, 200);
@@ -713,6 +964,11 @@ public static class ProductionConfigService
         settings.Label.Copies = 1;
         settings.Label.TemplateType = LabelProfileResolver.NormalizeTemplateType(settings.Label.TemplateType);
         settings.Label.TemplatePath = (settings.Label.TemplatePath ?? string.Empty).Trim();
+        settings.Label.LargeTemplateOverrideBase64 = (settings.Label.LargeTemplateOverrideBase64 ?? string.Empty).Trim();
+        settings.Label.LargeSqdzTemplateOverrideBase64 = (settings.Label.LargeSqdzTemplateOverrideBase64 ?? string.Empty).Trim();
+        settings.Label.SmallTemplateOverrideBase64 = (settings.Label.SmallTemplateOverrideBase64 ?? string.Empty).Trim();
+        settings.Label.SmallQrTemplateOverrideBase64 = (settings.Label.SmallQrTemplateOverrideBase64 ?? string.Empty).Trim();
+        settings.Label.BcwTemplateOverrideBase64 = (settings.Label.BcwTemplateOverrideBase64 ?? string.Empty).Trim();
         settings.Label.EncodingName = string.IsNullOrWhiteSpace(settings.Label.EncodingName)
             ? "us-ascii"
             : settings.Label.EncodingName.Trim();
@@ -753,6 +1009,16 @@ public static class ProductionConfigService
         if (close <= 1) return (string.Empty, string.Empty);
         return (line[1..close].Trim(), line[(close + 1)..].Trim());
     }
+
+    private static bool IsInternalOnlyConfigKey(string key) =>
+        key.StartsWith("App.", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("Version", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("BoardMode", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("UseTestPointer", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("ManualModeEnabled", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("AutoMasterSequence", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("SettingsPassword", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("DiscardPassword", StringComparison.OrdinalIgnoreCase);
 
     private static string S(Dictionary<string, string> map, string key, string fallback) => map.TryGetValue(key, out string? value) ? value : fallback;
     private static string SAny(Dictionary<string, string> map, string fallback, params string[] keys)
@@ -797,16 +1063,61 @@ public static class ProductionConfigService
 
     private static void AtomicWrite(string path, string text)
     {
+        // Settings workers and production LOT persistence may reach this file
+        // together. Keep the temporary file owned by one writer through replace.
+        lock (AtomicWriteGate)
+            AtomicWriteCore(path, text);
+    }
+
+    private static void AtomicWriteCore(string path, string text)
+    {
         string tmp = path + ".tmp";
-        File.WriteAllText(tmp, text, new UTF8Encoding(false));
-        if (File.Exists(path))
+        try
         {
-            try { File.Replace(tmp, path, path + ".bak", true); }
-            catch { File.Copy(tmp, path, true); File.Delete(tmp); }
+            using (var stream = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(false)))
+            {
+                writer.Write(text);
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(path))
+            {
+                try { File.Replace(tmp, path, null, true); }
+                catch (PlatformNotSupportedException) { File.Move(tmp, path, overwrite: true); }
+                catch (IOException) { File.Move(tmp, path, overwrite: true); }
+            }
+            else
+            {
+                File.Move(tmp, path);
+            }
         }
-        else
+        finally
         {
-            File.Move(tmp, path);
+            if (File.Exists(tmp))
+                File.Delete(tmp);
         }
+    }
+
+    internal static string[] ReadCfgLines(string path)
+    {
+        byte[] bytes = File.ReadAllBytes(path);
+        string text;
+        try
+        {
+            text = new UTF8Encoding(
+                encoderShouldEmitUTF8Identifier: false,
+                throwOnInvalidBytes: true).GetString(bytes);
+        }
+        catch (DecoderFallbackException)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            text = Encoding.GetEncoding(949).GetString(bytes);
+        }
+
+        return text.Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Split('\n');
     }
 }

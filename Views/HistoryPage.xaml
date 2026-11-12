@@ -1,63 +1,231 @@
-﻿<UserControl x:Class="JBZUniversalTester.Views.HistoryPage"
+<UserControl x:Class="JBZUniversalTester.Views.HistoryPage"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Background="#EEF1F4"
+        Background="{DynamicResource PageBackground}"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True"
-        PreviewKeyDown="Page_PreviewKeyDown">
+    PreviewKeyDown="Page_PreviewKeyDown" Foreground="{DynamicResource TextPrimary}">
 
     <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></ResourceDictionary.MergedDictionaries>
+        <!-- ===== Màu dùng chung ===== -->
+        <SolidColorBrush x:Key="HistoryBrandBlue" Color="{StaticResource BrandBlueValue}"/>
+        <SolidColorBrush x:Key="HistoryNeutralBackground" Color="{StaticResource ButtonNeutralBackgroundValue}"/>
+        <SolidColorBrush x:Key="HistoryNeutralForeground" Color="{StaticResource TextSecondaryValue}"/>
+        <SolidColorBrush x:Key="HistoryNeutralBorder" Color="{StaticResource InputBorderValue}"/>
+        <SolidColorBrush x:Key="HistoryExportLightBackground" Color="{StaticResource AccentTintValue}"/>
+        <SolidColorBrush x:Key="HistoryExportAction" Color="{StaticResource AccentBlueDarkValue}"/>
+        <SolidColorBrush x:Key="HistoryExitBackground" Color="{StaticResource ButtonNeutralBackgroundValue}"/>
+        <SolidColorBrush x:Key="HistoryExitForeground" Color="{StaticResource TextSecondaryValue}"/>
+        <SolidColorBrush x:Key="HistoryExitBorder" Color="{StaticResource InputBorderValue}"/>
+        <SolidColorBrush x:Key="HistoryPanelBorder" Color="{StaticResource BorderColorValue}"/>
+        <SolidColorBrush x:Key="HistoryTitleText" Color="{StaticResource TextPrimaryValue}"/>
+        <SolidColorBrush x:Key="HistoryMutedText" Color="{StaticResource TextMutedValue}"/>
+        <SolidColorBrush x:Key="HistoryPassText" Color="{StaticResource PassTextValue}"/>
+        <SolidColorBrush x:Key="HistoryPassSoft" Color="{StaticResource PassTintValue}"/>
+        <SolidColorBrush x:Key="HistoryFailSolid" Color="{StaticResource FailRedValue}"/>
+
+        <!-- Nút gọn. Đặt MinHeight rõ ràng vì style Button toàn cục có MinHeight 46,
+             nếu không đặt thì Height bị bỏ qua. -->
         <Style x:Key="CompactButton"
                TargetType="Button"
                BasedOn="{StaticResource {x:Type Button}}">
-            <Setter Property="Height" Value="32"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="MinHeight" Value="36"/>
             <Setter Property="MinWidth" Value="78"/>
             <Setter Property="Padding" Value="11,4"/>
             <Setter Property="Margin" Value="3,0"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Background" Value="{StaticResource HistoryNeutralBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryNeutralForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HistoryNeutralBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="ButtonBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="4"/>
+                            <Border x:Name="InteractionOverlay"
+                                    Background="{StaticResource InkBlack}"
+                                    CornerRadius="4"
+                                    IsHitTestVisible="False"
+                                    Opacity="0"/>
+                            <ContentPresenter
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.08"/>
+                            </MultiTrigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsPressed" Value="True"/>
+                                    <Condition Property="IsEnabled" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.16"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+                                <Setter Property="Foreground" Value="{StaticResource InputBorder}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
+        <Style x:Key="HistoryCsvButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryExportLightBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryExportAction}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentTintBorder}"/>
+        </Style>
+
+        <Style x:Key="HistoryExcelButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryExportAction}"/>
+            <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource AccentBlueDark}"/>
+        </Style>
+
+        <Style x:Key="HistorySearchButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryBrandBlue}"/>
+            <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BrandBlue}"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+        </Style>
+
+        <Style x:Key="HistoryLoadMoreButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+            <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource InputBorder}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Width" Value="180"/>
+            <Setter Property="MinWidth" Value="180"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="HistoryCloseButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource CompactButton}">
+            <Setter Property="Background" Value="{StaticResource HistoryExitBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource HistoryExitForeground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource HistoryExitBorder}"/>
+        </Style>
+
+        <!-- Ô lọc: cùng chiều cao 40 với nút trong hàng lọc để thẳng hàng -->
         <Style x:Key="FilterTextBox"
                TargetType="TextBox"
                BasedOn="{StaticResource {x:Type TextBox}}">
-            <Setter Property="Height" Value="46"/>
-            <Setter Property="MinWidth" Value="90"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinHeight" Value="40"/>
             <Setter Property="Padding" Value="8,3"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <Style x:Key="HistoryCalendarDayButtonStyle" TargetType="CalendarDayButton">
+            <Style.Triggers>
+                <Trigger Property="IsInactive" Value="True">
+                    <Setter Property="Visibility" Value="Hidden"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="HistoryCalendarStyle" TargetType="Calendar">
+            <Setter Property="CalendarDayButtonStyle" Value="{StaticResource HistoryCalendarDayButtonStyle}"/>
         </Style>
 
         <Style x:Key="FilterDatePicker"
                TargetType="DatePicker">
-            <Setter Property="Height" Value="46"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="CalendarStyle" Value="{StaticResource HistoryCalendarStyle}"/>
         </Style>
 
         <Style x:Key="FilterComboBox"
                TargetType="ComboBox">
-            <Setter Property="Height" Value="46"/>
-            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="MinHeight" Value="40"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
 
         <Style x:Key="FilterLabel" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="#5B6470"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
             <Setter Property="Margin" Value="1,0,0,3"/>
         </Style>
 
         <Style x:Key="HistoryHeaderStyle" TargetType="DataGridColumnHeader">
-            <Setter Property="MinWidth" Value="86"/>
-            <Setter Property="Background" Value="#E8EDF3"/>
-            <Setter Property="Foreground" Value="#293241"/>
+            <!-- MinWidth phải <= độ rộng cột nhỏ nhất (85), nếu lớn hơn thì header lấn sang
+                 cột bên cạnh và che mất vạch ngăn. -->
+            <Setter Property="MinWidth" Value="0"/>
+            <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="BorderBrush" Value="#C8D0D9"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
             <Setter Property="Padding" Value="6,4"/>
+            <!-- Template riêng: viền được snap theo pixel thiết bị nên vạch ngăn giữa
+                 các tiêu đề luôn hiện đủ, không biến mất khi scale DPI 125%/150%. -->
+            <Setter Property="UseLayoutRounding" Value="False"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridColumnHeader">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter ContentSource="Content"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              SnapsToDevicePixels="True"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
             <Setter Property="ContentTemplate">
                 <Setter.Value>
                     <DataTemplate>
@@ -70,6 +238,15 @@
         <Style x:Key="CenterCellText" TargetType="TextBlock">
             <Setter Property="HorizontalAlignment" Value="Center"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0"/>
+        </Style>
+
+        <Style x:Key="ResultCellText" TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Setter Property="Padding" Value="4,0"/>
         </Style>
 
         <Style x:Key="HistoryCellStyle" TargetType="DataGridCell">
@@ -78,11 +255,60 @@
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#DCEBFA"/>
-                    <Setter Property="Foreground" Value="#172B3A"/>
+                    <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+                    <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
+
+        <Style x:Key="HistoryCenterCellStyle"
+               TargetType="DataGridCell"
+               BasedOn="{StaticResource HistoryCellStyle}">
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- Ô KẾT QUẢ: PASS nền xanh nhạt (dịu mắt vì chiếm đa số),
+             lỗi nền đỏ đặc chữ trắng để nổi bật ngay khi quét bảng.
+             Các trigger khai báo sau trigger IsSelected của style gốc nên màu kết quả
+             vẫn hiện khi dòng được chọn.
+             LƯU Ý: so khớp theo đúng chuỗi HistoryResultText; nếu có giá trị khác
+             thì thêm DataTrigger tương ứng. -->
+        <Style x:Key="HistoryResultCellStyle"
+               TargetType="DataGridCell"
+               BasedOn="{StaticResource HistoryCenterCellStyle}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="PASS">
+                    <Setter Property="Background" Value="{StaticResource HistoryPassSoft}"/>
+                    <Setter Property="Foreground" Value="{StaticResource HistoryPassText}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="FAIL">
+                    <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="NG LEAK">
+                    <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="DÂY CHƯA KẾT NỐI">
+                    <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="ĐẤU SAI">
+                    <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="CHẬP MẠCH">
+                    <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="ĐIỆN TRỞ KHÔNG ĐẠT">
+                    <Setter Property="Background" Value="{StaticResource HistoryFailSolid}"/>
+                    <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+            </ResourceDictionary>
     </UserControl.Resources>
 
     <Grid Margin="6">
@@ -90,17 +316,17 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="28"/>
+            <RowDefinition Height="44"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
         <Border Grid.Row="0"
-                Background="White"
-                BorderBrush="#B8C2CC"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource HistoryPanelBorder}"
                 BorderThickness="1"
                 CornerRadius="3"
                 Padding="10,6"
-                MinHeight="56"
+                MinHeight="58"
                 Margin="0,0,0,4">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -108,38 +334,38 @@
                     <ColumnDefinition Width="92"/>
                     <ColumnDefinition Width="92"/>
                     <ColumnDefinition Width="92"/>
-                    <ColumnDefinition Width="300"/>
+                    <ColumnDefinition Width="430"/>
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                     <TextBlock Text="LỊCH SỬ KIỂM TRA"
                                FontSize="18"
                                FontWeight="Bold"
-                               Foreground="#243447"/>
+                               Foreground="{StaticResource HistoryTitleText}"/>
                     <TextBlock Text="Tra cứu nhanh, xem dữ liệu tem và xuất Excel theo mẫu chuẩn"
-                               FontSize="10.5"
-                               Foreground="#7A8490"
+                               FontSize="11.5"
+                               Foreground="{StaticResource TextMuted}"
                                Margin="0,1,0,0"/>
                 </StackPanel>
 
-                <Border Grid.Column="1" Background="#F2F5F8" CornerRadius="3" Margin="3,0" Padding="7,3">
+                <Border Grid.Column="1" Background="{StaticResource SurfaceAlt}" CornerRadius="3" Margin="3,0" Padding="7,3">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="TỔNG" FontSize="9.5" Foreground="#69737D" HorizontalAlignment="Center"/>
-                        <TextBlock x:Name="TotalCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="#22313F" HorizontalAlignment="Center"/>
+                        <TextBlock Text="TỔNG" FontSize="10.5" Foreground="{StaticResource TextMuted}" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="TotalCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="{StaticResource TextPrimary}" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="2" Background="#EEF8F1" CornerRadius="3" Margin="3,0" Padding="7,3">
+                <Border Grid.Column="2" Background="{StaticResource PassTint}" CornerRadius="3" Margin="3,0" Padding="7,3">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="PASS" FontSize="9.5" Foreground="#3E6D4D" HorizontalAlignment="Center"/>
-                        <TextBlock x:Name="PassCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="#16813A" HorizontalAlignment="Center"/>
+                        <TextBlock Text="PASS" FontSize="10.5" Foreground="{StaticResource PassText}" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="PassCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="{StaticResource PassText}" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="3" Background="#FFF0F0" CornerRadius="3" Margin="3,0" Padding="7,3">
+                <Border Grid.Column="3" Background="{StaticResource FailTint}" CornerRadius="3" Margin="3,0" Padding="7,3">
                     <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="FAIL" FontSize="9.5" Foreground="#8A4B4B" HorizontalAlignment="Center"/>
-                        <TextBlock x:Name="FailCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="#C62828" HorizontalAlignment="Center"/>
+                        <TextBlock Text="FAIL" FontSize="10.5" Foreground="{StaticResource FailText}" HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="FailCountText" Text="0" FontSize="17" FontWeight="Bold" Foreground="{StaticResource HistoryFailSolid}" HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
 
@@ -150,74 +376,55 @@
                             Margin="0">
                     <Button Content="CSV"
                             Width="78"
-                            Style="{StaticResource CompactButton}"
+                            Style="{StaticResource HistoryCsvButtonStyle}"
                             Click="ExportCsv_Click"/>
                     <Button Content="XUẤT EXCEL"
                             Width="112"
-                            Style="{StaticResource CompactButton}"
-                            Click="ExportXlsx_Click"
-                            Background="#DDEFD9"
-                            BorderBrush="#8AB681"/>
-                    <Button Content="ĐÓNG"
+                            Style="{StaticResource HistoryExcelButtonStyle}"
+                            Click="ExportXlsx_Click"/>
+                    <Button x:Name="CloseButton"
+                            Content="ĐÓNG"
                             Width="78"
-                            Style="{StaticResource CompactButton}"
-                            BorderBrush="#7F8790"
-                            BorderThickness="1"
+                            Style="{StaticResource HistoryCloseButtonStyle}"
                             Click="Close_Click"/>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Compact filters -->
+        <!-- Bộ lọc: WrapPanel tự xuống dòng khi màn hình hẹp, không còn cuộn ngang.
+             Thứ tự: thời gian → đối tượng → loại/kết quả → nút hành động. -->
         <Border Grid.Row="1"
-                Background="White"
-                BorderBrush="#B8C2CC"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource HistoryPanelBorder}"
                 BorderThickness="1"
                 CornerRadius="3"
-                Padding="8,6"
-                MinHeight="62"
+                Padding="10,8,10,4"
                 Margin="0,0,0,4">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Disabled">
-            <Grid MinWidth="1030">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="142"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="142"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="105"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="220"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="175"/>
-                    <ColumnDefinition Width="10"/>
-                    <ColumnDefinition Width="106"/>
-                    <ColumnDefinition Width="8"/>
-                    <ColumnDefinition Width="92"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-
-                <StackPanel Grid.Column="0" VerticalAlignment="Top">
+            <WrapPanel Orientation="Horizontal">
+                <StackPanel Width="150" Margin="0,0,10,6">
                     <TextBlock Text="Từ ngày" Style="{StaticResource FilterLabel}"/>
                     <DatePicker x:Name="FromDatePicker" Style="{StaticResource FilterDatePicker}"/>
                 </StackPanel>
 
-                <StackPanel Grid.Column="2" VerticalAlignment="Top">
+                <StackPanel Width="150" Margin="0,0,10,6">
                     <TextBlock Text="Đến ngày" Style="{StaticResource FilterLabel}"/>
                     <DatePicker x:Name="ToDatePicker" Style="{StaticResource FilterDatePicker}"/>
                 </StackPanel>
 
-                <StackPanel Grid.Column="4" VerticalAlignment="Top">
-                    <TextBlock Text="LOTNO" Style="{StaticResource FilterLabel}"/>
+                <StackPanel Width="120" Margin="0,0,10,6">
+                    <TextBlock Text="Số đếm PASS" Style="{StaticResource FilterLabel}"/>
                     <TextBox x:Name="LotTextBox" Style="{StaticResource FilterTextBox}"/>
                 </StackPanel>
 
-                <StackPanel Grid.Column="6" VerticalAlignment="Top">
-                    <TextBlock Text="Mã hàng / tên hàng" Style="{StaticResource FilterLabel}"/>
-                    <TextBox x:Name="PartTextBox" Style="{StaticResource FilterTextBox}"/>
+                <StackPanel Width="230" Margin="0,0,10,6">
+                    <TextBlock Text="File THT" Style="{StaticResource FilterLabel}"/>
+                    <ComboBox x:Name="PartComboBox"
+                              Style="{StaticResource FilterComboBox}"
+                              DisplayMemberPath="Display"
+                              SelectedValuePath="Keyword"/>
                 </StackPanel>
 
-                <StackPanel Grid.Column="8" VerticalAlignment="Top">
+                <StackPanel Width="200" Margin="0,0,10,6">
                     <TextBlock Text="Kết quả" Style="{StaticResource FilterLabel}"/>
                     <ComboBox x:Name="ResultComboBox"
                               Style="{StaticResource FilterComboBox}"
@@ -232,33 +439,48 @@
                     </ComboBox>
                 </StackPanel>
 
-                <Button Grid.Column="10"
-                        Content="TÌM KIẾM"
-                        Width="106"
-                        Margin="0"
-                        VerticalAlignment="Bottom"
-                        Style="{StaticResource CompactButton}"
-                        Click="Search_Click"
-                        Background="#DDEBF7"
-                        BorderBrush="#83A9C7"
-                        FontWeight="Bold"/>
-                <Button Grid.Column="12"
-                        Content="XÓA LỌC"
-                        Width="92"
-                        Margin="0"
-                        VerticalAlignment="Bottom"
-                        Style="{StaticResource CompactButton}"
-                        Click="ClearFilter_Click"/>
-            </Grid>
-            </ScrollViewer>
+                <!-- Chuỗi tiếng Hàn giữ nguyên làm chú thích; Tag (giá trị lọc) không đổi -->
+                <StackPanel Width="270" Margin="0,0,14,6">
+                    <TextBlock Text="Loại kiểm tra" Style="{StaticResource FilterLabel}"/>
+                    <ComboBox x:Name="InspectionTypeComboBox"
+                              Style="{StaticResource FilterComboBox}"
+                              SelectedIndex="0">
+                        <ComboBoxItem Content="TẤT CẢ" Tag=""/>
+                        <ComboBoxItem Content="PRODUCTION" Tag="PRODUCT"/>
+                        <ComboBoxItem Content="MẪU TỐT (정상 마스터)" Tag="MASTER_GOOD"/>
+                        <ComboBoxItem Content="MẪU XẤU (불량 마스터)" Tag="MASTER_BAD"/>
+                        <ComboBoxItem Content="KIỂM TRA KÍN KHÍ (기밀 검사 시작)" Tag="LEAK_RETEST"/>
+                    </ComboBox>
+                </StackPanel>
+
+                <!-- Nhãn rỗng để hai nút thẳng hàng đáy với các ô lọc -->
+                <StackPanel Margin="0,0,0,6">
+                    <TextBlock Text="&#160;" Style="{StaticResource FilterLabel}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="TÌM KIẾM"
+                                Width="110"
+                                Height="40" MinHeight="40"
+                                Margin="0,0,8,0"
+                                Style="{StaticResource HistorySearchButtonStyle}"
+                                Click="Search_Click"/>
+                        <Button Content="XÓA LỌC"
+                                Width="96"
+                                Height="40" MinHeight="40"
+                                Margin="0"
+                                Style="{StaticResource CompactButton}"
+                                Click="ClearFilter_Click"/>
+                    </StackPanel>
+                </StackPanel>
+            </WrapPanel>
         </Border>
 
-        <!-- History table -->
+        <!-- Bảng lịch sử -->
         <Border Grid.Row="2"
-                Background="White"
-                BorderBrush="#C8D0D9"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource BorderColor}"
                 BorderThickness="1"
                 CornerRadius="2">
+            <!-- 4 cột đóng băng: Ngày, Thời gian, Mã hàng, Kết quả (~500px) -->
             <DataGrid x:Name="HistoryGrid"
                       AutoGenerateColumns="False"
                       IsReadOnly="True"
@@ -271,89 +493,145 @@
                       ScrollViewer.VerticalScrollBarVisibility="Auto"
                       GridLinesVisibility="Horizontal"
                       HeadersVisibility="Column"
-                      RowHeight="28"
-                      ColumnHeaderHeight="36"
-                      FontSize="11"
-                      Background="White"
+                      RowHeight="32"
+                      ColumnHeaderHeight="40"
+                      FontSize="13"
+                      Background="{StaticResource PanelBackground}"
                       BorderThickness="0"
                       SelectionMode="Extended"
                       SelectionUnit="FullRow"
-                      AlternatingRowBackground="#F8FAFC"
-                      RowBackground="White"
+                      AlternatingRowBackground="{StaticResource SurfaceAlt}"
+                      RowBackground="{StaticResource PanelBackground}"
                       FrozenColumnCount="4"
                       CellStyle="{StaticResource HistoryCellStyle}"
                       ColumnHeaderStyle="{StaticResource HistoryHeaderStyle}"
                       EnableRowVirtualization="True"
-                      EnableColumnVirtualization="True">
+                      EnableColumnVirtualization="True"
+                      VirtualizingPanel.IsVirtualizing="True"
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      ToolTipOpening="HistoryGrid_ToolTipOpening">
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
-                        <Setter Property="BorderBrush" Value="#E1E6EB"/>
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
                         <Setter Property="BorderThickness" Value="0,0,0,1"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding Passed}" Value="True">
-                                <Setter Property="ToolTip" Value="Kết quả PASS"/>
-                            </DataTrigger>
-                        </Style.Triggers>
+                        <Setter Property="Height" Value="32"/>
+                        <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
                     </Style>
                 </DataGrid.RowStyle>
+                <DataGrid.Resources>
+                    <Style TargetType="ToolTip">
+                        <Setter Property="MaxWidth" Value="1100"/>
+                        <Setter Property="ContentTemplate">
+                            <Setter.Value>
+                                <DataTemplate>
+                                    <ScrollViewer MaxHeight="560" VerticalScrollBarVisibility="Auto">
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" MaxWidth="1050"/>
+                                    </ScrollViewer>
+                                </DataTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </DataGrid.Resources>
 
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="100"/>
-                    <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="90"/>
-                    <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180"/>
-                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150"/>
-                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150"/>
-                    <DataGridTextColumn Header="Loại xe" Binding="{Binding VehicleType}" Width="115"/>
-                    <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110"/>
-                    <DataGridTextColumn Header="Kết quả" Binding="{Binding ExportResultText}" Width="85" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Số thứ tự" Binding="{Binding ExportSequenceNo}" Width="100" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTemplateColumn Header="Hồ sơ kiểm tra" Width="1200">
+                    <!-- ===== Nhóm đóng băng ===== -->
+                    <!-- Ngày/Thời gian = thời điểm BẮT ĐẦU TEST (EffectiveTestStartedAt).
+                         TestHistoryStore sắp xếp từ cũ đến mới theo timestamp này. -->
+                    <DataGridTextColumn Header="Ngày" Binding="{Binding DateText}" Width="95" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Thời gian" Binding="{Binding TimeText}" Width="85" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Mã hàng" Binding="{Binding PartNumber}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Kết quả" Binding="{Binding HistoryResultText}" Width="170" CellStyle="{StaticResource HistoryResultCellStyle}" ElementStyle="{StaticResource ResultCellText}"/>
+
+                    <!-- ===== Nhóm cuộn ===== -->
+                    <DataGridTextColumn x:Name="FileColumn" Header="File" Binding="{Binding ExportModelFileName}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
+                                <Setter Property="TextWrapping" Value="NoWrap"/>
+                                <Setter Property="ToolTip" Value="{Binding ExportModelFileName}"/>
+                                <Setter Property="ToolTipService.InitialShowDelay" Value="150"/>
+                                <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="200" CellStyle="{StaticResource HistoryCenterCellStyle}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
+                                <Setter Property="TextWrapping" Value="NoWrap"/>
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Header="Tên sản phẩm" Binding="{Binding PartName}" Width="150" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Eco" Binding="{Binding Eco}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Nco" Binding="{Binding Nco}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Alc" Binding="{Binding Alc}" Width="140" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="KẾT QUẢ" Binding="{Binding ExportProgressText}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Số đếm PASS" Binding="{Binding ExportPassCountText}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <!-- Thu từ 1200 xuống 420: nội dung đầy đủ có ở tooltip khi ô bị cắt -->
+                    <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="420" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding ExportTestLogText}"
-                                           ToolTip="{Binding ExportTestLogText}"
-                                           TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap"/>
+                                <TextBlock Text="{Binding HistoryTestLogSingleLineText}"
+                                           ToolTip="{Binding HistoryTestLogText}"
+                                           ToolTipService.ShowDuration="60000"
+                                           HorizontalAlignment="Stretch"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                           TextAlignment="Left" Margin="6,0"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTemplateColumn Header="Mã vạch" Width="260">
+                    <DataGridTextColumn Header="Mã vạch đầu vào" Binding="{Binding ExportBarcodeInputText}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTemplateColumn Header="Mã vạch đầu ra" Width="260" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding ExportBarcodeText}"
-                                           ToolTip="{Binding ExportBarcodeText}"
+                                <TextBlock Text="{Binding BarcodeOutputText}"
+                                           ToolTip="{Binding BarcodeOutputText}"
                                            TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap"/>
+                                           TextWrapping="NoWrap"
+                                           HorizontalAlignment="Stretch"
+                                           VerticalAlignment="Center"
+                                           TextAlignment="Center"
+                                           Margin="0"/>
                             </DataTemplate>
                         </DataGridTemplateColumn.CellTemplate>
                     </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="200 %" Binding="{Binding ExportPercentText}" Width="80"/>
-                    <DataGridTextColumn Header="Kiểm tra đầu vào" Binding="{Binding ExportIncomingInspectionText}" Width="130"/>
-                    <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="220"/>
+                    <DataGridTextColumn Header="Đo lường" Binding="{Binding ExportResistanceText}" Width="240" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Chương trình" Binding="{Binding HtdrvName}" Width="220" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Nội dung" Binding="{Binding ExportContentText}" Width="300" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="Ghi chú" Width="160" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                 </DataGrid.Columns>
             </DataGrid>
         </Border>
 
-        <!-- Status bar -->
+        <!-- Thanh trạng thái -->
         <Grid Grid.Row="3" Margin="2,4,2,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="310"/>
+                <ColumnDefinition Width="196"/>
+                <ColumnDefinition Width="340"/>
             </Grid.ColumnDefinitions>
 
             <TextBlock x:Name="SummaryText"
                        Grid.Column="0"
                        VerticalAlignment="Center"
-                       Foreground="#66717C"
-                       FontSize="10.5"
+                       Foreground="{StaticResource HistoryMutedText}"
+                       FontSize="13"
                        TextTrimming="CharacterEllipsis"/>
 
-            <TextBlock Grid.Column="1"
-                       Text="Enter: tìm kiếm  •  Có thể kéo giãn và sắp xếp cột"
+            <Button x:Name="LoadMoreButton"
+                    Grid.Column="1"
+                    Content="XEM THÊM LỊCH SỬ"
+                    Style="{StaticResource HistoryLoadMoreButtonStyle}"
+                    Click="LoadMore_Click"/>
+
+            <TextBlock Grid.Column="2"
+                       Text="Enter: tìm kiếm  •  Rê chuột vào dòng để xem hồ sơ"
                        VerticalAlignment="Center"
-                       Foreground="#9098A1"
-                       FontSize="10"
+                       Foreground="{StaticResource TextMuted}"
+                       FontSize="11.5"
                        Margin="12,0,2,0"/>
         </Grid>
     </Grid>

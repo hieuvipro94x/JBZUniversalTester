@@ -1,170 +1,342 @@
-﻿<Window x:Class="JBZUniversalTester.Views.MainWindow"
+<Window x:Class="JBZUniversalTester.Views.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:JBZUniversalTester.Views"
         Title="UniversalTester - JBZ Production"
         WindowState="Maximized"
         WindowStyle="None"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
-        Background="#FFFFFF"
+        Background="{DynamicResource PageBackground}"
+        Foreground="{DynamicResource TextPrimary}"
         FontFamily="Segoe UI"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         Loaded="MainWindow_Loaded"
         Closing="MainWindow_Closing">
 
     <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
 
-        <SolidColorBrush x:Key="PageBackground" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="TextPrimary" Color="#555555"/>
-        <SolidColorBrush x:Key="TextMuted" Color="#777777"/>
-        <SolidColorBrush x:Key="BrandBlue" Color="#273F91"/>
-        <SolidColorBrush x:Key="StatusPurple" Color="#8E44AD"/>
+            <!-- ============ NÚT CƠ SỞ ============ -->
+            <Style x:Key="FlatButton" TargetType="Button">
+                <Setter Property="Height" Value="50"/>
+                <Setter Property="Margin" Value="3"/>
+                <Setter Property="MinWidth" Value="0"/>
+                <Setter Property="Padding" Value="12,6"/>
+                <Setter Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
+                <Setter Property="Foreground" Value="{StaticResource ButtonNeutralForeground}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource ButtonNeutralBorder}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="FontSize" Value="14"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid>
+                                <Border x:Name="ButtonBorder"
+                                        Background="{TemplateBinding Background}"
+                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                        CornerRadius="5"/>
+                                <!-- Lớp tương tác làm tối chính màu của từng nút -->
+                                <Border x:Name="InteractionOverlay"
+                                        Background="{StaticResource InkBlack}"
+                                        CornerRadius="5"
+                                        IsHitTestVisible="False"
+                                        Opacity="0"/>
+                                <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="{TemplateBinding Padding}">
+                                    <ContentPresenter
+                                        HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                                </Viewbox>
+                            </Grid>
+                            <ControlTemplate.Triggers>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsMouseOver" Value="True"/>
+                                        <Condition Property="IsEnabled" Value="True"/>
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.08"/>
+                                </MultiTrigger>
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsPressed" Value="True"/>
+                                        <Condition Property="IsEnabled" Value="True"/>
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0.16"/>
+                                </MultiTrigger>
+                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                    <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource AccentBlue}"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource ButtonNeutralBackground}"/>
+                                    <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+                                    <Setter Property="Foreground" Value="{StaticResource InputBorder}"/>
+                                    <Setter Property="Cursor" Value="Arrow"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
 
-        <Style x:Key="FlatButton" TargetType="Button">
-            <Setter Property="Height" Value="50"/>
-            <Setter Property="Margin" Value="3"/>
-            <Setter Property="Padding" Value="12,6"/>
-            <Setter Property="Background" Value="#EFEFEE"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="BorderBrush" Value="#666666"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource FlatButton}">
+                <Setter Property="Height" Value="50"/>
+                <Setter Property="Background" Value="{StaticResource BrandBlue}"/>
+                <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BrandDark}"/>
+                <Setter Property="FontSize" Value="18"/>
+                <Setter Property="FontWeight" Value="Bold"/>
+            </Style>
 
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="ButtonBorder"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}">
+            <Style x:Key="HistoryButtonStyle" TargetType="Button" BasedOn="{StaticResource FlatButton}"/>
+            <Style x:Key="SettingsButtonStyle" TargetType="Button" BasedOn="{StaticResource FlatButton}"/>
+            <Style x:Key="TopologyButtonStyle" TargetType="Button" BasedOn="{StaticResource FlatButton}"/>
 
-                            <ContentPresenter
-                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                Margin="{TemplateBinding Padding}"/>
-                        </Border>
+            <Style x:Key="ModelButtonStyle" TargetType="Button" BasedOn="{StaticResource FlatButton}">
+                <Setter Property="Background" Value="{StaticResource AccentBlue}"/>
+                <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource AccentBlueDark}"/>
+            </Style>
 
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Background"
-                                        Value="#DDDDDA"/>
-                            </Trigger>
+            <Style x:Key="ExitButtonStyle" TargetType="Button" BasedOn="{StaticResource FlatButton}">
+                <Setter Property="Background" Value="{StaticResource ExitSolidBackground}"/>
+                <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource ExitSolidBorder}"/>
+            </Style>
 
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Background"
-                                        Value="#CBCBC8"/>
-                            </Trigger>
-
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="ButtonBorder"
-                                        Property="Opacity"
-                                        Value="0.42"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="PrimaryButton"
-               TargetType="Button"
-               BasedOn="{StaticResource FlatButton}">
-            <Setter Property="Width" Value="260"/>
-            <Setter Property="Height" Value="50"/>
-            <Setter Property="Background" Value="{StaticResource StatusPurple}"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="FontSize" Value="18"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-        </Style>
-
+            <!-- ============ NHÃN NHỎ TRONG THẺ ============ -->
+            <Style x:Key="CardCaption" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="FontWeight" Value="Bold"/>
+                <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            </Style>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Grid Background="{StaticResource PageBackground}">
 
         <Grid.RowDefinitions>
-            <RowDefinition Height="88"/>
-            <RowDefinition Height="*"/>
             <RowDefinition Height="64"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="72"/>
         </Grid.RowDefinitions>
 
         <!-- ====================================================== -->
         <!-- HEADER                                                 -->
         <!-- ====================================================== -->
-
-        <Grid Grid.Row="0"
-              Margin="20,16,20,0">
-
-            <StackPanel HorizontalAlignment="Right"
-                        VerticalAlignment="Top">
+        <Border Grid.Row="0" Background="{StaticResource BrandBlue}"
+                BorderBrush="{StaticResource AccentBlue}" BorderThickness="0,0,0,3">
+            <Grid Margin="28,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Rectangle Width="4" Height="34" Fill="{StaticResource AccentBlue}" RadiusX="2" RadiusY="2"/>
+                    <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="UNIVERSAL TESTER" Foreground="{StaticResource PanelBackground}" FontSize="20" FontWeight="Bold"/>
+                        <TextBlock Text="HỆ THỐNG KIỂM TRA DÂY ĐIỆN  ·  WIRE HARNESS TEST SYSTEM"
+                                   Foreground="{StaticResource OnDarkMuted}" FontSize="11" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </StackPanel>
 
                 <TextBlock x:Name="AppVersionText"
                            Text="JBZ Universal"
-                           Foreground="{StaticResource TextMuted}"
-                           FontSize="15"
+                           Foreground="{StaticResource OnDarkMuted}"
+                           FontSize="14"
+                           HorizontalAlignment="Right"
+                           VerticalAlignment="Center"
                            TextAlignment="Right"/>
-
-            </StackPanel>
-        </Grid>
+            </Grid>
+        </Border>
 
         <!-- ====================================================== -->
         <!-- MÀN HÌNH KHỞI ĐỘNG / CHỌN MÃ HÀNG                     -->
         <!-- ====================================================== -->
+        <Grid Grid.Row="1" Margin="18,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.25*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <local:MainProductCatalog x:Name="ProductCatalog" Grid.Column="1" Margin="16,0,0,0"/>
+            <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
+                <StackPanel Width="780" MaxWidth="780">
+                    <Border Width="452" Height="137" Background="{StaticResource PanelBackground}"
+                            HorizontalAlignment="Center" BorderBrush="{StaticResource BorderColor}"
+                            BorderThickness="1" CornerRadius="8">
+                        <Image Source="/Assets/mainlogo.gif" Stretch="Uniform"
+                               SnapsToDevicePixels="True" Margin="6"/>
+                    </Border>
 
-        <Grid Grid.Row="1">
-
-            <StackPanel Width="1080"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center">
-
-                <Border Width="220"
-                        Background="White"
-                        HorizontalAlignment="Center"
-                        BorderBrush="#D0D0CE"
-                        BorderThickness="1">
-
-                    <StackPanel>
-
-                        <TextBlock Text="VINA"
-                                   Foreground="{StaticResource BrandBlue}"
-                                   FontSize="58"
-                                   FontWeight="Bold"
-                                   TextAlignment="Center"
-                                   Margin="16,4"/>
-
-                        <Border Background="{StaticResource BrandBlue}">
-                            <TextBlock Text="JBZVINA-2026"
-                                       Foreground="White"
-                                       FontSize="22"
-                                       FontWeight="Bold"
-                                       TextAlignment="Center"
-                                       Padding="8,4"/>
-                        </Border>
-                    </StackPanel>
-                </Border>
-
-            </StackPanel>
+                    <Border x:Name="ModelSummaryCard" Margin="0,22,0,0" Background="{StaticResource PanelBackground}"
+                            BorderBrush="{StaticResource BorderColor}"
+                            BorderThickness="1" CornerRadius="8" Padding="22,18">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="200"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="MÃ HÀNG ĐANG CHỌN" Style="{StaticResource CardCaption}"/>
+                                    <TextBlock Text="{Binding Home.ModelName}" Margin="0,5,8,0"
+                                               FontSize="21" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Home.ModelName}"/>
+                                    <Border Margin="0,8,8,0" Padding="10,5" CornerRadius="5"
+                                            Background="{StaticResource InfoBadgeBackground}"
+                                            BorderBrush="{StaticResource InfoBadgeBorder}" BorderThickness="1"
+                                            HorizontalAlignment="Left">
+                                        <TextBlock Text="{Binding Home.LabelTemplateDisplayName, StringFormat=Loại tem: {0}}"
+                                                   FontSize="14" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource InfoBadgeForeground}"
+                                                   TextWrapping="Wrap"/>
+                                    </Border>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                                    <TextBlock Text="MÃ SẢN PHẨM" Style="{StaticResource CardCaption}"/>
+                                    <TextBlock Text="{Binding Home.PartNumber}" Margin="0,7,0,0"
+                                               FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Home.PartNumber}"/>
+                                </StackPanel>
+                            </Grid>
+                            <Border Grid.Row="1" Height="1" Background="{StaticResource DividerColor}" Margin="0,16,0,15"/>
+                            <StackPanel Grid.Row="2">
+                                <TextBlock Text="TRẠNG THÁI MÁY TEST" Style="{StaticResource CardCaption}"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,5,0,8">
+                                    <Ellipse Width="11" Height="11" Margin="0,0,8,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{StaticResource FailRed}"/>
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding Test.IsBoardConnected}" Value="True"/>
+                                                            <Condition Binding="{Binding Test.IsDeviceFault}" Value="False"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Fill" Value="{StaticResource PassGreen}"/>
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <TextBlock x:Name="MainTesterStatusText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="CHƯA KẾT NỐI MÁY TEST!"/>
+                                                <Setter Property="Foreground" Value="{StaticResource FailText}"/>
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding Test.IsBoardConnected}" Value="True"/>
+                                                            <Condition Binding="{Binding Test.IsDeviceFault}" Value="False"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Text" Value="ĐÃ KẾT NỐI MÁY TEST"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource PassText}"/>
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                                <TextBlock x:Name="MainInspectionModeText" Text="{Binding Test.HomeInspectionModeText, StringFormat=KIỂM TRA: {0}}"
+                                           FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="MainDiscardStatusText" Text="{Binding Test.HomeDiscardConfigurationText}"
+                                           FontSize="13" FontWeight="SemiBold" Foreground="{Binding Test.HomeDiscardConfigurationColor}"
+                                           Margin="0,0,0,13" TextWrapping="Wrap"/>
+                                <Grid Margin="0,0,0,16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border x:Name="ProductionQuantityCard" Grid.Column="0" Margin="0,0,8,0" Padding="16,12" CornerRadius="8"
+                                            Background="{StaticResource AccentTint}" BorderBrush="{StaticResource AccentTintBorder}" BorderThickness="1">
+                                        <StackPanel>
+                                            <TextBlock Text="TỔNG ĐÃ TEST HÔM NAY" FontSize="14" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
+                                            <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                                <TextBlock x:Name="ProductionQuantityText" Text="{Binding Test.DailyTestCount, Mode=OneWay, StringFormat={}{0:N0}}"
+                                                           FontSize="46" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
+                                            </Viewbox>
+                                            <WrapPanel Margin="0,2,0,5">
+                                                <TextBlock Text="ĐẠT: " FontWeight="SemiBold" Foreground="{StaticResource PassText}"/>
+                                                <TextBlock x:Name="MainPassText" Text="{Binding Test.Pass, StringFormat={}{0:N0}}" FontWeight="Bold" Foreground="{StaticResource PassText}" Margin="0,0,16,0"/>
+                                                <TextBlock Text="KHÔNG ĐẠT: " FontWeight="SemiBold" Foreground="{StaticResource FailText}"/>
+                                                <TextBlock x:Name="MainFailText" Text="{Binding Test.Fail, StringFormat={}{0:N0}}" FontWeight="Bold" Foreground="{StaticResource FailText}"/>
+                                            </WrapPanel>
+                                            <TextBlock Text="PASS + FAIL trong ngày của mã hàng hiện tại" FontSize="12"
+                                                       Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border x:Name="CurrentLotCard" Grid.Column="1" Margin="8,0,0,0" Padding="16,12" CornerRadius="8"
+                                            Background="{StaticResource PassTint}" BorderBrush="{StaticResource PassTintBorder}" BorderThickness="1">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Home.IsLabelPrintingEnabled}" Value="False">
+                                                        <!-- Reserve the LOT slot before the model is loaded. -->
+                                                        <Setter Property="Visibility" Value="Hidden"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <StackPanel>
+                                            <TextBlock Text="LOTNO ĐÃ GHI NHẬN" FontSize="14" FontWeight="Bold" Foreground="{StaticResource PassText}"/>
+                                            <Viewbox Height="65" Margin="0,5,0,3" Stretch="Uniform" StretchDirection="DownOnly" HorizontalAlignment="Left">
+                                                <TextBlock x:Name="CurrentLotText" Text="{Binding Test.Lot, Mode=OneWay}"
+                                                           FontSize="46" FontWeight="Bold" Foreground="{StaticResource PassText}"/>
+                                            </Viewbox>
+                                            <TextBlock Text="LOT của PASS đã lưu; không xác nhận tem đã in" FontSize="12" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,12,0">
+                                        <TextBlock Text="MÁY IN TEM" FontSize="11" FontWeight="Bold" Foreground="{StaticResource TextMuted}"/>
+                                        <TextBlock Text="{Binding Test.HomePrinterStatusText}" ToolTip="{Binding Test.LabelStatusText}" Margin="0,4,0,0"
+                                                   FontSize="12" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Margin="12,0,0,0">
+                                        <TextBlock Text="MÁY LEAK" FontSize="11" FontWeight="Bold" Foreground="{StaticResource TextMuted}"/>
+                                        <TextBlock Text="{Binding Test.HomeLeakStatusText}" Margin="0,4,0,0"
+                                                   FontSize="12" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </Viewbox>
         </Grid>
 
         <!-- ====================================================== -->
         <!-- THANH CHỨC NĂNG                                        -->
         <!-- ====================================================== -->
+        <Border Grid.Row="2" Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource BorderColor}" BorderThickness="0,1,0,0"/>
 
-        <Grid Grid.Row="2"
-              Margin="4,0,4,4">
+        <Grid x:Name="MainActionBar"
+              Grid.Row="2"
+              Margin="10,0"
+              VerticalAlignment="Center">
 
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="230"/>
-                <ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="190"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="120"/>
+                <ColumnDefinition Width="1.25*"/>
+                <ColumnDefinition Width="1.00*"/>
+                <ColumnDefinition Width="1.00*"/>
+                <ColumnDefinition Width="1.10*"/>
+                <ColumnDefinition Width="1.10*"/>
+                <ColumnDefinition Width="1.35*"/>
             </Grid.ColumnDefinitions>
 
             <Button x:Name="StartTestButton"
@@ -177,57 +349,154 @@
                  trong TestWindow nên người vận hành không cần chuyển chế độ. -->
             <Button Grid.Column="1"
                     Click="OpenHistory_Click"
-                    Style="{StaticResource FlatButton}"
+                    Style="{StaticResource HistoryButtonStyle}"
                     Content="LỊCH SỬ"/>
 
             <Button Grid.Column="2"
                     Click="OpenSettings_Click"
-                    Style="{StaticResource FlatButton}"
+                    Style="{StaticResource SettingsButtonStyle}"
                     Content="CÀI ĐẶT"/>
 
-            <Button x:Name="SelectModelButton"
+            <Button x:Name="LearnTopologyButton"
                     Grid.Column="3"
-                    Command="{Binding Home.LoadModelCommand}"
-                    Style="{StaticResource FlatButton}"
-                    Content="CHỌN MÃ HÀNG"/>
+                    Click="OpenTopologyLearning_Click"
+                    Style="{StaticResource TopologyButtonStyle}"
+                    Content="QUÉT / HỌC MÃ"/>
+
+            <Button x:Name="EditThtMainButton" Grid.Column="4"
+                    Click="OpenThtEditor_Click" Style="{StaticResource SettingsButtonStyle}"
+                    Content="SỬA CẤU HÌNH THT"/>
 
             <Button Grid.Column="5"
                     Command="{Binding ExitCommand}"
-                    Style="{StaticResource FlatButton}"
-                    Content="KẾT THÚC"/>
+                    Style="{StaticResource ExitButtonStyle}"
+                    Content="THOÁT ỨNG DỤNG"/>
         </Grid>
 
+        <!-- ====================================================== -->
+        <!-- THÔNG BÁO THÁO SẢN PHẨM                                -->
+        <!-- ====================================================== -->
         <Border x:Name="ProductRemovalNotice"
-                Grid.Row="1"
+                Grid.Row="0"
+                Grid.RowSpan="3"
                 Panel.ZIndex="10"
                 Visibility="Collapsed"
-                IsHitTestVisible="False"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Padding="36,22"
-                Background="#FFF2A8"
-                BorderBrush="#C89000"
-                BorderThickness="2"
-                CornerRadius="6">
-            <StackPanel>
-                <TextBlock Text="VUI LÒNG THÁO SẢN PHẨM"
-                           FontSize="30"
-                           FontWeight="Bold"
-                           Foreground="#8A3B00"
-                           TextAlignment="Center"/>
-                <TextBlock Text="Chọn mã hàng đang bị khóa. Bạn vẫn có thể mở màn hình kiểm tra để theo dõi; thông báo sẽ tự mất khi sản phẩm đã được tháo hoàn toàn."
-                           Margin="0,8,0,0"
-                           FontSize="15"
-                           Foreground="#5C4200"
-                           TextAlignment="Center"/>
-            </StackPanel>
+                Padding="24"
+                Background="{StaticResource PageBackground}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border Background="{StaticResource AttentionYellow}" CornerRadius="10" Padding="24,20">
+                    <StackPanel>
+                        <TextBlock Text="VUI LÒNG THÁO SẢN PHẨM!!"
+                                   FontSize="38" FontWeight="Bold" Foreground="{StaticResource TextPrimary}"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                        <TextBlock Text="Tháo các kết nối bên dưới khỏi bàn test để tiếp tục."
+                                   Margin="0,8,0,0" FontSize="21" Foreground="{StaticResource TextSecondary}"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                        <TextBlock Text="{Binding Test.PartNumber, StringFormat=Mã hàng: {0}}"
+                                   Margin="0,10,0,0" FontSize="24" FontWeight="Bold"
+                                   Foreground="{StaticResource BrandBlue}" TextWrapping="Wrap" TextAlignment="Center"/>
+                        <TextBlock Text="{Binding Test.ModelName}" FontSize="18" Foreground="{StaticResource TextSecondary}"
+                                   TextWrapping="Wrap" TextAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+                <Grid Grid.Row="1" Margin="0,20,0,12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="CÁC CHÂN IO CÒN KẾT NỐI"
+                               FontSize="23" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"
+                               VerticalAlignment="Center"/>
+                    <Border Grid.Column="1" Background="{StaticResource DividerColor}" CornerRadius="6" Padding="16,8">
+                        <TextBlock Text="{Binding Test.MainRemovalContacts.Count, StringFormat=Còn {0} cặp kết nối}"
+                                   FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource ButtonNeutralForeground}"/>
+                    </Border>
+                </Grid>
+                <DataGrid Grid.Row="2" ItemsSource="{Binding Test.MainRemovalRows}"
+                          AutoGenerateColumns="False" IsReadOnly="True"
+                          CanUserAddRows="False" CanUserDeleteRows="False" CanUserSortColumns="False"
+                          CanUserReorderColumns="False" CanUserResizeRows="False"
+                          CanUserResizeColumns="False" HeadersVisibility="Column"
+                          RowHeaderWidth="0" FontSize="26" FontWeight="SemiBold" MinRowHeight="64"
+                          Background="{StaticResource PanelBackground}" RowBackground="{StaticResource PanelBackground}" AlternatingRowBackground="{StaticResource PanelBackground}"
+                          Foreground="{StaticResource WarningText}" GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="{StaticResource DividerColor}" BorderBrush="{StaticResource BorderColor}"
+                          EnableRowVirtualization="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Setter Property="BorderThickness" Value="0"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsNetworkStart}" Value="True">
+                                    <Setter Property="BorderBrush" Value="{StaticResource AccentBlue}"/>
+                                    <Setter Property="BorderThickness" Value="0,10,0,0"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.ColumnHeaderStyle>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Background" Value="{StaticResource BrandBlue}"/>
+                            <Setter Property="Foreground" Value="{StaticResource PanelBackground}"/>
+                            <Setter Property="FontSize" Value="22"/>
+                            <Setter Property="FontWeight" Value="Bold"/>
+                            <Setter Property="Height" Value="54"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+                            <Setter Property="BorderThickness" Value="0"/>
+                        </Style>
+                    </DataGrid.ColumnHeaderStyle>
+                    <DataGrid.Resources>
+                        <Style x:Key="RemovalIoText" TargetType="TextBlock">
+                            <Setter Property="HorizontalAlignment" Value="Center"/>
+                            <Setter Property="VerticalAlignment" Value="Center"/>
+                            <Setter Property="TextAlignment" Value="Center"/>
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                            <Setter Property="Margin" Value="8,10"/>
+                        </Style>
+                    </DataGrid.Resources>
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="CHÂN IO" Width="1.4*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding IoText, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="CONNECTOR" Width="*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding Connector, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="CHÂN PIN" Width="0.7*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding Pin, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="MÃ DÂY" Width="1.5*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding WireNameDisplay, Mode=OneWay}"/>
+                        <DataGridTextColumn Header="IO-CN-PIN" Width="1.5*"
+                                            ElementStyle="{StaticResource RemovalIoText}"
+                                            Binding="{Binding IoCnPnText, Mode=OneWay}"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+                <Grid Grid.Row="3" Margin="0,16,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Chọn mã hàng đang khóa · Tháo hết sẽ tự trở về màn hình chính"
+                               FontSize="20" Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap"
+                               VerticalAlignment="Center" Margin="0,0,20,0"/>
+                    <Button Grid.Column="1" Content="THOÁT ỨNG DỤNG" Width="210"
+                            Command="{Binding ExitCommand}" Style="{StaticResource ExitButtonStyle}"/>
+                </Grid>
+            </Grid>
         </Border>
-    
 
         <!-- ====================================================== -->
         <!-- V12.9 - SINGLE WINDOW INTERNAL PAGE HOST               -->
         <!-- Cài đặt/Lịch sử được nhúng trong MainWindow, không     -->
         <!-- tạo Window/ShowDialog nên không sinh thêm Alt+Tab.      -->
+        <!-- Template có nền riêng để trang nhúng trong suốt không   -->
+        <!-- làm lộ màn hình chính phía sau.                         -->
         <!-- ====================================================== -->
         <ContentControl x:Name="InternalPageHost"
                         Grid.Row="0"
@@ -236,7 +505,15 @@
                         Visibility="Collapsed"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch"
-                        Background="#F3F4F6"/>
+                        Background="{StaticResource PageBackground}">
+            <ContentControl.Template>
+                <ControlTemplate TargetType="ContentControl">
+                    <Border Background="{TemplateBinding Background}">
+                        <ContentPresenter/>
+                    </Border>
+                </ControlTemplate>
+            </ContentControl.Template>
+        </ContentControl>
 
-</Grid>
+    </Grid>
 </Window>

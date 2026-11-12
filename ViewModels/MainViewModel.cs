@@ -9,7 +9,7 @@ namespace JBZUniversalTester.ViewModels;
 public sealed class MainViewModel : ObservableObject
 {
     private object _page;
-    private string _status = "CHƯA KẾT NỐI";
+    private string _status = TesterConnectionNotice.Message;
     private ProductModel? _model;
 
     private readonly AppSettings _settings;
@@ -57,12 +57,12 @@ public sealed class MainViewModel : ObservableObject
     public int RequiredCardCount =>
         Model is null
             ? 1
-            : BoardCapacity.RequiredExpansionModulesForIo(
-                Model.MaxIo,
-                _productionSettings.StartCardNumber);
+            : BoardCapacity.RequiredScanUnitsForIo(Model.MaxIo);
 
-    public int ConfiguredCardCount => CurrentBoardCapacity.ExpansionModuleCount;
+    public int ConfiguredCardCount => CurrentBoardCapacity.ExpansionCardCount;
     public int ConfiguredIoCapacity => CurrentBoardCapacity.TotalIoCapacity;
+    public long RequiredIoCapacity =>
+        (long)RequiredCardCount * BoardCapacity.IoPerExpansionCard;
     public int ConfiguredIoStart => CurrentBoardCapacity.FirstGlobalIo;
     public int ConfiguredIoEnd => CurrentBoardCapacity.LastGlobalIo;
 
@@ -72,7 +72,7 @@ public sealed class MainViewModel : ObservableObject
         Model is null || !UsesD2xxCardCapacity ||
         (CurrentBoardCapacity.IsRangeWithinSystem &&
          Model.MaxIo <= BoardCapacity.MaxGlobalIo &&
-         Model.Pins.All(pin => CurrentBoardCapacity.ContainsGlobalIo(pin.IoNumber)));
+         RequiredCardCount <= ConfiguredCardCount);
 
     public HomeViewModel Home { get; }
     public TestViewModel Test { get; }
@@ -81,10 +81,17 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand ShowTestCommand { get; }
     public RelayCommand ExitCommand { get; }
 
-    public MainViewModel()
+    public MainViewModel() : this(AppSettings.Load(), ProductionConfigService.Load()) { }
+
+    private readonly Task? _productionDataPreparation;
+    public event Action<int, string>? StartupProgress;
+    public Task StartupHardwareTask { get; private set; } = Task.CompletedTask;
+
+    public MainViewModel(AppSettings settings, ProductionSettings productionSettings, Task? productionDataPreparation = null)
     {
-        _settings = AppSettings.Load();
-        _productionSettings = ProductionConfigService.Load();
+        _productionDataPreparation = productionDataPreparation;
+        _settings = settings;
+        _productionSettings = productionSettings;
         _board = new UnifiedBoardTransport(
             _settings.Board.FtdiSerial,
             _productionSettings
@@ -106,12 +113,12 @@ public sealed class MainViewModel : ObservableObject
             _visa,
             _waterProof,
             _settings,
-            _productionSettings
+            _productionSettings,
+            requireStartupIoClear: false
         );
 
-        // Việc tự nạp mã + tự kết nối bo được bắt đầu tại MainWindow.Loaded.
-        // Không dùng fire-and-forget trong constructor để tránh race giữa WPF
-        // StartupUri/ShowDialog và quá trình recovery D2XX.
+        // App starts initialization after the splash paints. Constructors never
+        // start device work; MainWindow retains a guarded standalone fallback.
         _page = Home;
 
         ShowHomeCommand = new RelayCommand(
@@ -143,33 +150,53 @@ public sealed class MainViewModel : ObservableObject
     {
         Status = "ĐANG NẠP MÃ HÀNG VÀ KẾT NỐI BO...";
 
-        await Task.Run(StartupBootstrapService.EnsureDeferredProductionFiles);
-        StartupPerformanceTrace.Mark("T3 SETTINGS_READY");
+        // DB migration/import counter và nhận dạng FTDI độc lập. Chỉ kết nối
+        // hardware song song; nạp model/statistics chờ bootstrap xong để DB cũ
+        // luôn được chuyển sang canonical path trước khi repository có thể tạo DB.
+        StartupProgress?.Invoke(62, "Đang chuẩn bị dữ liệu và kết nối thiết bị…");
+        Task productionDataTask = _productionDataPreparation
+            ?? Task.Run(() => StartupBootstrapService.EnsureDeferredProductionFiles());
 
         Task printerConnectionTask = Test.AutoConnectLabelPrinterAsync();
         _ = ObservePrinterStartupAsync(printerConnectionTask);
 
-        // TestViewModel thực hiện hai việc tự động: recovery/kết nối FTDI và
-        // tải model gần nhất. SetModel sẽ đồng bộ model trở lại MainWindow.
+        Task boardInitializationTask = Test.InitializeHardwareAsync();
+        StartupHardwareTask = boardInitializationTask;
+        Task modelPreparationTask = PrepareModelAfterDataAsync(productionDataTask);
+        await Task.WhenAll(productionDataTask, boardInitializationTask, modelPreparationTask);
+        StartupProgress?.Invoke(80, "Đang nạp mã hàng gần nhất và sản lượng…");
+
+        // Sau khi canonical DB đã sẵn sàng mới nạp model và lịch sử sản lượng.
+        // InitializeAsync reuse kết nối vừa hoàn tất, không mở bo lần hai.
         await Test.InitializeAsync();
+        StartupPerformanceTrace.Mark("T3 SETTINGS_READY");
 
         Home.Refresh();
+        StartupProgress?.Invoke(92, "Đang chuẩn bị giao diện vận hành…");
         Raise(nameof(CurrentBoardCapacity));
         Raise(nameof(RequiredCardCount));
         Raise(nameof(ConfiguredCardCount));
         Raise(nameof(ConfiguredIoCapacity));
+        Raise(nameof(RequiredIoCapacity));
         Raise(nameof(ConfiguredIoStart));
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
 
-        if (Test.IsBoardConnected && Model is not null)
-            Status = $"SẴN SÀNG - {Model.ModelName} - BO ĐÃ KẾT NỐI";
-        else if (Test.IsBoardConnected)
-            Status = "BO ĐÃ KẾT NỐI - CHƯA CÓ MÃ HÀNG";
+        if (Test.IsDeviceFault)
+            Status = TesterConnectionNotice.Message;
+        else if (Test.IsBoardStartupUnavailable)
+            Status = TesterConnectionNotice.Message;
         else if (Model is not null)
-            Status = $"ĐÃ NẠP {Model.ModelName} - BO CHƯA KẾT NỐI";
+            Status = $"CHỜ LẮP SẢN PHẨM - {Model.ModelName}";
         else
-            Status = "CHƯA CÓ MÃ HÀNG - BO CHƯA KẾT NỐI";
+            Status = "CHƯA CHỌN MÃ HÀNG";
+    }
+
+    private async Task PrepareModelAfterDataAsync(Task productionDataTask)
+    {
+        await productionDataTask;
+        StartupProgress?.Invoke(70, "Đang chuẩn bị mã hàng và chờ thiết bị sẵn sàng…");
+        await Test.PrepareStartupModelAsync();
     }
 
     private async Task ObservePrinterStartupAsync(Task printerConnectionTask)
@@ -197,7 +224,7 @@ public sealed class MainViewModel : ObservableObject
             _shutdownCompleted = true;
 
             // Dừng mọi âm báo ngay để không còn TESTPOINT.wav sau khi UI đóng.
-            AppSoundService.Current.StopAll();
+            AppSoundService.Current.StopAll(force: true);
 
             try
             {
@@ -218,7 +245,7 @@ public sealed class MainViewModel : ObservableObject
 
             try
             {
-                _visa.Dispose();
+                await Task.Run(_visa.Dispose);
             }
             catch
             {
@@ -249,12 +276,8 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task<ProductModel?> LoadModelAsync(string path)
     {
-        if (!Test.IsBoardConnected)
-            throw new InvalidOperationException(
-                "Chưa kết nối bo JBZ. Chỉ được chọn mã hàng sau khi bo kết nối thành công.");
-
         if (Test.IsProductRemovalPending)
-            throw new InvalidOperationException("VUI LÒNG THÁO SẢN PHẨM");
+            throw new InvalidOperationException("THÁO SẢN PHẨM");
 
         Status = "ĐANG NẠP MÃ HÀNG...";
         string full = Path.GetFullPath(path);
@@ -266,21 +289,25 @@ public sealed class MainViewModel : ObservableObject
 
         if (full.EndsWith(".jbzproduct.json", StringComparison.OrdinalIgnoreCase))
         {
-            bundle = ProductBundle.Load(full);
+            bundle = await Task.Run(() => ProductBundle.Load(full));
             if (string.IsNullOrWhiteSpace(bundle.D2xxThtPath) || !File.Exists(bundle.D2xxThtPath))
                 throw new InvalidDataException($"Bundle {bundle.PartNumber} chưa có file .tht cho JBZ D2XX.");
             model = await Test.LoadSelectedModelFromPathAsync(bundle.D2xxThtPath);
         }
-        else if (extension == ".model")
+        else if (extension != ".tht")
         {
-            throw new InvalidDataException("Project này chỉ dùng bo JBZ D2XX và file mã hàng .tht.");
+            throw new InvalidDataException("Project này chỉ dùng file mã hàng .tht.");
         }
         else
         {
             model = await Test.LoadSelectedModelFromPathAsync(full);
         }
 
-        if (model is null) return null;
+        if (model is null)
+        {
+            Status = Model is null ? "CHƯA CHỌN MÃ HÀNG" : $"MODEL ĐÃ TẢI: {Model.ModelName}";
+            return null;
+        }
 
         Model = model;
         Home.Refresh();
@@ -288,6 +315,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(RequiredCardCount));
         Raise(nameof(ConfiguredCardCount));
         Raise(nameof(ConfiguredIoCapacity));
+        Raise(nameof(RequiredIoCapacity));
         Raise(nameof(ConfiguredIoStart));
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
@@ -298,9 +326,6 @@ public sealed class MainViewModel : ObservableObject
         ExplicitModelLoaded?.Invoke(model);
         return model;
     }
-
-    private static string NormalizeModelKey(string? value) =>
-        new string((value ?? string.Empty).Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
 
     public void ReloadProductionSettings()
     {
@@ -321,31 +346,54 @@ public sealed class MainViewModel : ObservableObject
             BoardMode = _productionSettings.BoardMode,
             ExpansionCardCount = _productionSettings.ExpansionCardCount,
             StartCardNumber = _productionSettings.StartCardNumber,
-            UsbDelay = _productionSettings.UsbDelay
+            UsbDelay = _productionSettings.UsbDelay,
+            UseTestPointer = _productionSettings.UseTestPointer
         };
 
-        ProductionConfigService.ReloadInto(_productionSettings);
+        long settingsStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        ProductionSettings loaded = await Task.Run(() => ProductionConfigService.LoadSavedSettings());
+        ProductionConfigService.CopyInto(_productionSettings, loaded);
+        AsyncFileLogService.Current.Performance(
+            $"SETTINGS_PERF phase=RELOAD_FILE elapsed_ms={System.Diagnostics.Stopwatch.GetElapsedTime(settingsStarted).TotalMilliseconds:0.###}");
         AsyncFileLogService.Current.Configure(_productionSettings.EnableSystemLogs);
-
         bool boardSelectionChanged = old.BoardMode != _productionSettings.BoardMode;
         bool scanHardwareChanged =
             old.ExpansionCardCount != _productionSettings.ExpansionCardCount ||
             old.StartCardNumber != _productionSettings.StartCardNumber ||
-            old.UsbDelay != _productionSettings.UsbDelay;
+            old.UsbDelay != _productionSettings.UsbDelay ||
+            old.UseTestPointer != _productionSettings.UseTestPointer;
 
         // Manual relay là trạng thái runtime tức thời, không reload từ file.
         _productionSettings.ManualModeEnabled = false;
 
+        Task hardwareApplyTask = Task.CompletedTask;
         if (boardSelectionChanged)
-            await Test.ReconnectBoardForSettingsAsync();
-        else if (scanHardwareChanged)
-            await Test.RefreshProductionConfigurationAsync();
+            Test.RequireApplicationRestartAfterBoardSettingsChange();
+        else if (scanHardwareChanged || Test.RequiresProductionScanSynchronization)
+            hardwareApplyTask = Test.RefreshProductionConfigurationAsync(
+                forceNativeRestart: old.UsbDelay != _productionSettings.UsbDelay ||
+                                    old.UseTestPointer != _productionSettings.UseTestPointer);
         else
             Test.RefreshProductionSettingsOnly();
 
-        await Test.AutoConnectLabelPrinterAsync();
-
         RefreshSettingsBindings();
+        _ = ObserveSettingsApplyAsync(
+            hardwareApplyTask,
+            Test.AutoConnectLabelPrinterAsync());
+    }
+
+    private static async Task ObserveSettingsApplyAsync(
+        Task hardwareApplyTask,
+        Task printerApplyTask)
+    {
+        try
+        {
+            await Task.WhenAll(hardwareApplyTask, printerApplyTask);
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Background settings apply failed: {ex}");
+        }
     }
 
     private void RefreshSettingsBindings()
@@ -356,6 +404,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(RequiredCardCount));
         Raise(nameof(ConfiguredCardCount));
         Raise(nameof(ConfiguredIoCapacity));
+        Raise(nameof(RequiredIoCapacity));
         Raise(nameof(ConfiguredIoStart));
         Raise(nameof(ConfiguredIoEnd));
         Raise(nameof(HasEnoughCardsForModel));
@@ -385,6 +434,8 @@ public sealed class MainViewModel : ObservableObject
             : $"Hãy vào CÀI ĐẶT -> Card mở rộng và chọn tối thiểu {RequiredCardCount} card trước khi test.";
 
         MessageBox.Show(
+            $"KHÔNG ĐỦ CARD MỞ RỘNG\n" +
+            $"{ConfiguredIoCapacity} / {RequiredIoCapacity} IO\n\n" +
             $"THÔNG TIN PIN / CARD\n\n" +
             $"Số I/O của mã hàng : {Model.MaxIo}\n" +
             $"Card mở rộng cần    : {RequiredCardCount}\n" +

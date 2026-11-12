@@ -1,0 +1,113 @@
+<UserControl x:Class="JBZUniversalTester.ModelEditor.Pages.LinePage"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ xmlns:conv="clr-namespace:JBZUniversalTester.ModelEditor.Converters" Foreground="{DynamicResource TextPrimary}">
+    <UserControl.Resources><ResourceDictionary><ResourceDictionary.MergedDictionaries><ResourceDictionary Source="../EditorResources.xaml"/></ResourceDictionary.MergedDictionaries>
+        <conv:HexBrushConverter x:Key="HexBrush"/>
+    </ResourceDictionary></UserControl.Resources>
+    <Grid Background="{StaticResource PanelBackground}" Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+            <Button x:Name="InsertRowButton" Style="{StaticResource ActionButton}" Content="THÊM DÒNG SAU DÒNG CHỌN" Padding="12,5" Margin="0,0,8,0" Click="InsertRow_Click"/>
+            <Button x:Name="DeleteRowButton" Style="{StaticResource ActionButton}" Content="XÓA DÒNG ĐANG CHỌN" Padding="12,5" Click="DeleteRow_Click"/>
+        </StackPanel>
+        <DockPanel Grid.Row="1" Margin="0,0,0,8" LastChildFill="True">
+            <TextBlock DockPanel.Dock="Left" Text="TÌM DÂY / IO" FontWeight="SemiBold" Margin="0,0,10,0" VerticalAlignment="Center"/>
+            <Button x:Name="FindWireButton" DockPanel.Dock="Right" Style="{StaticResource ActionButton}"
+                    Content="TÌM TIẾP" Margin="8,0,0,0" Click="FindWire_Click"/>
+            <Button DockPanel.Dock="Right" Style="{StaticResource ActionButton}"
+                    Content="XÓA TÌM" Margin="8,0,0,0" Click="ClearWireSearch_Click"/>
+            <TextBlock x:Name="WireSearchStatus" DockPanel.Dock="Right" MinWidth="110" Margin="10,0,0,0"
+                       VerticalAlignment="Center" TextAlignment="Right"/>
+            <TextBox x:Name="WireSearchBox" FontSize="17" Height="36" MinHeight="36" Padding="7,0"
+                     VerticalContentAlignment="Center" VerticalAlignment="Center"
+                     ToolTip="Gõ tên dây hoặc số IO (12 hoặc IO12) để tự tìm. CN12: Connector; PN3: Pin. Enter: tìm tiếp; Esc: xóa tìm."
+                     TextChanged="WireSearch_TextChanged" PreviewKeyDown="WireSearch_KeyDown"/>
+        </DockPanel>
+        <DataGrid x:Name="Grid" Grid.Row="2"
+            Style="{StaticResource GridStyle}"
+            ItemsSource="{Binding Rows, RelativeSource={RelativeSource AncestorType=UserControl}}"
+            HorizontalScrollBarVisibility="Auto"
+            CanUserAddRows="False"
+            CanUserDeleteRows="False"
+            CanUserReorderColumns="False"
+            CanUserResizeColumns="False"
+            CanUserSortColumns="False"
+            SelectionUnit="Cell"
+            SelectionMode="Single"
+            IsReadOnly="False"
+            BeginningEdit="Grid_BeginningEdit"
+            SelectedCellsChanged="Grid_SelectedCellsChanged"
+            CurrentCellChanged="Grid_CurrentCellChanged"
+            CellEditEnding="Grid_CellEditEnding">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="I/O" Binding="{Binding Io, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
+                <DataGridTextColumn Header="CONNECTOR" Binding="{Binding Connector}" IsReadOnly="True" Width="140">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                            <Setter Property="ToolTip" Value="{Binding Connector}"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="PIN" Binding="{Binding PinNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="55"/>
+                <DataGridTextColumn Header="TÊN DÂY" Binding="{Binding Line, UpdateSourceTrigger=PropertyChanged}" Width="*" MinWidth="150">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{StaticResource InkBlack}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsWireUnconnected}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                    <DataGridTextColumn.EditingElementStyle>
+                        <Style TargetType="TextBox">
+                            <Setter Property="Foreground" Value="{StaticResource InkBlack}"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsWireUnconnected}" Value="True">
+                                    <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGridTextColumn.EditingElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="DÂY NỐI" Binding="{Binding Add, UpdateSourceTrigger=PropertyChanged}" Width="*" MinWidth="130"/>
+                <DataGridTextColumn Header="ĐỘ DÀY" Binding="{Binding Thickness, UpdateSourceTrigger=PropertyChanged}" Width="90"/>
+                <DataGridTemplateColumn Header="MÀU" Width="110">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Color}" FontSize="17" Padding="3,0" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                    <DataGridTemplateColumn.CellEditingTemplate>
+                        <DataTemplate>
+                            <ComboBox Background="{Binding Background, RelativeSource={RelativeSource AncestorType=DataGridCell}}" IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                 LostKeyboardFocus="Color_LostKeyboardFocus" PreviewKeyDown="Color_PreviewKeyDown"
+                 ItemsSource="{Binding DataContext.ColorCodes, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                 Text="{Binding Color, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" FontSize="17" BorderThickness="0" Padding="3,0"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellEditingTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="#1" Width="40" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border Background="{Binding Preview1, Converter={StaticResource HexBrush}}" BorderBrush="{StaticResource BorderColor}" BorderThickness="0.5" ToolTip="{Binding PreviewTip1}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="#2" Width="40" IsReadOnly="True">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border Background="{Binding Preview2, Converter={StaticResource HexBrush}}" BorderBrush="{StaticResource BorderColor}" BorderThickness="0.5" ToolTip="{Binding PreviewTip2}"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

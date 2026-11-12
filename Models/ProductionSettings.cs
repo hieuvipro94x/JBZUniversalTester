@@ -11,19 +11,27 @@ public sealed class ProductionSettings
 
 
     /// <summary>
-    /// Số scan-unit mà firmware nhận ở byte thứ ba của START_SCAN.
+    /// Card vật lý cuối cùng mà firmware nhận ở byte thứ ba của START_SCAN.
     /// Trace Htdrv trong project xác nhận command xx=4 quét 256 I/O, vì vậy
-    /// 1 scan-unit = 64 I/O = 2 card vật lý x 32 I/O. Giá trị này được đồng
-    /// bộ tự động từ ExpansionCardCount.
+    /// mỗi scan-unit = 64 I/O = 2 port nội bộ x 32 I/O. Khi Start Card lớn hơn
+    /// 1, giá trị này là StartCardNumber + ExpansionCardCount - 1.
     /// </summary>
-    public int CardCount { get; set; } = 1;
+    public int CardCount { get; set; } = 2;
 
     public int IoConfirm1 { get; set; } = 1;
 
     public int IoConfirmN { get; set; } = 1;
 
     public int UsbDelay { get; set; } = 1;
-
+    // 0/0 preserves existing THT configuration; a pair updates explicitly selected files.
+    // Legacy CFG read compatibility only. Runtime discard IO belongs to the product THT.
+    public int DiscardContactIo1 { get; set; }
+    public int DiscardContactIo2 { get; set; }
+    public bool ShowDiscardConfigurationNotice { get; set; } = true;
+    /// <summary>
+    /// Card vật lý đầu tiên của dải được lắp. Firmware vẫn quét từ card 1 tới
+    /// card cuối của dải; decoder bỏ vùng đứng trước và ánh xạ Start Card thành IO1.
+    /// </summary>
     public int StartCardNumber { get; set; } = 1;
 
     public bool UseTestPointer { get; set; } = true;
@@ -43,13 +51,21 @@ public sealed class ProductionSettings
 
     /// <summary>
     /// Số điểm lỗi dây duy nhất phải phát hiện trên MASTER NG. Giá trị này là
-    /// fallback/default; cấu hình theo từng model nằm trong MasterFaultCountsByModel.
+    /// dùng chung cho tất cả mã hàng; 0 tắt kiểm tra Master trên toàn ứng dụng.
     /// </summary>
     public int MasterFaultRequiredCount { get; set; } = 2;
+    public MasterSampleSelection MasterSelectedFaultSamples { get; set; } = MasterSampleSelection.All;
+    public Dictionary<string, MasterSampleSelection> MasterSelectedFaultSamplesByModel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public int MasterOpenFaultRequiredCount { get; set; } = 1;
+    public Dictionary<string, int> MasterOpenFaultCountsByModel { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public MasterSampleType MasterSampleType { get; set; } = MasterSampleType.WrongWiring;
+    public Dictionary<string, MasterSampleType> MasterSampleTypesByModel { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Cấu hình Số lỗi Master theo mã hàng/model. Key ưu tiên PartNumber; nếu THT
-    /// chưa có PartNumber thì dùng tên model/tên file.
+    /// Cấu hình cũ theo mã hàng, giữ để đọc/ghi tương thích. Không còn quyết định
+    /// yêu cầu Master; runtime dùng cấu hình chung MasterFaultRequiredCount.
     /// </summary>
     public Dictionary<string, int> MasterFaultCountsByModel { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
@@ -67,13 +83,16 @@ public sealed class ProductionSettings
     public Dictionary<string, WaterProofModelSettings> WaterProofProfilesByModel { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Cấu hình 10 kênh điện trở riêng theo file/model THT.</summary>
+    public Dictionary<string, ResistanceChannelSetting[]> ResistanceProfilesByModel { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
-    /// Số module/card mở rộng người vận hành cấu hình: 1..10.
-    /// 1 module = 2 card vật lý x 32 I/O = 64 I/O.
-    /// 10 module = 20 card vật lý = 640 I/O.
-    /// START_SCAN xx dùng chính số module/scan-unit này.
+    /// Số card mở rộng 64 I/O người vận hành cấu hình: 1..10.
+    /// Mỗi card có 2 port nội bộ x 32 I/O; operator không cấu hình số port.
+    /// START_SCAN xx dùng chính số card/scan-unit này.
     /// </summary>
-    public int ExpansionCardCount { get; set; } = 1;
+    public int ExpansionCardCount { get; set; } = 2;
 
     // ============================================================
     // THÔNG TIN PRODUCTION
@@ -84,9 +103,8 @@ public sealed class ProductionSettings
     // Chỉ sau khi in tem PASS thành công, phần mềm mới tăng +1 và lưu lại.
     public long LotNo { get; set; } = 2000;
 
-    // Ngày làm việc gắn với LOTNO, lưu theo ISO yyyy-MM-dd. Cấu hình cũ chưa
-    // có trường này sẽ giữ nguyên LOTNO trong ngày nâng cấp đầu tiên; từ ngày
-    // kế tiếp LOTNO tự trở về 0.
+    // Ngày làm việc gắn với LOTNO, lưu theo ISO yyyy-MM-dd. Sang ngày mới,
+    // LOT kế tiếp trở về LOTNO bắt đầu riêng của mã hàng; daily PASS về 0.
     public string LotNoDate { get; set; } = string.Empty;
 
     /// <summary>
@@ -95,6 +113,9 @@ public sealed class ProductionSettings
     /// hiển thị cho mã hàng được chọn.
     /// </summary>
     public Dictionary<string, ProductLotSettings> LotSettingsByProduct { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    public Dictionary<string, string> LabelTemplateTypesByProduct { get; set; } =
         new(StringComparer.OrdinalIgnoreCase);
 
     // Giữ trường cũ để đọc các file cấu hình V11.4 trở về trước.
@@ -115,10 +136,19 @@ public sealed class ProductionSettings
     public bool AutoSaveErrors { get; set; }
 
     /// <summary>
-    /// Khóa tổng cho Data/Logs và Data/ErrorLogs. History dùng kho riêng và
-    /// luôn được ghi độc lập với tùy chọn này.
+    /// Enables the main diagnostic/protocol log. History and crash reports
+    /// are persisted independently.
     /// </summary>
     public bool EnableSystemLogs { get; set; }
+
+    /// <summary>
+    /// Tắt: lỗi vẫn được chốt FAIL và ghi History nhưng không mở cửa sổ xác nhận,
+    /// không kích relay; bảng lỗi/âm báo hướng dẫn người vận hành tháo sản phẩm.
+    /// Bật: hiện popup xác nhận lỗi, sau xác nhận mới kích relay JIG.
+    /// </summary>
+    public bool WiringFaultConfirmationEnabled { get; set; } = true;
+    public bool MissingConnectionConfirmationEnabled { get; set; }
+    public int MissingConnectionConfirmationSeconds { get; set; } = 5;
 
     // ============================================================
     // THỜI GIAN
@@ -145,16 +175,19 @@ public sealed class ProductionSettings
     /// <summary>Chu kỳ bảo trì Probe Pin dùng chung; counter vẫn tách theo model.</summary>
     public long ProbeReplacementThreshold { get; set; } = 200_000;
 
+    /// <summary>Presentation only: vi or ko. Never changes test/label/history data.</summary>
+    public string TestViewLanguage { get; set; } = "vi";
+
     // Compatibility cho config cũ. Normalize đồng bộ về ShortCircuitConfirmMs.
     public int ShortConfirmMs { get; set; } = 0;
 
     /// <summary>Thời gian Relay 1 - MỞ/ĐẨY JIG giữ ON trước khi cưỡng bức OFF.</summary>
-    public int Relay1JigPulseMs { get; set; } = 250;
+    public int Relay1JigPulseMs { get; set; } = 120;
 
     /// <summary>Thời gian Relay 2 - MARKING giữ ON trước khi cưỡng bức OFF.</summary>
-    public int Relay2MarkingPulseMs { get; set; } = 250;
+    public int Relay2MarkingPulseMs { get; set; } = 120;
 
-    /// <summary>Bật/tắt Relay 1 JIG trong chuỗi PASS/FAIL/Master.</summary>
+    /// <summary>Bật/tắt relay JIG trong chuỗi production PASS/FAIL. Master hoàn thành luôn mở JIG.</summary>
     public bool JigEjectRelayEnabled { get; set; } = true;
 
     /// <summary>Bật/tắt Relay 2 MARKING trong chuỗi PASS. FAIL/Master không bao giờ dùng MARKING.</summary>
@@ -176,22 +209,16 @@ public sealed class ProductionSettings
     public int FaultJigRelayNumber { get; set; } = 1;
 
     /// <summary>Khoảng chờ an toàn sau khi R2 MARKING OFF trước khi R1 JIG ON trong chu trình PASS.</summary>
-    public int PassMarkingToJigDelayMs { get; set; } = 430;
+    public int PassMarkingToJigDelayMs { get; set; } = 350;
 
     /// <summary>Compatibility V15.1 trở về trước: "R1,R2". V15.2 UI không còn dùng trực tiếp.</summary>
-    public string StampDelay { get; set; } = "250,250";
+    public string StampDelay { get; set; } = "200,200";
 
     public int OversizeWaitSeconds { get; set; }
 
     public int ShieldDelay { get; set; } = 1;
 
     public int ResistanceDelayMs { get; set; }
-
-    /// <summary>
-    /// Mật khẩu chỉ bảo vệ nhóm cài đặt in tem. Không dùng để mở trang Cài đặt
-    /// và không dùng cho thao tác reset chu kỳ thay Probe Pin.
-    /// </summary>
-    public string Password { get; set; } = string.Empty;
 
     // ============================================================
     // GIAO DIỆN
@@ -212,6 +239,7 @@ public sealed class ProductionSettings
     // ============================================================
 
     public string LastThtPath { get; set; } = string.Empty;
+    public string LastThtPartKey { get; set; } = string.Empty;
 
     // ============================================================
     // ĐO ĐIỆN TRỞ R1-R10
@@ -309,7 +337,7 @@ public sealed class ProductionSettings
     public bool AutoPrintLabelOnPass { get; set; } = true;
 
     /// <summary>Thư mục tương đối chứa DB/export lịch sử.</summary>
-    public string HistoryDirectory { get; set; } = "Data/History";
+    public string HistoryDirectory { get; set; } = "Data";
 
     // ============================================================
     // MÁY IN TEM
@@ -320,7 +348,26 @@ public sealed class ProductionSettings
 
 public sealed class ProductLotSettings
 {
+    /// <summary>Runtime day starts at zero; preserves the separately configured StartLotNo.</summary>
+    public bool DailyLotStartsAtZero { get; set; }
+    /// <summary>Operator explicitly changed this product base; use it even before the first PASS.</summary>
+    public bool UseConfiguredStartLot { get; set; }
+    public string HistoryBatchId { get; set; } = string.Empty;
+    public string LastStartChangedDate { get; set; } = string.Empty;
+    /// <summary>
+    /// LOTNO bắt đầu do operator đặt một lần cho mã hàng. -1 chỉ xuất hiện khi
+    /// đọc cấu hình cũ chưa có field này và sẽ được migrate từ LotNo hiện tại.
+    /// </summary>
+    public long StartLotNo { get; set; } = -1;
+
+    /// <summary>LOT kế tiếp thực tế dành cho giao dịch in tem an toàn.</summary>
     public long LotNo { get; set; }
+
+    /// <summary>
+    /// LOT riêng của chế độ in hàng loạt. Không được dùng để tính sản lượng,
+    /// lịch sử test hoặc LOT của chu kỳ Production.
+    /// </summary>
+    public long BulkPrintLotNo { get; set; } = -1;
 
     public string LotNoDate { get; set; } = string.Empty;
 }
@@ -340,9 +387,13 @@ public sealed class ResistanceChannelSetting
 
 public sealed class LabelSettings
 {
-    public const string LargeTemplate = "TEM_TO";
-    public const string SmallTemplate = "TEM_BE";
-    public const string SmallQrTemplate = "TEM_BE_QR";
+    public const string LargeTemplate = "TEM_TO_KETN";
+    public const string LargeSqdzTemplate = "TEM_TO_SQDZ";
+    public const string SmallTemplate = "TEM_BE_SQDZ";
+    public const string SmallQrTemplate = "TEM_BE_QRCODE";
+    public const string BcwTemplate = "BCW";
+    public string BcwVehicleCode { get; set; } = string.Empty;
+    public string BcwPosition { get; set; } = "LH";
 
     /// <summary>
     /// Tên máy in được cài trong Windows.
@@ -367,11 +418,22 @@ public sealed class LabelSettings
 
     public int Copies { get; set; } = 1;
 
-    /// <summary>Chọn file mẫu lệnh in dạng TXT trong thư mục Labels cạnh EXE.</summary>
+    /// <summary>Chọn một trong ba mẫu lệnh in tích hợp trong EXE.</summary>
     public string TemplateType { get; set; } = LargeTemplate;
+
+    // Derived from an explicitly saved product choice; never a global CFG flag.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool PreferSelectedTemplate { get; set; }
 
     /// <summary>Explicit profile/template selection. No part-number inference is allowed.</summary>
     public string TemplatePath { get; set; } = string.Empty;
+
+    /// <summary>UTF-8/Base64 overrides stored in the single canonical CFG.</summary>
+    public string LargeTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string LargeSqdzTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string SmallTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string SmallQrTemplateOverrideBase64 { get; set; } = string.Empty;
+    public string BcwTemplateOverrideBase64 { get; set; } = string.Empty;
 
     public string EncodingName { get; set; } = "us-ascii";
 

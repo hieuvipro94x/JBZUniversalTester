@@ -13,6 +13,16 @@ public sealed class LabelPrintService : IAsyncDisposable
     private SerialPort? _printerPort;
     private string _connectedPort = string.Empty;
     private int _connectedBaudRate;
+    private readonly BcwSerialStore _bcwSerials;
+    private readonly Func<DateTime> _localClock;
+    private readonly Action<SerialPort> _closePort;
+    public LabelPrintService(BcwSerialStore? bcwSerials = null, Func<DateTime>? localClock = null,
+        Action<SerialPort>? closePort = null)
+    {
+        _bcwSerials = bcwSerials ?? new BcwSerialStore();
+        _localClock = localClock ?? (() => DateTime.Now);
+        _closePort = closePort ?? CloseAndDisposePort;
+    }
 
     public bool IsConnected => _printerPort?.IsOpen == true;
 
@@ -24,6 +34,8 @@ public sealed class LabelPrintService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
         string portName = settings.PrinterCom?.Trim() ?? string.Empty;
+        int baudRate = settings.BaudRate, writeTimeoutMs = settings.WriteTimeoutMs;
+        string encodingName = settings.EncodingName;
         if (string.IsNullOrWhiteSpace(portName))
             return new LabelPrinterConnectionResult(false, "Chưa chọn cổng COM máy in.");
 
@@ -32,20 +44,22 @@ public sealed class LabelPrintService : IAsyncDisposable
         {
             await EnsureComConnectedAsync(
                 portName,
-                settings.BaudRate,
-                settings.WriteTimeoutMs,
-                settings.EncodingName,
+                baudRate,
+                writeTimeoutMs,
+                encodingName,
                 ct);
             return new LabelPrinterConnectionResult(
                 true,
-                $"ĐÃ KẾT NỐI {portName} - {settings.BaudRate} baud");
+                $"ĐÃ KẾT NỐI {portName} - {baudRate} baud");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            ClosePrinterPort();
+            await ClosePrinterPortAsync();
+            AsyncFileLogService.Current.Error(
+                $"Label printer connection failed on {portName}: {ex}");
             return new LabelPrinterConnectionResult(
                 false,
-                $"KHÔNG KẾT NỐI ĐƯỢC {portName}: {ex.Message}");
+                "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
         }
         finally
         {
@@ -53,16 +67,64 @@ public sealed class LabelPrintService : IAsyncDisposable
         }
     }
 
+    public async Task DisconnectAsync(CancellationToken ct = default)
+    {
+        await _printGate.WaitAsync(ct);
+        try
+        {
+            await ClosePrinterPortAsync();
+        }
+        finally
+        {
+            _printGate.Release();
+        }
+    }
+
+    public async Task<LabelPrintRequest> CaptureProductionRequestAsync(LabelPrintRequest request, CancellationToken ct = default)
+    {
+        if (request.Profile.Id != LabelSettings.BcwTemplate) return request;
+        // SQLite owns reservation serialization. Never wait for a slow physical
+        // printer before capturing the next product's PASS history.
+        return (await Task.Run(() => _bcwSerials.Prepare(request, request.Data.TestedAt,
+            explicitReprint: false, productionCapture: true), ct)).Request;
+    }
+
     public async Task<LabelPrintTransportResult> PrintPassLabelAsync(
         LabelPrintRequest request,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool explicitReprint = false,
+        Func<LabelPrintRequest, Task>? beforeBcwSend = null,
+        bool productionSnapshot = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
         await _printGate.WaitAsync(ct);
         try
         {
-            return await PrintSerializedAsync(request, ct);
+            if (request.Profile.Id == LabelSettings.BcwTemplate)
+            {
+                ct.ThrowIfCancellationRequested();
+                var prepared = await Task.Run(() => _bcwSerials.Prepare(request, _localClock(), explicitReprint,
+                    productionCapture: productionSnapshot), ct);
+                request = prepared.Request;
+                if (prepared.AlreadySent)
+                    return new LabelPrintTransportResult(true, "BCW đã gửi trước đó; chặn gửi trùng tự động.") { EffectiveRequest = request };
+                try
+                {
+                    if (beforeBcwSend is not null) await beforeBcwSend(request);
+                    await Task.Run(() => _bcwSerials.Outcome(request.CycleId, "Sending", "Physical print ACK unavailable"));
+                    LabelPrintTransportResult result = await PrintSerializedAsync(request, ct, productionSnapshot);
+                    result = result with { Message = result.Message + $" BCW QR={request.Data.Barcode}; physical print ACK unavailable." };
+                    await Task.Run(() => _bcwSerials.Outcome(request.CycleId, result.Printed ? "Sent" : "Failed", result.Message));
+                    return result with { EffectiveRequest = request };
+                }
+                catch (Exception ex)
+                {
+                    await Task.Run(() => _bcwSerials.Outcome(request.CycleId, "Failed", ex.Message + "; physical print uncertain"));
+                    throw;
+                }
+            }
+            return await PrintSerializedAsync(request, ct, productionSnapshot);
         }
         finally
         {
@@ -72,8 +134,11 @@ public sealed class LabelPrintService : IAsyncDisposable
 
     private async Task<LabelPrintTransportResult> PrintSerializedAsync(
         LabelPrintRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool productionComOnly = false)
     {
+        if (productionComOnly && string.IsNullOrWhiteSpace(request.PrinterCom))
+            return new LabelPrintTransportResult(false, "Production payload saved; printer COM is not selected.");
         string transport = ResolveTransportName(request);
         AsyncFileLogService.Current.Application(
             $"[LABEL] Product={request.Data.PartNumber} Profile={request.Profile.Id} " +
@@ -81,18 +146,9 @@ public sealed class LabelPrintService : IAsyncDisposable
             $"Copies={request.Copies} CycleId={request.CycleId}");
         Encoding encoding = ResolveEncoding(request.Profile.EncodingName);
         byte[] payload = EncodeStrict(request.Payload, encoding);
-        string previewDirectory = Path.Combine(AppContext.BaseDirectory, "Data", "Labels");
-        Directory.CreateDirectory(previewDirectory);
-        string extension = ResolvePreviewExtension(request);
-        string previewPath = Path.Combine(
-            previewDirectory,
-            $"{request.Data.TestedAt:yyyyMMdd_HHmmssfff}_{SafeFilePart(request.Data.PartNumber)}_LOT{request.Data.LotNo}_{SafeFilePart(request.Profile.Id)}_{SafeFilePart(request.CycleId)}{extension}");
-        await File.WriteAllBytesAsync(previewPath, payload, ct);
-        AsyncFileLogService.Current.Application(
-            $"[LABEL] Preview={previewPath} Bytes={payload.Length} CycleId={request.CycleId}");
 
-        if (request.Profile.Mode == LabelPrintMode.ExternalHelper)
-            return await PrintWithExternalHelperAsync(request, payload, previewPath, ct);
+        if (!productionComOnly && request.Profile.Mode == LabelPrintMode.ExternalHelper)
+            return await PrintWithExternalHelperAsync(request, payload, ct);
 
         if (!string.IsNullOrWhiteSpace(request.PrinterCom))
         {
@@ -102,10 +158,11 @@ public sealed class LabelPrintService : IAsyncDisposable
                 request.WriteTimeoutMs,
                 request.Profile.EncodingName,
                 ct);
+            ct.ThrowIfCancellationRequested();
             await WriteToConnectedComAsync(payload, request.Copies, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via {request.PrinterCom}. Preview: {previewPath}");
+                $"Sent {request.Copies} label job(s) via {request.PrinterCom}; no printer ACK is available.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.PrinterName))
@@ -120,7 +177,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             }, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via Windows printer '{request.PrinterName}'. Preview: {previewPath}");
+                $"Sent {request.Copies} label job(s) via Windows printer '{request.PrinterName}'; no physical print ACK is available.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.RawDestination))
@@ -128,12 +185,12 @@ public sealed class LabelPrintService : IAsyncDisposable
             await PrintToRawDestinationAsync(request.RawDestination, payload, request.Copies, ct);
             return new LabelPrintTransportResult(
                 true,
-                $"Printed {request.Copies} label(s) via raw destination '{request.RawDestination}'. Preview: {previewPath}");
+                $"Sent {request.Copies} label job(s) via raw destination '{request.RawDestination}'; no physical print ACK is available.");
         }
 
         return new LabelPrintTransportResult(
             false,
-            $"No printer transport configured. Preview saved: {previewPath}");
+            "No printer transport configured.");
     }
 
     private async Task EnsureComConnectedAsync(
@@ -148,7 +205,7 @@ public sealed class LabelPrintService : IAsyncDisposable
             _connectedBaudRate == baudRate)
             return;
 
-        ClosePrinterPort();
+        await ClosePrinterPortAsync();
         Encoding encoding = ResolveEncoding(encodingName);
         var port = new SerialPort(
             portName,
@@ -167,6 +224,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         try
         {
             await Task.Run(port.Open, ct);
+            ct.ThrowIfCancellationRequested();
             _printerPort = port;
             _connectedPort = portName;
             _connectedBaudRate = baudRate;
@@ -175,7 +233,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         }
         catch
         {
-            port.Dispose();
+            await Task.Run(port.Dispose);
             throw;
         }
     }
@@ -197,22 +255,46 @@ public sealed class LabelPrintService : IAsyncDisposable
         }
         catch
         {
-            ClosePrinterPort();
+            await ClosePrinterPortAsync();
             throw;
         }
     }
 
-    private void ClosePrinterPort()
+    private async Task ClosePrinterPortAsync()
     {
         SerialPort? port = _printerPort;
+        string oldPortName = _connectedPort;
+        int oldBaudRate = _connectedBaudRate;
         _printerPort = null;
         _connectedPort = string.Empty;
         _connectedBaudRate = 0;
         if (port is null)
             return;
 
-        try { port.Close(); } catch { }
-        port.Dispose();
+        // Driver Close/Dispose can block for seconds. The caller retains the
+        // print gate until cleanup finishes, so no new session can overlap it.
+        try { await Task.Run(() => _closePort(port)).ConfigureAwait(false); }
+        catch
+        {
+            // Keep ownership if the driver failed to dispose. The next attempt
+            // must retry this cleanup before it can open any replacement port.
+            _printerPort = port;
+            _connectedPort = oldPortName;
+            _connectedBaudRate = oldBaudRate;
+            throw;
+        }
+    }
+
+    private static void CloseAndDisposePort(SerialPort port)
+    {
+        try { port.Close(); }
+        catch (Exception ex) { AsyncFileLogService.Current.Error($"Label COM close failed: {ex.Message}"); }
+        try { port.Dispose(); }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Label COM dispose failed: {ex.Message}");
+            throw;
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -220,7 +302,7 @@ public sealed class LabelPrintService : IAsyncDisposable
         await _printGate.WaitAsync();
         try
         {
-            ClosePrinterPort();
+            await ClosePrinterPortAsync();
         }
         finally
         {
@@ -252,7 +334,6 @@ public sealed class LabelPrintService : IAsyncDisposable
     private static async Task<LabelPrintTransportResult> PrintWithExternalHelperAsync(
         LabelPrintRequest request,
         byte[] payload,
-        string previewPath,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request.ExternalHelperPath) ||
@@ -290,17 +371,7 @@ public sealed class LabelPrintService : IAsyncDisposable
                 return new LabelPrintTransportResult(false, $"External label helper exited with code {process.ExitCode}.");
         }
 
-        return new LabelPrintTransportResult(true, $"External helper completed. Preview: {previewPath}");
-    }
-
-    private static string SafeFilePart(string? value)
-    {
-        HashSet<char> invalid = Path.GetInvalidFileNameChars().ToHashSet();
-        string safe = new((value ?? string.Empty)
-            .Where(character => !invalid.Contains(character))
-            .Take(60)
-            .ToArray());
-        return string.IsNullOrWhiteSpace(safe) ? "NO_PART_NUMBER" : safe;
+        return new LabelPrintTransportResult(true, $"External helper accepted the label job; no physical print ACK is available. Print file: {printFile}");
     }
 
     private static string ResolveTransportName(LabelPrintRequest request) =>
@@ -343,15 +414,6 @@ public sealed class LabelPrintService : IAsyncDisposable
                 $"Label payload contains characters unsupported by encoding '{encoding.WebName}'.", ex);
         }
     }
-
-    private static string ResolvePreviewExtension(LabelPrintRequest request) => request.Profile.Mode switch
-    {
-        LabelPrintMode.RawZpl => ".zpl",
-        LabelPrintMode.RawEpl or LabelPrintMode.StoredForm => ".epl",
-        _ when Path.GetExtension(request.Profile.TemplatePath).Equals(".zpl", StringComparison.OrdinalIgnoreCase) => ".zpl",
-        _ when Path.GetExtension(request.Profile.TemplatePath).Equals(".epl", StringComparison.OrdinalIgnoreCase) => ".epl",
-        _ => ".txt"
-    };
 
     private static class RawPrinter
     {

@@ -1,8 +1,10 @@
-﻿namespace JBZUniversalTester.Models;
+namespace JBZUniversalTester.Models;
 
 public sealed class TestHistoryRecord
 {
     private CustomerFaultDisplay? _customerFault;
+    private string? _barcodePayloadSource;
+    private string _barcodeFromPayload = string.Empty;
 
     public long Id { get; set; }
     public DateTime Started { get; set; }
@@ -59,32 +61,74 @@ public sealed class TestHistoryRecord
     public int LabelCopies { get; set; }
     public int ReprintCount { get; set; }
     public string PrintMessage { get; set; } = string.Empty;
+    public long? HistoryOrdinal { get; set; }
+    public string ProductionBatchKey { get; set; } = string.Empty;
 
+    public TestHistoryRecord ClonePersistenceSnapshot() => (TestHistoryRecord)MemberwiseClone();
+
+    // Cột Ngày/Thời gian của History biểu diễn thời điểm BẮT ĐẦU TEST.
+    // Việc sắp xếp/query/cursor trong TestHistoryStore phải dùng cùng timestamp này.
     public string DateText => EffectiveTestStartedAt.ToString("yyyy/MM/dd");
     public string TimeText => EffectiveTestStartedAt.ToString("HH:mm:ss");
     public string PassedText => Passed ? "PASS" : "FAIL";
     public string LabelTypeText => !string.IsNullOrWhiteSpace(LabelTemplateType)
         ? LabelTemplateType
         : LabelProfile;
-    // BarcodeValue chỉ được chốt sau khi sản phẩm PASS và máy in xác nhận thành công.
-    // LabelPayload là toàn bộ lệnh máy in, không được đưa vào cột 바코드출력.
-    public string BarcodeOutputText => BarcodeValue ?? string.Empty;
+    // Show output only after a successful send. The captured barcode and full
+    // command remain stored independently for offline audit and explicit retry.
+    public string BarcodeOutputText
+    {
+        get
+        {
+            if (!IsProductionRecord || !Passed || PrintStatus != LabelPrintStatus.Printed.ToString()) return string.Empty;
+            if (!string.IsNullOrWhiteSpace(BarcodeValue)) return BarcodeValue;
+            if (!string.Equals(_barcodePayloadSource, LabelPayload, StringComparison.Ordinal))
+            {
+                _barcodeFromPayload = JBZUniversalTester.Services.SavedLabelBarcodeReader.Read(LabelPayload);
+                _barcodePayloadSource = LabelPayload;
+            }
+            return _barcodeFromPayload;
+        }
+    }
     public string ExportModelFileName => System.IO.Path.GetFileName(ModelFile ?? string.Empty);
-    public string ExportLotText => LotText ?? string.Empty;
+    // The original export keeps Lot empty and puts the saved production LOT
+    // in the PASS-count column. Do not rewrite or renumber legacy Tests.Lot.
+    public string ExportLotText => string.Empty;
+    public string ExportPassCountText => IsProductionRecord && Passed
+        ? Math.Max(0, LotNo).ToString(System.Globalization.CultureInfo.InvariantCulture)
+        : string.Empty;
+    public bool IsProductionRecord => HistoryInspectionType.IsProduct(InspectionType);
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
-    public string InspectionTypeText => HistoryInspectionType.KoreanName(InspectionType);
-    public string ExportProgressText => Passed ? "1/1" : "0/1";
+    public string InspectionTypeText => IsMasterRecord
+        ? MasterHistoryPresentation.InspectionName(this)
+        : IsProductionRecord && (InspectionTrace.Contains("기밀검사", StringComparison.Ordinal) ||
+                                 InspectionTrace.Contains("기밀 검사", StringComparison.Ordinal))
+            ? "회로·기밀 검사"
+            : HistoryInspectionType.KoreanName(InspectionType);
+    public string HistoryResultText => IsMasterRecord
+        ? Passed ? "확인 합격" : "확인 불합격"
+        : ExportResultText;
+    public string HistoryTestLogText => IsMasterRecord
+        ? MasterHistoryPresentation.BuildLog(this)
+        : ExportTestLogText;
+    public string HistoryTestLogSingleLineText => SingleLineLog(HistoryTestLogText);
+    public string ExportTestLogSingleLineText => SingleLineLog(ExportTestLogText);
+    private static string SingleLineLog(string text) => string.Join(" | ",
+        text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    public string ExportProgressText => Passed ? "PASS" : "NG";
     public string ExportResultText => Passed ? "합격" : "불량";
-    public long? ExportAcceptedLotNo => !IsMasterRecord && Passed && LotNo > 0 ? LotNo : null;
-    public long? ExportSequenceNo => ExportAcceptedLotNo;
+    public long? ExportAcceptedLotNo => IsProductionRecord && Passed && LotNo > 0 ? LotNo : null;
+    public long? ExportSequenceNo => IsProductionRecord && Passed
+        ? ExportAcceptedLotNo ?? (ProductionCounter > 0 ? ProductionCounter : null)
+        : null;
     public string ExportBarcodeInputText => string.Empty;
     public string ExportBarcodeText =>
-        !IsMasterRecord &&
-        Passed &&
-        string.Equals(PrintStatus, LabelPrintStatus.Printed.ToString(), StringComparison.OrdinalIgnoreCase)
-            ? BarcodeOutputText
+        IsProductionRecord &&
+        Passed
+            ? !string.IsNullOrEmpty(LabelPayload) ? LabelPayload : BarcodeValue ?? string.Empty
             : string.Empty;
     public string ExportPercentText => string.Empty;
+    public string PrinterCommandSingleLineText => SingleLineLog(ExportBarcodeText);
     public string ExportIncomingInspectionText => string.Empty;
     public string ExportResistanceText => KoreanHistoryFormatter.FormatResistanceSummary(Resistance);
     public DateTime EffectiveInstallStartedAt => InstallStartedAt ?? Started;
@@ -92,6 +136,7 @@ public sealed class TestHistoryRecord
     public DateTime EffectiveResultAt => ResultAt ?? Finished;
     public double? InstallDurationSeconds => DurationSeconds(EffectiveInstallStartedAt, TestStartedAt);
     public double? TestDurationSeconds => DurationSeconds(TestStartedAt, EffectiveResultAt);
+    public double? InstallAndTestDurationSeconds => DurationSeconds(EffectiveInstallStartedAt, EffectiveResultAt);
     public double? RemovalDurationSeconds => DurationSeconds(RemovalStartedAt, RemovedAt);
     public string InstallDurationText => FormatDuration(InstallDurationSeconds);
     public string TestDurationText => FormatDuration(TestDurationSeconds);
@@ -101,21 +146,21 @@ public sealed class TestHistoryRecord
         get
         {
             var text = new System.Text.StringBuilder();
-            if (InstallDurationSeconds is double installSeconds)
+            if (InstallAndTestDurationSeconds is double installAndTestSeconds)
             {
-                text.Append("장착 ")
+                text.Append("장착/검사 ")
                     .Append(EffectiveInstallStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
                     .Append('~')
-                    .Append(EffectiveTestStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append(EffectiveResultAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
                     .Append('(')
-                    .Append(installSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append(installAndTestSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
                     .Append("초) ");
             }
 
-            text.Append(EffectiveTestStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
-                .Append(" 검사시작 ");
-
-            string trace = InspectionTrace?.Trim() ?? string.Empty;
+            string trace = (InspectionTrace?.Trim() ?? string.Empty)
+                .Replace("LEAK RETEST", "기밀 검사 시작", StringComparison.OrdinalIgnoreCase);
+            if (IsMasterRecord && trace.Length > 0)
+                trace = KoreanHistoryFormatter.FormatMasterTrace(trace);
             if (trace.Length == 0)
             {
                 bool continuityPassed = Passed ||
@@ -125,6 +170,8 @@ public sealed class TestHistoryRecord
                     FaultType?.Contains("KÍN NƯỚC", StringComparison.OrdinalIgnoreCase) == true;
                 trace = $"{EffectiveResultAt:HH:mm:ss} 회로검사:{(continuityPassed ? "PASS" : "FAIL")}";
             }
+            if (IsMasterRecord)
+                text.Append(MasterHistoryPresentation.ExportTiming(this));
             text.Append(trace);
 
             if (!Passed || InspectionType == HistoryInspectionType.MasterBad)
@@ -166,8 +213,6 @@ public sealed class TestHistoryRecord
             }
             if (!string.IsNullOrWhiteSpace(LabelTypeText))
                 parts.Add($"[라벨]{LabelTypeText.Trim()}");
-            if (!string.IsNullOrWhiteSpace(PrintStatus))
-                parts.Add($"[인쇄]{KoreanPrintStatus(PrintStatus)}");
             if (!string.IsNullOrWhiteSpace(DeviceName))
                 parts.Add($"[검사기]{DeviceName.Trim()}");
             return string.Join(' ', parts);
@@ -208,8 +253,15 @@ public sealed class TestHistoryRecord
 public static class HistoryInspectionType
 {
     public const string Product = "PRODUCT";
+    public const string LeakRetest = "LEAK_RETEST";
     public const string MasterGood = "MASTER_GOOD";
     public const string MasterBad = "MASTER_BAD";
+
+    public static bool IsProduct(string? value) =>
+        string.Equals(value, Product, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsLeakRetest(string? value) =>
+        string.Equals(value, LeakRetest, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsMaster(string? value) =>
         string.Equals(value, MasterGood, StringComparison.OrdinalIgnoreCase) ||
@@ -219,6 +271,7 @@ public static class HistoryInspectionType
     {
         MasterGood => "마스터 합격품",
         MasterBad => "마스터 불량품",
+        LeakRetest => "기밀 검사 시작",
         _ => "제품"
     };
 }
@@ -229,7 +282,64 @@ public sealed record HistorySearchCriteria(
     long? LotNo,
     string PartKeyword,
     string Result,
-    int MaxRows = 5000);
+    int MaxRows = 200,
+    int Offset = 0,
+    string InspectionType = "",
+    string FaultType = "",
+    int? Io = null,
+    string WireName = "",
+    string CycleId = "",
+    string AppVersion = "",
+    DateTime? BeforeHistoryAt = null,
+    long? BeforeId = null);
+
+public sealed record HistorySummary(
+    long Total,
+    long ProductTotal,
+    long ProductPass,
+    long ProductFail,
+    long MasterTotal,
+    long LeakRetestTotal)
+{
+    public double ProductPassRate => ProductTotal == 0
+        ? 0
+        : ProductPass * 100d / ProductTotal;
+}
+
+public sealed record HistoryPartOption(string Keyword, string Display)
+{
+    public override string ToString() => Display;
+}
+
+public static class HistoryPresentation
+{
+    public static void AssignProductOrdinals(
+        IEnumerable<TestHistoryRecord> records,
+        IDictionary<string, long> passCountsByProduct)
+    {
+        foreach (TestHistoryRecord record in records)
+        {
+            if (!record.IsProductionRecord)
+            {
+                record.HistoryOrdinal = null;
+                continue;
+            }
+
+            string productKey = !string.IsNullOrWhiteSpace(record.PartNumber)
+                ? "PN:" + record.PartNumber.Trim().ToUpperInvariant()
+                : !string.IsNullOrWhiteSpace(record.ModelFile)
+                    ? "FILE:" + record.ModelFile.Trim().ToUpperInvariant()
+                    : "MODEL:" + (record.ModelName ?? string.Empty).Trim().ToUpperInvariant();
+            productKey += "|" + (string.IsNullOrWhiteSpace(record.ProductionBatchKey)
+                ? "LEGACY"
+                : record.ProductionBatchKey);
+            passCountsByProduct.TryGetValue(productKey, out long passCount);
+            record.HistoryOrdinal ??= ++passCount;
+            passCount = Math.Max(passCount, record.HistoryOrdinal.Value);
+            passCountsByProduct[productKey] = passCount;
+        }
+    }
+}
 
 public sealed record LabelPrintData(
     string PartName,
@@ -243,7 +353,10 @@ public sealed record LabelPrintData(
     string CustomerCode = "",
     string CycleId = "",
     string Barcode = "",
-    string BarcodePrint = "");
+    string BarcodePrint = "",
+    string BcwVehicleCode = "",
+    string BcwPosition = "",
+    long BcwSerial = 0);
 
 public enum LabelPrintStatus
 {
@@ -291,6 +404,20 @@ public sealed record LabelPrintRequest(
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(settings);
 
+        if (JBZUniversalTester.Services.LabelProfileResolver.NormalizeTemplateType(settings.TemplateType) == LabelSettings.BcwTemplate)
+        {
+            var bcwData = new LabelPrintData(model.ProductName, model.PartNumber, model.Eco, model.Nco, model.Alc,
+                history.LotNo, history.Finished, model.VehicleType, model.CustomerCode, history.CycleId,
+                BcwVehicleCode: JBZUniversalTester.Services.BcwLabelService.Vehicle(model, settings),
+                BcwPosition: JBZUniversalTester.Services.BcwLabelService.Position(model, settings));
+            var bcw = new LabelPrintRequest(history.CycleId, bcwData, string.Empty,
+                JBZUniversalTester.Services.LabelProfileResolver.Resolve(model, settings), model.ModelName, model.SourcePath,
+                settings.PrinterName, settings.PrinterCom, 60, 15, "JBZBCW", settings.BaudRate,
+                settings.WriteTimeoutMs, 1, settings.RawDestination, string.Empty, string.Empty, string.Empty);
+            // Preview identity only. The printer gate assigns the persistent BCW serial at actual send time.
+            return JBZUniversalTester.Services.BcwLabelService.Bind(bcw, history.Finished, 1);
+        }
+
         var data = new LabelPrintData(
             model.ProductName,
             model.PartNumber,
@@ -307,16 +434,17 @@ public sealed record LabelPrintRequest(
             JBZUniversalTester.Services.LabelProfileResolver.NormalizeTemplateType(settings.TemplateType);
         bool isSmallLabel = templateType == LabelSettings.SmallTemplate;
         bool isSmallQrLabel = templateType == LabelSettings.SmallQrTemplate;
+        bool isLargeSqdzLabel = templateType == LabelSettings.LargeSqdzTemplate;
         LabelIdentity identity = JBZUniversalTester.Services.EplLabelService.BuildIdentity(
             data,
-            includeAlcLotSuffix: !isSmallLabel && !isSmallQrLabel);
+            includeAlcLotSuffix: !isSmallLabel && !isSmallQrLabel && !isLargeSqdzLabel);
         data = data with { Barcode = identity.BarcodeValue, BarcodePrint = identity.BarcodeValue };
         IReadOnlyDictionary<string, string> variables =
             JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
 
-        if (isSmallLabel)
+        if (isSmallLabel || isLargeSqdzLabel)
         {
-            string barcode = variables["SMALL_LABEL_BARCODE"];
+            string barcode = variables["SQDZ_LABEL_BARCODE"];
             data = data with { Barcode = barcode, BarcodePrint = barcode };
             variables = JBZUniversalTester.Services.LabelVariableResolver.Resolve(model, data, settings);
         }
@@ -328,9 +456,23 @@ public sealed record LabelPrintRequest(
         }
         else if (!string.IsNullOrWhiteSpace(model.LabelTemplate.BarcodeTemplate))
         {
+            Dictionary<string, string> barcodeVariables = variables.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value,
+                StringComparer.OrdinalIgnoreCase);
+            if (barcodeVariables.TryGetValue("LOT_NO_BARCODE", out string? barcodeLot))
+            {
+                // BarcodeTemplate là ngữ cảnh mã vạch riêng. Giữ tương thích
+                // template cũ dùng LOT/LOTNO/SEQUENCE bằng cách chỉ đưa LOT có
+                // hậu tố ALC vào lần render này; payload chữ vẫn dùng LOT gốc.
+                barcodeVariables["LOT"] = barcodeLot;
+                barcodeVariables["LOT_NO"] = barcodeLot;
+                barcodeVariables["SEQUENCE"] = barcodeLot;
+            }
+
             string barcode = JBZUniversalTester.Services.LabelTemplateRenderer.Render(
                 model.LabelTemplate.BarcodeTemplate,
-                variables,
+                barcodeVariables,
                 model.PartNumber,
                 model.LabelTemplate.ProfileId);
             data = data with { Barcode = barcode, BarcodePrint = barcode };
@@ -338,7 +480,8 @@ public sealed record LabelPrintRequest(
         }
 
         LabelProfile profile = JBZUniversalTester.Services.LabelProfileResolver.Resolve(model, settings);
-        string template = JBZUniversalTester.Services.LabelTemplateProvider.Load(profile, model.LabelTemplate.RawTemplate);
+        string template = JBZUniversalTester.Services.LabelTemplateProvider.Load(
+            profile, settings.PreferSelectedTemplate ? string.Empty : model.LabelTemplate.RawTemplate);
         string payload = JBZUniversalTester.Services.LabelTemplateRenderer.Render(
             profile, template, variables, model.PartNumber);
 
@@ -350,11 +493,22 @@ public sealed record LabelPrintRequest(
         // payload của TEM_BE, TEM_TO hoặc template tùy chỉnh khác.
         if (isSmallQrLabel)
             payload = JBZUniversalTester.Services.LabelTemplateRenderer.NormalizeEplJob(payload);
+        else if ((templateType is LabelSettings.LargeTemplate or LabelSettings.LargeSqdzTemplate) &&
+                  JBZUniversalTester.Services.BuiltInLabelTemplateStore.IsReference(profile.TemplatePath))
+            payload = payload.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
         if (isSmallLabel)
         {
             JBZUniversalTester.Services.AsyncFileLogService.Current.Application(
                 $"[LABEL] Type={LabelSettings.SmallTemplate} PartNumber={data.PartNumber} " +
+                $"YearCode={variables["YEAR_CODE"]} MonthCode={variables["MONTH_CODE"]} " +
+                $"DayCode={variables["DAY_CODE"]} Lot={variables["LOT_NO"]} Barcode={data.Barcode}",
+                JBZUniversalTester.Services.AppLogLevel.Diagnostic);
+        }
+        else if (isLargeSqdzLabel)
+        {
+            JBZUniversalTester.Services.AsyncFileLogService.Current.Application(
+                $"[LABEL] Type={LabelSettings.LargeSqdzTemplate} PartNumber={data.PartNumber} " +
                 $"YearCode={variables["YEAR_CODE"]} MonthCode={variables["MONTH_CODE"]} " +
                 $"DayCode={variables["DAY_CODE"]} Lot={variables["LOT_NO"]} Barcode={data.Barcode}",
                 JBZUniversalTester.Services.AppLogLevel.Diagnostic);
@@ -387,10 +541,68 @@ public sealed record LabelPrintRequest(
             profile.ExternalHelperArgument,
             profile.ExternalPrintFile);
     }
+
+    public static LabelPrintRequest Restore(
+        TestHistoryRecord history,
+        ProductModel model,
+        LabelSettings currentSettings)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        if (string.IsNullOrWhiteSpace(history.LabelPayload))
+            throw new InvalidOperationException("Persisted label payload is empty.");
+
+        if (history.LabelTemplateType == LabelSettings.BcwTemplate)
+        {
+            // Restore by cycle from the immutable stored request below, never from current BCW settings.
+            var store = new JBZUniversalTester.Services.BcwSerialStore();
+            var snapshot = store.Find(history.CycleId);
+            if (snapshot is null) return JBZUniversalTester.Services.BcwLabelService.RestoreUnsent(history, currentSettings);
+            return snapshot with { PrinterCom = currentSettings.PrinterCom, PrinterName = currentSettings.PrinterName,
+                RawDestination = currentSettings.RawDestination, BaudRate = currentSettings.BaudRate,
+                WriteTimeoutMs = currentSettings.WriteTimeoutMs };
+        }
+
+        LabelSettings identitySettings = new()
+        {
+            TemplateType = history.LabelTemplateType,
+            PrinterName = currentSettings.PrinterName,
+            PrinterCom = currentSettings.PrinterCom,
+            RawDestination = currentSettings.RawDestination,
+            BaudRate = currentSettings.BaudRate,
+            WriteTimeoutMs = currentSettings.WriteTimeoutMs,
+            EncodingName = currentSettings.EncodingName,
+            ExternalHelperPath = currentSettings.ExternalHelperPath,
+            ExternalHelperArgument = currentSettings.ExternalHelperArgument,
+            ExternalPrintFile = currentSettings.ExternalPrintFile
+        };
+        LabelPrintRequest captured = Capture(history, model, identitySettings);
+        return captured with
+        {
+            Payload = history.LabelPayload,
+            Copies = Math.Max(1, history.LabelCopies),
+            Data = captured.Data with
+            {
+                PartName = history.PartName,
+                PartNumber = history.PartNumber,
+                VehicleType = history.VehicleType,
+                Eco = history.Eco,
+                Nco = history.Nco,
+                Alc = history.Alc,
+                LotNo = history.LotNo,
+                TestedAt = history.Finished,
+                CycleId = history.CycleId,
+                Barcode = string.IsNullOrWhiteSpace(history.BarcodeValue) ? captured.Data.Barcode : history.BarcodeValue,
+                BarcodePrint = string.IsNullOrWhiteSpace(history.BarcodeValue) ? captured.Data.BarcodePrint : history.BarcodeValue
+            }
+        };
+    }
 }
 
 public sealed record LabelIdentity(string SerialText, string BarcodeValue);
 
-public sealed record LabelPrintTransportResult(bool Printed, string Message);
+public sealed record LabelPrintTransportResult(bool Printed, string Message)
+{
+    public LabelPrintRequest? EffectiveRequest { get; init; }
+}
 
 public sealed record LabelPrinterConnectionResult(bool Connected, string Message);

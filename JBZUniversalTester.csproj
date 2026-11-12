@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <Import Project="Version.props" />
 
@@ -6,13 +6,14 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
 
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- V12.10.2: namespace code giu nguyen, ten EXE/assembly co version de khong ghi de ban cu -->
+    <!-- Canonical portable runtime keeps one stable executable name. -->
     <RootNamespace>JBZUniversalTester</RootNamespace>
-    <AssemblyName>JBZUniversalTester_V$(VersionFileTag)</AssemblyName>
+    <AssemblyName>JBZUniversalTester</AssemblyName>
 
     <!-- Phần mềm 32-bit -->
     <PlatformTarget>x86</PlatformTarget>
@@ -50,6 +51,12 @@
     <Platforms>AnyCPU;x86</Platforms>
   </PropertyGroup>
 
+  <!-- Keep WPF type resolution unchanged; WinForms is used only for the classic file dialog. -->
+  <ItemGroup>
+    <Using Remove="System.Drawing" />
+    <Using Remove="System.Windows.Forms" />
+  </ItemGroup>
+
   <!-- V12.9: chan build neu Version.props bi cap nhat lech. -->
   <Target Name="ValidateVersionConfiguration" BeforeTargets="BeforeBuild">
     <PropertyGroup>
@@ -66,11 +73,24 @@
 
   <!-- Icon -->
   <ItemGroup>
+    <None Remove="Assets\mainlogo.gif" />
+    <None Remove="Assets\000_JPG_BACKJPG_1042.jpg" />
+    <Resource Include="Assets\000_JPG_BACKJPG_1042.jpg" />
+    <None Remove="Assets\reset_probe_cycle.png" />
     <None Remove="logo.ico" />
+    <Resource Include="Assets\mainlogo.gif">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Assets\reset_probe_cycle.png" />
     <Resource Include="logo.ico" />
   </ItemGroup>
 
   <!-- SQLite -->
+  <ItemGroup>
+    <EmbeddedResource Include="Features\ModelEditor\Assets\*">
+      <LogicalName>JBZUniversalTester.ModelEditor.Assets.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.12" />
     <PackageReference Include="System.IO.Ports" Version="10.0.10" />
@@ -78,23 +98,44 @@
 
   <!-- Self-tests là project console riêng, không được compile vào WPF app. -->
   <ItemGroup>
-    <Content Include="Labels\*.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
     <Compile Remove="Tests\**\*.cs" />
     <Compile Remove="HardwareVerification\**\*.cs" />
+  </ItemGroup>
+
+  <!-- Built-in label templates stay inside the single EXE. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Labels\TEM_TO_KETN.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_TO_KETN.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Labels\TEM_TO_SQDZ.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_TO_SQDZ.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Labels\TEM_BE_SQDZ.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_BE_SQDZ.txt</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Labels\BCW.txt"><LogicalName>JBZUniversalTester.Labels.BCW.txt</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Labels\TEM_BE_QRCODE.txt">
+      <LogicalName>JBZUniversalTester.Labels.TEM_BE_QRCODE.txt</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!-- Nhúng âm thanh vào EXE -->
   <ItemGroup>
     <None Remove="Assets\Sounds\CLICK.wav" />
+    <None Remove="Assets\Sounds\COMPUTER.wav" />
     <None Remove="Assets\Sounds\DINGDONG.wav" />
+    <None Remove="Assets\Sounds\STAGEOK.wav" />
     <None Remove="Assets\Sounds\START.wav" />
     <None Remove="Assets\Sounds\TESTPOINT.wav" />
+    <None Remove="Assets\Sounds\DRIP.wav" />
+    <None Remove="Assets\Sounds\NG.wav" />
 
     <EmbeddedResource Include="Assets\Sounds\CLICK.wav">
       <LogicalName>JBZUniversalTester.Assets.Sounds.CLICK.wav</LogicalName>
+    </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\COMPUTER.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.COMPUTER.wav</LogicalName>
     </EmbeddedResource>
 
     <EmbeddedResource Include="Assets\Sounds\DINGDONG.wav">
@@ -108,6 +149,20 @@
     <EmbeddedResource Include="Assets\Sounds\TESTPOINT.wav">
       <LogicalName>JBZUniversalTester.Assets.Sounds.TESTPOINT.wav</LogicalName>
     </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\DRIP.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.DRIP.wav</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Assets\Sounds\STAGEOK.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.STAGEOK.wav</LogicalName>
+    </EmbeddedResource>
+
+    <EmbeddedResource Include="Assets\Sounds\NG.wav">
+      <LogicalName>JBZUniversalTester.Assets.Sounds.NG.wav</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Themes\" />
   </ItemGroup>
 
 </Project>

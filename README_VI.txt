@@ -36,23 +36,17 @@ Kết quả:
 
 Máy chạy cần .NET 8 Desktop Runtime x86.
 
-3. CẤU HÌNH JSON
-AppSettings.cs tự tạo:
-  C:\ProgramData\JBZUniversalTester\appsettings.json
+3. CẤU HÌNH KỸ THUẬT NỘI BỘ
+Các giá trị AppSettings về bo, thiết bị đo và thời gian kỹ thuật được biên dịch
+trong EXE. Phần mềm không đọc/ghi chúng vào JBZUniversalTester.cfg hoặc
+appsettings.json.
 
-Không đưa appsettings.json vào thư mục Publish và không đặt CopyToOutputDirectory.
-Nhờ vậy kết quả phát hành ban đầu vẫn chỉ có một EXE.
+JBZUniversalTester.cfg chỉ lưu các thông số vận hành được chỉnh trên màn hình
+Cài đặt, ví dụ LOT, số card, Leak, relay, điện trở và máy in tem.
 
-4. THÊM TRƯỜNG CẤU HÌNH SAU NÀY
-Ví dụ thêm vào TestSettings:
-
-  public int ScanTimeoutMs { get; set; } = 3000;
-
-Build phiên bản mới. Khi chạy lần đầu, Load() sẽ tự ghi trường mới vào JSON:
-
-  "ScanTimeoutMs": 3000
-
-Các trường lạ chưa được phần mềm biết sẽ được giữ qua JsonExtensionData.
+4. THÊM GIÁ TRỊ KỸ THUẬT SAU NÀY
+Thêm giá trị mặc định vào lớp AppSettings/TestSettings rồi build phiên bản mới.
+Không tạo khóa App.* trong file cấu hình dành cho người vận hành.
 
 5. DÙNG TRONG CHƯƠNG TRÌNH
 Khởi tạo:
@@ -61,9 +55,7 @@ Khởi tạo:
 Đọc:
   int delay = settings.Keysight.SettleDelayMs;
 
-Thay đổi và lưu:
-  settings.Board.FtdiSerial = "SERIAL_MOI";
-  settings.Save();
+Các giá trị này không có API lưu ra file cấu hình.
 
 6. LƯU Ý
 - Không bật EnableCompressionInSingleFile=true khi SelfContained=false.

@@ -36,7 +36,7 @@ public sealed record WireNet(
 {
     public int SourceIo => IoNumbers.Count > 0 ? IoNumbers[0] : 0;
 
-    public IReadOnlyList<int> ExpectedActiveIo =>
+    public IReadOnlyList<int> ExpectedActiveIo { get; } =
         IoNumbers.Count <= 1
             ? Array.Empty<int>()
             : IoNumbers.Skip(1).Distinct().ToArray();
@@ -98,6 +98,9 @@ public sealed class ProductModel
     public string Nco { get; set; } = "";
     public string Alc { get; set; } = "";
     public string SourcePath { get; set; } = "";
+    public string SourceHash { get; set; } = "";
+    public long SourceLength { get; set; }
+    public DateTime? SourceModifiedAt { get; set; }
 
     /// <summary>
     /// Additional static label values read from the Part table in the THT file.
@@ -118,6 +121,14 @@ public sealed class ProductModel
     public List<ConnectorDefinition> Connectors { get; set; } = [];
     public List<string> TopologyWarnings { get; set; } = [];
     public List<ResistanceStep> ResistanceSteps { get; set; } = [];
+
+    /// <summary>
+    /// Hai I/O được khai báo bằng Connector=_Interlock trong THT. Đây là một
+    /// cặp tiếp điểm thường mở của thùng hàng lỗi, không thuộc topology sản phẩm.
+    /// </summary>
+    public List<int> DiscardContactIo { get; set; } = [];
+
+    public bool HasDiscardInterlock => DiscardContactIo.Count == 2;
 
     /// <summary>
     /// I/O đặc biệt không đủ thông tin để dựng topology. AO/aN hợp lệ sẽ được
@@ -143,7 +154,10 @@ public sealed class ProductModel
             int clipTargetMax = Clip is not null && Clip.Branches.Count > 0
                 ? Clip.Branches.Max(branch => branch.TargetIo)
                 : 0;
-            return Math.Max(pinMax, clipTargetMax);
+            int discardMax = DiscardContactIo.Count == 0
+                ? 0
+                : DiscardContactIo.Max();
+            return Math.Max(Math.Max(pinMax, clipTargetMax), discardMax);
         }
     }
 }
@@ -174,7 +188,8 @@ public sealed record LabelProfile(
     string ExternalPrintFile = "",
     string EncodingName = "us-ascii",
     int Copies = 1,
-    string VerificationStatus = "VERIFIED");
+    string VerificationStatus = "VERIFIED",
+    string InlineTemplate = "");
 
 public sealed record ResistanceStep(
     string Name,

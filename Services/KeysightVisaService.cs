@@ -8,7 +8,6 @@ namespace JBZUniversalTester.Services;
 public class KeysightVisaService : IDisposable
 {
     const int VI_SUCCESS = 0;
-    const uint VI_TMO_INFINITE = 0xFFFFFFFF;
     const uint VI_ATTR_TMO_VALUE = 0x3FFF001A;
 
     readonly object _sync = new();
@@ -118,6 +117,13 @@ public class KeysightVisaService : IDisposable
     /// nếu rỗng hoặc lỗi thì tự tìm USBTMC và chọn thiết bị trả IDN Keysight/34461A.
     /// </summary>
     public virtual string ConnectAutomatic(string? preferredResource = null)
+    {
+        // Reconnect and production/manual connection share one VISA session.
+        // Hold the same lock through discovery, identity validation and cleanup.
+        lock (_sync) return ConnectAutomaticCore(preferredResource);
+    }
+
+    private string ConnectAutomaticCore(string? preferredResource)
     {
         if (IsConnected) return InstrumentId;
 

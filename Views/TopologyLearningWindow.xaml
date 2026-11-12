@@ -1,0 +1,205 @@
+<Window x:Class="JBZUniversalTester.Views.TopologyLearningWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Quét IO / Học mã" WindowState="Maximized" ResizeMode="NoResize"
+        WindowStyle="None" WindowStartupLocation="CenterScreen" ShowInTaskbar="False"
+        Background="{DynamicResource PageBackground}" Foreground="{DynamicResource TextPrimary}" FontFamily="Segoe UI" FontSize="14"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Loaded="Window_Loaded" Closed="Window_Closed">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/></ResourceDictionary.MergedDictionaries>
+        <Style TargetType="Button">
+            <Setter Property="Height" Value="40"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Padding" Value="14,4"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+        </Style>
+        <Style x:Key="PanelStyle" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="Padding" Value="10"/>
+        </Style>
+        <Style x:Key="MetricLabelStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Height" Value="36"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
+            <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="DataGrid">
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="EnableRowVirtualization" Value="True"/>
+            <Setter Property="EnableColumnVirtualization" Value="True"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="GridLinesVisibility" Value="Horizontal"/>
+            <Setter Property="AlternatingRowBackground" Value="{StaticResource SurfaceAlt}"/>
+            <Setter Property="RowHeight" Value="36"/>
+            <Setter Property="ColumnHeaderHeight" Value="38"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DividerColor}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="9,5"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DividerColor}"/>
+        </Style>
+        <Style x:Key="IoCellTextStyle" TargetType="TextBlock">
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+            </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Background="{StaticResource BrandBlue}" CornerRadius="9" Padding="14,8">
+            <StackPanel>
+                <TextBlock Text="QUÉT IO / HỌC MÃ" FontSize="22" FontWeight="Bold" Foreground="{StaticResource PanelBackground}"/>
+                <TextBlock Text="Quan sát IO trực tiếp → Chụp ổn định → Lưu cấu hình."
+                           Margin="0,2,0,0" FontSize="14" Foreground="{StaticResource AccentTint}" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="1" Style="{StaticResource PanelStyle}" Margin="0,8,0,8" Padding="12,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*" MaxWidth="320"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="80"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Mã cấu hình khi lưu" Style="{StaticResource MetricLabelStyle}"
+                           VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBox x:Name="ProductCodeTextBox" Grid.Column="1"
+                         ToolTip="Bắt buộc khi lưu file chẩn đoán."/>
+                <TextBlock Grid.Column="2" Text="Frame ổn định (2–500)" Style="{StaticResource MetricLabelStyle}"
+                           VerticalAlignment="Center" Margin="20,0,10,0"/>
+                <TextBox x:Name="StableFrameCountTextBox" Grid.Column="3" Text="20"
+                         TextAlignment="Center"
+                         ToolTip="Số frame giống nhau liên tiếp cần có trước khi cho phép lưu."/>
+                <TextBlock Grid.Column="4" Text="Lưu .jbzscan.json · Cấu hình chẩn đoán"
+                           VerticalAlignment="Center" Margin="20,0,0,0" Foreground="{StaticResource TextMuted}"
+                           TextWrapping="Wrap"/>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource PanelStyle}"><Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="IO ĐANG TIẾP XÚC" FontSize="17" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                            <TextBlock Text="Kẹt / chưa tháo: " Foreground="{StaticResource TextMuted}"/>
+                            <TextBlock x:Name="StuckIoCountText" Text="0" FontWeight="SemiBold" Foreground="{StaticResource FailText}"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <Border Grid.Column="1" Background="{StaticResource AccentTint}" CornerRadius="6" Padding="10,4"
+                            Margin="12,0,0,0" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="ActiveIoCountText" Text="0" FontSize="20" FontWeight="Bold" Foreground="{StaticResource AccentBlue}"/>
+                            <TextBlock Text=" IO" Foreground="{StaticResource AccentBlue}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <DataGrid x:Name="ActiveIoGrid" Grid.Row="1" ItemsSource="{Binding ActiveIoRows}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="100"
+                                            ElementStyle="{StaticResource IoCellTextStyle}"/>
+                        <DataGridTextColumn Header="LIÊN KẾT" Binding="{Binding RelatedText}" Width="*"
+                                            ElementStyle="{StaticResource IoCellTextStyle}"/>
+                        <DataGridTextColumn Header="TRẠNG THÁI" Binding="{Binding StatusText}" Width="190">
+                            <DataGridTextColumn.ElementStyle><Style TargetType="TextBlock" BasedOn="{StaticResource IoCellTextStyle}">
+                                <Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{Binding StatusBrush}"/>
+                            </Style></DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid></Border>
+            <Border Grid.Column="2" Style="{StaticResource PanelStyle}"><Grid>
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="CÁC IO ĐANG NỐI" FontSize="17" FontWeight="Bold" Foreground="{StaticResource AccentBlueDark}"/>
+                        <TextBlock Text="Các nhóm IO liên thông trên toàn bộ card." Margin="0,3,0,0"
+                                   Foreground="{StaticResource TextMuted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <Border Grid.Column="1" Background="{StaticResource AccentTint}" CornerRadius="6" Padding="10,4"
+                            Margin="12,0,0,0" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="NetworkCountText" Text="0" FontSize="20" FontWeight="Bold" Foreground="{StaticResource AccentBlueDark}"/>
+                            <TextBlock Text=" nhóm" Foreground="{StaticResource AccentBlueDark}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <DataGrid x:Name="TopologyGrid" Grid.Row="1" ItemsSource="{Binding Rows}">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="60"
+                                            ElementStyle="{StaticResource IoCellTextStyle}"/>
+                        <DataGridTextColumn Header="LOẠI" Binding="{Binding TopologyType}" Width="140"
+                                            ElementStyle="{StaticResource IoCellTextStyle}"/>
+                        <DataGridTextColumn Header="IO" Binding="{Binding IoText}" Width="*"
+                                            ElementStyle="{StaticResource IoCellTextStyle}"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid></Border>
+        </Grid>
+
+        <Border Grid.Row="3" Style="{StaticResource PanelStyle}" Margin="0,8,0,0" Padding="10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="176"/>
+                    <ColumnDefinition Width="176"/>
+                    <ColumnDefinition Width="112"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                    <TextBlock x:Name="LearningStatusText" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{StaticResource BrandBlue}" TextWrapping="Wrap"/>
+                    <ProgressBar x:Name="LearningProgress" Height="7" Margin="0,7,0,0"
+                                 Minimum="0" Maximum="1" Foreground="{StaticResource AccentBlue}" Background="{StaticResource DividerColor}"/>
+                </StackPanel>
+                <Button x:Name="DiagnoseButton" Grid.Column="1" Content="CHỤP ỔN ĐỊNH" Click="Diagnose_Click"
+                        Margin="0,0,8,0"
+                        Background="{StaticResource AccentTint}" Foreground="{StaticResource AccentBlue}" BorderBrush="{StaticResource AccentTintBorder}"/>
+                <Button x:Name="SaveButton" Grid.Column="2" Content="LƯU CẤU HÌNH" Click="Save_Click"
+                        Margin="0,0,8,0"
+                        IsEnabled="False" Background="{StaticResource AccentBlue}" Foreground="{StaticResource PanelBackground}" BorderBrush="{StaticResource AccentBlue}"/>
+                <Button Grid.Column="3" Content="ĐÓNG" Click="Close_Click"/>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

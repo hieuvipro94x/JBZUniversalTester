@@ -1,33 +1,60 @@
 ﻿using JBZUniversalTester.Core;
 using JBZUniversalTester.Converters;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows.Media;
 namespace JBZUniversalTester.Models;
 
 public enum FaultKind { Start, Open, MissingConnection, WrongWiring, Short, Resistance, Info, Probe }
+public enum WrongWiringDisplayRole { None, Source, WrongTarget, ExpectedTarget }
 
 /// <summary>Chế độ giải mã cùng stream scan của bo.</summary>
 public enum BoardScanMode { Production, Probe }
 
+public sealed class FaultRowCollection : ObservableCollection<FaultRow>
+{
+    public void ReplaceAll(IReadOnlyList<FaultRow> rows)
+    {
+        Items.Clear();
+        foreach (FaultRow row in rows)
+            Items.Add(row);
+
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+        OnPropertyChanged(new PropertyChangedEventArgs("Item[]"));
+        OnCollectionChanged(new NotifyCollectionChangedEventArgs(
+            NotifyCollectionChangedAction.Reset));
+    }
+}
+
 public sealed class FaultRow : ObservableObject
 {
-    private static readonly Brush PiFieldBrush = Frozen(System.Windows.Media.Color.FromRgb(0xF8, 0xF8, 0xF6));
     private static readonly Brush PiTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x55, 0x55, 0x55));
-    private static readonly Brush PiDarkTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x33, 0x33, 0x33));
-    private static readonly Brush PiWrongRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0x34, 0x46, 0xA8));
-    private static readonly Brush PiProbeRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0xBD, 0xEE, 0xEE));
-    private static readonly Brush PiNetworkPassRowBrush = Frozen(System.Windows.Media.Color.FromRgb(0xDF, 0xF4, 0xE3));
-    private static readonly Brush PiNetworkPassTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x14, 0x6B, 0x2E));
     private static readonly Brush PiFailBrush = Frozen(System.Windows.Media.Color.FromRgb(0xC6, 0x28, 0x28));
-    private static readonly Brush PiOpenTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x00, 0x26, 0xD9));
+    private static readonly Brush BlackTextBrush = Frozen(System.Windows.Media.Color.FromRgb(0x11, 0x11, 0x11));
     private static readonly Brush WhiteBrush = Brushes.White;
 
     string _status = "";
+    string? _ioCnPnText;
+    string? _presentationKey;
     public FaultKind Kind { get; init; }
     public ProductFaultType ProductFaultType { get; init; } = ProductFaultType.None;
     public string FaultCode => FaultTypeCatalog.Code(ProductFaultType);
     public string FaultType { get; init; } = "";
+    // Operator guidance only; preserve electrical classifications and saved faults.
+    public WrongWiringDisplayRole WiringDisplayRole { get; init; }
+    public bool IsWrongWiringGuide => WiringDisplayRole != WrongWiringDisplayRole.None;
+    public string OperatorFaultType => IsWrongWiringGuide ? IsNetworkStart ? "SAI DÂY" : string.Empty : FaultType;
+    public string OperatorStatus => WiringDisplayRole switch
+    {
+        WrongWiringDisplayRole.Source => "ĐẤU SAI DÂY",
+        WrongWiringDisplayRole.WrongTarget => "ĐANG CẮM NHẦM",
+        WrongWiringDisplayRole.ExpectedTarget => "DÂY ĐÚNG",
+        _ => Status
+    };
     public int Io { get; init; }
+    public string IoTextOverride { get; init; } = "";
     public int? ExpectedSourceIo { get; init; }
     public int? ExpectedTargetIo { get; init; }
     public int? ActualSourceIo { get; init; }
@@ -36,60 +63,54 @@ public sealed class FaultRow : ObservableObject
     public string Connector { get; init; } = "";
     public string Pin { get; init; } = "";
     public string WireName { get; init; } = "";
+    public bool IsWireNameMissing => string.IsNullOrWhiteSpace(WireName);
+    public string WireNameDisplay => IsWireNameMissing ? "-" : WireName;
     public string Splice { get; init; } = "";
     public string Section { get; init; } = "";
     public string Color { get; init; } = "";
+    public string IoCnPnOverride { get; init; } = "";
     public int DisplayOrder { get; init; } = int.MaxValue;
+    public bool IsNetworkStart { get; init; }
 
     // Không bind enum/custom converter trực tiếp trong XAML để WPF Designer
     // có thể render ngay cả trước lần build đầu tiên.
     public string KindName => Kind.ToString();
-    public string IoText => Io > 0
-        ? Io.ToString(CultureInfo.InvariantCulture)
-        : string.Empty;
-    public string IoCnPnText => Io > 0
-        ? string.Join("-", new[]
-            {
-                Io.ToString(CultureInfo.InvariantCulture),
-                string.IsNullOrWhiteSpace(Connector) ? null : Connector.Trim(),
-                string.IsNullOrWhiteSpace(Pin) ? null : Pin.Trim()
-            }.Where(value => !string.IsNullOrWhiteSpace(value)))
-        : string.Empty;
+    public string IoText => !string.IsNullOrWhiteSpace(IoTextOverride)
+        ? IoTextOverride
+        : Io > 0
+            ? Io.ToString(CultureInfo.InvariantCulture)
+            : string.Empty;
+    public string IoCnPnText => _ioCnPnText ??= BuildIoCnPnText();
     public string WireColorText => WireColorToBrushConverter.ToDisplayCode(Color);
     public Brush WireColorBrush => WireColorToBrushConverter.ToBrush(Color);
-    public Brush WireColorForegroundBrush => ResolveWireColorForeground();
-    public Brush Color1Brush => TokenBrush(0);
-    public Brush Color2Brush => TokenBrush(1);
-    public Brush Color3Brush => TokenBrush(2);
-    public Brush Color4Brush => TokenBrush(3);
-    public bool HasColor1 => HasColorToken(0);
-    public bool HasColor2 => HasColorToken(1);
-    public bool HasColor3 => HasColorToken(2);
-    public bool HasColor4 => HasColorToken(3);
     public bool IsNetworkPassed =>
         Kind == FaultKind.Info &&
         string.Equals(FaultType, "THÔNG MẠCH", StringComparison.OrdinalIgnoreCase);
+    public bool IsLiveTopologyPresentation =>
+        Kind == FaultKind.Info &&
+        ProductFaultType == ProductFaultType.None &&
+        string.Equals(FaultType, "CHẬP MẠCH", StringComparison.OrdinalIgnoreCase);
 
     public Brush RowBackgroundBrush => Kind switch
     {
-        FaultKind.WrongWiring or FaultKind.Short => PiWrongRowBrush,
-        FaultKind.Probe => PiProbeRowBrush,
         FaultKind.Resistance => PiFailBrush,
-        FaultKind.Info when IsNetworkPassed => PiNetworkPassRowBrush,
-        _ => PiFieldBrush
+        _ => WhiteBrush
     };
     public Brush RowForegroundBrush => Kind switch
     {
-        FaultKind.WrongWiring or FaultKind.Short or FaultKind.Resistance => WhiteBrush,
-        FaultKind.Open or FaultKind.MissingConnection => PiOpenTextBrush,
-        FaultKind.Probe => PiDarkTextBrush,
-        FaultKind.Info when IsNetworkPassed => PiNetworkPassTextBrush,
+        FaultKind.WrongWiring or FaultKind.Short or FaultKind.Probe => PiFailBrush,
+        FaultKind.Resistance => WhiteBrush,
+        FaultKind.Open or FaultKind.MissingConnection => BlackTextBrush,
+        FaultKind.Info when IsNetworkPassed => BlackTextBrush,
         _ => PiTextBrush
     };
     public string ColorName => WireColorToBrushConverter.ToVietnameseName(Color);
     public string ProbeIoText => $"IO ({Io})";
     public string ProbeWireText => string.IsNullOrWhiteSpace(WireName) ? string.Empty : $"Tên dây {WireName}";
     public string ProbeColorText => string.IsNullOrWhiteSpace(ColorName) ? string.Empty : $"Màu {ColorName}";
+    public string PresentationKey => _presentationKey ??=
+        $"{(int)Kind}|{(int)ProductFaultType}|{(int)WiringDisplayRole}|{Io}|{IoTextOverride}|{Connector}|{Pin}|{WireName}|{Splice}|" +
+        $"{ExpectedSourceIo}|{ExpectedTargetIo}|{ActualSourceIo}|{ActualTargetIo}";
 
     public FaultDetail ToFaultDetail() => new()
     {
@@ -112,35 +133,22 @@ public sealed class FaultRow : ObservableObject
         Message = Status
     };
 
-    public string Status { get => _status; set => Set(ref _status, value); }
-
-    private Brush TokenBrush(int index)
+    public string Status
     {
-        IReadOnlyList<string> tokens = WireColorToBrushConverter.Tokenize(Color);
-        if (index < 0 || index >= tokens.Count)
-            return PiFieldBrush;
-
-        Brush brush = WireColorToBrushConverter.ToTokenBrush(Color, index);
-        return brush == Brushes.Transparent ? PiFieldBrush : brush;
+        get => _status;
+        set { if (Set(ref _status, value)) Raise(nameof(OperatorStatus)); }
     }
 
-    private bool HasColorToken(int index)
-    {
-        IReadOnlyList<string> tokens = WireColorToBrushConverter.Tokenize(Color);
-        return index >= 0 && index < tokens.Count;
-    }
-
-    private Brush ResolveWireColorForeground()
-    {
-        Brush background = Color1Brush;
-        if (background is not SolidColorBrush solid || !HasColor1)
-            return RowForegroundBrush;
-
-        Color color = solid.Color;
-        double luminance =
-            (0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B) / 255.0;
-        return luminance >= 0.48 ? PiDarkTextBrush : WhiteBrush;
-    }
+    private string BuildIoCnPnText() => !string.IsNullOrWhiteSpace(IoCnPnOverride)
+        ? IoCnPnOverride
+        : Io > 0
+        ? string.Join("-", new[]
+            {
+                Io.ToString(CultureInfo.InvariantCulture),
+                string.IsNullOrWhiteSpace(Connector) ? null : Connector.Trim(),
+                string.IsNullOrWhiteSpace(Pin) ? null : Pin.Trim()
+            }.Where(value => !string.IsNullOrWhiteSpace(value)))
+        : string.Empty;
 
     private static SolidColorBrush Frozen(Color color)
     {
@@ -164,7 +172,14 @@ public sealed class ResistanceResult : ObservableObject
 
     public string Name { get; init; } = "";
     public int Channel { get; init; }
-    public string ChannelText => Channel > 0 ? $"CH{Channel}" : string.Empty;
+    public string ChannelTextOverride { get; init; } = string.Empty;
+    public string MinDisplayTextOverride { get; init; } = string.Empty;
+    public string MaxDisplayTextOverride { get; init; } = string.Empty;
+    public string DisplayOverride { get; init; } = string.Empty;
+    public string ResultTextOverride { get; init; } = string.Empty;
+    public string ChannelText => !string.IsNullOrWhiteSpace(ChannelTextOverride)
+        ? ChannelTextOverride
+        : Channel > 0 ? $"CH{Channel}" : string.Empty;
     public double? ValueOhm
     {
         get => _valueOhm;
@@ -230,11 +245,19 @@ public sealed class ResistanceResult : ObservableObject
     }
     public int SampleCount { get; set; }
     public long StabilizationTimeMs { get; set; }
-    public string MinDisplayText => FormatOhm(MinOhm, DisplayScale);
-    public string MaxDisplayText => FormatOhm(MaxOhm, DisplayScale);
+    public string MinDisplayText => !string.IsNullOrWhiteSpace(MinDisplayTextOverride)
+        ? MinDisplayTextOverride
+        : FormatOhm(MinOhm, DisplayScale);
+    public string MaxDisplayText => !string.IsNullOrWhiteSpace(MaxDisplayTextOverride)
+        ? MaxDisplayTextOverride
+        : FormatOhm(MaxOhm, DisplayScale);
     public string DisplayUnitText => DisplayScale.UnitLog;
-    public string Display => !_isMeasured ? "—" : IsOpen ? "OPEN" : ValueOhm is null ? "—" : FormatOhm(ValueOhm.Value, DisplayScale);
-    public string ResultText => !_isMeasured && MeasurementStatus != "—" ? MeasurementStatus : !_isMeasured ? "—" : MeasurementStatus == "UNSTABLE" ? "UNSTABLE" : Passed ? "PASS" : "FAIL";
+    public string Display => !string.IsNullOrWhiteSpace(DisplayOverride)
+        ? DisplayOverride
+        : !_isMeasured ? "—" : IsOpen ? "OPEN" : ValueOhm is null ? "—" : FormatOhm(ValueOhm.Value, DisplayScale);
+    public string ResultText => !string.IsNullOrWhiteSpace(ResultTextOverride)
+        ? ResultTextOverride
+        : !_isMeasured && MeasurementStatus != "—" ? MeasurementStatus : !_isMeasured ? "—" : MeasurementStatus == "UNSTABLE" ? "UNSTABLE" : Passed ? "PASS" : "FAIL";
 
     private ResistanceDisplayScale DisplayScale => ChooseDisplayScale(ValueOhm, MinOhm, MaxOhm);
 
@@ -273,7 +296,13 @@ public sealed record ScanFrame(
     long Sequence = 0,
     IReadOnlyDictionary<int, IReadOnlySet<int>>? ConnectionsBySource = null,
     IReadOnlyDictionary<int, int>? TargetHitCounts = null,
-    BoardScanMode Mode = BoardScanMode.Production)
+    BoardScanMode Mode = BoardScanMode.Production,
+    int ExpectedIoCount = 0,
+    int SourceCount = 0,
+    byte? EndMarkerCode = null,
+    int ScanUnitCount = 0,
+    bool TerminatorKnown = true,
+    long ScanGeneration = 0)
 {
     public IReadOnlyDictionary<int, IReadOnlySet<int>> Connections =>
         ConnectionsBySource ?? new Dictionary<int, IReadOnlySet<int>>();
@@ -281,6 +310,19 @@ public sealed record ScanFrame(
     public IReadOnlyDictionary<int, int> TargetHits =>
         TargetHitCounts ?? new Dictionary<int, int>();
 }
+
+/// <summary>
+/// Tín hiệu đầu dò đã đủ mạnh ngay trong lúc decoder đang thu một frame
+/// Production. Đây chỉ là dữ liệu trình bày/interlock; ScanFrame hoàn chỉnh
+/// vẫn là nguồn duy nhất cho TestEngine và quyết định PASS/FAIL.
+/// </summary>
+public sealed record ProductionProbePreview(
+    DateTime Timestamp,
+    IReadOnlyList<int> ActiveIo,
+    int RequiredHitCount,
+    int PeakHitCount,
+    long Sequence = 0,
+    long ScanGeneration = 0);
 
 public sealed record WiringFaultPair(
     int SourceIo,

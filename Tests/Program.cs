@@ -1,6 +1,8 @@
 ﻿using System.IO.Compression;
 using System.Diagnostics;
+using System.Collections.Specialized;
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -9,46 +11,809 @@ using JBZUniversalTester.Models;
 using JBZUniversalTester.Converters;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
+using JBZUniversalTester.Views;
 using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.SelfTests;
 
-internal static class Program
+internal static partial class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
+        AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
+            "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-history-tooltips"])
+        { TestHistoryClippedTooltips(); Console.WriteLine("PASS: History tooltips follow actual visible text bounds"); return 0; }
+        if (args is ["--test-history-long-file-names"])
+        { TestHistoryLongFileNames(); Console.WriteLine("PASS: full long History filenames and stable column width"); return 0; }
+        if (args is ["--test-station-database"])
+        {
+            TestStationDatabaseRelocation();
+            Console.WriteLine("PASS: verified ProgramData relocation, WAL and history preservation"); return 0;
+        }
+        if (args is ["--test-grouped-leak"])
+        {
+            TestGroupedLeakCycle(); TestEarlyGoodMasterLeak(); TestLeakFailureSummary();
+            TestEarlyLeakSharedRet(); TestPassedLeakReconnect(); TestLeakWithoutRetTrigger(); TestSealLeakTrigger();
+            Console.WriteLine("PASS: grouped Leak start/retry, Master, sparse channels and topology gates"); return 0;
+        }
+        if (args is ["--test-peripheral-capacity-isolation"])
+        {
+            TestManualPeripheralCapacityIsolation();
+            Console.WriteLine("PASS: peripheral/manual failures and invalid model capacity never reconnect or fault a connected board");
+            return 0;
+        }
+        if (args is ["--test-editor-ordering"])
+        {
+            TestEditorConnectorPinOrdering();
+            Console.WriteLine("PASS: natural connector/PIN ordering, unchanged topology and no false dirty prompts");
+            return 0;
+        }
+        if (args is ["--test-editor-ordering", var nativeOrderSource])
+        {
+            TestEditorOrderedNativeCopy(nativeOrderSource);
+            Console.WriteLine("PASS: actual native editor sorting/open/edit/save on a temporary copy; source unchanged");
+            return 0;
+        }
+        if (args is ["--test-sparse-connector-pins"])
+        {
+            TestSparseConnectorPins();
+            Console.WriteLine("PASS: sparse physical connector PINs survive open/edit/save and layout changes");
+            return 0;
+        }
+        if (args is ["--test-sparse-connector-pins", var nativeSparseSource])
+        {
+            TestSparseConnectorNativeCopy(nativeSparseSource);
+            Console.WriteLine("PASS: actual sparse native THT editor round-trip on a temporary copy; source unchanged");
+            return 0;
+        }
+        if (args is ["--activation-child", var activationRole, var activationName])
+            return RunActivationChild(activationRole, activationName);
+        if (args is ["--test-shared-theme"])
+        {
+            TestSharedUiTheme();
+            return 0;
+        }
+        if (args is ["--preview-shared-theme", var themePreviewDirectory])
+        {
+            VerifySharedUiTheme(themePreviewDirectory);
+            return 0;
+        }
+        if (args is ["--test-instance-activation"])
+        {
+            TestSingleInstanceActivation();
+            return 0;
+        }
+        if (args is ["--single-instance-child", var instanceName])
+            return RunSingleInstanceChild(instanceName);
+        if (args is ["--test-single-instance"])
+        {
+            TestSingleInstanceStartup();
+            Console.WriteLine("PASS: concurrent launches reject duplicates throughout slow startup and release ownership on exit");
+            return 0;
+        }
+        if (args is ["--test-startup-optimization"])
+        {
+            TestStartupModelPreparation();
+            TestStartupUpgradeFastPath();
+            Console.WriteLine("PASS: parallel startup preparation, stale guards and data preservation");
+            return 0;
+        }
+        if (args is ["--preview-startup", var startupImage])
+        {
+            TestStartupWindow(startupImage);
+            Console.WriteLine("PASS: startup progress, layout and window lifetime");
+            return 0;
+        }
+        if (args is ["--preview-settings-fit", var settingsPreviewDirectory])
+        {
+            TestSettingsOpeningResponsiveness(settingsPreviewDirectory);
+            return 0;
+        }
+        if (args is ["--test-background-state-dispatch"])
+        {
+            TestBackgroundStateDispatch();
+            Console.WriteLine("PASS: background State notifications use Dispatcher and reject old generations");
+            return 0;
+        }
+        if (args is ["--test-runtime-risk-review"])
+        {
+            TestCycleTokenCancellationRace();
+            TestHistoryRepositoryIdentity();
+            TestSoftwareObserverDoesNotFaultBoard();
+            TestDetachedTaskObservation();
+            TestLifetimeTokenAfterShutdown();
+            Console.WriteLine("PASS: runtime risk review regressions");
+            return 0;
+        }
+        if (args is ["--preview-editor-colors", var colorPickerImage])
+        {
+            TestColorPickerLayout(colorPickerImage);
+            Console.WriteLine("PASS: aligned color picker with complete borders");
+            return 0;
+        }
+        if (args is ["--test-native-clip-save"])
+        {
+            TestSparseNativeClipSave();
+            Console.WriteLine("PASS: Native sparse CLIP edits, repeated saves, IO aliases and Wire PIN editing");
+            return 0;
+        }
+        if (args is ["--test-native-clip-save", var nativeClipSource])
+        {
+            VerifyNativeClipSaveCopy(nativeClipSource);
+            Console.WriteLine("PASS: Actual native THT saved on temporary copies; original unchanged");
+            return 0;
+        }
+        if (args is ["--test-connector-delete"])
+        {
+            TestConnectorDeleteLastRow();
+            Console.WriteLine("PASS: Connector deletion removes only the last row, handles edits and persists to THT");
+            return 0;
+        }
+        if (args is ["--test-connector-auto-io"])
+        {
+            TestConnectorAutomaticStartIo();
+            Console.WriteLine("PASS: Connector PIN edits update automatic IO ranges and preserve explicit anchors");
+            return 0;
+        }
+        if (args is ["--test-editor-arrow-navigation"])
+        {
+            TestEditorArrowNavigation();
+            Console.WriteLine("PASS: editor arrows navigate and retain edits/search text");
+            return 0;
+        }
+        if (args is ["--test-editor-wire-search"])
+        {
+            TestEditorWireSearch();
+            Console.WriteLine("PASS: wire search finds all IO without altering model data");
+            return 0;
+        }
+        if (args is ["--test-editor-pin-presentation"])
+        {
+            TestEditorPinPresentation();
+            Console.WriteLine("PASS: readable PIN contacts retain numeric edits and original data");
+            return 0;
+        }
+        if (args is ["--test-editor-blank-clip"])
+        {
+            TestLegacyClipBlankPinTypes();
+            Console.WriteLine("PASS: legacy blank CLIP branches remain blank");
+            return 0;
+        }
+        if (args is ["--test-editor-blank-clip", var blankClipSource])
+        {
+            VerifyLegacyClipBlankFile(blankClipSource);
+            Console.WriteLine("PASS: blank CLIP preservation on temporary copy; original unchanged");
+            return 0;
+        }
+        if (args is ["--test-editor-native-file", var nativeEditorPath])
+        {
+            TestNativeEditorFileCopy(nativeEditorPath);
+            Console.WriteLine("PASS: native editor open/save on temporary copy; original preserved");
+            return 0;
+        }
+        if (args is ["--preview-integrated-tht-editor", var previewModel, var previewImage, var previewPage])
+        {
+            RenderIntegratedEditorPreview(previewModel, previewImage, int.Parse(previewPage));
+            return 0;
+        }
+        if (args is ["--test-testview-diagnostics"])
+        {
+            TestTestViewDiagnostics();
+            Console.WriteLine("PASS: TestView diagnostics preserve log semantics and skip disabled table work");
+            return 0;
+        }
+        if (args is ["--test-integrated-tht-editor"])
+        {
+            TestIntegratedThtEditor();
+            Console.WriteLine("PASS: integrated native THT editor, backup, validation, five pages and UI save");
+            return 0;
+        }
+        if (args is ["--preview-integrated-tht-editor", var editorModelPath, var editorImagePath])
+        {
+            RenderIntegratedEditorPreview(editorModelPath, editorImagePath);
+            return 0;
+        }
+        if (args is ["--test-discard-learning-dialog"])
+        {
+            TestDiscardLearningDialog();
+            TestDiscardSettingsSave();
+            Console.WriteLine("PASS: modal discard learning completion and Settings persistence");
+            return 0;
+        }
+        if (args is ["--test-discard-configuration-status"])
+        {
+            TestDiscardConfigurationStatus();
+            Console.WriteLine("PASS: configured/unconfigured/invalid discard notices and live MainWindow status");
+            return 0;
+        }
+        if (args is ["--test-tht-discard-editor"])
+        {
+            TestThtDiscardEditor();
+            TestDiscardContactLearning();
+            Console.WriteLine("PASS: native THT discard editor, atomic backups, IO conflicts, repeat selection and CFG persistence");
+            return 0;
+        }
+        if (args is ["--preview-combined-history", var historyPreviewPath])
+        {
+            ExportCombinedLeakHistoryPreview(historyPreviewPath);
+            return 0;
+        }
+        if (args is ["--test-seal-leak"])
+        {
+            TestSealLeakTrigger();
+            TestEarlyLeakSharedRet();
+            TestLeakWithoutRetTrigger();
+            TestCombinedInspectionResults();
+            Console.WriteLine("PASS: SEAL/RET triggers, early fitting, Probe isolation, per-channel removal and combined results");
+            return 0;
+        }
+        if (args is ["--test-master-splice-items", var spliceItemDirectory])
+        {
+            TestMasterSpliceClassification();
+            TestMasterSpliceOnItemFiles(spliceItemDirectory);
+            return 0;
+        }
+        if (args is ["--test-master-splice"])
+        {
+            TestMasterSpliceClassification();
+            Console.WriteLine("PASS: Master splice replacement and intact-splice bridge classification");
+            return 0;
+        }
+        if (args is ["--preview-history-barcodes", var barcodePreviewPath])
+        {
+            RenderHistoryBarcodePreview(barcodePreviewPath);
+            return 0;
+        }
+        if (args is ["--test-history-barcode-display"])
+        {
+            TestHistoryBarcodeOnlyAndPassLot();
+            TestAlwaysPrintHistory();
+            Console.WriteLine("PASS: Barcode-only History, offline immutable snapshots and PASS-driven LOT sequence");
+            return 0;
+        }
+        if (args is ["--test-main-daily-quantity"])
+        {
+            TestMainDailyQuantityByProduct();
+            TestThtFileStatisticsMigration();
+            Console.WriteLine("PASS: MainWindow daily product quantity, live updates and date/product isolation");
+            return 0;
+        }
+        if (args is ["--preview-master-counters", var masterCounterPreviewPath])
+        {
+            RenderMasterCounterPreview(masterCounterPreviewPath);
+            return 0;
+        }
+        if (args is ["--test-tester-connection-notice"])
+        {
+            TestUnifiedTesterConnectionNotice();
+            TestStartupWithoutBoardStaysUiOnly();
+            TestDisconnectedBoardOperatorActions();
+            Console.WriteLine("PASS: Unified tester connection notice and preserved disconnected hardware guards");
+            return 0;
+        }
+        if (args is ["--test-settings-recovery-perf"])
+        {
+            TestSettingsInvalidLeakLayoutRecovery();
+            TestSettingsAuthenticationResponsiveness();
+            Console.WriteLine("PASS: Settings recovery from invalid Leak files and asynchronous authentication responsiveness");
+            return 0;
+        }
+        if (args is ["--test-probe-maintenance"])
+        {
+            TestProbeMaintenanceSharedPasswordAndReset();
+            TestProbeMaintenanceAutomaticDialog();
+            Console.WriteLine("PASS: Automatic PIN replacement confirmation, shared settings password and durable maintenance audit");
+            return 0;
+        }
+        if (args is ["--test-probe-threshold-refresh"])
+        {
+            TestProbeThresholdRefreshAfterSettingsSave();
+            Console.WriteLine("PASS: PIN threshold refresh, warning updates, preserved count and stale snapshot protection");
+            return 0;
+        }
+        if (args is ["--test-testview-language"])
+        {
+            TestTestViewLanguagePersistence();
+            TestTestViewLanguageCoverage();
+            TestTestViewKoreanPresentation();
+            TestExclusiveTestingAndPassLabels();
+            Console.WriteLine("PASS: TestView language persistence, Korean coverage, rendered bindings and unchanged hardware behavior");
+            return 0;
+        }
+        if (args is ["--test-settings-access"])
+        {
+            TestSettingsCredentialsAndPermissions();
+            TestSettingsPermissionSaveGuards();
+            TestSettingsPermissionUi();
+            Console.WriteLine("PASS: Admin password, password changes, five permission groups, UI and save guards");
+            return 0;
+        }
+        if (args is ["--test-probe-and-fault-status"])
+        {
+            TestLargeProbeImmediateTransitions();
+            TestWrongWiringDelayedRemovalStatus();
+            Console.WriteLine("PASS: 640-IO Probe immediate transitions and five-second wrong-wire removal status");
+            return 0;
+        }
+        if (args is ["--test-leak-run-completion"])
+        {
+            TestLeakRunCompletionAndProductFailure();
+            TestEquipmentErrorReturnToMain();
+            Console.WriteLine("PASS: Leak completes after connector removal, final NG counts once, equipment-error Back uses physical removal");
+            return 0;
+        }
+        if (args is ["--test-peripheral-equipment-exit"])
+        {
+            TestPeripheralEquipmentRecoveryCancellation();
+            TestRecoverableKeysightEquipmentFault();
+            TestEquipmentErrorReturnToMain();
+            Console.WriteLine("PASS: Peripheral connection errors and canceled recovery preserve the app and physical-removal Back gate");
+            return 0;
+        }
+        if (args is ["--test-peripheral-reconnect"])
+        {
+            TestPeripheralAutomaticReconnect();
+            TestPeripheralEquipmentRecoveryCancellation();
+            Console.WriteLine("PASS: Automatic peripheral reconnect, exclusive ownership, responsive UI, shutdown and removal gates");
+            return 0;
+        }
+        if (args is ["--test-untested-daily-lot"])
+        {
+            TestUntestedDailyLotStartsAtZero(); TestLotDailyCounterReset(); TestLotBaseRetainsDailyPassProgress();
+            TestThtLabelAndLotLifecycle(); TestHistoryBarcodeOnlyAndPassLot();
+            Console.WriteLine("PASS: untested product/day LOT starts at zero; configured bases and all history preserved"); return 0;
+        }
+        if (args is ["--test-product-label-lot"])
+        {
+            TestProductLabelAndImmediateLotSettings();
+            TestFirstProductPrintSetup();
+            TestLotBaseRetainsDailyPassProgress();
+            Console.WriteLine("PASS: Per-product label selection, immediate LOT base changes and preserved history");
+            return 0;
+        }
+        if (args is ["--test-lot-responsiveness"])
+        {
+            TestLotPersistenceResponsiveness();
+            TestProductLabelAndImmediateLotSettings();
+            TestLotBaseRetainsDailyPassProgress();
+            Console.WriteLine("PASS: Slow CFG storage keeps input/LOT reads responsive and retains transaction semantics");
+            return 0;
+        }
+        if (args is ["--test-deferred-resistance-recovery"])
+        {
+            TestDeferredResistanceRecovery();
+            Console.WriteLine("PASS: Production resistance recovery waits for full removal; relays do not wait for recovery/audio");
+            return 0;
+        }
+        if (args is ["--test-master-sample-confirmation"])
+        {
+            TestMasterShortGroupAndConfiguredOpen();
+            Console.WriteLine("PASS: Master three-IO short groups and automatic configured open counts");
+            return 0;
+        }
+        if (args is ["--test-master-clip-reinstall"])
+        {
+            TestMasterClipReinstallation();
+            Console.WriteLine("PASS: Removed incomplete Masters and sample transitions require fresh AO/aN connections");
+            return 0;
+        }
+        if (args is ["--test-ui-status-audit"])
+        {
+            try
+            {
+                TestFinalTestStatusGuards();
+                TestD2xxResistanceRouting();
+                TestLearnedTopology();
+                TestProductionFaultConfirmation();
+                TestDiagnosticUiAudit();
+                Console.WriteLine("PASS: UI status, Master transitions, diagnostic details, ten resistance slots and fault confirmation");
+                return 0;
+            }
+            finally { AppSoundService.Current.StopAll(force: true); }
+        }
+        if (args is ["--test-persistent-electrical-alarm"])
+        {
+            TestPersistentElectricalAlarm();
+            Console.WriteLine("PASS: TESTPOINT survives operator actions until confirmed clean removal and ready state");
+            return 0;
+        }
+        if (args is ["--test-discard-confirmation-sound"])
+        {
+            TestDiscardConfirmationSound();
+            TestPersistentElectricalAlarm();
+            Console.WriteLine("PASS: full removal stops TESTPOINT before NG confirmation; sensor entry plays DRIP, release rearms safely");
+            return 0;
+        }
+        if (args is ["--test-early-master-leak"])
+        {
+            TestEarlyGoodMasterLeak();
+            Console.WriteLine("PASS: Good Master Leak waits for all enabled connectors and retries the full group, retry and stale-result guards");
+            return 0;
+        }
+        if (args is ["--test-single-window-navigation"])
+        {
+            TestSingleWindowNavigation();
+            Console.WriteLine("PASS: Settings/History share one window and require safe close before navigation");
+            return 0;
+        }
+        if (args is ["--test-leak-result-framing"])
+        {
+            TestLeakResultFragmentedPayload();
+            Console.WriteLine("PASS: Fragmented Leak RESULT waits for six numeric values");
+            return 0;
+        }
+        if (args is ["--test-settings-opening"])
+        {
+            TestSettingsOpeningResponsiveness();
+            TestSettingsLongLeakErrorLayout();
+            Console.WriteLine("PASS: Settings staged opening, input responsiveness, cancellation and layout");
+            return 0;
+        }
+        if (args is ["--preview-combined-results", string combinedPreviewPath])
+        {
+            RenderLeakSummaryPreview(combinedPreviewPath, combined: true);
+            return 0;
+        }
+        if (args is ["--test-combined-inspection-results"])
+        {
+            TestCombinedInspectionResults();
+            TestFinalLeakResultTable();
+            TestProductionResistancePassPresentation();
+            Console.WriteLine("PASS: Combined Leak/resistance table, live PASS and cycle cleanup");
+            return 0;
+        }
+        if (args is ["--test-pass-sound-relay-order"])
+        {
+            TestPassSoundRelayOrder();
+            Console.WriteLine("PASS: PASS audio runs independently of relays and preserves sequential WAV playback");
+            return 0;
+        }
+        if (args is ["--test-resistance-trace-timing"])
+        {
+            TestResistanceTraceTiming();
+            TestD2xxNativeIoResponsiveness();
+            TestProductionResistancePassPresentation();
+            Console.WriteLine("PASS: Original resistance recovery timing, UI independence and PASS synchronization");
+            return 0;
+        }
+        if (args is ["--test-resistance-pass-presentation"])
+        {
+            TestProductionResistancePassPresentation();
+            Console.WriteLine("PASS: Production resistance and large PASS display synchronize");
+            return 0;
+        }
+        if (args is ["--preview-main-label", string mainPreviewPath])
+        {
+            RenderMainLabelPreview(mainPreviewPath);
+            return 0;
+        }
+        if (args is ["--preview-status-colors", string palettePath])
+        {
+            RenderStatusPalettePreview(palettePath);
+            return 0;
+        }
+        if (args is ["--preview-leak-ng", string previewPath])
+        {
+            RenderLeakSummaryPreview(previewPath);
+            return 0;
+        }
+        if (args is ["--test-early-leak"])
+        {
+            TestLeakFailureSummary();
+            TestFinalLeakResultTable();
+            TestPassedLeakReconnect();
+            TestEarlyLeakSharedRet();
+            TestLeakWithoutRetTrigger();
+            TestLeakIndependentContinuityPresentation();
+            Console.WriteLine("PASS: Early Leak per-connector trigger and retry isolation");
+            return 0;
+        }
+        if (args is ["--test-good-master-sound"])
+        {
+            TestGoodMasterWiringSound();
+            Console.WriteLine("PASS: Good Master wiring TESTPOINT and sound ownership");
+            return 0;
+        }
+        if (args is ["--test-always-print-history"])
+        {
+            TestAlwaysPrintHistory();
+            TestCompactPrintConfig();
+            TestOriginalHistoryExportColumns();
+            return 0;
+        }
+        if (args is ["--test-master-rejected-removal"])
+        {
+            TestRejectedMasterResistanceRemoval();
+            return 0;
+        }
+        if (args is ["--test-wire-color-layout"])
+        {
+            TestWireColorCellFillsBounds();
+            return 0;
+        }
+        if (args is ["--test-history-export"])
+        {
+            TestOriginalHistoryExportColumns();
+            TestHistory();
+            TestHistoryTransactionAtomicity();
+            TestLegacyDatabaseWithoutSchemaInfo();
+            TestDatabaseSchemaV5();
+            TestHistoryLotBatchOrdinals();
+            TestDetailedMasterHistory();
+            Console.WriteLine("PASS: History export columns, existing data, migration, pagination and transaction regression checks");
+            return 0;
+        }
+        if (args is ["--test-app-responsiveness"])
+        {
+            TestApplicationAsyncLogShutdown();
+            TestD2xxNativeIoResponsiveness();
+            TestBcwJournalResponsiveness();
+            TestProductPickerDebouncedSearch();
+            return 0;
+        }
+        if (args is ["--test-settings-lifecycle"])
+        {
+            TestSettingsAsyncSave();
+            TestSettingsManualStop();
+            TestSettingsPrinterClose();
+            TestSettingsLongLeakErrorLayout();
+            return 0;
+        }
+        if (args is ["--test-master-history"])
+        {
+            TestDetailedMasterHistory();
+            TestMasterHistorySessionPresentation();
+            return 0;
+        }
+        if (args is ["--test-master-resistance"])
+        {
+            TestMasterResistanceRemovalTransition();
+            TestMasterLiveResistancePresentation();
+            return 0;
+        }
+        if (args is ["--test-picker"])
+        {
+            TestProductPickerDebouncedSearch();
+            return 0;
+        }
+        if (args is ["--test-main-catalog"])
+        {
+            TestMainProductCatalog();
+            Console.WriteLine("PASS: Main catalog scrolling, search, exact-path selection and read-only history");
+            return 0;
+        }
+        if (args is ["--test-bcw"])
+        {
+            TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwHistorySnapshotPreservesRows(); TestBcwThtAutomaticPassLabel(); TestBcwEditableTemplate();
+            return 0;
+        }
+        if (args is ["--test-recent-products"])
+        {
+            TestRecentTestedProducts();
+            return 0;
+        }
+        if (args is ["--test-orphaned-probe"])
+        {
+            TestOrphanedProbeCandidateRestoresCenter();
+            return 0;
+        }
+        if (args is ["--test-main-removal"])
+        {
+            TestMainRemovalContacts();
+            TestStartupIoInterlock();
+            return 0;
+        }
+        if (args is ["--test-removal-status"])
+        {
+            TestRemovalStatusNotifications();
+            return 0;
+        }
+        if (args is ["--test-modelcreator-leak", var leakPath])
+        {
+            TestModelLeakLayout();
+            TestModelCreatorLeakFile(leakPath);
+            return 0;
+        }
+        int benchmarkIndex = Array.FindIndex(
+            args,
+            value => value.Equals("--database-benchmark", StringComparison.OrdinalIgnoreCase));
+        if (benchmarkIndex >= 0)
+        {
+            int rows = benchmarkIndex + 1 < args.Length && int.TryParse(args[benchmarkIndex + 1], out int parsed)
+                ? parsed
+                : 100_000;
+            return DatabaseBenchmark.Run(Math.Clamp(rows, 100_000, 1_000_000));
+        }
+
         (string Name, Action Run)[] tests =
         [
+            ("Shared theme covers all WPF surfaces and code-created dialogs without changing wire colors", TestSharedUiTheme),
+            ("Repeated launches activate the owner across slow startup and restore its owned window", TestSingleInstanceActivation),
+            ("Concurrent launches reject duplicates before slow startup and permit restart after exit", TestSingleInstanceStartup),
+            ("A1 cycle token survives reentrant cancellation and CTS disposal", TestCycleTokenCancellationRace),
+            ("A2 settings refresh retains the production writer repository identity", TestHistoryRepositoryIdentity),
+            ("A3 software frame observer failure does not fault or restart D2XX", TestSoftwareObserverDoesNotFaultBoard),
+            ("B6 detached task failures are observed without hardware side effects", TestDetachedTaskObservation),
+            ("B7 late completions tolerate disposed lifetime CTS", TestLifetimeTokenAfterShutdown),
+            ("All enabled Leak connectors start and retry as one group", TestGroupedLeakCycle),
+            ("Leak attempts merge into one Korean product history and full Excel export", TestCombinedLeakHistory),
+            ("SEAL Leak trigger follows declared connector edges and preserves early/retry isolation", TestSealLeakTrigger),
+            ("Master distinguishes branch replacements from shorts on THT splices", TestMasterSpliceClassification),
+            ("History displays encoded barcodes with PASS-only LOT progression, including offline printers", TestHistoryBarcodeOnlyAndPassLot),
+            ("MainWindow quantity follows selected product and day instead of lifetime totals", TestMainDailyQuantityByProduct),
+            ("THT filename statistics migrate without losing history", TestThtFileStatisticsMigration),
+            ("Wire table keeps headers and color boundaries stable as rows arrive and recycle", TestWireColorCellFillsBounds),
+            ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),
+            ("Every PASS retains its printer command offline with clean History", TestAlwaysPrintHistory),
+            ("Compact settings preserve required profiles and read legacy files", TestCompactPrintConfig),
+            ("BCW reads the active THT and uses the automatic PASS print pipeline", TestBcwThtAutomaticPassLabel),
+            ("BCW Julian date, original EPL positions and safe template", TestBcwJulianAndPayload),
+            ("BCW persistent sequence, failed send, concurrency and reprint", TestBcwPersistentSerialAndTransport),
+            ("BCW history snapshot preserves production LOT and rows", TestBcwHistorySnapshotPreservesRows),
+            ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
+            ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
+            ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
+            ("TestView diagnostics preserve logging, throttles and read-only snapshots", TestTestViewDiagnostics),
+            ("D2XX native calls keep UI responsive and retain ownership through cancellation", TestD2xxNativeIoResponsiveness),
+            ("BCW journal contention keeps UI responsive and persists send outcome", TestBcwJournalResponsiveness),
+            ("Settings manual cancellation serializes cleanup and restores scanning", TestSettingsManualStop),
+            ("Printer driver close stays off Dispatcher and preserves exclusive ownership", TestSettingsPrinterClose),
+            ("Settings-only Leak profiles stay isolated per product and ignore legacy sidecars", TestModelLeakLayout),
+            ("History combines installation/test timing and retains removal timing", TestHistoryCombinedTiming),
+            ("Daily LOT and manual date reset preserve history", TestLotDailyCounterReset),
             ("Board capacity/address boundaries", TestBoardCapacity),
+            ("Startup without board stays UI-only", TestStartupWithoutBoardStaysUiOnly),
+            ("Startup splash progress, layout and lifetime", () => TestStartupWindow()),
+            ("Startup model preparation overlaps handshake without committing early", TestStartupModelPreparation),
+            ("Warm startup bypasses source probing and preserves SQLite history", TestStartupUpgradeFastPath),
+            ("Optional missing-pair confirmation waits 5/10 seconds and resets safely", TestMissingConnectionConfirmationTimeout),
+            ("Disconnected D2XX operator actions never enter fatal device fault", TestDisconnectedBoardOperatorActions),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
+            ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
+            ("Settings Admin credentials and group permissions persist securely", TestSettingsCredentialsAndPermissions),
+            ("Settings Leak editing uses its per-product profile independently of legacy sidecars", TestSettingsInvalidLeakLayoutRecovery),
+            ("Settings password verification leaves Dispatcher and permission reads responsive", TestSettingsAuthenticationResponsiveness),
+            ("Settings operator saves cannot modify denied groups", TestSettingsPermissionSaveGuards),
+            ("PIN threshold updates TestView immediately after saving settings", TestProbeThresholdRefreshAfterSettingsSave),
+            ("PIN replacement uses current settings password and records confirmed maintenance", TestProbeMaintenanceSharedPasswordAndReset),
+            ("Reaching PIN replacement threshold opens the confirmation dialog", TestProbeMaintenanceAutomaticDialog),
+            ("TestView language persists without changing printer data", TestTestViewLanguagePersistence),
+            ("Korean catalog covers TestView captions and fixed statuses", TestTestViewLanguageCoverage),
+            ("Korean TestView preserves product data, raw states and hardware behavior", TestTestViewKoreanPresentation),
+            ("Testing and PASS labels never overlap across Vietnamese/Korean transitions", TestExclusiveTestingAndPassLabels),
+            ("Settings UI honors Admin/operator permissions after staged opening", TestSettingsPermissionUi),
+            ("640-IO Probe updates immediately and retains contacts across scans", TestLargeProbeImmediateTransitions),
+            ("Wrong-wire removal status waits five seconds independently of confirmation", TestWrongWiringDelayedRemovalStatus),
+            ("Production probe preview arrives before frame terminator", TestProductionProbePreview),
+            ("10-card complete-frame stress", TestTenCardCompleteFrameStress),
             ("Startup connected-IO safety interlock", TestStartupIoInterlock),
+            ("MainWindow remaining IO list follows the model selection interlock", TestMainRemovalContacts),
+            ("Topology learning uses one direct-contact signal", TestTopologyLearningDirectContact),
+            ("THT discard contact interlock and frame isolation", TestDiscardContactInterlock),
             ("Probe target-only touch detection", TestProbeTargetOnlyTouchDetection),
+            ("Manual Probe TP latch and connector transitions", TestManualProbeSession),
             ("Inline probe does not clear wiring faults", TestInlineProbeDoesNotClearWiringFaults),
             ("Htdrv endpoint/probe display cases", TestHtdrvEndpointProbeDisplayCases),
             ("500-cycle scan/probe/fault stress", TestFiveHundredCycleScanProbeFaultStress),
             ("Continuity/open/wrong/splice engine", TestEngineVectors),
+            ("Pending continuity presentation and CLIP branch visibility", TestPendingContinuityPresentation),
+            ("Final Htdrv TestWindow presentation lifecycle", TestFinalHtdrvTestWindowPresentation),
             ("Production PASS gate minimal latency", TestProductionPassGateMinimalLatency),
             ("THT column semantics and string wire topology", TestThtColumnSemantics),
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
+            ("Learned diagnostic topology normalization and persistence", TestLearnedTopology),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
+            ("Original History export columns preserve THT metadata and existing database", TestOriginalHistoryExportColumns),
+            ("Tester connection notice is consistent across startup, manual actions and actual device loss", TestUnifiedTesterConnectionNotice),
+            ("History exactly-once transaction crash recovery", TestHistoryTransactionAtomicity),
+            ("Legacy SQLite without SchemaInfo initializes safely", TestLegacyDatabaseWithoutSchemaInfo),
+            ("SQLite schema v7 chronological History migration and query plans", TestDatabaseSchemaV5),
+            ("History initialization waits for an active SQLite writer", TestHistoryInitializationWaitsForWriter),
+            ("Production SQLite writer retries a transient lock", TestProductionPersistenceRetriesTransientLock),
+            ("SQLite interrupted transaction reopens without deleting database", TestHistoryInterruptedTransactionRecovery),
+            ("Canonical runtime paths and SQLite PartCnt authority", TestCanonicalRuntimePersistence),
             ("System log master switch preserves History", TestSystemLogMasterSwitch),
             ("ALL6 label data order", TestLabel),
             ("THT label renderer and LOT lifecycle", TestThtLabelAndLotLifecycle),
             ("PASS label snapshot/idempotency/traceability", TestLabelPrintingSafety),
+            ("Recent tested products are distinct, chronological and read-only", TestRecentTestedProducts),
             ("Standard product picker filter", TestProductPickerFilter),
+            ("Recursive ITEM product catalog and partial filename search", TestRecursiveProductCatalogSearch),
+            ("1000-file picker typing coalesces filtering and prevents stale selection", TestProductPickerDebouncedSearch),
+            ("Smooth navigation retains the rendered main window behind child screens", TestSmoothOwnedWindowNavigation),
+            ("Long Leak errors wrap without widening Production Settings", TestSettingsLongLeakErrorLayout),
+            ("Small QR manual batches start at 0001 with the selected print model", TestSmallQrManualPrintStart),
+            ("Leak waiting respects installed non-Leak connectors", TestLeakWaitingWithNonLeakConnector),
+            ("Keysight equipment faults preserve the app and await removal", TestRecoverableKeysightEquipmentFault),
+            ("Final Leak table shows suction/hold/leak only after both PASS and clears on cycle exit", TestFinalLeakResultTable),
             ("Fault display localization and detail", TestFaultDisplayFormatter),
+            ("Wrong-wire connector/pin repair guide and unchanged shorts", TestWrongWiringRepairGuide),
             ("UI brush cache and engine change filter", TestUiPerformanceGuards),
+            ("Authoritative production state and stale UI snapshot gate", TestAuthoritativeProductionState),
+            ("Model-aware product evidence rejects raw single IO", TestModelAwareProductEvidence),
             ("Duplicate CLIP fault rows do not lock hardware", TestDuplicateClipFaultRows),
             ("D2XX resistance selectors and ten-slot configuration", TestD2xxResistanceRouting),
             ("Leak connector mapping and PASS/FAIL presentation", TestWaterProofConfigurationAndPresentation),
+            ("Leak late-open cleanup retains exclusive COM gate", LeakLifecycleTests.LateOpenAndClose),
+            ("Leak coalescing preserves PRESS baseline and rejects stale progress", LeakLifecycleTests.CoalescedProgress),
+            ("D2XX suspended reader waits without polling and wakes on resume", LeakLifecycleTests.SuspendedReader),
             ("Final TestView status/master/device fault guards", TestFinalTestStatusGuards),
+            ("Shared Master settings and completion return to installation", TestGlobalMasterConfigurationAndCompletion),
+            ("Master Back follows table evidence instead of stale testing state", TestMasterWaitingReturnToMain),
+            ("Master first SOURCE connection updates installation presentation", TestMasterFirstConnectionPresentation),
+            ("Good Master shows live resistance measurement and per-channel PASS", TestMasterLiveResistancePresentation),
+            ("Resistance recovery matches original trace without UI scheduling waits", TestResistanceTraceTiming),
+            ("Production resistance recovery waits for full removal after immediate PASS relays", TestDeferredResistanceRecovery),
+            ("Leak run finishes after unplug and final NG commits one failed product", TestLeakRunCompletionAndProductFailure),
+            ("Equipment errors permit Main only after physical full removal", TestEquipmentErrorReturnToMain),
+            ("Manual peripheral cleanup isolates model capacity from connected board faults", TestManualPeripheralCapacityIsolation),
+            ("Peripheral recovery cancellation never becomes a board fault", TestPeripheralEquipmentRecoveryCancellation),
+            ("Peripheral USB reconnect is automatic, serialized and independent", TestPeripheralAutomaticReconnect),
+            ("Product label choices and LOT base edits apply immediately without rewriting history", TestProductLabelAndImmediateLotSettings),
+            ("New products load without setup prompts and explicit bases reach History", TestFirstProductPrintSetup),
+            ("Untested products start daily LOT at zero without inheriting global settings", TestUntestedDailyLotStartsAtZero),
+            ("LOT base edits retain the daily PASS count in display and printer output", TestLotBaseRetainsDailyPassProgress),
+            ("Slow LOT configuration writes never block input or counter reads", TestLotPersistenceResponsiveness),
+            ("Production resistance and large PASS display synchronize", TestProductionResistancePassPresentation),
+            ("PASS sound runs independently of configured relay sequence", TestPassSoundRelayOrder),
+            ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
+            ("Good Master Leak waits for all enabled connectors and retries the full group", TestEarlyGoodMasterLeak),
+            ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
+            ("Main catalog scrolls and selects the exact THT path without automatic loading", TestMainProductCatalog),
+            ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
+            ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
+            ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
+            ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),
+            ("THT discard IO editor preserves topology and backs up originals", TestThtDiscardEditor),
+            ("Color picker borders fit the form and stay aligned under application styles", () => TestColorPickerLayout()),
+            ("Native sparse CLIP edits and Wire PIN changes round-trip through Save", TestSparseNativeClipSave),
+            ("Sparse physical connector PINs survive native editing and layout changes", TestSparseConnectorPins),
+            ("THT editor reuses rows, defers color editors and isolates teardown bindings", TestEditorResponsiveReload),
+            ("Editor sorts connector/PIN labels naturally without changing native addresses", TestEditorConnectorPinOrdering),
+            ("Connector Delete works from the final row upward and preserves retained edits", TestConnectorDeleteLastRow),
+            ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),
+            ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
+            ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
+            ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),
+            ("THT wire search locates all IO without changing rows or dirty state", TestEditorWireSearch),
+            ("Exit cleanup deletes saved THT backup folders without touching production files", TestThtBackupExitCleanup),
+            ("Database exit cleanup removes only migration backups after integrity validation", TestDatabaseBackupExitCleanup),
+            ("Station database relocates atomically with WAL, all rows and source preservation", TestStationDatabaseRelocation),
+            ("History shows long filenames without width changes during scrolling", TestHistoryLongFileNames),
+            ("History tooltips open only for text clipped by cell or viewport", TestHistoryClippedTooltips),
+            ("Editor arrow navigation retains edits and leaves search safely", TestEditorArrowNavigation),
+            ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
+            ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
+            ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),
+            ("Discard configuration notices and persistent MainWindow status", TestDiscardConfigurationStatus),
+            ("Diagnostic fault popup retains every physical IO detail", TestDiagnosticUiAudit),
+            ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
+            ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
+            ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
+            ("All NG Masters keep wire rows and open Master requires an exact complete pattern", TestAllMasterWireRowsAndOpenPattern),
+            ("Master three-IO short groups and automatic configured open counts", TestMasterShortGroupAndConfiguredOpen),
+            ("Master completion replays removal confirmed while JIG was busy", TestMasterRemovalDuringEjectCompletion),
+            ("History PASS/FAIL ordinals restart for each product LOT batch", TestHistoryLotBatchOrdinals),
+            ("Master History hides session identifiers without changing audit data", TestMasterHistorySessionPresentation),
+            ("All Master samples persist detailed installation, confirmation and removal history", TestDetailedMasterHistory),
+            ("Master transitions only through explicitly selected NG samples", TestMasterSelectedSamplesOnly),
+            ("Committed PASS rejects stale installation rows until actual removal", TestCommittedPassRejectsInstallationRows),
+            ("Continuity PASS with Leak NG shows separate results and preserves connector retry", TestLeakFailureSummary),
+            ("Passed Leak channel removal requires a new run on reconnect", TestPassedLeakReconnect),
+            ("Leak shared RET waits for all enabled connector triggers", TestEarlyLeakSharedRet),
+            ("Leak connector without RET uses only expected IO edges to another connector", TestLeakWithoutRetTrigger),
+            ("Leak keeps continuity rows live and refits failed connectors for a grouped retry", TestLeakIndependentContinuityPresentation),
             ("Direct manual relay controls and production interlock", TestManualModeInterlock),
             ("START only arms and background scan survives cycle cancel", TestProductionScanTokenSurvivesCycleCancel),
             ("Production fault debounce and jig contact state", TestProductionFaultConfirmation),
+            ("Candidate-only Probe releases center after discard or complete empty frame", TestOrphanedProbeCandidateRestoresCenter),
+            ("Removal refreshes bound status even when raw State is unchanged", TestRemovalStatusNotifications),
             ("Incomplete product full release resets normal and CLIP cycle", TestIncompleteProductFullReleaseResetsClipCycle),
+            ("Master full removal clears CLIP and requires fresh installation", TestMasterClipReinstallation),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),
             ("Original PHT20 PASS/ERR history compatibility", TestLegacyPhtHistory),
             ("Per-model production/probe maintenance counters", TestProductionCounters)
@@ -66,6 +831,11 @@ internal static class Program
             {
                 failed++;
                 Console.WriteLine($"FAIL: {name}\n  {ex}");
+            }
+            finally
+            {
+                // Each self-test is a separate simulated application lifetime.
+                AppSoundService.Current.StopAll(force: true);
             }
         }
 
@@ -88,33 +858,248 @@ internal static class Program
 
         Assert(Accepts("sample.tht"), ".tht must be visible");
         Assert(Accepts("sample.THT"), ".THT must be visible");
-        Assert(Accepts("sample.model"), ".model must be visible");
-        Assert(Accepts("sample.MODEL"), ".MODEL must be visible");
         Assert(!Accepts("sample.json"), ".json must be hidden");
         Assert(!Accepts("sample.jbzproduct.json"), ".jbzproduct.json must be hidden");
-        Assert(!Accepts("sample.setup"), ".setup must be hidden");
         Assert(
             string.Equals(
                 filterText.GetRawConstantValue()?.ToString(),
-                "JBZ THT (*.tht)|*.tht|Mã hàng legacy (*.model)|*.model",
+                "The Files (*.tht)|*.tht|All Files (*.*)|*.*",
                 StringComparison.Ordinal),
-            "Standard dialog filter must prefer .tht first and keep .model as legacy");
+            "Native dialog filter must match the original Htdrv .tht/all-files order");
+
+        string pickerSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "HomeViewModel.cs"));
+        string resizeLockSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "FixedPositionOpenFileDialogGuard.cs"));
+        Assert(pickerSource.Contains("DefaultExt = \".tht\"", StringComparison.Ordinal) &&
+               pickerSource.Contains("OriginalItemDirectory = @\"C:\\Item\"", StringComparison.Ordinal) &&
+               pickerSource.Contains("FirstOrDefault(window => window.IsActive)", StringComparison.Ordinal) &&
+               pickerSource.Contains("AutoUpgradeEnabled = false", StringComparison.Ordinal) &&
+               pickerSource.Contains("dialog.ShowDialog(new NativeDialogOwner(owner))", StringComparison.Ordinal) &&
+               pickerSource.Contains("FixedPositionOpenFileDialogGuard(owner, resizeLockOnly: true)", StringComparison.Ordinal),
+            "Product picker uses the original owner-bound classic native dialog with resize lock only");
+        Assert(resizeLockSource.Contains("if (_resizeLockOnly)", StringComparison.Ordinal) &&
+               resizeLockSource.Contains("LockDialogSize(dialogHandle);", StringComparison.Ordinal) &&
+               resizeLockSource.Contains("return CallNextHookEx", StringComparison.Ordinal),
+            "Product picker resize lock changes only native resize/maximize styles");
+    }
+
+    private static void TestDiscardContactInterlock()
+    {
+        const string thtText =
+            "파트번호\t파트명\n" +
+            "DISCARD-TEST\tDISCARD SENSOR\n\n" +
+            "번 호\t커넥터\t핀 수\n" +
+            "1\t1\t2\n\n" +
+            "커넥터\t선이름\tI/O\t핀번호\n" +
+            "1\tMC01\t1\t1\n" +
+            "1\tMC01\t2\t2\n" +
+            "_DISCARD\t\t97\t1\n" +
+            "_DISCARD\t\t98\t2\n\n" +
+            "선이름\t선연결\t굵기\t색깔\n" +
+            "MC01\t\t0.5\tB";
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZDiscardThtTests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "discard.tht");
+            File.WriteAllBytes(path, BuildMinimalThtFile(thtText));
+            ProductModel parsed = new ThtModelParser().Load(path);
+            Assert(parsed.DiscardContactIo.SequenceEqual([97, 98]) &&
+                   parsed.HasDiscardInterlock &&
+                   parsed.Pins.All(pin => pin.IoNumber is not 97 and not 98) &&
+                   parsed.MaxIo == 98,
+                "THT parser must preserve two _DISCARD IO with PinNo 1/2 while excluding them from product topology");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+
+        var model = new ProductModel
+        {
+            Pins = [new PinRecord("1", "MC01", 1, "1")],
+            DiscardContactIo = [97, 98]
+        };
+        Assert(model.HasDiscardInterlock && model.MaxIo == 98,
+            "_DISCARD pair must extend active scan range without becoming a product pin");
+
+        ScanFrame raw = FrameSeq(
+            1,
+            (1, new[] { 18 }),
+            (97, new[] { 98 }));
+        Assert(DiscardContactInterlock.IsContactClosed(raw, model.DiscardContactIo),
+            "Normally-open _DISCARD contact closes when the configured pair is connected");
+
+        ScanFrame filtered = DiscardContactInterlock.RemoveDiscardIo(
+            raw,
+            model.DiscardContactIo);
+        Assert(!filtered.ActiveIo.Contains(97) &&
+               !filtered.ActiveIo.Contains(98) &&
+               filtered.Connections.ContainsKey(1) &&
+               !filtered.Connections.ContainsKey(97),
+            "Discard IO must remain visible to its monitor but never enter continuity/fault evaluation");
+
+        var tracker = new DiscardContactInterlock();
+        tracker.Arm(contactClosed: false);
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.FirstPassDetected &&
+               tracker.IsArmed && !tracker.IsCompleted,
+            "A fresh NG-bin sensor activation starts the one-pass confirmation");
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None,
+            "A held contact cannot complete the one-pass confirmation");
+        Assert(tracker.Observe(contactClosed: false) == DiscardContactTransition.Completed &&
+               tracker.IsCompleted,
+            "The first OFF after ON completes the one-pass confirmation");
+
+        tracker.Arm(contactClosed: true);
+        Assert(tracker.Observe(contactClosed: true) == DiscardContactTransition.None &&
+               tracker.Observe(contactClosed: false) == DiscardContactTransition.None &&
+               tracker.Observe(contactClosed: true) == DiscardContactTransition.FirstPassDetected &&
+               tracker.Observe(contactClosed: false) == DiscardContactTransition.Completed,
+            "A sensor active at ARM must return open before one new ON-to-OFF pass can complete it");
+
+        ScanFrame inputStyleSensorFrame = FrameSeq(2, (12, new[] { 97 }));
+        Assert(DiscardContactInterlock.GetActiveContactIo(inputStyleSensorFrame, model.DiscardContactIo)
+                .SequenceEqual([97]),
+            "_DISCARD detection accepts a configured IO used as a target instead of requiring IO97<->IO98");
+
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            UseTestPointer = true
+        };
+        TestViewModel discardVm = CreateTestViewModel(production, out FakeBoard discardBoard);
+        var discardModel = Model(("PAIR", new[] { 1, 18 }));
+        discardModel.ModelName = "SELF-TEST-DISCARD-INTERLOCK";
+        discardModel.PartNumber = "SELF-TEST-DISCARD-INTERLOCK";
+        discardModel.DiscardContactIo = [97, 98];
+        discardVm.LoadPreparedModelAsync(discardModel).GetAwaiter().GetResult();
+        discardVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        int totalBeforeDiscard = discardVm.Total;
+        int failBeforeDiscard = discardVm.Fail;
+
+        discardBoard.Publish(FrameSeq(10, (12, new[] { 97 })));
+        Assert(discardVm.IsProductRemovalPending &&
+               discardVm.ProbeContacts.Select(row => row.WireName)
+                   .SequenceEqual(["_Interlock IO(97)", "_Interlock IO(98)"]),
+            "First _DISCARD activation locks TEST and temporarily shows both configured _DISCARD rows");
+        discardBoard.Publish(FrameSeq(11));
+        Assert(!discardVm.IsProductRemovalPending &&
+               discardVm.Total == totalBeforeDiscard &&
+               discardVm.Fail == failBeforeDiscard,
+            $"One _DISCARD ON-to-OFF pass unlocks TEST without recording a product result " +
+            $"(pending={discardVm.IsProductRemovalPending}, total={discardVm.Total}, fail={discardVm.Fail}, state={discardVm.State})");
+
+        TestViewModel faultDiscardVm = CreateTestViewModel(production, out FakeBoard faultDiscardBoard);
+        faultDiscardVm.LoadPreparedModelAsync(discardModel).GetAwaiter().GetResult();
+        faultDiscardVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        MethodInfo armFaultRemoval = typeof(TestViewModel).GetMethod(
+            "ArmFaultProductRemoval",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-removal ARM method not found");
+        MethodInfo tryCompleteFaultRemoval = typeof(TestViewModel).GetMethod(
+            "TryCompleteFaultProductRemoval",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-removal completion method not found");
+        FieldInfo faultProductRemoved = typeof(TestViewModel).GetField(
+            "_faultProductRemoved",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-removal product gate not found");
+
+        armFaultRemoval.Invoke(faultDiscardVm, [discardModel]);
+        faultProductRemoved.SetValue(faultDiscardVm, 1);
+        tryCompleteFaultRemoval.Invoke(faultDiscardVm, null);
+        Assert(faultDiscardVm.IsProductRemovalPending &&
+               faultDiscardVm.CenterResultText == "ĐƯA HÀNG VÀO THÙNG HÀNG LỖI" &&
+               faultDiscardVm.ResultStatusText == "CHỜ XÁC NHẬN THÙNG LỖI",
+            "Product removal alone cannot unlock a discard-required FAIL and both UI regions show the discard gate");
+
+        faultDiscardBoard.Publish(FrameSeq(20, (12, new[] { 97 })));
+        Assert(faultDiscardVm.IsProductRemovalPending,
+            "Discard OFF-to-ON is only the entry edge and cannot complete fault removal");
+        faultDiscardBoard.Publish(FrameSeq(21));
+        Assert(!faultDiscardVm.IsProductRemovalPending &&
+               faultDiscardVm.State == "LẮP SẢN PHẨM" &&
+               faultDiscardVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+               faultDiscardVm.CenterResultText == "LẮP SẢN PHẨM",
+            "One discard ON-to-OFF pass completes both gates and returns every UI state to ready");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(
+            System.Text.RegularExpressions.Regex.Matches(
+                testViewModelSource,
+                "new JBZUniversalTester\\.Views\\.FaultConfirmationWindow\\(").Count == 2 &&
+            System.Text.RegularExpressions.Regex.Matches(
+                testViewModelSource,
+                "ShowFaultConfirmationDialog\\(").Count == 4,
+            "Non-Leak product FAIL and device communication faults use the shared confirmation window");
+
+        int confirmationStart = testViewModelSource.IndexOf(
+            "private void ShowFaultConfirmationDialog(",
+            StringComparison.Ordinal);
+        int waitingTextStart = testViewModelSource.IndexOf(
+            "private static string FaultRemovalWaitingText(",
+            confirmationStart,
+            StringComparison.Ordinal);
+        string confirmationMethod = testViewModelSource[confirmationStart..waitingTextStart];
+        Assert(!confirmationMethod.Contains("DiscardPassword", StringComparison.Ordinal),
+            "_DISCARD product FAIL confirmation must not request a password");
+
+        string settingsXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        Assert(!settingsXaml.Contains("Settings.DiscardPassword", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.Password", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("LabelSettingsLockPanel", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("LabelUnlockPasswordBox", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Mật khẩu thùng lỗi", StringComparison.Ordinal),
+            "Production settings exposes neither NG-bin nor label-print passwords");
+
+        int finalRejectStart = testViewModelSource.IndexOf(
+            "private async Task HandleFinalPassRejectedAsync(",
+            StringComparison.Ordinal);
+        int nextMethodStart = testViewModelSource.IndexOf(
+            "private async Task RecoverAfterUncommittedFailAsync(",
+            finalRejectStart,
+            StringComparison.Ordinal);
+        string finalRejectMethod = testViewModelSource[finalRejectStart..nextMethodStart];
+        Assert(finalRejectMethod.Contains(
+                   "ShowFaultConfirmationDialog(faults, cycleModel);",
+                   StringComparison.Ordinal) &&
+               finalRejectMethod.Contains(
+                   "ArmFaultProductRemoval(cycleModel);",
+                   StringComparison.Ordinal) &&
+               !finalRejectMethod.Contains(
+                   "Interlocked.Exchange(ref _discardRequiredForFault, 0)",
+                   StringComparison.Ordinal),
+            "Final PASS rejection must require _DISCARD sensor completion like every other FAIL");
     }
 
     private static void TestProductionScanFirstFrameAfterSequenceReset()
     {
         var board = new FakeBoard();
-        board.Publish(CreateProductionFrame(sequence: 1));
+        var supervisor = new ScanSupervisor(board, _ => { });
+        board.SetRequestedScanCapacityForTest(2);
+        board.SetAppliedScanCapacityForTest(2);
+        supervisor.EnsureProductionScanAsync(128, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        board.Publish(CreateProductionFrame(sequence: 1, scanUnits: 2, generation: 1));
+        board.SetRequestedScanCapacityForTest(10);
+        long callbackGeneration = 1;
         board.StartScanCallback = current =>
         {
             _ = Task.Run(async () =>
             {
                 await Task.Delay(50);
-                current.Publish(CreateProductionFrame(sequence: 1));
+                current.Publish(CreateProductionFrame(
+                    sequence: 1,
+                    scanUnits: current.Capacity.ScanCardCount,
+                    generation: Interlocked.Increment(ref callbackGeneration)));
             });
         };
-
-        var supervisor = new ScanSupervisor(board, _ => { });
         supervisor.StartProductionScanAndVerifyFrameAsync(
                 BoardCapacity.MaxGlobalIo,
                 CancellationToken.None,
@@ -122,9 +1107,53 @@ internal static class Program
             .GetAwaiter()
             .GetResult();
 
+        board.SetRequestedScanCapacityForTest(2);
+        supervisor.StartProductionScanAndVerifyFrameAsync(128, CancellationToken.None, "SELF_TEST_10_TO_2")
+            .GetAwaiter().GetResult();
+        board.SetRequestedScanCapacityForTest(10);
+        supervisor.StartProductionScanAndVerifyFrameAsync(640, CancellationToken.None, "SELF_TEST_2_TO_10_AGAIN")
+            .GetAwaiter().GetResult();
+        Assert(board.Commands.Count(command => command == "START") == 3 && board.ConnectAttempts == 0,
+            "2 -> 10 -> 2 -> 10 applies each capacity transition in place without reopening the board");
+
+        var sameCapacityBoard = new FakeBoard();
+        var sameCapacitySupervisor = new ScanSupervisor(sameCapacityBoard, _ => { });
+        sameCapacitySupervisor.EnsureProductionScanAsync(
+                BoardCapacity.MaxGlobalIo,
+                CancellationToken.None)
+            .GetAwaiter().GetResult();
+        sameCapacityBoard.Publish(CreateProductionFrame(sequence: 1, scanUnits: 10, generation: 1));
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(50);
+            sameCapacityBoard.Publish(CreateProductionFrame(sequence: 2, scanUnits: 10, generation: 1));
+        });
+        sameCapacitySupervisor.StartProductionScanAndVerifyFrameAsync(
+                BoardCapacity.MaxGlobalIo,
+                CancellationToken.None,
+                "SELF_TEST_SAME_CAPACITY")
+            .GetAwaiter()
+            .GetResult();
         Assert(
-            board.Commands.Count(command => command == "START") == 1,
-            "First frame of the new generation must not trigger STOP/START recovery");
+            sameCapacityBoard.Commands.All(command => command is not "START" and not "STOP"),
+            "Same active capacity reuses the healthy scan without STOP/START");
+
+        // Regression cho call path thật của TestViewModel: stream có thể đang chạy
+        // active=1 từ lúc Connect, sau đó model được nạp và requested đổi thành 8.
+        // EnsureContinuousProductionScanAsync không được return sớm chỉ vì IsScanning.
+        TestViewModel vm = CreateTestViewModel(new ProductionSettings(), out FakeBoard vmBoard);
+        vmBoard.SetRequestedScanCapacityForTest(8);
+        vmBoard.SetAppliedScanCapacityForTest(1);
+        MethodInfo ensureContinuous = typeof(TestViewModel).GetMethod(
+            "EnsureContinuousProductionScanAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("EnsureContinuousProductionScanAsync method not found.");
+        ((Task)ensureContinuous.Invoke(vm, [])!).GetAwaiter().GetResult();
+        Assert(
+            vmBoard.Commands.Count(command => command == "START") == 1 &&
+            vmBoard.AppliedScanCapacity?.StartScanParameter == 8,
+            "Running active=1 stream is reconciled to requested active=8 instead of returning early");
+
         Assert(
             ScanSupervisor.ResolveFirstFrameTimeoutMs(BoardCapacity.Create(10)) == 15_000,
             "Ten-module first-frame watchdog must allow the measured long hardware frame");
@@ -132,9 +1161,9 @@ internal static class Program
             ScanSupervisor.ResolveProductionStallTimeoutMs(BoardCapacity.Create(10)) == 17_500,
             "Ten-module background stall watchdog must not interrupt a valid frame");
 
-        static ScanFrame CreateProductionFrame(long sequence) => new(
+        static ScanFrame CreateProductionFrame(long sequence, int scanUnits, long generation) => new(
             DateTime.Now,
-            BoardCapacity.MaxExpansionModuleCount,
+            scanUnits,
             new HashSet<int>(),
             [],
             true,
@@ -142,7 +1171,255 @@ internal static class Program
             sequence,
             new Dictionary<int, IReadOnlySet<int>>(),
             new Dictionary<int, int>(),
-            BoardScanMode.Production);
+            BoardScanMode.Production,
+            scanUnits * BoardCapacity.IoPerExpansionCard,
+            scanUnits * BoardCapacity.IoPerExpansionCard,
+            0,
+            scanUnits,
+            true,
+            generation);
+    }
+
+    private static void TestStartupWithoutBoardStaysUiOnly()
+    {
+        Assert(!typeof(App).Assembly.GetTypes().Any(type =>
+                type.Namespace is "JBZUniversalTester.Licensing" or "JBZ.Licensing"),
+            "Application starts directly with all activation types removed from the executable");
+
+        var reports = new List<(Exception Error, string Source, string? Context)>();
+        TestViewModel viewModel = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0, EnableSystemLogs = false },
+            out FakeBoard board,
+            hardwareFaultReport: (error, source, context) => reports.Add((error, source, context)));
+        board.SetConnectionStateForTest(false);
+        board.ThrowOnConnect = true;
+
+        viewModel.InitializeHardwareAsync().GetAwaiter().GetResult();
+        viewModel.InitializeHardwareAsync().GetAwaiter().GetResult();
+        viewModel.LoadPreparedModelAsync(Model(("OFFLINE", new[] { 1, 2 })))
+            .GetAwaiter().GetResult();
+        viewModel.StartProductionTestAsync().GetAwaiter().GetResult();
+        viewModel.ReportStartupBoardTimeout();
+
+        Assert(reports.Count == 1 && reports[0].Source == "Hardware.DeviceFault.BoardStartup" &&
+               reports[0].Context?.Contains("StartupUnavailable=true", StringComparison.Ordinal) == true,
+            "Handled board startup failure reports once even when system logs are disabled");
+
+        var timeoutReports = new List<Exception>();
+        TestViewModel timeoutVm = CreateTestViewModel(new ProductionSettings(), out _,
+            hardwareFaultReport: (error, _, _) => timeoutReports.Add(error));
+        timeoutVm.ReportStartupBoardTimeout();
+        timeoutVm.ReportStartupBoardTimeout();
+        Assert(timeoutReports.Count == 1 && timeoutReports[0] is TimeoutException &&
+               timeoutVm.IsBoardStartupUnavailable && !timeoutVm.IsDeviceFault,
+            "Startup timeout creates one report without becoming a fatal device fault");
+
+        Assert(!viewModel.IsDeviceFault &&
+               viewModel.IsBoardStartupUnavailable &&
+               viewModel.DeviceFaultTransitionCount == 0 &&
+               viewModel.DeviceFaultDialogCount == 0 &&
+               board.ConnectAttempts == 1 &&
+               !board.Commands.Contains("START", StringComparer.Ordinal) &&
+               viewModel.State == TesterConnectionNotice.Message,
+            "No-board startup keeps model UI available without scan, Production ARM, or DeviceFault");
+    }
+
+    private static void TestDisconnectedBoardOperatorActions()
+    {
+        foreach (bool initializeOffline in new[] { false, true })
+        {
+            TestViewModel viewModel = CreateTestViewModel(
+                new ProductionSettings { MasterFaultRequiredCount = 0 }, out FakeBoard board);
+            board.SetConnectionStateForTest(false);
+            board.ThrowOnConnect = true;
+            if (initializeOffline)
+                viewModel.InitializeHardwareAsync().GetAwaiter().GetResult();
+            board.Commands.Clear();
+
+            Action[] actions =
+            [
+                () => viewModel.ReportBoardUnavailableForOperatorAction("OpenTopologyLearning"),
+                () => viewModel.StartProductionTestAsync().GetAwaiter().GetResult(),
+                () => viewModel.StartProbeScanAsync().GetAwaiter().GetResult(),
+                () => viewModel.StartTopologyLearningAsync().GetAwaiter().GetResult(),
+                () => viewModel.Relay1Command.Execute(null),
+                () => viewModel.Relay2Command.Execute(null),
+                () => viewModel.RelaysOffCommand.Execute(null),
+                () => viewModel.SetManualRelayAsync(1, true).GetAwaiter().GetResult(),
+                () => viewModel.ResetManualOutputsAsync().GetAwaiter().GetResult(),
+                () => Assert(viewModel.MeasureManualResistanceAsync([new ResistanceStep("R1", 1, 0, 100)])
+                    .GetAwaiter().GetResult().Count == 0, "Offline manual resistance cannot run a measurement"),
+                () => viewModel.MeasureCommand.Execute(null),
+                () => viewModel.CompleteCommand.Execute(null),
+                () => viewModel.RequireApplicationRestartAfterBoardSettingsChange()
+            ];
+            foreach (Action action in actions)
+            {
+                action();
+                Assert(!viewModel.IsDeviceFault && viewModel.DeviceFaultTransitionCount == 0 &&
+                       viewModel.DeviceFaultDialogCount == 0 && !viewModel.IsManualModeActive &&
+                       (int)typeof(TestViewModel).GetField("_probeSessionActive", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(viewModel)! == 0 &&
+                       viewModel.State == TesterConnectionNotice.Message &&
+                       viewModel.BoardConnectionMessage == TesterConnectionNotice.Message &&
+                       board.Commands.Count == 0,
+                    "An unavailable D2XX action reports the connection warning without shutdown, scan, relay, or mode changes");
+            }
+        }
+
+        TestViewModel runningFault = CreateTestViewModel(new ProductionSettings());
+        typeof(TestViewModel).GetMethod("ReportDeviceFaultForTest", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(runningFault, [new IOException("D2XX failure during scan"), -1]);
+        Assert(runningFault.IsDeviceFault && runningFault.DeviceFaultTransitionCount == 1 &&
+               runningFault.DeviceFaultDialogCount == 1,
+            "A real scan/device fault still enters the existing hardware safety path");
+    }
+
+    private static void TestScanWatchdogRecovery()
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.Zero));
+        var board = new FakeBoard();
+        var supervisor = new ScanSupervisor(board, _ => { }, clock);
+
+        supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "A reused production stream must pass through the first-frame gate");
+
+        board.Publish(HealthFrame(1, 1, complete: false));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "An incomplete frame cannot arm Monitoring");
+        board.Publish(HealthFrame(2, 1));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "The first complete frame enters Monitoring");
+
+        clock.Advance(TimeSpan.FromMilliseconds(999));
+        Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "A healthy stream below its stall timeout does not recover");
+
+        supervisor.Suspend("Resistance");
+        board.StopScanAsync().GetAwaiter().GetResult();
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Suspended &&
+               !supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "An intentional resistance STOP remains healthy beyond watchdog timeout");
+        board.SetConnectionStateForTest(false);
+        Assert(!supervisor.TryBeginDisconnectedRecovery(out _),
+            "Suspended resistance phase cannot trigger watchdog reopen recovery");
+        board.SetConnectionStateForTest(true);
+
+        supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "START after an intentional pause resets the baseline and enters Starting");
+        clock.Advance(TimeSpan.FromMilliseconds(20));
+        Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "Starting cannot fault a few milliseconds later from the pre-STOP frame age");
+        board.Publish(HealthFrame(3, 2, complete: false));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "Raw receive activity without a complete frame keeps the first-frame gate armed");
+        board.Publish(HealthFrame(4, 2));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "A complete frame from the new generation resumes Monitoring");
+
+        for (int cycle = 0; cycle < 40; cycle++)
+        {
+            supervisor.Suspend("Resistance");
+            board.StopScanAsync().GetAwaiter().GetResult();
+            clock.Advance(TimeSpan.FromSeconds(10));
+            Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+                $"AUTO-R cycle {cycle + 1}: watchdog stays suspended for the complete resistance window");
+            supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            board.Publish(HealthFrame(20 + cycle, 3 + cycle));
+            Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+                $"AUTO-R cycle {cycle + 1}: monitoring resumes only after the requested START and complete frame");
+        }
+
+        supervisor.Suspend("ProductionReconfigure");
+        board.StopScanAsync().GetAwaiter().GetResult();
+        supervisor.EnsureProductionScanAsync(BoardCapacity.MaxGlobalIo, CancellationToken.None)
+            .GetAwaiter().GetResult();
+        board.Publish(HealthFrame(60, 42));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Starting,
+            "A complete frame from the stale generation is ignored");
+        board.Publish(HealthFrame(61, 43));
+        Assert(supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "A complete frame from the new generation is accepted");
+
+        board.Publish(HealthFrame(62, 43, complete: false));
+        clock.Advance(TimeSpan.FromMilliseconds(1_001));
+        Assert(supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out ScanHealthSnapshot stalled) &&
+               stalled.State == ScanHealthState.Recovering,
+            "Raw bytes with frames=0 eventually trigger a Monitoring stall recovery");
+        Assert(!supervisor.TryBeginWatchdogRecovery(1_500, 1_000, out _),
+            "A second watchdog tick cannot start duplicate recovery");
+
+        board.StartScanCallback = current => current.Publish(HealthFrame(63, 44));
+        Assert(supervisor.RecoverSoftAsync(
+                    BoardCapacity.MaxGlobalIo,
+                    BoardScanMode.Production,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult() &&
+               supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "Soft STOP/START recovery succeeds after its first complete frame");
+
+        supervisor.BeginRecovery("force-soft-failure");
+        board.StartFailuresRemaining = 1;
+        Assert(!supervisor.RecoverSoftAsync(
+                    BoardCapacity.MaxGlobalIo,
+                    BoardScanMode.Production,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult(),
+            "A failed soft restart is reported for reopen escalation");
+        board.StartScanCallback = current => current.Publish(HealthFrame(64, 45));
+        Assert(supervisor.RecoverReopenAsync(
+                    BoardCapacity.MaxGlobalIo,
+                    BoardScanMode.Production,
+                    CancellationToken.None)
+                .GetAwaiter().GetResult() &&
+               board.ConnectAttempts == 1 &&
+               board.IsConnected && board.IsScanning &&
+               board.CurrentScanMode == BoardScanMode.Production &&
+               supervisor.HealthSnapshot.State == ScanHealthState.Monitoring,
+            "Reopen recovery restores the same scan mode and reaches Monitoring");
+
+        string source = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        int recoveryStart = source.IndexOf(
+            "private async Task<bool> RecoverProductionScanAsync",
+            StringComparison.Ordinal);
+        int recoveryEnd = source.IndexOf(
+            "private async Task HardwareMonitorLoopAsync",
+            recoveryStart,
+            StringComparison.Ordinal);
+        string recoveryMethod = source[recoveryStart..recoveryEnd];
+        Assert(source.Contains("_lifetimeToken = _lifetimeCts.Token;", StringComparison.Ordinal) &&
+               recoveryMethod.Contains("_lifetimeToken", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("CurrentCycleToken", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("Record", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("SetRelay", StringComparison.Ordinal) &&
+               !recoveryMethod.Contains("Print", StringComparison.Ordinal),
+            "Recovery is scoped to transport lifetime and cannot repeat production side effects");
+        Assert(source.Split("_scanSupervisor.Suspend(\"Resistance\")", StringSplitOptions.None).Length - 1 >= 3,
+            "Manual, Master and automatic resistance paths suspend ScanSupervisor before TestEngine stops scan");
+
+        static ScanFrame HealthFrame(long sequence, long generation, bool complete = true) => new(
+            DateTime.Now,
+            BoardCapacity.MaxExpansionCardCount,
+            new HashSet<int>(),
+            [],
+            complete,
+            0,
+            sequence,
+            new Dictionary<int, IReadOnlySet<int>>(),
+            new Dictionary<int, int>(),
+            BoardScanMode.Production,
+            ExpectedIoCount: BoardCapacity.MaxGlobalIo,
+            SourceCount: complete ? BoardCapacity.MaxGlobalIo : 128,
+            ScanUnitCount: BoardCapacity.MaxExpansionCardCount,
+            TerminatorKnown: complete,
+            ScanGeneration: generation);
     }
 
     private static void TestProductionDataUpgrade()
@@ -153,17 +1430,19 @@ internal static class Program
         string target = Path.Combine(root, "V16.0.45");
         try
         {
-            Directory.CreateDirectory(Path.Combine(older, "Data", "History"));
-            Directory.CreateDirectory(Path.Combine(previous, "Data", "History"));
+            Directory.CreateDirectory(Path.Combine(older, "Data"));
+            Directory.CreateDirectory(Path.Combine(previous, "Data"));
             Directory.CreateDirectory(target);
 
             File.WriteAllText(Path.Combine(older, "production.statistics.json"), "older-statistics-with-real-production-data");
             File.WriteAllText(Path.Combine(older, "production.settings.json"), "{\"LotNo\":3456}");
             File.WriteAllText(Path.Combine(previous, "production.statistics.json"), "latest-statistics");
             File.WriteAllText(Path.Combine(previous, "production.settings.json"), "{\"LotNo\":2000}");
+            File.WriteAllText(Path.Combine(previous, "JBZUniversalTester.cfg"), "[LotNo]3456\r\n");
+            File.WriteAllText(Path.Combine(previous, "JBZUniversalTester.log"), "canonical-log");
             File.WriteAllText(Path.Combine(previous, "PartCnt.txt"), "PART-A 200000 4321");
             File.WriteAllBytes(
-                Path.Combine(previous, "Data", "History", "test-history.db"),
+                Path.Combine(previous, "Data", "JBZUniversalTester.db"),
                 [1, 2, 3, 4]);
 
             // A value already created on the destination machine is authoritative.
@@ -174,19 +1453,23 @@ internal static class Program
                 [previous, older]);
 
             Assert(
-                File.ReadAllText(Path.Combine(target, "production.statistics.json")) == "older-statistics-with-real-production-data",
-                "Populated production statistics must win over a newer empty-version file");
+                !File.Exists(Path.Combine(target, "production.statistics.json")) &&
+                !File.Exists(Path.Combine(target, "production.settings.json")),
+                "Legacy JSON files must not be copied into the canonical runtime directory");
             Assert(
-                File.ReadAllText(Path.Combine(target, "production.settings.json")) == "{\"LotNo\":3456}",
-                "Highest persisted LOT must win over a newer default configuration");
+                File.ReadAllText(Path.Combine(target, "JBZUniversalTester.cfg")) == "[LotNo]3456\r\n",
+                "Canonical CFG must be inherited");
             Assert(
                 File.ReadAllText(Path.Combine(target, "PartCnt.txt")) == "PART-A 200000 5000",
                 "Existing destination PartCnt must never be overwritten");
             Assert(
-                File.ReadAllBytes(Path.Combine(target, "Data", "History", "test-history.db"))
+                File.ReadAllBytes(Path.Combine(target, "Data", "JBZUniversalTester.db"))
                     .SequenceEqual(new byte[] { 1, 2, 3, 4 }),
-                "SQLite test history must be inherited");
-            Assert(migrated.Count == 3, "Only missing production files must be reported as migrated");
+                "Canonical SQLite database must be inherited");
+            Assert(
+                !File.Exists(Path.Combine(target, "JBZUniversalTester.log")),
+                "Runtime logs must never be inherited from an older version");
+            Assert(migrated.Count == 2, "Only missing production state files must be reported as migrated");
         }
         finally
         {
@@ -217,21 +1500,30 @@ internal static class Program
         var wrong = new FaultDetail
         {
             Type = ProductFaultType.WrongWiring,
-            WireName = "W12",
-            WireColor = "RED",
-            ConnectorFrom = "CN1",
-            PinFrom = "3",
-            ConnectorTo = "CN2",
-            PinTo = "8",
-            ActualConnectorFrom = "CN1",
-            ActualPinFrom = "3",
-            ActualConnectorTo = "CN1",
-            ActualPinTo = "5"
+            WireName = "BE21",
+            ConnectorFrom = "CN2",
+            PinFrom = "2",
+            ConnectorTo = "CN10",
+            PinTo = "27",
+            ActualConnectorTo = "CN10",
+            ActualPinTo = "27",
+            ExpectedSourceIo = 34,
+            ExpectedTargetIo = 315,
+            ActualSourceIo = 43,
+            ActualTargetIo = 315
         };
         OperatorFaultDisplay wrongOperator = FaultDisplayFormatter.FormatOperator(wrong);
         Assert(wrongOperator.Title == "KIỂM TRA LỖI SAI DÂY", "Wrong connection operator instruction");
-        Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí tiêu chuẩn"), "Wrong standard position");
-        Assert(wrongOperator.Lines.Any(line => line.Label == "Vị trí thực tế"), "Wrong actual position");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "VỊ TRÍ ĐÚNG" &&
+                                                  line.Value.Contains("CN2 - Chân 2 (IO 34)", StringComparison.Ordinal)),
+            "Wrong wiring shows the configured connector/pin and IO");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "ĐANG CẮM SAI" &&
+                                                  line.Value.Contains("IO 43 [JIG 2 - Chân 11]", StringComparison.Ordinal)),
+            "Wrong wiring identifies an unmapped physical JIG position");
+        Assert(wrongOperator.Lines.Any(line => line.Label == "CẦN SỬA" &&
+                                                  line.Value.Contains("IO 43 [JIG 2 - Chân 11]", StringComparison.Ordinal) &&
+                                                  line.Value.Contains("CN2 - Chân 2 (IO 34)", StringComparison.Ordinal)),
+            "Wrong wiring gives one unambiguous move instruction");
         Assert(FaultDisplayFormatter.FormatCustomer(wrong).FaultType == "INCORRECT CONNECTION", "Wrong customer mapping");
 
         var shortFault = new FaultDetail
@@ -245,6 +1537,8 @@ internal static class Program
         OperatorFaultDisplay shortOperator = FaultDisplayFormatter.FormatOperator(shortFault);
         Assert(shortOperator.Title == "KIỂM TRA LỖI CHẬP MẠCH", "Short operator instruction");
         Assert(shortOperator.Lines.Any(line => line.Value.Contains("CN4 - Chân 2 ↔ CN6 - Chân 9", StringComparison.Ordinal)), "Short actual connection");
+        Assert(shortOperator.Lines.Count == 2 && shortOperator.Lines.Any(line => line.Label == "CẦN SỬA"),
+            "Short circuit display contains only the actual short and correction");
         Assert(FaultDisplayFormatter.FormatCustomer(shortFault).FaultType == "SHORT CIRCUIT", "Short customer mapping");
 
         var resistanceHigh = new FaultDetail
@@ -289,46 +1583,85 @@ internal static class Program
         var stripe2 = WireColorToBrushConverter.ToBrush("W/B");
         Assert(ReferenceEquals(red1, red2) && red1.IsFrozen, "Single wire color brush is cached and frozen");
         Assert(ReferenceEquals(stripe1, stripe2) && stripe1.IsFrozen, "Composite wire color brush is cached and frozen");
-        AssertBalancedTwoColorBrush("R/W", "#ED0000", "#FFFFFF");
-        AssertBalancedTwoColorBrush("W/R", "#FFFFFF", "#ED0000");
-
-        AssertWireColorCells("B", "#101010", "#F8F8F6", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("B/G", "#101010", "#00D000", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("B/L", "#101010", "#0077FF", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("Gr/Br", "#808080", "#8A4300", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("B/Y", "#101010", "#FFFF00", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("R/W/R", "#ED0000", "#FFFFFF", "#ED0000", "#F8F8F6");
-        AssertWireColorCells("B/G/L/Br", "#101010", "#00D000", "#0077FF", "#8A4300");
-        AssertWireColorCells("", "#F8F8F6", "#F8F8F6", "#F8F8F6", "#F8F8F6");
-        AssertWireColorCells("UNKNOWN", "#F8F8F6", "#F8F8F6", "#F8F8F6", "#F8F8F6");
+        AssertBalancedTwoColorBrush("R/W", "#FF0000", "#FFFFFF");
+        AssertBalancedTwoColorBrush("W/R", "#FFFFFF", "#FF0000");
+        AssertBalancedTwoColorBrush("R/W/G", "#FF0000", "#FFFFFF");
+        AssertBalancedTwoColorBrush("B/Or", "#000000", "#FF8C00");
+        AssertBalancedTwoColorBrush("Or/B", "#FF8C00", "#000000");
 
         var wrongRow = new FaultRow { Kind = FaultKind.WrongWiring, Color = "B/Br" };
-        Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#3446A8", "Wrong row uses Pi blue");
-        Assert(BrushHex(wrongRow.RowForegroundBrush) == "#FFFFFF", "Wrong row text is white");
-        Assert(BrushHex(wrongRow.Color1Brush) == "#101010" && BrushHex(wrongRow.Color2Brush) == "#8A4300",
-            "Wrong row color cells override semantic row background");
+        Assert(BrushHex(wrongRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(wrongRow.RowForegroundBrush) == "#C62828",
+            "Wrong wiring uses red text on an absolute white row");
+        Assert(wrongRow.IsWireNameMissing && wrongRow.WireNameDisplay == "-" &&
+               new FaultRow { WireName = "  " }.WireNameDisplay == "-" &&
+               new FaultRow { WireName = "MC4" }.WireNameDisplay == "MC4",
+            "An empty wire code displays a dash without changing populated wire codes");
 
         var probeRow = new FaultRow { Kind = FaultKind.Probe, Color = "B/L" };
-        Assert(BrushHex(probeRow.RowBackgroundBrush) == "#BDEEEE", "Probe row uses Pi cyan row");
-        Assert(BrushHex(probeRow.Color1Brush) == "#101010" && BrushHex(probeRow.Color2Brush) == "#0077FF",
-            "Probe row color cells override probe background");
+        Assert(BrushHex(probeRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(probeRow.RowForegroundBrush) == "#C62828",
+            "Probe uses red text on an absolute white row");
+
+        var connectedRow = new FaultRow { Kind = FaultKind.Info, FaultType = "THÔNG MẠCH" };
+        Assert(BrushHex(connectedRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(connectedRow.RowForegroundBrush) == "#111111",
+            "Connected network uses black text on an absolute white row");
 
         var openGreenRow = new FaultRow { Kind = FaultKind.MissingConnection, Color = "G" };
         var openBlueRow = new FaultRow { Kind = FaultKind.Open, Color = "L" };
         var normalCheckRow = new FaultRow { Kind = FaultKind.Start, Status = "KIỂM TRA" };
-        Assert(BrushHex(openGreenRow.RowForegroundBrush) == "#0026D9" &&
-               BrushHex(openBlueRow.RowForegroundBrush) == "#0026D9",
-            "Open/missing rows use the original Htdrv blue text");
+        Assert(BrushHex(openGreenRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(openBlueRow.RowBackgroundBrush) == "#FFFFFF" &&
+               BrushHex(openGreenRow.RowForegroundBrush) == "#111111" &&
+               BrushHex(openBlueRow.RowForegroundBrush) == "#111111",
+            "Open/missing rows use bold black text on a white background");
         Assert(BrushHex(normalCheckRow.RowForegroundBrush) == "#555555" &&
+               BrushHex(normalCheckRow.RowBackgroundBrush) == "#FFFFFF" &&
                normalCheckRow.Status == "KIỂM TRA",
-            "Normal KIỂM TRA row and status use the original dark operator text");
+            "Normal KIỂM TRA row uses the original dark text on absolute white");
         Assert(BrushHex(openGreenRow.WireColorBrush) == "#00D000" &&
-               BrushHex(openGreenRow.WireColorForegroundBrush) == "#333333" &&
-               BrushHex(openBlueRow.WireColorBrush) == "#0077FF" &&
-               BrushHex(openBlueRow.WireColorForegroundBrush) == "#FFFFFF",
-            "Single Màu cell matches original green/blue background and readable text");
+               BrushHex(openBlueRow.WireColorBrush) == "#0000FF" &&
+               BrushHex(new FaultRow { Color = "R" }.WireColorBrush) == "#FF0000" &&
+               BrushHex(new FaultRow { Color = "P" }.WireColorBrush) == "#EAADEA" &&
+               BrushHex(new FaultRow { Color = "B" }.WireColorBrush) == "#000000" &&
+               BrushHex(new FaultRow { Color = "W" }.WireColorBrush) == "#FFFFFF" &&
+               BrushHex(new FaultRow { Color = "Gr" }.WireColorBrush) == "#606060" &&
+               BrushHex(new FaultRow { Color = "Br" }.WireColorBrush) == "#A62A2A" &&
+               BrushHex(new FaultRow { Color = "Or" }.WireColorBrush) == "#FF8C00" &&
+               BrushHex(new FaultRow { Color = "O" }.WireColorBrush) == "#FF8C00" &&
+               BrushHex(new FaultRow { Color = "OG" }.WireColorBrush) == "#FF8C00" &&
+               new FaultRow { Color = "Y/B" }.WireColorBrush is LinearGradientBrush &&
+               new FaultRow { Color = "W" }.WireColorBrush is SolidColorBrush,
+            "Single and striped wire-color backgrounds preserve the original tester palette");
+        var cachedRow = new FaultRow { Io = 42, Connector = " CN1 ", Pin = " 7 ", Color = "L" };
+        string cachedIoCnPn = cachedRow.IoCnPnText;
+        Assert(cachedIoCnPn == "42-CN1-7" && ReferenceEquals(cachedIoCnPn, cachedRow.IoCnPnText),
+            "FaultRow caches the formatted IO-CN-PN text after first access");
         Assert(new FaultRow { Color = "B/G" }.WireColorBrush is LinearGradientBrush,
             "Multi-color wire is combined into one striped Màu cell");
+        Assert(typeof(FaultRow).GetProperty("Color1Brush") is null &&
+               typeof(FaultRow).GetProperty("Color4Brush") is null,
+            "FaultRow exposes only the single one-or-two-color cell presentation");
+
+        Assert(typeof(TestViewModel).GetProperty("Logs") is null,
+            "TestViewModel does not maintain an unused UI log collection");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.Contains(
+                   "ProcessScheduledEngineChangedOnUi(request, rows)",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "TryAcceptProductionUiSnapshot(request, rows)",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "AdvanceProductionUiCycleEpoch();",
+                   StringComparison.Ordinal) &&
+               !testViewModelSource.Contains(
+                   "ProcessScheduledEngineChangedOnUi(Volatile.Read(ref _runtimeGeneration))",
+                   StringComparison.Ordinal),
+            "Coalesced engine UI callbacks preserve version identity and reject stale product cycles");
 
         var disabled = new ResistanceChannelEditor(
             new ResistanceChannelSetting { Enabled = true, Name = "R3", Channel = 3, MinOhm = 1, MaxOhm = 2 },
@@ -385,9 +1718,373 @@ internal static class Program
         stopwatch.Stop();
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
-        Assert(changed <= 1, "Identical complete frames do not raise unbounded engine UI updates");
+        Assert(changed <= 2, "Identical complete frames only publish initial and presence-confirmed UI updates");
         Console.WriteLine(
             $"PERF: 10,000 identical ProcessFrame calls: {stopwatch.ElapsedMilliseconds} ms, {allocated:N0} bytes allocated");
+
+        (string Name, int[] Io)[] largeNetDefinitions = Enumerable.Range(0, 250)
+            .Select(index => ($"NET{index + 1:000}", new[] { (index * 2) + 1, (index * 2) + 2 }))
+            .ToArray();
+        ProductModel largeModel = Model(largeNetDefinitions);
+        Assert(ReferenceEquals(
+                largeModel.Nets[0].ExpectedActiveIo,
+                largeModel.Nets[0].ExpectedActiveIo),
+            "WireNet caches its receiver endpoint list instead of rebuilding it on every engine query");
+
+        (int Source, int[] Targets)[] largeConnections = largeNetDefinitions
+            .Select(net => (net.Io[0], new[] { net.Io[1] }))
+            .ToArray();
+        using TestEngine largeEngine = CreateEngine(out _);
+        largeEngine.SetModel(largeModel);
+        ScanFrame allConnected = FrameSeq(1, largeConnections);
+        largeEngine.ProcessFrame(allConnected);
+        Assert(largeEngine.ContinuityPassed && largeEngine.BuildRows().Count == 0,
+            "A 500-IO/250-network model still completes only when every required network is connected");
+
+        largeEngine.ProcessFrame(FrameSeq(2, largeConnections[..^1]));
+        FaultRow[] reopenedRows = largeEngine.BuildRows().ToArray();
+        Assert(!largeEngine.ContinuityPassed &&
+               reopenedRows.Length == 2 &&
+               reopenedRows.All(row => row.WireName == "NET250"),
+            "Removing one connection from a 500-IO model immediately reopens exactly that network");
+
+        largeEngine.ProcessFrame(allConnected with { Sequence = 3 });
+        ScanFrame repeatedLarge = allConnected with { Sequence = 4 };
+        long largeAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var largeStopwatch = Stopwatch.StartNew();
+        for (int index = 0; index < 2_000; index++)
+            largeEngine.ProcessFrame(repeatedLarge);
+        largeStopwatch.Stop();
+        long largeAllocated = GC.GetAllocatedBytesForCurrentThread() - largeAllocatedBefore;
+        Assert(largeEngine.ContinuityPassed && largeEngine.BuildRows().Count == 0,
+            "Repeated complete frames cannot lose a passed network in the optimized large-model path");
+        Console.WriteLine(
+            $"PERF: 2,000 identical 500-IO/250-network frames: {largeStopwatch.ElapsedMilliseconds} ms, " +
+            $"{largeAllocated:N0} bytes allocated");
+    }
+
+    private static void TestAuthoritativeProductionState()
+    {
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            IoConfirm1 = 1,
+            IoConfirmN = 1
+        };
+        ProductModel model = Model(
+            ("PAIR-A", new[] { 1, 3 }),
+            ("PAIR-B", new[] { 2, 4 }));
+        using TestEngine engine = CreateEngine(out _, production);
+        engine.SetModel(model);
+
+        ProductionElectricalSnapshot waiting = engine.GetProductionElectricalSnapshot();
+        Assert(!waiting.ProductEvidence &&
+               !waiting.RealtimeEvaluationEnabled &&
+               !waiting.ContinuityComplete,
+            "No product evidence is authoritative WaitingForProduct input");
+
+        engine.ProcessFrame(FrameSeq(100, (1, new[] { 3 })));
+        TestEnginePresentationSnapshot installing = engine.CapturePresentationSnapshot(removal: false);
+        Assert(!installing.Electrical.ProductEvidence &&
+               installing.Electrical.RealtimeEvaluationEnabled,
+            "First model-related frame enables realtime evaluation without confirming lifecycle presence");
+        engine.ProcessFrame(FrameSeq(101, (1, new[] { 3 })));
+        installing = engine.CapturePresentationSnapshot(removal: false);
+        Assert(installing.Electrical.ProductEvidence &&
+               !installing.Electrical.ContinuityComplete &&
+               installing.Rows.Count(row => row.WireName == "PAIR-A") == 0 &&
+               installing.Rows.Count(row => row.WireName == "PAIR-B") == 2,
+            "Second correct frame confirms presence and removes only its rows");
+
+        engine.ProcessFrame(FrameSeq(102));
+        TestEnginePresentationSnapshot released = engine.CapturePresentationSnapshot(removal: false);
+        Assert(released.Electrical.ProductEvidence && !released.Electrical.RealtimeEvaluationEnabled,
+            "One clean frame does not remove a confirmed product");
+        engine.ProcessFrame(FrameSeq(103));
+        released = engine.CapturePresentationSnapshot(removal: false);
+        Assert(!released.Electrical.ProductEvidence && !released.Electrical.RealtimeEvaluationEnabled &&
+               released.Rows.Count(row => row.WireName == "PAIR-A") == 2 &&
+               released.Rows.Count(row => row.WireName == "PAIR-B") == 2,
+            "Disconnecting the pair immediately restores its rows without waiting for full product state");
+
+        engine.ProcessFrame(FrameSeq(104, (1, new[] { 4 })));
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(FrameSeq(105, (1, new[] { 4 })));
+        ProductionElectricalSnapshot wrong = engine.GetProductionElectricalSnapshot();
+        Assert(wrong.ProductEvidence &&
+               wrong.RealtimeEvaluationEnabled &&
+               !wrong.ContinuityComplete &&
+               wrong.HasConfirmedWiringFault,
+            "Wrong wiring remains confirmed during partial installation");
+
+        var gate = new ProductionUiVersionGate();
+        Assert(gate.TryAccept(10, 20, 30, 100, 1),
+            "First production UI snapshot is accepted");
+        Assert(!gate.TryAccept(9, 20, 30, 101, 2),
+            "Older runtime generation cannot update UI");
+        Assert(!gate.TryAccept(10, 19, 30, 101, 3),
+            "Older product cycle cannot update UI");
+        Assert(!gate.TryAccept(10, 20, 29, 999, 4),
+            "Older D2XX scan generation cannot update UI");
+        Assert(!gate.TryAccept(10, 20, 30, 99, 5),
+            "Older complete-frame sequence cannot overwrite the latest UI");
+        Assert(gate.TryAccept(10, 20, 30, 100, 6),
+            "A newer confirmation revision of the same frame remains applicable");
+        Assert(gate.TryAccept(10, 21, 0, 0, 7) &&
+               !gate.TryAccept(10, 20, 30, 200, 8),
+            "ProductRemoved cycle epoch invalidates every queued callback from the removed product");
+
+        TestViewModel pipelineVm = CreateTestViewModel(production, out FakeBoard pipelineBoard);
+        pipelineVm.SetModel(model);
+        pipelineVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        long requestsBefore = pipelineVm.EngineUiRequestCount;
+        long renderedBefore = pipelineVm.EngineUiRenderedCount;
+        pipelineBoard.Publish(FrameSeq(104, (1, new[] { 3 })));
+        Assert(pipelineVm.EngineUiRequestCount > requestsBefore &&
+               pipelineVm.EngineUiRenderedCount > renderedBefore &&
+               pipelineVm.EngineUiDispatcherEnqueueCount == 0,
+            "Headless UI pipeline counts request and accepted inline render without claiming a Dispatcher enqueue");
+
+        string pipelineSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        int enqueueCounter = pipelineSource.IndexOf(
+            "Interlocked.Increment(ref _uiDispatcherEnqueueCount);",
+            StringComparison.Ordinal);
+        int dispatcherInvoke = pipelineSource.IndexOf(
+            "await dispatcher.InvokeAsync",
+            enqueueCounter,
+            StringComparison.Ordinal);
+        Assert(enqueueCounter >= 0 &&
+               dispatcherInvoke > enqueueCounter &&
+               dispatcherInvoke - enqueueCounter < 200,
+            "Dispatcher enqueue counter increments only at the actual InvokeAsync call site");
+        string diagnosticsSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "TestViewDiagnostics.cs"));
+        Assert(pipelineSource.Contains("_diagnostics.LogScanMetrics(", StringComparison.Ordinal) &&
+               diagnosticsSource.Contains("UI_PIPELINE requests=", StringComparison.Ordinal) &&
+               diagnosticsSource.Contains("dispatcher_enqueued=", StringComparison.Ordinal) &&
+               diagnosticsSource.Contains("rendered={m.PipelineRendered} coalesced={coalesced}", StringComparison.Ordinal),
+            "Periodic diagnostics expose separate request, Dispatcher enqueue, rendered and coalesced totals");
+    }
+
+    private static void TestModelAwareProductEvidence()
+    {
+        var clock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 10, 0, 0, 0, TimeSpan.Zero));
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            IoConfirm1 = 1,
+            IoConfirmN = 1
+        };
+        var board = new FakeBoard();
+        using var engine = new TestEngine(
+            board,
+            new KeysightVisaService(),
+            new AppSettings(),
+            production,
+            clock);
+        engine.SetModel(Model(
+            ("PAIR-A", new[] { 1, 2 }),
+            ("PAIR-B", new[] { 3, 4 })));
+
+        AssertWaiting("No activity", FrameSeq(1));
+        for (int sequence = 2; sequence <= 101; sequence++)
+            AssertWaiting("Sustained raw IO18", FrameSeq(sequence, (18, new[] { 18 })));
+        AssertWaiting("Raw IO26 touch", FrameSeq(102, (26, new[] { 26 })));
+        AssertWaiting("Raw IO26 release", FrameSeq(103));
+        AssertWaiting("Sequential raw IO10", FrameSeq(104, (10, new[] { 10 })));
+        AssertWaiting("Sequential raw IO18", FrameSeq(105, (18, new[] { 18 })));
+        AssertWaiting("Sequential raw IO26", FrameSeq(106, (26, new[] { 26 })));
+        AssertWaiting(
+            "Two raw IOs without a logical edge",
+            FrameSeq(107, (10, new[] { 10 }), (18, new[] { 18 })));
+        engine.SetModel(Model(("PAIR-A", new[] { 4, 8 })));
+        ScanFrame externalBoundaryShort = FrameSeq(
+            108,
+            (127, new[] { 128 }),
+            (128, new[] { 127 })) with
+        {
+            ExpectedIoCount = 128,
+            SourceCount = 128,
+            ScanUnitCount = 2
+        };
+        engine.ProcessFrame(externalBoundaryShort);
+        ProductEvidenceSnapshot unmappedWrong = engine.GetProductEvidenceSnapshot();
+        Assert(!unmappedWrong.ValidProductEvidence &&
+               unmappedWrong.ShortCandidateCount == 1 &&
+               unmappedWrong.Reason == "RAW_ACTIVITY_ONLY" &&
+               !engine.HasWiringFault,
+            "IO127-IO128 outside THT starts SHORT debounce without creating model product presence");
+        clock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 1));
+        engine.ProcessFrame(externalBoundaryShort with { Sequence = 109 });
+        ProductEvidenceSnapshot confirmedExternalShort = engine.GetProductEvidenceSnapshot();
+        Assert(engine.HasWiringFault &&
+               confirmedExternalShort.ShortConfirmedCount == 1 &&
+               confirmedExternalShort.Reason == "SHORT_CONFIRMED" &&
+               !confirmedExternalShort.ValidProductEvidence,
+            "Stable IO127-IO128 short outside a two-IO THT is always confirmed as product fault");
+        FaultRow[] externalShortRows = engine.BuildRows()
+            .Where(row => row.Kind == FaultKind.Short)
+            .ToArray();
+        Assert(externalShortRows.Length == 2 &&
+               externalShortRows.Select(row => row.Io).SequenceEqual([127, 128]) &&
+               externalShortRows.Select(row => row.IsNetworkStart).SequenceEqual([true, false]) &&
+               externalShortRows.All(row => row.ProductFaultType == ProductFaultType.ShortCircuit &&
+                                            row.Status == "CHẬP MẠCH") &&
+               externalShortRows.Select(row => row.IoText).SequenceEqual(["IO (127)", "IO (128)"]),
+            "Confirmed IO127-IO128 outside THT renders as two separate operator rows");
+
+        engine.SetModel(Model(
+            ("PAIR-A", new[] { 1, 2 }),
+            ("PAIR-B", new[] { 3, 4 })));
+        ScanFrame tenCardPair = FrameSeq(110, (200, [201]), (201, [200])) with
+        {
+            ExpectedIoCount = 640,
+            SourceCount = 640,
+            ScanUnitCount = 10
+        };
+        engine.ProcessFrame(tenCardPair);
+        Assert(engine.GetPassGateDiagnostics().ShortCandidateCount == 1 &&
+               LiveTopologyPresenter.Build(tenCardPair, BoardCapacity.Create(10)).Pairs
+                   .Contains(new LiveTopologyPair(200, 201)),
+            "10-card physical coverage retains IO200-IO201 as one SHORT outside the model");
+        ScanFrame upperBoundaryPair = FrameSeq(111, (639, [640]), (640, [639])) with
+        {
+            ExpectedIoCount = 640,
+            SourceCount = 640,
+            ScanUnitCount = 10
+        };
+        engine.ProcessFrame(upperBoundaryPair);
+        Assert(engine.GetPassGateDiagnostics().ShortCandidateCount == 1 &&
+               LiveTopologyPresenter.Build(upperBoundaryPair, BoardCapacity.Create(10)).Pairs
+                   .Contains(new LiveTopologyPair(639, 640)),
+            "10-card upper boundary IO639-IO640 remains observable and classified SHORT");
+
+        engine.ProcessFrame(FrameSeq(112, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        Assert(!engine.GetProductEvidenceSnapshot().ValidProductEvidence,
+            "One model-related frame remains only a presence candidate");
+        engine.ProcessFrame(FrameSeq(113, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        ProductEvidenceSnapshot expected = engine.GetProductEvidenceSnapshot();
+        Assert(expected.ValidProductEvidence &&
+               expected.State == ProductPresenceState.Present &&
+               expected.ExpectedConnectedCount == 1 &&
+               expected.Reason == "EXPECTED_CONNECTIVITY" &&
+               engine.GetProductionElectricalSnapshot().ProductEvidence,
+            "Two consecutive valid expected frames confirm product presence");
+        Assert(engine.BuildRows().All(row => row.WireName != "PAIR-A") &&
+               engine.BuildRows().Count(row => row.WireName == "PAIR-B") == 2,
+            "Realtime row delta removes a connected pair and restores it after disconnect");
+
+        engine.ProcessFrame(FrameSeq(114));
+        Assert(!engine.HasProductActivity && engine.GetProductEvidenceSnapshot().ValidProductEvidence,
+            "One clean frame does not remove a confirmed product");
+        engine.ProcessFrame(FrameSeq(115));
+        Assert(!engine.HasProductActivity && !engine.GetProductEvidenceSnapshot().ValidProductEvidence &&
+               engine.BuildRows().Count(row => row.WireName == "PAIR-A") == 2,
+            "Two clean frames confirm removal and restore Waiting rows");
+
+        engine.ProcessFrame(FrameSeq(116, (1, new[] { 4 })));
+        ProductEvidenceSnapshot wrongCandidate = engine.GetProductEvidenceSnapshot();
+        Assert(wrongCandidate.WrongCandidateCount == 1 &&
+               !engine.ReadyToEvaluateProductFaults,
+            "A first wrong model-aware edge creates a realtime candidate before lifecycle confirmation");
+        Assert(!wrongCandidate.ValidProductEvidence,
+            "One wrong model-related frame does not confirm lifecycle presence");
+        clock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 1));
+        engine.ProcessFrame(FrameSeq(117, (1, new[] { 4 })));
+        Assert(engine.HasWiringFault &&
+               engine.GetProductEvidenceSnapshot().ValidProductEvidence &&
+               engine.GetProductEvidenceSnapshot().WrongConfirmedCount == 1,
+            "Wrong wiring confirmation remains realtime after semantic presence detection");
+
+        engine.SetModel(Model(
+            ("PAIR-A", new[] { 1, 2 }),
+            ("PAIR-B", new[] { 3, 4 })));
+        engine.ProcessFrame(FrameSeq(118, (2, new[] { 3 })));
+        ProductEvidenceSnapshot shortCandidate = engine.GetProductEvidenceSnapshot();
+        Assert(shortCandidate.ShortCandidateCount == 1,
+            "A first model-aware cross-network short creates a realtime candidate");
+        Assert(!shortCandidate.ValidProductEvidence,
+            "One short model-related frame does not confirm lifecycle presence");
+        clock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 1));
+        engine.ProcessFrame(FrameSeq(119, (2, new[] { 3 })));
+        Assert(engine.HasWiringFault &&
+               engine.GetProductEvidenceSnapshot().ShortConfirmedCount == 1,
+            "Short confirmation remains realtime without waiting for an expected pair");
+
+        engine.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
+        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 2 }, sequence: 120) &&
+               engine.HasContinuityPreviewProductActivity &&
+               engine.HasRealtimePresentationProductActivity &&
+               !engine.HasProductActivity &&
+               !engine.GetProductEvidenceSnapshot().ProbeEvidence,
+            "Presentation/Probe evidence is independent from authoritative ProductPresence");
+        engine.ProcessFrame(FrameSeq(120, (1, new[] { 2 })) with { ScanGeneration = 2 });
+        Assert(engine.ApplyContinuityPreviewSource(1, new[] { 3 }, sequence: 121) &&
+               engine.HasRealtimePresentationProductActivity,
+            "A remaining wrong edge keeps realtime product presentation active after the expected edge is removed");
+        Assert(engine.ApplyContinuityPreviewSource(1, Array.Empty<int>(), sequence: 121) &&
+               !engine.HasRealtimePresentationProductActivity &&
+               engine.HasProductActivity,
+            "In-progress SOURCE removal restores waiting presentation before C0 without changing authoritative activity");
+
+        TestViewModel vm = CreateTestViewModel(production, out FakeBoard vmBoard);
+        vm.SetModel(Model(("PAIR-A", new[] { 1, 2 })));
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        ((Task)(typeof(TestViewModel).GetField(
+            "_statisticsLoadTask",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? Task.CompletedTask)).GetAwaiter().GetResult();
+        int totalBefore = vm.Total;
+        int passBefore = vm.Pass;
+        int failBefore = vm.Fail;
+        string lotBefore = vm.Lot;
+        for (int sequence = 200; sequence < 300; sequence++)
+            vmBoard.Publish(FrameSeq(sequence, (10, new[] { 10 })));
+
+        int productSoundFlag = (int)(typeof(TestViewModel).GetField(
+            "_productStartSoundPlayed",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? -1);
+        bool productDetectedThisCycle = (bool)(typeof(TestViewModel).GetField(
+            "_productDetectedThisCycle",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? true);
+        Assert(vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               vm.Total == totalBefore && vm.Pass == passBefore && vm.Fail == failBefore &&
+               vm.Lot == lotBefore && productSoundFlag == 0 && !productDetectedThisCycle &&
+               !vmBoard.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+            $"100 raw single-IO frames cannot start product lifecycle side effects " +
+            $"(state={vm.CurrentProductionRuntimeState}, totals={vm.Total}/{vm.Pass}/{vm.Fail}, " +
+            $"lot={vm.Lot}/{lotBefore}, sound={productSoundFlag}, detected={productDetectedThisCycle}, " +
+            $"commands={string.Join(',', vmBoard.Commands)})");
+
+        string d2xxSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "D2xxBoardTransport.cs"));
+        string supervisorSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "ScanSupervisor.cs"));
+        Assert(d2xxSource.Contains(
+                   "readGeneration != Volatile.Read(ref _scanGeneration)",
+                   StringComparison.Ordinal) &&
+               supervisorSource.Contains("frame.ScanGeneration != _previousScanGeneration", StringComparison.Ordinal),
+            "Stale scan generations remain rejected by transport and ScanSupervisor gates");
+
+        void AssertWaiting(string scenario, ScanFrame frame)
+        {
+            engine.ProcessFrame(frame);
+            ProductEvidenceSnapshot evidence = engine.GetProductEvidenceSnapshot();
+            Assert(!evidence.ValidProductEvidence &&
+                   evidence.State == ProductPresenceState.WaitingForProduct &&
+                   !engine.HasProductActivity &&
+                   !engine.ReadyToEvaluateProductFaults &&
+                   !engine.HasWiringFault &&
+                   !engine.ContinuityPassed,
+                $"{scenario} remains raw-only WaitingForProduct");
+        }
     }
 
     private static void TestFinalTestStatusGuards()
@@ -399,12 +2096,18 @@ internal static class Program
             "Master minimum 0 must be preserved and disable Master");
 
         ProductionConfigService.SetMasterFaultRequiredCountForPath(settings, "PN-1.tht", 1);
-        ProductModel model1 = new() { ModelName = "PN-1", PartNumber = "PN-1", SourcePath = "PN-1.tht" };
+        ProductModel model1 = Model(("PN-1-WIRE", new[] { 1, 2 }));
+        model1.ModelName = "PN-1";
+        model1.PartNumber = "PN-1";
+        model1.SourcePath = "PN-1.tht";
         Assert(ProductionConfigService.GetMasterFaultRequiredCount(settings, model1) == 1,
             "Master minimum 1 must be preserved");
 
         ProductionConfigService.SetMasterFaultRequiredCountForPath(settings, "PN-2.tht", 2);
-        ProductModel model2 = new() { ModelName = "PN-2", PartNumber = "PN-2", SourcePath = "PN-2.tht" };
+        ProductModel model2 = Model(("PN-2-WIRE", new[] { 1, 2 }));
+        model2.ModelName = "PN-2";
+        model2.PartNumber = "PN-2";
+        model2.SourcePath = "PN-2.tht";
         Assert(ProductionConfigService.GetMasterFaultRequiredCount(settings, model2) == 2,
             "Master minimum 2 must be preserved");
 
@@ -412,53 +2115,150 @@ internal static class Program
         disabledMasterVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         Assert(disabledMasterVm.MasterApproved, "Master min 0 unlocks production immediately");
         Assert(disabledMasterVm.MasterState == MasterSequenceState.Completed, "Master min 0 marks Master completed/disabled");
-        Assert(!disabledMasterVm.IsMasterSequenceActive && !disabledMasterVm.IsMasterBannerVisible,
-            "Master min 0 must not show Master banner");
+        Assert(!disabledMasterVm.IsMasterSequenceActive &&
+               typeof(TestViewModel).GetProperty("IsMasterBannerVisible") is null,
+            "Master workflow no longer exposes a separate Master banner");
         Assert(disabledMasterVm.ProductionEnabled, "Master min 0 allows production");
-        Assert(disabledMasterVm.ResultStatusText == "SẴN SÀNG", "Ready result text is canonical");
-        Assert(disabledMasterVm.StateBackground == "#FFF3A0" && disabledMasterVm.StateForeground == "#222222",
-            "Ready status uses yellow/dark mapping");
+        Assert(disabledMasterVm.ResultStatusText == "LẮP SẢN PHẨM",
+            $"Waiting-product result text is canonical (actual='{disabledMasterVm.ResultStatusText}', state='{disabledMasterVm.State}')");
+        Assert(disabledMasterVm.StateBackground == "#83CCEB" && disabledMasterVm.StateForeground == "#222222",
+            "Ready status uses the requested blue background");
 
         TestViewModel enabledMasterVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 1 });
         enabledMasterVm.LoadPreparedModelAsync(model1).GetAwaiter().GetResult();
         Assert(!enabledMasterVm.MasterApproved && enabledMasterVm.IsMasterSequenceActive,
             "Master min 1 keeps Master workflow enabled");
         Assert(enabledMasterVm.MasterRequiredFaultCount == 1, "Master min 1 requires one unique fault");
-        Assert(enabledMasterVm.ResultStatusText == "CHỜ MASTER" && enabledMasterVm.StateBackground == "#FFF3A0",
-            "Waiting Master status is canonical yellow");
+        Assert(enabledMasterVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT" &&
+               (!enabledMasterVm.IsCenterResultVisible ||
+                enabledMasterVm.CenterResultText == "KIỂM TRA MẪU ĐẠT") &&
+               enabledMasterVm.StateBackground == "#F5E731" &&
+               enabledMasterVm.StateForeground == "#222222",
+            $"Good-Master waiting state prompts for the sample before any product activity: status={enabledMasterVm.ResultStatusText}, center={enabledMasterVm.CenterResultText}, background={enabledMasterVm.StateBackground}, foreground={enabledMasterVm.StateForeground}, master={enabledMasterVm.MasterState}, runtime={enabledMasterVm.CurrentProductionRuntimeState}");
+
+        TestViewModel masterExitVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 1 },
+            out FakeBoard masterExitBoard);
+        ProductModel masterExitModel = Model(("MASTER-PAIR", new[] { 1, 18 }), ("PENDING-PAIR", new[] { 2, 19 }));
+        masterExitVm.LoadPreparedModelAsync(masterExitModel).GetAwaiter().GetResult();
+        AwaitModelReconcile(masterExitVm);
+        typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(masterExitVm, 1);
+        TestEngine masterExitEngine =
+            (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(masterExitVm) ?? throw new InvalidOperationException("Master exit TestEngine not found"));
+        masterExitEngine.SetFrameProcessingEnabled(true);
+        Assert(masterExitVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT",
+            "Good-Master status remains a sample prompt before a scan detects it");
+        HashSet<string> masterPresentationChanges = new(StringComparer.Ordinal);
+        masterExitVm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is not null)
+                masterPresentationChanges.Add(args.PropertyName);
+        };
+        masterExitBoard.Publish(FrameSeq(100, (1, new[] { 18 })));
+        masterExitBoard.Publish(FrameSeq(101, (1, new[] { 18 })));
+        Assert(masterExitVm.MasterState == MasterSequenceState.TestingGoodMaster &&
+               masterExitVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT" &&
+               masterExitVm.StateBackground == "#F5E731" &&
+               masterPresentationChanges.Contains(nameof(TestViewModel.ResultStatusText)) &&
+               masterPresentationChanges.Contains(nameof(TestViewModel.StateBackground)) &&
+               masterPresentationChanges.Contains(nameof(TestViewModel.CenterResultText)),
+            $"Detected Master sample starts the good-Master test and checking presentation: master={masterExitVm.MasterState}, status={masterExitVm.ResultStatusText}, raw={masterExitVm.State}, background={masterExitVm.StateBackground}, device={masterExitVm.IsDeviceFault}, notifications={string.Join(',', masterPresentationChanges)}");
+        bool masterExitAllowed = masterExitVm.StopViewAsync().GetAwaiter().GetResult();
+        Assert(!masterExitAllowed,
+            "Returning to Main during Master is blocked until the sample is removed");
+        masterExitBoard.Publish(FrameSeq(102, (1, new[] { 18 })));
+        Assert(masterExitVm.HasProductOnTestTable,
+            "Master exit remains blocked while the sample is physically connected");
+        masterExitBoard.Publish(FrameSeq(103));
+        Assert(masterExitVm.HasProductOnTestTable,
+            "One empty Master frame cannot bypass the full-removal confirmation gate");
+        masterExitBoard.Publish(FrameSeq(104));
+        Assert(!masterExitVm.HasProductOnTestTable &&
+               masterExitVm.ResultStatusText == "KIỂM TRA MẪU ĐẠT" &&
+               masterExitVm.Faults.Count == 0,
+            "Further empty frames restore the Master sample prompt");
+
+        FieldInfo masterGoodVerified = typeof(TestViewModel).GetField(
+            "_masterGoodVerified",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Master-good verification field not found");
+        masterGoodVerified.SetValue(enabledMasterVm, true);
+        MethodInfo transitionToBadMaster = typeof(TestViewModel).GetMethod(
+            "TransitionToBadMaster",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Bad-Master transition not found");
+        transitionToBadMaster.Invoke(enabledMasterVm, null);
+        Assert(enabledMasterVm.MasterState == MasterSequenceState.WaitingBadMaster &&
+               enabledMasterVm.ResultStatusText == "KIỂM TRA MẪU SAI DÂY" &&
+               (!enabledMasterVm.IsCenterResultVisible ||
+                enabledMasterVm.CenterResultText == "KIỂM TRA MẪU SAI DÂY") &&
+               enabledMasterVm.WrongCountText == "0/1" &&
+               enabledMasterVm.Faults.Count == 0,
+            "Bad Master waits for its sample at 0/N with an empty table");
+
+        TestViewModel twoFaultMasterVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 2 });
+        twoFaultMasterVm.LoadPreparedModelAsync(model2).GetAwaiter().GetResult();
+        masterGoodVerified.SetValue(twoFaultMasterVm, true);
+        transitionToBadMaster.Invoke(twoFaultMasterVm, null);
+        Assert(twoFaultMasterVm.WrongCountText == "0/2",
+            "Two-fault bad Master displays 0/2 in the wrong-wiring counter");
+
+        MethodInfo buildMasterFaultGridRow = typeof(TestViewModel).GetMethod(
+            "BuildMasterFaultGridRow",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Master fault grid row builder not found");
+        FaultRow masterWrongWireRow = (FaultRow)(buildMasterFaultGridRow.Invoke(
+            enabledMasterVm,
+            [new FaultDetail
+            {
+                Type = ProductFaultType.WrongWiring,
+                ExpectedSourceIo = 1,
+                ExpectedTargetIo = 18,
+                ActualSourceIo = 1,
+                ActualTargetIo = 19,
+                RelatedIos = [1, 18, 19]
+            }]) ?? throw new InvalidOperationException("Master fault row was not built"));
+        Assert(masterWrongWireRow.Kind == FaultKind.WrongWiring &&
+               masterWrongWireRow.IsNetworkStart &&
+               masterWrongWireRow.Status == "SAI DÂY",
+            "Confirmed bad-Master wrong wiring uses the same red SAI DÂY row semantics as production");
 
         TestViewModel statusVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         statusVm.State = "PASS";
-        Assert(statusVm.ResultStatusText == "ĐẠT" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
-            "PASS status mapping");
+        Assert(statusVm.ResultStatusText == "PASS" && statusVm.StateBackground == "#2AA84A" && statusVm.StateForeground == "#FFFFFF",
+            "PASS state keeps the canonical PASS header mapping");
         statusVm.State = "PASS - THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" && statusVm.StateBackground == "#2AA84A",
             "Committed PASS explicitly asks for product removal until ProductRemoved returns the UI to ready");
         statusVm.State = "ĐANG TEST LEAK";
-        Assert(statusVm.ResultStatusText == "ĐANG TEST LEAK" &&
-               statusVm.StateBackground == "#FFF3A0",
-            "Leak stage has an explicit in-progress presentation before PASS");
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               statusVm.StateBackground == "#173B88" &&
+               statusVm.StateForeground == "#FFFFFF",
+            "Leak stage uses the canonical checking presentation before PASS");
         statusVm.State = "CHƯA ĐẠT";
-        Assert(statusVm.ResultStatusText == "KHÔNG ĐẠT" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
-            "FAIL status mapping");
+        Assert(statusVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" && statusVm.StateBackground == "#C62828" && statusVm.StateForeground == "#FFFFFF",
+            "Product FAIL reports rejection and explicitly requests removal");
         statusVm.State = "CHỜ THÁO SẢN PHẨM";
         Assert(statusVm.ResultStatusText == "THÁO SẢN PHẨM" &&
                statusVm.StateBackground == "#FFF3A0" &&
                statusVm.StateForeground == "#222222",
-            "Removal interlock must not be presented as SẴN SÀNG");
+            "Removal interlock must not be presented as LẮP SẢN PHẨM");
         statusVm.State = "ĐANG KIỂM TRA...";
-        Assert(statusVm.ResultStatusText == "ĐANG TEST" && statusVm.StateBackground == "#FFF3A0" && statusVm.StateForeground == "#222222",
-            "Testing status mapping");
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" && statusVm.StateBackground == "#173B88" && statusVm.StateForeground == "#FFFFFF",
+            "Current testing status uses the requested navy background and white text");
         statusVm.State = "ĐANG KẾT NỐI BO";
-        Assert(statusVm.ResultStatusText == "ĐANG KẾT NỐI BO" &&
-               statusVm.StateBackground == "#FFF3A0" &&
-               statusVm.StateForeground == "#222222",
-            "Board connection progress must not be presented as production testing");
-        statusVm.State = "MODEL ĐÃ TẢI - BO CHƯA KẾT NỐI";
-        Assert(statusVm.ResultStatusText == "CHƯA KẾT NỐI BO" &&
+        Assert(statusVm.ResultStatusText == "ĐANG KIỂM TRA" &&
+               statusVm.StateBackground == "#173B88" &&
+               statusVm.StateForeground == "#FFFFFF",
+            "Board connection progress uses the canonical checking presentation");
+        statusVm.State = "LỖI THIẾT BỊ";
+        Assert(statusVm.ResultStatusText == "LỖI THIẾT BỊ" &&
                statusVm.StateBackground == "#C62828" &&
                statusVm.StateForeground == "#FFFFFF",
-            "Disconnected board must never be presented as ready");
+            "A non-latched equipment error retains its source message instead of a product rejection label");
 
         statusVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
         MethodInfo buildFinalPassRejectionFaults = typeof(TestViewModel).GetMethod(
@@ -480,11 +2280,29 @@ internal static class Program
         recoveryVm.LoadPreparedModelAsync(recoveryModel).GetAwaiter().GetResult();
         typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
             ?.SetValue(recoveryVm, 1);
+        ScanSupervisor recoverySupervisor =
+            (ScanSupervisor)(typeof(TestViewModel).GetField(
+                "_scanSupervisor",
+                BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(recoveryVm)
+                ?? throw new InvalidOperationException("Recovery ScanSupervisor not found"));
+        recoveryBoard.SetRequestedScanCapacityForTest(1);
+        recoveryBoard.SetAppliedScanCapacityForTest(1);
+        recoverySupervisor.Suspend("self-test-healthy-stream");
+        recoverySupervisor.EnsureProductionScanAsync(
+                recoveryModel.MaxIo,
+                CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
         TestEngine recoveryEngine =
             (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(recoveryVm) ?? throw new InvalidOperationException("Recovery TestEngine not found"));
         recoveryEngine.SetFrameProcessingEnabled(true);
-        recoveryBoard.Publish(FrameSeq(1, (1, new[] { 18 })));
+        recoveryBoard.Publish(FrameSeq(1, (1, new[] { 18 })) with { ScanGeneration = 1 });
+        ScanHealthSnapshot recoveryHealth = recoverySupervisor.HealthSnapshot;
+        Assert(recoveryHealth.State == ScanHealthState.Monitoring &&
+               recoveryHealth.ScanGeneration == 1,
+            $"Rejected FAIL recovery setup establishes a healthy generation-aware production stream; " +
+            $"state={recoveryHealth.State}, generation={recoveryHealth.ScanGeneration}, reason={recoveryHealth.Reason}");
         Assert(recoveryVm.Faults.Count == 0, "Passed recovery model hides completed network rows before removal");
         long recoveryGeneration = (long)(typeof(TestViewModel).GetField(
             "_runtimeGeneration",
@@ -493,10 +2311,15 @@ internal static class Program
             "RecoverAfterUncommittedFailAsync",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Uncommitted FAIL recovery method not found");
+        int recoveryStartCountBefore = recoveryBoard.Commands.Count(command => command == "START");
         Task publishRecoveryFrame = Task.Run(async () =>
         {
             await Task.Delay(50);
             recoveryBoard.Publish(FrameSeq(2));
+            Assert(recoveryVm.IsProductRemovalPending,
+                "Rejected FAIL recovery must retain its gate after one empty frame");
+            recoveryBoard.Publish(FrameSeq(3));
+            recoveryBoard.Publish(FrameSeq(4));
         });
         ((Task)(recoverUncommittedFail.Invoke(
             recoveryVm,
@@ -505,11 +2328,20 @@ internal static class Program
             .GetAwaiter()
             .GetResult();
         publishRecoveryFrame.GetAwaiter().GetResult();
-        Assert(recoveryVm.ResultStatusText == "SẴN SÀNG" &&
-               recoveryVm.Faults.Count == 2 &&
-               !recoveryBoard.Commands.Contains("START") &&
+        bool recoveryCompleted = SpinWait.SpinUntil(
+            () => recoveryVm.ResultStatusText == "LẮP SẢN PHẨM" &&
+                  recoveryVm.Faults.Count == 0 &&
+                  recoveryVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+                  !recoveryVm.IsProductRemovalPending,
+            TimeSpan.FromSeconds(2));
+        int recoveryStartCountAfter = recoveryBoard.Commands.Count(command => command == "START");
+        Assert(recoveryCompleted &&
+               recoveryStartCountAfter == recoveryStartCountBefore &&
                !recoveryBoard.Commands.Contains("SET:2"),
-            "Rejected FAIL commit reuses healthy removal scan, restores IO rows, and cannot remain latched at KHÔNG ĐẠT");
+            "Rejected FAIL commit reuses healthy removal scan, returns to authoritative WaitingForProduct with no removal latch, " +
+            $"and cannot remain latched at KHÔNG ĐẠT; status={recoveryVm.ResultStatusText}, state={recoveryVm.State}, " +
+            $"runtime={recoveryVm.CurrentProductionRuntimeState}, removal={recoveryVm.IsProductRemovalPending}, " +
+            $"starts={recoveryStartCountBefore}->{recoveryStartCountAfter}");
 
         string xaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
         Assert(!xaml.Contains("ProbeToggleText", StringComparison.Ordinal) &&
@@ -523,16 +2355,76 @@ internal static class Program
                    "Text=\"{Binding ProbeCycleCount, Mode=OneWay}\" Style=\"{StaticResource PiCounterTextStyle}\"",
                    StringComparison.Ordinal),
             "TestView Số LOT must display the daily accepted quantity, never the probe maintenance counter");
+        Assert(xaml.Contains(
+                   "Text=\"{Binding WrongCountText, Mode=OneWay}\"",
+                   StringComparison.Ordinal) &&
+               !xaml.Contains("IsMasterBannerVisible", StringComparison.Ordinal) &&
+               !xaml.Contains("MasterBannerText", StringComparison.Ordinal) &&
+               !xaml.Contains("MasterProgressText", StringComparison.Ordinal),
+            "Master progress uses the wrong-wiring counter without a separate yellow banner");
         Assert(xaml.Contains("x:Key=\"WireColorCellTemplate\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Background=\"#F2FFFFFF\"", StringComparison.Ordinal) &&
+               xaml.Contains("views:OutlinedTextBlock Text=\"{Binding WireColorText}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Foreground=\"{StaticResource PanelBackground}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Stroke=\"{StaticResource WireOutline}\"", StringComparison.Ordinal) &&
+               xaml.Contains("StrokeThickness=\"1\"", StringComparison.Ordinal) &&
+               xaml.Contains("FontFamily=\"Malgun Gothic\"", StringComparison.Ordinal) &&
+               xaml.Contains("FontSize=\"22\"", StringComparison.Ordinal) &&
+               !xaml.Contains("BorderBrush=\"#606060\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Key=\"HtdrvGridTextStyle\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"HtdrvGridCenterTextStyle\"", StringComparison.Ordinal) &&
+               xaml.Contains("ElementStyle=\"{StaticResource HtdrvGridStrongCenterTextStyle}\"", StringComparison.Ordinal) &&
+                xaml.Contains("Header=\"Mã Dây\" Binding=\"{Binding WireNameDisplay}\" Width=\"1.25*\" MinWidth=\"100\" CanUserSort=\"False\" CanUserReorder=\"False\" CanUserResize=\"False\" HeaderStyle=\"{StaticResource WireNameHeaderStyle}\" CellStyle=\"{StaticResource WireNameCellStyle}\" ElementStyle=\"{StaticResource OperatorWireNameTextStyle}\"", StringComparison.Ordinal) &&
                xaml.Contains("TestFaultGridFontSize", StringComparison.Ordinal) &&
                xaml.Contains("TestGridRowHeight", StringComparison.Ordinal) &&
-               xaml.Contains("Header=\"M&#224;u\" Width=\"0.60*\" MinWidth=\"64\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"M&#224;u\" Width=\"0.85*\" MinWidth=\"90\"", StringComparison.Ordinal) &&
+               xaml.IndexOf("Header=\"Mã Dây\"", StringComparison.Ordinal) <
+               xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
+               xaml.IndexOf("Header=\"M&#224;u\"", StringComparison.Ordinal) <
+               xaml.IndexOf("Header=\"Tiết Diện\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#1\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#2\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#3\"", StringComparison.Ordinal) &&
                !xaml.Contains("Header=\"#4\"", StringComparison.Ordinal),
-            "TestView uses responsive bold wiring text and a narrow original-style Màu column without #1..#4");
+            "TestView renders full-cell wire colors with outlined readable codes and no #1..#4 columns");
+        Assert(xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"Open\">", StringComparison.Ordinal) &&
+               xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"MissingConnection\">", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"{StaticResource AccentTintBorder}\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,10,0,0\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"{StaticResource FailRed}\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"WrongWiring\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"Short\"/>", StringComparison.Ordinal),
+            "TestView uses 10px blue separators for normal networks and red separators for confirmed wiring fault groups");
+        int operatorWireStyleStart = xaml.IndexOf("x:Key=\"OperatorWireTextStyle\"", StringComparison.Ordinal);
+        int operatorConnectorStyleStart = xaml.IndexOf("x:Key=\"OperatorConnectorTextStyle\"", StringComparison.Ordinal);
+        string operatorWireStyle = operatorWireStyleStart >= 0 && operatorConnectorStyleStart > operatorWireStyleStart
+            ? xaml[operatorWireStyleStart..operatorConnectorStyleStart]
+            : string.Empty;
+        Assert(operatorWireStyle.Contains("Value=\"WrongWiring\"", StringComparison.Ordinal) &&
+                operatorWireStyle.Contains("Value=\"Short\"", StringComparison.Ordinal) &&
+                operatorWireStyle.Contains("Foreground\" Value=\"{StaticResource PiFailBrush}", StringComparison.Ordinal),
+            "Wrong-wiring and short rows override blue connector/wire text with the red FAIL brush");
+        Assert(xaml.Contains("x:Key=\"OperatorWireNameTextStyle\"", StringComparison.Ordinal) &&
+               xaml.Contains("Binding=\"{Binding IsWireNameMissing}\" Value=\"True\"", StringComparison.Ordinal),
+            "Missing wire codes use the red FAIL brush only in the wire-name column");
+        Assert(!xaml.Contains("Content=\"TH&#7916; L&#7840;I IN TEM\"", StringComparison.Ordinal) &&
+               xaml.Contains("Content=\"IN TH&#202;M B&#7842;N SAO\"", StringComparison.Ordinal) &&
+               xaml.Contains("Style=\"{StaticResource LabelReprintButtonStyle}\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Command=\"{Binding RetryLabelCommand}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Command=\"{Binding ReprintLabelCommand}\"", StringComparison.Ordinal) &&
+               !xaml.Contains("Text=\"{Binding LabelStatusText}\"", StringComparison.Ordinal),
+            "TestView exposes audited duplicate printing without a failed first-print retry button or LabelStatusText");
+        Assert(xaml.Contains("Click=\"BackToMain_Click\"", StringComparison.Ordinal) &&
+               xaml.Contains("Style=\"{StaticResource TestExitButtonStyle}\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"TestExitBackground\" Color=\"{StaticResource SurfaceAltValue}\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Key=\"TestExitForeground\" Color=\"{StaticResource TextSecondaryValue}\"", StringComparison.Ordinal),
+            "TestView back navigation uses neutral navigation colors");
+        Assert(xaml.Contains("x:Name=\"HeaderNavigationRow\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Name=\"StatusLedPanel\"", StringComparison.Ordinal) &&
+               xaml.Contains("Margin=\"10,0,2,0\"", StringComparison.Ordinal) &&
+               xaml.Contains("x:Name=\"LabelActionButtonsPanel\"", StringComparison.Ordinal) &&
+               xaml.Contains("<ColumnDefinition Width=\"6\"/>", StringComparison.Ordinal),
+            "TestView separates the four status LEDs from navigation and gives both label actions responsive equal widths");
 
         string testWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml.cs"));
@@ -541,20 +2433,74 @@ internal static class Program
                testWindowSource.Contains("TestGridMaximumScale = 1.25", StringComparison.Ordinal) &&
                testWindowSource.Contains("Resources[\"TestFaultGridFontSize\"]", StringComparison.Ordinal),
             "TestView keeps large 1280x768 text and scales grid typography/row spacing uniformly through Full HD");
+        int yellowLedIndex = xaml.IndexOf("x:Name=\"YellowStatusLed\"", StringComparison.Ordinal);
+        int whiteLedIndex = xaml.IndexOf("x:Name=\"WhiteStatusLed\"", StringComparison.Ordinal);
+        int greenLedIndex = xaml.IndexOf("x:Name=\"GreenStatusLed\"", StringComparison.Ordinal);
+        int redLedIndex = xaml.IndexOf("x:Name=\"RedStatusLed\"", StringComparison.Ordinal);
+        Assert(yellowLedIndex >= 0 && yellowLedIndex < whiteLedIndex &&
+               whiteLedIndex < greenLedIndex && greenLedIndex < redLedIndex &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(200)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(100)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("TimeSpan.FromMilliseconds(50)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("viewModel.IsPassStatusLedHeld", StringComparison.Ordinal) &&
+               testWindowSource.Contains("StatusLedFrameTracker.IsCompleteScan(frame)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("viewModel.IsDeviceFault", StringComparison.Ordinal),
+            "TestView LEDs keep YELLOW-WHITE-GREEN-RED order, scan pulses, relay-scoped PASS hold and hardware-fault blackout");
 
         string mainWindowSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
-        Assert(mainWindowSource.Contains(
-                   "StartTestButton.IsEnabled = boardConnected && _viewModel.Model is not null;",
+        Assert(mainWindowSource.Contains("bool hardwareReady =", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("bool offlineUiAvailable =", StringComparison.Ordinal) &&
+               mainWindowSource.Contains(
+                   "StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null && !blocked;",
                    StringComparison.Ordinal) &&
                mainWindowSource.Contains(
-                   "SelectModelButton.IsEnabled = boardConnected && !blocked;",
-                   StringComparison.Ordinal) &&
-               mainWindowSource.Contains("nameof(TestViewModel.IsBoardConnected)", StringComparison.Ordinal),
-            "Main actions unlock only after board connection; removal still locks only product selection");
+                   "ProductCatalog.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;",
+                   StringComparison.Ordinal),
+            "Main allows offline UI entry only after product removal; hardware-only actions remain locked");
+
+        string mainViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
+        Assert(mainViewModelSource.Contains(
+                   "TesterConnectionNotice.Message",
+                   StringComparison.Ordinal),
+            "Main status clearly identifies the no-board UI-only state");
+        Assert(mainViewModelSource.Contains("requireStartupIoClear: false", StringComparison.Ordinal),
+            "Production startup accepts the first live frame for the remembered model without requiring a clean baseline");
+
+        Assert(xaml.Contains("x:Name=\"OperationTablesHost\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Lo&#7841;i\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Connector\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Chân Pin\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Mã Dây\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Tiết Diện\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"M&#224;u\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"Tr&#7841;ng th&#225;i\"", StringComparison.Ordinal) &&
+               xaml.Contains("Header=\"IO-CN-PN\"", StringComparison.Ordinal) &&
+               !testWindowSource.Contains("OperationTablesHost.Visibility = Visibility.Collapsed;", StringComparison.Ordinal) &&
+               testWindowSource.Contains("if (_autoStartProduction)", StringComparison.Ordinal) &&
+               testWindowSource.Contains("viewModel.IsBoardConnected", StringComparison.Ordinal),
+            "TestWindow remains visible offline, skips Production start, and keeps status LEDs tied to real board state");
+        int typeColumnIndex = xaml.IndexOf("Header=\"Lo&#7841;i\"", StringComparison.Ordinal);
+        int ioColumnIndex = xaml.IndexOf("Header=\"IO\" Binding=\"{Binding IoText}\"", StringComparison.Ordinal);
+        int connectorColumnIndex = xaml.IndexOf("Header=\"Connector\"", StringComparison.Ordinal);
+        Assert(typeColumnIndex >= 0 &&
+               ioColumnIndex > typeColumnIndex &&
+               connectorColumnIndex > ioColumnIndex,
+            "TestWindow places the THT IO column directly after Loại and before Connector");
 
         string testViewModelSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.Contains("HOÀN THÀNH MẪU MASTER ĐẠT", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("HOÀN THÀNH MẪU MASTER LỖI", StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "MasterDetectedFaultCount < MasterRequiredFaultCount",
+                   StringComparison.Ordinal),
+            "Master completion appears in the main status box and remains gated by the configured N/N fault count");
+        Assert(testViewModelSource.Contains("resumeCurrentStartupModel", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("BoardFrameActivity?.Invoke(this, frame);", StringComparison.Ordinal),
+            "Remembered-model START resumes real frame processing while UI LEDs observe the existing board frame stream");
         int initializeHardwareIndex = testViewModelSource.IndexOf(
             "await InitializeHardwareAsync();",
             StringComparison.Ordinal);
@@ -565,30 +2511,166 @@ internal static class Program
             "Startup connects the board before loading the last product model");
 
         string settingsXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
-        Assert(settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal),
-            "Production settings exposes reconnectable printer control and connection status");
-        Assert(settingsXaml.Contains("<ColumnDefinition Width=\"110\"/>", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Width=\"115\"", StringComparison.Ordinal) &&
-               settingsXaml.Contains("Grid.Row=\"2\"\n                                    Grid.Column=\"2\"", StringComparison.Ordinal),
+        string settingsSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml.cs"));
+        string labelPrintServiceSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "LabelPrintService.cs"));
+        string historySource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml.cs"));
+        string topologyLearningSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml.cs"));
+        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
+        Assert(settingsXaml.Contains(
+                   "SelectionChanged=\"PrinterComComboBox_SelectionChanged\"",
+                   StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Content=\"KẾT NỐI\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Click=\"ConnectPrinter_Click\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("x:Name=\"PrinterConnectionStatusText\"", StringComparison.Ordinal) &&
+               !settingsSource.Contains("ProductionConfigService.Save(_vm.Settings);", StringComparison.Ordinal) &&
+               settingsSource.Contains("private async Task<bool> PersistSettingsAsync()", StringComparison.Ordinal) &&
+               settingsSource.Contains("CommitPendingEditorValues();", StringComparison.Ordinal) &&
+               settingsSource.Contains("await NotifySettingsSavedAsync();", StringComparison.Ordinal) &&
+               settingsSource.Contains("ConnectLabelPrinterAsync(_vm.Settings.Label, selectionToken)", StringComparison.Ordinal) &&
+               settingsSource.Contains("DisconnectLabelPrinterAsync()", StringComparison.Ordinal) &&
+               settingsSource.Contains("new ComPortOption(savedPort, savedPort)", StringComparison.Ordinal) &&
+               !settingsSource.Contains("$\"{savedPort} - chưa kết nối\"", StringComparison.Ordinal),
+            "Selecting a printer COM applies live without autosave; explicit Save uses one validated save pipeline");
+        Assert(settingsXaml.Contains("Content=\"LƯU CÀI ĐẶT\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Click=\"Save_Click\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Content=\"TRỞ VỀ\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (await PersistSettingsAsync())", StringComparison.Ordinal) &&
+               settingsSource.Contains("bool? saveChanges = ConfirmSaveBeforeLeaving();", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (saveChanges is null)", StringComparison.Ordinal) &&
+               settingsSource.Contains("if (saveChanges == true && !await PersistSettingsAsync())", StringComparison.Ordinal) &&
+               settingsSource.Contains("_savedSettingsSnapshot = CaptureEditableSettingsSnapshot();", StringComparison.Ordinal) &&
+               settingsSource.Contains("Content = \"LƯU\"", StringComparison.Ordinal) &&
+               settingsSource.Contains("Content = \"HỦY\"", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("await settingsPage.ReleaseManualOutputsAsync();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("InternalPageHost.Content = _settingsPage;", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("InternalPageHost.Content = _historyPage;", StringComparison.Ordinal) &&
+               !mainWindowSource.Contains("_settingsWindow", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("await _settingsPage.TryLeaveAsync();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("InternalPageHost.Content = null;", StringComparison.Ordinal),
+            "Settings and History share one window, restore Main after safe relay reset, and preserve unsaved-edit checks");
+        Assert(settingsXaml.Contains("x:Name=\"LabelPrintSettingsForm\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("<ColumnDefinition Width=\"48\"/>", StringComparison.Ordinal) &&
+               (settingsXaml.Contains("Content=\"QU&#201;T\"", StringComparison.Ordinal) ||
+                settingsXaml.Contains("Content=\"QUÉT\"", StringComparison.Ordinal)) &&
+               settingsXaml.Contains("<RowDefinition Height=\"30\"/>", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Grid.Row=\"2\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Grid.Column=\"2\"", StringComparison.Ordinal),
             "Label printer controls use a compact three-row layout so manual resistance stays visible");
         Assert(settingsXaml.Contains("x:Name=\"RelayWiringModeComboBox\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("Settings.RelayWiringMode", StringComparison.Ordinal),
             "Production settings exposes one physical relay-role mapping and states FAIL behavior clearly");
-        Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"234\"", StringComparison.Ordinal) &&
+        Assert(xaml.Contains("x:Name=\"TestHeaderSurface\" Width=\"1344\" Height=\"198\"", StringComparison.Ordinal) &&
                xaml.Contains("x:Name=\"TestAppVersionText\"", StringComparison.Ordinal) &&
                xaml.Contains("Grid.Row=\"8\"", StringComparison.Ordinal) &&
                xaml.Contains("ScrollViewer.HorizontalScrollBarVisibility\" Value=\"Auto\"", StringComparison.Ordinal) &&
                xaml.Contains("MinWidth=\"125\"", StringComparison.Ordinal),
             "TestView scales its fixed header and preserves table text at 1024/1368 widths");
-        Assert(settingsXaml.Contains("<ScrollViewer Grid.Row=\"1\"", StringComparison.Ordinal) &&
+        Assert(settingsXaml.Contains("<ScrollViewer x:Name=\"SettingsScrollViewer\" Grid.Row=\"1\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"SettingsPanelsHost\"", StringComparison.Ordinal) &&
                settingsXaml.Contains("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal),
-            "Production settings wraps panels and scrolls instead of clipping at 1024x768");
-        Assert(settingsXaml.Contains("Tag=\"TEM_BE_QR\"", StringComparison.Ordinal),
+            "Production settings preserves all panels in a scrollable responsive layout");
+        Assert(settingsSource.Contains("e.ViewportWidth / MinimumSettingsColumnWidth", StringComparison.Ordinal) &&
+               settingsXaml.Contains("ScrollChanged=\"SettingsScrollViewer_ScrollChanged\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("<Viewbox", StringComparison.Ordinal) &&
+               settingsSource.Contains("GridUnitType.Star", StringComparison.Ordinal) &&
+               settingsSource.Contains("Grid.SetColumn(panels[index], column);", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"UnifiedSettingsGrid\" Margin=\"4\" HorizontalAlignment=\"Stretch\"", StringComparison.Ordinal) &&
+                settingsXaml.Contains("<Grid x:Name=\"LabelPrintActionsPanel\"", StringComparison.Ordinal) &&
+                settingsXaml.Contains("Columns=\"3\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"WaterProofChannelRows\"", StringComparison.Ordinal),
+            "Production settings uses the real viewport, preserves the right border, and evenly sizes label buttons");
+        Assert(!settingsXaml.Contains("Settings.ItemHeight", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.PageDelay", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.ShowTitle", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.ShowConnector", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.MinimumErrorLogValue", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) &&
+               settingsXaml.IndexOf("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) >
+                    settingsXaml.IndexOf("x:Name=\"RelaySettingsPanel\"", StringComparison.Ordinal) &&
+               settingsXaml.IndexOf("x:Name=\"WaterProofSettingsPanel\"", StringComparison.Ordinal) <
+                    settingsXaml.IndexOf("x:Name=\"LabelSettingsPanel\"", StringComparison.Ordinal) &&
+               !settingsSource.Contains("MoveWaterProofSettingsToRelayColumn", StringComparison.Ordinal),
+            "Unused legacy UI fields are hidden and TEST LEAK is grouped in the relay/maintenance column");
+        System.Xml.Linq.XElement[] settingsButtons =
+            System.Xml.Linq.XDocument.Parse(settingsXaml)
+                .Descendants()
+                .Where(element => element.Name.LocalName == "Button")
+                .ToArray();
+        Assert(settingsButtons.Length == 22 &&
+               settingsButtons.All(button =>
+                   button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
+               settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsInfoButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsActionButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsWarningButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("SettingsExitButtonStyle", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal),
+            "Every Production Settings button uses the shared semantic palette and interaction template");
+        Assert(settingsXaml.Contains("Tag=\"TEM_BE_QRCODE\"", StringComparison.Ordinal),
             "Production settings exposes the dedicated TEM BE QR selection");
+        Assert(settingsXaml.Contains("Tag=\"TEM_TO_SQDZ\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchPrintStartLotTextBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchPrintEndLotTextBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchPrintDelayMsComboBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"BatchStopPrintButton\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Click=\"BatchStopPrint_Click\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Tag=\"500\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Tag=\"2000\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"SinglePrintLotTextBox\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Click=\"BatchPrintLabel_Click\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("x:Name=\"BatchLabelCountTextBox\"", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("InlineLabelCommandTextBox", StringComparison.Ordinal) &&
+               settingsSource.Contains("await Task.Delay(delayMs, batchCts.Token);", StringComparison.Ordinal) &&
+               settingsSource.Contains("await _main.Test.DisconnectLabelPrinterAsync();", StringComparison.Ordinal) &&
+               settingsSource.Contains("ShowLabelPreviewWindow(request);", StringComparison.Ordinal) &&
+               !settingsSource[settingsSource.IndexOf("private async void BatchPrintLabel_Click", StringComparison.Ordinal)..
+                    settingsSource.IndexOf("private LabelPrintRequest BuildSettingsLabelRequest", StringComparison.Ordinal)]
+                   .Contains("ProductionConfigService.Save", StringComparison.Ordinal),
+            "Manual label printing uses an explicit LOT range without changing Production counters or inline preview");
+
+        Assert(System.Text.RegularExpressions.Regex.Matches(
+                   testViewModelSource,
+                   @"CrashReportService\.Write\(").Count == 1 &&
+               testViewModelSource.Contains("$\"Hardware.DeviceFault.{source}\"", StringComparison.Ordinal) &&
+               !labelPrintServiceSource.Contains("CrashReportService.Write", StringComparison.Ordinal) &&
+               !settingsSource.Contains("CrashReportService.Write", StringComparison.Ordinal),
+            "Within TestViewModel, RPT is limited to the latched main-tester DeviceFault; Leak and label-printer paths never create it");
+        string crashReportSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "CrashReportService.cs"));
+        Assert(crashReportSource.Contains("IsDeviceConnectionFault(source) &&", StringComparison.Ordinal) &&
+               crashReportSource.Contains("!AsyncFileLogService.Current.FileLoggingEnabled", StringComparison.Ordinal) &&
+               crashReportSource.Contains("ToString(\"G\", CultureInfo.CurrentCulture)", StringComparison.Ordinal) &&
+               !crashReportSource.Contains("DateTime.Now.ToString(\"O\")", StringComparison.Ordinal) &&
+               crashReportSource.Contains("TesterConnectionNotice.Message", StringComparison.Ordinal) &&
+               crashReportSource.Contains("BuildOperatorConnectionReport()", StringComparison.Ordinal) &&
+               !crashReportSource[crashReportSource.IndexOf("BuildOperatorConnectionReport() =>", StringComparison.Ordinal)..
+                   crashReportSource.IndexOf("private static string BuildTechnicalReport", StringComparison.Ordinal)]
+                   .Contains("Source:", StringComparison.Ordinal),
+            "Device-fault RPT hides technical details unless the operator explicitly enables all system logs");
+        Assert(testViewModelSource.Contains(
+                   "Mất kết nối máy Leak. Cắm lại USB; phần mềm sẽ tự kết nối lại. Tháo/lắp lại sản phẩm để kiểm tra tiếp.",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains("RequestLeakReconnect(_productionSettings.WaterProofMachine)", StringComparison.Ordinal) &&
+               labelPrintServiceSource.Contains(
+                   "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
+                   StringComparison.Ordinal),
+            "Leak failures schedule automatic reconnect after USB return; printer failures retain their COM guidance");
+        Assert(!appSource.Contains("$\"Chi tiết: {e.Exception.Message}\"", StringComparison.Ordinal) &&
+               !mainWindowSource.Contains("ex.ToString()", StringComparison.Ordinal) &&
+               !settingsSource.Contains("ShowMessage(ex.Message", StringComparison.Ordinal) &&
+               !historySource.Contains("| DB: {_historyPath}", StringComparison.Ordinal) &&
+               !topologyLearningSource.Contains("LearningStatusText.Text = ex.Message", StringComparison.Ordinal) &&
+               !testViewModelSource.Contains(
+                   "MasterStatus = $\"LỖI KIỂM TRA MASTER PASS: {ex.Message}\"",
+                   StringComparison.Ordinal) &&
+               !testViewModelSource.Contains(
+                   "MasterStatus = $\"LỖI EJECT MASTER: {ex.Message}\"",
+                   StringComparison.Ordinal),
+            "Operator-facing screens do not expose exception details or internal persistence paths");
 
         Assert(settingsXaml.Contains(
                    "Settings.EnableSystemLogs, Mode=TwoWay",
@@ -598,49 +2680,121 @@ internal static class Program
                    StringComparison.Ordinal),
             "Production settings exposes a system-log master switch that preserves History");
 
-        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
         string soundSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
+        using (Stream stageSound = typeof(AppSoundService).Assembly.GetManifestResourceStream(
+                   "JBZUniversalTester.Assets.Sounds.STAGEOK.wav")
+               ?? throw new InvalidOperationException("STAGEOK.wav must be embedded for resistance PASS"))
+        {
+            using var stagePlayer = new System.Media.SoundPlayer(stageSound);
+            stagePlayer.Load();
+            Assert(stagePlayer.IsLoadCompleted, "Packaged resistance PASS sound is a playable WAV");
+        }
         Assert(appSource.Contains("AppSoundService.Current.PlayStartup();", StringComparison.Ordinal) &&
                appSource.Contains("DispatcherPriority.ApplicationIdle", StringComparison.Ordinal) &&
-               soundSource.Contains("SafePlaySync(player)", StringComparison.Ordinal) &&
+               soundSource.Contains("SafePlay(player);", StringComparison.Ordinal) &&
                soundSource.Contains("_startupPlaybackActive", StringComparison.Ordinal),
             "START.wav begins after first-render idle and is protected from Probe reset/click interruption");
+        Assert(typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
+                   name.EndsWith(".Assets.Sounds.COMPUTER.wav", StringComparison.OrdinalIgnoreCase)) &&
+               soundSource.Contains("PlayProductStart()", StringComparison.Ordinal) &&
+               soundSource.Contains("CreatePlayer(\"COMPUTER.wav\"", StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "PlayProductStartSoundOnce(generation, preserveProductionFaultsForProbe);",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "Interlocked.CompareExchange(ref _productStartSoundPlayed, 1, 0)",
+                   StringComparison.Ordinal) &&
+               testViewModelSource.Contains(
+                   "CurrentProductionPhase != ProductionPhase.Continuity",
+                   StringComparison.Ordinal),
+            "COMPUTER.wav is embedded and requested once on the first real Production connection of each cycle");
+        Assert(typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
+                   name.EndsWith(".Assets.Sounds.STAGEOK.wav", StringComparison.OrdinalIgnoreCase)) &&
+               typeof(AppSoundService).Assembly.GetManifestResourceNames().Any(name =>
+                   name.EndsWith(".Assets.Sounds.NG.wav", StringComparison.OrdinalIgnoreCase)) &&
+               soundSource.Contains("CreatePlayer(\"STAGEOK.wav\"", StringComparison.Ordinal) &&
+               soundSource.Contains("CreatePlayer(\"NG.wav\"", StringComparison.Ordinal) &&
+               soundSource.Contains("public void PlayLeakFail()", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("if (!result.Passed)", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("_sound.PlayLeakFail();", StringComparison.Ordinal),
+            "Only Leak FAIL uses the dedicated embedded NG sound; Leak PASS is silent");
 
         TestViewModel deviceFaultVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
         deviceFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
+        deviceFaultVm.SelectedOperationTabIndex = 3;
+        deviceFaultVm.Faults.Add(new FaultRow
+        {
+            Kind = FaultKind.MissingConnection,
+            Io = 1,
+            Status = "CHỜ LẮP DÂY"
+        });
         MethodInfo reportDeviceFault = typeof(TestViewModel).GetMethod(
             "ReportDeviceFaultForTest",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("DeviceFault test reporter not found");
-        MethodInfo resetDeviceFault = typeof(TestViewModel).GetMethod(
-            "ResetDeviceFaultForTestAsync",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("DeviceFault test reset not found");
-
         for (int index = 0; index < 100; index++)
             reportDeviceFault.Invoke(deviceFaultVm, [new ArgumentOutOfRangeException("index", "simulated index fault"), -1]);
         Assert(deviceFaultVm.IsDeviceFault, "DeviceFault latches after index exception");
         Assert(deviceFaultVm.DeviceFaultTransitionCount == 1, "Repeated index exceptions produce one DeviceFault transition");
         Assert(deviceFaultVm.DeviceFaultDialogCount == 1, "Repeated index exceptions produce one operator dialog episode");
-        Assert(deviceFaultVm.ResultStatusText == "LỖI THIẾT BỊ" &&
+        Assert(deviceFaultVm.ResultStatusText == TesterConnectionNotice.Message &&
                deviceFaultVm.StateBackground == "#C62828" &&
                deviceFaultVm.StateForeground == "#FFFFFF",
             "DeviceFault status mapping");
+        Assert(deviceFaultVm.SelectedOperationTabIndex == 0 && deviceFaultVm.Faults.Count == 0,
+            "DeviceFault returns to the empty continuity grid so headers remain visible without stale frame rows");
 
-        ((Task)(resetDeviceFault.Invoke(deviceFaultVm, []) ?? throw new InvalidOperationException("DeviceFault reset returned null")))
-            .GetAwaiter()
-            .GetResult();
-        Assert(!deviceFaultVm.IsDeviceFault, "DeviceFault reset clears latch");
-        Assert(deviceFaultVm.ResultStatusText == "SẴN SÀNG", "DeviceFault reset returns to ready presentation");
         reportDeviceFault.Invoke(deviceFaultVm, [new InvalidOperationException("second episode"), -1]);
-        Assert(deviceFaultVm.DeviceFaultTransitionCount == 2 &&
-               deviceFaultVm.DeviceFaultDialogCount == 2,
-            "A later independent DeviceFault episode may show one new dialog");
+        Assert(deviceFaultVm.IsDeviceFault &&
+               deviceFaultVm.DeviceFaultTransitionCount == 1 &&
+               deviceFaultVm.DeviceFaultDialogCount == 1,
+            "DeviceFault remains latched for the process lifetime and cannot be reset in-app");
+        Assert(deviceFaultVm.DeviceFaultMessage ==
+               TesterConnectionNotice.Message,
+            "The board-fault message matches the shared tester connection notice");
+        Assert(testViewModelSource.Contains("ExitApplicationAfterDeviceFaultAsync", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("await _deviceFaultHardwareLockTask;", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("mainWindow.Close();", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("windowHeader: TesterConnectionNotice.Message", StringComparison.Ordinal) &&
+               testWindowSource.Contains("deviceFaultViewModel.IsDeviceFault", StringComparison.Ordinal),
+            "DeviceFault uses the shared fault confirmation window, then safely locks hardware and exits");
+
+        string testWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
+        Assert(!testWindowXaml.Contains("ResetDeviceFaultCommand", StringComparison.Ordinal) &&
+               !testWindowXaml.Contains("KH&#7902;I T&#7840;O L&#7840;I", StringComparison.Ordinal) &&
+               !testWindowXaml.Contains("Visibility=\"{Binding IsDeviceFault", StringComparison.Ordinal) &&
+               !testWindowXaml.Contains("Text=\"{Binding DeviceFaultMessage}\"", StringComparison.Ordinal),
+            "DeviceFault UI has no separate banner or reinitialize button");
+
+        TestViewModel startupFaultVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard startupFaultBoard);
+        startupFaultBoard.SetConnectionStateForTest(false);
+        startupFaultBoard.ThrowOnConnect = true;
+        startupFaultVm.InitializeHardwareAsync().GetAwaiter().GetResult();
+        startupFaultVm.InitializeHardwareAsync().GetAwaiter().GetResult();
+        startupFaultVm.LoadPreparedModelAsync(model0).GetAwaiter().GetResult();
+        startupFaultVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(!startupFaultVm.IsDeviceFault &&
+               startupFaultVm.IsBoardStartupUnavailable &&
+               startupFaultVm.DeviceFaultTransitionCount == 0 &&
+               startupFaultVm.DeviceFaultDialogCount == 0 &&
+               startupFaultBoard.ConnectAttempts == 1 &&
+               !startupFaultBoard.Commands.Contains("START", StringComparer.Ordinal) &&
+               startupFaultVm.State == TesterConnectionNotice.Message,
+            "Startup board failure allows model UI but never arms scan or raises a DeviceFault dialog");
     }
 
     private static void TestManualModeInterlock()
     {
-        var settings = new ProductionSettings { ManualModeEnabled = false, MasterFaultRequiredCount = 0 };
+        var settings = new ProductionSettings
+        {
+            ManualModeEnabled = false,
+            MasterFaultRequiredCount = 0,
+            Relay1JigPulseMs = 50,
+            Relay2MarkingPulseMs = 50
+        };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
         vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
 
@@ -652,35 +2806,51 @@ internal static class Program
         board.Commands.Clear();
         int relay = vm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
         Assert(relay == 1 && vm.IsManualModeActive && vm.State == "MANUAL" && !board.IsScanning,
-            "Relay 1 ON automatically enters temporary Manual runtime");
+            "Manual Relay 1 ON holds one relay and keeps Production scan stopped");
         Assert(board.Commands.Count(command => command == "OFF") >= 1 &&
                board.Commands.Last() == "SET:1",
-            "Direct Relay 1 ON performs safe all-off before SetRelay(1)");
+            "Manual Relay 1 ON forces all relay OFF before selecting Relay 1");
 
         board.Commands.Clear();
         relay = vm.SetManualRelayAsync(2, true).GetAwaiter().GetResult();
-        Assert(relay == 2, "Relay 2 ON replaces Relay 1");
+        Assert(relay == 2 && vm.IsManualModeActive && !board.IsScanning,
+            "Manual Relay 2 ON replaces Relay 1 while Manual remains active");
         Assert(string.Join(",", board.Commands) == "OFF,SET:2",
-            "Relay 2 ON performs all-off before SetRelay(2)");
-
-        board.Commands.Clear();
-        relay = vm.SetManualRelayAsync(2, false).GetAwaiter().GetResult();
-        Assert(relay == 0 && !vm.IsManualModeActive &&
-               board.Commands.Contains("OFF") && board.Commands.Contains("START"),
-            "Relay OFF leaves all outputs off and automatically resumes Production scan");
+            "Manual relay switching is mutually exclusive: OFF before SET:2");
 
         board.Commands.Clear();
         vm.ResetManualOutputsAsync().GetAwaiter().GetResult();
         Assert(!vm.IsManualModeActive &&
-               board.Commands.Contains("RESET") &&
-               board.Commands.Contains("OFF") &&
-               board.Commands.Contains("START"),
-            "Direct RESET needs no saved mode, leaves relay OFF, and resumes Production scan");
+               string.Join(",", board.Commands) == "OFF,RESET,OFF,START",
+            "RESET while Relay 2 is ON forces OFF, clears the board, confirms OFF, then resumes scan");
+
+        board.Commands.Clear();
+        relay = vm.SetManualRelayAsync(1, true).GetAwaiter().GetResult();
+        Assert(relay == 1 && vm.IsManualModeActive && board.Commands.Last() == "SET:1",
+            "Manual Relay 1 can be selected again after RESET");
+
+        board.Commands.Clear();
+        relay = vm.SetManualRelayAsync(1, false).GetAwaiter().GetResult();
+        Assert(relay == 0 && !vm.IsManualModeActive &&
+               board.Commands.Contains("OFF") && board.Commands.Last() == "START",
+            "TẮT TẤT CẢ forces both outputs OFF and resumes Production scan");
+
+        int commandsAfterManualExit = board.Commands.Count;
+        vm.ExitManualModeAsync().GetAwaiter().GetResult();
+        vm.ExitManualModeAsync().GetAwaiter().GetResult();
+        Assert(board.Commands.Count == commandsAfterManualExit,
+            "Repeated manual cleanup does not send OFF or restart scan again");
 
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         Assert(vm.State != "MANUAL", "Production is no longer locked after direct Relay OFF/RESET");
 
-        var faultSettings = new ProductionSettings { ManualModeEnabled = false, MasterFaultRequiredCount = 0 };
+        var faultSettings = new ProductionSettings
+        {
+            ManualModeEnabled = false,
+            MasterFaultRequiredCount = 0,
+            Relay1JigPulseMs = 50,
+            Relay2MarkingPulseMs = 50
+        };
         TestViewModel faultVm = CreateTestViewModel(faultSettings, out FakeBoard faultBoard);
         faultVm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
         faultBoard.ThrowOnSetRelay = true;
@@ -695,6 +2865,28 @@ internal static class Program
 
         Assert(faultVm.IsDeviceFault, "Manual relay hardware failure latches DeviceFault");
         Assert(faultBoard.Commands.Contains("OFF"), "Manual relay failure attempts safe OFF");
+
+        string settingsPageSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml.cs"));
+        string mainWindowSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
+        string settingsXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        Assert(settingsPageSource.Contains("await _main.Test.ResetManualOutputsAsync();", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("await settingsPage.ReleaseManualOutputsAsync();", StringComparison.Ordinal),
+            "Every Settings-page close path awaits Manual RESET before releasing the page");
+        Assert((settingsXaml.Contains("T&#7854;T T&#7844;T C&#7842;", StringComparison.Ordinal) ||
+                settingsXaml.Contains("TẮT TẤT CẢ", StringComparison.Ordinal)) &&
+               !settingsXaml.Contains("ManualRelay2OffCommand", StringComparison.Ordinal),
+            "Manual relay UI exposes the proven mutually-exclusive R1/R2 selector and one ALL OFF command");
+
+        string d2xxSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "D2xxBoardTransport.cs"));
+        Assert(d2xxSource.Contains("const int RelayCommandSettleMs = 100;", StringComparison.Ordinal) &&
+               d2xxSource.Contains("await Task.Delay(RelayCommandSettleMs, CancellationToken.None);", StringComparison.Ordinal) &&
+               d2xxSource.IndexOf("await Task.Delay(RelayCommandSettleMs, CancellationToken.None);", StringComparison.Ordinal) <
+               d2xxSource.IndexOf("Volatile.Write(ref _activeRelay, relayState);", StringComparison.Ordinal),
+            "D2XX completes the non-cancellable firmware relay settle before caching the new relay state");
     }
 
     private static void TestStartupIoInterlock()
@@ -708,6 +2900,70 @@ internal static class Program
         Assert(normalized.Count == 1 && normalized[0] == new StartupIoContactPair(1, 18),
             "Startup IO detector normalizes and de-duplicates bidirectional edges");
 
+        ScanFrame substitutedSource = FrameSeq(99, (12, new[] { 13 })) with
+        {
+            ActiveIo = new HashSet<int> { 13 },
+            ExpectedIoCount = 64,
+            SourceCount = 63,
+            ScanUnitCount = 1
+        };
+        Assert(StartupIoInterlock.FindConnectedPairs(
+                   substitutedSource,
+                   Model(("OTHER", new[] { 1, 18 })),
+                   BoardCapacity.Create(1)).Count == 0,
+            "A lone TARGET replacing its SOURCE word is raw IO activity, not IO12<->IO13 product evidence");
+
+        ScanFrame expectedSubstitutedSource = substitutedSource with
+        {
+            ConnectionsBySource = new Dictionary<int, IReadOnlySet<int>>
+            {
+                [12] = new HashSet<int> { 13 }
+            }
+        };
+        Assert(StartupIoInterlock.FindConnectedPairs(
+                   expectedSubstitutedSource,
+                   Model(("EXPECTED", new[] { 12, 13 })),
+                   BoardCapacity.Create(1)).Single() == new StartupIoContactPair(12, 13),
+            "A real expected product pair remains authoritative even when its target replaces a SOURCE word");
+
+        Assert(StartupIoInterlock.FindConnectedPairs(
+                   ProbeFrameSeq(98, 13),
+                   model: null,
+                   capacity: BoardCapacity.Create(10)).Count == 0,
+            "Probe/TP fan-in is never product-removal evidence");
+
+        TestViewModel rawIoVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard rawIoBoard);
+        rawIoVm.SetModel(Model(("RAW-IO-CONTROL", new[] { 1, 18 })));
+        rawIoBoard.Publish(substitutedSource with { Sequence = 99 });
+        Assert(!rawIoVm.IsProductRemovalPending &&
+               !rawIoVm.State.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase),
+            "A complete frame containing only raw IO13 cannot lock START or request product removal");
+
+        var resumeProduction = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            ProductSettleTimeMs = 0,
+            WrongConnectionConfirmMs = 0,
+            ShortCircuitConfirmMs = 0
+        };
+        TestViewModel resumeVm = CreateTestViewModel(
+            resumeProduction,
+            out FakeBoard resumeBoard,
+            requireStartupIoClear: false);
+        resumeVm.SetModel(Model(("RESUME-PAIR", new[] { 1, 18 })));
+        resumeBoard.Publish(duplicatedDirections);
+        Assert(resumeVm.IsProductRemovalPending,
+            "Installed product in background locks changing the current model");
+        AssertThrows<InvalidOperationException>(
+            () => resumeVm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
+            "Background installed product cannot be assigned to another model");
+        resumeVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(!resumeVm.IsProductRemovalPending &&
+               !resumeVm.State.Contains("THÁO SẢN PHẨM", StringComparison.OrdinalIgnoreCase),
+            "START resumes the remembered model without requiring a clean frame first");
+
         var production = new ProductionSettings
         {
             MasterFaultRequiredCount = 0,
@@ -719,35 +2975,42 @@ internal static class Program
             production,
             out FakeBoard board,
             requireStartupIoClear: true);
-        vm.SetModel(Model(("PAIR", new[] { 1, 18 })));
+        ProductModel startupInterlockModel = Model(("PAIR", new[] { 1, 18 }));
+        startupInterlockModel.ModelName = "SELF-TEST-STARTUP-INTERLOCK";
+        startupInterlockModel.PartNumber = "SELF-TEST-STARTUP-INTERLOCK";
+        vm.SetModel(startupInterlockModel);
 
         board.Publish(duplicatedDirections);
         Assert(vm.IsProductRemovalPending &&
-               vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM",
+               vm.ResultStatusText == "THÁO SẢN PHẨM",
             "Background startup scan locks product selection and START while a product or stuck pin remains");
         AssertThrows<InvalidOperationException>(
             () => vm.SetModel(Model(("OTHER", new[] { 2, 19 }))),
             "Product model cannot change while the startup removal gate is locked");
         int commandsBeforeBlockedStart = board.Commands.Count;
-        vm.StartProductionTestAsync().GetAwaiter().GetResult();
-        Assert(board.Commands.Count == commandsBeforeBlockedStart && vm.IsProductRemovalPending,
-            "START cannot arm production while the startup removal gate is locked");
+        Task pendingStart = vm.StartProductionTestAsync();
+        Assert(!pendingStart.IsCompleted &&
+               board.Commands.Count == commandsBeforeBlockedStart &&
+               vm.IsProductRemovalPending,
+            "START remains pending and cannot arm production while the startup removal gate is locked");
 
         board.Publish(FrameSeq(101));
-        Assert(!vm.IsProductRemovalPending && vm.ResultStatusText == "SẴN SÀNG",
-            "A complete clean background frame unlocks product selection and START");
-
-        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        pendingStart.GetAwaiter().GetResult();
+        Assert(!vm.IsProductRemovalPending &&
+               vm.State.Contains("ĐỒNG BỘ DỮ LIỆU BO", StringComparison.Ordinal),
+            "A complete clean background frame unlocks START and enters the startup baseline gate");
         int totalBeforeWarning = vm.Total;
         int passBeforeWarning = vm.Pass;
         int failBeforeWarning = vm.Fail;
 
-        Assert(vm.State.Contains("KIỂM TRA IO BAN ĐẦU", StringComparison.Ordinal),
-            "Production does not present READY before receiving a clean baseline frame");
+        Assert(vm.State.Contains("ĐỒNG BỘ DỮ LIỆU BO", StringComparison.Ordinal) &&
+               vm.ResultStatusText == "ĐANG KIỂM TRA",
+            "Production waits for a clean baseline frame without reporting an IO-capacity warning");
 
         board.Publish(FrameSeq(102, (1, new[] { 18 }), (18, new[] { 1 })));
-        Assert(vm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM" &&
+        Assert(vm.ResultStatusText == "THÁO SẢN PHẨM" &&
                vm.IsProductRemovalPending &&
+               vm.MainRemovalContacts.SequenceEqual(new[] { new StartupIoContactPair(1, 18) }) &&
                vm.Faults.Count == 1 &&
                vm.Faults[0].Kind == FaultKind.Info &&
                vm.Faults[0].ProductFaultType == ProductFaultType.None &&
@@ -758,12 +3021,161 @@ internal static class Program
                vm.Pass == passBeforeWarning &&
                vm.Fail == failBeforeWarning &&
                !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
-            "Startup IO warning cannot commit production or activate a relay");
+            $"Startup IO warning cannot commit production or activate a relay " +
+            $"(totals {totalBeforeWarning}/{passBeforeWarning}/{failBeforeWarning} -> " +
+            $"{vm.Total}/{vm.Pass}/{vm.Fail}; commands={string.Join(',', board.Commands)})");
 
         board.Publish(FrameSeq(103));
         Assert(!vm.IsProductRemovalPending &&
-               vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "SẴN SÀNG",
+               vm.MainRemovalContacts.Count == 0 &&
+               vm.State == "CHỜ LẮP SẢN PHẨM" && vm.ResultStatusText == "LẮP SẢN PHẨM",
             "A complete clean frame clears the startup interlock and arms Production");
+    }
+
+    private static void TestTopologyLearningDirectContact()
+    {
+        var connections = new Dictionary<int, IReadOnlySet<int>>();
+        for (int source = 1; source <= 256; source++)
+        {
+            if (source != 20)
+                connections[source] = new HashSet<int> { 20 };
+        }
+
+        var frame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 20 },
+            [],
+            true,
+            0,
+            171,
+            connections,
+            new Dictionary<int, int> { [20] = 255 },
+            BoardScanMode.Production);
+
+        IReadOnlyList<int> directActiveIo = TopologyLearningService.FindProbeContactIo(
+            frame,
+            BoardCapacity.Create(4));
+
+        Assert(directActiveIo.SequenceEqual(new[] { 20 }),
+            "Topology learning reports only the directly active GND-contact IO, not every connection source");
+        LearnedTopologySnapshot probeSnapshot = TopologyLearningService.BuildSnapshot(
+            frame,
+            BoardCapacity.Create(4));
+        Assert(probeSnapshot.Rows.Count == 0,
+            "A detected Probe signature is not learned a second time as a continuity network");
+
+        var noisyPairConnections = new Dictionary<int, IReadOnlySet<int>>();
+        int[] everyIo = Enumerable.Range(1, 256).ToArray();
+        foreach (int source in everyIo)
+        {
+            noisyPairConnections[source] = everyIo
+                .Where(target => target != source)
+                .ToHashSet();
+        }
+
+        var noisyPairFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 21, 23 },
+            [],
+            true,
+            0,
+            172,
+            noisyPairConnections,
+            new Dictionary<int, int> { [21] = 255, [23] = 255 },
+            BoardScanMode.Production);
+        LearnedTopologySnapshot noisyPairSnapshot = TopologyLearningService.BuildSnapshot(
+            noisyPairFrame,
+            BoardCapacity.Create(4));
+        Assert(TopologyLearningService.FindProbeContactIo(
+                   noisyPairFrame,
+                   BoardCapacity.Create(4)).Count == 0 &&
+               noisyPairSnapshot.Networks.Count == 1 &&
+               noisyPairSnapshot.Networks[0].Ios.SequenceEqual(new[] { 21, 23 }),
+            "Two active IOs produce only their IO21-to-IO23 network even when raw scan sources contain card-wide noise");
+
+        var singleContactFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 12 },
+            [],
+            true,
+            0,
+            173,
+            new Dictionary<int, IReadOnlySet<int>>
+            {
+                [12] = new HashSet<int> { 12 }
+            },
+            new Dictionary<int, int> { [12] = 1 },
+            BoardScanMode.Production);
+        Assert(TopologyLearningService.FindProbeContactIo(
+                   singleContactFrame,
+                   BoardCapacity.Create(4)).Count == 0 &&
+               TopologyLearningService.BuildSnapshot(
+                   singleContactFrame,
+                   BoardCapacity.Create(4)).Rows.Count == 0,
+            "A single GND/IO self-contact has no Probe or topology effect");
+
+        ScanFrame ordinaryPair = FrameSeq(174, (7, new[] { 18 }));
+        Assert(TopologyLearningService.FindProbeContactIo(
+                   ordinaryPair,
+                   BoardCapacity.Create(4)).Count == 0 &&
+               TopologyLearningService.BuildSnapshot(
+                   ordinaryPair,
+                   BoardCapacity.Create(4)).Rows.Count == 1,
+            "An ordinary IO-to-IO pair remains learnable topology and is not treated as Probe");
+
+        var targetOnlyPairFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 2 },
+            [],
+            true,
+            0,
+            175,
+            new Dictionary<int, IReadOnlySet<int>>
+            {
+                [1] = new HashSet<int> { 2 }
+            },
+            new Dictionary<int, int> { [2] = 1 },
+            BoardScanMode.Production);
+        LearnedTopologySnapshot targetOnlyPair = TopologyLearningService.BuildSnapshot(
+            targetOnlyPairFrame,
+            BoardCapacity.Create(4));
+        Assert(targetOnlyPair.Rows.Count == 1 &&
+               targetOnlyPair.Rows[0].Connection == "IO(1) ↔ IO(2)",
+            "Learning shows IO(1) connected to IO(2) when firmware reports only the target as active");
+
+        var twoTargetOnlyPairsFrame = new ScanFrame(
+            DateTime.Now,
+            4,
+            new HashSet<int> { 2, 4 },
+            [],
+            true,
+            0,
+            176,
+            new Dictionary<int, IReadOnlySet<int>>
+            {
+                [1] = new HashSet<int> { 2 },
+                [3] = new HashSet<int> { 4 }
+            },
+            new Dictionary<int, int> { [2] = 1, [4] = 1 },
+            BoardScanMode.Production);
+        LearnedTopologySnapshot twoTargetOnlyPairs = TopologyLearningService.BuildSnapshot(
+            twoTargetOnlyPairsFrame,
+            BoardCapacity.Create(4));
+        Assert(twoTargetOnlyPairs.Rows.Count == 2 &&
+               twoTargetOnlyPairs.Rows[0].Connection == "IO(1) ↔ IO(2)" &&
+               twoTargetOnlyPairs.Rows[1].Connection == "IO(3) ↔ IO(4)",
+            "Learning displays every simultaneous physical pair instead of merging only the first pair");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.Contains(
+                   "Volatile.Read(ref _topologyLearningActive) == 0",
+                   StringComparison.Ordinal),
+            "Background product interlock is bypassed while topology learning owns the frame presentation");
     }
 
     private static void TestDuplicateClipFaultRows()
@@ -888,8 +3300,10 @@ internal static class Program
         Assert(settingsResistanceXaml.Contains("ManualMeasureResistanceCommand", StringComparison.Ordinal) &&
                settingsResistanceXaml.Contains("ManualResistanceOptions", StringComparison.Ordinal) &&
                settingsResistanceXaml.Contains("ManualResistanceResults", StringComparison.Ordinal) &&
-               settingsResistanceXaml.Contains("Value=\"ĐANG ĐO\"", StringComparison.Ordinal),
-            "Settings exposes manual ALL/single-CH measurement and returned results");
+               settingsResistanceXaml.Contains("Value=\"ĐANG ĐO\"", StringComparison.Ordinal) &&
+               settingsResistanceXaml.Contains("x:Name=\"ManualResistanceResultLines\"", StringComparison.Ordinal) &&
+               !settingsResistanceXaml.Contains("Height=\"150\" MaxHeight=\"150\"", StringComparison.Ordinal),
+            "Settings exposes manual ALL/single-CH measurement and a stretchable result grid for ten rows");
 
         string cfgPath = Path.Combine(
             Path.GetTempPath(),
@@ -982,11 +3396,13 @@ internal static class Program
         var fastApp = new AppSettings();
         fastApp.Test.ResistanceMinimumSettleMs = 0;
         fastApp.Test.ResistanceSampleIntervalMs = 0;
-        // Giá trị legacy 3 không được phép làm engine đọc lặp lại.
-        fastApp.Test.ResistanceStableSampleCount = 3;
+        fastApp.Test.ResistanceStableSampleCount = 2;
         fastApp.Test.ResistanceStabilityTimeoutMs = 100;
         using (var measurementEngine = new TestEngine(fakeBoard, fakeVisa, fastApp, configured))
         {
+            var resistanceSoundChannels = new List<int>();
+            measurementEngine.ResistanceChannelMeasurementStarted +=
+                step => resistanceSoundChannels.Add(step.Channel);
             measurementEngine.SetModel(new ProductModel { ModelName = "R-PLAN" });
             List<ResistanceResult> measured = measurementEngine.MeasureResistanceAsync()
                 .GetAwaiter().GetResult();
@@ -1004,12 +3420,15 @@ internal static class Program
                     .Select(frame => frame[7])
                     .SequenceEqual(new byte[] { 0x08, 0x02, 0x0A, 0x04, 0x07, 0x07 }),
                 "Engine emits direct CH8/CH2/CH10/CH4/CH7/CH7 selectors, never bitmasks");
-            Assert(measured.Count == 6 && fakeVisa.MeasureCallCount == 6,
-                "Disabled R5 and Channel=0 R6 create neither route nor Keysight call/result");
+            Assert(measured.Count == 6 && fakeVisa.MeasureCallCount == 12 &&
+                   measured.All(result => result.IsStable && result.SampleCount == 2),
+                "Each enabled slot requires two stable samples; disabled/Channel=0 slots create no route or result");
             Assert(fakeBoard.ReleaseResistanceRouteCount == 1 &&
                    fakeBoard.ReleaseResistanceFrames.SequenceEqual(
                        new byte[] { 0x91, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x30 }),
                 "Measurement route is released in finally after the sequence");
+            Assert(resistanceSoundChannels.SequenceEqual(new[] { 8, 2, 10, 4, 7, 7 }),
+                "CLICK sound trigger fires exactly once when each enabled resistance channel begins measurement");
         }
 
         var manualBoard = new FakeBoard();
@@ -1024,12 +3443,63 @@ internal static class Program
                 .GetResult();
             Assert(manualResults is [{ Name: "R3", Channel: 10 }] &&
                    manualBoard.ResistanceSteps.Select(step => step.Channel).SequenceEqual(new[] { 10 }) &&
-                   manualVisa.MeasureCallCount == 1 &&
+                   manualVisa.MeasureCallCount == 2 &&
                    manualUpdates.Count == 2 &&
                    manualUpdates[0].ResultText == "ĐANG ĐO" &&
                    manualUpdates[1].ResultText == "PASS" &&
                    manualUpdates[1].Display != "—",
-                "Manual single CH immediately reports measuring, then measured value and PASS");
+                "Manual single CH reports measuring, then only the stable final value and PASS");
+        }
+
+        var stableGateSettings = new ProductionSettings
+        {
+            ResistanceChannels =
+            [
+                new() { Enabled = true, Name = "R1", Channel = 1, MinOhm = 8_000, MaxOhm = 11_000 }
+            ]
+        };
+        var transientOpenVisa = new FakeKeysightVisaService(connected: true, measurement: 8_818);
+        transientOpenVisa.Measurements.Enqueue(9.9e37);
+        transientOpenVisa.Measurements.Enqueue(8_820);
+        transientOpenVisa.Measurements.Enqueue(8_818);
+        using (var transientOpenEngine = new TestEngine(
+                   new FakeBoard(), transientOpenVisa, fastApp, stableGateSettings))
+        {
+            transientOpenEngine.SetModel(new ProductModel { ModelName = "R-STABLE" });
+            var updates = new List<ResistanceResult>();
+            ResistanceResult result = transientOpenEngine
+                .MeasureResistanceAsync(updates.Add)
+                .GetAwaiter().GetResult().Single();
+            Assert(result.Passed && result.IsStable && !result.IsOpen &&
+                   result.SampleCount == 3 &&
+                   Math.Abs((result.ValueOhm ?? 0) - 8_819) < 0.001 &&
+                   updates.Count == 2 && updates[0].ResultText == "ĐANG ĐO" &&
+                   updates[1].Passed,
+                "Transient OPEN is hidden; two following numeric samples stabilize at their average and PASS");
+        }
+
+        var persistentOpenVisa = new FakeKeysightVisaService(connected: true, measurement: 9.9e37);
+        using (var persistentOpenEngine = new TestEngine(
+                   new FakeBoard(), persistentOpenVisa, fastApp, stableGateSettings))
+        {
+            persistentOpenEngine.SetModel(new ProductModel { ModelName = "R-OPEN" });
+            ResistanceResult result = persistentOpenEngine.MeasureResistanceAsync()
+                .GetAwaiter().GetResult().Single();
+            Assert(!result.Passed && result.IsStable && result.IsOpen && result.SampleCount == 2,
+                "Consecutive OPEN samples confirm a real stable OPEN failure");
+        }
+
+        var outOfRangeVisa = new FakeKeysightVisaService(connected: true, measurement: 12_010);
+        outOfRangeVisa.Measurements.Enqueue(12_000);
+        using (var outOfRangeEngine = new TestEngine(
+                   new FakeBoard(), outOfRangeVisa, fastApp, stableGateSettings))
+        {
+            outOfRangeEngine.SetModel(new ProductModel { ModelName = "R-OUT" });
+            ResistanceResult result = outOfRangeEngine.MeasureResistanceAsync()
+                .GetAwaiter().GetResult().Single();
+            Assert(!result.Passed && result.IsStable && !result.IsOpen &&
+                   result.SampleCount == 2 && result.ValueOhm > 11_000,
+                "Stable numeric value outside MinOhm/MaxOhm remains a real failure");
         }
 
         var failureBoard = new FakeBoard();
@@ -1040,7 +3510,7 @@ internal static class Program
         using (var failureEngine = new TestEngine(failureBoard, failingVisa, fastApp, duplicateChannelPlan))
         {
             failureEngine.SetModel(new ProductModel { ModelName = "R-FAIL" });
-            AssertThrows<InvalidOperationException>(
+            AssertThrows<KeysightEquipmentException>(
                 () => failureEngine.MeasureResistanceAsync().GetAwaiter().GetResult(),
                 "Keysight failure must propagate to the production lifecycle");
             Assert(failureBoard.ReleaseResistanceRouteCount == 1,
@@ -1100,6 +3570,33 @@ internal static class Program
         Assert(WaterProofSerialService.BuildTestCommand(loaded) == ":TEST,1,0,1,0,1200,600\r\n",
             "Connector metadata must not change the proven Leak UART command format");
 
+        var fixedBaudSettings = new ProductionSettings
+        {
+            WaterProofMachine = new WaterProofMachineSettings
+            {
+                PortName = " COM7 ",
+                BaudRate = 9600
+            }
+        };
+        string fixedBaudPath = Path.Combine(
+            Path.GetTempPath(),
+            $"jbz-leak-fixed-baud-{Guid.NewGuid():N}.cfg");
+        try
+        {
+            ProductionConfigService.SaveLegacyCfg(fixedBaudSettings, fixedBaudPath);
+            string fixedBaudConfig = File.ReadAllText(fixedBaudPath);
+            Assert(fixedBaudSettings.WaterProofMachine.PortName == "COM7" &&
+                   fixedBaudSettings.WaterProofMachine.BaudRate == WaterProofMachineSettings.DefaultBaudRate &&
+                   fixedBaudConfig.Contains("[WaterProofPortName]COM7", StringComparison.Ordinal) &&
+                   fixedBaudConfig.Contains("[WaterProofBaudRate]115200", StringComparison.Ordinal),
+                "Leak COM selection is trimmed and the removed baud setting remains fixed at 115200");
+        }
+        finally
+        {
+            if (File.Exists(fixedBaudPath))
+                File.Delete(fixedBaudPath);
+        }
+
         var passRow = new WaterProofChannelResult
         {
             Channel = 1,
@@ -1117,6 +3614,13 @@ internal static class Program
         Assert(passRow.ChannelText == "CH1 • CN-A" && passRow.ResultText == "PASS" &&
                failRow.ChannelText == "CH3 • CN-C" && failRow.ResultText == "FAIL",
             "Leak result rows identify both machine channel and mapped THT connector");
+        Assert(passRow.LiveCellBackground == "#2AA84A" &&
+               failRow.LiveCellBackground == "#C62828" &&
+               passRow.LiveCellForeground == "#FFFFFF" &&
+               failRow.LiveCellForeground == "#FFFFFF" &&
+               new WaterProofChannelResult().LiveCellBackground == "#FFFFFF" &&
+               new WaterProofChannelResult().LiveCellForeground == "#0F172A",
+            "Compact Leak cells use professional PASS/FAIL backgrounds with readable contrast");
 
         passRow.PressPressure = 83.9;
         passRow.WaitPressure = 81.8;
@@ -1128,29 +3632,415 @@ internal static class Program
         Assert(passRow.PressureText == "2.1" && passRow.LeakText == "2.1",
             "Leak summary card displays machine-reported pressure drop instead of fill/hold pressure");
 
-        string xaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
-        Assert(xaml.Contains("Text=\"ĐỘ RÒ LỚN NHẤT\"", StringComparison.Ordinal) &&
-               xaml.Contains("Text=\" kPa\"", StringComparison.Ordinal),
-            "Leak summary card identifies the machine-reported leak value and displays kPa");
+        var settingsLeakVm = new ProductionSettingsViewModel();
+        MethodInfo resetSettingsLeak = typeof(ProductionSettingsViewModel).GetMethod(
+            "ResetManualWaterProofResults",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings Leak result reset method not found");
+        MethodInfo updateSettingsLeak = typeof(ProductionSettingsViewModel).GetMethod(
+            "UpdateManualWaterProofProgress",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings Leak realtime update method not found");
+        MethodInfo finishSettingsLeak = typeof(ProductionSettingsViewModel).GetMethod(
+            "ApplyManualWaterProofResult",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Settings Leak final result method not found");
+        resetSettingsLeak.Invoke(settingsLeakVm, [profile]);
+        updateSettingsLeak.Invoke(settingsLeakVm,
+        [
+            "COM7",
+            new WaterProofProgress(WaterProofStage.Pressurizing, [84.0, 0.0, 83.5], ":PRESS,84,0,83.5")
+        ]);
+        updateSettingsLeak.Invoke(settingsLeakVm,
+        [
+            "COM7",
+            new WaterProofProgress(WaterProofStage.Waiting, [83.4, 0.0, 82.7], ":WAIT,83.4,0,82.7")
+        ]);
+        Assert(settingsLeakVm.ManualWaterProofResults.Count == 3 &&
+               Math.Abs(settingsLeakVm.ManualWaterProofResults[0].Leak.GetValueOrDefault() - 0.6) < 0.0001 &&
+               !settingsLeakVm.ManualWaterProofResults[0].IsMeasured &&
+               !settingsLeakVm.ManualWaterProofResults[1].Enabled &&
+               Math.Abs(settingsLeakVm.ManualWaterProofResults[2].LiveMachineValue.GetValueOrDefault() - 82.7) < 0.0001,
+            "Settings Leak CH1/CH2/CH3 cards update PRESS/WAIT values in realtime without an early result");
+        finishSettingsLeak.Invoke(settingsLeakVm,
+        [
+            new WaterProofRunResult(
+            [
+                new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
+                new WaterProofChannelMeasurement(2, false, 0.0, 0.0, 0.0, false),
+                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, false)
+            ],
+            false,
+            ":RESULT,84,83.4,0.6,1,0,0,0,0,83.5,82.7,0.8,0")
+        ]);
+        Assert(settingsLeakVm.ManualWaterProofResults[0].ResultText == "PASS" &&
+               settingsLeakVm.ManualWaterProofResults[1].ResultText == "---" &&
+               settingsLeakVm.ManualWaterProofResults[1].LiveMachineValue is null &&
+               settingsLeakVm.ManualWaterProofResults[2].ResultText == "FAIL",
+            "Settings Leak cards publish PASS/FAIL only from the final machine result");
+
+        string xaml = File.ReadAllText(
+    Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
+        string leakWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "WaterProofTestWindow.xaml"));
+
+        Assert(
+            !xaml.Contains("WaterProofChannels", StringComparison.Ordinal) &&
+            !xaml.Contains("WaterProofStageText", StringComparison.Ordinal) &&
+            xaml.Contains("x:Name=\"ResultStatusHost\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Width=\"220\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Height=\"50\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("Text=\"{Binding Channel1Text}\"", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("<Setter Property=\"Background\" Value=\"{Binding Channel1Background}\"/>", StringComparison.Ordinal) &&
+            leakWindowXaml.Contains("<DataTrigger Binding=\"{Binding IsRunning}\" Value=\"True\">", StringComparison.Ordinal) &&
+            !leakWindowXaml.Contains("Text=\"{Binding StageText}\"", StringComparison.Ordinal) &&
+            !leakWindowXaml.Contains("Text=\"{Binding Title}\"", StringComparison.Ordinal),
+            "Leak UI is exactly three compact numeric cells anchored below the main status box");
+
+        var leakWindowVm = new WaterProofTestViewModel("MODEL-A", profile);
+        TestViewModel windowCoordinator = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
+        ProductModel windowModel = Model(("WINDOW-PAIR", new[] { 1, 18 }));
+        windowCoordinator.LoadPreparedModelAsync(windowModel).GetAwaiter().GetResult();
+        int openedWindows = 0, closedWindows = 0;
+        windowCoordinator.WaterProofWindowOpenRequested += (_, _) => openedWindows++;
+        windowCoordinator.WaterProofWindowCloseRequested += (_, _) => closedWindows++;
+        const BindingFlags windowFlags = BindingFlags.Instance | BindingFlags.NonPublic;
+        MethodInfo openWindow = typeof(TestViewModel).GetMethod("OpenWaterProofWindow", windowFlags)!;
+        MethodInfo closeWindow = typeof(TestViewModel).GetMethod("CloseWaterProofWindow", windowFlags)!;
+        FieldInfo windowProfile = typeof(TestViewModel).GetField("_waterProofProfile", windowFlags)!;
+        windowProfile.SetValue(windowCoordinator, new WaterProofModelSettings { Enabled = false });
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
+        Assert(openedWindows == 0, "Disabled Leak does not create a window/viewmodel");
+        windowProfile.SetValue(windowCoordinator, new WaterProofModelSettings
+        {
+            Enabled = true, Channel1Enabled = false, Channel2Enabled = false, Channel3Enabled = false
+        });
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
+        Assert(openedWindows == 0, "Zero enabled channels bypass the Leak window");
+        windowProfile.SetValue(windowCoordinator, profile);
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
+        Assert(openedWindows == 1 && closedWindows == 0,
+            "One Leak cycle creates exactly one compact window");
+
+        FieldInfo windowVmField = typeof(TestViewModel).GetField(
+            "_waterProofWindowViewModel",
+            windowFlags)!;
+        var retainedWindowVm = (WaterProofTestViewModel)windowVmField.GetValue(windowCoordinator)!;
+        retainedWindowVm.ApplyFinal(new WaterProofRunResult(
+            [
+                new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
+                new WaterProofChannelMeasurement(2, false, 0, 0, 0, false),
+                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, false)
+            ],
+            false,
+            ":RESULT"));
+        Assert(!retainedWindowVm.IsRunning && closedWindows == 0,
+            "Final Leak PASS/FAIL stays visible while the product remains on the JIG");
+
+        openWindow.Invoke(windowCoordinator, [windowModel, null]);
+        Assert(openedWindows == 1 && retainedWindowVm.IsRunning,
+            "Leak-only retest rearms the same compact window without close/open flicker");
+
+        closeWindow.Invoke(windowCoordinator, ["PRODUCT_REMOVED"]);
+        closeWindow.Invoke(windowCoordinator, ["CANCEL"]);
+        Assert(openedWindows == 1 && closedWindows == 1,
+            "Authoritative ProductRemoved closes the retained Leak window exactly once");
+        leakWindowVm.ApplyProgress(new WaterProofProgress(
+            WaterProofStage.Pressurizing, [84.0, 0.0, 83.5], ":PRESS,84,0,83.5"));
+        Assert(leakWindowVm.StageText == "PRESS" &&
+               leakWindowVm.Channel1Text == "84.0" &&
+               leakWindowVm.Channel2Text == "--" &&
+               leakWindowVm.Channel3Text == "83.5",
+            "PRESS displays the live fill pressure for enabled channels without an official result");
+        leakWindowVm.ApplyProgress(new WaterProofProgress(
+            WaterProofStage.Waiting, [83.7, 0.0, 81.5], ":WAIT,83.7,0,81.5"));
+        Assert(leakWindowVm.StageText == "WAIT" &&
+               leakWindowVm.Channel1Text == "83.7" &&
+               leakWindowVm.Channel2Text == "--" &&
+               leakWindowVm.Channel3Text == "81.5",
+            "WAIT replaces the cells with live hold pressure only for enabled channels");
+        leakWindowVm.ApplyFinal(new WaterProofRunResult(
+            [
+                new WaterProofChannelMeasurement(1, true, 84.0, 83.4, 0.6, true),
+                new WaterProofChannelMeasurement(2, false, 0, 0, 0, false),
+                new WaterProofChannelMeasurement(3, true, 83.5, 82.7, 0.8, false)
+            ],
+            false,
+            ":RESULT,84,83.4,0,0,83.5,82.7"));
+        Assert(leakWindowVm.StageText == "FAIL" &&
+               leakWindowVm.Channel1Text == "0.6" &&
+               leakWindowVm.Channel3Text == "0.8" &&
+               leakWindowVm.Channel1Background == "#32CD32" &&
+               leakWindowVm.Channel2Background == "#E5E7EB" &&
+               leakWindowVm.Channel3Background == "#FF4040" &&
+               !leakWindowVm.IsRunning,
+            "RESULT keeps official channel values: PASS cell green, FAIL cell red, disabled cell neutral");
+
+        leakWindowVm.BeginRun();
+        Assert(leakWindowVm.IsRunning &&
+               leakWindowVm.Channel1Text == "--" &&
+               leakWindowVm.Channel3Text == "--" &&
+               leakWindowVm.Channel1Background == "#FFF3A0" &&
+               leakWindowVm.Channel3Background == "#FFF3A0",
+            "Leak retest resets live cells without creating a new window");
+
+        // Regression: :PRESS lưu áp cuối làm baseline, từng :WAIT phải cập nhật
+        // Leak ngay trên UI nhưng tuyệt đối chưa được chốt PASS/FAIL trước :RESULT.
+        TestViewModel realtimeLeakVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 });
+
+        FieldInfo realtimeProfileField = typeof(TestViewModel).GetField(
+            "_waterProofProfile",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak realtime profile field not found");
+
+        MethodInfo resetRealtimeLeak = typeof(TestViewModel).GetMethod(
+            "ResetWaterProofDisplay",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak realtime reset method not found");
+
+        MethodInfo applyRealtimeLeak = typeof(TestViewModel).GetMethod(
+            "ApplyWaterProofProgress",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak realtime progress method not found");
+
+        realtimeProfileField.SetValue(
+            realtimeLeakVm,
+            new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel2Enabled = true,
+                Channel3Enabled = true,
+                LeakLimit = 2.0
+            });
+
+        resetRealtimeLeak.Invoke(realtimeLeakVm, null);
+
+        Assert(
+            realtimeLeakVm.WaterProofChannels.Count == 3 &&
+            realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured),
+            "Leak realtime reset creates three enabled channels without marking a result");
+
+        applyRealtimeLeak.Invoke(
+            realtimeLeakVm,
+            [
+                new WaterProofProgress(
+                    WaterProofStage.Pressurizing,
+                    new double[] { 84.1, 84.2, 84.0 },
+                    ":PRESS,84.1,84.2,84.0")
+            ]);
+
+        Assert(
+            Math.Abs(realtimeLeakVm.WaterProofChannels[0].PressPressure.GetValueOrDefault() - 84.1) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[1].PressPressure.GetValueOrDefault() - 84.2) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[2].PressPressure.GetValueOrDefault() - 84.0) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].LiveMachineValueText == "84.1" &&
+            realtimeLeakVm.WaterProofChannels[1].LiveMachineValueText == "84.2" &&
+            realtimeLeakVm.WaterProofChannels[2].LiveMachineValueText == "84.0" &&
+            realtimeLeakVm.WaterProofChannels[0].FirstPressureText == "84.1" &&
+            realtimeLeakVm.WaterProofChannels[0].SecondPressureText == "---" &&
+            realtimeLeakVm.WaterProofChannels.All(row => Math.Abs(row.Leak.GetValueOrDefault()) < 0.0001) &&
+            realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured),
+            "PRESS updates live pressure/table baseline, starts Leak at zero, and cannot mark PASS/FAIL");
+
+        applyRealtimeLeak.Invoke(
+            realtimeLeakVm,
+            [
+                new WaterProofProgress(
+                    WaterProofStage.Waiting,
+                    new double[] { 84.0, 84.1, 83.9 },
+                    ":WAIT,84.0,84.1,83.9")
+            ]);
+
+        Assert(
+            Math.Abs(realtimeLeakVm.WaterProofChannels[0].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[1].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.1) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].LiveMachineValueText == "84.0" &&
+            realtimeLeakVm.WaterProofChannels[1].LiveMachineValueText == "84.1" &&
+            realtimeLeakVm.WaterProofChannels[2].LiveMachineValueText == "83.9" &&
+            realtimeLeakVm.WaterProofChannels[0].SecondPressureText == "84.0" &&
+            realtimeLeakVm.WaterProofStageText == "ĐANG ĐO ĐỘ RÒ",
+            "First WAIT frame updates displayed hold pressure and Leak immediately for all channels");
+
+        applyRealtimeLeak.Invoke(
+            realtimeLeakVm,
+            [
+                new WaterProofProgress(
+                    WaterProofStage.Waiting,
+                    new double[] { 83.5, 83.7, 83.4 },
+                    ":WAIT,83.5,83.7,83.4")
+            ]);
+
+        Assert(
+            Math.Abs(realtimeLeakVm.WaterProofChannels[0].Leak.GetValueOrDefault() - 0.6) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[1].Leak.GetValueOrDefault() - 0.5) < 0.0001 &&
+            Math.Abs(realtimeLeakVm.WaterProofChannels[2].Leak.GetValueOrDefault() - 0.6) < 0.0001 &&
+            realtimeLeakVm.WaterProofChannels[0].LiveMachineValueText == "83.5" &&
+            realtimeLeakVm.WaterProofChannels[1].LiveMachineValueText == "83.7" &&
+            realtimeLeakVm.WaterProofChannels[2].LiveMachineValueText == "83.4",
+            "Later WAIT frames continuously replace both calculated Leak and compact live values");
+
+        Assert(
+            realtimeLeakVm.WaterProofChannels.All(row => !row.IsMeasured) &&
+            realtimeLeakVm.WaterProofChannels.All(row => row.ResultText == "---"),
+            "Realtime PRESS/WAIT display never publishes PASS/FAIL before the final RESULT");
+
+        MethodInfo showLeakPanel = typeof(TestViewModel).GetMethod(
+            "ShowWaterProofOperationPanel",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak operation panel method not found");
+        realtimeLeakVm.SelectedOperationTabIndex = 0;
+        showLeakPanel.Invoke(realtimeLeakVm, null);
+        Assert(realtimeLeakVm.SelectedOperationTabIndex == 0,
+            "Leak run keeps the lower continuity table visible and reports realtime values only in the TEST LEAK card");
         int resultStyleUses = xaml.Split(
             "CellStyle=\"{StaticResource PassFailResultCellStyle}\"",
             StringSplitOptions.None).Length - 1;
-        Assert(resultStyleUses == 2,
-            "Resistance and Leak result columns must share green PASS/red FAIL cell presentation");
-        Assert(xaml.Contains("<Viewbox Margin=\"10\"", StringComparison.Ordinal) &&
+        Assert(resultStyleUses == 1 &&
+               xaml.Contains("ItemsSource=\"{Binding InspectionResultRows}\"", StringComparison.Ordinal) &&
+               !xaml.Contains("WaterProofResultCellStyle", StringComparison.Ordinal),
+            "One combined table applies the same PASS/FAIL styling to resistance and individual Leak rows");
+        Assert(xaml.Contains("<Viewbox Grid.Row=\"0\"", StringComparison.Ordinal) &&
                xaml.Contains("StretchDirection=\"DownOnly\"", StringComparison.Ordinal),
-            "Large result text scales down to keep ĐẠT/KHÔNG ĐẠT/SẴN SÀNG inside its box");
+            "The fixed Htdrv header surface scales down at narrow resolutions without scaling up above design size");
 
         ProductModel connectorModel = HtdrvTwoEndpointModel();
         using TestEngine connectorEngine = CreateEngine(out _);
         connectorEngine.SetModel(connectorModel);
-        Assert(!connectorEngine.IsConnectorConnected("1"),
-            "Leak connector gate remains closed before the selected connector is fitted");
+        Assert(!connectorEngine.HasConnectorActivity("1") &&
+               !connectorEngine.IsConnectorConnected("1") &&
+               connectorEngine.IsConnectorDisconnected("1"),
+            "Leak connector gate remains closed and confirms full disconnection before fitting");
         connectorEngine.ProcessFrame(FrameSeq(1, (1, new[] { 2 })));
-        Assert(connectorEngine.IsConnectorConnected("1") &&
+        Assert(connectorEngine.HasConnectorActivity("1") &&
+               !connectorEngine.HasConnectedRetWire("1") &&
+               connectorEngine.IsConnectorConnected("1") &&
+               !connectorEngine.IsConnectorDisconnected("1") &&
                !connectorEngine.IsConnectorConnected("2") &&
                !connectorEngine.IsConnectorConnected(string.Empty),
             "Leak connector gate opens only for the exact connected THT connector");
+
+        ProductModel retTriggerModel = TopologyModel(
+            new Terminal(40, "1", "1", "2", "RET1"),
+            new Terminal(41, "2", "1", "2", "RET1"),
+            new Terminal(42, "1", "2", "2", "NORMAL"),
+            new Terminal(43, "2", "2", "2", "NORMAL"));
+        using TestEngine retTriggerEngine = CreateEngine(out _);
+        retTriggerEngine.SetModel(retTriggerModel);
+        retTriggerEngine.ProcessFrame(FrameSeq(2, (42, new[] { 43 })));
+        Assert(!retTriggerEngine.HasConnectedRetWire("1"),
+            "A correctly connected non-RET wire cannot start Leak");
+        retTriggerEngine.ProcessFrame(FrameSeq(3, (40, new[] { 41 })));
+        Assert(retTriggerEngine.HasConnectedRetWire("1") &&
+               !retTriggerEngine.HasConnectedRetWire("UNKNOWN"),
+            "RET1 connected to its matching RET1 topology through the selected connector starts Leak");
+
+        ProductModel twoChannelLeakModel = TopologyModel(
+            new Terminal(40, "LEAK-1", "1", "2", "RET1"),
+            new Terminal(41, "OTHER-1", "1", "2", "RET1"),
+            new Terminal(42, "LEAK-2", "1", "2", "RET2"),
+            new Terminal(43, "OTHER-2", "1", "2", "RET2"));
+        TestViewModel earlyLeakVm = CreateTestViewModel(new ProductionSettings { MasterFaultRequiredCount = 0 });
+        earlyLeakVm.SetModel(twoChannelLeakModel);
+        typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(earlyLeakVm, new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel2Enabled = true,
+                Channel3Enabled = false,
+                Channel1Connector = "LEAK-1",
+                Channel2Connector = "LEAK-2"
+            });
+        TestEngine earlyLeakEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(earlyLeakVm)
+            ?? throw new InvalidOperationException("Early Leak engine not found"));
+        earlyLeakEngine.SetFrameProcessingEnabled(true);
+        MethodInfo selectReadyLeakChannel = typeof(TestViewModel).GetMethod(
+            "SelectReadyWaterProofChannel", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Early Leak channel selector not found");
+        earlyLeakEngine.ProcessFrame(FrameSeq(2, (40, new[] { 41 })));
+        int firstReadyLeakChannel = (int)(selectReadyLeakChannel.Invoke(earlyLeakVm, null) ?? 0);
+        Assert(firstReadyLeakChannel == 0,
+            $"CH1 waits until the other enabled Leak connector is fitted (actual={firstReadyLeakChannel})");
+        typeof(TestViewModel).GetField("_waterProofPassedChannelsMask", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(earlyLeakVm, 1);
+        earlyLeakEngine.ProcessFrame(FrameSeq(3, (40, new[] { 41 }), (42, new[] { 43 })));
+        Assert((int)(selectReadyLeakChannel.Invoke(earlyLeakVm, null) ?? 0) == 1,
+            "Both connectors trigger a grouped run; an old partial CH1 result cannot skip it");
+        MethodInfo recordPassedLeakChannels = typeof(TestViewModel).GetMethod(
+            "RecordPassedWaterProofChannels", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak completion recorder not found");
+        FieldInfo passedLeakMask = typeof(TestViewModel).GetField(
+            "_waterProofPassedChannelsMask", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak channel mask not found");
+        FieldInfo allLeakPassed = typeof(TestViewModel).GetField(
+            "_preContinuityWaterProofPassed", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak completion gate not found");
+        passedLeakMask.SetValue(earlyLeakVm, 0);
+        recordPassedLeakChannels.Invoke(earlyLeakVm, [new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(1, true, 80, 79.5, 0.5, true)], true, "CH1_PASS")]);
+        Assert((int)(allLeakPassed.GetValue(earlyLeakVm) ?? 0) == 0,
+            "Product PASS remains gated while another configured Leak channel has not passed");
+        recordPassedLeakChannels.Invoke(earlyLeakVm, [new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(2, true, 80, 79.6, 0.4, true)], true, "CH2_PASS")]);
+        Assert((int)(allLeakPassed.GetValue(earlyLeakVm) ?? 0) == 0,
+            "Separate single-channel PASS results cannot be accumulated into a grouped PASS");
+        recordPassedLeakChannels.Invoke(earlyLeakVm, [new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(1, true, 80, 79.5, 0.5, true),
+             new WaterProofChannelMeasurement(2, true, 80, 79.6, 0.4, true)], true, "GROUP_PASS")]);
+        Assert((int)(allLeakPassed.GetValue(earlyLeakVm) ?? 0) == 1,
+            "Product PASS requires every configured Leak channel to pass in the same run");
+
+        var sequentialLeakWindow = new WaterProofTestViewModel("TWO-CHANNEL", new WaterProofModelSettings
+        {
+            Enabled = true, Channel1Enabled = true, Channel2Enabled = false, Channel3Enabled = false
+        });
+        sequentialLeakWindow.ApplyFinal(new WaterProofRunResult(
+            [new WaterProofChannelMeasurement(1, true, 80, 79.5, 0.5, true)], true, "CH1_PASS"));
+        sequentialLeakWindow.BeginRun(new WaterProofModelSettings
+        {
+            Enabled = true, Channel1Enabled = false, Channel2Enabled = true, Channel3Enabled = false
+        });
+        Assert(sequentialLeakWindow.Channel1Text == "0.5" &&
+               sequentialLeakWindow.Channel1Background == "#32CD32" &&
+               sequentialLeakWindow.Channel2Text == "--" &&
+               sequentialLeakWindow.Channel2Background == "#FFF3A0",
+            "Starting CH2 retains CH1's completed result and resets only CH2's cell");
+
+        foreach (string supportedRetName in new[] { "RET1", "RET01", "RT1" })
+        {
+            ProductModel supportedRetModel = TopologyModel(
+                new Terminal(50, "LEAK", "1", "2", supportedRetName),
+                new Terminal(51, "OTHER", "1", "2", supportedRetName));
+            using TestEngine supportedRetEngine = CreateEngine(out _);
+            supportedRetEngine.SetModel(supportedRetModel);
+            supportedRetEngine.ProcessFrame(FrameSeq(4, (50, new[] { 51 })));
+            Assert(supportedRetEngine.HasConnectedRetWire("LEAK"),
+                $"{supportedRetName} must be accepted as a Leak trigger wire name");
+        }
+
+        ProductModel multiNetConnectorModel = TopologyModel(
+            new Terminal(1, "LEAK", "1", "2", "A"),
+            new Terminal(2, "OTHER-A", "1", "1", "A"),
+            new Terminal(3, "LEAK", "2", "2", "B"),
+            new Terminal(4, "OTHER-B", "1", "1", "B"));
+        using TestEngine multiNetConnectorEngine = CreateEngine(out _);
+        multiNetConnectorEngine.SetModel(multiNetConnectorModel);
+        multiNetConnectorEngine.ProcessFrame(FrameSeq(2, (1, new[] { 2 }), (3, new[] { 4 })));
+        Assert(multiNetConnectorEngine.IsConnectorConnected("LEAK"),
+            "All Leak connector relations fitted report connected");
+        multiNetConnectorEngine.ProcessFrame(FrameSeq(3, (1, new[] { 2 })));
+        Assert(!multiNetConnectorEngine.IsConnectorConnected("LEAK") &&
+               multiNetConnectorEngine.HasConnectorActivity("LEAK") &&
+               !multiNetConnectorEngine.IsConnectorDisconnected("LEAK"),
+            "Any Leak connector pin activity can start Leak even before every connector relation is fitted");
+        multiNetConnectorEngine.ProcessFrame(FrameSeq(4));
+        Assert(multiNetConnectorEngine.IsConnectorDisconnected("LEAK"),
+            "Leak connector removal requires every mapped continuity relation to disappear");
 
         TestViewModel removalVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -1164,7 +4054,9 @@ internal static class Program
             (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
                 ?.GetValue(removalVm) ?? throw new InvalidOperationException("Leak removal TestEngine not found"));
         removalEngine.SetFrameProcessingEnabled(true);
-        removalVm.SelectedOperationTabIndex = 3;
+        removalVm.SelectedOperationTabIndex = 0;
+        removalBoard.Publish(FrameSeq(1, (1, new[] { 18 })));
+        removalBoard.Publish(FrameSeq(2, (1, new[] { 18 })));
 
         MethodInfo armRemoval = typeof(TestViewModel).GetMethod(
             "ArmWaterProofFaultRemovalWait",
@@ -1176,17 +4068,20 @@ internal static class Program
             "_waitForFaultProductRemoval",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Leak removal wait flag not found");
-        Assert(removalVm.SelectedOperationTabIndex == 3 &&
+        Assert(removalVm.SelectedOperationTabIndex == 0 &&
                (bool)(waitForFaultRemoval.GetValue(removalVm) ?? false),
-            "Leak FAIL keeps the result page visible and arms ProductRemoved confirmation");
+            "Leak FAIL keeps the continuity/final result area visible and arms ProductRemoved confirmation");
 
-        removalBoard.Publish(FrameSeq(1, (1, new[] { 18 })));
+        removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
         Assert((bool)(waitForFaultRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.SelectedOperationTabIndex == 3,
-            "Leak FAIL must keep its result table while any product IO remains connected");
-        removalBoard.Publish(FrameSeq(2));
+               removalVm.SelectedOperationTabIndex == 0,
+            "Leak FAIL must keep the continuity/final area while any product IO remains connected");
+        removalBoard.Publish(FrameSeq(4));
+        Assert((bool)(waitForFaultRemoval.GetValue(removalVm) ?? false),
+            "One clean frame cannot clear Leak FAIL removal");
+        removalBoard.Publish(FrameSeq(5));
         Assert(!(bool)(waitForFaultRemoval.GetValue(removalVm) ?? true) &&
-               removalVm.ResultStatusText == "SẴN SÀNG" &&
+               removalVm.ResultStatusText == "LẮP SẢN PHẨM" &&
                removalVm.SelectedOperationTabIndex == 0,
             "Fresh empty frame after Leak FAIL resets the cycle instead of hanging on results");
 
@@ -1204,17 +4099,109 @@ internal static class Program
         faultMainEngine.SetFrameProcessingEnabled(true);
         armRemoval.Invoke(faultMainVm, null);
         faultMainBoard.Publish(FrameSeq(20, (1, new[] { 18 })));
-        faultMainVm.StopViewAsync().GetAwaiter().GetResult();
-        Assert(faultMainVm.IsProductRemovalPending &&
-               faultMainVm.State == "VUI LÒNG THÁO SẢN PHẨM",
-            "Returning to MainWindow during FAIL removal preserves the shared removal lock and warning");
+        bool faultMainExitAllowed = faultMainVm.StopViewAsync().GetAwaiter().GetResult();
+        Assert(!faultMainExitAllowed && faultMainVm.IsProductRemovalPending,
+            "Returning to MainWindow during FAIL removal is blocked until the product is removed");
         faultMainBoard.Publish(FrameSeq(21, (1, new[] { 18 })));
         Assert(faultMainVm.IsProductRemovalPending,
             "FAIL MainWindow removal lock remains while any product connection is present");
         faultMainBoard.Publish(FrameSeq(22));
+        Assert(faultMainVm.IsProductRemovalPending,
+            "FAIL MainWindow removal needs two complete empty frames");
+        faultMainBoard.Publish(FrameSeq(23));
         Assert(!faultMainVm.IsProductRemovalPending &&
-               faultMainVm.ResultStatusText == "SẴN SÀNG",
+               faultMainVm.ResultStatusText == "LẮP SẢN PHẨM",
             "FAIL MainWindow removal lock clears only after a complete empty frame");
+
+        var shortRemovalClock = new ManualTimeProvider(
+            new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
+        TestViewModel shortRemovalVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard shortRemovalBoard,
+            timeProvider: shortRemovalClock);
+        shortRemovalVm.SetModel(Model(("EXPECTED", new[] { 4, 8 })));
+        ((Task)(typeof(TestViewModel).GetField("_statisticsLoadTask", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(shortRemovalVm) ?? Task.CompletedTask)).GetAwaiter().GetResult();
+        typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(shortRemovalVm, 1);
+        TestEngine shortRemovalEngine =
+            (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(shortRemovalVm) ?? throw new InvalidOperationException("Short removal engine not found"));
+        shortRemovalEngine.SetFrameProcessingEnabled(true);
+        armRemoval.Invoke(shortRemovalVm, null);
+        typeof(TestViewModel).GetField("_cycleActive", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(shortRemovalVm, false);
+        typeof(TestViewModel).GetField("_wiringFaultHandlingStarted", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(shortRemovalVm, 1);
+        shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.ShortCircuit);
+        shortRemovalBoard.Publish(FrameSeq(30, (4, new[] { 8 }), (3, new[] { 7 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(31, (3, new[] { 7 })));
+        shortRemovalBoard.Publish(FrameSeq(32, (3, new[] { 7 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               !shortRemovalEngine.IsFaultConnectionReleased &&
+               shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
+               shortRemovalVm.StateBackground == "#C62828" &&
+               shortRemovalVm.ActiveFaultTitle == "KIỂM TRA LỖI CHẬP MẠCH" &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 &&
+                                                row.ActualTargetIo == 7 &&
+                                                row.Kind == FaultKind.Short),
+            "FAIL screen and counter stay latched while IO3-IO7 remains after IO4-IO8 disappears; " +
+            $"pending={shortRemovalVm.IsProductRemovalPending} status={shortRemovalVm.ResultStatusText} state={shortRemovalVm.State} " +
+            $"title={shortRemovalVm.ActiveFaultTitle} rows={string.Join(" | ", shortRemovalVm.Faults.Select(row => $"{row.Kind}:{row.ActualSourceIo}->{row.ActualTargetIo}"))} " +
+            $"engine={string.Join(" | ", shortRemovalEngine.WiringFaults.Select(pair => $"{pair.FaultType}:{pair.SourceIo}->{pair.TargetIo}"))}");
+        shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.WrongWiring);
+        Assert(shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
+               shortRemovalVm.StateBackground == "#C62828",
+            "Wrong-wiring FAIL also stays red while awaiting full product removal");
+        shortRemovalVm.State = FaultDisplayFormatter.OperatorInstruction(ProductFaultType.ShortCircuit);
+        shortRemovalBoard.Publish(FrameSeq(33, (3, new[] { 7 }), (5, new[] { 6 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultShortCircuitConfirmMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(34, (3, new[] { 7 }), (5, new[] { 6 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 && row.ActualTargetIo == 7) &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 5 && row.ActualTargetIo == 6) &&
+               shortRemovalVm.ActiveFaultActualText.Contains("IO 5", StringComparison.Ordinal),
+            "A second short is added immediately to the same FAIL screen while the first short remains; " +
+            $"rows={string.Join(" | ", shortRemovalVm.Faults.Select(row => $"{row.Kind}:{row.ActualSourceIo}->{row.ActualTargetIo}"))}; " +
+            $"engine={string.Join(" | ", shortRemovalEngine.WiringFaults.Select(pair => $"{pair.FaultType}:{pair.SourceIo}->{pair.TargetIo}"))}; " +
+            $"active={shortRemovalVm.ActiveFaultActualText}");
+        shortRemovalBoard.Publish(FrameSeq(35, (3, new[] { 7 }), (5, new[] { 6 }), (4, new[] { 5 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultProductSettleTimeMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(36, (3, new[] { 7 }), (5, new[] { 6 }), (4, new[] { 5 })));
+        shortRemovalClock.Advance(TimeSpan.FromMilliseconds(
+            ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5));
+        shortRemovalBoard.Publish(FrameSeq(37, (3, new[] { 7 }), (5, new[] { 6 }), (4, new[] { 5 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 4 &&
+                                              row.ActualTargetIo == 5 &&
+                                              row.Kind == FaultKind.WrongWiring) &&
+               shortRemovalVm.ActiveFaultActualText.Contains("IO 4", StringComparison.Ordinal),
+            "A new wrong-wiring pair is recognized while two earlier shorts are still displayed");
+        shortRemovalBoard.Publish(FrameSeq(38, (5, new[] { 6 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               !shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 3 && row.ActualTargetIo == 7) &&
+               shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 5 && row.ActualTargetIo == 6) &&
+               !shortRemovalVm.Faults.Any(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 5) &&
+               shortRemovalVm.ActiveFaultActualText.Contains("IO 5", StringComparison.Ordinal),
+            "Released pairs disappear immediately while the remaining short stays visible");
+        shortRemovalBoard.Publish(FrameSeq(39, (7, new[] { 7 })));
+        Assert(shortRemovalVm.IsProductRemovalPending &&
+               !shortRemovalEngine.IsFaultConnectionReleased &&
+               shortRemovalVm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO SẢN PHẨM" &&
+               shortRemovalVm.Faults.Count == 0 &&
+               shortRemovalVm.ActiveFaultActualText == string.Empty,
+            "All fault rows clear when their pairs release, while an active IO keeps the FAIL cycle pending");
+        shortRemovalBoard.Publish(FrameSeq(40));
+        Assert(shortRemovalVm.IsProductRemovalPending,
+            "One fully clear frame cannot release an outside-THT short FAIL");
+        shortRemovalBoard.Publish(FrameSeq(41));
+        Assert(!shortRemovalVm.IsProductRemovalPending,
+            "Two fully clear frames release the short FAIL exactly once");
 
         FieldInfo cycleActiveAfterLeakFail = typeof(TestViewModel).GetField(
             "_cycleActive",
@@ -1233,57 +4220,103 @@ internal static class Program
                (int)(waterProofRunningAfterLeakFail.GetValue(removalVm) ?? -1) == 0,
             "Leak FAIL removal fully re-arms cycle 2 and releases both automatic-test locks");
 
-        removalVm.SelectedOperationTabIndex = 3;
+        TestViewModel passRemovalVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 },
+            out FakeBoard passRemovalBoard);
+        passRemovalVm.LoadPreparedModelAsync(Model(
+                ("PASS-PAIR-1", new[] { 1, 18 }),
+                ("PASS-PAIR-2", new[] { 2, 19 })))
+            .GetAwaiter()
+            .GetResult();
+        typeof(TestViewModel).GetField("_runtimeMode", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(passRemovalVm, 1);
+        TestEngine passRemovalEngine =
+            (TestEngine)(typeof(TestViewModel).GetField("_engine", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(passRemovalVm) ?? throw new InvalidOperationException("PASS removal TestEngine not found"));
+        passRemovalEngine.SetFrameProcessingEnabled(true);
+        passRemovalBoard.Publish(FrameSeq(30, (1, new[] { 18 }), (2, new[] { 19 })));
+        passRemovalBoard.Publish(FrameSeq(31, (1, new[] { 18 }), (2, new[] { 19 })));
+        Assert(SpinWait.SpinUntil(
+                () => passRemovalVm.ProductionFramesProcessed >= 2,
+                TimeSpan.FromSeconds(2)),
+            "PASS removal setup waits for the asynchronous board-frame worker");
+
         MethodInfo armPassRemoval = typeof(TestViewModel).GetMethod(
             "ArmPassProductRemovalWait",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS removal arm method not found");
-        armPassRemoval.Invoke(removalVm, null);
+        armPassRemoval.Invoke(passRemovalVm, null);
         FieldInfo waitForPassRemoval = typeof(TestViewModel).GetField(
             "_waitForProductRelease",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("PASS removal wait flag not found");
-        Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.IsProductRemovalPending &&
-               removalVm.SelectedOperationTabIndex == 3 &&
-               removalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
-               removalVm.StateBackground == "#2AA84A",
-            "Committed Leak PASS keeps the result table, stays green, and explicitly requests ProductRemoved before scan restart");
-        removalVm.StopViewAsync().GetAwaiter().GetResult();
-        Assert(removalVm.IsProductRemovalPending &&
-               removalVm.State.Contains("VUI LÒNG THÁO SẢN PHẨM", StringComparison.Ordinal),
-            "Returning to MainWindow preserves the committed PASS removal lock and background IO monitoring");
-        removalBoard.Publish(FrameSeq(3, (1, new[] { 18 })));
-        Assert((bool)(waitForPassRemoval.GetValue(removalVm) ?? false) &&
-               removalVm.IsProductRemovalPending &&
-               removalVm.SelectedOperationTabIndex == 3 &&
-               removalVm.ResultStatusText == "VUI LÒNG THÁO SẢN PHẨM",
-            "Leak PASS result table remains visible while any product IO is still connected");
-        removalBoard.Publish(FrameSeq(4));
-        FieldInfo cycleActiveAfterMainRemoval = typeof(TestViewModel).GetField(
-            "_cycleActive",
+        Assert((bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? false) &&
+               passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "PASS" &&
+               passRemovalVm.Faults.Count == 0 &&
+               passRemovalVm.StateBackground == "#2AA84A",
+            "Committed final PASS stays green and hides removal rows before a real expected connection is lost");
+
+        passRemovalBoard.Publish(FrameSeq(32));
+        passRemovalBoard.Publish(FrameSeq(33));
+        Assert((bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? false) &&
+               passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "PASS" &&
+               passRemovalVm.Faults.Count == 0,
+            "Temporary empty frames immediately after scan restart cannot erase committed PASS without a reacquired baseline");
+
+        MethodInfo markPassRemovalScanReady = typeof(TestViewModel).GetMethod(
+            "MarkPassRemovalScanReady",
             BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("PASS main-screen cycle-active flag not found");
-        Assert(!(bool)(waitForPassRemoval.GetValue(removalVm) ?? true) &&
-               !removalVm.IsProductRemovalPending &&
-               !(bool)(cycleActiveAfterMainRemoval.GetValue(removalVm) ?? true) &&
-               removalVm.ResultStatusText == "SẴN SÀNG" &&
-               removalVm.SelectedOperationTabIndex == 0,
-            "After committed Leak PASS, a fresh empty frame clears the MainWindow lock without auto-arming a new test");
+            ?? throw new InvalidOperationException("PASS removal verified-scan marker not found");
+        markPassRemovalScanReady.Invoke(passRemovalVm, null);
+        passRemovalBoard.Publish(FrameSeq(34));
+        Assert(passRemovalVm.IsProductRemovalPending,
+            "Immediate PASS removal still requires two clean frames after scan verification");
+        passRemovalBoard.Publish(FrameSeq(35));
+        Assert(!(bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? true) &&
+               !passRemovalVm.IsProductRemovalPending,
+            "Removal before topology reacquisition completes after two verified clean frames");
+
+        armPassRemoval.Invoke(passRemovalVm, null);
+
+        passRemovalBoard.Publish(FrameSeq(36, (1, new[] { 18 }), (2, new[] { 19 })));
+        Assert(passRemovalVm.ResultStatusText == "PASS" && passRemovalVm.Faults.Count == 0,
+            "Reacquired complete topology keeps PASS and establishes the removal baseline");
+
+        passRemovalBoard.Publish(FrameSeq(37, (2, new[] { 19 })));
+        Assert((bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? false) &&
+               passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "THÁO SẢN PHẨM" &&
+               passRemovalVm.Faults.Any(row =>
+                   row.Status == "CHỜ THÁO" &&
+                   row.RelatedIos.Contains(2) &&
+                   row.RelatedIos.Contains(19)) &&
+               passRemovalVm.Faults.All(row => !row.RelatedIos.Contains(1)),
+            "Losing one expected connection changes PASS to removal and shows only connectivity still on the JIG");
+
+        passRemovalBoard.Publish(FrameSeq(38));
+        Assert(passRemovalVm.IsProductRemovalPending,
+            "PASS removal requires two complete clean frames");
+        passRemovalBoard.Publish(FrameSeq(39));
+        Assert(!(bool)(waitForPassRemoval.GetValue(passRemovalVm) ?? true) &&
+               !passRemovalVm.IsProductRemovalPending &&
+               passRemovalVm.ResultStatusText == "LẮP SẢN PHẨM",
+            "Two complete clean frames confirm PASS ProductRemoved and return to ready");
 
         TestViewModel pauseVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
             out FakeBoard pauseBoard);
         MethodInfo pauseD2xx = typeof(TestViewModel).GetMethod(
-            "PauseProductionScanForWaterProofAsync",
+            "EnsureProductionScanForWaterProofAsync",
             BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new InvalidOperationException("Leak D2XX pause method not found");
         ((Task)(pauseD2xx.Invoke(pauseVm, [CancellationToken.None])
             ?? throw new InvalidOperationException("Leak D2XX pause task not returned")))
             .GetAwaiter()
             .GetResult();
-        Assert(!pauseBoard.IsScanning && pauseBoard.Commands.Contains("STOP"),
-            "Leak stage pauses D2XX scan so pressure activity cannot invalidate continuity PASS");
+        Assert(pauseBoard.IsScanning && !pauseBoard.Commands.Contains("STOP"),
+            "Leak COM keeps D2XX production scanning independently");
 
         TestViewModel finalPassPauseVm = CreateTestViewModel(
             new ProductionSettings { MasterFaultRequiredCount = 0 },
@@ -1307,6 +4340,183 @@ internal static class Program
                !(bool)(shouldRestart.Invoke(null, [false, false]) ?? true),
             "Completed Leak always enters removal/reset lifecycle even when legacy auto-restart is disabled");
 
+        TestViewModel retestArmVm = CreateTestViewModel(
+            new ProductionSettings { MasterFaultRequiredCount = 0 });
+        retestArmVm.LoadPreparedModelAsync(HtdrvTwoEndpointModel())
+            .GetAwaiter()
+            .GetResult();
+        typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel1Connector = "1"
+            });
+        typeof(TestViewModel).GetField("_waterProofCurrentRunProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofModelSettings
+            {
+                Enabled = true,
+                Channel1Enabled = true,
+                Channel2Enabled = false,
+                Channel1Connector = "1"
+            });
+        typeof(TestViewModel).GetField("_lastWaterProofMeasurements", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofChannelMeasurement[]
+            {
+                new(1, true, 84.0, 83.8, 0.2, true)
+            });
+        typeof(TestViewModel).GetField("_productionPhase", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, 3);
+        MethodInfo armLeakRetest = typeof(TestViewModel).GetMethod(
+            "ArmWaterProofRetestConnectorCycle",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak retest connector ARM method not found");
+        FieldInfo leakRetestState = typeof(TestViewModel).GetField(
+            "_waterProofRetestConnectorState",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Leak retest connector state not found");
+        armLeakRetest.Invoke(retestArmVm, null);
+        Assert((int)(leakRetestState.GetValue(retestArmVm) ?? 0) == 1,
+            "A pre-continuity Leak FAIL arms connector remove/reinsert retest");
+        Assert(retestArmVm.State == "LẮP SẢN PHẨM" && retestArmVm.ResultStatusText == "LẮP SẢN PHẨM",
+            "Leak FAIL waits for connector reinstallation instead of showing testing");
+
+        retestArmVm.Faults.Add(new FaultRow
+        {
+            Kind = FaultKind.MissingConnection,
+            Io = 40,
+            WireName = "RET1",
+            Status = "CHỜ LẮP DÂY"
+        });
+        MethodInfo refreshLeakFaults = typeof(TestViewModel).GetMethod(
+            "RefreshFaults",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-grid refresh method not found");
+        refreshLeakFaults.Invoke(retestArmVm, null);
+        Assert(retestArmVm.Faults.Count == 0,
+            "An empty table fixture stays empty when no product connection exists during Leak retry");
+        typeof(TestViewModel).GetField("_waterProofProfile", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(retestArmVm, new WaterProofModelSettings { Enabled = false });
+        armLeakRetest.Invoke(retestArmVm, null);
+        Assert((int)(leakRetestState.GetValue(retestArmVm) ?? -1) == 0,
+            "Models without Leak enabled cannot arm connector retest");
+        string testViewModelSource = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory,
+            "ViewModels",
+            "TestViewModel.cs"));
+        int leakGateStart = testViewModelSource.IndexOf(
+            "private bool TryValidateWaterProofConnectorGate",
+            StringComparison.Ordinal);
+        int leakGateEnd = testViewModelSource.IndexOf(
+            "private string[] ConfiguredWaterProofConnectorIds",
+            leakGateStart,
+            StringComparison.Ordinal);
+        string leakGateSource = testViewModelSource[leakGateStart..leakGateEnd];
+        Assert(leakGateSource.Contains("HasWaterProofConnectorTrigger", StringComparison.Ordinal) &&
+               !leakGateSource.Contains("HasConnectorActivity", StringComparison.Ordinal),
+            "Production Leak gate requires its topology-based trigger, not arbitrary connector activity");
+        int retestMethodStart = testViewModelSource.IndexOf(
+            "private async Task RunWaterProofRetestOnlyAsync",
+            StringComparison.Ordinal);
+        int retestMethodEnd = testViewModelSource.IndexOf(
+            "private void CaptureWaterProofAttemptHistory",
+            retestMethodStart,
+            StringComparison.Ordinal);
+        string retestMethodSource = testViewModelSource[retestMethodStart..retestMethodEnd];
+        Assert(retestMethodSource.Contains("CaptureWaterProofAttemptHistory", StringComparison.Ordinal) &&
+               retestMethodSource.Contains("Interlocked.Exchange(ref _postContinuityStarted, 0)", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("FinalizeWaterProofProductFailureAsync", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
+               !retestMethodSource.Contains("EjectFaultProductAsync", StringComparison.Ordinal),
+            "Every Leak-only retest is captured in the current product without finalizing/ejecting the production cycle");
+
+        int processStart = testViewModelSource.IndexOf(
+            "private void ProcessEngineChangedOnUi",
+            StringComparison.Ordinal);
+        int processEnd = testViewModelSource.IndexOf(
+            "private void CaptureProductTestStartedAt",
+            processStart,
+            StringComparison.Ordinal);
+        string processSource = testViewModelSource[processStart..processEnd];
+        int postContinuityStart = testViewModelSource.IndexOf(
+            "private async Task RunAutomaticPostContinuityAsync",
+            StringComparison.Ordinal);
+        int postContinuityEnd = testViewModelSource.IndexOf(
+            "private async Task HandleFinalPassRejectedAsync",
+            postContinuityStart,
+            StringComparison.Ordinal);
+        string postContinuitySource = testViewModelSource[postContinuityStart..postContinuityEnd];
+        int resistanceStep = postContinuitySource.IndexOf(
+            "if (IsResistanceEnabledForModel(_model))",
+            StringComparison.Ordinal);
+        Assert(processSource.Contains("TryBeginWaterProofOnConnector(generation)", StringComparison.Ordinal) &&
+               resistanceStep >= 0 &&
+               postContinuitySource.Contains("Volatile.Read(ref _preContinuityWaterProofPassed) == 0", StringComparison.Ordinal) &&
+               !postContinuitySource.Contains("await RunAutomaticWaterProofAsync", StringComparison.Ordinal),
+            "Each RET connector starts its Leak channel before full continuity; final product PASS waits for all enabled channels");
+        int durablePassCommit = postContinuitySource.IndexOf(
+            "bool passCommitted = await RecordCompletedProductAsync",
+            StringComparison.Ordinal);
+        int passRelayExecution = postContinuitySource.IndexOf(
+            "bool ok = await _engine.CompletePassAsync",
+            StringComparison.Ordinal);
+        Assert(durablePassCommit >= 0 &&
+               passRelayExecution > durablePassCommit &&
+               testViewModelSource.Contains("EnsureProductionPersistenceReadyAsync(\"StartProduction.Preflight\")", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("HandlePersistenceFaultAsync", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("Data.Persistence.", StringComparison.Ordinal),
+            "Production requires SQLite preflight and durable PASS commit before MARKING/JIG; DB faults are not Hardware.DeviceFault");
+
+        int masterGoodStart = testViewModelSource.IndexOf(
+            "private async Task CompleteGoodMasterAsync",
+            StringComparison.Ordinal);
+        int masterGoodEnd = testViewModelSource.IndexOf(
+            "private void TransitionToBadMaster",
+            masterGoodStart,
+            StringComparison.Ordinal);
+        string masterGoodSource = testViewModelSource[masterGoodStart..masterGoodEnd];
+        int masterGoodCommit = masterGoodSource.IndexOf(
+            "RecordMasterHistory(",
+            masterGoodSource.IndexOf("masterPassAt = DateTime.Now", StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        int masterGoodAwait = masterGoodSource.IndexOf(
+            "await _masterPersistenceTask",
+            masterGoodCommit,
+            StringComparison.Ordinal);
+        int masterGoodRelay = masterGoodSource.IndexOf(
+            "bool ok = await _engine.CompletePassAsync",
+            StringComparison.Ordinal);
+        int masterBadStart = testViewModelSource.IndexOf(
+            "private async Task EjectValidatedBadMasterAsync",
+            StringComparison.Ordinal);
+        int masterBadEnd = testViewModelSource.IndexOf(
+            "private void BeginMasterHistoryCycle",
+            masterBadStart,
+            StringComparison.Ordinal);
+        string masterBadSource = testViewModelSource[masterBadStart..masterBadEnd];
+        Assert(masterGoodCommit >= 0 &&
+               masterGoodAwait > masterGoodCommit &&
+               masterGoodRelay > masterGoodAwait &&
+               masterBadSource.IndexOf("await _masterPersistenceTask", StringComparison.Ordinal) >= 0 &&
+               masterBadSource.IndexOf("await _engine.EjectMasterSampleAsync", StringComparison.Ordinal) >
+               masterBadSource.IndexOf("await _masterPersistenceTask", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("Master.{inspectionType}.OpenStore", StringComparison.Ordinal),
+            "Master GOOD/BAD history must commit before JIG eject; SQLite open failures stay in persistence-fault routing");
+
+        using var leakDisplayRow = new InspectionResultRow(new WaterProofChannelResult
+        {
+            Channel = 1, Enabled = true, IsMeasured = true, Passed = true,
+            FirstResultPressure = 80.5, SecondResultPressure = 80.3, Leak = 0.2, LeakLimit = 2
+        });
+        Assert(xaml.Contains("ItemsSource=\"{Binding InspectionResultRows}\"", StringComparison.Ordinal) &&
+               leakDisplayRow.Name == "TEST LEAK" &&
+               leakDisplayRow.ChannelText == "CH1" &&
+               leakDisplayRow.LeakText == "0.2" && leakDisplayRow.FirstPressureText == "80.5" &&
+               leakDisplayRow.SecondPressureText == "80.3" &&
+               leakDisplayRow.ResultText == "PASS",
+            "Combined result table preserves individual Leak pressures and PASS alongside resistance");
+
         var idleLeakService = new WaterProofSerialService();
         Stopwatch disposeWatch = Stopwatch.StartNew();
         idleLeakService.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -1317,13 +4527,43 @@ internal static class Program
             Environment.CurrentDirectory,
             "Services",
             "WaterProofSerialService.cs"));
-        Assert(leakServiceSource.Contains(
-                   "await DisconnectAsync(cancellationToken).ConfigureAwait(false);",
-                   StringComparison.Ordinal) &&
-               leakServiceSource.Contains(
-                   "next run will reconnect cleanly",
-                   StringComparison.Ordinal),
-            "A completed Leak result closes its COM session so cycle 2 cannot reuse stale machine state");
+        string productionSettingsXaml = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory,
+            "Views",
+            "ProductionSettingsPage.xaml"));
+        string productionSettingsVmSource = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory,
+            "ViewModels",
+            "ProductionSettingsViewModel.cs"));
+        string manualLeakMethodSource = testViewModelSource[
+            testViewModelSource.IndexOf("public async Task<WaterProofRunResult> TestManualWaterProofAsync", StringComparison.Ordinal)..
+            testViewModelSource.IndexOf("private string ReadyStateForCurrentModel", StringComparison.Ordinal)];
+        Assert(
+            leakServiceSource.Contains(
+                "ReleaseRunPort(runNumber, port)",
+                StringComparison.Ordinal) &&
+            leakServiceSource.Contains(
+                "ReleaseGateAfterCleanupAsync",
+                StringComparison.Ordinal) &&
+            leakServiceSource.Contains(
+                "LEAK_SESSION_CLOSED",
+                StringComparison.Ordinal),
+            "Leak keeps the public gate closed until its single owned COM cleanup has actually completed");
+        Assert(productionSettingsXaml.Contains("Content=\"CHẠY TEST\"", StringComparison.Ordinal) &&
+               productionSettingsXaml.Contains("ManualWaterProofTestCommand", StringComparison.Ordinal) &&
+               productionSettingsXaml.Contains("ManualWaterProofResults", StringComparison.Ordinal) &&
+               productionSettingsXaml.Contains("LiveMachineValueText", StringComparison.Ordinal) &&
+               !productionSettingsXaml.Contains("Settings.WaterProofMachine.BaudRate", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("ManualWaterProofStatus", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("UpdateManualWaterProofProgress", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("ApplyManualWaterProofResult", StringComparison.Ordinal) &&
+               productionSettingsVmSource.Contains("Máy Leak phải dùng một cổng COM riêng", StringComparison.Ordinal) &&
+               manualLeakMethodSource.Contains("_waterProof.RunTestAsync", StringComparison.Ordinal) &&
+               manualLeakMethodSource.Contains("AllRelaysOffAsync", StringComparison.Ordinal) &&
+               !manualLeakMethodSource.Contains("RecordCompletedProductAsync", StringComparison.Ordinal) &&
+               !manualLeakMethodSource.Contains("CompletePassAsync", StringComparison.Ordinal) &&
+               !manualLeakMethodSource.Contains("EjectFaultProductAsync", StringComparison.Ordinal),
+            "Settings manual Leak test uses the owned COM path without production count or relay output");
     }
 
     private static void TestProductionScanTokenSurvivesCycleCancel()
@@ -1331,6 +4571,15 @@ internal static class Program
         var settings = new ProductionSettings { MasterFaultRequiredCount = 0 };
         TestViewModel vm = CreateTestViewModel(settings, out FakeBoard board);
         vm.LoadPreparedModelAsync(Model(("PAIR", new[] { 1, 18 }))).GetAwaiter().GetResult();
+
+        PropertyInfo modelTransitionActive = typeof(TestViewModel).GetProperty(
+            "IsModelTransitionActive",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Model-transition state not found.");
+        Assert(SpinWait.SpinUntil(
+                () => !(bool)(modelTransitionActive.GetValue(vm) ?? true),
+                TimeSpan.FromSeconds(2)),
+            "Asynchronous model scan reconciliation completes before testing START behavior");
 
         board.StopScanAsync().GetAwaiter().GetResult();
         int commandsBeforeArm = board.Commands.Count;
@@ -1371,18 +4620,709 @@ internal static class Program
         IReadOnlyList<ProbeContactClassifier.Detection> detections =
             ProbeContactClassifier.DetectMany(frame, model, maxContacts: 2, boardCapacity: BoardCapacity.Create(10));
 
-        Assert(detections.Count == 1 && detections[0].Io == 113,
-            "Target-only production probe touch appears on TestWindow instead of being ignored");
+        Assert(detections.Count == 0,
+            "One target-only hit is only noise/candidate and must not confirm Probe");
+
+        ScanFrame strongFrame = FrameSeq(
+            8,
+            Enumerable.Range(20, 20)
+                .Select(source => (source, new[] { 113 }))
+                .ToArray());
+        detections = ProbeContactClassifier.DetectMany(
+            strongFrame,
+            model,
+            maxContacts: 2,
+            boardCapacity: BoardCapacity.Create(10));
+        Assert(detections.Count == 1 && detections[0].Io == 113 && detections[0].FanIn == 20,
+            "A complete frame with strong repeated fan-in identifies one Probe IO");
+        Assert(!ProbeContactClassifier.HasDirectConnectionEvidence(strongFrame),
+            "Htdrv high-fan-in Probe signature is not treated as a direct wire connection");
+
+        ScanFrame directWireFrame = FrameSeq(10, (5, new[] { 8 }), (6, new[] { 7 }));
+        Assert(ProbeContactClassifier.DetectMany(
+                   directWireFrame,
+                   model,
+                   maxContacts: 2,
+                   boardCapacity: BoardCapacity.Create(10)).Count == 0 &&
+               ProbeContactClassifier.HasDirectConnectionEvidence(directWireFrame) &&
+               ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(directWireFrame, model),
+            "Htdrv hit=1 edges 5-8 and 6-7 remain authoritative unexpected wire evidence, not Probe");
+        Assert(!ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(strongFrame, model),
+            "Strong high-fan-in TP signature is not mistaken for a two-pin short");
+
+        int[] spliceIos = Enumerable.Range(1, 13).ToArray();
+        ProductModel largeSplice = Model(("SPLICE", spliceIos));
+        ScanFrame expectedFanIn = FrameSeq(
+            9,
+            spliceIos.Skip(1).Select(source => (source, new[] { 1 })).ToArray());
+        Assert(ProbeContactClassifier.DetectMany(
+                   expectedFanIn,
+                   largeSplice,
+                   maxContacts: 1,
+                   boardCapacity: BoardCapacity.Create(1)).Count == 0,
+            "A large fan-in that belongs to the expected THT splice is not misclassified as Probe");
+
+        var clipCommon = new PinRecord("CLIP", "AO", 401, "AO", PinType: "AO");
+        ClipBranch[] clipBranches = Enumerable.Range(1, 19)
+            .Select(number => new ClipBranch(
+                $"a{number}", number, 401 + number,
+                new PinRecord("CLIP", $"a{number}", 401 + number, $"a{number}", PinType: $"a{number}"),
+                null))
+            .ToArray();
+        var clipModel = new ProductModel
+        {
+            Pins = [clipCommon, .. clipBranches.Select(branch => branch.ClipPin)],
+            Clip = new ClipTopology(clipCommon, clipBranches)
+        };
+        ScanFrame clipFanIn = FrameSeq(
+            12,
+            Enumerable.Range(401, 19).Select(source => (source, new[] { 420 })).ToArray());
+        Assert(ProbeContactClassifier.DetectMany(
+                   clipFanIn, clipModel, maxContacts: 2, boardCapacity: BoardCapacity.Create(10)).Count == 0 &&
+               !ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(clipFanIn, clipModel),
+            "AO/a1-a19 are one configured CLIP component; IO401/IO420 fan-in is not Probe or a short");
+
+        var candidateTracker = new ProbeStateTracker(confirmFrames: 2, releaseFrames: 1);
+        Assert(!candidateTracker.Update([420]) && candidateTracker.HasTrackedContacts &&
+               candidateTracker.Update([]) && !candidateTracker.HasTrackedContacts,
+            "A one-frame Probe candidate releases immediately on the empty product-removal frame");
+
+        ScanFrame twoProbeContacts = FrameSeq(
+            10,
+            Enumerable.Range(20, 20)
+                .Select(source => (source, new[] { 113, 114 }))
+                .ToArray());
+        Assert(ProbeContactClassifier.DetectMany(
+                   twoProbeContacts,
+                   model,
+                   maxContacts: 2,
+                   boardCapacity: BoardCapacity.Create(10)).Count == 2 &&
+               !ProbeContactClassifier.HasDirectConnectionEvidence(twoProbeContacts),
+            "Htdrv trace: two high-fan-in targets remain two Probe contacts, not a direct wire fault");
+
+        ScanFrame directBridgeAfterProbe = FrameSeq(11, (113, new[] { 114 }));
+        Assert(ProbeContactClassifier.DetectMany(
+                   directBridgeAfterProbe,
+                   model,
+                   maxContacts: 2,
+                   boardCapacity: BoardCapacity.Create(10)).Count == 0 &&
+               ProbeContactClassifier.HasDirectConnectionEvidence(directBridgeAfterProbe),
+            "Htdrv trace: a low-fan-in edge after Probe release is direct electrical evidence and must reach TestEngine");
     }
 
-    private static void AssertWireColorCells(string code, string one, string two, string three, string four)
+    private static void TestManualProbeSession()
     {
-        var row = new FaultRow { Color = code };
-        Assert(row.WireColorText == code, $"Wire color text preserved for '{code}'");
-        Assert(BrushHex(row.Color1Brush) == one, $"Color #1 for '{code}'");
-        Assert(BrushHex(row.Color2Brush) == two, $"Color #2 for '{code}'");
-        Assert(BrushHex(row.Color3Brush) == three, $"Color #3 for '{code}'");
-        Assert(BrushHex(row.Color4Brush) == four, $"Color #4 for '{code}'");
+        ProductModel model = Model(("PAIR", new[] { 1, 2 }));
+        BoardCapacity capacity = BoardCapacity.Create(1);
+        var session = new ManualProbeSession(confirmFrames: 2, releaseFrames: 2);
+        session.Start();
+
+        ProbeContactClassifier.Detection tp = new(7, 120, "TP", FanIn: 20);
+        ManualProbeUpdate firstTp = session.Update(1, [tp], model, capacity);
+        Assert(firstTp.Transition == ManualProbeTransition.PointerCandidateChanged && session.ProbeIo == 0,
+            "First strong TP frame remains a candidate");
+        session.Update(1, [tp], model, capacity);
+        Assert(session.ProbeIo == 0, "Duplicate callback from the same frame cannot confirm TP");
+        ManualProbeUpdate confirmedTp = session.Update(2, [tp], model, capacity);
+        Assert(confirmedTp.Transition == ManualProbeTransition.PointerConfirmed &&
+               session.ProbeIo == 7 &&
+               session.Phase == ManualProbePhase.ConnectorCheck,
+            "Second distinct stable frame latches the free TP IO and enters connector check");
+
+        ProbeContactClassifier.Detection io1 = new(1, 100, "IO1", FanIn: 20, IsMapped: true);
+        ProbeContactClassifier.Detection io2 = new(2, 110, "IO2", FanIn: 20, IsMapped: true);
+        session.Update(3, [io1], model, capacity);
+        session.Update(4, [io1], model, capacity);
+        Assert(session.ContactIo == 1 && session.ProbeIo == 7,
+            "Stable connector contact is shown without replacing the latched TP");
+
+        session.Update(5, [io2, io1], model, capacity);
+        Assert(session.ContactIo == 1,
+            "A multi-target transition keeps the previous stable connector");
+        session.Update(6, [io2], model, capacity);
+        Assert(session.ContactIo == 1, "First frame on a new connector is only a candidate");
+        session.Update(7, [io2], model, capacity);
+        Assert(session.ContactIo == 2 && session.ProbeIo == 7,
+            "New connector replaces the old one only after stable confirmation");
+
+        session.Update(8, [], model, capacity);
+        Assert(session.ContactIo == 2, "First empty frame is release debounce");
+        session.Update(9, [], model, capacity);
+        Assert(session.ContactIo == 0 && session.ProbeIo == 7,
+            "Release clears connector contact but keeps TP latched");
+        session.Reset();
+        Assert(session.Phase == ManualProbePhase.Inactive && session.ProbeIo == 0,
+            "Session reset clears the TP latch");
+    }
+
+    private static void TestLegacyDatabaseWithoutSchemaInfo()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZLegacyDatabaseWithoutSchemaInfo",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        string backupPath = dbPath + $".pre-schema-v{TestHistoryStore.CurrentSchemaVersion}.backup";
+        try
+        {
+            Directory.CreateDirectory(root);
+            using (var legacy = new SqliteConnection($"Data Source={dbPath}"))
+            {
+                legacy.Open();
+                using SqliteCommand create = legacy.CreateCommand();
+                create.CommandText = "CREATE TABLE LegacyMarker(Value TEXT NOT NULL); " +
+                                     "INSERT INTO LegacyMarker(Value) VALUES ('KEEP');";
+                create.ExecuteNonQuery();
+            }
+
+            var store = new TestHistoryStore(dbPath);
+            Assert(store.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "Legacy database initializes the current relational schema");
+            Assert(File.Exists(backupPath),
+                "Legacy database is backed up before schema migration");
+
+            using var verify = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            verify.Open();
+            using SqliteCommand probe = verify.CreateCommand();
+            probe.CommandText = "SELECT " +
+                                "(SELECT COUNT(*) FROM SchemaInfo), " +
+                                "(SELECT COUNT(*) FROM LegacyMarker WHERE Value='KEEP');";
+            using SqliteDataReader reader = probe.ExecuteReader();
+            Assert(reader.Read() && reader.GetInt32(0) == 1 && reader.GetInt32(1) == 1,
+                "Schema initialization preserves tables from a database without SchemaInfo");
+            reader.Close();
+            verify.Close();
+
+            string v3Path = Path.Combine(root, "schema-v3.db");
+            var v3Store = new TestHistoryStore(v3Path);
+            v3Store.Add(new TestHistoryRecord
+            {
+                Started = new DateTime(2026, 9, 1, 8, 0, 0, DateTimeKind.Local),
+                Finished = new DateTime(2026, 9, 1, 8, 0, 1, DateTimeKind.Local),
+                PartNumber = "V3-PART",
+                ModelName = "V3-MODEL",
+                ModelFile = "V3.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "v3-existing-cycle"
+            });
+            SqliteConnection.ClearAllPools();
+            using (var downgrade = new SqliteConnection($"Data Source={v3Path};Pooling=False"))
+            {
+                downgrade.Open();
+                using SqliteCommand command = downgrade.CreateCommand();
+                command.CommandText = """
+                    DROP TABLE ActiveTestCycles;
+                    UPDATE SchemaInfo SET SchemaVersion=3 WHERE Id=1;
+                    """;
+                command.ExecuteNonQuery();
+            }
+
+            var migratedV3 = new TestHistoryStore(v3Path);
+            Assert(File.Exists(v3Path + $".pre-schema-v{TestHistoryStore.CurrentSchemaVersion}.backup"),
+                "Schema v3 database is backed up before v4 migration");
+            using var migratedVerify = new SqliteConnection($"Data Source={v3Path};Pooling=False");
+            migratedVerify.Open();
+            using SqliteCommand migratedProbe = migratedVerify.CreateCommand();
+            migratedProbe.CommandText = """
+                SELECT
+                    (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='ActiveTestCycles'),
+                    (SELECT COUNT(*) FROM Tests WHERE CycleId='v3-existing-cycle');
+                """;
+            using SqliteDataReader migratedReader = migratedProbe.ExecuteReader();
+            Assert(migratedReader.Read() && migratedReader.GetInt32(0) == 1 &&
+                   migratedReader.GetInt32(1) == 1 &&
+                   migratedV3.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "Schema v3 migration is idempotent and preserves existing test rows");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    private static void TestDatabaseSchemaV5()
+    {
+        Assert(TestHistoryStore.CurrentSchemaVersion >= 7,
+            "Production History schema support must never regress below v7");
+
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZDatabaseSchemaV5Tests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        try
+        {
+            Directory.CreateDirectory(root);
+            var initial = new TestHistoryStore(dbPath);
+            DateTime at = new(2026, 9, 7, 8, 0, 0, DateTimeKind.Local);
+
+            static ProductionResultCommitRequest Request(
+                string partNumber,
+                string cycleId,
+                DateTime at)
+            {
+                var model = new ProductModel
+                {
+                    PartNumber = partNumber,
+                    ProductName = partNumber,
+                    ModelName = "SHARED-HARNESS",
+                    SourcePath = @"C:\Models\shared.tht",
+                    SourceHash = new string('A', 64),
+                    SourceLength = 1234,
+                    SourceModifiedAt = at
+                };
+                var history = new TestHistoryRecord
+                {
+                    Started = at.AddSeconds(-1),
+                    TestStartedAt = at.AddMilliseconds(-500),
+                    ResultAt = at,
+                    Finished = at,
+                    PartName = partNumber,
+                    PartNumber = partNumber,
+                    ModelName = model.ModelName,
+                    ModelFile = model.SourcePath,
+                    Result = "PASS",
+                    Passed = true,
+                    CycleId = cycleId,
+                    InspectionType = HistoryInspectionType.Product,
+                    LabelPayload = new string('P', 4096)
+                };
+                return ProductionResultCommitRequest.Capture(
+                    history,
+                    model,
+                    new ProductionSettings(),
+                    [],
+                    [new ResistanceResult
+                    {
+                        Channel = 1,
+                        Name = "R1",
+                        ValueOhm = 100,
+                        MinOhm = 90,
+                        MaxOhm = 110,
+                        Passed = true,
+                        SampleCount = 3,
+                        StabilizationTimeMs = 5
+                    }],
+                    [new WaterProofChannelMeasurement(1, true, 84, 83.8, 0.2, true)],
+                    "SELF-TEST");
+            }
+
+            ProductionCommitResult first = initial.CommitResult(
+                Request("PART-M2M-A", "schema-v5-a", at),
+                null);
+            ProductionCommitResult second = initial.CommitResult(
+                Request("PART-M2M-B", "schema-v5-b", at.AddSeconds(1)),
+                null);
+            Assert(first.TestId > 0 && second.TestId > first.TestId,
+                "Two Parts using one harness both commit normally");
+
+            HistorySearchCriteria allHistory = new(
+                at.Date, at.Date.AddDays(1), null, string.Empty, "ALL", MaxRows: 1);
+            HistorySummary allSummary = initial.GetHistorySummary(allHistory);
+            HistorySummary partASummary = initial.GetHistorySummary(
+                allHistory with { PartKeyword = "PART-M2M-A" });
+            HistorySummary failSummary = initial.GetHistorySummary(
+                allHistory with { Result = "FAIL" });
+            IReadOnlyList<HistoryPartOption> historyParts = initial.GetHistoryPartOptions();
+            Assert(allSummary.Total == 2 && allSummary.ProductTotal == 2 &&
+                   allSummary.ProductPass == 2 && allSummary.ProductFail == 0 &&
+                   partASummary.Total == 1 && partASummary.ProductPass == 1 &&
+                   failSummary.Total == 0,
+                "History SQL summary uses the complete filtered dataset independently of page size");
+            Assert(historyParts.Count == 2 && historyParts[0].Keyword.Length == 0 &&
+                   historyParts.Any(item => item.Keyword == "shared.tht"),
+                "History ComboBox is populated from distinct saved THT filenames, not PartNumber");
+
+            IReadOnlyList<PartModelRelationSnapshot> partA = initial.GetModelsForPart("PN:PART-M2M-A");
+            IReadOnlyList<PartModelRelationSnapshot> partB = initial.GetModelsForPart("PN:PART-M2M-B");
+            Assert(partA.Count == 1 && partB.Count == 1 && partA[0].ModelId == partB[0].ModelId,
+                "PartModels resolves one physical model for multiple Parts");
+            Assert(initial.GetPartsForModel(partA[0].ModelId).Count == 2,
+                "Reverse PartModels index resolves both Parts for one model");
+
+            IReadOnlyList<TestHistoryRecord> firstPage = initial.SearchSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 1));
+            Assert(firstPage.Count == 1 && firstPage[0].LabelPayload.Length == 0,
+                "History summary omits large label payloads");
+            IReadOnlyList<TestHistoryRecord> allRows = initial.SearchAllSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 1));
+            Assert(allRows.Count == 2 && allRows.All(row => row.LabelPayload.Length == 0),
+                "History full summary returns every matching row without the UI page limit");
+            IReadOnlyList<TestHistoryRecord> secondPage = initial.SearchSummary(
+                new HistorySearchCriteria(
+                    null,
+                    null,
+                    null,
+                    string.Empty,
+                    "ALL",
+                    MaxRows: 1,
+                    BeforeHistoryAt: firstPage[0].EffectiveTestStartedAt,
+                    BeforeId: firstPage[0].Id));
+            Assert(secondPage.Count == 1 && secondPage[0].Id != firstPage[0].Id,
+                "History keyset cursor returns the next stable page without OFFSET");
+            Assert(firstPage.Count + secondPage.Count == allSummary.Total,
+                "Incremental keyset pages can reach the final matching row while summary remains global");
+
+            SqliteConnection.ClearAllPools();
+            using (var downgrade = new SqliteConnection($"Data Source={dbPath};Pooling=False"))
+            {
+                downgrade.Open();
+                using SqliteCommand command = downgrade.CreateCommand();
+                command.CommandText = """
+                    DROP TABLE PartModels;
+                    DROP INDEX IF EXISTS IX_Tests_ResultAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_Part_Inspection_ResultAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_ModelId_ResultAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_HistoryAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_Part_Inspection_HistoryAt_Id;
+                    DROP INDEX IF EXISTS IX_Tests_ProductBatch_HistoryAt_Id;
+                    DROP INDEX IF EXISTS IX_TestFaults_TestId_FaultOrder_Id;
+                    DROP INDEX IF EXISTS IX_ResistanceMeasurements_TestId;
+                    DROP INDEX IF EXISTS IX_WaterProofMeasurements_TestId;
+                    CREATE INDEX IF NOT EXISTS IX_Tests_ResultAt ON Tests(ResultAt DESC);
+                    CREATE INDEX IF NOT EXISTS IX_Tests_Part_ResultAt ON Tests(PartId,ResultAt DESC);
+                    CREATE INDEX IF NOT EXISTS IX_TestFaults_TestId ON TestFaults(TestId);
+                    ALTER TABLE Tests DROP COLUMN TestStartedAt;
+                    UPDATE SchemaInfo SET SchemaVersion=4 WHERE Id=1;
+                    """;
+                command.ExecuteNonQuery();
+            }
+
+            var migrated = new TestHistoryStore(dbPath);
+            var rerun = new TestHistoryStore(dbPath);
+            Assert(File.Exists(dbPath + $".pre-schema-v{TestHistoryStore.CurrentSchemaVersion}.backup"),
+                "Schema v4 is backed up before v7 migration");
+            Assert(migrated.SchemaVersion == TestHistoryStore.CurrentSchemaVersion &&
+                   rerun.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "Schema v7 migration is idempotent");
+            Assert(migrated.SearchSummary(new HistorySearchCriteria(
+                       null, null, null, "PART-M2M", "ALL", MaxRows: 10)).Count == 2,
+                "Migration adds TestStartedAt before creating History indexes and preserves legacy rows");
+            Assert(migrated.GetModelsForPart("PN:PART-M2M-A").Count == 1 &&
+                   migrated.Search(new HistorySearchCriteria(
+                       null, null, null, "PART-M2M", "ALL", MaxRows: 10)).Count == 2,
+                "v4 Tests remain readable and legacy Models.PartId backfills without inferred relations");
+
+            using var verify = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            verify.Open();
+            using SqliteCommand probe = verify.CreateCommand();
+            probe.CommandText = """
+                SELECT
+                    (SELECT COUNT(*) FROM PartModels),
+                    (SELECT COUNT(*) FROM (SELECT PartId,ModelId FROM PartModels GROUP BY PartId,ModelId HAVING COUNT(*)>1)),
+                    (SELECT COUNT(*) FROM Tests),
+                    (SELECT COUNT(*) FROM TestFaults),
+                    (SELECT COUNT(*) FROM ResistanceMeasurements),
+                    (SELECT COUNT(*) FROM WaterProofMeasurements),
+                    (SELECT COUNT(*) FROM TestFaults c LEFT JOIN Tests t ON t.Id=c.TestId WHERE t.Id IS NULL) +
+                    (SELECT COUNT(*) FROM ResistanceMeasurements c LEFT JOIN Tests t ON t.Id=c.TestId WHERE t.Id IS NULL) +
+                    (SELECT COUNT(*) FROM WaterProofMeasurements c LEFT JOIN Tests t ON t.Id=c.TestId WHERE t.Id IS NULL),
+                    (SELECT integrity_check FROM pragma_integrity_check LIMIT 1);
+                """;
+            using SqliteDataReader reader = probe.ExecuteReader();
+            Assert(reader.Read() && reader.GetInt32(0) == 1 && reader.GetInt32(1) == 0 &&
+                   reader.GetInt32(2) == 2 && reader.GetInt32(3) == 0 &&
+                   reader.GetInt32(4) == 2 && reader.GetInt32(5) == 2 &&
+                   reader.GetInt32(6) == 0 && reader.GetString(7) == "ok",
+                "v7 migration preserves Tests and child rows without orphans and integrity_check remains clean");
+            reader.Close();
+
+            string latestPlan = ExplainPlan(
+                verify,
+                "SELECT Id FROM Tests ORDER BY ResultAt DESC,Id DESC LIMIT 200;");
+            string partPlan = ExplainPlan(
+                verify,
+                "SELECT Id FROM Tests WHERE PartId=1 AND InspectionType='PRODUCT' ORDER BY ResultAt DESC,Id DESC LIMIT 200;");
+            string resistancePlan = ExplainPlan(
+                verify,
+                $"SELECT * FROM ResistanceMeasurements WHERE TestId={first.TestId};");
+            string waterproofPlan = ExplainPlan(
+                verify,
+                $"SELECT * FROM WaterProofMeasurements WHERE TestId={first.TestId};");
+            string reversePlan = ExplainPlan(
+                verify,
+                $"SELECT PartId FROM PartModels WHERE ModelId={partA[0].ModelId};");
+            Assert(latestPlan.Contains("IX_Tests_ResultAt_Id", StringComparison.Ordinal) &&
+                   partPlan.Contains("IX_Tests_Part_Inspection_ResultAt_Id", StringComparison.Ordinal) &&
+                   resistancePlan.Contains("IX_ResistanceMeasurements_TestId", StringComparison.Ordinal) &&
+                   waterproofPlan.Contains("IX_WaterProofMeasurements_TestId", StringComparison.Ordinal) &&
+                   reversePlan.Contains("IX_PartModels_ModelId_PartId", StringComparison.Ordinal),
+                "EXPLAIN QUERY PLAN selects every v5 workload index");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    private static string ExplainPlan(SqliteConnection connection, string sql)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "EXPLAIN QUERY PLAN " + sql;
+        using SqliteDataReader reader = command.ExecuteReader();
+        var details = new List<string>();
+        while (reader.Read())
+            details.Add(reader.GetString(3));
+        return string.Join(" | ", details);
+    }
+
+    private static void TestHistoryInitializationWaitsForWriter()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZHistoryInitializationLockTests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        try
+        {
+            Directory.CreateDirectory(root);
+            _ = new TestHistoryStore(dbPath);
+
+            using var writerStarted = new ManualResetEventSlim(false);
+            Task writer = Task.Run(() =>
+            {
+                using var connection = new SqliteConnection(
+                    $"Data Source={dbPath};Cache=Shared;Pooling=False;Default Timeout=5");
+                connection.Open();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "UPDATE SchemaInfo SET UpdatedAt=UpdatedAt WHERE Id=1;";
+                command.ExecuteNonQuery();
+                writerStarted.Set();
+                Thread.Sleep(250);
+                transaction.Commit();
+            });
+
+            Assert(writerStarted.Wait(TimeSpan.FromSeconds(5)),
+                "Concurrent SQLite writer entered its transaction");
+            var reopened = new TestHistoryStore(dbPath);
+            writer.GetAwaiter().GetResult();
+            Assert(reopened.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "History store opens after the active writer commits instead of throwing SQLITE_LOCKED");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    private static void TestHistoryInterruptedTransactionRecovery()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZHistoryInterruptedTransactionTests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        try
+        {
+            Directory.CreateDirectory(root);
+            _ = new TestHistoryStore(dbPath);
+
+            using (var connection = new SqliteConnection(
+                       $"Data Source={dbPath};Pooling=False;Default Timeout=2"))
+            {
+                connection.Open();
+                using (SqliteCommand seed = connection.CreateCommand())
+                {
+                    seed.CommandText =
+                        "CREATE TABLE IF NOT EXISTS PowerLossProbe(Id INTEGER PRIMARY KEY, Value TEXT NOT NULL);" +
+                        "INSERT OR REPLACE INTO PowerLossProbe(Id,Value) VALUES(1,'COMMITTED');";
+                    seed.ExecuteNonQuery();
+                }
+
+                using SqliteTransaction interrupted = connection.BeginTransaction();
+                using SqliteCommand update = connection.CreateCommand();
+                update.Transaction = interrupted;
+                update.CommandText = "UPDATE PowerLossProbe SET Value='UNCOMMITTED' WHERE Id=1;";
+                update.ExecuteNonQuery();
+                // Không Commit: mô phỏng transaction bị ngắt giữa chừng ở mức
+                // ứng dụng. Dispose phải rollback phần chưa durable.
+            }
+
+            var reopened = new TestHistoryStore(dbPath);
+            using var verify = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            verify.Open();
+            using SqliteCommand command = verify.CreateCommand();
+            command.CommandText =
+                "SELECT Value, (SELECT quick_check FROM pragma_quick_check LIMIT 1) " +
+                "FROM PowerLossProbe WHERE Id=1;";
+            using SqliteDataReader reader = command.ExecuteReader();
+            Assert(reader.Read() && reader.GetString(0) == "COMMITTED" && reader.GetString(1) == "ok",
+                "WAL reopens cleanly and discards only the interrupted transaction");
+            Assert(reopened.SchemaVersion == TestHistoryStore.CurrentSchemaVersion,
+                "Recovered production database keeps the current schema");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    private static void TestProductionPersistenceRetriesTransientLock()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "JBZProductionPersistenceRetryTests",
+            Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "JBZUniversalTester.db");
+        ProductionPersistenceService? persistence = null;
+        try
+        {
+            Directory.CreateDirectory(root);
+            var repository = new TestHistoryStore(dbPath);
+            persistence = new ProductionPersistenceService(
+                repository,
+                new ProductionSettings(),
+                "SELF-TEST");
+            persistence.Initialization.GetAwaiter().GetResult();
+
+            using var writerStarted = new ManualResetEventSlim(false);
+            Task writer = Task.Run(() =>
+            {
+                using var connection = new SqliteConnection(
+                    $"Data Source={dbPath};Pooling=False;Default Timeout=2");
+                connection.Open();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand command = connection.CreateCommand();
+                command.Transaction = transaction;
+                command.CommandText = "UPDATE SchemaInfo SET UpdatedAt=UpdatedAt WHERE Id=1;";
+                command.ExecuteNonQuery();
+                writerStarted.Set();
+                Thread.Sleep(2150);
+                transaction.Commit();
+            });
+
+            Assert(writerStarted.Wait(TimeSpan.FromSeconds(5)),
+                "Transient SQLite writer acquired the database lock");
+            var part = new PartIdentitySnapshot(
+                "PN:LOCK-RETRY",
+                "LOCK-RETRY",
+                "", "", "", "", "", "");
+            ProbeCounterSnapshot counter = persistence.IncrementProbeCounterAsync(part, 200000)
+                .GetAwaiter().GetResult();
+            writer.GetAwaiter().GetResult();
+            Assert(counter.Counter == 1 && string.IsNullOrEmpty(persistence.LastDatabaseError),
+                "Serialized writer retries BUSY and commits once after the transient lock clears");
+        }
+        finally
+        {
+            if (persistence is not null)
+                persistence.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, true);
+        }
+    }
+
+    private static void TestCanonicalRuntimePersistence()
+    {
+        Assert(Path.GetFileName(RuntimePaths.ConfigFile) == "JBZUniversalTester.cfg",
+            "Canonical config filename");
+        Assert(Path.GetFileName(RuntimePaths.PartCounterFile) == "PartCnt.txt",
+            "Canonical PartCnt filename");
+        Assert(Path.GetFileName(RuntimePaths.LogFile) == "JBZUniversalTester.log",
+            "Canonical log filename");
+        Assert(Path.GetFileName(RuntimePaths.DatabaseFile) == "JBZUniversalTester.db" &&
+               string.Equals(Path.GetFileName(Path.GetDirectoryName(RuntimePaths.DatabaseFile)), "Data", StringComparison.OrdinalIgnoreCase),
+            "Canonical database path");
+        Assert(Path.GetFileName(RuntimePaths.CrashReportFile) == "JBZUniversalTester.RPT" &&
+               string.Equals(Path.GetFileName(Path.GetDirectoryName(RuntimePaths.CrashReportFile)), "Crash", StringComparison.OrdinalIgnoreCase),
+            "Canonical lazy crash-report path");
+        Assert(RuntimePaths.PassRoot == @"C:\Pass" && RuntimePaths.ErrorRoot == @"C:\Error" &&
+               RuntimePaths.ItemDirectory == @"C:\ITEM",
+            "Canonical external ITEM/Pass/Error roots");
+
+        bool crashDirectoryExisted = Directory.Exists(RuntimePaths.CrashDirectory);
+        bool crashReportExisted = File.Exists(RuntimePaths.CrashReportFile);
+        if (!crashReportExisted)
+        {
+            CrashReportService.Write(
+                new InvalidOperationException("SIMULATED_CRASH_REPORT_TEST"),
+                "SELF-TEST",
+                "Model=TEST; Cycle=TEST-CYCLE");
+            string report = File.ReadAllText(RuntimePaths.CrashReportFile, Encoding.UTF8);
+            Assert(report.Contains("SIMULATED_CRASH_REPORT_TEST", StringComparison.Ordinal) &&
+                   report.Contains("Model=TEST; Cycle=TEST-CYCLE", StringComparison.Ordinal) &&
+                   report.Contains("AppVersion:", StringComparison.Ordinal),
+                "Crash RPT is created lazily with exception and runtime context");
+            File.Delete(RuntimePaths.CrashReportFile);
+
+            bool loggingWasEnabled = AsyncFileLogService.Current.FileLoggingEnabled;
+            AsyncFileLogService.Current.Configure(false);
+            CrashReportService.Write(
+                new IOException("FTDI D2XX board secret detail"),
+                "Hardware.DeviceFault.BoardStartup",
+                "BoardGeneration=7; transport=D2XX");
+            string operatorReport = File.ReadAllText(RuntimePaths.CrashReportFile, Encoding.UTF8);
+            Assert(operatorReport.Contains(TesterConnectionNotice.Message, StringComparison.Ordinal) &&
+                   !operatorReport.Contains("Hardware.DeviceFault", StringComparison.Ordinal) &&
+                   !operatorReport.Contains("FTDI", StringComparison.OrdinalIgnoreCase) &&
+                   !operatorReport.Contains("D2XX", StringComparison.OrdinalIgnoreCase) &&
+                   !operatorReport.Contains("Board", StringComparison.OrdinalIgnoreCase) &&
+                   !operatorReport.Contains("StackTrace", StringComparison.Ordinal),
+                "Device connection RPT hides code, transport, and board details while system logs are disabled");
+            File.Delete(RuntimePaths.CrashReportFile);
+            AsyncFileLogService.Current.Configure(loggingWasEnabled);
+            if (!crashDirectoryExisted && Directory.Exists(RuntimePaths.CrashDirectory) &&
+                !Directory.EnumerateFileSystemEntries(RuntimePaths.CrashDirectory).Any())
+            {
+                Directory.Delete(RuntimePaths.CrashDirectory);
+            }
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "JBZCanonicalPersistenceTests", Guid.NewGuid().ToString("N"));
+        string dbPath = Path.Combine(root, "Data", "JBZUniversalTester.db");
+        string counterPath = Path.Combine(root, "PartCnt.txt");
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(counterPath, "PART-A 50000 42\r\n", new UTF8Encoding(false));
+            var repository = new TestHistoryStore(dbPath);
+            var mirror = new PartCounterStore(counterPath);
+            Assert(repository.ImportPartCountersOnce(mirror.ReadAll(), counterPath) == 1,
+                "Existing PartCnt is imported only as initial migration input");
+            ProbeCounterSnapshot imported = repository.GetAllProbeCounters().Single();
+            Assert(imported.PartNumber == "PART-A" && imported.Counter == 42 && imported.ReplacementThreshold == 50000,
+                "SQLite receives initial PartCnt counter and threshold");
+
+            File.WriteAllText(counterPath, "PART-A 50000 999\r\n", new UTF8Encoding(false));
+            Assert(repository.ImportPartCountersOnce(mirror.ReadAll(), counterPath) == 0 &&
+                   repository.GetAllProbeCounters().Single().Counter == 42,
+                "Later PartCnt edits cannot overwrite authoritative SQLite state");
+
+            File.Delete(counterPath);
+            mirror.MirrorAll(repository.GetAllProbeCounters());
+            Assert(File.ReadAllText(counterPath, Encoding.UTF8) == "PART-A 50000 42\r\n",
+                "Missing PartCnt mirror is rebuilt from SQLite");
+            var pinPart = new PartIdentitySnapshot("PN:PART-A", "PART-A", "", "", "", "", "", "");
+            ProbeCounterSnapshot changedThreshold = repository.GetProbeCounter(pinPart, 150000);
+            Assert(changedThreshold.Counter == 42 && changedThreshold.ReplacementThreshold == 150000,
+                "Configured PIN threshold replaces the old per-part threshold without resetting the existing count");
+            ProbeCounterSnapshot incremented = repository.IncrementProbeCounter(pinPart, 150000);
+            Assert(incremented.Counter == 43 && incremented.ReplacementThreshold == 150000,
+                "Next product keeps the configured PIN threshold and increments only the existing counter");
+            using var pinConnection = new SqliteConnection($"Data Source={dbPath};Pooling=False");
+            pinConnection.Open();
+            using var pinIntegrity = pinConnection.CreateCommand();
+            pinIntegrity.CommandText = "PRAGMA integrity_check;";
+            Assert((string?)pinIntegrity.ExecuteScalar() == "ok", "PIN threshold update preserves SQLite integrity");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     private static void TestSystemLogMasterSwitch()
@@ -1399,9 +5339,11 @@ internal static class Program
             try
             {
                 logger.Configure(enabled: false, rootDirectory: logsRoot);
-                logger.Application("MUST_NOT_CREATE_LOG_DIRECTORY");
+                logger.Application("NORMAL_LIFECYCLE_RECORD");
+                Assert(!logger.FileLoggingEnabled && logger.Level == AppLogLevel.Normal,
+                    "Disabled system logging blocks the canonical runtime log");
                 Assert(!Directory.Exists(logsRoot),
-                    "Disabled system logging does not create Data/Logs");
+                    "Disabled system logging does not create a log directory");
 
                 logger.Configure(enabled: true);
                 Assert(logger.FileLoggingEnabled && logger.Level == AppLogLevel.ProtocolTrace,
@@ -1409,26 +5351,23 @@ internal static class Program
                 logger.Board("ENABLED_PROTOCOL_TRACE", AppLogLevel.ProtocolTrace);
 
                 logger.Configure(enabled: false);
-                logger.Error("MUST_NOT_BE_WRITTEN_AFTER_DISABLE");
+                logger.Error("NORMAL_ERROR_AFTER_DIAGNOSTIC_DISABLE");
+                Assert(!logger.FileLoggingEnabled,
+                    "Disabling system logging takes effect without restarting the application");
             }
             finally
             {
                 logger.Dispose();
             }
 
-            string boardLog = Directory.EnumerateFiles(
-                    Path.Combine(logsRoot, AppLogCategory.Board.ToString()),
-                    "*.log")
-                .Single();
-            Assert(File.ReadAllText(boardLog).Contains(
-                    "ENABLED_PROTOCOL_TRACE",
-                    StringComparison.Ordinal),
-                "Enabled system logging writes Board protocol trace");
-            Assert(!Directory.EnumerateFiles(
-                    Path.Combine(logsRoot, AppLogCategory.Error.ToString()),
-                    "*.log")
-                .Any(),
-                "Disabling the master switch stops subsequent Error log writes");
+            string[] logFiles = Directory.EnumerateFiles(logsRoot, "*.log").ToArray();
+            Assert(logFiles.Length == 1 && Path.GetFileName(logFiles[0]) == "JBZUniversalTester.log",
+                "Runtime writes one canonical main log instead of category/day files");
+            string logText = File.ReadAllText(logFiles[0]);
+            Assert(!logText.Contains("NORMAL_LIFECYCLE_RECORD", StringComparison.Ordinal) &&
+                   logText.Contains("ENABLED_PROTOCOL_TRACE", StringComparison.Ordinal) &&
+                   !logText.Contains("NORMAL_ERROR_AFTER_DIAGNOSTIC_DISABLE", StringComparison.Ordinal),
+                "Main log contains only records written while system logging is enabled");
 
             string historyPath = Path.Combine(root, "History", "test-history.db");
             var history = new TestHistoryStore(historyPath);
@@ -1477,26 +5416,245 @@ internal static class Program
 
     private static void TestBoardCapacity()
     {
+        var defaultSettings = new ProductionSettings();
+        Assert(
+            defaultSettings.ExpansionCardCount == 2 &&
+            defaultSettings.CardCount == 2 &&
+            BoardCapacity.FromSettings(defaultSettings).TotalIoCapacity == 128,
+            "A new station defaults to two expansion cards / 128 IO");
+
+        for (int cardCount = 1; cardCount <= 10; cardCount++)
+        {
+            BoardCapacity everyCapacity = BoardCapacity.Create(cardCount);
+            Assert(everyCapacity.ExpansionCardCount == cardCount &&
+                   everyCapacity.TotalIoCapacity == cardCount * 64 &&
+                   everyCapacity.StartScanParameter == cardCount,
+                $"Every selectable card count {cardCount} maps to {cardCount * 64} IO and START_SCAN={cardCount}");
+        }
+
         AssertCapacity(1, 2, 1, 64);
         AssertCapacity(2, 4, 2, 128);
+        AssertCapacity(3, 6, 3, 192);
+        AssertCapacity(4, 8, 4, 256);
         AssertCapacity(5, 10, 5, 320);
         AssertCapacity(10, 20, 10, 640);
 
         BoardCapacity capacity = BoardCapacity.Create(10);
         var mapper = new BoardAddressMapper(capacity);
-        Assert(mapper.GetCardAddress(1) == new BoardCardAddress(1, 1, 1, 1, 1), "IO1 mapping");
-        Assert(mapper.GetCardAddress(32).LocalIoNumber == 32, "IO32 local");
-        Assert(mapper.GetCardAddress(33).PhysicalCardNumber == 2, "IO33 card");
-        Assert(mapper.GetCardAddress(64).LocalIoNumber == 32, "IO64 local");
-        Assert(mapper.GetCardAddress(65).PhysicalCardNumber == 3, "IO65 card");
+        AssertAddress(mapper, 1, 1, 1, 1);
+        AssertAddress(mapper, 32, 1, 1, 32);
+        AssertAddress(mapper, 33, 1, 2, 1);
+        AssertAddress(mapper, 64, 1, 2, 32);
+        AssertAddress(mapper, 65, 2, 1, 1);
+        AssertAddress(mapper, 96, 2, 1, 32);
+        AssertAddress(mapper, 97, 2, 2, 1);
+        AssertAddress(mapper, 128, 2, 2, 32);
+        AssertAddress(mapper, 129, 3, 1, 1);
+        AssertAddress(mapper, 160, 3, 1, 32);
+        AssertAddress(mapper, 161, 3, 2, 1);
+        AssertAddress(mapper, 192, 3, 2, 32);
+        AssertAddress(mapper, 193, 4, 1, 1);
+        AssertAddress(mapper, 224, 4, 1, 32);
+        AssertAddress(mapper, 225, 4, 2, 1);
+        AssertAddress(mapper, 256, 4, 2, 32);
+        AssertAddress(mapper, 577, 10, 1, 1);
+        AssertAddress(mapper, 608, 10, 1, 32);
+        AssertAddress(mapper, 609, 10, 2, 1);
+        AssertAddress(mapper, 640, 10, 2, 32);
         Assert(capacity.ContainsGlobalIo(640), "IO640 accepted");
         Assert(!capacity.ContainsGlobalIo(641), "IO641 rejected");
+
+        (int MaxIo, int RequiredCards, long RequiredIo)[] requiredCases =
+        [
+            (1, 1, 64),
+            (64, 1, 64),
+            (65, 2, 128),
+            (128, 2, 128),
+            (129, 3, 192),
+            (192, 3, 192),
+            (193, 4, 256),
+            (201, 4, 256),
+            (256, 4, 256),
+            (257, 5, 320),
+            (640, 10, 640)
+        ];
+        foreach ((int maxIo, int requiredCards, long requiredIo) in requiredCases)
+        {
+            BoardScanCapacity requiredCapacity = BoardScanCapacity.Create(
+                new ProductionSettings { ExpansionCardCount = 10 },
+                maxIo);
+            Assert(requiredCapacity.RequiredScanUnits == requiredCards &&
+                   requiredCapacity.RequiredIoCapacity == requiredIo,
+                $"MaxIO {maxIo} requires {requiredCards} card / {requiredIo} IO");
+        }
+
+        BoardScanCapacity insufficient = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 3 },
+            201);
+        Assert(!insufficient.IsModelWithinInstalledCapacity &&
+               insufficient.Installed.TotalIoCapacity == 192 &&
+               insufficient.RequiredScanUnits == 4 &&
+               insufficient.RequiredIoCapacity == 256 &&
+               insufficient.CapacityErrorMessage.Contains("192 / 256 IO", StringComparison.Ordinal),
+            "Configured 3 / MaxIO 201 blocks Production and warns 192 / 256 IO");
+
+        BoardScanCapacity configured4 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 4 },
+            201);
+        Assert(configured4.IsModelWithinInstalledCapacity &&
+               configured4.RequiredScanUnits == 4 &&
+               configured4.StartScanParameter == 4,
+            "Configured 4 / MaxIO 201 is valid and keeps START_SCAN=4");
+
+        BoardScanCapacity configured10Model201 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            201);
+        Assert(configured10Model201.IsModelWithinInstalledCapacity &&
+               configured10Model201.RequiredScanUnits == 4 &&
+               configured10Model201.InstalledScanUnits == 10 &&
+               configured10Model201.ActiveScanUnits == 4 &&
+               configured10Model201.StartScanParameter == 4 &&
+               configured10Model201.ActiveIoCapacity == 256,
+            "Installed 10 / MaxIO 201 keeps installed capacity but scans only the four required cards");
+
+        BoardScanCapacity configured10Model512 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            512);
+        Assert(configured10Model512.IsModelWithinInstalledCapacity &&
+               configured10Model512.RequiredScanUnits == 8 &&
+               configured10Model512.InstalledScanUnits == 10 &&
+               configured10Model512.ActiveScanUnits == 8 &&
+               configured10Model512.StartScanParameter == 8,
+            "Installed 10 / MaxIO 512 scans only the eight required cards");
+
+        BoardScanCapacity configured10Model37 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            37);
+        Assert(configured10Model37.IsModelWithinInstalledCapacity &&
+               configured10Model37.InstalledScanUnits == 10 &&
+               configured10Model37.RequiredScanUnits == 1 &&
+               configured10Model37.ActiveScanUnits == 2 &&
+               configured10Model37.StartScanParameter == 2 &&
+               configured10Model37.ActiveIoCapacity == 128,
+            "Htdrv3 trace parity: installed 10 / MaxIO 37 sends START_SCAN=2 instead of scanning all 640 IO");
+
+        BoardScanCapacity configured10WithoutModel = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            0);
+        Assert(configured10WithoutModel.ActiveScanUnits == 10 &&
+               configured10WithoutModel.StartScanParameter == 10 &&
+               configured10WithoutModel.ActiveIoCapacity == 640,
+            "Startup without a model and blank-THT IO mapping still scan every installed card");
+
+        BoardScanCapacity overLimit = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            641);
+        Assert(!overLimit.IsModelWithinInstalledCapacity &&
+               overLimit.RequiredScanUnits == 11 &&
+               overLimit.CapacityErrorMessage.Contains("vượt giới hạn 640 IO", StringComparison.Ordinal),
+            "MaxIO 641 is rejected as beyond the 10-card/640-IO hardware limit");
+
+        BoardScanCapacity tenCardModel = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            640);
+        Assert(tenCardModel.IsModelWithinInstalledCapacity &&
+               tenCardModel.RequiredScanUnits == 10 &&
+               tenCardModel.ActiveScanUnits == 10 &&
+               tenCardModel.ActiveIoCapacity == 640 &&
+               tenCardModel.StartScanParameter == 10,
+            "A valid IO640 model fits exactly in ten cards without a capacity warning");
+
+        var offsetStart = new ProductionSettings
+        {
+            ExpansionCardCount = 4,
+            StartCardNumber = 3
+        };
+        BoardCapacity offsetCapacity = BoardCapacity.FromSettings(offsetStart);
+        Assert(offsetCapacity.FirstGlobalIo == 1 && offsetCapacity.LastGlobalIo == 256 &&
+               offsetCapacity.TotalIoCapacity == 256 && offsetCapacity.StartCardNumber == 3 &&
+               offsetCapacity.ScanCardCount == 6 && offsetCapacity.StartScanParameter == 6 &&
+               offsetCapacity.FirstPhysicalIo == 129 && offsetCapacity.LastPhysicalIo == 384,
+            "StartCard=3 keeps logical IO1-256 and scans the physical card 3-6 range");
+
+        var offsetMapper = new BoardAddressMapper(offsetCapacity);
+        AssertAddress(offsetMapper, 1, 3, 1, 1);
+        AssertAddress(offsetMapper, 256, 6, 2, 32);
+        Assert(!offsetMapper.TryDecode(0x80, BoardIoDecoder.SourceBase, 127, out _) &&
+               offsetMapper.TryDecode(0x81, BoardIoDecoder.SourceBase, 0, out int firstOffsetIo) &&
+               firstOffsetIo == 1 &&
+               offsetMapper.TryDecode(0x82, BoardIoDecoder.SourceBase, 127, out int lastOffsetIo) &&
+               lastOffsetIo == 256,
+            "Decoder ignores cards before Start Card and maps the selected physical range to logical IO1-N");
+
+        BoardScanCapacity offsetModel = BoardScanCapacity.Create(offsetStart, 201);
+        BoardScanCapacity offsetSmallModel = BoardScanCapacity.Create(offsetStart, 37);
+        BoardScanCapacity offsetTooLarge = BoardScanCapacity.Create(offsetStart, 257);
+        Assert(offsetModel.IsModelWithinInstalledCapacity &&
+               offsetModel.Active.ExpansionCardCount == 4 &&
+               offsetModel.StartScanParameter == 6 &&
+               offsetSmallModel.IsModelWithinInstalledCapacity &&
+               offsetSmallModel.Active.ExpansionCardCount == 2 &&
+               offsetSmallModel.StartScanParameter == 4 &&
+               offsetSmallModel.ActiveIoCapacity == 128 &&
+               !offsetTooLarge.IsModelWithinInstalledCapacity,
+            "Start Card does not let a model exceed the configured logical card count");
+
+        string settingsXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "ProductionSettingsPage.xaml"));
+        Assert(settingsXaml.Contains("Settings.ExpansionCardCount", StringComparison.Ordinal) &&
+               settingsXaml.Contains("x:Name=\"TotalIoCapacityText\"", StringComparison.Ordinal) &&
+               settingsXaml.Contains("Settings.StartCardNumber", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.PhysicalCardCount", StringComparison.Ordinal) &&
+               !settingsXaml.Contains("Settings.PortCount", StringComparison.Ordinal),
+            "Production Settings exposes Start Card, ExpansionCardCount and read-only Total IO");
+
+        string cfgPath = Path.Combine(Path.GetTempPath(), $"jbz-card-capacity-{Guid.NewGuid():N}.cfg");
+        try
+        {
+            ProductionConfigService.SaveLegacyCfg(offsetStart, cfgPath);
+            string cfg = File.ReadAllText(cfgPath);
+            Assert(offsetStart.StartCardNumber == 3 && offsetStart.CardCount == 6 &&
+                    cfg.Contains("[StartCardNumber]3", StringComparison.Ordinal) &&
+                    cfg.Contains("[ExpansionCardCount]4", StringComparison.Ordinal) &&
+                    !cfg.Contains("[CardCount]", StringComparison.Ordinal) &&
+                    ProductionConfigService.LoadSavedSettings(cfgPath).CardCount == 6,
+                "Compact CFG persists Start Card and logical count, deriving firmware scan-through on reload");
+            Assert(!cfg.Contains("[Version]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[BoardMode]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[UseTestPointer]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[ManualModeEnabled]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[AutoMasterSequence]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[SettingsPassword]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[DiscardPassword]", StringComparison.OrdinalIgnoreCase) &&
+                   !cfg.Contains("[App.", StringComparison.OrdinalIgnoreCase),
+                "Operator CFG excludes internal board/code settings and password material");
+        }
+        finally
+        {
+            if (File.Exists(cfgPath))
+                File.Delete(cfgPath);
+        }
+    }
+
+    private static void AssertAddress(
+        BoardAddressMapper mapper,
+        int globalIo,
+        int expansionCard,
+        int port,
+        int localIo)
+    {
+        BoardCardAddress address = mapper.GetCardAddress(globalIo);
+        Assert(address.GlobalIoNumber == globalIo &&
+               address.ExpansionCardNumber == expansionCard &&
+               address.PortNumber == port &&
+               address.LocalIoOnPort == localIo,
+            $"IO{globalIo} => expansion card {expansionCard} / port {port} / local {localIo}");
     }
 
     private static void AssertCapacity(int expansion, int physical, int scan, int io)
     {
         BoardCapacity capacity = BoardCapacity.Create(expansion);
-        Assert(capacity.PhysicalCardCount == physical, $"Expansion {expansion}: physical");
+        Assert(capacity.PortCount == physical, $"Expansion {expansion}: internal port count");
         Assert(capacity.ScanCardCount == scan, $"Expansion {expansion}: scan");
         Assert(capacity.TotalIoCapacity == io, $"Expansion {expansion}: IO");
     }
@@ -1504,42 +5662,175 @@ internal static class Program
     private static void TestDecoderModes()
     {
         var decoder = new BoardIoDecoder();
-        decoder.ConfigureCapacity(BoardCapacity.Create(2));
+        decoder.ConfigureCapacity(BoardCapacity.Create(1));
         decoder.ConfigureMode(BoardScanMode.Production);
-        ScanFrame production = decoder.Feed([0x80, 0x00, 0xA0, 0x11, 0xC0, 0x00]).Single();
+        byte[] smallRaw = BuildProductionScanFrame(1, 0x00, (1, 18));
+        ScanFrame production = decoder.Feed(smallRaw).Single(frame => frame.Complete);
         Assert(production.Complete && production.Mode == BoardScanMode.Production, "Production complete");
         Assert(production.Connections.TryGetValue(1, out IReadOnlySet<int>? targets) && targets.SetEquals([18]), "IO1->IO18");
+        Assert(production.SourceCount == 64 && production.ExpectedIoCount == 64 &&
+               production.EndMarkerCode == 0x00 && production.UnknownBytes == 0,
+            "Small production frame has strict coverage and C0 00 metadata");
 
         decoder.Reset();
-        Assert(decoder.Feed([0x80]).Count == 0, "Partial source byte is buffered");
-        ScanFrame splitFrame = decoder.Feed([0x00, 0xA0, 0x11, 0xC0, 0x00]).Single();
+        var replacementRaw = BuildProductionScanFrame(1, 0x00, (1, 2)).ToList();
+        replacementRaw.RemoveRange(4, 2); // Bo thật có thể phát A0 01 thay cho source 80 01.
+        ScanFrame targetReplacement = decoder.Feed(replacementRaw.ToArray()).Single(frame => frame.Complete);
+        Assert(targetReplacement.Complete &&
+               targetReplacement.SourceCount == 63 &&
+               targetReplacement.ActiveIo.SetEquals([2]) &&
+               targetReplacement.Connections.TryGetValue(1, out IReadOnlySet<int>? replacementTargets) &&
+               replacementTargets.SetEquals([2]),
+            "Target word replacing its own source still provides complete production coverage");
+        using (TestEngine replacementEngine = CreateEngine(out _))
+        {
+            replacementEngine.SetModel(Model(("NAM", new[] { 1, 2 })));
+            replacementEngine.ProcessFrame(targetReplacement);
+            Assert(replacementEngine.ContinuityPassed,
+                "Source-replacement frame reaches TestEngine and passes the NAM IO1-IO2 network");
+        }
+
+        decoder.Reset();
+        Assert(decoder.Feed(smallRaw.AsSpan(0, smallRaw.Length - 1)).All(frame => !frame.Complete),
+            "Partial terminator is buffered");
+        ScanFrame splitFrame = decoder.Feed(smallRaw.AsSpan(smallRaw.Length - 1)).Single(frame => frame.Complete);
         Assert(splitFrame.Connections.TryGetValue(1, out IReadOnlySet<int>? splitTargets) &&
-               splitTargets.SetEquals([18]), "Frame split across reads is reconstructed");
+               splitTargets.SetEquals([18]) && splitFrame.Complete,
+            "Frame split across reads is reconstructed");
 
         decoder.Reset();
-        IReadOnlyList<ScanFrame> multiple = decoder.Feed([
-            0x80, 0x00, 0xA0, 0x11, 0xC0, 0x00,
-            0x80, 0x01, 0xA0, 0x07, 0xC0, 0x00
-        ]);
+        byte[] secondRaw = BuildProductionScanFrame(1, 0x00, (2, 8));
+        IReadOnlyList<ScanFrame> multiple = decoder.Feed(smallRaw.Concat(secondRaw).ToArray())
+            .Where(frame => frame.Complete)
+            .ToArray();
         Assert(multiple.Count == 2 &&
                multiple[0].Connections[1].SetEquals([18]) &&
                multiple[1].Connections[2].SetEquals([8]),
             "Multiple complete frames in one read are decoded");
 
         decoder.Reset();
-        Assert(decoder.Feed([0x80, 0x00, 0xA0, 0x11]).Count == 0, "Incomplete frame does not publish");
-        ScanFrame completedAfterTail = decoder.Feed([0xC0, 0x00]).Single();
-        Assert(completedAfterTail.Connections[1].SetEquals([18]), "Incomplete frame completes after tail read");
+        byte[] partialLarge = BuildProductionScanFrame(10, 0x01)
+            .Take(300 * 2)
+            .Concat(new byte[] { 0xC0, 0x01 })
+            .ToArray();
+        decoder.ConfigureCapacity(BoardCapacity.Create(10));
+        ScanFrame incomplete = decoder.Feed(partialLarge).Single();
+        Assert(!incomplete.Complete && incomplete.SourceCount == 300 &&
+               incomplete.ExpectedIoCount == 640 && incomplete.EndMarkerCode == 0x01,
+            "Partial 300/640 frame is diagnostic incomplete and cannot ARM");
 
         decoder.Reset();
-        ScanFrame resynced = decoder.Feed([0x55, 0x80, 0x00, 0xA0, 0x11, 0xC0, 0x00]).Single();
-        Assert(resynced.UnknownBytes == 1 &&
-               resynced.Connections[1].SetEquals([18]), "Unknown byte is skipped and decoder resyncs");
+        byte[] largeRaw = BuildProductionScanFrame(10, 0x01);
+        ScanFrame large = decoder.Feed(largeRaw).Single();
+        Assert(large.Complete && large.SourceCount == 640 && large.ExpectedIoCount == 640 &&
+               large.EndMarkerCode == 0x01 && large.UnknownBytes == 0,
+            "Ten-card 640-source frame accepts C0 01 without unknown bytes");
+        Assert(large.Connections.Values.All(targets => targets.Count == 0) &&
+               ReferenceEquals(large.Connections[1], large.Connections[640]),
+            "Empty source targets share one immutable set instead of allocating 640 empty HashSets per frame");
+
+        decoder.Reset();
+        Assert(decoder.Feed(largeRaw.AsSpan(0, largeRaw.Length - 1)).Count == 0,
+            "Large C0 byte remains buffered across RX boundary");
+        ScanFrame splitLarge = decoder.Feed([0x01]).Single();
+        Assert(splitLarge.Complete && splitLarge.EndMarkerCode == 0x01,
+            "Split C0/01 terminator is recognized");
+
+        decoder.Reset();
+        byte[] unknownEnd = BuildProductionScanFrame(8, 0x02);
+        ScanFrame unknownTerminator = decoder.Feed(unknownEnd).Single();
+        Assert(!unknownTerminator.Complete && !unknownTerminator.TerminatorKnown &&
+               unknownTerminator.EndMarkerCode == 0x02,
+            "C0 02 is diagnostic only, not guessed as a valid terminator");
+
+        BoardScanCapacity configured10Required8 = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            512);
+        Assert(configured10Required8.InstalledScanUnits == 10 &&
+               configured10Required8.RequiredScanUnits == 8 &&
+               configured10Required8.ActiveScanUnits == 8 &&
+               configured10Required8.StartScanParameter == 8 &&
+               configured10Required8.ActiveIoCapacity == 512 &&
+               configured10Required8.IsModelWithinInstalledCapacity,
+            "Installed 10 / required 8 keeps installed capacity but scans active 8");
+
+        BoardScanCapacity probeAllInstalled = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 2, UseTestPointer = true },
+            maxGlobalIo: 18,
+            scanAllInstalledIo: true);
+        Assert(probeAllInstalled.InstalledScanUnits == 2 &&
+               probeAllInstalled.ActiveScanUnits == 2 &&
+               probeAllInstalled.ActiveIoCapacity == 128 &&
+               probeAllInstalled.IsModelWithinInstalledCapacity,
+            "Test pointer scans all configured IO: a two-card station exposes IO1-128 regardless of THT MaxIo");
+
+        BoardScanCapacity insufficient = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 4 },
+            512);
+        Assert(insufficient.InstalledScanUnits == 4 && insufficient.RequiredScanUnits == 8 &&
+               !insufficient.IsModelWithinInstalledCapacity,
+            "Installed 4 / required 8 is an explicit capacity mismatch");
 
         Assert(BoardCapacity.Create(2).StartScanParameter == 2 &&
                BoardCapacity.Create(4).StartScanParameter == 4,
             "START_SCAN parameter follows BoardCapacity, not a hard-coded 02");
 
+        decoder.ConfigureCapacity(BoardCapacity.Create(4, 3));
+        decoder.ConfigureMode(BoardScanMode.Production);
+        ScanFrame offsetFrame = decoder.Feed(
+            BuildProductionScanFrame(6, 0x01, (129, 130))).Single(frame => frame.Complete);
+        Assert(offsetFrame.Complete && offsetFrame.SourceCount == 256 &&
+               offsetFrame.ExpectedIoCount == 256 &&
+               offsetFrame.Connections.TryGetValue(1, out IReadOnlySet<int>? offsetTargets) &&
+               offsetTargets.SetEquals([2]),
+            "StartCard=3 discards physical cards 1-2 and exposes physical IO129 as logical IO1");
+
+        var confirmationSettings = new ProductionSettings { IoConfirm1 = 2, IoConfirmN = 3 };
+        var confirmationTransport = new D2xxBoardTransport(string.Empty, confirmationSettings);
+        MethodInfo shouldPublish = typeof(D2xxBoardTransport).GetMethod(
+            "ShouldPublishConfirmedFrame",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ShouldPublishConfirmedFrame method not found.");
+        bool Confirm(ScanFrame frame) => (bool)(shouldPublish.Invoke(confirmationTransport, [frame]) ?? false);
+        ScanFrame stableA = FrameSeq(1, (1, [2]));
+        ScanFrame stableB = FrameSeq(2, (1, [3]));
+        Assert(!Confirm(stableA) && !Confirm(stableB) && Confirm(stableB),
+            "IO Confirm 1/2 resets when the complete logical snapshot changes");
+        ScanFrame stableC = FrameSeq(3, (1, [4]));
+        Assert(!Confirm(stableC) && !Confirm(stableC) && Confirm(stableC),
+            "IO Confirm N=3 requires three consecutive matching snapshots after first confirmation");
+        confirmationTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        var singleConfirmTransport = new D2xxBoardTransport(
+            string.Empty,
+            new ProductionSettings { IoConfirm1 = 1, IoConfirmN = 1 });
+        MethodInfo singleShouldPublish = typeof(D2xxBoardTransport).GetMethod(
+            "ShouldPublishConfirmedFrame",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ShouldPublishConfirmedFrame method not found.");
+        bool ConfirmSingle(ScanFrame frame) =>
+            (bool)(singleShouldPublish.Invoke(singleConfirmTransport, [frame]) ?? false);
+        Assert(ConfirmSingle(FrameSeq(4, (1, [2]))) &&
+               ConfirmSingle(FrameSeq(5, (1, [3]))),
+            "IO Confirm=1 publishes every complete state immediately without requiring a repeated snapshot");
+        singleConfirmTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        var orderTransport = new D2xxBoardTransport(
+            string.Empty,
+            new ProductionSettings { IoConfirm1 = 2, IoConfirmN = 2 });
+        MethodInfo orderShouldPublish = typeof(D2xxBoardTransport).GetMethod(
+            "ShouldPublishConfirmedFrame",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("ShouldPublishConfirmedFrame method not found.");
+        bool ConfirmOrder(ScanFrame frame) =>
+            (bool)(orderShouldPublish.Invoke(orderTransport, [frame]) ?? false);
+        ScanFrame orderA = FrameSeq(10, (1, [2, 3]), (4, [5]));
+        ScanFrame orderB = FrameSeq(11, (4, [5]), (1, [3, 2]));
+        Assert(!ConfirmOrder(orderA) && ConfirmOrder(orderB),
+            "Stable-frame confirmation compares exact logical sets without depending on dictionary/target order");
+        orderTransport.DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        decoder.ConfigureCapacity(BoardCapacity.Create(4));
         decoder.ConfigureMode(BoardScanMode.Probe);
         ScanFrame touch5 = decoder.Feed([0xA0, 0x04]).Single();
         Assert(touch5.Mode == BoardScanMode.Probe && touch5.ActiveIo.SetEquals([5]), "Probe touch IO5");
@@ -1550,8 +5841,221 @@ internal static class Program
 
         // ConfigureMode phải reset source còn dở của decoder trước đó.
         decoder.ConfigureMode(BoardScanMode.Production);
-        ScanFrame noStaleSource = decoder.Feed([0xA0, 0x11, 0xC0, 0x00]).Single();
-        Assert(noStaleSource.Connections.Count == 0, "No stale source after mode switch");
+        decoder.ConfigureCapacity(BoardCapacity.Create(1));
+        ScanFrame noStaleSource = decoder.Feed(BuildProductionScanFrame(1, 0x00)).Single();
+        Assert(noStaleSource.Connections.Values.All(targetsAfterSwitch => targetsAfterSwitch.Count == 0),
+            "No stale source/target edge after mode switch");
+
+        decoder.ConfigureCapacity(BoardCapacity.Create(3));
+        _ = decoder.Feed(BuildProductionScanFrame(3, 0x00).AsSpan(0, 200));
+        decoder.ConfigureCapacity(BoardCapacity.Create(10));
+        ScanFrame afterCapacityChange = decoder.Feed(BuildProductionScanFrame(10, 0x01)).Single();
+        Assert(afterCapacityChange.Complete &&
+               afterCapacityChange.SourceCount == 640 &&
+               afterCapacityChange.ExpectedIoCount == 640 &&
+               afterCapacityChange.Sequence == 1,
+            "Changing 3 -> 10 cards discards old partial data and resets frame sequence");
+    }
+
+    private static void TestTenCardCompleteFrameStress()
+    {
+        var decoder = new BoardIoDecoder();
+        decoder.ConfigureCapacity(BoardCapacity.Create(10));
+        decoder.ConfigureMode(BoardScanMode.Production);
+        byte[] raw = BuildProductionScanFrame(10, 0x01);
+
+        using TestEngine engine = CreateEngine(out FakeBoard board);
+        engine.SetModel(Model(("PAIR", new[] { 1, 18 })));
+        int changed = 0;
+        engine.Changed += (_, _) => changed++;
+
+        var supervisor = new ScanSupervisor(board, _ => { });
+        bool restarted = supervisor.EnsureProductionScanAsync(640, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+
+        const int frameCount = 500;
+        int changedAfterConfirmation = 0;
+        long retainedBefore = GC.GetTotalMemory(forceFullCollection: true);
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        var stopwatch = Stopwatch.StartNew();
+        for (int index = 0; index < frameCount; index++)
+        {
+            ScanFrame frame = decoder.Feed(raw).Single();
+            board.Publish(frame);
+            engine.ProcessFrame(frame);
+            if (index == 1)
+                changedAfterConfirmation = changed;
+        }
+        stopwatch.Stop();
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        long retainedAfter = GC.GetTotalMemory(forceFullCollection: true);
+        int startCount = board.Commands.Count(command => command == "START");
+        int stopCount = board.Commands.Count(command => command == "STOP");
+
+        Assert(!restarted && startCount == 0 && stopCount == 0,
+            "Ten-card stress reuses the healthy configured stream without repeated START/STOP");
+        Assert(board.CompleteFramesReceived == frameCount &&
+               engine.FramesProcessed == frameCount,
+            "Ten-card stress processes all 500 complete 640-IO frames");
+        Assert(changedAfterConfirmation == 1 && changed == changedAfterConfirmation,
+            "A never-present empty product emits only the initial snapshot; identical empty frames cannot manufacture ProductRemoved UI events");
+        Assert(retainedAfter <= retainedBefore + (32L * 1024 * 1024),
+            $"Ten-card stress retained memory stays bounded ({retainedBefore} -> {retainedAfter})");
+        Console.WriteLine(
+            $"10-CARD STRESS: frames={frameCount} elapsedMs={stopwatch.ElapsedMilliseconds} " +
+            $"allocated={allocated:N0} changed={changed} START={startCount} STOP={stopCount}");
+    }
+
+    private static void TestProductionProbePreview()
+    {
+        var decoder = new BoardIoDecoder();
+        decoder.ConfigureCapacity(BoardCapacity.Create(4));
+        decoder.ConfigureMode(BoardScanMode.Production);
+
+        var raw = new List<byte>();
+        for (int source = 1; source <= 24; source++)
+        {
+            int sourceZeroBased = source - 1;
+            raw.Add(checked((byte)(BoardIoDecoder.SourceBase + sourceZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            raw.Add(checked((byte)(sourceZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+            int targetZeroBased = 198 - 1;
+            raw.Add(checked((byte)(BoardIoDecoder.TargetBase + targetZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            raw.Add(checked((byte)(targetZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+        }
+
+        IReadOnlyList<ScanFrame> frames = decoder.Feed(raw.ToArray());
+        IReadOnlyList<ProductionProbePreview> previews = decoder.DrainProductionProbePreviews();
+        Assert(frames.All(frame => !frame.Complete) &&
+               previews.Count == 1 &&
+               previews[0].ActiveIo.SequenceEqual([198]) &&
+               previews[0].RequiredHitCount == 12 &&
+               previews[0].PeakHitCount == 12,
+            "Strong Production probe contact is previewed before C0 without creating a partial ScanFrame");
+
+        var singleReadDecoder = new BoardIoDecoder();
+        singleReadDecoder.ConfigureCapacity(BoardCapacity.Create(4));
+        singleReadDecoder.ConfigureMode(BoardScanMode.Production);
+        var completeRaw = new List<byte>(raw);
+        for (int source = 25; source <= 256; source++)
+        {
+            int sourceZeroBased = source - 1;
+            completeRaw.Add(checked((byte)(BoardIoDecoder.SourceBase + sourceZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            completeRaw.Add(checked((byte)(sourceZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+        }
+        completeRaw.Add(BoardIoDecoder.WordEnd1);
+        completeRaw.Add(0x00);
+        Assert(singleReadDecoder.Feed(completeRaw.ToArray()).Single(frame => frame.Complete).Complete &&
+               singleReadDecoder.DrainProductionProbePreviews().Count == 1,
+            "Early Probe preview survives when TARGET threshold and C0 arrive in the same FT_Read batch");
+
+        var singleTargetDecoder = new BoardIoDecoder();
+        singleTargetDecoder.ConfigureCapacity(BoardCapacity.Create(4));
+        singleTargetDecoder.ConfigureMode(BoardScanMode.Production);
+        _ = singleTargetDecoder.Feed([BoardIoDecoder.SourceBase, 0, BoardIoDecoder.TargetBase, 11]);
+        Assert(singleTargetDecoder.DrainProductionProbePreviews().Count == 0,
+            "One ordinary TARGET word cannot become an early Probe/GND false positive");
+
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            ProductSettleTimeMs = 10_000,
+            WrongConnectionConfirmMs = 0,
+            ShortCircuitConfirmMs = 0
+        };
+        TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
+        vm.SetModel(Model(("PAIR", new[] { 1, 86 })));
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        long processedBefore = vm.ProductionFramesProcessed;
+        int commandsBefore = board.Commands.Count;
+        board.PublishProbePreview(previews[0] with { ScanGeneration = 1 });
+        Assert(vm.HasInlineProbeContacts &&
+               vm.Faults.Count(row => row.Kind == FaultKind.Probe && row.Io == 198) == 1 &&
+               vm.ProductionFramesProcessed == processedBefore &&
+               board.Commands.Count == commandsBefore,
+            "Early Probe preview renders candidate UI immediately without changing TestEngine, counters, or relay; " +
+            $"active={vm.HasInlineProbeContacts}, rows={string.Join("|", vm.Faults.Select(row => $"{row.Kind}:IO{row.Io}"))}, " +
+            $"processed={processedBefore}->{vm.ProductionFramesProcessed}, " +
+            $"commands={commandsBefore}->{board.Commands.Count}");
+
+        TestEngine previewEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? throw new InvalidOperationException("Preview engine not found"));
+        long engineFramesBeforeCandidate = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 50, ScanGeneration: 1));
+        board.Publish(FrameSeq(50, (230, new[] { 1 })) with { ScanGeneration = 1 });
+        Assert(previewEngine.FramesProcessed == engineFramesBeforeCandidate &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               previewEngine.GetPassGateDiagnostics().WrongCandidateCount == 0 &&
+               (int)(typeof(TestViewModel).GetField(
+                   "_productStartSoundPlayed",
+                   BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(vm) ?? -1) == 0,
+            "Probe preview quarantines the matching leading complete frame before ProductEvidence, WRONG and sound");
+
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 51, ScanGeneration: 1));
+        board.Publish(ProbeFrameSeq(51, 1) with { ScanGeneration = 1 });
+        Assert(vm.HasInlineProbeContacts &&
+               vm.CurrentProbePresentationState == ProbePresentationState.Touch &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               vm.Faults.All(row => row.Kind == FaultKind.Probe),
+            "Confirmed Probe touch owns presentation but never changes ProductState");
+        board.Publish(FrameSeq(52) with { ScanGeneration = 1 });
+        Assert(!vm.HasInlineProbeContacts &&
+               vm.CurrentProbePresentationState == ProbePresentationState.Released &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
+            "Probe release restores the prior waiting ProductState on the next complete frame");
+
+        long beforeStaleGeneration = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 53, ScanGeneration: 1));
+        board.Publish(FrameSeq(53) with { ScanGeneration = 2 });
+        Assert(previewEngine.FramesProcessed == beforeStaleGeneration + 1,
+            "Probe preview from an older scan generation cannot quarantine a new-generation frame");
+
+        long beforeStaleSequence = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [1], 12, 12, Sequence: 54, ScanGeneration: 2));
+        board.Publish(FrameSeq(55) with { ScanGeneration = 2 });
+        Assert(previewEngine.FramesProcessed == beforeStaleSequence + 1,
+            "Probe preview can quarantine only its exact complete-frame sequence");
+
+        long beforePhysicalPair = previewEngine.FramesProcessed;
+        board.PublishProbePreview(new ProductionProbePreview(
+            DateTime.Now, [9], 12, 12, Sequence: 56, ScanGeneration: 2));
+        board.Publish(FrameSeq(56, (9, new[] { 10 }), (10, new[] { 9 })) with { ScanGeneration = 2 });
+        PassGateDiagnostics directPair = previewEngine.GetPassGateDiagnostics();
+        Assert(previewEngine.FramesProcessed == beforePhysicalPair + 1 &&
+               directPair.ShortCandidateCount == 1 && directPair.WrongCandidateCount == 0,
+            "Reciprocal IO9-IO10 physical evidence bypasses Probe and is one canonical SHORT");
+    }
+
+    private static byte[] BuildProductionScanFrame(
+        int scanUnits,
+        byte terminatorCode,
+        (int Source, int Target)? connection = null)
+    {
+        int ioCount = scanUnits * BoardCapacity.IoPerExpansionCard;
+        var bytes = new List<byte>((ioCount * 2) + 4);
+        for (int io = 1; io <= ioCount; io++)
+        {
+            int zeroBased = io - 1;
+            bytes.Add(checked((byte)(BoardIoDecoder.SourceBase + zeroBased / BoardAddressMapper.IoPerProtocolBank)));
+            bytes.Add(checked((byte)(zeroBased % BoardAddressMapper.IoPerProtocolBank)));
+
+            if (connection is { } edge && edge.Source == io)
+            {
+                int targetZeroBased = edge.Target - 1;
+                bytes.Add(checked((byte)(BoardIoDecoder.TargetBase + targetZeroBased / BoardAddressMapper.IoPerProtocolBank)));
+                bytes.Add(checked((byte)(targetZeroBased % BoardAddressMapper.IoPerProtocolBank)));
+            }
+        }
+
+        bytes.Add(BoardIoDecoder.WordEnd1);
+        bytes.Add(terminatorCode);
+        return bytes.ToArray();
     }
 
     private static void TestEngineVectors()
@@ -1562,8 +6066,9 @@ internal static class Program
         engine.SetModel(pair);
         IReadOnlyList<FaultRow> initialPairRows = engine.BuildRows().Where(row => row.WireName == "PAIR").ToArray();
         Assert(initialPairRows.Count == 2 &&
-               initialPairRows.Any(row => row.Io == 1 && row.Kind == FaultKind.Info && row.FaultType == "KIỂM TRA" && row.Pin == "1") &&
-               initialPairRows.Any(row => row.Io == 18 && row.Kind == FaultKind.MissingConnection && row.FaultType == "HỞ MẠCH" && row.Pin == "18") &&
+               initialPairRows.Any(row => row.Io == 1 && row.Kind == FaultKind.MissingConnection && row.FaultType == "Đơn" && row.Pin == "1") &&
+               initialPairRows.Any(row => row.Io == 18 && row.Kind == FaultKind.MissingConnection && row.FaultType == "Đơn" && row.Pin == "18") &&
+               initialPairRows.All(row => row.Status == "CHỜ LẮP DÂY") &&
                initialPairRows.All(row => !row.IoText.Contains("<->", StringComparison.Ordinal) &&
                                           !row.Pin.Contains("<->", StringComparison.Ordinal)),
             "Model load shows one Htdrv-style endpoint row per pin, not a merged IO/pin row");
@@ -1579,7 +6084,7 @@ internal static class Program
         engine.ProcessFrame(Frame((1, Array.Empty<int>())));
         IReadOnlyList<FaultRow> pairReleased = engine.BuildRows().Where(row => row.WireName == "PAIR").ToArray();
         Assert(pairReleased.Count == 2 &&
-               pairReleased.Any(row => row.Io == 18 && row.FaultType == "HỞ MẠCH"),
+               pairReleased.All(row => row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY"),
             "Releasing/jig-open frame shows endpoint rows again");
 
         engine.SetModel(pair);
@@ -1593,8 +6098,8 @@ internal static class Program
 
         engine.SetModel(pair);
         engine.ProcessFrame(Frame());
-        Assert(engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
-            "Missing IO1-IO18 is a display-only pending row");
+        Assert(engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 2,
+            "Missing IO1-IO18 keeps both endpoint rows as display-only pending rows");
         Assert(!engine.BuildRows().Any(row => row.Kind == FaultKind.Open), "Missing IO1-IO18 is not a production fault row");
         Assert(!engine.HasConfirmedOpenCircuit, "Empty fixture is not inferred as product OPEN");
 
@@ -1626,6 +6131,30 @@ internal static class Program
                !engine.HasConfirmedOpenCircuit &&
                !engine.HasWiringFault,
             "Partial source coverage is installing, not product FAIL");
+
+        // Một cạnh sai vật lý phải được xác nhận ngay cả khi sản phẩm mới lắp
+        // một phần. PASS vẫn bị khóa bởi coverage đầy đủ, nhưng không được xóa
+        // candidate sai dây chỉ vì các source khác chưa xuất hiện.
+        engine.SetModel(twoPairs);
+        ScanFrame partialWrongWire = Frame((1, new[] { 40 }));
+        engine.ProcessFrame(partialWrongWire);
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(partialWrongWire);
+        Assert(!engine.ReadyToEvaluateProductFaults && engine.HasWiringFault,
+            "A stable wrong physical pair fails without waiting for full model source coverage");
+
+        // Source==target là trạng thái một đầu chạm/từ decoder target-replace,
+        // không phải một dây nối giữa hai đầu và không được tạo FAIL giả.
+        engine.SetModel(twoPairs);
+        ScanFrame oneEndTouch = Frame((1, new[] { 1 }));
+        engine.ProcessFrame(oneEndTouch);
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(oneEndTouch);
+        Assert(!engine.HasWiringFault &&
+               !engine.HasProductActivity &&
+               !engine.ReadyToEvaluateProductFaults,
+            "One-end source self-edge never becomes ProductPresence or a wrong-wire FAIL");
+
         ScanFrame fullCoverageOpen = Frame((1, new[] { 18 }), (2, Array.Empty<int>()));
         engine.ProcessFrame(fullCoverageOpen);
         Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
@@ -1633,8 +6162,8 @@ internal static class Program
         Assert(engine.ReadyToEvaluateProductFaults &&
                !engine.HasConfirmedOpenCircuit &&
                !engine.HasWiringFault &&
-               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
-            "Full source coverage with missing endpoint remains display-only");
+               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 2,
+            "Full source coverage with a pending pair keeps both endpoint rows display-only");
 
         ProductModel splice = Model(("SPLICE", new[] { 5, 20, 33 }));
         engine.SetModel(splice);
@@ -1645,8 +6174,11 @@ internal static class Program
         IReadOnlyList<FaultDetail> confirmedSpliceOpen = engine.BuildConfirmedOpenFaults();
         Assert(confirmedSpliceOpen.Count == 0 &&
                !engine.BuildRows().Any(row => row.Kind == FaultKind.Open) &&
-               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1,
-            "Splice missing target is display-only, not production OPEN");
+               engine.BuildRows().Count(row => row.Kind == FaultKind.MissingConnection) == 1 &&
+               engine.BuildRows().Single(row => row.Kind == FaultKind.MissingConnection).Io == 33 &&
+               engine.BuildRows().Where(row => row.WireName == "SPLICE")
+                   .All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY"),
+            "Splice hides reached endpoints and keeps only the missing target as display-only, not production OPEN");
 
         engine.SetModel(splice);
         ScanFrame splicePassFrame = Frame((5, new[] { 20, 33 }));
@@ -1696,8 +6228,407 @@ internal static class Program
         Assert(!engine.HasWiringFault && !engine.ContinuityPassed, "Probe frame never enters production evaluation");
     }
 
+    private static void TestPendingContinuityPresentation()
+    {
+        using var engine = CreateEngine(out _);
+        ProductModel twoPairs = Model(
+            ("PAIR-A", new[] { 1, 3 }),
+            ("PAIR-B", new[] { 2, 4 }));
+        engine.SetModel(twoPairs);
+
+        FaultRow[] initialRows = engine.BuildRows()
+            .Where(row => row.WireName is "PAIR-A" or "PAIR-B")
+            .ToArray();
+        int[] initialOrder = initialRows.Select(row => row.Io).ToArray();
+        Dictionary<int, int> initialDisplayOrder = initialRows.ToDictionary(row => row.Io, row => row.DisplayOrder);
+        Assert(initialRows.Length == 4 && initialOrder.SequenceEqual([1, 3, 2, 4]),
+            "Two pending pairs keep the model/display endpoint order");
+        Assert(initialRows.All(row =>
+                   row.Kind == FaultKind.MissingConnection &&
+                   row.FaultType == "Đơn" &&
+                   row.Status == "CHỜ LẮP DÂY") &&
+               initialRows.All(row => row.FaultType != "KIỂM TRA" && row.Status != "CHỜ KẾT NỐI"),
+            "Pending point-to-point rows use only Đơn / CHỜ LẮP DÂY");
+
+        ScanFrame pairAPass = Frame((1, new[] { 3 }));
+        engine.ProcessFrame(pairAPass);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(pairAPass);
+        FaultRow[] afterPairA = engine.BuildRows()
+            .Where(row => row.WireName is "PAIR-A" or "PAIR-B")
+            .ToArray();
+        Assert(afterPairA.Select(row => row.Io).SequenceEqual([2, 4]) &&
+               afterPairA.All(row => row.Status == "CHỜ LẮP DÂY") &&
+               !engine.ContinuityPassed,
+            "Passing PAIR-A hides only IO1/IO3 and leaves PAIR-B pending");
+
+        ScanFrame bothPass = Frame((1, new[] { 3 }), (2, new[] { 4 }));
+        engine.ProcessFrame(bothPass);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(bothPass);
+        Assert(engine.ContinuityPassed &&
+               !engine.HasWiringFault &&
+               !engine.BuildRows().Any(row => row.WireName is "PAIR-A" or "PAIR-B"),
+            "Both correct pairs remove all normal pending rows without false wiring faults");
+
+        engine.ProcessFrame(Frame((2, new[] { 4 })));
+        FaultRow[] restoredPairA = engine.BuildRows().Where(row => row.WireName == "PAIR-A").ToArray();
+        Assert(restoredPairA.Select(row => row.Io).SequenceEqual([1, 3]) &&
+               restoredPairA.All(row =>
+                   row.Status == "CHỜ LẮP DÂY" &&
+                   row.DisplayOrder == initialDisplayOrder[row.Io]),
+            "A lost completed pair reappears at its original DisplayOrder");
+
+        ProductModel splice = Model(("SPLICE", new[] { 5, 20, 33 }));
+        engine.SetModel(splice);
+        FaultRow[] spliceRows = engine.BuildRows().Where(row => row.WireName == "SPLICE").ToArray();
+        Assert(spliceRows.Length == 3 &&
+               spliceRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY"),
+            "A multi-endpoint network remains one splice topology presented as Nối chung");
+
+        var common = new PinRecord("CLIP", "AO", 201, "AO", PinType: "AO", OriginalOrder: 1);
+        var a1 = new PinRecord("CLIP", "a1", 202, "a1", PinType: "a1", OriginalOrder: 2);
+        var a2 = new PinRecord("CLIP", "a2", 203, "a2", PinType: "a2", OriginalOrder: 3);
+        var a3 = new PinRecord("CLIP", "a3", 204, "a3", PinType: "a3", OriginalOrder: 4);
+        var clipModel = new ProductModel { ModelName = "CLIP", PartNumber = "CLIP" };
+        clipModel.Pins.AddRange([common, a1, a2, a3]);
+        clipModel.Clip = new ClipTopology(
+            common,
+            [
+                new ClipBranch("a1", 1, 202, a1, null),
+                new ClipBranch("a2", 2, 203, a2, null),
+                new ClipBranch("a3", 3, 204, a3, null)
+            ]);
+        engine.SetModel(clipModel);
+        FaultRow[] initialClipRows = engine.BuildRows().ToArray();
+        Assert(initialClipRows.Length == 4 &&
+               initialClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY"),
+            "CLIP common and all unlatch branches use Nối chung / CHỜ LẮP DÂY");
+
+        engine.ProcessFrame(Frame((201, new[] { 202 })));
+        FaultRow[] remainingClipRows = engine.BuildRows().ToArray();
+        Assert(remainingClipRows.Select(row => row.Io).Order().SequenceEqual([203, 204]) &&
+               remainingClipRows.All(row => row.FaultType == "Nối chung" && row.Status == "CHỜ LẮP DÂY") &&
+               !engine.HasWiringFault,
+            "Latching CLIP a1 hides only common/a1 per existing common behavior; a2/a3 remain without false SHORT");
+        FaultRow[] clipRemovalRows = engine.BuildRemovalRows().ToArray();
+        Assert(clipRemovalRows.Length == 1 &&
+               clipRemovalRows[0].Io == 202 &&
+               clipRemovalRows[0].Status == "CHỜ THÁO",
+            "Connected CLIP removal rows use the removal-only CHỜ THÁO presentation");
+    }
+
+    private static void TestFinalHtdrvTestWindowPresentation()
+    {
+        var production = new ProductionSettings
+        {
+            MasterFaultRequiredCount = 0,
+            ProductSettleTimeMs = 0,
+            WrongConnectionConfirmMs = 0,
+            ShortCircuitConfirmMs = 0
+        };
+        ProductModel model = Model(
+            ("BG1", new[] { 1, 3 }),
+            ("BG2", new[] { 2, 4 }));
+
+        TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
+        vm.SetModel(model);
+        vm.StartProductionTestAsync().GetAwaiter().GetResult();
+        Assert(vm.Faults.Count == 0 &&
+               vm.IsCenterResultVisible &&
+               vm.CenterResultText == "LẮP SẢN PHẨM",
+            "No product activity keeps FaultGrid empty and shows LẮP SẢN PHẨM");
+
+        board.Publish(FrameSeq(100, (1, new[] { 3 })));
+        Assert(!vm.IsCenterResultVisible &&
+               vm.State == "ĐANG KIỂM TRA..." &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
+            "The first completed expected connection hides the waiting overlay without bypassing product debounce");
+        board.Publish(FrameSeq(101, (1, new[] { 3 })));
+        Assert(!vm.IsCenterResultVisible &&
+               vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
+               !vm.Faults.Any(row => row.WireName == "BG1") &&
+               vm.Faults.All(row => row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY"),
+            "First real product edge starts presentation and only the passed network disappears");
+
+        TestViewModel removalPreviewVm = CreateTestViewModel(production, out FakeBoard removalPreviewBoard);
+        removalPreviewVm.SetModel(Model(
+            ("PAIR-A", new[] { 1, 3 }),
+            ("PAIR-B", new[] { 2, 4 }),
+            ("PAIR-C", new[] { 5, 6 })));
+        removalPreviewVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        removalPreviewBoard.Publish(FrameSeq(90, (1, new[] { 3 }), (2, new[] { 4 })));
+        removalPreviewBoard.Publish(FrameSeq(91, (1, new[] { 3 }), (2, new[] { 4 })));
+        Assert(!removalPreviewVm.IsCenterResultVisible,
+            "Installed product hides waiting overlay before realtime removal previews");
+
+        removalPreviewBoard.Publish(ContinuityPreviewFrame(92, 1, Array.Empty<int>()));
+        Assert(!removalPreviewVm.IsCenterResultVisible,
+            "Removing only one product network must not restore LẮP SẢN PHẨM");
+
+        removalPreviewBoard.Publish(ContinuityPreviewFrame(92, 2, Array.Empty<int>()));
+        Assert(removalPreviewVm.IsCenterResultVisible &&
+               removalPreviewVm.CenterResultText == "LẮP SẢN PHẨM" &&
+               removalPreviewVm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime,
+            "Removing every product network restores waiting overlay before C0 without mutating lifecycle state");
+
+        MethodInfo showBoardUnavailable = typeof(TestViewModel).GetMethod(
+            "ShowBoardUnavailablePresentation",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Board-unavailable presentation method not found");
+        showBoardUnavailable.Invoke(vm, [false]);
+        Assert(vm.SelectedOperationTabIndex == 0 && vm.Faults.Count == 0,
+            "Transient board loss clears stale rows but leaves the continuity table selected");
+        board.Publish(FrameSeq(102, (1, new[] { 3 })));
+        Assert(vm.Faults.Count(row => row.WireName == "BG2") == 2 &&
+               !vm.Faults.Any(row => row.WireName == "BG1"),
+            "First complete frame after reconnect rebuilds rows even when physical topology is unchanged");
+
+        TestViewModel overlayVm = CreateTestViewModel(production);
+        typeof(TestViewModel).GetField("_productionPhase", BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.SetValue(overlayVm, 6);
+        overlayVm.State = "PASS";
+        Assert(overlayVm.IsCenterResultVisible &&
+               overlayVm.IsCenterPassPresentation &&
+               overlayVm.CenterResultText == "PASS",
+            "Center PASS appears only from the existing final Completed phase/state");
+
+        using TestEngine engine = CreateEngine(out _, production);
+        engine.SetModel(model);
+        ScanFrame crossed = FrameSeq(110, (1, new[] { 4 }));
+        engine.ProcessFrame(crossed);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(crossed with { Sequence = 111 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(crossed with { Sequence = 112 });
+        FaultRow[] crossedRows = engine.BuildRows().ToArray();
+        Assert(engine.HasWiringFault &&
+               crossedRows.Take(3).Select(row => row.IsNetworkStart).SequenceEqual([true, false, false]) &&
+               crossedRows.Count(row => row.Io == 1 && row.WireName == "BG1" && row.Status == "SAI DÂY") == 1 &&
+               crossedRows.Count(row => row.Io == 4 && row.WireName == "BG2" && row.Status == "CHẬP MẠCH") == 1 &&
+               crossedRows.Count(row => row.Io == 3 && row.WireName == "BG1" && row.Status == "HỞ MẠCH") == 1 &&
+               crossedRows.Where(row => row.Io is 1 or 3 or 4).All(row => row.FaultType == "Đơn") &&
+               crossedRows.Where(row => row.Io is 1 or 3 or 4).All(row => !string.IsNullOrWhiteSpace(row.IoCnPnText)),
+            "Confirmed crossed wire preserves topology/operator metadata and emits SAI/CHẬP/HỞ exactly once. Rows=" +
+            string.Join(" | ", crossedRows.Select(row => $"{row.Io}/{row.WireName}/{row.FaultType}/{row.Status}/{row.IoCnPnText}")));
+
+        engine.SetModel(model);
+        ScanFrame twoCrossed = FrameSeq(113, (1, new[] { 4 }), (2, new[] { 3 }));
+        engine.ProcessFrame(twoCrossed);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(twoCrossed with { Sequence = 114 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(twoCrossed with { Sequence = 115 });
+        FaultRow[] twoCrossedRows = engine.BuildRows().ToArray();
+        Assert(twoCrossedRows.Count(row => row.IsNetworkStart &&
+                   row.Kind is (FaultKind.WrongWiring or FaultKind.Short)) == 2,
+            "Each confirmed wrong IO pair starts its own FAIL separator");
+
+        engine.SetModel(Model(("SPLICE", new[] { 5, 20, 33 })));
+        ScanFrame wrongCommon = FrameSeq(116, (5, new[] { 40 }));
+        engine.ProcessFrame(wrongCommon);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(wrongCommon with { Sequence = 117 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(wrongCommon with { Sequence = 118 });
+        FaultRow[] wrongCommonRows = engine.BuildRows().ToArray();
+        Assert(wrongCommonRows.Any(row => row.IsNetworkStart &&
+                   row.Kind == FaultKind.WrongWiring && row.FaultType == "Nối chung"),
+            "Confirmed wrong splice connection starts a FAIL separator for the common network");
+
+        engine.SetModel(model);
+        ScanFrame unused = FrameSeq(120, (1, new[] { 40 }));
+        engine.ProcessFrame(unused);
+        Thread.Sleep(ProductionTimingPolicy.DefaultProductSettleTimeMs + 5);
+        engine.ProcessFrame(unused with { Sequence = 121 });
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 5);
+        engine.ProcessFrame(unused with { Sequence = 122 });
+        FaultRow unusedRow = engine.BuildRows().Single(row => row.Io == 40);
+        Assert(unusedRow.FaultType.Length == 0 &&
+               unusedRow.IoText == "IO (40)" &&
+               unusedRow.Connector.Length == 0 &&
+               unusedRow.Pin.Length == 0 &&
+               unusedRow.WireName.Length == 0 &&
+               unusedRow.Section.Length == 0 &&
+               unusedRow.Color.Length == 0 &&
+               unusedRow.Status == "CHẬP MẠCH" &&
+               unusedRow.IoCnPnText == "IO40",
+            "Unused actual IO is identified in the IO column while Connector stays empty");
+
+        engine.SetModel(Model(("BE21", new[] { 34, 315 })));
+        bool resolvedTargetSideFault = engine.TryResolveExpectedWiringRelation(
+            new WiringFaultPair(43, 315, "wrong", ProductFaultType.WrongWiring),
+            out int resolvedExpectedSource,
+            out int resolvedExpectedTarget);
+        Assert(resolvedTargetSideFault && resolvedExpectedSource == 34 && resolvedExpectedTarget == 315,
+            "Wrong wiring through the configured target IO resolves the missing standard source position");
+
+        engine.ProcessFrame(FrameSeq(123));
+        FaultRow[] repairedRows = engine.BuildRows().ToArray();
+        Assert(!engine.HasWiringFault &&
+               repairedRows.All(row => row.Status == "CHỜ LẮP DÂY") &&
+               !repairedRows.Any(row => row.Status is "SAI DÂY" or "CHẬP MẠCH" or "HỞ MẠCH"),
+            "Removing a confirmed physical fault immediately restores normal pending presentation");
+
+        engine.SetModel(model);
+        engine.ProcessFrame(FrameSeq(130, (1, new[] { 3 }), (2, new[] { 4 })));
+        FaultRow[] connectedRemovalRows = engine.BuildRemovalRows().ToArray();
+        Assert(connectedRemovalRows.Length == 4 &&
+               connectedRemovalRows.All(row => row.Status == "CHỜ THÁO"),
+            "Removal presentation initially shows every connection still on the jig");
+        engine.ProcessFrame(FrameSeq(131, (2, new[] { 4 })));
+        FaultRow[] remaining = engine.BuildRemovalRows().ToArray();
+        Assert(remaining.Length == 2 &&
+               remaining.All(row => row.WireName == "BG2" && row.Status == "CHỜ THÁO") &&
+               !engine.IsProductReleased,
+            "Removing one network hides only that network and retains the last real connection");
+        engine.ProcessFrame(FrameSeq(132));
+        Assert(engine.BuildRemovalRows().Count == 0 && engine.IsProductReleased,
+            "Only complete loss of product relations empties removal rows and confirms release");
+
+        string testWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
+        Assert(testWindowXaml.Contains("EnableRowVirtualization\" Value=\"True", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("EnableColumnVirtualization\" Value=\"True", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("VirtualizingPanel.IsVirtualizing\" Value=\"True", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("VirtualizingPanel.VirtualizationMode\" Value=\"Recycling", StringComparison.Ordinal) &&
+               testWindowXaml.Contains("IsHitTestVisible=\"False\"", StringComparison.Ordinal),
+            "TestWindow keeps recycling virtualization and a non-interactive center overlay");
+        Assert(!testWindowXaml.Contains("DropShadowEffect", StringComparison.Ordinal),
+            "Wire-color cells avoid per-row DropShadowEffect rendering");
+
+        TestViewModel deltaVm = CreateTestViewModel(production);
+        MethodInfo synchronize = typeof(TestViewModel).GetMethod(
+            "SynchronizeFaultRows",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault row synchronizer not found");
+        FaultRow[] largeRows = Enumerable.Range(1, 200)
+            .Select(io => new FaultRow
+            {
+                Kind = FaultKind.MissingConnection,
+                Io = io,
+                WireName = $"BG{io:000}",
+                Status = "CHỜ LẮP DÂY"
+            })
+            .ToArray();
+        int collectionEvents = 0;
+        deltaVm.Faults.CollectionChanged += (_, _) => collectionEvents++;
+        synchronize.Invoke(deltaVm, [largeRows]);
+        Assert(collectionEvents == 1 && deltaVm.Faults.Count == 200,
+            "First large 10-card presentation reaches DataGrid with one collection reset");
+
+        FaultRow[] sampleFaultRows = [
+            new FaultRow { Kind = FaultKind.WrongWiring, Io = 1, Status = "SAI DÂY" },
+            new FaultRow { Kind = FaultKind.Short, Io = 2, Status = "CHẬP MẠCH" },
+            new FaultRow { Kind = FaultKind.MissingConnection, Io = 3, Status = "HỞ MẠCH" }
+        ];
+        synchronize.Invoke(deltaVm, [sampleFaultRows]);
+        Assert(deltaVm.WrongCountText == "1" && deltaVm.CurrentFaultCount == 3,
+            "Wrong-wiring counter is separate from the total current child-fault counter");
+        synchronize.Invoke(deltaVm, [largeRows]);
+
+        collectionEvents = 0;
+        synchronize.Invoke(deltaVm, [largeRows.Skip(2).ToArray()]);
+        Assert(collectionEvents == 2 &&
+               deltaVm.Faults.Count == 198 &&
+               deltaVm.Faults[0].Io == 3,
+            "Passing the first network removes only its two rows instead of moving the remaining 198 rows");
+
+        TestViewModel tenCardVm = CreateTestViewModel(production);
+        FaultRow[] tenCardRows = Enumerable.Range(1, 640)
+            .Select(io => new FaultRow
+            {
+                Kind = FaultKind.MissingConnection,
+                Io = io,
+                WireName = $"TEN{io:000}",
+                Status = "CHỜ LẮP DÂY"
+            })
+            .ToArray();
+        int tenCardEvents = 0;
+        tenCardVm.Faults.CollectionChanged += (_, _) => tenCardEvents++;
+        synchronize.Invoke(tenCardVm, [tenCardRows]);
+        Assert(tenCardEvents == 1 && tenCardVm.Faults.Count == 640,
+            "Initial 640-row presentation uses one collection reset");
+
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [tenCardRows.Skip(2).ToArray()]);
+        Assert(tenCardEvents == 2 && tenCardVm.Faults.Count == 638,
+            "Large active table removes only the changed endpoint rows without rebuilding all 638 rows");
+
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [tenCardRows]);
+        Assert(tenCardEvents == 2 &&
+               tenCardVm.Faults.Count == 640 &&
+               ReferenceEquals(tenCardVm.Faults[0], tenCardRows[0]) &&
+               ReferenceEquals(tenCardVm.Faults[1], tenCardRows[1]),
+            "Reopened network inserts only its two cached rows without resetting the 640-row DataGrid");
+
+        string testViewModelCode = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelCode.Contains("TryRemoveMissingFaultRowsInOrder(desiredRows)", StringComparison.Ordinal) &&
+               testViewModelCode.Contains("TryInsertMissingFaultRowsInOrder(desiredRows)", StringComparison.Ordinal) &&
+               testViewModelCode.Contains("ReferenceEquals(Faults[currentIndex], desiredRows[desiredIndex])", StringComparison.Ordinal),
+            "Large row remove/reinsert deltas use reference subsequence fast paths without rebuilding row keys");
+
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [Array.Empty<FaultRow>()]);
+        Assert(tenCardEvents == 1 && tenCardVm.Faults.Count == 0,
+            "Clearing a large presentation uses one collection reset");
+
+        tenCardEvents = 0;
+        synchronize.Invoke(tenCardVm, [Array.Empty<FaultRow>()]);
+        Assert(tenCardEvents == 0,
+            "An already empty presentation does not issue redundant DataGrid resets");
+
+        string testWindowCode = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml.cs"));
+        Assert(testWindowCode.Contains("_scrollDispatchQueued", StringComparison.Ordinal) &&
+               testWindowCode.Contains("Interlocked.Exchange(ref _scrollDispatchQueued, 1)", StringComparison.Ordinal) &&
+               testWindowCode.Contains("IsFaultRowVisible(firstFault)", StringComparison.Ordinal),
+            "Fault-grid auto-scroll coalesces collection bursts and skips rows already in view");
+
+        MethodInfo shouldAutoScroll = typeof(TestWindow).GetMethod(
+            "ShouldAutoScrollToFirstFault",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Fault-grid auto-scroll filter not found");
+        bool scrollOnAdd = (bool)shouldAutoScroll.Invoke(
+            null,
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, new object()), vm])!;
+        bool scrollOnReset = (bool)shouldAutoScroll.Invoke(
+            null,
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset), vm])!;
+        bool scrollOnPassRemoval = (bool)shouldAutoScroll.Invoke(
+            null,
+            [new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Remove, new object(), 0), vm])!;
+        Assert(!scrollOnAdd && !scrollOnReset && !scrollOnPassRemoval,
+            "Non-fault continuity changes never schedule DataGrid ScrollIntoView/layout");
+
+        Assert(testViewModelCode.Contains(
+                   "if (!AsyncFileLogService.Current.FileLoggingEnabled ||",
+                   StringComparison.Ordinal) &&
+               testViewModelCode.Contains(
+                   "private void LogFaultGate(long generation)",
+                   StringComparison.Ordinal) &&
+               testViewModelCode.Contains(
+                   "Tránh dựng PassGateDiagnostics lần thứ hai trên UI thread",
+                   StringComparison.Ordinal),
+            "Disabled system logging skips full-network diagnostics on frame and UI hot paths");
+    }
+
     private static void TestProductionFaultConfirmation()
     {
+        MethodInfo continueAlarm = typeof(TestViewModel).GetMethod(
+            "ShouldContinueWiringFaultAlarm", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("Wiring alarm transition policy not found");
+        bool Alarm(bool active, bool valid, bool confirmed, bool candidate) =>
+            (bool)(continueAlarm.Invoke(null, [active, valid, confirmed, candidate]) ?? false);
+        Assert(!Alarm(false, true, false, true) &&
+               Alarm(false, true, true, false) &&
+               Alarm(true, true, false, true) &&
+               Alarm(true, false, false, false) &&
+               !Alarm(true, true, false, false),
+            "TESTPOINT starts on confirmed fault, stays continuous across a new candidate/invalid frame, and stops on a clean frame");
+
         var settings = new ProductionSettings
         {
             OpenCircuitConfirmMs = 100,
@@ -1752,14 +6683,13 @@ internal static class Program
 
         gate.Reset();
         var shortFault = new[] { new UnexpectedFaultObservation(1, 2, ProductFaultType.ShortCircuit) };
-        gate.Observe(clean, [], true);
-        clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultProductSettleTimeMs + 1));
-        gate.Observe(clean, [], true);
         gate.Observe(clean, shortFault, true);
         clock.Advance(TimeSpan.FromMilliseconds(ProductionTimingPolicy.DefaultShortCircuitConfirmMs - 1));
-        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient SHORT not confirmed");
+        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Count == 0,
+            "Transient SHORT is not confirmed, without waiting for product settle first");
         clock.Advance(TimeSpan.FromMilliseconds(2));
-        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Contains((1, 2)), "Stable SHORT confirmed");
+        Assert(gate.Observe(clean, shortFault, true).ConfirmedUnexpectedPairs.Contains((1, 2)),
+            "Stable SHORT is confirmed on the next stable frame without extra product-settle latency");
         Assert(gate.Observe(clean, [], true).ConfirmedUnexpectedPairs.Count == 0, "SHORT recovery resets candidate");
 
         var wrongFault = new[] { new UnexpectedFaultObservation(3, 4, ProductFaultType.WrongWiring) };
@@ -1768,6 +6698,212 @@ internal static class Program
         Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Count == 0, "Transient wrong connection not confirmed");
         clock.Advance(TimeSpan.FromMilliseconds(2));
         Assert(gate.Observe(clean, wrongFault, true).ConfirmedUnexpectedPairs.Contains((3, 4)), "Stable wrong connection confirmed");
+
+        string testViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        Assert(testViewModelSource.IndexOf("TriggerPassUi();", StringComparison.Ordinal) <
+               testViewModelSource.IndexOf("await PauseProductionScanForFinalPassAsync(ct);", StringComparison.Ordinal),
+            "PASS UI is raised before waiting for the hardware scan to stop");
+
+        string soundSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "AppSoundService.cs"));
+        int productSoundStart = soundSource.IndexOf("public void PlayProductStart()", StringComparison.Ordinal);
+        int passSoundStart = soundSource.IndexOf("public void PlayTestOk()", StringComparison.Ordinal);
+        string productSoundMethod = soundSource[productSoundStart..passSoundStart];
+        Assert(productSoundMethod.Contains("SafePlay(player);", StringComparison.Ordinal) &&
+               !productSoundMethod.Contains("SafePlaySync(player);", StringComparison.Ordinal),
+            "Product-start sound never holds the UI sound path for the full WAV duration");
+
+        string faultDialogXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml"));
+        string faultDialogSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml.cs"));
+        int faultItemsStart = faultDialogXaml.IndexOf("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal);
+        int faultItemsTagEnd = faultItemsStart < 0
+            ? -1
+            : faultDialogXaml.IndexOf('>', faultItemsStart);
+        string faultItemsOpeningTag = faultItemsStart < 0 || faultItemsTagEnd < 0
+            ? string.Empty
+            : faultDialogXaml[faultItemsStart..faultItemsTagEnd];
+        Assert(faultDialogXaml.Contains("SizeToContent=\"Height\"", StringComparison.Ordinal) &&
+               faultDialogXaml.Contains("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal) &&
+               faultDialogXaml.Contains("Loaded=\"FaultSummary_Loaded\"", StringComparison.Ordinal) &&
+               faultDialogSource.Contains("new Run(item.Summary)", StringComparison.Ordinal) &&
+               !faultItemsOpeningTag.Contains("Visibility=\"Collapsed\"", StringComparison.Ordinal) &&
+               !faultDialogXaml.Contains("x:Name=\"FaultTypeText\"", StringComparison.Ordinal) &&
+               !faultDialogXaml.Contains("x:Name=\"SummaryText\"", StringComparison.Ordinal) &&
+               faultDialogSource.Contains(".Select(FaultDisplayFormatter.FormatCompactOperator)", StringComparison.Ordinal) &&
+               !faultDialogSource.Contains("BuildShortSummary", StringComparison.Ordinal),
+            "FAIL dialog renders every fault as a concise item instead of hiding all but the first fault");
+
+        FaultDetail[] popupFaults =
+        [
+            new FaultDetail
+            {
+                Type = ProductFaultType.WrongWiring,
+                ConnectorFrom = "CN2",
+                PinFrom = "2",
+                ConnectorTo = "CN10",
+                PinTo = "27",
+                ActualConnectorTo = "CN10",
+                ActualPinTo = "27",
+                ExpectedSourceIo = 34,
+                ExpectedTargetIo = 315,
+                ActualSourceIo = 43,
+                ActualTargetIo = 315
+            },
+            new FaultDetail
+            {
+                Type = ProductFaultType.WrongWiring,
+                ConnectorFrom = "CN2",
+                PinFrom = "4",
+                ConnectorTo = "CN10",
+                PinTo = "28",
+                ActualConnectorTo = "CN10",
+                ActualPinTo = "28",
+                ExpectedSourceIo = 36,
+                ExpectedTargetIo = 316,
+                ActualSourceIo = 44,
+                ActualTargetIo = 316
+            }
+        ];
+        CompactOperatorFaultDisplay[] popupDisplays = popupFaults
+            .Select(FaultDisplayFormatter.FormatCompactOperator)
+            .ToArray();
+        Assert(popupDisplays.Length == 2 &&
+               popupDisplays[0].Title == "LỖI SAI DÂY" &&
+               popupDisplays[0].Summary.Contains("IO 43 [JIG 2 - Chân 11]", StringComparison.Ordinal) &&
+               popupDisplays[1].Summary.Contains("IO 44 [JIG 2 - Chân 12]", StringComparison.Ordinal),
+            "FAIL popup keeps every confirmed wrong-wire pair in a short operator summary");
+
+        string mainWindowXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));
+        string mainWindowSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml.cs"));
+        Assert(!mainWindowXaml.Contains("KẾT NỐI LẠI BO", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("Test.ConnectBoardCommand", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("StartupControlUnlockTimeout", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("Task.WhenAny(", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("ReportStartupBoardTimeout()", StringComparison.Ordinal) &&
+               mainWindowSource.Contains("ObserveDeferredStartupAsync(initialization)", StringComparison.Ordinal) &&
+               !mainWindowSource.Contains("ĐANG TỰ THỬ LẠI", StringComparison.Ordinal),
+            "Slow board startup latches the session and requires an application restart");
+        string scanSupervisorSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "ScanSupervisor.cs"));
+        string d2xxTransportSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "D2xxBoardTransport.cs"));
+        Assert(testViewModelSource.Contains("StopScanIntentionallyAsync", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("RecoverProductionScanAsync", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("ScanHealthState.Suspended", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("ScanHealthState.Starting", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("ScanHealthState.Monitoring", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("RecoverSoftAsync", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("RecoverReopenAsync", StringComparison.Ordinal) &&
+               scanSupervisorSource.Contains("_board.DisconnectAsync()", StringComparison.Ordinal) &&
+               d2xxTransportSource.Contains("Drain-to-empty", StringComparison.Ordinal) &&
+               !d2xxTransportSource.Contains("waitForRxNotification", StringComparison.Ordinal) &&
+               !d2xxTransportSource.Contains("attempt <= 6", StringComparison.Ordinal),
+            "D2XX watchdog keeps recovery safety while the reader drains queued bytes before waiting for RX events");
+        // V399 moved the palette to Theme.xaml. Verify resource resolution
+        // and button roles rather than obsolete inline color literals.
+        var themeBrushes = System.Xml.Linq.XDocument.Load(
+                Path.Combine(Environment.CurrentDirectory, "Themes", "Theme.xaml"))
+            .Descendants().Where(element => element.Name.LocalName == "SolidColorBrush")
+            .Select(element => element.Attribute(System.Xml.Linq.XName.Get(
+                "Key", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value).ToHashSet();
+        Assert(new[] { "BrandBlue", "BrandDark", "AccentBlue", "AccentBlueDark",
+                   "ButtonNeutralBackground", "ButtonNeutralForeground", "ButtonNeutralBorder",
+                   "ExitSolidBackground", "ExitSolidBorder" }.All(themeBrushes.Contains) &&
+               mainWindowXaml.Contains("component/Themes/Theme.xaml", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource BrandBlue}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource AccentBlue}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource ButtonNeutralBackground}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource ExitSolidBackground}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource HistoryButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource SettingsButtonStyle}\"", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("x:Name=\"SelectModelButton\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("x:Name=\"ProductCatalog\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource TopologyButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Style=\"{StaticResource ExitButtonStyle}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("Background=\"{TemplateBinding Background}\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("TargetName=\"InteractionOverlay\" Property=\"Opacity\" Value=\"0.08\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("TargetName=\"InteractionOverlay\" Property=\"Opacity\" Value=\"0.16\"", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("Value=\"#DDDDDA\"", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("Value=\"#CBCBC8\"", StringComparison.Ordinal),
+            "MainWindow buttons use semantic colors and preserve them through shared hover feedback");
+        System.Xml.Linq.XElement actionBar = System.Xml.Linq.XDocument.Parse(mainWindowXaml)
+            .Descendants().Single(element => element.Attribute(
+                System.Xml.Linq.XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "MainActionBar");
+        System.Xml.Linq.XElement[] actionColumns = actionBar.Elements()
+            .Single(element => element.Name.LocalName == "Grid.ColumnDefinitions").Elements().ToArray();
+        Assert(actionColumns.Length == 6 && actionColumns.All(column =>
+                   column.Attribute("Width")?.Value.EndsWith('*') == true) &&
+               mainWindowXaml.Contains("x:Name=\"MainActionBar\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("UseLayoutRounding=\"True\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("SnapsToDevicePixels=\"True\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("<ColumnDefinition Width=\"1.25*\"/>", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("<Setter Property=\"Width\" Value=\"260\"/>", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("<ColumnDefinition Width=\"230\"/>", StringComparison.Ordinal),
+            "MainWindow action buttons use DPI-safe proportional columns without fixed-width border clipping");
+
+        string bootstrapSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "StartupBootstrapService.cs"));
+        Assert(bootstrapSource.Contains("Critical filesystem bootstrap completed.", StringComparison.Ordinal) &&
+               !bootstrapSource.Contains("ImportLegacyHistoryForMaintenanceAsync(", StringComparison.Ordinal) &&
+               !bootstrapSource.Contains("LEGACY_PHT_UNDERSCORE_IMPORT", StringComparison.Ordinal),
+            "Legacy underscore history remains external and has no runtime path into SQLite");
+
+        string persistenceSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Services", "ProductionPersistenceService.cs"));
+        Assert(persistenceSource.Contains("SQLITE_BUSY_RETRY", StringComparison.Ordinal) &&
+               persistenceSource.Contains("exception.SqliteErrorCode is 5 or 6", StringComparison.Ordinal),
+            "Production SQLite writer retries transient BUSY/LOCKED transactions");
+
+        string mainViewModelSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "ViewModels", "MainViewModel.cs"));
+        Assert(mainViewModelSource.Contains(
+                   "Task.WhenAll(productionDataTask, boardInitializationTask, modelPreparationTask)",
+                   StringComparison.Ordinal) &&
+               mainViewModelSource.Contains(
+                   "await Test.InitializeAsync();",
+                   StringComparison.Ordinal),
+            "Board connects alongside DB bootstrap while model/history wait for canonical database migration");
+
+        string historyPageXaml = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
+        string historyPageSource = File.ReadAllText(
+            Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml.cs"));
+        Assert(!historyPageXaml.Contains("NHẬP LỊCH SỬ CŨ", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("x:Name=\"CloseButton\"", StringComparison.Ordinal) &&
+               historyPageSource.Contains("GetHistorySummary(criteria)", StringComparison.Ordinal) &&
+               historyPageSource.Contains("MaxRows = PageSize", StringComparison.Ordinal) &&
+               historyPageSource.Contains("BeforeHistoryAt = cursor.EffectiveTestStartedAt", StringComparison.Ordinal) &&
+               !historyPageSource.Contains("UiRowLimit", StringComparison.Ordinal),
+            "History uses full SQL summary plus incremental keyset pages and exposes no legacy import action");
+        Assert(testViewModelSource.Contains(
+                   "ProbeContactClassifier.HasUnexpectedDirectConnectionEvidence(frame, _model)",
+                   StringComparison.Ordinal),
+            "Unexpected two-pin electrical edges take precedence over Probe preview routing");
+        System.Xml.Linq.XElement[] historyButtons =
+            System.Xml.Linq.XDocument.Parse(historyPageXaml)
+                .Descendants()
+                .Where(element => element.Name.LocalName == "Button")
+                .ToArray();
+        Assert(historyButtons.Length == 6 &&
+               historyButtons.All(button =>
+                   button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
+               historyPageXaml.Contains("HistoryCsvButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("HistoryExcelButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("HistorySearchButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("HistoryCloseButtonStyle", StringComparison.Ordinal) &&
+               historyPageXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal),
+            "Every HistoryPage button uses the shared semantic palette and interaction template");
+
+        string appSource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "App.xaml.cs"));
+        Assert(appSource.Contains("Local\\JBZUniversalTester.Production", StringComparison.Ordinal) &&
+               appSource.Contains("_ownsSingleInstanceMutex", StringComparison.Ordinal),
+            "A station cannot open two app processes that compete for the same board and SQLite database");
 
         var invalid = new ProductionSettings
         {
@@ -1785,8 +6921,8 @@ internal static class Program
                invalid.WrongConnectionConfirmMs == ProductionTimingPolicy.DefaultWrongConnectionConfirmMs &&
                invalid.ProductSettleTimeMs == ProductionTimingPolicy.DefaultProductSettleTimeMs &&
                invalid.JigContactUnstableWindowMs == ProductionTimingPolicy.DefaultJigContactUnstableWindowMs &&
-               invalid.ProbeReplacementThreshold >= 1_000,
-            "Timing settings normalize to internal defaults and maintenance setting keeps bounds");
+               invalid.ProbeReplacementThreshold == 1,
+            "Timing settings normalize to internal defaults and invalid PIN thresholds normalize to the minimum positive cycle");
 
         string settingsJson = JsonSerializer.Serialize(settings);
         ProductionSettings reloaded = JsonSerializer.Deserialize<ProductionSettings>(settingsJson)
@@ -1847,25 +6983,28 @@ internal static class Program
             1,
             (1, new[] { 18 }),
             (201, new[] { 202, 203 })));
-        Assert(vm.PassedNetworkCount == 3 && vm.State != "SẴN SÀNG",
-            "Normal wire and connected AO-aN branches are latched in the incomplete cycle");
+        board.Publish(FrameSeq(
+            2,
+            (1, new[] { 18 }),
+            (201, new[] { 202, 203 })));
+        Assert(vm.PassedNetworkCount == 3 && vm.State == "ĐANG KIỂM TRA...",
+            "The first completed expected connection moves presentation to the checking state without granting PASS");
 
         // Tháo dây thường nhưng AO-a1 vẫn còn: tuyệt đối chưa reset.
-        board.Publish(FrameSeq(2, (201, new[] { 202 })));
-        Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
         board.Publish(FrameSeq(3, (201, new[] { 202 })));
-        Assert(vm.PassedNetworkCount > 0 && vm.State != "SẴN SÀNG",
+        Assert(vm.PassedNetworkCount > 0 && vm.State != "LẮP SẢN PHẨM",
             "One remaining AO-a1 connection prevents cycle reset");
 
-        // Chỉ khi không còn bất kỳ cặp dây thường/CLIP nào và trạng thái rỗng
-        // ổn định hết cửa sổ chống chập chờn thì mới xóa toàn bộ latch.
+        // Complete frame đầu tiên không còn bất kỳ cặp dây thường/CLIP nào
+        // phải xóa toàn bộ latch và trả UI về LẮP SẢN PHẨM ngay.
         board.Publish(FrameSeq(4));
-        Thread.Sleep(ProductionTimingPolicy.DefaultJigContactUnstableWindowMs + 20);
+        Assert(vm.State != "LẮP SẢN PHẨM",
+            "One authoritative clean frame does not reset the cycle");
         board.Publish(FrameSeq(5));
         Assert(vm.PassedNetworkCount == 0 &&
-               vm.State == "SẴN SÀNG" &&
-               vm.ResultStatusText == "SẴN SÀNG",
-            "Full stable release clears normal/CLIP latches and returns the cycle to ready");
+               vm.State == "LẮP SẢN PHẨM" &&
+               vm.ResultStatusText == "LẮP SẢN PHẨM",
+            "Two authoritative full-release frames reset normal/CLIP latches");
     }
 
     private static void TestPartCounterStore()
@@ -2024,7 +7163,7 @@ internal static class Program
                     StringComparison.OrdinalIgnoreCase),
                 "PHT ERR path uses original Year/Month/Day.err hierarchy");
             Assert(errorText.StartsWith(
-                    "[정상마스터 Short Open] *BMS EXT; 1200020430; US4 HEV; 12000/20430; ; ; 2000 2026/08/22 08:55:34 - 08:55:36|\r\n",
+                    "[정상마스터 합선 단선] *BMS EXT; 1200020430; US4 HEV; 12000/20430; ; ; 2000 2026/08/22 08:55:34 - 08:55:36|\r\n",
                     StringComparison.Ordinal) &&
                    errorText.Contains(" >검사 IO:12\r\n -합선 IO:14", StringComparison.Ordinal) &&
                    errorText.Contains(" >검사 IO:10\r\n  단선 IO:11", StringComparison.Ordinal) &&
@@ -2032,6 +7171,29 @@ internal static class Program
                 "PHT ERR header, Korean IO detail and CRLF record separator match original format");
             Assert(errorBytes.Length > 4 && !(errorBytes[0] == 0xEF && errorBytes[1] == 0xBB && errorBytes[2] == 0xBF),
                 "PHT shared files use CP949 without UTF-8 BOM");
+
+            var leakFailure = new CompletedTestResult
+            {
+                Started = failed.Started.AddDays(1),
+                Finished = failed.Finished.AddDays(1),
+                Passed = false,
+                ResultText = "FAIL",
+                Faults = [new FaultDetail
+                {
+                    Type = ProductFaultType.WaterProofLeak,
+                    Message = "CH1 • 1: áp giữ 16.7; độ rò 67.5; yêu cầu áp >= 35, độ sụt <= 20"
+                }]
+            };
+            var leakWriter = new LegacyPhtHistoryService(Path.Combine(root, "LeakPass"), Path.Combine(root, "LeakError"));
+            string leakPath = leakWriter.AppendProduct(model, leakFailure, 2000);
+            string leakText = cp949.GetString(File.ReadAllBytes(leakPath));
+            Assert(leakText.Contains("누수 CH1 / 1: 유지압력 16.7  누설량 67.5  최소압력 >= 35, 최대압력강하 <= 20", StringComparison.Ordinal) &&
+                   !leakText.Contains('?') && !leakText.Contains("áp", StringComparison.Ordinal),
+                "Leak ERR details preserve channel, measured values and limits in CP949 Korean without replacement characters");
+            leakWriter.AppendProduct(model, leakFailure, 2000);
+            Assert(cp949.GetString(File.ReadAllBytes(leakPath)) == leakText + leakText &&
+                   File.ReadAllBytes(errorPath).SequenceEqual(errorBytes),
+                "Korean Leak appends preserve existing daily records without rewriting historical files");
 
             var reader = new LegacyPhtHistoryReader(passRoot, errorRoot);
             LegacyProductionSnapshot shared = reader.GetProductionSnapshot(
@@ -2079,6 +7241,27 @@ internal static class Program
         Directory.CreateDirectory(root);
         try
         {
+            var perModelMeasurement = new ProductionSettings();
+            ProductionConfigService.SetResistanceProfileForPath(
+                perModelMeasurement, @"C:\ITEM\PART-A.tht",
+                [new ResistanceChannelSetting { Name = "R1", Enabled = true, Channel = 3, MinOhm = 10, MaxOhm = 20 }]);
+            ProductionConfigService.SetResistanceProfileForPath(
+                perModelMeasurement, @"C:\ITEM\PART-B.tht",
+                [new ResistanceChannelSetting { Name = "R1", Enabled = false, Channel = 7, MinOhm = 30, MaxOhm = 40 }]);
+            ResistanceChannelSetting resistanceA = ProductionConfigService
+                .GetResistanceProfileForPath(perModelMeasurement, @"C:\ITEM\PART-A.tht")[0];
+            ResistanceChannelSetting resistanceB = ProductionConfigService
+                .GetResistanceProfileForPath(perModelMeasurement, @"C:\ITEM\PART-B.tht")[0];
+            Assert(resistanceA.Enabled && resistanceA.Channel == 3 && resistanceA.MinOhm == 10 &&
+                   !resistanceB.Enabled && resistanceB.Channel == 7 && resistanceB.MinOhm == 30,
+                "Resistance Enabled/channel/limits are isolated and restored by THT model key");
+            string perModelCfg = Path.Combine(root, "per-model-measurement.cfg");
+            ProductionConfigService.SaveLegacyCfg(perModelMeasurement, perModelCfg);
+            string cfgText = File.ReadAllText(perModelCfg);
+            Assert(cfgText.Contains("[Resistance.Model.PART-A.R1]1;3;10;20", StringComparison.Ordinal) &&
+                   cfgText.Contains("[Resistance.Model.PART-B.R1]0;7;30;40", StringComparison.Ordinal),
+                "Per-model Resistance profiles persist Enabled/channel/min/max in station configuration");
+
             string path = Path.Combine(root, "production.statistics.json");
             var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 9, 8, 0, 0, TimeSpan.Zero));
             var store = new ProductionStatisticsStore(path, clock);
@@ -2126,7 +7309,7 @@ internal static class Program
                 "New day increments the correct daily production counters");
 
             TestViewModel lotDisplayVm = CreateTestViewModel(
-                new ProductionSettings { LotNo = 2002, MasterFaultRequiredCount = 0 });
+                new ProductionSettings { LotNo = 2000, MasterFaultRequiredCount = 0 });
             MethodInfo applyDailyStatistics = typeof(TestViewModel).GetMethod(
                 "ApplyDailyProductionStatistics",
                 BindingFlags.Instance | BindingFlags.NonPublic)
@@ -2135,17 +7318,96 @@ internal static class Program
             [
                 new ModelProductionStatistics
                 {
-                    DailyTestCount = 3,
-                    DailyPassCount = 2,
-                    DailyFailCount = 1
+                    DailyTestCount = 10,
+                    DailyPassCount = 10,
+                    DailyFailCount = 0
                 }
             ]);
-            Assert(lotDisplayVm.Lot == "2" && lotDisplayVm.Total == 3 &&
-                   lotDisplayVm.Pass == 2 && lotDisplayVm.Fail == 1,
-                "LOT 2002 displays daily accepted quantity 2, not serial base 2000");
+            Assert(lotDisplayVm.Lot == "2000" && lotDisplayVm.Total == 10 &&
+                   lotDisplayVm.Pass == 10 && lotDisplayVm.Fail == 0,
+                "LOT display uses the committed product LOT without adding daily PASS twice");
             applyDailyStatistics.Invoke(lotDisplayVm, [new ModelProductionStatistics()]);
-            Assert(lotDisplayVm.Lot == "0" && lotDisplayVm.Total == 0,
-                "New daily period displays LOT quantity zero");
+            Assert(lotDisplayVm.Lot == "2000" && lotDisplayVm.Total == 0,
+                "New daily period resets production to zero and LOT display to its starting value");
+
+            var switchSettings = new ProductionSettings
+            {
+                MasterFaultRequiredCount = 0,
+                LotSettingsByProduct = new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["PART-A"] = new() { StartLotNo = 2000, LotNo = 2010, LotNoDate = DateTime.Now.ToString("yyyy-MM-dd") },
+                    ["PART-B"] = new() { StartLotNo = 7000, LotNo = 7003, LotNoDate = DateTime.Now.ToString("yyyy-MM-dd") }
+                }
+            };
+            TestViewModel switchVm = CreateTestViewModel(switchSettings);
+            ProductModel partA = Model(("SHARED", new[] { 1, 2 }));
+            partA.PartNumber = "PART-A";
+            partA.ModelName = "SAME-MODEL";
+            ProductModel partB = Model(("SHARED", new[] { 1, 2 }));
+            partB.PartNumber = "PART-B";
+            partB.ModelName = "SAME-MODEL";
+            MethodInfo applyProductionStatistics = typeof(TestViewModel).GetMethod(
+                "ApplyProductionStatistics", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("Production statistics UI method not found");
+            MethodInfo activeStatisticsContext = typeof(TestViewModel).GetMethod(
+                "IsActiveStatisticsContext", BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("Statistics context guard not found");
+
+            switchVm.SetModel(partA);
+            long generationA = (long)(typeof(TestViewModel).GetField(
+                "_statisticsLoadGeneration", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(switchVm) ?? 0L);
+            applyProductionStatistics.Invoke(switchVm,
+                [new ProductionStatisticsSnapshot(12, 10, 2, 12, 12, 10, 2, 2009, "FAIL")]);
+            Assert(switchVm.Total == 12 && switchVm.Pass == 10 && switchVm.Fail == 2 && switchVm.Lot == "2010",
+                "CASE A: Part A shows only A daily totals and its committed LOT");
+
+            switchVm.SetModel(partB);
+            long generationB = (long)(typeof(TestViewModel).GetField(
+                "_statisticsLoadGeneration", BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(switchVm) ?? 0L);
+            applyProductionStatistics.Invoke(switchVm,
+                [new ProductionStatisticsSnapshot(4, 3, 1, 4, 4, 3, 1, 7002, "FAIL")]);
+            Assert(switchVm.Total == 4 && switchVm.Pass == 3 && switchVm.Fail == 1 && switchVm.Lot == "7003",
+                "CASE A: Part B replaces A totals and uses B StartLot");
+            bool staleAAllowed = (bool)(activeStatisticsContext.Invoke(switchVm,
+                [partA, PartIdentitySnapshot.Capture(partA), generationA]) ?? true);
+            bool currentBAllowed = (bool)(activeStatisticsContext.Invoke(switchVm,
+                [partB, PartIdentitySnapshot.Capture(partB), generationB]) ?? false);
+            Assert(!staleAAllowed && currentBAllowed,
+                "CASE D: stale Part A statistics cannot apply after Part B becomes active");
+
+            var cardSaveLot = new ProductionSettings
+            {
+                LotNo = 142,
+                LotNoDate = DateTime.Today.ToString("yyyy-MM-dd"),
+                LotSettingsByProduct = new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["PART-CARD"] = new()
+                    {
+                        StartLotNo = 0,
+                        LotNo = 142,
+                        LotNoDate = DateTime.Today.ToString("yyyy-MM-dd")
+                    }
+                }
+            };
+            ProductionConfigService.SetProductLot(
+                cardSaveLot,
+                "PART-CARD",
+                142,
+                DateTime.Today.ToString("yyyy-MM-dd"));
+            Assert(cardSaveLot.LotNo == 142 &&
+                   cardSaveLot.LotSettingsByProduct["PART-CARD"].LotNo == 142,
+                "Saving card settings cannot add the existing LOT progress a second time");
+
+            switchVm.SetModel(partA);
+            applyProductionStatistics.Invoke(switchVm,
+                [new ProductionStatisticsSnapshot(13, 11, 2, 13, 13, 11, 2, 2010, "PASS")]);
+            Assert(switchVm.Total == 13 && switchVm.Pass == 11 && switchVm.Fail == 2 && switchVm.Lot == "2010",
+                "CASE A/E: statistics refresh cannot advance A LOT without a committed PASS");
+            switchVm.SetModel(partB);
+            applyProductionStatistics.Invoke(switchVm,
+                [new ProductionStatisticsSnapshot(4, 3, 1, 4, 4, 3, 1, 7002, "FAIL")]);
+            Assert(switchVm.Total == 4 && switchVm.Pass == 3 && switchVm.Fail == 1 && switchVm.Lot == "7003",
+                "CASE B/C: B remains isolated; FAIL contributes to Total/FAIL but not LOT");
 
             clock.Advance(TimeSpan.FromDays(24));
             Assert(restarted.Get(modelA).MonthlyTestCount == 0 && restarted.Get(modelA).ProbeCycleCount == 1, "Monthly period rolls without resetting probe");
@@ -2162,10 +7424,10 @@ internal static class Program
             Assert(!AdminAuthenticationService.Verify(string.Empty, string.Empty), "Empty admin password cannot authorize reset");
             Assert(!AdminAuthenticationService.Verify("admin-secret", "wrong"), "Wrong admin password rejected");
             Assert(AdminAuthenticationService.Verify("admin-secret", "admin-secret"), "Configured admin password accepted");
-            Assert(!AdminAuthenticationService.VerifyProbeMaintenance("wrong"),
-                "Probe maintenance rejects a wrong independent password");
-            Assert(AdminAuthenticationService.VerifyProbeMaintenance("admin"),
-                "Probe maintenance uses the independent admin password");
+            var access = new SettingsAccessService(Path.Combine(root, "settings-access.json"));
+            access.ChangePassword(SettingsAccessSession.Administrator, "admin", "settings-secret", "settings-secret");
+            Assert(!access.VerifyAdmin("wrong") && !access.VerifyAdmin("admin") && access.VerifyAdmin("settings-secret"),
+                "Maintenance authentication follows the current settings password instead of a fixed independent password");
         }
         finally
         {
@@ -2319,6 +7581,14 @@ internal static class Program
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         board.Publish(FrameSeq(10, (1, new[] { 86 }), (2, new[] { 87 })));
         Assert(vm.PassedNetworkCount == 0, "Reused background scan rejects stale pre-cycle complete frame");
+        board.Publish((FrameSeq(11, (1, new[] { 86 }), (2, new[] { 87 }))) with
+        {
+            ExpectedIoCount = 128,
+            SourceCount = 128,
+            ScanUnitCount = 2
+        });
+        Assert(vm.PassedNetworkCount == 0,
+            "Fresh-frame gate rejects a frame whose coverage belongs to another capacity");
         board.Publish(FrameSeq(11, (1, new[] { 86 }), (2, new[] { 87 })));
         Assert(vm.PassedNetworkCount == 2, "Fresh post-ARM frame can satisfy two-wire PASS gate");
 
@@ -2368,11 +7638,8 @@ internal static class Program
             "Wiring fault candidate exists before inline Probe frame");
         long processedBeforeProbe = vm.ProductionFramesProcessed;
 
-        board.Publish(FrameSeq(
-            22,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        board.Publish(ProbeFrameSeq(22, 1));
+        board.Publish(ProbeFrameSeq(23, 1));
 
         Assert(vm.HasInlineProbeContacts, "Inline Probe frame appears as transient UI state");
         Assert(vm.ProductionFramesProcessed > processedBeforeProbe,
@@ -2384,14 +7651,40 @@ internal static class Program
         TestViewModel cleanProbeVm = CreateTestViewModel(production, out FakeBoard cleanProbeBoard);
         cleanProbeVm.SetModel(model);
         cleanProbeVm.StartProductionTestAsync().GetAwaiter().GetResult();
-        cleanProbeBoard.Publish(FrameSeq(
-            23,
-            Enumerable.Range(10, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        cleanProbeBoard.Publish(ProbeFrameSeq(24, 1));
+        cleanProbeBoard.Publish(ProbeFrameSeq(25, 1));
+        TestEngine cleanProbeEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(cleanProbeVm) ?? throw new InvalidOperationException("Clean Probe engine not found"));
+        int cleanProbeProductSoundFlag = (int)(typeof(TestViewModel).GetField(
+            "_productStartSoundPlayed",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(cleanProbeVm) ?? -1);
         Assert(cleanProbeVm.HasInlineProbeContacts &&
+               cleanProbeVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               !cleanProbeEngine.GetProductEvidenceSnapshot().ValidProductEvidence &&
+               cleanProbeProductSoundFlag == 0 &&
                !cleanProbeVm.Faults.Any(row => row.Kind is FaultKind.WrongWiring or FaultKind.Short),
-            "Inline Probe contact is display-only and cannot create a new WRONG/SHORT fault");
+            "Inline Probe contact stays display-only and cannot create ProductPresence, sound, WRONG or SHORT");
+
+        TestViewModel leadingFrameVm = CreateTestViewModel(production, out FakeBoard leadingFrameBoard);
+        leadingFrameVm.SetModel(model);
+        leadingFrameVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        leadingFrameBoard.Publish(FrameSeq(26, (230, new[] { 1 }), (231, new[] { 1 })));
+        TestEngine leadingFrameEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(leadingFrameVm) ?? throw new InvalidOperationException("Leading-frame engine not found"));
+        Assert(leadingFrameEngine.GetPassGateDiagnostics().WrongCandidateCount > 0 &&
+               leadingFrameEngine.HasProductActivity,
+            "Setup: a weak leading frame can temporarily look like model-related wrong wiring");
+        leadingFrameBoard.Publish(ProbeFrameSeq(27, 1));
+        ProductEvidenceSnapshot isolatedEvidence = leadingFrameEngine.GetProductEvidenceSnapshot();
+        Assert(isolatedEvidence.WrongCandidateCount == 0 &&
+               !isolatedEvidence.ValidProductEvidence &&
+               leadingFrameVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct,
+            "A transient leading edge followed by Probe never confirms a production lifecycle");
 
         var pointerDisabled = new ProductionSettings
         {
@@ -2404,19 +7697,12 @@ internal static class Program
         TestViewModel pointerDisabledVm = CreateTestViewModel(pointerDisabled, out FakeBoard disabledBoard);
         pointerDisabledVm.SetModel(model);
         pointerDisabledVm.StartProductionTestAsync().GetAwaiter().GetResult();
-        disabledBoard.Publish(new ScanFrame(
-            DateTime.Now,
-            1,
-            new HashSet<int> { 113 },
-            [],
-            false,
-            0,
-            30,
-            new Dictionary<int, IReadOnlySet<int>>(),
-            new Dictionary<int, int> { [113] = 1 },
-            BoardScanMode.Production));
-        Assert(!pointerDisabledVm.HasInlineProbeContacts,
-            "UseTestPointer=false disables inline Probe display");
+        disabledBoard.Publish(ProbeFrameSeq(30, 1));
+        disabledBoard.Publish(ProbeFrameSeq(31, 1));
+        Assert(pointerDisabledVm.HasInlineProbeContacts,
+            "Legacy UseTestPointer=false is normalized to always-on Probe observation");
+        disabledBoard.Publish(FrameSeq(32));
+        disabledBoard.Publish(FrameSeq(33));
 
         MethodInfo waitMethod = typeof(TestViewModel).GetMethod(
             "WaitForProbeRelayInterlockAsync",
@@ -2425,7 +7711,23 @@ internal static class Program
         Stopwatch sw = Stopwatch.StartNew();
         ((Task)waitMethod.Invoke(pointerDisabledVm, [CancellationToken.None])!).GetAwaiter().GetResult();
         sw.Stop();
-        Assert(sw.ElapsedMilliseconds < 50, "UseTestPointer=false disables Probe relay interlock");
+        Assert(sw.ElapsedMilliseconds < 100, "Released always-on Probe adds no production PASS delay");
+
+        TestViewModel transitionVm = CreateTestViewModel(production, out FakeBoard transitionBoard);
+        transitionVm.SetModel(model);
+        transitionVm.StartProductionTestAsync().GetAwaiter().GetResult();
+        transitionBoard.Publish(FrameSeq(40));
+        TestEngine transitionEngine = (TestEngine)(typeof(TestViewModel).GetField(
+            "_engine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(transitionVm) ?? throw new InvalidOperationException("Transition engine not found"));
+        long engineFramesBeforeProbe = transitionEngine.FramesProcessed;
+        transitionBoard.Publish(ProbeFrameSeq(41, 14, fanIn: 12));
+        transitionBoard.Publish(ProbeFrameSeq(42, 14, fanIn: 5));
+        Assert(transitionEngine.FramesProcessed == engineFramesBeforeProbe &&
+               !transitionEngine.HasProductActivity &&
+               transitionEngine.GetPassGateDiagnostics().WrongCandidateCount == 0,
+            "A weak trailing Probe transition frame remains quarantined from ProductDetect/WRONG_CANDIDATE");
     }
 
     private static void TestHtdrvEndpointProbeDisplayCases()
@@ -2437,8 +7739,8 @@ internal static class Program
 
         FaultRow[] openRows = engine.BuildRows().Where(row => row.WireName == "1").ToArray();
         Assert(openRows.Length == 2 &&
-               openRows.Any(row => row.Io == 1 && row.FaultType == "KIỂM TRA" && row.Connector == "1" && row.Pin == "1" && row.IoCnPnText == "1-1-1") &&
-               openRows.Any(row => row.Io == 2 && row.FaultType == "HỞ MẠCH" && row.Connector == "1" && row.Pin == "2" && row.IoCnPnText == "2-1-2") &&
+               openRows.Any(row => row.Io == 1 && row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY" && row.Connector == "1" && row.Pin == "1" && row.IoCnPnText == "1-1-1") &&
+               openRows.Any(row => row.Io == 2 && row.FaultType == "Đơn" && row.Status == "CHỜ LẮP DÂY" && row.Connector == "1" && row.Pin == "2" && row.IoCnPnText == "2-1-2") &&
                openRows.All(row => !row.IoText.Contains("<->", StringComparison.Ordinal) && !row.Pin.Contains("<->", StringComparison.Ordinal)),
             "CASE A: Open display uses one endpoint row per pin with IO-CN-PN metadata");
 
@@ -2454,21 +7756,120 @@ internal static class Program
         vm.SetModel(model);
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
         board.Publish(FrameSeq(10, (1, Array.Empty<int>())));
-        board.Publish(FrameSeq(
-            11,
-            Enumerable.Range(20, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        int totalBeforeProbe = vm.Total;
+        int passBeforeProbe = vm.Pass;
+        int failBeforeProbe = vm.Fail;
+        int commandsBeforeProbe = board.Commands.Count;
+        string centerBeforeProbe = vm.CenterResultText;
+        board.Publish(ProbeFrameSeq(11, 1));
+        board.Publish(ProbeFrameSeq(12, 1));
 
         Assert(vm.HasInlineProbeContacts &&
-               vm.Faults.Any(row => row.Kind == FaultKind.Probe && row.Io == 1 && row.FaultType == "KIỂM TRA") &&
-               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "HỞ MẠCH"),
-            "CASE B: Probe IO1 is displayed while the IO2 open row remains");
+               vm.Faults.Any(row =>
+                   row.Kind == FaultKind.Probe &&
+                   row.FaultType == "TP" &&
+                   row.Io == 1 &&
+                   row.IoText == "1" &&
+                   row.Connector == "1" &&
+                   row.Pin == "1" &&
+                   row.WireName == "1" &&
+                   row.Section == "0.5" &&
+                   row.Color == "R" &&
+                   row.Status == "TP - IO(1)" &&
+                   row.IoCnPnText == "1-1-1") &&
+               vm.CenterResultText.Length == 0 &&
+               vm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
+               vm.Total == totalBeforeProbe &&
+               vm.Pass == passBeforeProbe &&
+               vm.Fail == failBeforeProbe &&
+               board.Commands.Count == commandsBeforeProbe,
+            "CASE B: mapped Probe shows the complete touched THT row without production or relay side effects; " +
+            $"active={vm.HasInlineProbeContacts}, center={vm.CenterResultText}/{centerBeforeProbe}, " +
+            $"count={vm.Total}/{totalBeforeProbe},{vm.Pass}/{passBeforeProbe},{vm.Fail}/{failBeforeProbe}, " +
+            $"commands={board.Commands.Count}/{commandsBeforeProbe}, rows=" +
+            string.Join("|", vm.Faults.Select(row =>
+                $"{row.Kind}/IO{row.Io}/{row.IoText}/{row.IoCnPnText}/{row.WireName}/{row.Section}/{row.Color}/{row.Status}")));
 
-        board.Publish(FrameSeq(12));
+        long touchRevision = (long)(typeof(TestViewModel).GetField(
+            "_inlineProbeUiRevision",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? -1L);
+        board.Publish(FrameSeq(13));
+        long releaseRevision = (long)(typeof(TestViewModel).GetField(
+            "_inlineProbeUiRevision",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?.GetValue(vm) ?? -1L);
         Assert(!vm.HasInlineProbeContacts &&
-               vm.Faults.Any(row => row.Io == 2 && row.FaultType == "HỞ MẠCH"),
-            "CASE C: Probe release removes only Probe presentation and keeps production open row");
+               vm.Faults.All(row => row.Kind != FaultKind.Probe) &&
+               vm.Faults.Count == 0 &&
+               vm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               vm.CurrentProductionPresentationMode == ProductionPresentationMode.Waiting &&
+               vm.CurrentProbePresentationState == ProbePresentationState.Released &&
+               vm.State == "LẮP SẢN PHẨM" &&
+               releaseRevision > touchRevision &&
+               vm.CenterResultText == "LẮP SẢN PHẨM",
+            "CASE C: one RELEASE frame clears TP, keeps pending model rows hidden while waiting, restores waiting presentation, and invalidates stale TOUCH callbacks");
+
+        var duplicateModel = new ProductModel
+        {
+            ModelName = "PROBE-DUPLICATE-MAPPING",
+            PartNumber = "PROBE-DUPLICATE-MAPPING"
+        };
+        var duplicateA1 = new PinRecord("CN-A", "WIRE-A", 5, "1", Section: "0.3", Color: "B", OriginalOrder: 1);
+        var duplicateA2 = new PinRecord("CN-B", "WIRE-A", 6, "2", Section: "0.3", Color: "B", OriginalOrder: 2);
+        var duplicateB1 = new PinRecord("CN-C", "WIRE-B", 5, "3", Section: "0.5", Color: "R", OriginalOrder: 3);
+        var duplicateB2 = new PinRecord("CN-D", "WIRE-B", 7, "4", Section: "0.5", Color: "R", OriginalOrder: 4);
+        var duplicateSingle = new PinRecord("CN-E", string.Empty, 5, "5", Section: "0.8", Color: "G", OriginalOrder: 5);
+        duplicateModel.Pins.AddRange([duplicateA1, duplicateA2, duplicateB1, duplicateB2, duplicateSingle]);
+        duplicateModel.Nets.Add(new WireNet("WIRE-A", [5, 6], [duplicateA1, duplicateA2]));
+        duplicateModel.Nets.Add(new WireNet("WIRE-B", [5, 7], [duplicateB1, duplicateB2]));
+        TestViewModel duplicateVm = CreateTestViewModel(production);
+        duplicateVm.SetModel(duplicateModel);
+        IReadOnlyList<FaultRow> duplicateRows = duplicateVm.GetProbeRows(5);
+        Assert(duplicateRows.Count == 3 &&
+               duplicateRows.All(row => row.Io == 5 && row.FaultType == "TP") &&
+               duplicateRows.Select(row => row.Connector).SequenceEqual(["CN-A", "CN-C", "CN-E"]) &&
+               duplicateRows.Any(row => row.Connector == "CN-E" &&
+                                        row.Pin == "5" &&
+                                        row.Section == "0.8" &&
+                                        row.Color == "G"),
+            "CASE C1: duplicate IO mapping shows every direct THT row without expanding peer endpoints");
+
+        var unnamedPinModel = new ProductModel
+        {
+            ModelName = "PROBE-UNNAMED-PIN",
+            PartNumber = "PROBE-UNNAMED-PIN"
+        };
+        unnamedPinModel.Pins.Add(new PinRecord("3", string.Empty, 10, "5", OriginalOrder: 1));
+        TestViewModel unnamedPinVm = CreateTestViewModel(production);
+        unnamedPinVm.SetModel(unnamedPinModel);
+        FaultRow unnamedPinRow = unnamedPinVm.GetProbeRows(10).Single();
+        Assert(unnamedPinRow.Io == 10 &&
+               unnamedPinRow.IoText == "IO (10)" &&
+               unnamedPinRow.Connector == "3" &&
+               unnamedPinRow.Pin == "5" &&
+               unnamedPinRow.WireName.Length == 0,
+            "CASE C1.1: unnamed THT pin shows IO (10) in IO, Connector 3 and Pin 5 in their own columns");
+
+        ScanFrame unmappedPairFrame = FrameSeq(14, (23, new[] { 25 }));
+        Assert(ProbeContactClassifier.DetectMany(
+                   unmappedPairFrame,
+                   model,
+                   maxContacts: 2,
+                   boardCapacity: BoardCapacity.Create(10)).Count == 0,
+            "CASE C2: an ordinary IO23<->IO25 edge has no Probe signature");
+        using TestEngine unmappedPairEngine = CreateEngine(out _, production);
+        unmappedPairEngine.SetModel(model);
+        unmappedPairEngine.ProcessFrame(unmappedPairFrame);
+        Thread.Sleep(ProductionTimingPolicy.DefaultWrongConnectionConfirmMs + 20);
+        unmappedPairEngine.ProcessFrame(unmappedPairFrame with { Sequence = 15 });
+        PassGateDiagnostics unmappedDiagnostics = unmappedPairEngine.GetPassGateDiagnostics();
+        Assert(unmappedDiagnostics.WrongCandidateCount == 0 &&
+               unmappedDiagnostics.ShortCandidateCount == 1 &&
+               !unmappedDiagnostics.HasProductActivity &&
+               unmappedDiagnostics.ShortConfirmedCount == 1 &&
+               unmappedPairEngine.HasWiringFault,
+            "CASE C2: a non-Probe IO23<->IO25 edge outside THT is confirmed as SHORT without manufacturing model presence");
 
         ProductModel shortModel = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
         var shortProduction = new ProductionSettings
@@ -2501,13 +7902,13 @@ internal static class Program
             "CASE D setup: real SHORT is confirmed before Probe observation. Rows=" +
             string.Join(" | ", shortVm.Faults.Select(row => $"{row.Kind}/{row.FaultType}/IO{row.Io}/{row.Status}")) +
             $" Diagnostics shortCandidate={shortDiagnostics.ShortCandidateCount} shortConfirmed={shortDiagnostics.ShortConfirmedCount} wrongCandidate={shortDiagnostics.WrongCandidateCount} wrongConfirmed={shortDiagnostics.WrongConfirmedCount}");
-        shortBoard.Publish(FrameSeq(
-            23,
-            Enumerable.Range(30, 20)
-                .Select(source => (source, new[] { 86 }))
-                .ToArray()));
+        shortBoard.Publish(ProbeFrameSeq(23, 86));
+        shortBoard.Publish(ProbeFrameSeq(24, 86));
         refreshFaults.Invoke(shortVm, []);
-        Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe && row.Io == 86) &&
+        Assert(shortVm.Faults.Any(row => row.Kind == FaultKind.Probe &&
+                                        row.Io == 86 &&
+                                        row.WireName == "PAIR-A" &&
+                                        row.FaultType == "TP") &&
                shortVm.Faults.Any(row => row.Kind == FaultKind.Short),
             "CASE D: Probe row and real SHORT row can coexist; SHORT remains visible");
 
@@ -2515,19 +7916,30 @@ internal static class Program
         unusedVm.SetModel(model);
         unusedVm.StartProductionTestAsync().GetAwaiter().GetResult();
         long processedBeforeUnusedProbe = unusedVm.ProductionFramesProcessed;
-        unusedBoard.Publish(FrameSeq(
-            30,
-            Enumerable.Range(40, 20)
-                .Select(source => (source, new[] { 7 }))
-                .ToArray()));
+        unusedBoard.Publish(ProbeFrameSeq(30, 7));
+        unusedBoard.Publish(ProbeFrameSeq(31, 7));
         Assert(unusedVm.HasInlineProbeContacts &&
-               unusedVm.Faults.Any(row =>
-                   row.Kind == FaultKind.Probe &&
-                   row.Io == 7 &&
-                   row.FaultType == "KIỂM TRA" &&
-                   row.Connector.Contains("KHÔNG SỬ DỤNG IO(7)", StringComparison.Ordinal)) &&
+               unusedVm.Faults.Count == 1 &&
+               unusedVm.Faults[0].Kind == FaultKind.Probe &&
+               unusedVm.Faults[0].Io == 7 &&
+               unusedVm.Faults[0].IoText == "IO (7)" &&
+               unusedVm.Faults[0].Connector.Length == 0 &&
+               unusedVm.Faults[0].Pin.Length == 0 &&
+               unusedVm.Faults[0].WireName.Length == 0 &&
+               unusedVm.Faults[0].FaultType == "TP" &&
+               unusedVm.Faults[0].Status == "TP - IO(7)" &&
+               unusedVm.CenterResultText.Length == 0 &&
+               unusedVm.CurrentProductionRuntimeState == ProductionRuntimeState.WaitingForProduct &&
+               unusedVm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
+               unusedVm.CurrentProbePresentationState == ProbePresentationState.Touch &&
+               unusedVm.State == "LẮP SẢN PHẨM" &&
                unusedVm.ProductionFramesProcessed > processedBeforeUnusedProbe,
-            "CASE E: Unused probe IO is presentation-only and the frame still reaches Production TestEngine");
+            "CASE E: always-on Probe shows an unmapped physical IO while Probe owns presentation, without starting the product cycle; " +
+            $"state={unusedVm.State}, runtime={unusedVm.CurrentProductionRuntimeState}, " +
+            $"presentation={unusedVm.CurrentProductionPresentationMode}, probe={unusedVm.CurrentProbePresentationState}, " +
+            $"center='{unusedVm.CenterResultText}', processed={unusedVm.ProductionFramesProcessed}/{processedBeforeUnusedProbe}, rows=" +
+            string.Join("|", unusedVm.Faults.Select(row =>
+                $"{row.Kind}/IO{row.Io}/{row.IoText}/{row.Connector}/{row.Pin}/{row.WireName}/{row.FaultType}/{row.Status}")));
 
         TestViewModel testPinVm = CreateTestViewModel(production, out FakeBoard testPinBoard);
         testPinVm.SetModel(model);
@@ -2537,11 +7949,10 @@ internal static class Program
                testPinVm.State != "ĐANG DÒ CHÂN",
             "TestPin observer does not switch transport out of Production mode or change production state");
         long processedBeforeTestPin = testPinVm.ProductionFramesProcessed;
-        testPinBoard.Publish(FrameSeq(
-            40,
-            Enumerable.Range(60, 20)
-                .Select(source => (source, new[] { 1 }))
-                .ToArray()));
+        testPinBoard.Publish(ProbeFrameSeq(40, 7));
+        testPinBoard.Publish(ProbeFrameSeq(41, 7));
+        testPinBoard.Publish(ProbeFrameSeq(42, 1));
+        testPinBoard.Publish(ProbeFrameSeq(43, 1));
         Assert(testPinVm.HasInlineProbeContacts &&
                testPinVm.ProductionFramesProcessed > processedBeforeTestPin,
             "StartProbeScanAsync enables Probe/TestPin observation on Production stream");
@@ -2557,10 +7968,29 @@ internal static class Program
             ShortCircuitConfirmMs = 0,
             UseTestPointer = true
         };
-        ProductModel model = Model(("PAIR-A", new[] { 1, 86 }), ("PAIR-B", new[] { 2, 87 }));
+        // Keep one network intentionally pending so this stress test exercises
+        // the continuous scan/probe/fault path without legitimately entering
+        // the separate final-PASS flow that stops scanning for relay handling.
+        ProductModel model = Model(
+            ("PAIR-A", new[] { 1, 86 }),
+            ("PAIR-B", new[] { 2, 87 }),
+            ("PAIR-C", new[] { 3, 88 }));
         TestViewModel vm = CreateTestViewModel(production, out FakeBoard board);
         vm.SetModel(model);
         vm.StartProductionTestAsync().GetAwaiter().GetResult();
+
+        // Warm every presentation/fault branch before measuring native handles.
+        // WPF creates a fixed set of process-wide resources on first use; the
+        // steady-state loop below is the part that must remain bounded.
+        board.Publish(FrameSeq(900, (1, new[] { 86 }), (2, new[] { 87 })));
+        board.Publish(FrameSeq(901, (1, Array.Empty<int>())));
+        board.Publish(FrameSeq(902, (1, new[] { 86, 87 }), (2, new[] { 87 })));
+        board.Publish(FrameSeq(
+            903,
+            Enumerable.Range(10, 20)
+                .Select(source => (source, new[] { 1 }))
+                .ToArray()));
+        board.Publish(FrameSeq(904));
 
         int threadCountBefore = Process.GetCurrentProcess().Threads.Count;
         int handleCountBefore = Process.GetCurrentProcess().HandleCount;
@@ -2780,6 +8210,37 @@ internal static class Program
                NetIos(wh322244Extract, "BG16").SequenceEqual([16, 79]) &&
                NetIos(wh322244Extract, "NUT01").SequenceEqual([34, 35]),
             "WH322244 extracted networks are grouped by string WireName only");
+
+        const string multiPartText =
+            "파트번호\t파트명\tECO\tNCO\tALC\n" +
+            "PART-A\tPRODUCT A\tECO-A\tNCO-A\tALC-A\n" +
+            "PART-B\tPRODUCT B\tECO-B\tNCO-B\tALC-B\n\n" +
+            "번 호\t커넥터\t핀 수\n" +
+            "1\tCN1\t2\n\n" +
+            "커넥터\t선이름\tI/O\t핀번호\n" +
+            "CN1\tW1\t1\t1\n" +
+            "CN1\tW1\t2\t2\n\n" +
+            "선이름\t선연결\t굵기\t색깔\n" +
+            "W1\t\t0.5\tR";
+        string multiPartRoot = Path.Combine(
+            Path.GetTempPath(), "JBZMultiPartThtTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(multiPartRoot);
+        try
+        {
+            string multiPartPath = Path.Combine(multiPartRoot, "multi-part.tht");
+            File.WriteAllBytes(multiPartPath, BuildMinimalThtFile(multiPartText));
+            IReadOnlyList<ProductModel> parts = new ThtModelParser().LoadAll(multiPartPath);
+            Assert(parts.Count == 2 &&
+                   parts[0].PartNumber == "PART-A" && parts[0].ProductName == "PRODUCT A" &&
+                   parts[1].PartNumber == "PART-B" && parts[1].ProductName == "PRODUCT B" &&
+                   parts.All(part => part.Nets.Single().IoNumbers.SequenceEqual([1, 2])) &&
+                   PartSelectionWindow.PartKey(parts[0]) != PartSelectionWindow.PartKey(parts[1]),
+                "Multi-Part THT returns one explicit candidate per Part row without inferring topology conversion");
+        }
+        finally
+        {
+            Directory.Delete(multiPartRoot, recursive: true);
+        }
     }
 
     private static void TestRelayOrdering()
@@ -2965,7 +8426,26 @@ internal static class Program
             };
 
             var store = new TestHistoryStore(Path.Combine(root, "history.db"));
+            store.UpsertActiveCycle(
+                record.CycleId,
+                record.PartNumber,
+                record.ModelFile,
+                record.Started,
+                "TEST_STARTED");
+            Assert(CountActiveCycles(store.DatabasePath, record.CycleId) == 1,
+                "Active production cycle is persisted before final PASS/FAIL commit");
             store.Add(record);
+            Assert(CountActiveCycles(store.DatabasePath, record.CycleId) == 0,
+                "Final result atomically clears its active cycle");
+            store.UpsertActiveCycle(
+                record.CycleId,
+                record.PartNumber,
+                record.ModelFile,
+                record.Started,
+                "RETRY");
+            store.Add(record);
+            Assert(CountActiveCycles(store.DatabasePath, record.CycleId) == 0,
+                "Idempotent duplicate commit also clears a recreated active-cycle row");
             DateTime removalStarted = finished.AddMilliseconds(250);
             DateTime removedAt = removalStarted.AddSeconds(2);
             Assert(store.UpdateRemovalTiming(record.CycleId, removalStarted, null),
@@ -2980,6 +8460,7 @@ internal static class Program
                    found[0].InspectionType == HistoryInspectionType.Product &&
                    found[0].InstallDurationSeconds == 2 &&
                    found[0].TestDurationSeconds == 3 &&
+                   found[0].InstallAndTestDurationSeconds == 5 &&
                    found[0].RemovalDurationSeconds == 2 &&
                    found[0].RemovalStartedAt == removalStarted &&
                    found[0].RemovedAt == removedAt &&
@@ -2988,26 +8469,31 @@ internal static class Program
                    found[0].LabelPayload == record.LabelPayload,
                 "SQLite search preserves 14-column values, phase trace and immutable print payload");
 
+            Assert(found[0].DateText == "2026/08/09" &&
+                   found[0].TimeText == "14:07:05" &&
+                   found[0].EffectiveResultAt == finished,
+                "History Ngày/Thời gian must display TEST START time, not later ResultAt time");
+
             string csv = Path.Combine(root, "history.csv");
             HistoryExportService.ExportCsv(csv, found);
             byte[] csvBytes = File.ReadAllBytes(csv);
             Assert(csvBytes.Length >= 3 && !(csvBytes[0] == 0xEF && csvBytes[1] == 0xBB && csvBytes[2] == 0xBF),
-                "ALL13 CSV uses CP949 without UTF-8 BOM");
+                "History CSV uses CP949 without UTF-8 BOM");
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
             Assert(csvText.StartsWith(
-                    "일 자,시 간,파 일,품 명,품 번,차 종,Lot,결 과,순 번,검 사 기 록,바코드,200 %,수입검사,프로그램\n",
+                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,RESULT,결과,합격,검사기록,바코드입력,바코드출력,측정,JBZUniversalTester,내용,메모\n",
                     StringComparison.Ordinal),
-                "History CSV preserves the exact original 14-column Korean header");
+                "History CSV has the original 18 Korean columns in order");
             Assert(csvText.Contains(
-                    "2026-08-09,14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,VOLVO Radio,합격,2001",
+                    "2026/08/09 14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,,NI375/C1000,,PASS,합격,2001,",
                     StringComparison.Ordinal) &&
-                   csvText.Contains("장착 14:07:03~14:07:05(2.000초) 14:07:05 검사시작", StringComparison.Ordinal) &&
+                   csvText.Contains("장착/검사 14:07:03~14:07:08(5.000초)", StringComparison.Ordinal) &&
+                   !csvText.Contains("검사시작", StringComparison.Ordinal) &&
                    csvText.Contains("저항검사 [CH1: 100 Ω < 101.5 Ω < 110 Ω :PASS]", StringComparison.Ordinal) &&
                    csvText.Contains("탈거 14:07:08~14:07:10(2.000초)", StringComparison.Ordinal) &&
-                   csvText.Contains(",NI375C10002608092001,,,JBZUniversalTester V15.2.0", StringComparison.Ordinal) &&
-                   !csvText.Contains("N\r\nNI375C10002608092001", StringComparison.Ordinal),
-                "Sample history CSV keeps three test phases, sequence and barcode without raw EPL payload");
+                   csvText.Contains("\"" + record.LabelPayload.Replace("\"", "\"\"") + "\"", StringComparison.Ordinal),
+                "Sample history CSV keeps test phases and the entire printer command, with saved LOT in the PASS count");
 
             string xlsx = Path.Combine(root, "history.xlsx");
             HistoryExportService.ExportXlsx(xlsx, found);
@@ -3015,46 +8501,69 @@ internal static class Program
             string sheet = ReadEntry(archive, "xl/worksheets/sheet1.xml");
             string styles = ReadEntry(archive, "xl/styles.xml");
             Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"B2\" s=\"4\"><v>", StringComparison.Ordinal),
-                "XLSX date and time use separate native numeric cells");
-            Assert(sheet.Contains("<c r=\"I2\"><v>2001</v></c>", StringComparison.Ordinal),
-                "XLSX sequence uses the PASS LOT number");
+                   styles.Contains("formatCode=\"yyyy/mm/dd hh:mm:ss\"", StringComparison.Ordinal),
+                "XLSX uses one native numeric datetime cell for test-start time");
+            Assert(sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">2001</t>", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"L2\" t=\"inlineStr\" s=\"3\">", StringComparison.Ordinal) &&
+                   !sheet.Contains("순 번", StringComparison.Ordinal),
+                "XLSX puts saved LOT in the PASS count immediately before the test log");
             Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">NI375C10002608092001</t>", StringComparison.Ordinal) &&
-                   !sheet.Contains("N&#xD;", StringComparison.Ordinal) &&
-                   sheet.Contains("autoFilter ref=\"A1:N2\"", StringComparison.Ordinal),
-                "XLSX preserves Korean headers, barcode value and 14-column filter");
+                   string.Concat(System.Xml.Linq.XDocument.Parse(sheet).Descendants()
+                       .Single(element => element.Name.LocalName == "c" && (string?)element.Attribute("r") == "N2")
+                       .Descendants().Where(element => element.Name.LocalName == "t").Select(element => element.Value)) == record.LabelPayload &&
+                   sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
+                "XLSX preserves Korean headers, exact printer command and original 18-column filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
-                   styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
-                "XLSX date, time and wrapped test-log styles");
+                   styles.Contains("wrapText=\"0\"", StringComparison.Ordinal) &&
+                   !styles.Contains("wrapText=\"1\"", StringComparison.Ordinal),
+                "XLSX preserves native date/time types and keeps test logs on a single unwrapped row");
 
             string historyXaml = File.ReadAllText(
                 Path.Combine(Environment.CurrentDirectory, "Views", "HistoryPage.xaml"));
             string[] sampleHeaders =
             [
-                "Ngày", "Thời gian", "File", "Tên sản phẩm", "Mã hàng", "Loại xe", "LOT",
-                "Kết quả", "Số thứ tự", "Hồ sơ kiểm tra", "Mã vạch", "200 %",
-                "Kiểm tra đầu vào", "Chương trình"
+                "Ngày", "Thời gian", "Mã hàng", "Kết quả", "File", "Loại kiểm tra", "Tên sản phẩm", "Eco", "Nco", "Alc", "LOT",
+                "KẾT QUẢ", "Số đếm PASS", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
+                "Đo lường", "Chương trình", "Nội dung", "Ghi chú"
             ];
             int previousHeader = -1;
             foreach (string header in sampleHeaders)
             {
                 int headerIndex = historyXaml.IndexOf($"Header=\"{header}\"", previousHeader + 1, StringComparison.Ordinal);
-                Assert(headerIndex > previousHeader, $"History UI Vietnamese 14-column order: {header}");
+                Assert(headerIndex > previousHeader, $"History UI follows V403 frozen identity/result columns and retains inspection type: {header}");
                 previousHeader = headerIndex;
             }
+            Assert(!historyXaml.Contains("Header=\"Số thứ tự\"", StringComparison.Ordinal),
+                "History UI omits the ordinal column requested by operators");
             Assert(historyXaml.Contains("CanUserResizeColumns=\"False\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("<Setter Property=\"HorizontalContentAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
+                   historyXaml.Contains("<Setter Property=\"HorizontalAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
                    historyXaml.Contains("CanUserReorderColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("CanUserSortColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("ScrollViewer.HorizontalScrollBarVisibility=\"Visible\"", StringComparison.Ordinal) &&
-                   historyXaml.Contains("Header=\"Hồ sơ kiểm tra\" Width=\"1200\"", StringComparison.Ordinal),
-                "History UI locks column layout and keeps the inspection record widest with horizontal scrolling");
+                   historyXaml.Contains("FrozenColumnCount=\"4\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"420\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Text=\"{Binding HistoryTestLogSingleLineText}\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("ToolTip=\"{Binding HistoryTestLogText}\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("ToolTipOpening=\"HistoryGrid_ToolTipOpening\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("x:Name=\"LoadMoreButton\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("x:Key=\"HistoryLoadMoreButtonStyle\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Content=\"XEM THÊM LỊCH SỬ\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Style=\"{StaticResource HistoryLoadMoreButtonStyle}\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("BorderThickness\" Value=\"1\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"Width\" Value=\"180\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"HorizontalAlignment\" Value=\"Center\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"Height\" Value=\"36\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Property=\"MinHeight\" Value=\"36\"", StringComparison.Ordinal),
+                "History UI locks columns, retains full log tooltips and fits compact controls without clipping");
 
             var failed = new TestHistoryRecord
             {
                 Finished = finished,
                 Passed = false,
+                LotNo = 0,
+                ProductionCounter = 2001,
                 Result = "FAIL",
                 FaultCode = "OPEN_CIRCUIT",
                 FaultType = "DÂY CHƯA KẾT NỐI",
@@ -3074,10 +8583,12 @@ internal static class Program
             string customerCsv = Path.Combine(root, "customer-fault.csv");
             HistoryExportService.ExportCsv(customerCsv, [failed]);
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
-            Assert(customerText.Contains(",불량,,", StringComparison.Ordinal) &&
+            Assert(failed.HistoryOrdinal == 1 && failed.ExportLotText.Length == 0 &&
+                   failed.ExportPassCountText.Length == 0 &&
+                   customerText.Contains(",,NG,불량,,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
-                "History CSV FAIL uses concise Korean fault detail and blank accepted LOT");
+                "History CSV FAIL uses concise Korean fault detail with blank LOT and no ordinal column");
 
             var masterBad = new TestHistoryRecord
             {
@@ -3098,6 +8609,77 @@ internal static class Program
                    masterBad.ExportTestLogText.Contains("회로검사:FAIL", StringComparison.Ordinal) &&
                    masterBad.ExportTestLogText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal),
                 "MASTER BAD history is separate from production and preserves Korean fault evidence");
+
+            var leakRetestModel = new ProductModel
+            {
+                ModelName = "LEAK-RETEST-MODEL",
+                PartNumber = "LEAK-RETEST-PART",
+                ProductName = "LEAK RETEST PRODUCT",
+                SourcePath = Path.Combine(root, "LEAK-RETEST.tht")
+            };
+            var leakRetestRecord = new TestHistoryRecord
+            {
+                Started = finished.AddMinutes(1),
+                Finished = finished.AddMinutes(1).AddSeconds(3),
+                TestStartedAt = finished.AddMinutes(1),
+                ResultAt = finished.AddMinutes(1).AddSeconds(3),
+                InspectionType = HistoryInspectionType.LeakRetest,
+                PartName = leakRetestModel.ProductName,
+                PartNumber = leakRetestModel.PartNumber,
+                Result = "FAIL",
+                Passed = false,
+                ModelName = leakRetestModel.ModelName,
+                ModelFile = leakRetestModel.SourcePath,
+                LotNo = 0,
+                LotText = "LOT GỐC",
+                CycleId = "history-cycle-leak-retest-0001",
+                InspectionTrace = "14:08:08~14:08:11 LEAK RETEST #1 [CH1/CN1: 84→83 Δ1≤0.5:FAIL]",
+                FaultType = FaultTypeCatalog.DisplayName(ProductFaultType.WaterProofLeak),
+                FaultCode = FaultTypeCatalog.Code(ProductFaultType.WaterProofLeak),
+                BarcodeValue = "MUST-NOT-EXPORT",
+                PrintStatus = LabelPrintStatus.Printed.ToString()
+            };
+            var leakRetestFault = new FaultDetail
+            {
+                Type = ProductFaultType.WaterProofLeak,
+                WireName = "CH1 • CN1",
+                Message = "Leak retest FAIL"
+            };
+            leakRetestRecord.FaultDetailsJson = JsonSerializer.Serialize(new[] { leakRetestFault });
+            var leakRetestMeasurement = new WaterProofChannelMeasurement(1, true, 84, 83, 1, false);
+            ProductionResultCommitRequest leakRetestRequest = ProductionResultCommitRequest.Capture(
+                leakRetestRecord,
+                leakRetestModel,
+                new ProductionSettings(),
+                [leakRetestFault],
+                [],
+                [leakRetestMeasurement],
+                ProgramIdentityService.VersionText);
+            Assert(!leakRetestRequest.UpdateProductionTotals &&
+                   leakRetestRequest.WaterProof.Count == 1 &&
+                   !leakRetestRecord.IsProductionRecord &&
+                   !leakRetestRecord.IsMasterRecord &&
+                   leakRetestRecord.InspectionTypeText == "기밀 검사 시작" &&
+                   leakRetestRecord.ExportAcceptedLotNo is null &&
+                   leakRetestRecord.ExportBarcodeText.Length == 0,
+                "Leak retest is a visible history type but never becomes a production LOT/barcode result");
+            store.CommitResult(leakRetestRequest, null);
+            IReadOnlyList<TestHistoryRecord> leakRetestRows = store.Search(new HistorySearchCriteria(
+                finished.Date,
+                finished.Date.AddDays(1),
+                null,
+                leakRetestModel.PartNumber,
+                "FAIL",
+                InspectionType: HistoryInspectionType.LeakRetest));
+            ProductionStatisticsSnapshot leakRetestStats = store.GetStatistics(
+                PartIdentitySnapshot.Capture(leakRetestModel),
+                finished);
+            Assert(leakRetestRows.Count == 1 &&
+                   leakRetestRows[0].InspectionType == HistoryInspectionType.LeakRetest &&
+                   leakRetestRows[0].Passed == false &&
+                   leakRetestStats.DailyTotal == 0 &&
+                   leakRetestStats.LifetimeTotal == 0,
+                "Leak retest PASS/FAIL persists in history without increasing product statistics");
 
             var normalProduct = new TestHistoryRecord
             {
@@ -3168,6 +8750,7 @@ internal static class Program
                 ModelFile = @"D:\Models\C.tht",
                 Result = "PASS",
                 Passed = true,
+                LotNo = 2000,
                 CycleId = "export-part-a"
             });
             exportStore.Add(new TestHistoryRecord
@@ -3178,6 +8761,7 @@ internal static class Program
                 ModelFile = @"D:\Models\B.tht",
                 Result = "PASS",
                 Passed = true,
+                LotNo = 7001,
                 CycleId = "export-part-z-b"
             });
             exportStore.Add(new TestHistoryRecord
@@ -3188,6 +8772,7 @@ internal static class Program
                 ModelFile = @"D:\Models\A.tht",
                 Result = "PASS",
                 Passed = true,
+                LotNo = 7000,
                 CycleId = "export-part-z-a"
             });
 
@@ -3202,13 +8787,242 @@ internal static class Program
             IReadOnlyList<TestHistoryRecord> allExportRows = exportStore.SearchForExport(monthlyCriteria);
             Assert(limitedRows.Count == 1 && allExportRows.Count == 3,
                 "History export is independent from the DataGrid row limit");
-            Assert(allExportRows[0].PartNumber == "PART-A" &&
-                   allExportRows[1].CycleId == "export-part-z-a" &&
-                   allExportRows[2].CycleId == "export-part-z-b",
-                "History export sorts by part number, test start time and stable Id");
-            Assert(allExportRows[1].ExportModelFileName == "A.tht" &&
-                   allExportRows[2].ExportModelFileName == "B.tht",
+            Assert(allExportRows[0].CycleId == "export-part-z-a" &&
+                   allExportRows[1].CycleId == "export-part-z-b" &&
+                   allExportRows[2].CycleId == "export-part-a",
+                "History export sorts oldest-to-newest by displayed test-start time and stable Id");
+            Assert(allExportRows[1].ExportModelFileName == "B.tht" &&
+                   allExportRows[0].ExportModelFileName == "A.tht",
                 "Changing A.tht to B.tht snapshots B.tht only for the new cycle");
+            string lotCsv = Path.Combine(root, "history-export-lot.csv");
+            HistoryExportService.ExportCsv(lotCsv, allExportRows);
+            Assert(allExportRows.Select(row => row.ExportPassCountText).SequenceEqual(new[] { "7000", "7001", "2000" }) &&
+                   allExportRows.Select(row => row.HistoryOrdinal).SequenceEqual(new long?[] { 1, 2, 1 }),
+                "Full filtered CSV keeps LOT and counts PASS sequence independently per product");
+
+            // Regression: row cũ bắt đầu trước nhưng test lâu hơn nên ResultAt muộn hơn.
+            // History phải vẫn sắp theo giờ BẮT ĐẦU TEST đang hiển thị, không theo ResultAt.
+            var orderingStore = new TestHistoryStore(Path.Combine(root, "history-ordering.db"));
+            DateTime orderBase = new(2026, 9, 13, 8, 0, 0, DateTimeKind.Local);
+            orderingStore.Add(new TestHistoryRecord
+            {
+                Started = orderBase,
+                TestStartedAt = orderBase,
+                ResultAt = orderBase.AddMinutes(5),
+                Finished = orderBase.AddMinutes(5),
+                PartNumber = "ORDER-TEST",
+                ModelFile = @"D:\Models\ORDER.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "older-start-later-result"
+            });
+            orderingStore.Add(new TestHistoryRecord
+            {
+                Started = orderBase.AddMinutes(1),
+                TestStartedAt = orderBase.AddMinutes(1),
+                ResultAt = orderBase.AddMinutes(2),
+                Finished = orderBase.AddMinutes(2),
+                PartNumber = "ORDER-TEST",
+                ModelFile = @"D:\Models\ORDER.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "newer-start-earlier-result"
+            });
+
+            IReadOnlyList<TestHistoryRecord> orderedRows = orderingStore.SearchSummary(
+                new HistorySearchCriteria(
+                    orderBase.Date,
+                    orderBase.Date.AddDays(1),
+                    null,
+                    "ORDER-TEST",
+                    "ALL",
+                    MaxRows: 10));
+            Assert(orderedRows.Count == 2 &&
+                   orderedRows[0].CycleId == "older-start-later-result" &&
+                   orderedRows[0].TimeText == "08:00:00" &&
+                   orderedRows[1].CycleId == "newer-start-earlier-result" &&
+                   orderedRows[1].TimeText == "08:01:00",
+                "History grid is strictly oldest-to-newest by displayed TEST START time even when ResultAt order differs");
+
+            IReadOnlyList<TestHistoryRecord> orderPage1 = orderingStore.SearchSummary(
+                new HistorySearchCriteria(
+                    orderBase.Date,
+                    orderBase.Date.AddDays(1),
+                    null,
+                    "ORDER-TEST",
+                    "ALL",
+                    MaxRows: 1));
+            IReadOnlyList<TestHistoryRecord> orderPage2 = orderingStore.SearchSummary(
+                new HistorySearchCriteria(
+                    orderBase.Date,
+                    orderBase.Date.AddDays(1),
+                    null,
+                    "ORDER-TEST",
+                    "ALL",
+                    MaxRows: 1,
+                    BeforeHistoryAt: orderPage1[0].EffectiveTestStartedAt,
+                    BeforeId: orderPage1[0].Id));
+            Assert(orderPage1.Count == 1 &&
+                   orderPage2.Count == 1 &&
+                   orderPage1[0].CycleId == "older-start-later-result" &&
+                   orderPage2[0].CycleId == "newer-start-earlier-result",
+                "History keyset pagination preserves oldest-to-newest TEST START order across pages");
+
+            DateTime sameTime = orderBase.AddMinutes(10);
+            foreach (string cycleId in new[] { "same-10", "same-11", "same-12" })
+            {
+                orderingStore.Add(new TestHistoryRecord
+                {
+                    Started = sameTime,
+                    TestStartedAt = sameTime,
+                    Finished = sameTime.AddSeconds(1),
+                    PartNumber = "SAME-TIME",
+                    ModelFile = @"D:\Models\ORDER.tht",
+                    Result = "PASS",
+                    Passed = true,
+                    CycleId = cycleId
+                });
+            }
+            IReadOnlyList<TestHistoryRecord> sameRows = orderingStore.SearchSummary(
+                new HistorySearchCriteria(null, null, null, "SAME-TIME", "ALL", MaxRows: 10));
+            Assert(sameRows.Select(row => row.CycleId).SequenceEqual(new[] { "same-10", "same-11", "same-12" }) &&
+                   sameRows[0].Id < sameRows[1].Id && sameRows[1].Id < sameRows[2].Id,
+                "Equal HistoryAt values use Id ASC as the stable tie-breaker");
+
+            orderingStore.Add(new TestHistoryRecord
+            {
+                Started = orderBase.AddDays(-1),
+                TestStartedAt = null,
+                Finished = orderBase.AddDays(-1).AddSeconds(1),
+                PartNumber = "LEGACY-ORDER",
+                ModelFile = @"D:\Models\ORDER.tht",
+                Result = "PASS",
+                Passed = true,
+                CycleId = "legacy-started-at"
+            });
+            IReadOnlyList<TestHistoryRecord> legacyRows = orderingStore.SearchSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 10));
+            Assert(legacyRows[0].CycleId == "legacy-started-at" &&
+                   legacyRows[0].EffectiveTestStartedAt == orderBase.AddDays(-1),
+                "Legacy NULL TestStartedAt falls back to StartedAt in oldest-first ordering");
+
+            IReadOnlyList<TestHistoryRecord> ordinalPage1 = orderingStore.SearchSummary(
+                new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 3));
+            TestHistoryRecord ordinalCursor = ordinalPage1[^1];
+            IReadOnlyList<TestHistoryRecord> ordinalPage2 = orderingStore.SearchSummary(
+                new HistorySearchCriteria(
+                    null, null, null, string.Empty, "ALL", MaxRows: 3,
+                    BeforeHistoryAt: ordinalCursor.EffectiveTestStartedAt,
+                    BeforeId: ordinalCursor.Id));
+            var pagePassOrdinals = new Dictionary<string, long>(StringComparer.Ordinal);
+            HistoryPresentation.AssignProductOrdinals(ordinalPage1, pagePassOrdinals);
+            HistoryPresentation.AssignProductOrdinals(ordinalPage2, pagePassOrdinals);
+            Assert(ordinalPage1.Concat(ordinalPage2).Select(row => row.Id).SequenceEqual(legacyRows.Select(row => row.Id)) &&
+                   ordinalPage1.Select(row => row.HistoryOrdinal).SequenceEqual(new long?[] { 1, 1, 2 }) &&
+                   ordinalPage2.Select(row => row.HistoryOrdinal).SequenceEqual(new long?[] { 1, 2, 3 }),
+                "ASC Load More has no duplicate/missing rows and continues PASS sequence per product");
+
+            var scaleStore = new TestHistoryStore(Path.Combine(root, "history-450.db"));
+            DateTime scaleStart = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Local);
+            long nextPrintedLot = 2000;
+            for (int index = 0; index < 450; index++)
+            {
+                bool passed = index % 3 != 0;
+                bool printedProduct = index % 2 == 0;
+                long savedLot = printedProduct ? nextPrintedLot : 0;
+                scaleStore.Add(new TestHistoryRecord
+                {
+                    Started = scaleStart.AddMinutes(index),
+                    TestStartedAt = scaleStart.AddMinutes(index),
+                    Finished = scaleStart.AddMinutes(index).AddSeconds(1),
+                    PartNumber = index % 2 == 0 ? "K32000-A" : "K32000-B",
+                    ModelFile = index % 2 == 0 ? @"D:\Models\K32000-A.tht" : @"D:\Models\K32000-B.tht",
+                    Result = passed ? "PASS" : "FAIL",
+                    Passed = passed,
+                    InspectionType = HistoryInspectionType.Product,
+                    LotNo = savedLot,
+                    CycleId = $"scale-{index:D3}"
+                });
+                if (printedProduct && passed)
+                    nextPrintedLot++;
+            }
+
+            HistorySearchCriteria scaleCriteria = new(
+                scaleStart.Date, scaleStart.Date.AddDays(1), null, string.Empty, "ALL", MaxRows: 200);
+            HistorySummary scaleSummary = scaleStore.GetHistorySummary(scaleCriteria);
+            var loadedScaleRows = new List<TestHistoryRecord>(450);
+            var scalePassOrdinals = new Dictionary<string, long>(StringComparer.Ordinal);
+            DateTime? scaleCursorAt = null;
+            long? scaleCursorId = null;
+            while (loadedScaleRows.Count < scaleSummary.Total)
+            {
+                IReadOnlyList<TestHistoryRecord> batch = scaleStore.SearchSummary(
+                    scaleCriteria with { BeforeHistoryAt = scaleCursorAt, BeforeId = scaleCursorId });
+                Assert(batch.Count > 0, "A 450-row History result always has a continuation batch");
+                HistoryPresentation.AssignProductOrdinals(batch, scalePassOrdinals);
+                loadedScaleRows.AddRange(batch);
+                TestHistoryRecord last = batch[^1];
+                scaleCursorAt = last.EffectiveTestStartedAt;
+                scaleCursorId = last.Id;
+            }
+            Assert(scaleSummary.Total == 450 && scaleSummary.ProductPass == 300 && scaleSummary.ProductFail == 150 &&
+                   loadedScaleRows.Count == 450 && loadedScaleRows.Select(row => row.Id).Distinct().Count() == 450 &&
+                   loadedScaleRows[0].ExportPassCountText.Length == 0 && loadedScaleRows[1].ExportPassCountText == "0" &&
+                   loadedScaleRows[2].ExportPassCountText == "2000" && loadedScaleRows[6].ExportPassCountText.Length == 0 &&
+                   loadedScaleRows[8].ExportPassCountText == "2002" &&
+                   loadedScaleRows[0].HistoryOrdinal == 1 && loadedScaleRows[1].HistoryOrdinal == 1 &&
+                   loadedScaleRows[2].HistoryOrdinal == 2 && loadedScaleRows[8].HistoryOrdinal == 5 &&
+                   loadedScaleRows[^1].HistoryOrdinal == 225,
+                "History counts PASS and FAIL independently for each product across pages");
+            IReadOnlyList<TestHistoryRecord> scaleExport = scaleStore.SearchForExport(scaleCriteria);
+            string scaleCsv = Path.Combine(root, "history-450.csv");
+            string scaleXlsx = Path.Combine(root, "history-450.xlsx");
+            Assert(scaleExport.Count == 450 && HistoryExportService.ExportCsv(scaleCsv, scaleExport) == 450 &&
+                   HistoryExportService.ExportXlsx(scaleXlsx, scaleExport) == 450 &&
+                   scaleExport[0].ExportPassCountText.Length == 0 && scaleExport[1].ExportPassCountText == "0" &&
+                   scaleExport[2].ExportPassCountText == "2000" && scaleExport[6].ExportPassCountText.Length == 0 &&
+                   scaleExport[8].ExportPassCountText == "2002" &&
+                   scaleExport[0].HistoryOrdinal == 1 && scaleExport[1].HistoryOrdinal == 1 &&
+                   scaleExport[2].HistoryOrdinal == 2 && scaleExport[^1].HistoryOrdinal == 225,
+                "CSV/XLSX keep blank FAIL LOT and count every production test per product");
+
+            var filterStore = new TestHistoryStore(Path.Combine(root, "history-filter-boundaries.db"));
+            void AddFilterRow(DateTime at, string part, bool passed, string inspectionType, string cycleId) =>
+                filterStore.Add(new TestHistoryRecord
+                {
+                    Started = at,
+                    TestStartedAt = at,
+                    Finished = at.AddSeconds(1),
+                    PartNumber = part,
+                    ModelFile = $@"D:\Models\{part}.tht",
+                    Result = passed ? "PASS" : "FAIL",
+                    Passed = passed,
+                    InspectionType = inspectionType,
+                    CycleId = cycleId
+                });
+            AddFilterRow(new DateTime(2026, 8, 31, 23, 59, 59), "K32000-A", true, HistoryInspectionType.Product, "before-range");
+            AddFilterRow(new DateTime(2026, 9, 1, 0, 0, 0), "K32000-A", true, HistoryInspectionType.Product, "range-a-pass");
+            AddFilterRow(new DateTime(2026, 9, 5, 12, 0, 0), "K32000-B", false, HistoryInspectionType.Product, "range-b-fail");
+            AddFilterRow(new DateTime(2026, 9, 10, 12, 0, 0), "K32000-A", false, HistoryInspectionType.Product, "range-a-fail");
+            AddFilterRow(new DateTime(2026, 9, 11, 12, 0, 0), "K32000-A", false, HistoryInspectionType.LeakRetest, "range-a-leak-fail");
+            AddFilterRow(new DateTime(2026, 9, 14, 23, 59, 59), "K32000-B", true, HistoryInspectionType.Product, "range-end-pass");
+            AddFilterRow(new DateTime(2026, 9, 15, 0, 0, 0), "K32000-A", true, HistoryInspectionType.Product, "after-range");
+
+            HistorySearchCriteria rangeCriteria = new(
+                new DateTime(2026, 9, 1), new DateTime(2026, 9, 15), null, string.Empty, "ALL", MaxRows: 200);
+            IReadOnlyList<TestHistoryRecord> rangeRows = filterStore.SearchAllSummary(rangeCriteria);
+            IReadOnlyList<TestHistoryRecord> onlyA = filterStore.SearchAllSummary(rangeCriteria with { PartKeyword = "K32000-A" });
+            IReadOnlyList<TestHistoryRecord> passRows = filterStore.SearchAllSummary(rangeCriteria with { Result = "PASS" });
+            IReadOnlyList<TestHistoryRecord> failRows = filterStore.SearchAllSummary(rangeCriteria with { Result = "FAIL" });
+            IReadOnlyList<TestHistoryRecord> combinedRows = filterStore.SearchAllSummary(
+                rangeCriteria with { PartKeyword = "K32000-A", Result = "FAIL", InspectionType = HistoryInspectionType.Product });
+            Assert(rangeRows.Count == 5 && rangeRows.First().CycleId == "range-a-pass" && rangeRows.Last().CycleId == "range-end-pass" &&
+                   rangeRows.Select(row => row.PartNumber).Distinct().Order().SequenceEqual(new[] { "K32000-A", "K32000-B" }) &&
+                   onlyA.Count == 3 && onlyA.All(row => row.PartNumber == "K32000-A") &&
+                   passRows.Count == 2 && passRows.All(row => row.Passed) &&
+                   failRows.Count == 3 && failRows.All(row => !row.Passed) &&
+                   combinedRows.Count == 1 && combinedRows[0].CycleId == "range-a-fail",
+                "Date end-day, ALL/single product, PASS/FAIL/ALL and combined SQL filters apply before paging");
         }
         finally
         {
@@ -3317,35 +9131,70 @@ internal static class Program
         int persistCount = 0;
         var lots = new LotSequenceService(settings, _ => persistCount++, () => lotClock);
         long cycleA = lots.ReserveForCycle("cycle-a");
-        Assert(cycleA == 2044 && lots.ReserveForCycle("cycle-a") == 2044,
+        Assert(cycleA == 2045 && lots.ReserveForCycle("cycle-a") == 2045,
             "Duplicate PASS callback keeps the same reserved LOT");
         Assert(lots.NextLot == 2044 && persistCount == 0,
-            "Reservation/printer failure does not advance persisted LOT");
-        Assert(lots.TryCommitSuccessfulPrint("cycle-a", 2044, out string errorA) && errorA.Length == 0,
-            "Successful print commits reserved LOT");
+            "Reservation alone does not advance persisted LOT before durable PASS");
+        Assert(lots.TryCommitSuccessfulPass("cycle-a", 2045, out string errorA) && errorA.Length == 0,
+            "Durable PASS commits reserved LOT before label printing");
         Assert(lots.NextLot == 2045 && persistCount == 1,
-            "Successful print advances and persists next LOT exactly once");
+            "Durable PASS advances and persists completed LOT exactly once");
 
         long cycleB = lots.ReserveForCycle("cycle-b");
-        Assert(cycleB == 2045 && lots.NextLot == 2045,
+        Assert(cycleB == 2046 && lots.NextLot == 2045,
             "Next PASS receives the next LOT without early commit");
-        Assert(!lots.TryCommitSuccessfulPrint("cycle-b", 2046, out _),
-            "Mismatched LOT cannot commit");
+        Assert(!lots.TryCommitSuccessfulPass("cycle-b", 2047, out _),
+            "Mismatched PASS LOT cannot commit");
         Assert(lots.NextLot == 2045,
-            "Failed/mismatched print leaves next LOT unchanged for retry");
+            "Failed/mismatched PASS LOT leaves committed LOT unchanged");
+
+        var staleSettings = new ProductionSettings { LotNo = 2036, LotNoDate = "2026-08-29" };
+        int stalePersistCount = 0;
+        var staleLots = new LotSequenceService(staleSettings, _ => stalePersistCount++, () => lotClock);
+        long failedLabelLot = staleLots.ReserveForCycle("old-label-failed");
+        long nextDurableLot = staleLots.ReserveForCycle("next-pass");
+        Assert(failedLabelLot == 2037 && nextDurableLot == 2038,
+            "A legacy failed-label reservation can leave the next durable PASS at a higher LOT");
+        Assert(staleLots.TryCommitSuccessfulPass("next-pass", nextDurableLot, out string staleCommitError) &&
+               staleCommitError.Length == 0 && staleLots.NextLot == 2038 && stalePersistCount == 1,
+            "SQLite-durable higher PASS clears stale lower label reservation instead of freezing LOTNO");
+        Assert(staleLots.ReserveForCycle("after-recovery") == 2039,
+            "LOT continues sequentially after stale failed-label recovery");
+
+        var recoveredSettings = new ProductionSettings { LotNo = 2036, LotNoDate = "2026-08-29" };
+        int recoveryPersistCount = 0;
+        var recoveredLots = new LotSequenceService(recoveredSettings, _ => recoveryPersistCount++, () => lotClock);
+        Assert(recoveredLots.TryReconcileCommittedLot(2040, out string recoveryError) &&
+               recoveryError.Length == 0 && recoveredLots.NextLot == 2040 && recoveryPersistCount == 1,
+            "SQLite history reconciles a stale persisted LOTNO left by older label-gated builds");
+        Assert(recoveredLots.ReserveForCycle("post-history-recovery") == 2041,
+            "Recovered machine reserves the next unused LOT instead of reusing historical LOTs");
+        Assert(recoveredLots.TryReconcileCommittedLot(2035, out _) && recoveredLots.NextLot == 2040,
+            "History reconciliation never moves LOTNO backwards");
 
         var restartedSettings = new ProductionSettings
         {
             LotNo = settings.LotNo,
-            LotNoDate = settings.LotNoDate
+            LotNoDate = settings.LotNoDate,
+            LotSettingsByProduct = settings.LotSettingsByProduct.ToDictionary(
+                pair => pair.Key,
+                pair => new ProductLotSettings
+                {
+                    StartLotNo = pair.Value.StartLotNo,
+                    LotNo = pair.Value.LotNo,
+                    LotNoDate = pair.Value.LotNoDate
+                },
+                StringComparer.OrdinalIgnoreCase)
         };
         var restarted = new LotSequenceService(restartedSettings, _ => { }, () => lotClock);
         Assert(restarted.NextLot == 2045,
             "Restart resumes from last successfully committed LOT");
 
         lotClock = lotClock.AddDays(1);
-        Assert(restarted.NextLot == 0 && restartedSettings.LotNoDate == "2026-08-30",
-            "LOTNO resets to zero and records the new production date");
+        Assert(restarted.StartLot == 0 &&
+               restarted.NextLot == 0 &&
+               restartedSettings.LotNoDate == "2026-08-30",
+            "New production day resets the current LOT to zero");
 
         var migratedSettings = new ProductionSettings { LotNo = 9876 };
         int migrationPersistCount = 0;
@@ -3364,19 +9213,19 @@ internal static class Program
             LotNoDate = "2026-08-30",
             LotSettingsByProduct = new Dictionary<string, ProductLotSettings>(StringComparer.OrdinalIgnoreCase)
             {
-                ["PART-2000"] = new() { LotNo = 2000, LotNoDate = "2026-08-30" },
-                ["PART-7000"] = new() { LotNo = 7000, LotNoDate = "2026-08-30" },
-                ["PART-5000"] = new() { LotNo = 5000, LotNoDate = "2026-08-30" }
+                ["PART-2000"] = new() { StartLotNo = 2000, LotNo = 2000, LotNoDate = "2026-08-30" },
+                ["PART-7000"] = new() { StartLotNo = 7000, LotNo = 7000, LotNoDate = "2026-08-30" },
+                ["PART-5000"] = new() { StartLotNo = 5000, LotNo = 5000, LotNoDate = "2026-08-30" }
             }
         };
         var perProductLots = new LotSequenceService(perProductSettings, _ => { }, () => lotClock);
         perProductLots.SelectProduct("PART-2000", migrateCurrentLotIfMissing: false);
         Assert(perProductLots.NextLot == 2000, "PART-2000 loads its own starting LOT");
-        Assert(perProductLots.TryCommitSuccessfulPrint(
+        Assert(perProductLots.TryCommitSuccessfulPass(
                 "part-2000-cycle",
                 perProductLots.ReserveForCycle("part-2000-cycle"),
                 out _),
-            "PART-2000 commits its own LOT");
+            "PART-2000 commits its own LOT on durable PASS");
         perProductLots.SelectProduct("PART-7000", migrateCurrentLotIfMissing: false);
         Assert(perProductLots.NextLot == 7000, "PART-7000 loads its own starting LOT");
         perProductLots.SelectProduct("PART-5000", migrateCurrentLotIfMissing: false);
@@ -3384,6 +9233,31 @@ internal static class Program
         perProductLots.SelectProduct("PART-2000", migrateCurrentLotIfMissing: false);
         Assert(perProductLots.NextLot == 2001,
             "Switching back restores the previously advanced LOT for that product");
+        lotClock = lotClock.AddDays(1);
+        Assert(perProductLots.NextLot == 0,
+            "PART-2000 starts from zero when the production date changes");
+
+        var zeroBasedSettings = new ProductionSettings { LotNo = 0, LotNoDate = "2026-08-30" };
+        int zeroBasedPersistCount = 0;
+        var zeroBasedLots = new LotSequenceService(
+            zeroBasedSettings,
+            _ => zeroBasedPersistCount++,
+            () => lotClock);
+        Assert(zeroBasedLots.NextLot == 0,
+            "A non-print product keeps configured base LOT zero before production PASS");
+        long firstNoPrintLot = zeroBasedLots.ReserveForCycle("no-print-pass-1");
+        Assert(firstNoPrintLot == 1 &&
+               zeroBasedLots.TryCommitSuccessfulPass("no-print-pass-1", firstNoPrintLot, out _) &&
+               zeroBasedLots.NextLot == 1 && zeroBasedPersistCount == 1,
+            "First non-print PASS advances configured base LOT 0 to completed LOT 1");
+        long lotBeforeFail = zeroBasedLots.NextLot;
+        Assert(lotBeforeFail == 1 && zeroBasedLots.NextLot == lotBeforeFail,
+            "FAIL does not reserve, consume or increment the product LOT");
+        long secondNoPrintLot = zeroBasedLots.ReserveForCycle("no-print-pass-2");
+        Assert(secondNoPrintLot == 2 &&
+               zeroBasedLots.TryCommitSuccessfulPass("no-print-pass-2", secondNoPrintLot, out _) &&
+               zeroBasedLots.NextLot == 2,
+            "Next non-print PASS continues LOT 2 after an intervening FAIL");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelProfileTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -3493,21 +9367,85 @@ internal static class Program
             history.Finished = new DateTime(2026, 8, 27, 8, 9, 10);
             labelSettings.TemplateType = LabelSettings.LargeTemplate;
             LabelPrintRequest largeSuffix1 = LabelPrintRequest.Capture(history, model, labelSettings);
+            IReadOnlyDictionary<string, string> largeSuffix1Variables =
+                LabelVariableResolver.Resolve(model, largeSuffix1.Data, labelSettings);
             Assert(model.Alc == "12000/20430/1" &&
                    largeSuffix1.Data.Barcode == "KL375C100026082720011" &&
-                   largeSuffix1.Payload.Contains("26082720011WH", StringComparison.Ordinal) &&
+                   largeSuffix1Variables["LOT_NO"] == "2001" &&
+                   largeSuffix1Variables["LOT_NO_BARCODE"] == "20011" &&
+                   largeSuffix1.Payload.Contains("2608272001WH", StringComparison.Ordinal) &&
+                   !largeSuffix1.Payload.Contains("26082720011WH", StringComparison.Ordinal) &&
                    largeSuffix1.Payload.Contains("KL375C100026082720011", StringComparison.Ordinal),
-                "TEM_TO reads ALC /1 from THT and appends 1 immediately after LOTNO");
+                "TEM_TO reads ALC /1 from THT but appends it only to Data Matrix, never the printed LOTNO");
+
+            var customerSuffixModel = new ProductModel
+            {
+                ModelName = "1210040120",
+                PartNumber = "1210040120",
+                ProductName = model.ProductName,
+                Eco = model.Eco,
+                Nco = model.Nco,
+                Alc = "12100/40120/1"
+            };
+            history.LotNo = 2001;
+            history.Finished = new DateTime(2026, 9, 8, 8, 9, 10);
+            LabelPrintRequest customerSuffixLabel =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(customerSuffixLabel.Data.Barcode == "121004012026090820011" &&
+                   customerSuffixLabel.Payload.Contains("2609082001WH", StringComparison.Ordinal) &&
+                   !customerSuffixLabel.Payload.Contains("26090820011WH", StringComparison.Ordinal) &&
+                   customerSuffixLabel.Payload.Contains("121004012026090820011", StringComparison.Ordinal),
+                "ALC 12100/40120/1 keeps printed LOT 2001 and adds suffix 1 only to Data Matrix");
+
+            customerSuffixModel.LabelTemplate = new LabelTemplateDefinition(
+                "N\n?\n$DATA$$LOTNO$WH\n{PART_NUMBER}$DATA$$LOTNO$\nP1",
+                ProfileId: LabelSettings.LargeTemplate);
+            LabelPrintRequest embeddedLegacySuffixLabel =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(embeddedLegacySuffixLabel.Payload.Contains("2609082001WH", StringComparison.Ordinal) &&
+                   embeddedLegacySuffixLabel.Payload.Contains("121004012026090820011", StringComparison.Ordinal) &&
+                   !embeddedLegacySuffixLabel.Payload.Contains("26090820011WH", StringComparison.Ordinal),
+                "Embedded legacy TEM_TO expression is upgraded safely to the separated barcode value");
+
+            customerSuffixModel.Alc = "12100/40120/2";
+            LabelPrintRequest customerSuffix2Label =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(customerSuffix2Label.Data.Barcode == "121004012026090820012" &&
+                   customerSuffix2Label.Payload.Contains("2609082001WH", StringComparison.Ordinal) &&
+                   customerSuffix2Label.Payload.Contains("121004012026090820012", StringComparison.Ordinal) &&
+                   !customerSuffix2Label.Payload.Contains("26090820012WH", StringComparison.Ordinal),
+                "ALC /2 also remains barcode-only while printed LOTNO stays unchanged");
+
+            history.LotNo = 7;
+            customerSuffixModel.Alc = "12100/40120/1";
+            customerSuffixModel.LabelTemplate = new LabelTemplateDefinition();
+            LabelPrintRequest fourDigitLotLabel =
+                LabelPrintRequest.Capture(history, customerSuffixModel, labelSettings);
+            Assert(fourDigitLotLabel.Data.Barcode == "121004012026090800071" &&
+                   fourDigitLotLabel.Payload.Contains("2609080007WH", StringComparison.Ordinal) &&
+                   !fourDigitLotLabel.Payload.Contains("26090800071WH", StringComparison.Ordinal),
+                "TEM_TO keeps LOTNO at four digits and leaves the ALC suffix outside the incrementing LOT");
+
+            const string editedLargeTemplate = "N\nEDITED={PART_NUMBER}\nP1\n";
+            BuiltInLabelTemplateStore.SaveOverride(
+                labelSettings,
+                LabelSettings.LargeTemplate,
+                editedLargeTemplate);
+            LabelPrintRequest editedLarge = LabelPrintRequest.Capture(history, model, labelSettings);
+            Assert(editedLarge.Payload == "N\nEDITED=KL375C1000\nP1\n" &&
+                   BuiltInLabelTemplateStore.LoadOverride(labelSettings, LabelSettings.LargeTemplate) == editedLargeTemplate,
+                "Built-in label editor override is Base64-backed and used without a Labels directory");
+            BuiltInLabelTemplateStore.ClearOverride(labelSettings, LabelSettings.LargeTemplate);
 
             LabelPrintData suffix2Data = largeSuffix1.Data with { Alc = "12000/20430/2" };
             LabelIdentity suffix2Identity = EplLabelService.BuildIdentity(suffix2Data);
             LabelIdentity noSuffixIdentity = EplLabelService.BuildIdentity(
                 suffix2Data with { Alc = "12000/20430" });
-            Assert(suffix2Identity.SerialText == "26082720012WH" &&
+            Assert(suffix2Identity.SerialText == "2608272001WH" &&
                    suffix2Identity.BarcodeValue == "KL375C100026082720012" &&
                    noSuffixIdentity.SerialText == "2608272001WH" &&
                    noSuffixIdentity.BarcodeValue == "KL375C10002608272001",
-                "TEM_TO supports ALC /2 and keeps legacy output when ALC has no suffix");
+                "TEM_TO supports Data Matrix suffix /2 without changing printed LOTNO");
 
             var qrModel = new ProductModel
             {
@@ -3536,6 +9474,7 @@ internal static class Program
                 .Count(item => item.value == (byte)'\n' &&
                                (item.index == 0 || qrPayloadBytes[item.index - 1] != (byte)'\r'));
             Assert(LabelProfileResolver.NormalizeTemplateType("TEM_BE_QR") == LabelSettings.SmallQrTemplate &&
+                   LabelProfileResolver.NormalizeTemplateType("TEM_TO_SQDZ") == LabelSettings.LargeSqdzTemplate &&
                    qrLabel.Profile.Id == LabelSettings.SmallQrTemplate &&
                    qrLabel.Profile.Mode == LabelPrintMode.ExternalTemplate &&
                    qrValues["LOT_NO"] == "0004" &&
@@ -3642,6 +9581,36 @@ internal static class Program
                 "P11",
                 "BE331H6000,SQDZP117002");
 
+            model.PartNumber = "1200020430";
+            model.ProductName = "BMS EXT";
+            model.Eco = "US4 HEV";
+            model.VehicleType = model.Eco;
+            model.Alc = "12000/20430";
+            model.CustomerCode = model.Alc;
+            history.LotNo = 7001;
+            history.Finished = new DateTime(2026, 7, 31, 8, 9, 10);
+            labelSettings.TemplateType = LabelSettings.LargeSqdzTemplate;
+            model.LabelTemplate = new LabelTemplateDefinition(
+                "N\nLEGACY-THT-TEMPLATE\nP1\n",
+                ProfileId: LabelSettings.LargeTemplate);
+            LabelPrintRequest largeSqdz = LabelPrintRequest.Capture(history, model, labelSettings);
+            Assert(largeSqdz.Profile.Id == LabelSettings.LargeSqdzTemplate &&
+                   largeSqdz.Data.Barcode == "1200020430,SQDZQ7V7001" &&
+                   largeSqdz.Payload.Contains("2607317001WH", StringComparison.Ordinal) &&
+                   largeSqdz.Payload.Contains("1200020430,SQDZQ7V7001", StringComparison.Ordinal) &&
+                   !largeSqdz.Payload.Contains("LEGACY-THT-TEMPLATE", StringComparison.Ordinal),
+                "TEM_TO_SQDZ keeps the large layout, uses calendar date/LOT on line four and SQDZ in the barcode");
+            history.LotNo = 0;
+            history.Finished = new DateTime(2026, 9, 30, 8, 9, 10);
+            LabelPrintRequest largeSqdzSeptember = LabelPrintRequest.Capture(history, model, labelSettings);
+            string[] largeSqdzLines = largeSqdzSeptember.Payload.Split('\n');
+            int variableStart = Array.IndexOf(largeSqdzLines, "?");
+            Assert(variableStart >= 0 &&
+                   largeSqdzLines[variableStart + 4] == "2609300000WH" &&
+                   largeSqdzLines[variableStart + 5].StartsWith("1200020430,SQDZ", StringComparison.Ordinal),
+                "TEM_TO_SQDZ line four after ? is yyMMdd plus four-digit LOTNO plus WH; barcode stays SQDZ");
+            model.LabelTemplate = new LabelTemplateDefinition();
+
             InvalidDataException undefinedYear = AssertThrows<InvalidDataException>(
                 () => SmallLabel(1, new DateTime(2036, 8, 25)),
                 "TEM_BE year 2036 must be rejected before creating a print request");
@@ -3655,12 +9624,6 @@ internal static class Program
             Assert(smallDuplicateGuard.LoadLast()?.Barcode == expectedSmallBarcode,
                 "TEM_BE duplicate state persists the physical SQDZ barcode");
 
-            model.PartNumber = "1200020430";
-            model.ProductName = "BMS EXT";
-            model.Eco = "US4 HEV";
-            model.VehicleType = model.Eco;
-            model.Alc = "12000/20430";
-            model.CustomerCode = model.Alc;
             model.LabelVariables.Clear();
             history.LotNo = 7001;
             history.Finished = new DateTime(2026, 7, 31, 8, 9, 10);
@@ -3689,8 +9652,8 @@ internal static class Program
                     continue;
                 string cycleId = $"stress-{cycle}";
                 long lot = stressLots.ReserveForCycle(cycleId);
-                Assert(stressLots.TryCommitSuccessfulPrint(cycleId, lot, out _),
-                    $"100-cycle label stress commits cycle {cycle}");
+                Assert(stressLots.TryCommitSuccessfulPass(cycleId, lot, out _),
+                    $"100-cycle PASS/FAIL stress commits cycle {cycle}");
             }
             Assert(stressLots.NextLot == 3050,
                 "100-cycle PASS/FAIL stress has no skipped or duplicate committed LOT");
@@ -3710,8 +9673,54 @@ internal static class Program
         Assert((bool)(shouldAutoPrint.Invoke(null, [true, true]) ?? false),
             "Final PASS with auto-print enabled is eligible for one print transaction");
         Assert(!(bool)(shouldAutoPrint.Invoke(null, [false, true]) ?? true) &&
-               !(bool)(shouldAutoPrint.Invoke(null, [true, false]) ?? true),
-            "NG/FAIL and disabled auto-print never create an automatic print transaction");
+               (bool)(shouldAutoPrint.Invoke(null, [true, false]) ?? false),
+            "FAIL never prints; production PASS always captures a label regardless of the legacy toggle");
+
+        MethodInfo hasLabelTransport = typeof(TestViewModel).GetMethod(
+            "HasConfiguredLabelTransport",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Label transport eligibility helper not found.");
+        Assert(!(bool)(hasLabelTransport.Invoke(null, [new LabelSettings()]) ?? true) &&
+               (bool)(hasLabelTransport.Invoke(null, [new LabelSettings { PrinterCom = "COM3" }]) ?? false) &&
+               (bool)(hasLabelTransport.Invoke(null, [new LabelSettings { PrinterName = "ZDesigner" }]) ?? false),
+            "Auto-print is skipped on stations without a configured printer transport");
+
+        string labelFlowSource = File.ReadAllText(Path.Combine(
+            Environment.CurrentDirectory, "ViewModels", "TestViewModel.cs"));
+        int recordStart = labelFlowSource.IndexOf(
+            "private async Task<bool> RecordCompletedProductCoreAsync",
+            StringComparison.Ordinal);
+        int captureStart = labelFlowSource.IndexOf(
+            "private static bool TryCapturePassLabel",
+            recordStart,
+            StringComparison.Ordinal);
+        string recordSource = labelFlowSource[recordStart..captureStart];
+        int printStart = labelFlowSource.IndexOf(
+            "private async Task PrintPassLabelSafeAsync",
+            StringComparison.Ordinal);
+        int retryStart = labelFlowSource.IndexOf(
+            "private async Task RetryLastFailedLabelAsync",
+            printStart,
+            StringComparison.Ordinal);
+        string firstPrintSource = labelFlowSource[printStart..retryStart];
+        int reprintStart = labelFlowSource.IndexOf(
+            "private async Task ReprintLastSuccessfulLabelAsync",
+            retryStart,
+            StringComparison.Ordinal);
+        string retrySource = labelFlowSource[retryStart..reprintStart];
+        Assert(recordSource.IndexOf("CommitSuccessfulPassAsync", StringComparison.Ordinal) >= 0 &&
+               recordSource.IndexOf("CommitSuccessfulPassAsync", StringComparison.Ordinal) <
+               recordSource.IndexOf("PrintPassLabelSafeAsync", StringComparison.Ordinal),
+            "LOT commits after durable PASS before asynchronous first-label printing");
+        Assert(!firstPrintSource.Contains("IsCommitCandidate", StringComparison.Ordinal) &&
+               !firstPrintSource.Contains("TryCommitSuccessfulPrint", StringComparison.Ordinal) &&
+               firstPrintSource.Contains("TryBeginFirstPrintAsync", StringComparison.Ordinal) &&
+               !retrySource.Contains("TryRestoreReservation", StringComparison.Ordinal),
+            "Printer failure/retry cannot freeze later LOTs; duplicate-print protection remains in SQLite");
+        Assert(labelFlowSource.Contains("GetLatestLabelForPartAsync", StringComparison.Ordinal) &&
+               labelFlowSource.Contains("LabelPrintStatus.Unknown", StringComparison.Ordinal) &&
+               labelFlowSource.Contains("result.Printed ? \"SENT\" : \"FAILED\"", StringComparison.Ordinal),
+            "Restart restores retryable snapshots, quarantines ambiguous Pending sends, and reports transport acceptance honestly");
 
         DateTime finished = new(2026, 8, 10, 9, 8, 7, DateTimeKind.Local);
         var history = new TestHistoryRecord
@@ -3755,14 +9764,16 @@ internal static class Program
         LabelIdentity identity = EplLabelService.BuildIdentity(request.Data);
         history.LabelSerial = identity.SerialText;
         history.BarcodeValue = identity.BarcodeValue;
-        Assert(history.ExportBarcodeText.Length == 0,
-            "Auto-print disabled/not requested hides any prepared barcode from history export");
+        Assert(history.ExportBarcodeText == identity.BarcodeValue,
+            "A legacy PASS without payload retains its saved barcode without a printer-status gate");
         history.BarcodeValue = string.Empty;
         history.LabelProfile = request.FormatName;
+        history.LabelTemplateType = settings.TemplateType;
+        history.LabelPayload = request.Payload;
         history.Printer = request.Printer;
         history.LabelCopies = request.Copies;
-        Assert(history.ExportBarcodeText.Length == 0,
-            "PASS history keeps barcode blank before the printer confirms success");
+        Assert(history.ExportBarcodeText == request.Payload,
+            "PASS history exposes the immutable printer command before any transport confirmation");
 
         // UI/current model changes after PASS must not mutate the queued label.
         history.PartNumber = "PART-B";
@@ -3833,9 +9844,9 @@ internal static class Program
                qrCaptureArguments[3] is LabelPrintRequest capturedQrRequest &&
                capturedQrRequest.Data.Barcode == "K32000-22402,2608100001" &&
                qrCaptureArguments[4] is LabelIdentity capturedQrIdentity &&
-               capturedQrIdentity.SerialText == "2608101WH" &&
+               capturedQrIdentity.SerialText == "2608100001WH" &&
                capturedQrIdentity.BarcodeValue == "K32000-22402,2608100001",
-            "TEM_BE_QR PASS history keeps QR barcode and does not apply TEM_TO ALC suffix");
+            "TEM_BE_QR PASS history keeps four-digit LOT and does not apply TEM_TO ALC suffix");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZLabelTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -3854,12 +9865,42 @@ internal static class Program
                 LabelPrintStatus.Failed,
                 null,
                 "printer offline");
+            PartIdentitySnapshot persistedPart = PartIdentitySnapshot.Capture(labelModel);
+            TestHistoryRecord recoverable = store.GetLatestLabelForPart(
+                persistedPart, LabelPrintStatus.NotRequested, LabelPrintStatus.Failed)
+                ?? throw new InvalidOperationException("Retryable label snapshot was not recovered.");
+            LabelPrintRequest restored = LabelPrintRequest.Restore(
+                recoverable, labelModel, new LabelSettings { PrinterName = "RECOVERED-PRINTER" });
+            Assert(restored.CycleId == request.CycleId &&
+                   restored.Data.LotNo == request.Data.LotNo &&
+                   restored.Payload == request.Payload &&
+                   restored.PrinterName == "RECOVERED-PRINTER",
+                "Crash after PASS commit restores the exact cycle/LOT/payload while allowing repaired printer routing");
             TestHistoryRecord failedPrint = store.Search(new HistorySearchCriteria(
                 null, null, 31415, "PART-A", "PASS", 10)).Single();
-            Assert(failedPrint.BarcodeValue.Length == 0 && failedPrint.ExportBarcodeText.Length == 0,
-                "Failed or disabled printing never writes barcode into history");
+            Assert(failedPrint.BarcodeValue.Length == 0 && failedPrint.ExportBarcodeText == request.Payload,
+                "An offline printer cannot erase the captured command from PASS history");
             Assert(store.TryBeginFirstPrint(id, request.CycleId), "Explicit retry reuses the failed cycle/LOT transaction");
             Assert(!store.TryBeginFirstPrint(id, request.CycleId), "Concurrent retry callback is blocked while Pending");
+            TestHistoryRecord ambiguous = store.GetLatestLabelForPart(
+                persistedPart, LabelPrintStatus.Pending)
+                ?? throw new InvalidOperationException("Pending label transaction was not recovered.");
+            store.UpdateLabelPrintOutcome(
+                ambiguous.Id,
+                ambiguous.CycleId,
+                LabelPrintStatus.Unknown,
+                null,
+                "restart ambiguity; no automatic retry");
+            Assert(!store.TryBeginFirstPrint(id, request.CycleId),
+                "Crash during transport send becomes Unknown and cannot auto-retry a possibly printed label");
+            store.UpdateLabelPrintOutcome(
+                id,
+                request.CycleId,
+                LabelPrintStatus.Failed,
+                null,
+                "operator confirmed no physical label");
+            Assert(store.TryBeginFirstPrint(id, request.CycleId),
+                "Operator-confirmed failed send can retry the same immutable LOT after restart");
             store.UpdateLabelPrintOutcome(
                 id,
                 request.CycleId,
@@ -3918,21 +9959,45 @@ internal static class Program
     private static TestViewModel CreateTestViewModel(
         ProductionSettings production,
         out FakeBoard board,
-        bool requireStartupIoClear = false)
+        bool requireStartupIoClear = false,
+        TimeProvider? timeProvider = null,
+        KeysightVisaService? visa = null,
+        Func<bool, Task>? passSoundPlayback = null,
+        Func<WaterProofModelSettings, CancellationToken, Task<WaterProofRunResult>>? waterProofRun = null,
+        Func<string, Task<bool>>? verifyProbeMaintenancePassword = null,
+        Action<Exception, string, string?>? hardwareFaultReport = null)
     {
+        AppSoundService.Current.StopAll(force: true);
         board = new FakeBoard();
         var app = new AppSettings();
-        var engine = new TestEngine(board, new KeysightVisaService(), app, production);
-        return new TestViewModel(
+        var engine = new TestEngine(board, visa ?? new KeysightVisaService(), app, production, timeProvider);
+        TestViewModel viewModel = new(
             new MainViewModel(),
             engine,
             board,
-            new KeysightVisaService(),
+            visa ?? new KeysightVisaService(),
             new WaterProofSerialService(),
             app,
             production,
             new LegacyPhtHistoryService(enabled: false),
-            requireStartupIoClear);
+            requireStartupIoClear,
+            passSoundPlayback: passSoundPlayback ?? (_ => Task.CompletedTask),
+            waterProofRun: waterProofRun,
+            verifyProbeMaintenancePassword: verifyProbeMaintenancePassword,
+            hardwareFaultReport: hardwareFaultReport);
+
+        // START is gated by ScanSupervisor.Monitoring. Prime the in-memory
+        // transport through the same clean complete-frame transition used by
+        // production startup instead of bypassing that safety invariant.
+        var supervisor = (ScanSupervisor)(typeof(TestViewModel).GetField(
+            "_scanSupervisor",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(viewModel)
+            ?? throw new InvalidOperationException("Scan supervisor not found"));
+        supervisor.EnsureProductionScanAsync(0, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
+        board.Publish(FrameSeq(0));
+        return viewModel;
     }
 
     private static ProductModel Model(params (string Name, int[] Io)[] nets)
@@ -3961,19 +10026,6 @@ internal static class Program
                 new ConnectorPin("1", 1, "1", pin1),
                 new ConnectorPin("2", 2, "1", pin2)
             ]));
-        return model;
-    }
-
-    private static ProductModel HtdrvShortModel()
-    {
-        var model = new ProductModel { ModelName = "HTDRV-SHORT", PartNumber = "HTDRV-SHORT" };
-        var a1 = new PinRecord("7", "A", 7, "1", Section: "0.5", Color: "R", OriginalOrder: 1);
-        var a2 = new PinRecord("7", "A", 8, "2", Section: "0.5", Color: "R", OriginalOrder: 2);
-        var b1 = new PinRecord("9", "B", 9, "1", Section: "0.5", Color: "B", OriginalOrder: 3);
-        var b2 = new PinRecord("9", "B", 10, "2", Section: "0.5", Color: "B", OriginalOrder: 4);
-        model.Pins.AddRange([a1, a2, b1, b2]);
-        model.Nets.Add(new WireNet("A", [7, 8], [a1, a2]));
-        model.Nets.Add(new WireNet("B", [9, 10], [b1, b2]));
         return model;
     }
 
@@ -4078,10 +10130,254 @@ internal static class Program
         return new ScanFrame(DateTime.Now, 1, active, [], true, 0, sequence, map, hits, BoardScanMode.Production);
     }
 
+    private static ScanFrame ContinuityPreviewFrame(long sequence, int source, int[] targets) =>
+        FrameSeq(sequence, (source, targets)) with
+        {
+            Complete = false,
+            SourceCount = 1,
+            EndMarkerCode = null,
+            TerminatorKnown = false
+        };
+
+    private static ScanFrame ProbeFrameSeq(long sequence, int target, int fanIn = 20) =>
+        ProbeFrameSeq(sequence, [target], fanIn);
+
+    private static ScanFrame ProbeFrameSeq(long sequence, int[] targets, int fanIn = 20)
+    {
+        Dictionary<int, IReadOnlySet<int>> map = Enumerable.Range(230, fanIn)
+            .ToDictionary(
+                source => source,
+                _ => (IReadOnlySet<int>)targets.ToHashSet());
+        Dictionary<int, int> hits = targets.ToDictionary(io => io, _ => fanIn);
+        return new ScanFrame(
+            DateTime.Now,
+            4,
+            targets.ToHashSet(),
+            [],
+            true,
+            0,
+            sequence,
+            map,
+            hits,
+            BoardScanMode.Production,
+            256,
+            256,
+            0,
+            4,
+            true);
+    }
+
     private static string ReadEntry(ZipArchive archive, string name)
     {
         using StreamReader reader = new(archive.GetEntry(name)?.Open() ?? throw new InvalidOperationException(name));
         return reader.ReadToEnd();
+    }
+
+    private static int CountActiveCycles(string databasePath, string cycleId)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM ActiveTestCycles WHERE CycleId=$CycleId;";
+        command.Parameters.AddWithValue("$CycleId", cycleId);
+        return Convert.ToInt32(command.ExecuteScalar() ?? 0, CultureInfo.InvariantCulture);
+    }
+
+    private static void TestHistoryTransactionAtomicity()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZHistoryAtomicity", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string[] failurePoints =
+            [
+                "Tests:BEFORE INSERT ON Tests",
+                "Faults:BEFORE INSERT ON TestFaults",
+                "Resistance:BEFORE INSERT ON ResistanceMeasurements",
+                "WaterProof:BEFORE INSERT ON WaterProofMeasurements",
+                "Totals:BEFORE UPDATE OF TotalTests ON Parts",
+                "ActiveCycle:BEFORE DELETE ON ActiveTestCycles"
+            ];
+
+            foreach (string failurePoint in failurePoints)
+            {
+                string[] parts = failurePoint.Split(':', 2);
+                string databasePath = Path.Combine(root, parts[0] + ".db");
+                var store = new TestHistoryStore(databasePath);
+                string cycleId = "atomic-" + parts[0].ToLowerInvariant();
+                ProductModel model = Model(("ATOMIC-WIRE", new[] { 1, 18 }));
+                model.PartNumber = "ATOMIC-PART";
+                model.ModelName = "ATOMIC-MODEL";
+                model.SourcePath = Path.Combine(root, "atomic.tht");
+                DateTime at = new(2026, 9, 13, 10, 0, 0, DateTimeKind.Local);
+                var history = new TestHistoryRecord
+                {
+                    Started = at,
+                    Finished = at.AddSeconds(2),
+                    ResultAt = at.AddSeconds(2),
+                    InspectionType = HistoryInspectionType.Product,
+                    PartNumber = model.PartNumber,
+                    ModelName = model.ModelName,
+                    ModelFile = model.SourcePath,
+                    Result = "FAIL",
+                    Passed = false,
+                    CycleId = cycleId
+                };
+                var duplicateFault = new FaultDetail
+                {
+                    Type = ProductFaultType.WrongWiring,
+                    ExpectedSourceIo = 1,
+                    ExpectedTargetIo = 18,
+                    ActualSourceIo = 1,
+                    ActualTargetIo = 19,
+                    WireName = "ATOMIC-WIRE"
+                };
+                var resistance = new ResistanceResult
+                {
+                    Channel = 1,
+                    Name = "R1",
+                    ValueOhm = 101,
+                    MinOhm = 100,
+                    MaxOhm = 110,
+                    Passed = true
+                };
+                var waterProof = new WaterProofChannelMeasurement(1, true, 85, 84.8, 0.2, true);
+                ProductionResultCommitRequest request = ProductionResultCommitRequest.Capture(
+                    history,
+                    model,
+                    new ProductionSettings(),
+                    [duplicateFault, duplicateFault],
+                    [resistance],
+                    [waterProof],
+                    ProgramIdentityService.VersionText);
+                Assert(request.Faults.Count == 1,
+                    "Repeated physical fault observations collapse before the transaction boundary");
+
+                store.UpsertActiveCycle(cycleId, model.PartNumber, model.SourcePath, at, "TEST_STARTED");
+                ExecuteSql(databasePath,
+                    $"CREATE TRIGGER InjectFailure {parts[1]} BEGIN SELECT RAISE(ABORT,'injected crash'); END;");
+                AssertThrows<SqliteException>(
+                    () => store.CommitResult(request, null),
+                    $"Injected failure at {parts[0]} must escape the commit");
+                Assert(ScalarInt(databasePath,
+                           "SELECT (SELECT COUNT(*) FROM Tests) + " +
+                           "(SELECT COUNT(*) FROM TestFaults) + " +
+                           "(SELECT COUNT(*) FROM ResistanceMeasurements) + " +
+                           "(SELECT COUNT(*) FROM WaterProofMeasurements);") == 0 &&
+                       CountActiveCycles(databasePath, cycleId) == 1 &&
+                       ScalarText(databasePath, "PRAGMA integrity_check;") == "ok",
+                    $"Failure at {parts[0]} rolls back the whole result while retaining the recoverable active cycle");
+
+                ExecuteSql(databasePath, "DROP TRIGGER InjectFailure;");
+                ProductionCommitResult first = store.CommitResult(request, null);
+                ProductionCommitResult duplicate = store.CommitResult(request, null);
+                Assert(!first.AlreadyCommitted && duplicate.AlreadyCommitted &&
+                       first.TestId == duplicate.TestId &&
+                       ScalarInt(databasePath, "SELECT COUNT(*) FROM Tests;") == 1 &&
+                       ScalarInt(databasePath, "SELECT COUNT(*) FROM TestFaults;") == 1 &&
+                       ScalarInt(databasePath, "SELECT COUNT(*) FROM ResistanceMeasurements;") == 1 &&
+                       ScalarInt(databasePath, "SELECT COUNT(*) FROM WaterProofMeasurements;") == 1 &&
+                       ScalarInt(databasePath, "SELECT TotalTests FROM Parts WHERE PartNumber='ATOMIC-PART';") == 1 &&
+                       CountActiveCycles(databasePath, cycleId) == 0,
+                    $"Retry after {parts[0]} commits exactly once with one child row per physical observation");
+
+                DateTime removalStarted = at.AddSeconds(3);
+                Assert(store.UpdateRemovalTiming(cycleId, removalStarted, at.AddSeconds(4)) &&
+                       ScalarInt(databasePath, "SELECT COUNT(*) FROM Tests;") == 1,
+                    "Removal/discard completion updates the same CycleId and never inserts another result");
+                Assert(ScalarInt(databasePath,
+                           "SELECT COUNT(*) FROM TestFaults f LEFT JOIN Tests t ON t.Id=f.TestId WHERE t.Id IS NULL;") == 0 &&
+                       ScalarInt(databasePath,
+                           "SELECT COUNT(*) FROM ResistanceMeasurements r LEFT JOIN Tests t ON t.Id=r.TestId WHERE t.Id IS NULL;") == 0 &&
+                       ScalarInt(databasePath,
+                           "SELECT COUNT(*) FROM WaterProofMeasurements w LEFT JOIN Tests t ON t.Id=w.TestId WHERE t.Id IS NULL;") == 0,
+                    "Committed database contains no orphan detail rows");
+            }
+
+            string isolationPath = Path.Combine(root, "snapshot-isolation.db");
+            var isolationStore = new TestHistoryStore(isolationPath);
+            DateTime snapshotAt = new(2026, 9, 14, 0, 0, 1, DateTimeKind.Local);
+            ProductModel oldModel = Model(("OLD-WIRE", new[] { 1, 18 }));
+            oldModel.PartNumber = "OLD-PART";
+            oldModel.ModelName = "OLD-MODEL";
+            oldModel.SourcePath = Path.Combine(root, "old.tht");
+            var oldHistory = new TestHistoryRecord
+            {
+                Started = snapshotAt,
+                Finished = snapshotAt.AddSeconds(1),
+                ResultAt = snapshotAt.AddSeconds(1),
+                InspectionType = HistoryInspectionType.Product,
+                PartNumber = oldModel.PartNumber,
+                ModelName = oldModel.ModelName,
+                ModelFile = oldModel.SourcePath,
+                Result = "PASS",
+                Passed = true,
+                CycleId = "old-model-callback"
+            };
+            ProductionResultCommitRequest oldSnapshot = ProductionResultCommitRequest.Capture(
+                oldHistory, oldModel, new ProductionSettings(), [], [], null,
+                ProgramIdentityService.VersionText);
+            oldModel.PartNumber = "NEW-PART";
+            oldModel.ModelName = "NEW-MODEL";
+            oldModel.SourcePath = Path.Combine(root, "new.tht");
+            isolationStore.CommitResult(oldSnapshot, null);
+            Assert(ScalarText(isolationPath,
+                       "SELECT p.PartNumber || '|' || m.ModelName FROM Tests t " +
+                       "JOIN Parts p ON p.Id=t.PartId JOIN Models m ON m.Id=t.ModelId " +
+                       "WHERE t.CycleId='old-model-callback';") == "OLD-PART|OLD-MODEL" &&
+                   ScalarInt(isolationPath,
+                       "SELECT COUNT(*) FROM Tests t JOIN Parts p ON p.Id=t.PartId WHERE p.PartNumber='NEW-PART';") == 0,
+                "A queued persistence callback owns immutable old-model snapshots and cannot write into the newly selected model");
+
+            var masterHistory = oldHistory.ClonePersistenceSnapshot();
+            masterHistory.Id = 0;
+            masterHistory.CycleId = "master-good-isolated";
+            masterHistory.InspectionType = HistoryInspectionType.MasterGood;
+            masterHistory.Result = "MASTER_GOOD_PASS";
+            ProductionResultCommitRequest masterRequest = ProductionResultCommitRequest.Capture(
+                masterHistory, oldModel, new ProductionSettings(), [], [], null,
+                ProgramIdentityService.VersionText);
+            Assert(!masterRequest.UpdateProductionTotals,
+                "Master history request is explicitly excluded from production totals and LOT authority");
+            isolationStore.CommitResult(masterRequest, null);
+            ProductionStatisticsSnapshot isolatedStats = isolationStore.GetStatistics(oldSnapshot.Part, snapshotAt);
+            Assert(ScalarInt(isolationPath,
+                       "SELECT COUNT(*) FROM Tests WHERE InspectionType='MASTER_GOOD';") == 1 &&
+                   isolatedStats.LifetimeTotal == 1,
+                "Master history is stored separately while product counters still contain only the physical product cycle");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void ExecuteSql(string databasePath, string sql)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
+
+    private static int ScalarInt(string databasePath, string sql)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToInt32(command.ExecuteScalar() ?? 0, CultureInfo.InvariantCulture);
+    }
+
+    private static string ScalarText(string databasePath, string sql)
+    {
+        using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        return Convert.ToString(command.ExecuteScalar(), CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
     private static void Assert(bool condition, string message)
@@ -4179,6 +10475,47 @@ internal static class Program
             }
 
             BoardCapacity capacity = BoardCapacity.Create(1);
+            LiveTopologySnapshot twoPairTopology = LiveTopologyPresenter.Build(
+                FrameSeq(
+                    20,
+                    (3, new[] { 1 }),
+                    (1, new[] { 3 }),
+                    (2, new[] { 4 }),
+                    (4, new[] { 2 })),
+                capacity);
+            Assert(twoPairTopology.Rows.Count == 4 &&
+                   twoPairTopology.Pairs.SequenceEqual([
+                       new LiveTopologyPair(1, 3),
+                       new LiveTopologyPair(2, 4)]) &&
+                   twoPairTopology.Components.Count == 2 &&
+                   twoPairTopology.Rows.All(row => row.IsLiveTopologyPresentation) &&
+                   twoPairTopology.Rows.Select(row => row.IsNetworkStart)
+                       .SequenceEqual([true, false, true, false]) &&
+                   twoPairTopology.Rows.Select(row => row.IoText)
+                       .SequenceEqual(["IO (1)", "IO (3)", "IO (2)", "IO (4)"]),
+                "LiveTopology renders one IO per row in each connected component");
+
+            LiveTopologySnapshot onePairRemoved = LiveTopologyPresenter.Build(
+                FrameSeq(21, (4, new[] { 2 })),
+                capacity);
+            Assert(onePairRemoved.Rows.Count == 2 &&
+                   onePairRemoved.Pairs.Single() == new LiveTopologyPair(2, 4),
+                "LiveTopology removal drops only the missing pair and retains the other pair");
+
+            LiveTopologySnapshot component = LiveTopologyPresenter.Build(
+                FrameSeq(22, (1, new[] { 3 }), (3, new[] { 1, 5 }), (5, new[] { 3 })),
+                capacity);
+            Assert(component.Pairs.SequenceEqual([
+                       new LiveTopologyPair(1, 3),
+                       new LiveTopologyPair(3, 5)]) &&
+                   component.Components.Single().SequenceEqual([1, 3, 5]) &&
+                   component.Rows.Count == 3 &&
+                   component.Rows.Select(row => row.IoText)
+                       .SequenceEqual(["IO (1)", "IO (3)", "IO (5)"]) &&
+                   component.Rows.All(row => row.Status == "NỐI CHUNG 3 IO") &&
+                   component.Rows.All(row => row.RelatedIos.SequenceEqual([1, 3, 5])),
+                "A shared component displays each IO once on its own row");
+
             IReadOnlyList<FaultRow> connectionRows = IoMappingFramePresenter.BuildRows(
                 FrameSeq(1, (2, new[] { 1, 3 }), (1, new[] { 2 })),
                 capacity);
@@ -4196,7 +10533,13 @@ internal static class Program
                 capacity);
             Assert(probeRows.Count == 1 &&
                    probeRows[0].Kind == FaultKind.Probe &&
-                   probeRows[0].Io == 7,
+                   probeRows[0].Io == 7 &&
+                   probeRows[0].IoText == "IO (7)" &&
+                   probeRows[0].FaultType == "TP" &&
+                   probeRows[0].Status == "TP - IO(7)" &&
+                   probeRows[0].Connector.Length == 0 &&
+                   probeRows[0].Pin.Length == 0 &&
+                   probeRows[0].WireName.Length == 0,
                 "Probe sweep in blank THT shows the touched IO instead of false wiring pairs");
 
             var production = new ProductionSettings
@@ -4210,24 +10553,193 @@ internal static class Program
             board.Publish(FrameSeq(3, (4, new[] { 9 })));
 
             Assert(vm.IsIoMappingMode &&
-                   vm.Faults.Count == 1 &&
-                   vm.Faults[0].ActualSourceIo == 4 &&
-                   vm.Faults[0].ActualTargetIo == 9 &&
+                   AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 2 &&
+                   vm.Faults.All(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 9) &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
+                   vm.CurrentProductionPresentationMode == ProductionPresentationMode.LiveTopology &&
                    vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 &&
                    !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
                 "Blank THT observation never commits production or activates a relay");
+            Assert(vm.WrongCount == 1 && vm.WrongCountText == "1" && vm.OpenCount == 0 && vm.ShortCount == 0,
+                "Blank-model live IO connections count once in the wrong-wiring display");
 
             board.Publish(FrameSeq(
                 4,
                 Enumerable.Range(10, 20)
-                    .Select(source => (source, new[] { 7 }))
+                    .Select(source => (source, new[] { 63 }))
                     .ToArray()));
-            Assert(AppSoundService.Current.IsTestPointContactSoundActive,
-                "Blank THT Probe TOUCH starts continuous TESTPOINT sound");
+            TestEngine emptyModelEngine = (TestEngine)(typeof(TestViewModel).GetField(
+                "_engine",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(vm) ?? throw new InvalidOperationException("Empty-model engine not found"));
+            Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 1 &&
+                   vm.Faults[0].Kind == FaultKind.Probe &&
+                   vm.Faults[0].Io == 63 &&
+                   vm.Faults[0].Status == "TP - IO(63)" &&
+                   vm.Faults[0].Connector.Length == 0 &&
+                   vm.Faults[0].Pin.Length == 0 &&
+                   emptyModelEngine.ExpectedNetCount == 0 &&
+                   !emptyModelEngine.HasProductActivity &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
+                   vm.CurrentProbePresentationState == ProbePresentationState.Touch &&
+                   vm.CurrentProductionPresentationMode == ProductionPresentationMode.Probe &&
+                   vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Blank THT Probe presentation overrides rows without changing LiveTopology product presence");
+            Assert(vm.WrongCount == 0, "Probe rows do not inflate the blank-model connection count");
 
             board.Publish(FrameSeq(5));
-            Assert(!AppSoundService.Current.IsTestPointContactSoundActive,
-                "Blank THT Probe RELEASE stops TESTPOINT sound immediately");
+            Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 2 &&
+                   vm.Faults.All(row => row.ActualSourceIo == 4 && row.ActualTargetIo == 9) &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime &&
+                   vm.CurrentProbePresentationState == ProbePresentationState.Released &&
+                   vm.CurrentProductionPresentationMode == ProductionPresentationMode.LiveTopology &&
+                   vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Blank THT Probe RELEASE restores the exact prior LiveTopology snapshot");
+            Assert(vm.WrongCount == 1, "Probe release restores the displayed connection count");
+
+            board.Publish(FrameSeq(6, (1, new[] { 3 }), (3, new[] { 1 }), (2, new[] { 4 }), (4, new[] { 2 })));
+            Assert(vm.Faults.Count == 4 &&
+                   vm.Faults.Select(row => (row.ActualSourceIo, row.ActualTargetIo)).SequenceEqual([
+                       ((int?)1, (int?)3),
+                       ((int?)1, (int?)3),
+                       ((int?)2, (int?)4),
+                       ((int?)2, (int?)4)]) &&
+                   vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Empty THT renders exactly two canonical live pairs without PASS/FAIL");
+            Assert(vm.WrongCount == 2, "Two reciprocal connection pairs count as two, not four endpoint rows");
+
+            board.Publish(FrameSeq(7, (4, new[] { 2 })));
+            Assert(vm.Faults.Count == 2 &&
+                   vm.Faults.All(row => row.ActualSourceIo == 2 && row.ActualTargetIo == 4),
+                "Empty THT removal removes IO1<->IO3 immediately and retains IO2<->IO4");
+            Assert(vm.WrongCount == 1, "Removing one pair immediately reduces the display count");
+
+            board.Publish(FrameSeq(8, (1, new[] { 3 }), (2, new[] { 4 })));
+            board.Publish(FrameSeq(
+                9,
+                Enumerable.Range(10, 20).Select(source => (source, new[] { 63 })).ToArray()));
+            Assert(vm.Faults.Count == 1 &&
+                   vm.Faults[0].Kind == FaultKind.Probe &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime,
+                "Empty THT Probe temporarily owns the table while ProductState remains Present");
+            board.Publish(FrameSeq(10));
+            Assert(vm.Faults.Count == 4 &&
+                   vm.Faults.Any(row => row.ActualSourceIo == 1 && row.ActualTargetIo == 3) &&
+                   vm.Faults.Any(row => row.ActualSourceIo == 2 && row.ActualTargetIo == 4) &&
+                   vm.CurrentProductionRuntimeState == ProductionRuntimeState.TestingRealtime,
+                "Empty THT Probe release restores the exact two-pair topology snapshot");
+
+            board.Publish(FrameSeq(100, (1, new[] { 3 })));
+            board.Publish(FrameSeq(99, (2, new[] { 4 })));
+            Assert(vm.Faults.Count == 2 &&
+                   vm.Faults.All(row => row.ActualSourceIo == 1 && row.ActualTargetIo == 3),
+                "An older LiveTopology snapshot cannot overwrite the latest rendered frame");
+
+            board.Publish(FrameSeq(101));
+            Assert(!AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 0 && vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 &&
+                   !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                "Empty THT stops contact sound when every connection is removed without production or relay effects");
+
+            board.Publish(FrameSeq(102, (60, new[] { 64 })));
+            Assert(AppSoundService.Current.IsTestPointContactSoundActive &&
+                   vm.Faults.Count == 2 && vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0,
+                "Empty THT contact sound also covers connections outside the previous IO pairs");
+            board.Publish(FrameSeq(103));
+
+            ProductModel noEligibleNetModel = new()
+            {
+                ModelName = "NO-ELIGIBLE-NET",
+                PartNumber = "NO-ELIGIBLE-NET"
+            };
+            PinRecord singlePin = new("CN1", "SINGLE", 8, "1");
+            noEligibleNetModel.Pins.Add(singlePin);
+            noEligibleNetModel.Nets.Add(new WireNet("SINGLE", [8], [singlePin]));
+            TestViewModel noEligibleVm = CreateTestViewModel(production);
+            noEligibleVm.SetModel(noEligibleNetModel);
+            Assert(!noEligibleNetModel.IsIoMappingTemplate &&
+                   noEligibleVm.ExpectedNetworkCount == 0 &&
+                   noEligibleVm.IsIoMappingMode,
+                "LiveTopology mode is derived from eligible ExpectedNetCount, not parser filename/empty-table flags");
+
+            var evolvingProbe = new ProbeStateTracker(confirmFrames: 2, releaseFrames: 1, maxContacts: 2);
+            Assert(!evolvingProbe.Update([10]) &&
+                   evolvingProbe.HasTrackedContacts &&
+                   evolvingProbe.Update([10, 12]) &&
+                   evolvingProbe.ActiveIos.SequenceEqual([10, 12]) &&
+                   evolvingProbe.Update([]) &&
+                   !evolvingProbe.IsActive,
+                "Probe candidate IO10 -> IO10+IO12 confirms by frame continuity and releases without a timer");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void TestLearnedTopology()
+    {
+        var activeIoRow = new ActiveIoDiagnosticRow(42);
+        Assert(activeIoRow.IoText == "IO(42)" &&
+               activeIoRow.StatusText == "KẸT / CHƯA THÁO",
+            "Live diagnostic reports an active physical IO immediately without a THT model or time threshold");
+
+        LearnedTopologySnapshot snapshot = TopologyLearningService.BuildSnapshot(
+            FrameSeq(
+                80,
+                (1, new[] { 18 }),
+                (18, new[] { 1, 35 }),
+                (35, new[] { 18 }),
+                (2, new[] { 19 }),
+                (19, new[] { 2 })),
+            BoardCapacity.Create(1));
+
+        Assert(snapshot.Networks.Count == 2 &&
+               snapshot.Networks[0].Ios.SequenceEqual(new[] { 1, 18, 35 }) &&
+               snapshot.Networks[1].Ios.SequenceEqual(new[] { 2, 19 }) &&
+               snapshot.Rows[0].Connection == "IO(1) ↔ IO(18) ↔ IO(35)",
+            "Learning canonicalizes bidirectional edges into stable connected components");
+
+        string root = Path.Combine(Path.GetTempPath(), "JBZLearnedTopologyTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, "SAMPLE.jbzscan.json");
+            var profile = new LearnedTopologyProfile
+            {
+                ProductCode = "SAMPLE",
+                CreatedAt = DateTime.Now,
+                ExpansionCardCount = 1,
+                FirstIo = 1,
+                LastIo = 64,
+                RequiredStableFrames = 20,
+                ObservedStableFrames = 20,
+                Networks = snapshot.Networks.Select(network => new LearnedTopologyNetwork
+                {
+                    Name = network.Name,
+                    Ios = network.Ios.ToList()
+                }).ToList()
+            };
+            TopologyLearningService.SaveAsync(path, profile).GetAwaiter().GetResult();
+            string json = File.ReadAllText(path);
+            Assert(json.Contains("\"ProfileType\": \"DiagnosticContinuity\"", StringComparison.Ordinal) &&
+                   json.Contains("\"ProductCode\": \"SAMPLE\"", StringComparison.Ordinal) &&
+                   !File.Exists(path + ".tmp"),
+                "Learned topology is atomically persisted as an explicitly diagnostic non-THT profile");
+
+            string mainXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));
+            string learningXaml = File.ReadAllText(Path.Combine(Environment.CurrentDirectory, "Views", "TopologyLearningWindow.xaml"));
+            Assert(mainXaml.Contains("Content=\"QUÉT / HỌC MÃ\"", StringComparison.Ordinal) &&
+                   learningXaml.Contains("x:Name=\"ActiveIoGrid\"", StringComparison.Ordinal) &&
+                   learningXaml.Contains("ItemsSource=\"{Binding ActiveIoRows}\"", StringComparison.Ordinal) &&
+                   learningXaml.Contains("x:Name=\"StuckIoCountText\"", StringComparison.Ordinal) &&
+                   !learningXaml.Contains("THỜI GIAN", StringComparison.Ordinal) &&
+                   !learningXaml.Contains("3 giây", StringComparison.Ordinal) &&
+                   learningXaml.Contains("EnableRowVirtualization", StringComparison.Ordinal),
+                "MainWindow exposes THT-independent live IO and stuck-contact diagnostics without production actions");
         }
         finally
         {
@@ -4354,32 +10866,98 @@ internal static class Program
         public List<byte[]> ResistanceFrames { get; } = [];
         public byte[] ReleaseResistanceFrames { get; private set; } = [];
         public int ReleaseResistanceRouteCount { get; private set; }
+        public Action? BeforeReleaseResistance { get; set; }
         public bool ThrowOnSetRelay { get; set; }
-        public bool IsConnected => true;
+        public bool ThrowOnConnect { get; set; }
+        public int StartFailuresRemaining { get; set; }
+        public int ConnectAttempts { get; private set; }
+        public TaskCompletionSource<BoardConnectionInfo>? PendingConnection { get; set; }
+        public bool IsConnected { get; private set; } = true;
         public bool IsScanning { get; private set; } = true;
         public BoardScanMode CurrentScanMode { get; private set; } = BoardScanMode.Production;
+        public BoardCapacity InstalledCapacity { get; private set; } = BoardCapacity.Create(10);
         public BoardCapacity Capacity { get; private set; } = BoardCapacity.Create(10);
+        public BoardCapacity? AppliedScanCapacity { get; private set; } = BoardCapacity.Create(10);
+        public BoardScanCapacity ScanCapacity { get; private set; } = BoardScanCapacity.Create(
+            new ProductionSettings { ExpansionCardCount = 10 },
+            640);
         public DateTime LastFrameTimestampUtc { get; private set; } = DateTime.UtcNow;
         public long LastFrameSequence { get; private set; }
+        public long LastCompleteFrameSequence { get; private set; }
         public long FramesReceived { get; private set; }
+        public long CompleteFramesReceived { get; private set; }
+        public int LastFrameSourceCount { get; private set; }
+        public byte? LastFrameEndMarkerCode { get; private set; }
+        public int LastFrameUnknownBytes { get; private set; }
+        public void SetAppliedScanCapacityForTest(int scanUnits) =>
+            AppliedScanCapacity = BoardCapacity.Create(scanUnits);
+        public void SetRequestedScanCapacityForTest(int scanUnits) =>
+            Capacity = BoardCapacity.Create(scanUnits);
+        public void SetConnectionStateForTest(bool connected) =>
+            IsConnected = connected;
         public CancellationToken? LastStartScanToken { get; private set; }
         public Action<FakeBoard>? StartScanCallback { get; set; }
+        public Func<Task>? ResistanceRecoveryWork { get; set; }
         private event EventHandler<ScanFrame>? FrameReceivedCore;
         public event EventHandler<ScanFrame>? FrameReceived { add { FrameReceivedCore += value; } remove { FrameReceivedCore -= value; } }
+        private event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceivedCore;
+        public event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceived { add { ProductionProbePreviewReceivedCore += value; } remove { ProductionProbePreviewReceivedCore -= value; } }
         public event EventHandler<string>? Log { add { } remove { } }
+        public void PublishProbePreview(ProductionProbePreview preview) =>
+            ProductionProbePreviewReceivedCore?.Invoke(this, preview);
         public void Publish(ScanFrame frame)
         {
             LastFrameTimestampUtc = DateTime.UtcNow;
             LastFrameSequence = frame.Sequence;
             FramesReceived++;
+            LastFrameSourceCount = frame.SourceCount;
+            LastFrameEndMarkerCode = frame.EndMarkerCode;
+            LastFrameUnknownBytes = frame.UnknownBytes;
+            if (frame.Mode == BoardScanMode.Production &&
+                frame.Complete && frame.UnknownBytes == 0 && frame.TerminatorKnown)
+            {
+                LastCompleteFrameSequence = frame.Sequence;
+                CompleteFramesReceived++;
+            }
             FrameReceivedCore?.Invoke(this, frame);
         }
-        public Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default) => Task.FromResult(new BoardConnectionInfo("Fake", "Fake"));
-        public Task DisconnectAsync() { IsScanning = false; return Task.CompletedTask; }
+        public Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default)
+        {
+            ConnectAttempts++;
+            if (PendingConnection is not null) return PendingConnection.Task;
+            if (ThrowOnConnect)
+                throw new InvalidOperationException("Simulated board connection failure");
+            IsConnected = true;
+            return Task.FromResult(new BoardConnectionInfo("Fake", "Fake"));
+        }
+        public Task DisconnectAsync() { IsConnected = false; IsScanning = false; return Task.CompletedTask; }
         public Task HandshakeAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task ResetClearAsync(CancellationToken ct = default) { Commands.Add("RESET"); return Task.CompletedTask; }
-        public void ConfigureScanRange(int maxIo) { }
-        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default) { IsScanning = true; CurrentScanMode = mode; LastStartScanToken = ct; Commands.Add("START"); StartScanCallback?.Invoke(this); return Task.CompletedTask; }
+        public ProductionSettings? CapacityValidationSettings { get; set; }
+        public void ConfigureActiveScanRange(int maxIo)
+        {
+            if (CapacityValidationSettings is null) return;
+            ScanCapacity = BoardScanCapacity.Create(CapacityValidationSettings, maxIo);
+            InstalledCapacity = ScanCapacity.Installed; Capacity = ScanCapacity.Active;
+        }
+        public Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default)
+        {
+            if (CapacityValidationSettings is not null && mode == BoardScanMode.Production && !ScanCapacity.IsModelWithinInstalledCapacity)
+                throw new InvalidOperationException(ScanCapacity.CapacityErrorMessage);
+            if (StartFailuresRemaining > 0)
+            {
+                StartFailuresRemaining--;
+                throw new InvalidOperationException("Simulated scan start failure");
+            }
+
+            IsScanning = true;
+            CurrentScanMode = mode;
+            AppliedScanCapacity = Capacity;
+            LastStartScanToken = ct;
+            Commands.Add("START");
+            StartScanCallback?.Invoke(this);
+            return Task.CompletedTask;
+        }
         public Task StopScanAsync(CancellationToken ct = default) { IsScanning = false; Commands.Add("STOP"); return Task.CompletedTask; }
         public Task EnterIdleAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task SelectResistanceRouteAsync(ResistanceStep step, CancellationToken ct = default)
@@ -4391,14 +10969,15 @@ internal static class Program
                     .ToArray());
             return Task.CompletedTask;
         }
-        public Task ReleaseResistanceRouteAsync(CancellationToken ct = default)
+        public async Task ReleaseResistanceRouteAsync(CancellationToken ct = default)
         {
+            BeforeReleaseResistance?.Invoke();
             ReleaseResistanceRouteCount++;
             ReleaseResistanceFrames = D2xxResistanceRouting.BuildReleaseRouteB()
                 .Concat(D2xxResistanceRouting.BuildReleaseRouteA())
                 .ToArray();
             Commands.Add("RELEASE_R");
-            return Task.CompletedTask;
+            if (ResistanceRecoveryWork is not null) await ResistanceRecoveryWork();
         }
         public Task SetRelayAsync(int relay, CancellationToken ct = default)
         {
@@ -4418,13 +10997,16 @@ internal static class Program
         public override bool IsConnected => connected;
         public int MeasureCallCount { get; private set; }
         public bool ThrowOnMeasure { get; set; }
+        public Queue<double> Measurements { get; } = new();
+        public Action? BeforeMeasure { get; set; }
 
         public override double MeasureResistance(string command = ":MEASURE:RES?")
         {
             MeasureCallCount++;
+            BeforeMeasure?.Invoke();
             if (ThrowOnMeasure)
                 throw new InvalidOperationException("Simulated Keysight failure");
-            return measurement;
+            return Measurements.Count > 0 ? Measurements.Dequeue() : measurement;
         }
     }
 

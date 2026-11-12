@@ -6,7 +6,7 @@
     QUY TAC BAT BUOC:
     - Moi lan sua source va phat hanh mot ban moi: tang VersionPrefix.
     - Dong thoi cap nhat AssemblyVersion/FileVersion theo cung version.
-    - VersionFileTag dung de tao ten EXE rieng, tranh nham lan cac ban build.
+    - VersionFileTag duoc giu dong bo cho packaging/metadata; runtime EXE co ten on dinh.
 
     Vi du lan sau:
       12.10.2 -> next release
@@ -15,17 +15,17 @@
       VersionFileTag  12_10_2 -> next release
   -->
   <PropertyGroup>
-    <VersionPrefix>16.0.133</VersionPrefix>
-    <Version>16.0.133</Version>
-    <AssemblyVersion>16.0.133.0</AssemblyVersion>
-    <FileVersion>16.0.133.0</FileVersion>
-    <InformationalVersion>16.0.133</InformationalVersion>
+    <VersionPrefix>2026.09.429</VersionPrefix>
+    <Version>2026.09.429</Version>
+    <AssemblyVersion>2026.09.429.0</AssemblyVersion>
+    <FileVersion>2026.09.429.0</FileVersion>
+    <InformationalVersion>2026.09.429</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <VersionFileTag>16_0_133</VersionFileTag>
+    <VersionFileTag>2026_09_429</VersionFileTag>
     <Product>JBZUniversalTester</Product>
-    <AssemblyTitle>JBZUniversalTester V16.0.133</AssemblyTitle>
+    <AssemblyTitle>JBZUniversalTester V2026.09.429</AssemblyTitle>
     <Description>JBZ Universal Tester - Production Harness Tester</Description>
     <Company>JBZ</Company>
-    <Copyright>Copyright © JBZ 2026</Copyright>
+    <Copyright>Copyright JBZ 2026</Copyright>
   </PropertyGroup>
 </Project>

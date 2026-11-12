@@ -13,6 +13,7 @@ public static class HistoryExportService
     {
         Text,
         Number,
+        DateTime,
         Date,
         Time
     }
@@ -22,29 +23,34 @@ public static class HistoryExportService
         double Width,
         HistoryCellType Type,
         Func<TestHistoryRecord, object?> GetValue,
-        bool Wrap = false);
+        bool DetailText = false);
 
-    // Mẫu ALL gốc có đúng 14 cột. CSV, XLSX và HistoryPage phải giữ cùng
-    // thứ tự này; chi tiết các công đoạn chỉ nằm trong cột 검 사 기 록.
+    // Original 18-column order. Date/filter/order semantics remain test-start;
+    // Lot is presentation-only blank, while 합격 shows the saved production LOT.
+    // The software column shows the running exporter, preserving the stored producer identity.
     private static readonly HistoryColumn[] Columns =
     [
-        new("일 자", 12, HistoryCellType.Date, r => r.EffectiveTestStartedAt),
-        new("시 간", 11, HistoryCellType.Time, r => r.EffectiveTestStartedAt),
-        new("파 일", 28, HistoryCellType.Text, r => r.ExportModelFileName),
-        new("품 명", 20, HistoryCellType.Text, r => r.PartName),
-        new("품 번", 20, HistoryCellType.Text, r => r.PartNumber),
-        new("차 종", 18, HistoryCellType.Text, r => r.VehicleType),
+        new("장착시간", 22, HistoryCellType.DateTime, r => r.EffectiveTestStartedAt),
+        new("파일", 28, HistoryCellType.Text, r => r.ExportModelFileName),
+        new("파트명", 20, HistoryCellType.Text, r => r.PartName),
+        new("파트번호", 20, HistoryCellType.Text, r => r.PartNumber),
+        new("Eco", 18, HistoryCellType.Text, r => r.Eco),
+        new("Nco", 18, HistoryCellType.Text, r => r.Nco),
+        new("Alc", 18, HistoryCellType.Text, r => r.Alc),
         new("Lot", 16, HistoryCellType.Text, r => r.ExportLotText),
-        new("결 과", 10, HistoryCellType.Text, r => r.ExportResultText),
-        new("순 번", 11, HistoryCellType.Number, r => r.ExportSequenceNo),
-        new("검 사 기 록", 80, HistoryCellType.Text, r => r.ExportTestLogText, true),
-        new("바코드", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
-        new("200 %", 10, HistoryCellType.Text, r => r.ExportPercentText),
-        new("수입검사", 14, HistoryCellType.Text, r => r.ExportIncomingInspectionText),
-        new("프로그램", 30, HistoryCellType.Text, r => r.HtdrvName)
+        new("RESULT", 12, HistoryCellType.Text, r => r.ExportProgressText),
+        new("결과", 10, HistoryCellType.Text, r => r.ExportResultText),
+        new("합격", 16, HistoryCellType.Text, r => r.ExportPassCountText),
+        new("검사기록", 80, HistoryCellType.Text, r => r.ExportTestLogSingleLineText, true),
+        new("바코드입력", 24, HistoryCellType.Text, r => r.ExportBarcodeInputText),
+        new("바코드출력", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
+        new("측정", 30, HistoryCellType.Text, r => r.ExportResistanceText),
+        new(ProgramIdentityService.ProgramName, 30, HistoryCellType.Text, _ => $"V{ProgramIdentityService.VersionText}"),
+        new("내용", 40, HistoryCellType.Text, r => r.ExportContentText),
+        new("메모", 24, HistoryCellType.Text, _ => string.Empty)
     ];
 
-    public static void ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
+    public static int ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Encoding cp949 = Encoding.GetEncoding(
@@ -54,12 +60,19 @@ public static class HistoryExportService
         using var writer = new StreamWriter(path, false, cp949) { NewLine = "\n" };
         writer.WriteLine(string.Join(',', Columns.Select(column => EscapeCsv(column.Header))));
 
+        int count = 0;
+        var passOrdinalsByProduct = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (TestHistoryRecord record in records)
+        {
+            HistoryPresentation.AssignProductOrdinals([record], passOrdinalsByProduct);
             writer.WriteLine(string.Join(',', Columns.Select(column =>
                 EscapeCsv(ToCsvValue(column, record)))));
+            count++;
+        }
+        return count;
     }
 
-    public static void ExportXlsx(string path, IReadOnlyList<TestHistoryRecord> records)
+    public static int ExportXlsx(string path, IEnumerable<TestHistoryRecord> records)
     {
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -76,7 +89,7 @@ public static class HistoryExportService
         WriteEntry(archive, "xl/workbook.xml", WorkbookXml());
         WriteEntry(archive, "xl/_rels/workbook.xml.rels", WorkbookRelsXml());
         WriteEntry(archive, "xl/styles.xml", StylesXml());
-        WriteEntry(archive, "xl/worksheets/sheet1.xml", SheetXml(records));
+        return WriteSheetEntry(archive, records);
     }
 
     private static string ToCsvValue(HistoryColumn column, TestHistoryRecord record)
@@ -87,6 +100,7 @@ public static class HistoryExportService
 
         return column.Type switch
         {
+            HistoryCellType.DateTime => ((DateTime)value).ToString("yyyy/MM/dd HH:mm:ss", CultureInfo.InvariantCulture),
             HistoryCellType.Date => ((DateTime)value).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             HistoryCellType.Time => ((DateTime)value).ToString("HH:mm:ss", CultureInfo.InvariantCulture),
             HistoryCellType.Number => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
@@ -110,8 +124,15 @@ public static class HistoryExportService
         writer.Write(text);
     }
 
-    private static string SheetXml(IReadOnlyList<TestHistoryRecord> records)
+    private static int WriteSheetEntry(
+        ZipArchive archive,
+        IEnumerable<TestHistoryRecord> records)
     {
+        ZipArchiveEntry entry = archive.CreateEntry(
+            "xl/worksheets/sheet1.xml",
+            CompressionLevel.Optimal);
+        using Stream stream = entry.Open();
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false));
         var sb = new StringBuilder(32_768);
         sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
         sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
@@ -123,18 +144,29 @@ public static class HistoryExportService
         sb.Append("</cols>");
         sb.Append("<sheetData>");
         AppendHeaderRow(sb);
+        writer.Write(sb);
+        sb.Clear();
 
-        for (int i = 0; i < records.Count; i++)
-            AppendDataRow(sb, i + 2, records[i]);
+        int count = 0;
+        var passOrdinalsByProduct = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (TestHistoryRecord record in records)
+        {
+            HistoryPresentation.AssignProductOrdinals([record], passOrdinalsByProduct);
+            AppendDataRow(sb, count + 2, record);
+            writer.Write(sb);
+            sb.Clear();
+            count++;
+        }
 
         sb.Append("</sheetData>");
-        if (records.Count >= 1)
+        if (count >= 1)
         {
             string lastColumn = ColumnName(Columns.Length);
-            sb.Append($"<autoFilter ref=\"A1:{lastColumn}{records.Count + 1}\"/>");
+            sb.Append($"<autoFilter ref=\"A1:{lastColumn}{count + 1}\"/>");
         }
         sb.Append("</worksheet>");
-        return sb.ToString();
+        writer.Write(sb);
+        return count;
     }
 
     private static void AppendHeaderRow(StringBuilder sb)
@@ -150,7 +182,7 @@ public static class HistoryExportService
 
     private static void AppendDataRow(StringBuilder sb, int rowNumber, TestHistoryRecord record)
     {
-        sb.Append($"<row r=\"{rowNumber}\" ht=\"30\" customHeight=\"1\">");
+        sb.Append($"<row r=\"{rowNumber}\" ht=\"20\" customHeight=\"1\">");
         for (int i = 0; i < Columns.Length; i++)
         {
             HistoryColumn column = Columns[i];
@@ -163,7 +195,12 @@ public static class HistoryExportService
                 continue;
             }
 
-            if (column.Type == HistoryCellType.Date)
+            if (column.Type == HistoryCellType.DateTime)
+            {
+                double serial = ((DateTime)value).ToOADate();
+                sb.Append($"<c r=\"{cell}\" s=\"2\"><v>{serial.ToString("0.###############", CultureInfo.InvariantCulture)}</v></c>");
+            }
+            else if (column.Type == HistoryCellType.Date)
             {
                 double serial = ((DateTime)value).Date.ToOADate();
                 sb.Append($"<c r=\"{cell}\" s=\"2\"><v>{serial.ToString("0.###############", CultureInfo.InvariantCulture)}</v></c>");
@@ -181,7 +218,7 @@ public static class HistoryExportService
             else
             {
                 string text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
-                string style = column.Wrap ? " s=\"3\"" : string.Empty;
+                string style = column.DetailText ? " s=\"3\"" : string.Empty;
                 sb.Append($"<c r=\"{cell}\" t=\"inlineStr\"{style}><is><t xml:space=\"preserve\">{Xml(text)}</t></is></c>");
             }
         }
@@ -201,7 +238,7 @@ public static class HistoryExportService
     }
 
     private static string Xml(string? value) =>
-        SecurityElement.Escape(value ?? string.Empty) ?? string.Empty;
+        (SecurityElement.Escape(value ?? string.Empty) ?? string.Empty).Replace("\r", "&#13;", StringComparison.Ordinal);
 
     private static string ContentTypesXml() => """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -240,7 +277,7 @@ public static class HistoryExportService
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
           <numFmts count="2">
-            <numFmt numFmtId="164" formatCode="yyyy-mm-dd"/>
+            <numFmt numFmtId="164" formatCode="yyyy/mm/dd hh:mm:ss"/>
             <numFmt numFmtId="165" formatCode="hh:mm:ss"/>
           </numFmts>
           <fonts count="2">
@@ -261,7 +298,7 @@ public static class HistoryExportService
             <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
             <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFill="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
             <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
-            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="0"/></xf>
             <xf numFmtId="165" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>
           </cellXfs>
           <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>

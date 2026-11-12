@@ -14,9 +14,8 @@ public sealed record LegacyProductionSnapshot(
     long LifetimeTotal);
 
 /// <summary>
-/// Reads the original PHT20 CP949 history. C:\Pass_ and C:\Error_ are the
-/// shared source written by both applications, so switching applications does
-/// not make production completed by the other application disappear.
+/// Reads DAT/ERR history for explicit compatibility import. Runtime production
+/// counters and history are always queried from SQLite.
 /// </summary>
 public sealed partial class LegacyPhtHistoryReader
 {
@@ -28,13 +27,47 @@ public sealed partial class LegacyPhtHistoryReader
 
     public LegacyPhtHistoryReader(string? passRoot = null, string? errorRoot = null)
     {
-        _passRoot = string.IsNullOrWhiteSpace(passRoot) ? @"C:\Pass_" : Path.GetFullPath(passRoot);
-        _errorRoot = string.IsNullOrWhiteSpace(errorRoot) ? @"C:\Error_" : Path.GetFullPath(errorRoot);
+        _passRoot = string.IsNullOrWhiteSpace(passRoot) ? RuntimePaths.PassRoot : Path.GetFullPath(passRoot);
+        _errorRoot = string.IsNullOrWhiteSpace(errorRoot) ? RuntimePaths.ErrorRoot : Path.GetFullPath(errorRoot);
     }
 
     public bool HasSharedHistory => Directory.Exists(_passRoot) || Directory.Exists(_errorRoot);
     public string PassRoot => _passRoot;
     public string ErrorRoot => _errorRoot;
+
+    public IReadOnlyList<LegacyImportFile> EnumerateImportFiles() =>
+        EnumerateFiles(_passRoot, "Day*.dat")
+            .Select(path => CreateImportFile(path, passedFile: true))
+            .Concat(EnumerateFiles(_errorRoot, "Day*.err")
+                .Select(path => CreateImportFile(path, passedFile: false)))
+            .Where(item => item is not null)
+            .Cast<LegacyImportFile>()
+            .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+    public IReadOnlyList<TestHistoryRecord> ReadImportFile(LegacyImportFile file) =>
+        ReadCachedFile(file.Path, file.PassedFile);
+
+    private static LegacyImportFile? CreateImportFile(string path, bool passedFile)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return new LegacyImportFile(
+                info.FullName,
+                info.Length,
+                info.LastWriteTimeUtc,
+                passedFile);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
 
     public LegacyProductionSnapshot GetProductionSnapshot(ProductModel model, DateTime now)
     {
@@ -246,7 +279,8 @@ public sealed partial class LegacyPhtHistoryReader
             row.VehicleType = match.Groups["vehicle"].Value.Trim();
             row.Alc = match.Groups["alc"].Value.Trim();
             row.FaultSummary = string.Join(" ", lines.Skip(1).Select(value => value.Trim()).Where(value => value.Length > 0));
-            row.FaultType = lines[0].Contains("Open", StringComparison.OrdinalIgnoreCase)
+            row.FaultType = lines[0].Contains("Open", StringComparison.OrdinalIgnoreCase) ||
+                            lines[0].Contains("단선", StringComparison.Ordinal)
                 ? "HỞ MẠCH"
                 : "SAI DÂY / CHẬP MẠCH";
             yield return row;

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -12,26 +13,34 @@ namespace JBZUniversalTester.Views;
 
 public partial class MainWindow : Window
 {
+    private static readonly TimeSpan StartupControlUnlockTimeout = TimeSpan.FromSeconds(8);
     private readonly MainViewModel _viewModel;
     private TestWindow? _testWindow;
     private ProductionSettingsPage? _settingsPage;
+    private bool _settingsPageCloseInProgress;
     private HistoryPage? _historyPage;
     private bool _shutdownStarted;
     private bool _shutdownComplete;
     private bool _startupStarted;
+    private long _internalPageGeneration;
     private UiStallWatchdog? _uiStallWatchdog;
 
-    public MainWindow()
+    public MainWindow() : this(new MainViewModel()) { }
+
+    public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
         StartupPerformanceTrace.Mark("T1 MainWindow constructed");
         Title = $"UniversalTester {AppVersion.DisplayVersion} - JBZ Production";
         AppVersionText.Text = $"JBZ Universal : {AppVersion.DisplayVersion}";
 
-        _viewModel = new MainViewModel();
+        _viewModel = viewModel;
         _viewModel.ExplicitModelLoaded += ViewModel_ExplicitModelLoaded;
         _viewModel.Test.PropertyChanged += TestViewModel_PropertyChanged;
         DataContext = _viewModel;
+        ProductCatalog.ProductRequested += OpenCatalogProduct;
+        ProductCatalog.BrowseRequested += BrowseCatalogFile;
+        Closed += (_, _) => ProductCatalog.Dispose();
         ContentRendered += MainWindow_ContentRendered;
         UpdateProductRemovalGate();
     }
@@ -40,13 +49,34 @@ public partial class MainWindow : Window
     {
         ContentRendered -= MainWindow_ContentRendered;
         StartupPerformanceTrace.Mark("T2 MainWindow first ContentRendered");
+        LogMemory("MEM STARTUP");
         _uiStallWatchdog = new UiStallWatchdog(Dispatcher);
 
-        // Quan trọng: không khởi tạo FTDI/model/printer trong Loaded.
-        // ContentRendered đảm bảo WPF đã vẽ frame đầu tiên; Task.Yield trả
-        // quyền cho Dispatcher xử lý input/paint trước khi bắt đầu startup I/O.
+        // Normal startup is prepared behind the splash. Keep this fallback for
+        // callers that construct/show MainWindow without the App startup flow.
         await Task.Yield();
+        Task catalogLoad = RefreshCatalogAsync();
         await InitializeApplicationAfterFirstRenderAsync();
+        await catalogLoad;
+    }
+
+    private Task RefreshCatalogAsync() => ProductCatalog.LoadAsync(
+        _viewModel.Home.CatalogDirectory, _viewModel.Model?.SourcePath ?? _viewModel.ProductionSettings.LastThtPath);
+
+    private async void OpenCatalogProduct(string path)
+    {
+        if (_shutdownStarted || !ProductCatalog.IsEnabled || !MainActionBar.IsEnabled ||
+            _testWindow is not null || _settingsPage is not null || _historyPage is not null) return;
+        ProductCatalog.IsHitTestVisible = false;
+        try { await _viewModel.Home.LoadProductFileAsync(path); }
+        finally { if (!_shutdownStarted) ProductCatalog.IsHitTestVisible = true; }
+    }
+
+    private void BrowseCatalogFile()
+    {
+        if (_shutdownStarted || !ProductCatalog.IsEnabled || !MainActionBar.IsEnabled ||
+            _testWindow is not null || _settingsPage is not null || _historyPage is not null) return;
+        _viewModel.Home.BrowseModelCommand.Execute(null);
     }
 
     private void ViewModel_ExplicitModelLoaded(ProductModel model)
@@ -59,13 +89,22 @@ public partial class MainWindow : Window
 
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        if (_startupStarted)
+        {
+            UpdateProductRemovalGate();
+            return;
+        }
         // Loaded có thể xảy ra trước ContentRendered. Chỉ khóa các nút phụ thuộc
         // hardware ở đây; tuyệt đối không chạy FTDI/model/printer trước frame đầu.
         StartTestButton.IsEnabled = false;
-        SelectModelButton.IsEnabled = false;
+        ProductCatalog.IsEnabled = false;
     }
 
-    private async Task InitializeApplicationAfterFirstRenderAsync()
+    // Called by App only after the splash has painted; later ContentRendered
+    // reuses the startup guard instead of opening devices a second time.
+    public Task PrepareStartupAsync(Task? initialization = null) => InitializeApplicationAfterFirstRenderAsync(initialization);
+
+    private async Task InitializeApplicationAfterFirstRenderAsync(Task? initialization = null)
     {
         if (_startupStarted)
             return;
@@ -74,26 +113,67 @@ public partial class MainWindow : Window
 
         try
         {
-            // Tự nạp mã gần nhất và tự kết nối/recovery bo sau khi cửa sổ đã
-            // render. Các API bên dưới vẫn await bình thường nên Dispatcher
-            // không bị giữ trong thời gian handshake/delay phần cứng.
-            await _viewModel.InitializeApplicationAsync();
+            // Splash (or the standalone MainWindow fallback) has rendered.
+            // Preserve the existing one-owner initialization and timeout.
+            initialization ??= _viewModel.InitializeApplicationAsync();
+            Task completed = await Task.WhenAny(
+                _viewModel.StartupHardwareTask,
+                Task.Delay(StartupControlUnlockTimeout));
+
+            if (completed != _viewModel.StartupHardwareTask)
+            {
+                // Driver/D2XX giữ lời gọi mở quá lâu được xem là lỗi phần cứng
+                // của phiên. Task muộn chỉ được quan sát để cleanup, không được
+                // mở khóa test hoặc hồi sinh kết nối.
+                _viewModel.Test.ReportStartupBoardTimeout();
+                _viewModel.Status =
+                    TesterConnectionNotice.Message;
+                AsyncFileLogService.Current.Error(
+                    $"STARTUP HARDWARE TIMEOUT after {StartupControlUnlockTimeout.TotalSeconds:0}s; " +
+                    "session latched until application restart.");
+                _ = ObserveDeferredStartupAsync(initialization);
+                return;
+            }
+
+            await initialization;
         }
         catch (Exception ex)
         {
-            // Startup phải luôn để MainWindow sử dụng được. Lỗi board/model đã
-            // được ViewModel ghi vào Status/HardwareStatus; popup này chỉ cho lỗi
-            // ngoài dự kiến.
+            if (!IsVisible && Application.Current?.MainWindow is StartupWindow)
+                throw;
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            // Startup phải luôn để MainWindow sử dụng được. Không đưa exception
+            // kỹ thuật lên giao diện vận hành.
+            AsyncFileLogService.Current.Error($"MainWindow startup failed: {ex}");
             MessageBox.Show(
-                this,
-                $"Khởi tạo ứng dụng chưa hoàn chỉnh.\n\n{ex.Message}",
-                "Cảnh báo khởi động",
+                IsVisible ? this : Application.Current?.MainWindow ?? this,
+                "Phần mềm chưa sẵn sàng. Vui lòng khởi động lại.",
+                "CHƯA SẴN SÀNG",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
         finally
         {
             UpdateProductRemovalGate();
+        }
+    }
+
+    private async Task ObserveDeferredStartupAsync(Task initialization)
+    {
+        try
+        {
+            await initialization;
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"DEFERRED STARTUP FAILED: {ex}");
+        }
+        finally
+        {
+            if (!_shutdownStarted)
+                await Dispatcher.InvokeAsync(UpdateProductRemovalGate);
         }
     }
 
@@ -104,16 +184,45 @@ public partial class MainWindow : Window
         OpenTestWindowCore(allowViewWhenInsufficient: false);
     }
 
+    private void OpenTopologyLearning_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_viewModel.Test.IsBoardConnected || _viewModel.Test.IsDeviceFault)
+        {
+            _viewModel.Test.ReportBoardUnavailableForOperatorAction("OpenTopologyLearning");
+            return;
+        }
+
+        if (_viewModel.Test.IsManualModeActive)
+        {
+            MessageBox.Show(this,
+                "Hãy tắt hoặc RESET relay tay trước khi học topology.",
+                "Đang ở Manual", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var window = new TopologyLearningWindow(_viewModel.Test)
+        {
+            Owner = this
+        };
+        window.ShowDialog();
+    }
+
     private void OpenTestWindowCore(bool allowViewWhenInsufficient = false)
     {
-        if (!_viewModel.Test.IsBoardConnected)
+        if (_shutdownStarted || _settingsPage is not null || _historyPage is not null || _settingsPageCloseInProgress)
+            return;
+        // Also guard deferred opens (for example the model-loaded callback).
+        // The physical removal gate must be clear before entering TestView.
+        if (_viewModel.Test.IsProductRemovalPending)
         {
-            MessageBox.Show(
-                "Bo JBZ chưa kết nối thành công. Phần mềm sẽ tự thử kết nối lại; " +
-                "chỉ có thể bắt đầu kiểm tra khi bo đã sẵn sàng.",
-                "Bo chưa kết nối",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            UpdateProductRemovalGate();
+            return;
+        }
+
+        if (_viewModel.Test.IsDeviceFault ||
+            (!_viewModel.Test.IsBoardConnected && !allowViewWhenInsufficient))
+        {
+            _viewModel.Test.ReportBoardUnavailableForOperatorAction("OpenTestWindow");
             return;
         }
 
@@ -141,7 +250,8 @@ public partial class MainWindow : Window
         // cấu hình dù số card chưa đủ; chỉ KHÔNG ARM test. MainViewModel đã
         // cảnh báo thiếu card ngay sau khi load. Với nút BẮT ĐẦU thủ công thì
         // vẫn chặn như máy gốc.
-        bool hasCapacity = _viewModel.EnsureModelCardCapacity(showWarning: !allowViewWhenInsufficient);
+        bool hasCapacity = _viewModel.EnsureModelCardCapacity(
+            showWarning: !allowViewWhenInsufficient);
         if (!hasCapacity && !allowViewWhenInsufficient)
             return;
 
@@ -156,28 +266,56 @@ public partial class MainWindow : Window
 
         try
         {
-            _testWindow = new TestWindow(_viewModel.Test, autoStartProduction: hasCapacity);
+            // A deferred settings preparation must not attach a page after
+            // the operator has already entered the production window.
+            Interlocked.Increment(ref _internalPageGeneration);
+            _testWindow = new TestWindow(
+                _viewModel.Test,
+                autoStartProduction: hasCapacity && _viewModel.Test.IsBoardConnected)
+            {
+                // Giữ MainWindow đã render sẵn ngay phía sau TestWindow. Khi
+                // đóng màn hình test, DWM luôn có sẵn bề mặt để hiển thị và
+                // không thể lộ desktop trong lúc dựng lại MainWindow.
+                Owner = this
+            };
             _testWindow.Closed += TestWindow_Closed;
+            _testWindow.ReturningToMain += TestWindow_ReturningToMain;
 
             // Faults đã được SetModel/BuildRows trước khi Show(), vì vậy DataGrid
             // có cấu hình THT ngay frame render đầu tiên của TestWindow.
             _testWindow.Show();
-            Hide();
+            LogMemory("MEM TESTWINDOW_OPEN");
         }
         catch (Exception ex)
         {
             if (_testWindow is not null)
             {
+                _testWindow.ReturningToMain -= TestWindow_ReturningToMain;
                 _testWindow.Closed -= TestWindow_Closed;
                 _testWindow = null;
             }
 
+            AsyncFileLogService.Current.Error($"Open TestWindow failed: {ex}");
             MessageBox.Show(
-                ex.ToString(),
-                "Không thể mở màn hình kiểm tra",
+                "Chưa mở được màn hình kiểm tra. Vui lòng thử lại.",
+                "CHƯA MỞ ĐƯỢC MÀN HÌNH KIỂM TRA",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
+    }
+
+    private void TestWindow_ReturningToMain(object? sender, EventArgs e)
+    {
+        if (_shutdownStarted || _viewModel.Test.IsDeviceFault)
+            return;
+
+        WindowState = WindowState.Maximized;
+        if (!IsVisible)
+            Show();
+
+        UpdateProductRemovalGate();
+        Activate();
+        Focus();
     }
 
     private void TestWindow_Closed(
@@ -186,12 +324,22 @@ public partial class MainWindow : Window
     {
         if (_testWindow is not null)
         {
+            _testWindow.ReturningToMain -= TestWindow_ReturningToMain;
             _testWindow.Closed -= TestWindow_Closed;
             _testWindow = null;
         }
 
-        Show();
+        if (_shutdownStarted || _viewModel.Test.IsDeviceFault)
+            return;
+
+        // MainWindow bình thường luôn tồn tại phía sau TestWindow. Đây là
+        // fallback nếu một nhánh khác từng ẩn cửa sổ chính.
         WindowState = WindowState.Maximized;
+        if (!IsVisible)
+            Show();
+
+        LogMemory("MEM TESTWINDOW_CLOSE");
+        _ = RefreshCatalogAsync();
         UpdateProductRemovalGate();
         Activate();
         Focus();
@@ -200,120 +348,309 @@ public partial class MainWindow : Window
     private void TestViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(TestViewModel.IsProductRemovalPending) or
-            nameof(TestViewModel.IsBoardConnected))
+            nameof(TestViewModel.IsBoardConnected) or
+            nameof(TestViewModel.IsDeviceFault) or
+            nameof(TestViewModel.IsBoardStartupUnavailable))
+        {
+            if (_viewModel.Test.IsDeviceFault)
+            {
+                _viewModel.Status =
+                    TesterConnectionNotice.Message;
+            }
             Dispatcher.BeginInvoke(UpdateProductRemovalGate);
+        }
     }
 
     private void UpdateProductRemovalGate()
     {
         bool blocked = _viewModel.Test.IsProductRemovalPending;
-        bool boardConnected = _viewModel.Test.IsBoardConnected;
+        bool hardwareReady =
+            _viewModel.Test.IsBoardConnected &&
+            !_viewModel.Test.IsDeviceFault;
+        bool offlineUiAvailable =
+            _viewModel.Test.IsBoardStartupUnavailable &&
+            !_viewModel.Test.IsDeviceFault;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
-        // Không cho nạp model/đi vào Production khi D2XX chưa hoàn tất kết nối.
-        // Khi đang chờ tháo vẫn cho mở lại TestView để quan sát, nhưng không
-        // cho đổi mã hàng cho tới khi nhận ProductRemoved đầy đủ.
-        StartTestButton.IsEnabled = boardConnected && _viewModel.Model is not null;
-        SelectModelButton.IsEnabled = boardConnected && !blocked;
+        StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null && !blocked;
+        ProductCatalog.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;
+        LearnTopologyButton.IsEnabled = hardwareReady;
     }
 
-    private void OpenSettings_Click(
+    private int _settingsAccessPromptActive;
+    private async void OpenSettings_Click(
         object sender,
-        RoutedEventArgs e)
+        RoutedEventArgs e) => await OpenSettingsCoreAsync(openEditor: false);
+
+    private async void OpenThtEditor_Click(object sender, RoutedEventArgs e) => await OpenSettingsCoreAsync(openEditor: true);
+
+    private async Task OpenSettingsCoreAsync(bool openEditor)
     {
+        if (_settingsPage is not null || _historyPage is not null || _testWindow is not null ||
+            Interlocked.CompareExchange(ref _settingsAccessPromptActive, 1, 0) != 0)
+            return;
         try
         {
-            ShowSettingsPage();
+            MainActionBar.IsEnabled = false;
+            // Direct THT editing is available without a settings login. Closing
+            // the editor returns to Main; settings still use their own login.
+            if (openEditor)
+            {
+                await ShowSettingsPageCoreAsync(SettingsAccessSession.Administrator, openEditor: true);
+                return;
+            }
+            long accessStarted = Stopwatch.GetTimestamp();
+            SettingsAccessService accessService = await Task.Run(() => SettingsAccessService.Current);
+            AsyncFileLogService.Current.Performance($"AUTH_PERF phase=ACCESS_LOAD elapsed_ms={Stopwatch.GetElapsedTime(accessStarted).TotalMilliseconds:0.###}");
+            if (_shutdownStarted) return;
+            SettingsAccessSession? access = SettingsSecurityDialogs.Login(this, accessService);
+            if (access is null || _shutdownStarted) return;
+            await ShowSettingsPageAsync(access);
         }
         catch (Exception ex)
         {
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"Open Settings failed: {ex}");
             MessageBox.Show(
                 this,
-                ex.ToString(),
-                "Không thể mở cài đặt",
+                "Chưa mở được Cài đặt. Vui lòng kiểm tra cấu hình và thử lại.",
+                "CHƯA MỞ ĐƯỢC CÀI ĐẶT",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
-    }
-
-    private void ShowSettingsPage()
-    {
-        CloseInternalPage();
-
-        _settingsPage = new ProductionSettingsPage(_viewModel);
-        _settingsPage.RequestClose += InternalPage_RequestClose;
-        _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
-
-        InternalPageHost.Content = _settingsPage;
-        InternalPageHost.Visibility = Visibility.Visible;
-    }
-
-    private async void SettingsPage_SettingsSaved(object? sender, EventArgs e)
-    {
-        try
+        finally
         {
-            if (_settingsPage is not null)
-                await _settingsPage.ReleaseManualOutputsAsync();
-            await _viewModel.ReloadProductionSettingsAsync();
+            Interlocked.Exchange(ref _settingsAccessPromptActive, 0);
+            if (!_shutdownStarted && _settingsPage is null && _historyPage is null)
+                MainActionBar.IsEnabled = true;
         }
-        catch (Exception ex)
+    }
+
+    private Task ShowSettingsPageAsync(SettingsAccessSession access) => ShowSettingsPageCoreAsync(access, openEditor: false);
+
+    private async Task ShowSettingsPageCoreAsync(SettingsAccessSession access, bool openEditor)
+    {
+        if (_settingsPage is not null || _historyPage is not null || _settingsPageCloseInProgress || _testWindow is not null)
         {
-            MessageBox.Show(
-                this,
-                $"Đã lưu file cài đặt nhưng chưa reconfigure runtime hoàn chỉnh.\n\n{ex.Message}",
-                "Cảnh báo áp dụng cài đặt",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
             return;
         }
 
-        CloseInternalPage();
+        await CloseInternalPageAsync();
+        long navigationGeneration = Volatile.Read(ref _internalPageGeneration);
+        LogMemory("MEM BEFORE_SETTINGS");
+
+        // Config/THT preparation có disk/parse work; tạo ViewModel ngoài
+        // Dispatcher để BAML của page được cấp phát sau khi UI đã rảnh.
+        await _viewModel.Test.WaitForLotConfigurationWritesAsync();
+        ProductionSettingsViewModel settingsViewModel = await Task.Run(
+            () => new ProductionSettingsViewModel(_viewModel.Test));
+
+        // Người dùng có thể chuyển sang History/đóng app trong lúc config/THT
+        // đang được chuẩn bị. Không dựng BAML cho một navigation đã stale.
+        if (_shutdownStarted ||
+            navigationGeneration != Volatile.Read(ref _internalPageGeneration))
+        {
+            return;
+        }
+
+        long settingsRenderStarted = Stopwatch.GetTimestamp();
+        var preparedPage = new ProductionSettingsPage(_viewModel, settingsViewModel, deferInitialLayout: true);
+        preparedPage.SetAccessSession(access);
+        bool attached = false;
+        try
+        {
+            // Warm templates/layout at the actual host size while Main remains
+            // visible and responsive. No loading page or partial editor is shown.
+            var size = new Size(
+                Math.Max(540, ActualWidth > 0 ? ActualWidth : SystemParameters.WorkArea.Width),
+                Math.Max(1, ActualHeight > 0 ? ActualHeight : SystemParameters.WorkArea.Height));
+            preparedPage.Measure(size);
+            preparedPage.Arrange(new Rect(size));
+            if (openEditor)
+            {
+                await preparedPage.OpenThtEditorAsync();
+                if (!preparedPage.IsThtEditorOpen) return;
+            }
+            else await preparedPage.PrepareForDisplayAsync();
+            if (_shutdownStarted || navigationGeneration != Volatile.Read(ref _internalPageGeneration))
+                return;
+
+            AsyncFileLogService.Current.Performance(
+                $"SETTINGS_PERF phase=OPEN_PREPARED elapsed_ms={Stopwatch.GetElapsedTime(settingsRenderStarted).TotalMilliseconds:0.###}");
+            long attachStarted = Stopwatch.GetTimestamp();
+            _settingsPage = preparedPage;
+            _settingsPage.RequestClose += InternalPage_RequestClose;
+            _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
+            InternalPageHost.Content = _settingsPage;
+            InternalPageHost.Visibility = Visibility.Visible;
+            MainActionBar.IsEnabled = false;
+            attached = true;
+            AsyncFileLogService.Current.Performance(
+                $"SETTINGS_PERF phase=OPEN_VIEW elapsed_ms={Stopwatch.GetElapsedTime(attachStarted).TotalMilliseconds:0.###}");
+            LogMemory("MEM AFTER_SETTINGS_OPEN");
+        }
+        finally
+        {
+            // Navigation may change while preparation yields. Never attach stale
+            // settings or leave background page callbacks alive after that.
+            if (!attached) preparedPage.ReleasePageResources();
+        }
     }
 
-    private void OpenHistory_Click(
-        object sender,
-        RoutedEventArgs e)
+    private async Task SettingsPage_SettingsSaved(object? sender, EventArgs e)
     {
         try
         {
-            CloseInternalPage();
+            BoardCapacity previousCapacity = _viewModel.CurrentBoardCapacity;
+            await _viewModel.ReloadProductionSettingsAsync();
 
-            _historyPage = new HistoryPage(_viewModel.ProductionSettings);
+            BoardCapacity currentCapacity = _viewModel.CurrentBoardCapacity;
+            bool capacityChanged =
+                previousCapacity.StartScanParameter != currentCapacity.StartScanParameter ||
+                previousCapacity.TotalIoCapacity != currentCapacity.TotalIoCapacity;
+            if (capacityChanged)
+            {
+                _viewModel.Status =
+                    $"ĐANG ĐỒNG BỘ CARD: {previousCapacity.ScanCardCount} → " +
+                    $"{currentCapacity.ScanCardCount}. CÓ THỂ CHỌN MÃ HÀNG NGAY.";
+            }
+
+            // The page requests navigation only after settings are saved and applied.
+            // Save and Back both use the existing safe settings-close path.
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Apply production settings failed: {ex}");
+            throw;
+        }
+    }
+
+    private async void OpenHistory_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_shutdownStarted || _settingsPage is not null || _historyPage is not null ||
+            _settingsPageCloseInProgress || _testWindow is not null) return;
+        try
+        {
+            await CloseInternalPageAsync();
+
+            _historyPage = new HistoryPage();
             _historyPage.RequestClose += InternalPage_RequestClose;
 
             InternalPageHost.Content = _historyPage;
             InternalPageHost.Visibility = Visibility.Visible;
+            MainActionBar.IsEnabled = false;
         }
         catch (Exception ex)
         {
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"Open History failed: {ex}");
             MessageBox.Show(
                 this,
-                ex.ToString(),
-                "Không thể mở lịch sử",
+                "Chưa mở được Lịch sử kiểm tra. Vui lòng thử lại.",
+                "CHƯA MỞ ĐƯỢC LỊCH SỬ",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
     }
 
-    private void InternalPage_RequestClose(object? sender, EventArgs e) =>
-        CloseInternalPage();
-
-    private void CloseInternalPage()
+    private async void InternalPage_RequestClose(object? sender, EventArgs e)
     {
-        if (_settingsPage is not null)
+        bool closingSettings = sender is ProductionSettingsPage;
+        if (closingSettings)
         {
-            _settingsPage.RequestClose -= InternalPage_RequestClose;
-            _settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
-            _settingsPage = null;
+            if (_settingsPageCloseInProgress)
+                return;
+            _settingsPageCloseInProgress = true;
+        }
+
+        try
+        {
+            await CloseInternalPageAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_viewModel.Test.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"Settings close relay safety failed: {ex}");
+            CrashReportService.Write(
+                ex,
+                "Hardware.SettingsCloseRelaySafety",
+                $"Model={_viewModel.Model?.ModelName ?? "(none)"}");
+            MessageBox.Show(
+                this,
+                "Máy test chưa về trạng thái an toàn. Vui lòng khởi động lại phần mềm.",
+                "VUI LÒNG KHỞI ĐỘNG LẠI",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            if (closingSettings)
+                _settingsPageCloseInProgress = false;
+        }
+    }
+
+    private async Task CloseInternalPageAsync()
+    {
+        Interlocked.Increment(ref _internalPageGeneration);
+
+        ProductionSettingsPage? settingsPage = _settingsPage;
+        if (settingsPage is not null)
+        {
+            // Không tháo page khỏi visual tree trước khi board xác nhận chuỗi
+            // Manual RESET: OFF -> RESET_CLEAR -> OFF và Production scan phục hồi.
+            await settingsPage.ReleaseManualOutputsAsync();
+            if (ReferenceEquals(_settingsPage, settingsPage))
+            {
+                settingsPage.RequestClose -= InternalPage_RequestClose;
+                settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
+                long releaseStarted = Stopwatch.GetTimestamp();
+                settingsPage.ReleasePageResources();
+                AsyncFileLogService.Current.Performance(
+                    $"SETTINGS_PERF phase=RELEASE_BINDINGS elapsed_ms={Stopwatch.GetElapsedTime(releaseStarted).TotalMilliseconds:0.###}");
+                _settingsPage = null;
+                LogMemory("MEM SETTINGS_CLOSE");
+            }
         }
 
         if (_historyPage is not null)
         {
             _historyPage.RequestClose -= InternalPage_RequestClose;
+            _historyPage.ReleasePageResources();
             _historyPage = null;
         }
 
         InternalPageHost.Content = null;
         InternalPageHost.Visibility = Visibility.Collapsed;
+        MainActionBar.IsEnabled = !_shutdownStarted;
+        if (!_shutdownStarted) UpdateProductRemovalGate();
+    }
+
+    private static void LogMemory(string marker)
+    {
+        if (!AsyncFileLogService.Current.FileLoggingEnabled) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                using Process process = Process.GetCurrentProcess();
+                AsyncFileLogService.Current.Performance(
+                    $"{marker} private_mb={process.PrivateMemorySize64 / 1048576d:0.###} " +
+                    $"working_set_mb={process.WorkingSet64 / 1048576d:0.###} " +
+                    $"gc_heap_mb={GC.GetTotalMemory(false) / 1048576d:0.###} " +
+                    $"handles={process.HandleCount} threads={process.Threads.Count}");
+            }
+            catch (Exception ex)
+            {
+                AsyncFileLogService.Current.Error($"Memory diagnostics failed: {ex.Message}");
+            }
+        });
     }
 
     private async void MainWindow_Closing(
@@ -323,6 +660,17 @@ public partial class MainWindow : Window
         if (_shutdownComplete)
             return;
 
+        // Alt+F4 on an internal page follows the same Back/unsaved-edit and
+        // manual-output cleanup path, rather than closing a second window.
+        if (!_shutdownStarted && (_settingsPage is not null || _historyPage is not null))
+        {
+            e.Cancel = true;
+            if (_settingsPageCloseInProgress) return;
+            if (_settingsPage is not null) await _settingsPage.TryLeaveAsync();
+            else await CloseInternalPageAsync();
+            return;
+        }
+
         // Không cho WPF hủy cửa sổ trước khi worker D2XX/VISA được dừng.
         e.Cancel = true;
 
@@ -330,13 +678,32 @@ public partial class MainWindow : Window
             return;
 
         _shutdownStarted = true;
+        MainActionBar.IsEnabled = false;
+        _viewModel.Status = "ĐANG THOÁT ỨNG DỤNG...";
+        await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
 
         try
         {
+            try
+            {
+                await CloseInternalPageAsync();
+            }
+            catch (Exception ex)
+            {
+                // ShutdownAsync/DisconnectAsync vẫn phải chạy để thử OFF lần
+                // cuối và đóng handle, kể cả RESET của trang Cài đặt thất bại.
+                _viewModel.Test.AddExternalLog(
+                    $"Không thể RESET relay khi đóng trang Cài đặt lúc thoát: {ex.Message}");
+            }
             _uiStallWatchdog?.Dispose();
             _uiStallWatchdog = null;
+            _viewModel.ExplicitModelLoaded -= ViewModel_ExplicitModelLoaded;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
             await _viewModel.ShutdownAsync();
+            await ThtBackupCleanupService.Current.CleanupAsync();
+            await DatabaseBackupCleanupService.Current.CleanupAsync();
+            AsyncFileLogService.Current.Application("SHUTDOWN cleanup complete");
+            await AsyncFileLogService.Current.DisposeAsync();
         }
         finally
         {

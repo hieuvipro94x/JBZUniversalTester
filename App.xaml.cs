@@ -1,33 +1,137 @@
 using System;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Threading;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.Versioning;
+using JBZUniversalTester.ViewModels;
+using JBZUniversalTester.Views;
 
 namespace JBZUniversalTester;
 
 public partial class App : Application
 {
-    protected override void OnStartup(StartupEventArgs e)
-    {
-        // Khởi tạo/migrate History và config trước để khóa log lấy đúng giá trị
-        // đã lưu của trạm. History không phụ thuộc và không bị khóa bởi log.
-        StartupBootstrapService.EnsureFastConfiguration();
-        var productionSettings = ProductionConfigService.Load();
-        AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
-        AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
-        StartupPerformanceTrace.Mark("T0 App.OnStartup");
+    private Mutex? _singleInstanceMutex;
+    private bool _ownsSingleInstanceMutex;
+    private SingleInstanceActivation? _instanceActivation;
+    private bool _activationPending;
 
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        _instanceActivation = new SingleInstanceActivation(@"Local\JBZUniversalTester.Production");
+        _ownsSingleInstanceMutex = SingleInstanceGate.TryAcquire(
+            @"Local\JBZUniversalTester.Production", out _singleInstanceMutex);
+        if (!_ownsSingleInstanceMutex)
+        {
+            _instanceActivation.RequestActivation();
+            // No modal dialog: it would keep a second process alive on each
+            // extra click while the first process is still starting slowly.
+            Shutdown(2);
+            return;
+        }
+
+        _instanceActivation.StartListening(() =>
+        {
+            if (!Dispatcher.HasShutdownStarted && !Dispatcher.HasShutdownFinished)
+                _ = Dispatcher.BeginInvoke(new Action(ActivateExistingWindow));
+        });
+        StartupPerformanceTrace.Begin();
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         base.OnStartup(e);
 
-        // Không load/khởi tạo audio đồng bộ trong OnStartup. Với StartupUri,
-        // MainWindow đã được tạo trong base.OnStartup nhưng Dispatcher chưa có
-        // cơ hội render frame đầu. Đẩy sound xuống ApplicationIdle để audio I/O
-        // không làm cửa sổ có cảm giác treo ngay khi vừa mở.
+        var splash = new StartupWindow();
+        MainWindow = splash;
+        splash.Show();
+        if (_activationPending) ActivateExistingWindow();
+        // Paint the lightweight splash before any configuration or database I/O.
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        string startupStage = "Đọc cài đặt";
+        MainViewModel? viewModel = null;
+        try
+        {
+            splash.Report(10, "Đang đọc cài đặt và ngôn ngữ…");
+            long configurationStarted = Stopwatch.GetTimestamp();
+            (AppSettings settings, Models.ProductionSettings productionSettings) = await Task.Run(() =>
+            {
+                StartupBootstrapService.EnsureFastConfiguration();
+                return (AppSettings.Load(), ProductionConfigService.Load());
+            });
+            AsyncFileLogService.Current.Configure(productionSettings.EnableSystemLogs);
+            AsyncFileLogService.Current.Application($"STARTUP {AppVersion.DisplayVersion}");
+            StartupPerformanceTrace.Stage("CONFIG_READY", configurationStarted);
+
+            startupStage = "Chuẩn bị database";
+            splash.Report(30, "Đang kiểm tra cấu trúc database và chuẩn bị dữ liệu…");
+            Task databasePreparation = Task.Run(async () =>
+            {
+                using var scope = StartupPerformanceTrace.Measure("DATABASE_PREPARE");
+                await StartupBootstrapService.EnsureDeferredProductionFiles(failOnError: true);
+            });
+            Task resourcePreparation = Task.Run(() =>
+            {
+                using var scope = StartupPerformanceTrace.Measure("RESOURCE_PREPARE");
+                AppSoundService.Current.PreloadResources();
+            });
+            Task dataPreparation = Task.WhenAll(databasePreparation, resourcePreparation);
+            StartupPerformanceTrace.Mark("T0 App.OnStartup PREPARING");
+
+            startupStage = "Nạp mã hàng và chuẩn bị giao diện";
+            viewModel = new MainViewModel(settings, productionSettings, productionDataPreparation: dataPreparation);
+            viewModel.StartupProgress += splash.Report;
+            // Driver handshake waits overlap with MainWindow BAML/layout work.
+            Task applicationInitialization = viewModel.InitializeApplicationAsync();
+            var mainWindow = new MainWindow(viewModel);
+            try
+            {
+                await mainWindow.PrepareStartupAsync(applicationInitialization);
+                // A hardware timeout may unlock Main, but data failures must
+                // still reach the startup error path before showing the app.
+                await dataPreparation;
+            }
+            finally
+            {
+                viewModel.StartupProgress -= splash.Report;
+            }
+            splash.Report(98, "Đang mở màn hình chính…");
+            await Dispatcher.Yield(DispatcherPriority.Background);
+
+            // Keep the splash until the populated MainWindow has painted once.
+            void FinishStartup(object? sender, EventArgs args)
+            {
+                mainWindow.ContentRendered -= FinishStartup;
+                StartupPerformanceTrace.Mark("SPLASH_HANDOFF_COMPLETE");
+                splash.Report(100, "Đã hoàn tất khởi động");
+                splash.Complete();
+            }
+            mainWindow.ContentRendered += FinishStartup;
+            MainWindow = mainWindow;
+            ShutdownMode = ShutdownMode.OnMainWindowClose;
+            mainWindow.Show();
+            if (_activationPending) ActivateExistingWindow();
+        }
+        catch (Exception ex)
+        {
+            WriteCrashDiagnostics(ex, $"Startup.{startupStage}");
+            MessageBox.Show(splash, $"Không thể khởi động ở bước: {startupStage}.\n{ex.Message}\n\nVui lòng kiểm tra dữ liệu và mở lại phần mềm.",
+                "KHÔNG THỂ KHỞI ĐỘNG", MessageBoxButton.OK, MessageBoxImage.Error);
+            splash.Complete();
+            try
+            {
+                if (viewModel is not null)
+                    await viewModel.ShutdownAsync();
+            }
+            catch (Exception cleanupException)
+            {
+                WriteCrashDiagnostics(cleanupException, "Startup.Cleanup");
+            }
+            finally { Shutdown(1); }
+            return;
+        }
+
+        // Defer audio I/O until MainWindow has rendered.
         _ = Dispatcher.BeginInvoke(
             new Action(() =>
             {
@@ -44,9 +148,40 @@ public partial class App : Application
             DispatcherPriority.ApplicationIdle);
     }
 
-    private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    private static async void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        AsyncFileLogService.Current.Error($"DispatcherUnhandledException: {e.Exception}");
+        WriteCrashDiagnostics(e.Exception, "DispatcherUnhandledException");
+
+        if (e.Exception is OutOfMemoryException)
+        {
+            // Không tiếp tục một visual tree nửa khởi tạo sau OOM. Ghi crash report
+            // ở trên, đưa hardware về safe state best-effort rồi shutdown có kiểm soát.
+            e.Handled = true;
+            try
+            {
+                if (Current?.MainWindow?.DataContext is MainViewModel viewModel)
+                    await viewModel.ShutdownAsync();
+            }
+            catch (Exception shutdownException)
+            {
+                WriteCrashDiagnostics(shutdownException, "OutOfMemory.SafeShutdown");
+            }
+
+            try
+            {
+                MessageBox.Show(
+                    "Phần mềm cần khởi động lại để tiếp tục. Báo cáo lỗi đã được lưu.",
+                    "VUI LÒNG KHỞI ĐỘNG LẠI",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            catch
+            {
+            }
+
+            Current?.Shutdown(-1);
+            return;
+        }
 
         // V15.1 SAFE OFFLINE MODE - lớp bảo vệ cuối cùng cho lỗi UI/async event.
         // Các thao tác phần cứng dự kiến phải được catch ở ViewModel/Command trước;
@@ -55,10 +190,8 @@ public partial class App : Application
         try
         {
             MessageBox.Show(
-                "Ứng dụng gặp lỗi hệ thống và đã dừng thao tác hiện tại.\n\n" +
-                "Hãy kiểm tra nguồn điện, bo mạch và cáp USB trước khi thử lại.\n\n" +
-                $"Chi tiết: {e.Exception.Message}",
-                "JBZ - LỖI HỆ THỐNG",
+                "Thao tác chưa hoàn thành. Vui lòng khởi động lại phần mềm.",
+                "THÔNG BÁO",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
@@ -67,8 +200,12 @@ public partial class App : Application
         }
     }
 
-    private static void OnUnhandledException(object? sender, UnhandledExceptionEventArgs e) =>
-        AsyncFileLogService.Current.Error($"AppDomain UnhandledException: {e.ExceptionObject}");
+    private static void OnUnhandledException(object? sender, UnhandledExceptionEventArgs e)
+    {
+        Exception exception = e.ExceptionObject as Exception
+            ?? new InvalidOperationException(e.ExceptionObject?.ToString() ?? "Unknown fatal exception");
+        WriteCrashDiagnostics(exception, "AppDomain.UnhandledException");
+    }
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
@@ -78,14 +215,79 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        AsyncFileLogService.Current.Application($"SHUTDOWN exitCode={e.ApplicationExitCode}");
-        AppSoundService.Current.Dispose();
+        _instanceActivation?.Dispose();
+        _instanceActivation = null;
+        if (!_ownsSingleInstanceMutex)
+        {
+            // A rejected launch never initialized runtime services.
+            base.OnExit(e);
+            return;
+        }
 
-        DispatcherUnhandledException -= OnDispatcherUnhandledException;
-        AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
-        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+        try
+        {
+            AsyncFileLogService.Current.Application($"SHUTDOWN exitCode={e.ApplicationExitCode}");
+            AppSoundService.Current.Dispose();
 
-        AsyncFileLogService.Current.Dispose();
-        base.OnExit(e);
+            DispatcherUnhandledException -= OnDispatcherUnhandledException;
+            AppDomain.CurrentDomain.UnhandledException -= OnUnhandledException;
+            TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+
+            AsyncFileLogService.Current.Dispose();
+        }
+        finally
+        {
+            _singleInstanceMutex?.ReleaseMutex();
+            _singleInstanceMutex?.Dispose();
+            _singleInstanceMutex = null;
+            _ownsSingleInstanceMutex = false;
+            base.OnExit(e);
+        }
+    }
+
+    private void ActivateExistingWindow()
+    {
+        if (!_ownsSingleInstanceMutex || Dispatcher.HasShutdownStarted) return;
+        _activationPending = !RunningWindowActivator.Activate(this);
+    }
+
+    private static string BuildRuntimeContext()
+    {
+        try
+        {
+            if (Current?.MainWindow?.DataContext is not MainViewModel viewModel)
+                return "MainViewModel unavailable";
+
+            return $"Model={viewModel.Model?.ModelName ?? "(none)"}; " +
+                   $"Part={viewModel.Model?.PartNumber ?? "(none)"}; " +
+                   $"AppState={viewModel.Status}; TestState={viewModel.Test.State}";
+        }
+        catch
+        {
+            return "Runtime context unavailable";
+        }
+    }
+
+    private static void WriteCrashDiagnostics(Exception exception, string source)
+    {
+        // Crash diagnostics must stay best-effort, especially for OOM where even
+        // formatting a second diagnostic can fail before hardware reaches safe state.
+        try
+        {
+            CrashReportService.Write(exception, source, BuildRuntimeContext());
+        }
+        catch
+        {
+            // The original fatal exception remains authoritative.
+        }
+
+        try
+        {
+            AsyncFileLogService.Current.Error($"{source}: {exception}");
+        }
+        catch
+        {
+            // Logging cannot be allowed to recursively fail the fatal-error handler.
+        }
     }
 }

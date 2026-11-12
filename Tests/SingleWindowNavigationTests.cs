@@ -1,0 +1,114 @@
+using System.Reflection;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using System.Xml.Linq;
+using JBZUniversalTester.ViewModels;
+using JBZUniversalTester.Views;
+
+namespace JBZUniversalTester.SelfTests;
+
+internal static partial class Program
+{
+    // Standalone UI fixture: creates no HWND and never raises Loaded, opens a
+    // COM port or starts board discovery. Application resources match production.
+    private static void TestSingleWindowNavigation()
+    {
+        OnSettingsDispatcher(async () =>
+        {
+            XNamespace ns = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+            var doc = XDocument.Load(Path.Combine(Environment.CurrentDirectory, "App.xaml"));
+            var application = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+            application.Resources = new ResourceDictionary { Source = new Uri(
+                doc.Root!.Element(ns + "Application.Resources")!.Element(ns + "ResourceDictionary")!.Attribute("Source")!.Value,
+                UriKind.Relative) };
+            const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+            var main = new MainWindow(new MainViewModel());
+            object? Call(string name, params object?[] args) => typeof(MainWindow).GetMethod(name, flags)!.Invoke(main, args);
+            var host = (ContentControl)main.FindName("InternalPageHost");
+            var actions = (Grid)main.FindName("MainActionBar");
+            try
+            {
+                var mainVm = (MainViewModel)typeof(MainWindow).GetField("_viewModel", flags)!.GetValue(main)!;
+                var noticeSettings = (JBZUniversalTester.Models.ProductionSettings)typeof(TestViewModel).GetField("_productionSettings", flags)!.GetValue(mainVm.Test)!;
+                object? originalModel = typeof(TestViewModel).GetField("_model", flags)!.GetValue(mainVm.Test);
+                var noticeModel = new JBZUniversalTester.Models.ProductModel { SourcePath = "NOTICE_ONLY.tht", DiscardContactIo = [41, 86] };
+                int loadGeneration = (int)typeof(TestViewModel).GetField("_modelLoadGeneration", flags)!.GetValue(mainVm.Test)!;
+                var notify = typeof(TestViewModel).GetMethod("NotifyDiscardConfiguration", flags)!;
+                noticeSettings.ShowDiscardConfigurationNotice = false;
+                notify.Invoke(mainVm.Test, [noticeModel, loadGeneration, false]);
+                Assert(application.Windows.Count == 1 && noticeModel.HasDiscardInterlock,
+                    "Disabling the popup does not construct a dialog or disable the discard interlock");
+                typeof(TestViewModel).GetField("_model", flags)!.SetValue(mainVm.Test, noticeModel);
+                noticeSettings.ShowDiscardConfigurationNotice = true;
+                notify.Invoke(mainVm.Test, [noticeModel, loadGeneration, true]);
+                noticeSettings.ShowDiscardConfigurationNotice = false;
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(application.Windows.Count == 1, "A notice queued before disabling the preference cannot appear later");
+                var splash = new StartupWindow();
+                application.MainWindow = splash;
+                noticeSettings.ShowDiscardConfigurationNotice = true;
+                notify.Invoke(mainVm.Test, [noticeModel, loadGeneration, true]);
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(application.Windows.Count == 2 && main.OwnedWindows.Count == 0,
+                    "Remembered-model notice waits for splash handoff instead of opening a modal startup dialog");
+                noticeSettings.ShowDiscardConfigurationNotice = false;
+                application.MainWindow = main;
+                splash.Complete();
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(application.Windows.Count == 1,
+                    "Startup notice rechecks its preference after splash completion");
+                typeof(TestViewModel).GetField("_model", flags)!.SetValue(mainVm.Test, originalModel);
+                noticeSettings.ShowDiscardConfigurationNotice = true;
+                Task abandonedOpen = (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
+                await Dispatcher.Yield(DispatcherPriority.Input);
+                Assert(host.Content is null && host.Visibility == Visibility.Collapsed && actions.IsEnabled,
+                    "Main stays interactive while disconnected settings templates are prepared; no loading page is attached");
+                await (Task)Call("CloseInternalPageAsync")!;
+                await abandonedOpen;
+                Assert(host.Content is null && actions.IsEnabled,
+                    "Navigation changed during preparation cannot attach the stale settings page");
+                await (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
+                var settings = (ProductionSettingsPage)(host.Content ?? throw new InvalidOperationException("Settings page was not opened"));
+                Assert(application.Windows.Count == 1 && main.OwnedWindows.Count == 0 && !actions.IsEnabled,
+                    "Opening Settings attaches a page without constructing another Window");
+                Assert(settings.PrepareForDisplayAsync().IsCompletedSuccessfully &&
+                    ((Button)settings.FindName("SaveSettingsButton")).IsEnabled &&
+                    new[] { "IoSettingsPanel", "RelayLeakMainPanel", "LabelSettingsPanel", "ResistanceSettingsPanel" }
+                        .All(name => ((Border)settings.FindName(name)).Visibility == Visibility.Visible),
+                    "Settings is attached only after all editor panels are ready, so its first visible frame has no staged reveal");
+                await (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
+                Call("OpenHistory_Click", main, new RoutedEventArgs());
+                Assert(ReferenceEquals(host.Content, settings),
+                    "Another page cannot replace active Settings before it is closed safely");
+                await (Task)Call("CloseInternalPageAsync")!;
+                Assert(host.Content is null && settings.DataContext is null && actions.IsEnabled,
+                    "Closing Settings releases its bindings and restores main actions");
+                Call("OpenHistory_Click", main, new RoutedEventArgs());
+                var history = (HistoryPage)(host.Content ?? throw new InvalidOperationException("History page was not opened"));
+                await (Task)Call("ShowSettingsPageAsync", JBZUniversalTester.Services.SettingsAccessSession.Administrator)!;
+                Assert(ReferenceEquals(host.Content, history) && application.Windows.Count == 1 && !actions.IsEnabled,
+                    "History occupies the same single window and must be closed before another page opens");
+                await (Task)Call("CloseInternalPageAsync")!;
+                Assert(host.Visibility == Visibility.Collapsed && actions.IsEnabled && history.DataContext is null,
+                    "History close fully restores Main without an extra window or stale page");
+                Assert(main.FindName("EditThtMainButton") is Button { Content: "SỬA CẤU HÌNH THT" },
+                    "MainWindow has a direct native THT editor action");
+                await (Task)Call("OpenSettingsCoreAsync", true)!;
+                var editing = (ProductionSettingsPage)host.Content!;
+                Assert(editing.IsThtEditorOpen && ((ContentControl)editing.FindName("ModelEditorHost")).Content is JBZUniversalTester.ModelEditor.ThtEditorPage &&
+                       application.Windows.Count == 1 && main.OwnedWindows.Count == 0 && !actions.IsEnabled,
+                    "Direct editor entry completes without a password dialog and opens in the existing window");
+                await editing.TryLeaveAsync();
+                await Dispatcher.Yield(DispatcherPriority.Background);
+                Assert(host.Content is null && actions.IsEnabled, "Leaving an unchanged editor restores Main directly");
+            }
+            finally
+            {
+                await (Task)Call("CloseInternalPageAsync")!;
+                typeof(MainWindow).GetField("_shutdownComplete", flags)!.SetValue(main, true);
+                main.Close();
+            }
+        });
+    }
+}

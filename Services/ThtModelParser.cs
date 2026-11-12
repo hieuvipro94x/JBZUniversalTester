@@ -15,8 +15,14 @@ namespace JBZUniversalTester.Services;
 /// MFC CArchive/CString. Lớp này đọc đúng stream Contents, kiểm tra token,
 /// lấy model_text CP949, rồi ánh xạ bốn bảng Part/Connector/Pin/Wire.
 /// </summary>
-public sealed class ThtModelParser
+public sealed partial class ThtModelParser
 {
+    public const string DiscardConnectorName = "_Interlock";
+
+    public static bool IsDiscardConnector(string? name) =>
+        string.Equals(name, DiscardConnectorName, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(name, "_DISCARD", StringComparison.OrdinalIgnoreCase);
+
     private const uint ExpectedDocumentToken = 0x389DEFB9;
     private const int FieldRecordCount = 64;
     private const int FieldRecordSize = 48;
@@ -55,13 +61,19 @@ public sealed class ThtModelParser
     }
 
     public ProductModel Load(string path)
+        => LoadAll(path).First();
+
+    public IReadOnlyList<ProductModel> LoadAll(string path)
     {
         ValidatePath(path);
 
         ThtArchiveDocument document = ReadArchive(path);
         ThtModelTables tables = ParseModelText(document.ModelText);
 
-        ProductModel model = BuildProductModel(path, tables, document.EmbeddedResistanceText);
+        int partCount = Math.Max(1, tables.Part.Rows.Count);
+        var models = new List<ProductModel>(partCount);
+        for (int partIndex = 0; partIndex < partCount; partIndex++)
+            models.Add(BuildProductModel(path, tables, document.EmbeddedResistanceText, partIndex));
 
         LastDiagnostics = new ThtLoadDiagnostics
         {
@@ -73,12 +85,12 @@ public sealed class ThtModelParser
             WireRowCount = tables.Wires.Rows.Count,
             FieldCount = document.Fields.Count,
             ViewCount = document.Views.Count,
-            ParsedPinCount = model.Pins.Count,
-            ParsedNetworkCount = model.Nets.Count,
-            ParsedResistanceStepCount = model.ResistanceSteps.Count
+            ParsedPinCount = models[0].Pins.Count,
+            ParsedNetworkCount = models[0].Nets.Count,
+            ParsedResistanceStepCount = models[0].ResistanceSteps.Count
         };
 
-        return model;
+        return models;
     }
 
     private static void ValidatePath(string path)
@@ -770,7 +782,8 @@ public sealed class ThtModelParser
     private static ProductModel BuildProductModel(
         string path,
         ThtModelTables tables,
-        string embeddedResistanceText)
+        string embeddedResistanceText,
+        int partIndex)
     {
         var model = new ProductModel
         {
@@ -778,7 +791,7 @@ public sealed class ThtModelParser
             SourcePath = Path.GetFullPath(path)
         };
 
-        ReadPartInformation(tables.Part, model);
+        ReadPartInformation(tables.Part, model, partIndex);
         model.LabelTemplate = new LabelTemplateDefinition(
             ExtractRawEplTemplate(tables.AllTables),
             1);
@@ -812,10 +825,10 @@ public sealed class ThtModelParser
             RawPin rawPin = rawPins[rawIndex];
             int originalOrder = rawIndex + 1;
 
-            if (rawPin.Connector.Equals(
-                    "_DISCARD",
-                    StringComparison.OrdinalIgnoreCase))
+            if (IsDiscardConnector(rawPin.Connector))
             {
+                if (!model.DiscardContactIo.Contains(rawPin.IoNumber))
+                    model.DiscardContactIo.Add(rawPin.IoNumber);
                 continue;
             }
 
@@ -954,6 +967,14 @@ public sealed class ThtModelParser
             {
                 model.IgnoredIo.Add(special.IoNumber);
             }
+        }
+
+        model.DiscardContactIo.Sort();
+        if (model.DiscardContactIo.Count != 0 && model.DiscardContactIo.Count != 2)
+        {
+            model.TopologyWarnings.Add(
+                $"DISCARD_CONFIG_INVALID count={model.DiscardContactIo.Count} " +
+                $"ios=[{string.Join(',', model.DiscardContactIo)}] expected=2 action=disabled");
         }
 
         if (model.Pins.Count == 0 && tables.Pins.Rows.Count > 0)
@@ -1145,9 +1166,12 @@ public sealed class ThtModelParser
 
     private static void ReadPartInformation(
         ThtTextTable partTable,
-        ProductModel model)
+        ProductModel model,
+        int partIndex)
     {
-        ThtTextRow? row = partTable.Rows.FirstOrDefault();
+        ThtTextRow? row = partTable.Rows.Count == 0
+            ? null
+            : partTable.Rows[Math.Clamp(partIndex, 0, partTable.Rows.Count - 1)];
 
         if (row is null)
         {
@@ -1326,9 +1350,13 @@ public sealed class ThtModelParser
                 "LinkedWire",
                 "WireConnection");
 
+            // Mọi connector được khai báo tường minh phải được giữ nguyên trên
+            // chính dòng đó. Riêng _DISCARD không trở thành lastConnector, nhưng
+            // PinNo 1/2 của cảm biến cũng không được làm nó rơi vào nhánh kế thừa.
             if (!string.IsNullOrWhiteSpace(connector))
             {
-                lastConnector = connector;
+                if (!IsDiscardConnector(connector))
+                    lastConnector = connector;
             }
             else if (!IsSpecialA0Pin(pinType) &&
                      (!string.IsNullOrWhiteSpace(wireName) ||
@@ -1912,9 +1940,11 @@ public sealed class ThtModelParser
         private readonly List<DirectoryEntry> _directoryEntries;
         private readonly byte[] _rootMiniStream;
 
-        public CompoundFileReader(string path)
+        public CompoundFileReader(string path) : this(ReadAllBytesSharedWithRetry(path)) { }
+
+        public CompoundFileReader(byte[] file)
         {
-            _file = ReadAllBytesSharedWithRetry(path);
+            _file = file;
 
             if (_file.Length < 512 ||
                 !_file.AsSpan(0, 8).SequenceEqual(CompoundSignature))

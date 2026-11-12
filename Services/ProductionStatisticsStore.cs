@@ -20,11 +20,10 @@ public sealed class ProductionStatisticsStore
     private Dictionary<string, ModelProductionStatistics> _items;
     private List<ProbeMaintenanceRecord> _maintenanceRecords;
 
-    public ProductionStatisticsStore(string? path = null, TimeProvider? timeProvider = null)
+    public ProductionStatisticsStore(string path, TimeProvider? timeProvider = null)
     {
-        _path = string.IsNullOrWhiteSpace(path)
-            ? Path.Combine(AppContext.BaseDirectory, "production.statistics.json")
-            : path;
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        _path = Path.GetFullPath(path);
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         StatisticsFile file = LoadFile();
@@ -126,6 +125,41 @@ public sealed class ProductionStatisticsStore
                 RestoreItem(key, existed, original);
                 throw;
             }
+        }
+    }
+
+    /// <summary>
+    /// Regenerates the legacy JSON cache from authoritative SQLite values.
+    /// No production decision may be made from this mirror.
+    /// </summary>
+    public ModelProductionStatistics Mirror(
+        ProductModel model,
+        ProductionStatisticsSnapshot statistics,
+        ProbeCounterSnapshot probe)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(statistics);
+        ArgumentNullException.ThrowIfNull(probe);
+        lock (_gate)
+        {
+            string key = BuildModelKey(model);
+            ModelProductionStatistics item = GetOrCreate(model);
+            item.Total = checked((int)statistics.LifetimeTotal);
+            item.Pass = checked((int)statistics.LifetimePass);
+            item.Fail = checked((int)statistics.LifetimeFail);
+            item.DailyTestCount = statistics.DailyTotal;
+            item.DailyPassCount = statistics.DailyPass;
+            item.DailyFailCount = statistics.DailyFail;
+            item.MonthlyTestCount = statistics.MonthlyTotal;
+            item.LifetimeTestCount = statistics.LifetimeTotal;
+            item.LastLotNo = statistics.LastLotNo;
+            item.LastResult = statistics.LastResult;
+            item.ProbeCycleCount = probe.Counter;
+            item.ProbeReplacementThreshold = probe.ReplacementThreshold;
+            item.LastTestedAt = LocalNow();
+            _items[key] = item;
+            SaveFile();
+            return item.Clone();
         }
     }
 
