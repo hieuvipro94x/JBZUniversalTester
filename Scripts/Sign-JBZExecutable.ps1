@@ -128,6 +128,15 @@ if (-not $signTool) {
     }
 }
 
+if (-not $signTool) {
+    # Visual Studio can install SignTool with ClickOnce without Windows SDK bin.
+    $signTool = @(
+        "${env:ProgramFiles(x86)}\Microsoft SDKs\ClickOnce\SignTool\signtool.exe",
+        "$env:ProgramFiles\Microsoft SDKs\ClickOnce\SignTool\signtool.exe"
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Select-Object -First 1
+}
+
 if (-not $signTool -or -not (Test-Path -LiteralPath $signTool)) {
     throw "signtool.exe was not found in PATH or the installed Windows SDK. Signing cannot continue."
 }
