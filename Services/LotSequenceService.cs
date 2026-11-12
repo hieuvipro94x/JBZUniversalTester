@@ -264,6 +264,7 @@ public sealed class LotSequenceService
                     item => item.Key, item => new ProductLotSettings
                     {
                         DailyLotStartsAtZero = item.Value.DailyLotStartsAtZero,
+                        UseConfiguredStartLot = item.Value.UseConfiguredStartLot,
                         StartLotNo = item.Value.StartLotNo, LotNo = item.Value.LotNo,
                         LotNoDate = item.Value.LotNoDate, BulkPrintLotNo = item.Value.BulkPrintLotNo,
                         HistoryBatchId = item.Value.HistoryBatchId, LastStartChangedDate = item.Value.LastStartChangedDate
@@ -306,7 +307,7 @@ public sealed class LotSequenceService
         finally { _asyncPersistenceGate.Release(); }
     }
 
-    private static string Revision(ProductLotSettings lot) => $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}:{lot.DailyLotStartsAtZero}";
+    private static string Revision(ProductLotSettings lot) => $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}:{lot.DailyLotStartsAtZero}:{lot.UseConfiguredStartLot}";
 
     public bool IsCommitCandidate(string cycleId, long lotNo)
     {
@@ -389,10 +390,10 @@ public sealed class LotSequenceService
                 storedDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out _))
         {
-            // A new date starts at zero. SQLite may restore that date's own
-            // committed LOT later; keep the saved configuration base untouched.
-            lot.LotNo = 0;
-            lot.DailyLotStartsAtZero = true;
+            // A new date starts at zero unless the operator explicitly saved a base.
+            // SQLite restores that date's committed PASS progress afterwards.
+            lot.LotNo = lot.UseConfiguredStartLot ? Math.Max(0, lot.StartLotNo) : 0;
+            lot.DailyLotStartsAtZero = !lot.UseConfiguredStartLot;
             // Keep the configured batch identity so returning to a date can
             // recover that date's committed production counters and LOT.
         }

@@ -212,7 +212,7 @@ public static class ProductionConfigService
             string encodedKey = Uri.EscapeDataString(productKey);
             lines.Add(
                 $"[ProductLot.{encodedKey}]{Math.Max(0, lot.LotNo)};{lot.LotNoDate};" +
-                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId};{lot.LastStartChangedDate};{(lot.DailyLotStartsAtZero ? 1 : 0)}");
+                $"{Math.Max(0, lot.StartLotNo)};{Math.Max(0, lot.BulkPrintLotNo)};{lot.HistoryBatchId};{lot.LastStartChangedDate};{(lot.DailyLotStartsAtZero ? 1 : 0)};{(lot.UseConfiguredStartLot ? 1 : 0)}");
         }
 
         foreach ((string modelKey, WaterProofModelSettings profile) in settings.WaterProofProfilesByModel
@@ -367,6 +367,7 @@ public static class ProductionConfigService
             lot.StartLotNo = normalizedStart;
             if (startChanged)
             {
+                lot.UseConfiguredStartLot = true;
                 lot.HistoryBatchId = Guid.NewGuid().ToString("N");
                 lot.LastStartChangedDate = normalizedDate;
             }
@@ -621,6 +622,7 @@ public static class ProductionConfigService
             {
                 LotNo = Math.Max(0, lotNo),
                 DailyLotStartsAtZero = parts.Length > 6 && parts[6].Trim() == "1",
+                UseConfiguredStartLot = parts.Length > 7 && parts[7].Trim() == "1",
                 HistoryBatchId = parts.Length > 4 ? parts[4] : string.Empty,
                 LastStartChangedDate = parts.Length > 5 ? parts[5].Trim() : string.Empty,
                 LotNoDate = parts.Length > 1 ? parts[1].Trim() : string.Empty,

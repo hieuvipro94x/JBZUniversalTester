@@ -2975,14 +2975,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (generation != Volatile.Read(ref _modelLoadGeneration))
             return null;
 
-        if (!await EnsureInitialProductPrintSetupAsync(model))
-        {
-            if (!IsDeviceFault && !IsBoardStartupUnavailable && !IsPersistenceFault)
-                State = ReadyStateForCurrentModel();
-            return null;
-        }
-        if (generation != Volatile.Read(ref _modelLoadGeneration)) return null;
-
         _productionSettings.LastThtPartKey = JBZUniversalTester.Views.PartSelectionWindow.PartKey(model);
         BeginModelTransition(generation);
         try
@@ -3010,48 +3002,6 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             ? ReadyStateForCurrentModel()
             : TesterConnectionNotice.Message;
         return model;
-    }
-
-    public async Task<bool> EnsureInitialProductPrintSetupAsync(ProductModel model,
-        Func<ProductModel, Func<JBZUniversalTester.Views.ProductInitialPrintSetup, Task>, Task<bool>>? showDialog = null,
-        Action<ProductionSettings>? persist = null)
-    {
-        // Real application prompts only on explicit selection; headless fixtures
-        // can supply a dialog callback without touching actual station config.
-        if (showDialog is null && Application.Current is null) return true;
-        string key = ProductionConfigService.GetLotProductKey(model);
-        if (_productionSettings.LabelTemplateTypesByProduct.ContainsKey(key)) return true;
-        int generation = Volatile.Read(ref _modelLoadGeneration);
-        ProductionStatisticsSnapshot stats = await ProductionPersistence.GetFileStatisticsAsync(
-            TestHistoryStore.ThtStatisticsFileName(model.SourcePath, model.ModelName), DateTime.Now, _lifetimeToken);
-        if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested) return false;
-        if (stats.LifetimeTotal > 0) return true;
-        async Task Save(JBZUniversalTester.Views.ProductInitialPrintSetup setup)
-        {
-            await WaitForLotConfigurationWritesAsync();
-            if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested || IsProductRemovalPending)
-                throw new InvalidOperationException("Lựa chọn mã hàng đã thay đổi hoặc chưa tháo hết sản phẩm.");
-            if (setup.StartLot < 0 || setup.StartLot == long.MaxValue ||
-                (setup.PrintLabel && setup.TemplateType != LabelProfileResolver.NormalizeTemplateType(setup.TemplateType)))
-                throw new InvalidOperationException("LOTNO hoặc loại tem không hợp lệ.");
-            ProductionSettings snapshot = await Task.Run(() =>
-                System.Text.Json.JsonSerializer.Deserialize<ProductionSettings>(
-                    System.Text.Json.JsonSerializer.Serialize(_productionSettings))!);
-            if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested || IsProductRemovalPending)
-                throw new InvalidOperationException("Lựa chọn mã hàng đã thay đổi hoặc chưa tháo hết sản phẩm.");
-            ProductionConfigService.SetProductLot(snapshot, key, setup.StartLot,
-                DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
-            snapshot.LabelTemplateTypesByProduct[key] = setup.PrintLabel ? setup.TemplateType : ProductionConfigService.NoProductLabel;
-            await Task.Run(() => (persist ?? ProductionConfigService.Save)(snapshot));
-            if (generation != Volatile.Read(ref _modelLoadGeneration) || _lifetimeCts.IsCancellationRequested) return;
-            ProductionConfigService.CopyInto(_productionSettings, snapshot);
-        }
-        if (showDialog is not null) return await showDialog(model, Save);
-        var dialog = new JBZUniversalTester.Views.ProductPrintSetupWindow(model, Save)
-        {
-            Owner = ResolveOperatorDialogOwner()
-        };
-        return dialog.ShowDialog() == true;
     }
 
     /// <summary>Nhận model đã parse sẵn bởi caller nội bộ.</summary>
@@ -12670,7 +12620,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             // Editing the base retains every PASS already produced today.
             // Do not reset progress or derive it from an old printed LOT range.
             // FAIL does not commit a LOT: a FAIL-only day must also start at zero.
-            bool noPassToday = snapshot.Stats.DailyPass == 0;
+            bool noPassToday = snapshot.Stats.DailyPass == 0 && productLot?.UseConfiguredStartLot != true;
             bool zeroStartDay = productLot?.DailyLotStartsAtZero == true;
             long selectedDateLot = noPassToday ? 0
                 : useDailyPassOffset && !zeroStartDay

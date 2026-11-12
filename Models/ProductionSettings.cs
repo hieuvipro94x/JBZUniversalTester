@@ -350,6 +350,8 @@ public sealed class ProductLotSettings
 {
     /// <summary>Runtime day starts at zero; preserves the separately configured StartLotNo.</summary>
     public bool DailyLotStartsAtZero { get; set; }
+    /// <summary>Operator explicitly changed this product base; use it even before the first PASS.</summary>
+    public bool UseConfiguredStartLot { get; set; }
     public string HistoryBatchId { get; set; } = string.Empty;
     public string LastStartChangedDate { get; set; } = string.Empty;
     /// <summary>

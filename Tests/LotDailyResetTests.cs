@@ -17,6 +17,7 @@ internal static partial class Program
             var now = new DateTime(2026, 10, 6, 9, 0, 0);
             var settings = new ProductionSettings();
             ProductionConfigService.SetProductLot(settings, "LOT-PART", 2000, "2026-10-06");
+            settings.LotSettingsByProduct["LOT-PART"].UseConfiguredStartLot = false; // Legacy base still follows the zero-day rule.
             var lots = new LotSequenceService(settings, _ => { }, () => now);
             lots.SelectProduct("LOT-PART", false);
             var model = new ProductModel { PartNumber = "LOT-PART", ModelName = "LOT-MODEL" };
@@ -96,7 +97,7 @@ internal static partial class Program
 
             now = now.AddDays(-1);
             string back = lots.HistoryBatchKey;
-            Assert(back != oldDay && lots.NextLot == 0 &&
+            Assert(back != oldDay && lots.NextLot == 3000 &&
                    store.GetStatistics(part, now).DailyTotal == 1 &&
                    lots.TryReconcileCommittedLot(2106, out _, back, restoreSelectedDate: true) &&
                    lots.NextLot == 2106,
@@ -119,7 +120,7 @@ internal static partial class Program
             model = savedModel;
             now = now.AddDays(1);
             var newDate = store.GetStatistics(part, now);
-            Assert(lots.NextLot == 0 && newDate.DailyTotal == 0 && newDate.LastLotNo == 0,
+            Assert(lots.NextLot == 3000 && newDate.DailyTotal == 0 && newDate.LastLotNo == 0,
                 "Only a date without saved results starts with zero production and the configured base LOT");
             ProductionConfigService.SetProductLot(settings, "LOT-PART", 3000, "2026-10-05");
             Assert(settings.LotSettingsByProduct["LOT-PART"].LotNoDate == "2026-10-05",

@@ -67,11 +67,11 @@ internal static partial class Program
                 }
                 vm.SetModel(a); await Loaded();
                 await Save(LabelSettings.LargeSqdzTemplate, 2000);
-                Commit("old-a", 2003, lots.HistoryBatchKey);
+                Commit("old-a", 2001, lots.HistoryBatchKey);
                 vm.SetModel(b); await Loaded();
                 await Save(LabelSettings.SmallTemplate, 5000);
                 vm.SetModel(a); await Loaded();
-                Assert(settings.Label.TemplateType == LabelSettings.LargeSqdzTemplate && vm.Lot == "2003",
+                Assert(settings.Label.TemplateType == LabelSettings.LargeSqdzTemplate && vm.Lot == "2001",
                     "A -> B -> A restores A's label and committed LOT independently");
                 await Save(LabelSettings.LargeSqdzTemplate, 7000);
                 Assert(vm.Lot == "7001" && settings.LotSettingsByProduct[a.PartNumber].StartLotNo == 7000 && vm.Pass == 1,

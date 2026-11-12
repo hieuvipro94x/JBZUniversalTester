@@ -558,7 +558,7 @@
                     <DataGridTextColumn Header="Nco" Binding="{Binding Nco}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Alc" Binding="{Binding Alc}" Width="140" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <DataGridTextColumn Header="Tiến độ" Binding="{Binding ExportProgressText}" Width="85" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn Header="KẾT QUẢ" Binding="{Binding ExportProgressText}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Số đếm PASS" Binding="{Binding ExportPassCountText}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <!-- Thu từ 1200 xuống 420: nội dung đầy đủ đã có ở tooltip của dòng -->
                     <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="420" CellStyle="{StaticResource HistoryCenterCellStyle}">

@@ -38,3 +38,17 @@ tra integrity_check cùng các LOT lịch sử trước/sau.
 hơn 0. Trường hợp WH321331 trên log V423 (Tổng 1, PASS 0, FAIL 1) không được
 khôi phục base 123456. PASS đầu tiếp theo dùng LOT 1. Số FAIL và LOT đã ghi trong
 lịch sử cũ được giữ nguyên; chỉ đồng bộ LOT đang chạy và cờ ngày trong CFG.
+
+
+## V2026.09.425: không hỏi cấu hình lần đầu; LOT do operator đặt được giữ riêng
+
+Chọn mã lần đầu không mở hộp thoại máy tem/Leak/LOT và không bắt buộc chọn loại
+tem. Mã chưa đặt LOT bắt đầu dùng 0; dữ liệu 6/7 field cũ tiếp tục theo quy tắc
+V424, không tự phục hồi base123456 khi chưa có PASS. Khi operator đổi LOT bắt
+đầu trong cài đặt mã, cờ UseConfiguredStartLot (field8 tùy chọn) được lưu cùng
+mã đó. Mức này dùng cả khi PASS0 và sang ngày mới. Lưu cài đặt khác không tự
+kích hoạt base cũ. Base2000 + PASS20 = LOT2020; cột Số đếm PASS và CSV/XLSX lấy
+đúng LOT đã lưu của từng PASS. Không tính lại hoặc ghi đè LOT lịch sử cũ.
+
+Cột Tiến độ đổi thành KẾT QUẢ, hiển thị PASS/NG trên History và CSV/XLSX.
+Trạng thái lưu trong database không đổi.

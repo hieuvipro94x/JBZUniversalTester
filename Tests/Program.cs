@@ -743,7 +743,7 @@ internal static partial class Program
             ("Peripheral recovery cancellation never becomes a board fault", TestPeripheralEquipmentRecoveryCancellation),
             ("Peripheral USB reconnect is automatic, serialized and independent", TestPeripheralAutomaticReconnect),
             ("Product label choices and LOT base edits apply immediately without rewriting history", TestProductLabelAndImmediateLotSettings),
-            ("First untested product selection requires and retains LOT/template setup", TestFirstProductPrintSetup),
+            ("New products load without setup prompts and explicit bases reach History", TestFirstProductPrintSetup),
             ("Untested products start daily LOT at zero without inheriting global settings", TestUntestedDailyLotStartsAtZero),
             ("LOT base edits retain the daily PASS count in display and printer output", TestLotBaseRetainsDailyPassProgress),
             ("Slow LOT configuration writes never block input or counter reads", TestLotPersistenceResponsiveness),
@@ -8466,11 +8466,11 @@ internal static partial class Program
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string csvText = File.ReadAllText(csv, Encoding.GetEncoding(949));
             Assert(csvText.StartsWith(
-                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,진도,결과,합격,검사기록,바코드입력,바코드출력,측정,JBZUniversalTester,내용,메모\n",
+                    "장착시간,파일,파트명,파트번호,Eco,Nco,Alc,Lot,RESULT,결과,합격,검사기록,바코드입력,바코드출력,측정,JBZUniversalTester,내용,메모\n",
                     StringComparison.Ordinal),
                 "History CSV has the original 18 Korean columns in order");
             Assert(csvText.Contains(
-                    "2026/08/09 14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,,NI375/C1000,,1/1,합격,2001,",
+                    "2026/08/09 14:07:05,A.tht,PRODUCT,NI375C1000,NE N EV,,NI375/C1000,,PASS,합격,2001,",
                     StringComparison.Ordinal) &&
                    csvText.Contains("장착/검사 14:07:03~14:07:08(5.000초)", StringComparison.Ordinal) &&
                    !csvText.Contains("검사시작", StringComparison.Ordinal) &&
@@ -8508,7 +8508,7 @@ internal static partial class Program
             string[] sampleHeaders =
             [
                 "Ngày", "Thời gian", "Mã hàng", "Kết quả", "File", "Loại kiểm tra", "Tên sản phẩm", "Eco", "Nco", "Alc", "LOT",
-                "Tiến độ", "Số đếm PASS", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
+                "KẾT QUẢ", "Số đếm PASS", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
                 "Đo lường", "Chương trình", "Nội dung", "Ghi chú"
             ];
             int previousHeader = -1;
@@ -8568,7 +8568,7 @@ internal static partial class Program
             string customerText = File.ReadAllText(customerCsv, Encoding.GetEncoding(949));
             Assert(failed.HistoryOrdinal == 1 && failed.ExportLotText.Length == 0 &&
                    failed.ExportPassCountText.Length == 0 &&
-                   customerText.Contains(",,0/1,불량,,", StringComparison.Ordinal) &&
+                   customerText.Contains(",,NG,불량,,", StringComparison.Ordinal) &&
                    customerText.Contains("단선 CN1-4↔CN3-6", StringComparison.Ordinal) &&
                    !customerText.Contains("OPEN CIRCUIT", StringComparison.Ordinal),
                 "History CSV FAIL uses concise Korean fault detail with blank LOT and no ordinal column");

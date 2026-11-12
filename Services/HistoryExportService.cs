@@ -38,7 +38,7 @@ public static class HistoryExportService
         new("Nco", 18, HistoryCellType.Text, r => r.Nco),
         new("Alc", 18, HistoryCellType.Text, r => r.Alc),
         new("Lot", 16, HistoryCellType.Text, r => r.ExportLotText),
-        new("진도", 10, HistoryCellType.Text, r => r.ExportProgressText),
+        new("RESULT", 12, HistoryCellType.Text, r => r.ExportProgressText),
         new("결과", 10, HistoryCellType.Text, r => r.ExportResultText),
         new("합격", 16, HistoryCellType.Text, r => r.ExportPassCountText),
         new("검사기록", 80, HistoryCellType.Text, r => r.ExportTestLogSingleLineText, true),

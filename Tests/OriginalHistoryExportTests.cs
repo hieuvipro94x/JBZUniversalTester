@@ -76,7 +76,7 @@ internal static partial class Program
                    loaded.Select(row => row.Id).Distinct().Count() == 4 && loaded[0].TestStartedAt is null &&
                    loaded.All(row => row.ExportLotText.Length == 0) &&
                    loaded.Select(row => row.ExportPassCountText).SequenceEqual(new[] { "2001", "", "", "" }) &&
-                   loaded.Select(row => row.ExportProgressText).SequenceEqual(new[] { "1/1", "0/1", "1/1", "1/1" }),
+                   loaded.Select(row => row.ExportProgressText).SequenceEqual(new[] { "PASS", "NG", "PASS", "PASS" }),
                 "Blank Lot, saved PASS count and progress preserve legacy fallback/order and isolate Master/Leak retests");
             var all = new HistorySearchCriteria(null, null, null, string.Empty, "ALL", MaxRows: 1);
             HistorySummary summary = store.GetHistorySummary(all);
@@ -89,12 +89,12 @@ internal static partial class Program
                    HistoryExportService.ExportXlsx(xlsx, store.EnumerateForExport(all)) == 4,
                 "Both exports include the full filtered dataset even when the UI page size is one");
             string[] expected = ["장착시간", "파일", "파트명", "파트번호", "Eco", "Nco", "Alc", "Lot",
-                "진도", "결과", "합격", "검사기록", "바코드입력", "바코드출력", "측정", "JBZUniversalTester", "내용", "메모"];
+                "RESULT", "결과", "합격", "검사기록", "바코드입력", "바코드출력", "측정", "JBZUniversalTester", "내용", "메모"];
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string[] lines = File.ReadAllLines(csv, Encoding.GetEncoding(949));
             Assert(lines.Length == 5 && lines[0].Split(',').SequenceEqual(expected) &&
-                   lines[1].Contains(",AE EV PE,NCO-7,ALC-SAVED,,1/1,합격,2001,", StringComparison.Ordinal) &&
-                   lines[2].Contains(",,0/1,불량,,", StringComparison.Ordinal),
+                   lines[1].Contains(",AE EV PE,NCO-7,ALC-SAVED,,PASS,합격,2001,", StringComparison.Ordinal) &&
+                   lines[2].Contains(",,NG,불량,,", StringComparison.Ordinal),
                 "CSV has original column order and exact parsed THT metadata with separate blank Lot and PASS count");
             string exportVersion = $"V{ProgramIdentityService.VersionText}";
             using (var csvReader = new Microsoft.VisualBasic.FileIO.TextFieldParser(csv, Encoding.GetEncoding(949)))
@@ -117,8 +117,8 @@ internal static partial class Program
                 string Cell(int row, string address) => Text(rows[row - 1].Elements(ns + "c").Single(c => (string?)c.Attribute("r") == address));
                 Assert(rows.Length == 5 && rows[0].Elements(ns + "c").Select(Text).SequenceEqual(expected) &&
                        Cell(2, "E2") == model.Eco && Cell(2, "F2") == model.Nco && Cell(2, "G2") == model.Alc &&
-                       Cell(2, "H2") == "" && Cell(2, "I2") == "1/1" && Cell(2, "K2") == "2001" &&
-                       Cell(3, "H3") == "" && Cell(3, "I3") == "0/1" && Cell(3, "K3") == "" &&
+                       Cell(2, "H2") == "" && Cell(2, "I2") == "PASS" && Cell(2, "K2") == "2001" &&
+                       Cell(3, "H3") == "" && Cell(3, "I3") == "NG" && Cell(3, "K3") == "" &&
                        Cell(2, "N2") == "RAW-PRINT-PAYLOAD" &&
                        DateTime.FromOADate(double.Parse(rows[1].Elements(ns + "c").First().Element(ns + "v")!.Value,
                            CultureInfo.InvariantCulture)) == at,
