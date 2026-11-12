@@ -71,7 +71,9 @@ public static class IntegratedThtStore
                         if (originalLeak is null) File.Move(staging + ".leak.json", sidecar);
                         else File.Replace(staging + ".leak.json", sidecar, backup + ".leak.json");
                     }
-                    return ThtFileService.Load(target);
+                    var saved = ThtFileService.Load(target);
+                    JBZUniversalTester.Services.ThtBackupCleanupService.Current.TrackSavedFile(target);
+                    return saved;
                 }
                 catch
                 {

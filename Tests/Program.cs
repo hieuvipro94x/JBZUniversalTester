@@ -769,6 +769,7 @@ internal static partial class Program
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
             ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),
             ("THT wire search locates all IO without changing rows or dirty state", TestEditorWireSearch),
+            ("Exit cleanup deletes saved THT backup folders without touching production files", TestThtBackupExitCleanup),
             ("Editor arrow navigation retains edits and leaves search safely", TestEditorArrowNavigation),
             ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),

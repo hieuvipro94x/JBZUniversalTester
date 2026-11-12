@@ -200,7 +200,7 @@ public partial class ThtEditorPage : UserControl
                 _document = saved.Doc; _hash = saved.Hash; _changes.MarkSaved(_document);
                 SavedPaths.Add(Path.GetFullPath(target)); PathText.Text = target; ShowPage(_page);
             }
-            StatusText.Text = "ĐÃ LƯU THT — bản gốc nằm trong ThtBackups.";
+            StatusText.Text = "ĐÃ LƯU THT — ThtBackups sẽ tự xóa khi thoát phần mềm.";
             SaveButton.Tag = "Saved";
             return true;
         }

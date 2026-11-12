@@ -355,7 +355,7 @@
                                             </Grid.ColumnDefinitions>
                                             <Button x:Name="LearnDiscardIoButton" Content="TỰ NHẬN IO THÙNG LỖI" Style="{StaticResource SettingsActionButtonStyle}" Click="LearnDiscardIo_Click"
                                                 Height="34" MinWidth="220" FontSize="13" Padding="12,0" Margin="0,0,8,0" SnapsToDevicePixels="True"
-                                                ToolTip="Đưa tay/vật qua cảm biến rồi lấy ra để tự nhận IO. Bấm Lưu để ghi vào THT của mã hàng đang chọn; bản gốc được sao lưu trong ThtBackups."/>
+                                                ToolTip="Đưa tay/vật qua cảm biến rồi lấy ra để tự nhận IO. Bấm Lưu để ghi vào THT của mã hàng đang chọn; bản gốc được sao lưu trong ThtBackups và tự xóa khi thoát phần mềm."/>
                                             <Button x:Name="ClearDiscardIoButton" Grid.Column="1" Content="XÓA CẶP IO" Style="{StaticResource SettingsPrimaryButtonStyle}" Click="ClearDiscardIo_Click"
                                                 Height="34" MinWidth="112" FontSize="13" Padding="12,0" Margin="0" SnapsToDevicePixels="True"/>
                                         </Grid>

@@ -700,6 +700,7 @@ public partial class MainWindow : Window
             _viewModel.ExplicitModelLoaded -= ViewModel_ExplicitModelLoaded;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
             await _viewModel.ShutdownAsync();
+            await ThtBackupCleanupService.Current.CleanupAsync();
             AsyncFileLogService.Current.Application("SHUTDOWN cleanup complete");
             await AsyncFileLogService.Current.DisposeAsync();
         }

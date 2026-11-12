@@ -156,6 +156,7 @@ public sealed partial class ThtModelParser
                 {
                     if (sidecarTemporary is not null && File.Exists(sidecarTemporary)) File.Delete(sidecarTemporary);
                 }
+                ThtBackupCleanupService.Current.TrackSavedFile(full);
                 return backup;
             }
             finally
