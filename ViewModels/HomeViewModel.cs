@@ -71,18 +71,7 @@ public sealed class HomeViewModel : ObservableObject
             RestoreDirectory = true
         };
 
-        if (Directory.Exists(OriginalItemDirectory))
-        {
-            dialog.InitialDirectory = OriginalItemDirectory;
-        }
-        else
-        {
-            string? currentModelDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
-            dialog.InitialDirectory = !string.IsNullOrWhiteSpace(currentModelDirectory) &&
-                                      Directory.Exists(currentModelDirectory)
-                ? currentModelDirectory
-                : AppContext.BaseDirectory;
-        }
+        dialog.InitialDirectory = CatalogDirectory;
 
         Window? owner = Application.Current?.Windows
             .OfType<Window>()
@@ -114,6 +103,27 @@ public sealed class HomeViewModel : ObservableObject
 
             selectedFilePath = dialog.FileName;
         }
+        await LoadProductFileAsync(selectedFilePath);
+    }
+
+    public string CatalogDirectory => Directory.Exists(OriginalItemDirectory)
+        ? OriginalItemDirectory
+        : Directory.Exists(Path.GetDirectoryName(_main.Model?.SourcePath ?? _main.ProductionSettings.LastThtPath))
+            ? Path.GetDirectoryName(_main.Model?.SourcePath ?? _main.ProductionSettings.LastThtPath)!
+            : AppContext.BaseDirectory;
+
+    private bool _loadingProduct;
+    public async Task LoadProductFileAsync(string selectedFilePath)
+    {
+        if (_loadingProduct) return;
+        _loadingProduct = true;
+        try { await LoadProductFileCoreAsync(selectedFilePath); }
+        finally { _loadingProduct = false; }
+    }
+
+    private async Task LoadProductFileCoreAsync(string selectedFilePath)
+    {
+        Window? owner = Application.Current?.MainWindow;
         if (!IsSupportedProductFile(selectedFilePath))
         {
             MessageBox.Show(

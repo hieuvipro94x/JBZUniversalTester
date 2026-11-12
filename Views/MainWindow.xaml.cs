@@ -38,6 +38,8 @@ public partial class MainWindow : Window
         _viewModel.ExplicitModelLoaded += ViewModel_ExplicitModelLoaded;
         _viewModel.Test.PropertyChanged += TestViewModel_PropertyChanged;
         DataContext = _viewModel;
+        ProductCatalog.ProductRequested += OpenCatalogProduct;
+        Closed += (_, _) => ProductCatalog.Dispose();
         ContentRendered += MainWindow_ContentRendered;
         UpdateProductRemovalGate();
     }
@@ -52,7 +54,21 @@ public partial class MainWindow : Window
         // Normal startup is prepared behind the splash. Keep this fallback for
         // callers that construct/show MainWindow without the App startup flow.
         await Task.Yield();
+        Task catalogLoad = RefreshCatalogAsync();
         await InitializeApplicationAfterFirstRenderAsync();
+        await catalogLoad;
+    }
+
+    private Task RefreshCatalogAsync() => ProductCatalog.LoadAsync(
+        _viewModel.Home.CatalogDirectory, _viewModel.Model?.SourcePath ?? _viewModel.ProductionSettings.LastThtPath);
+
+    private async void OpenCatalogProduct(string path)
+    {
+        if (_shutdownStarted || !SelectModelButton.IsEnabled || !MainActionBar.IsEnabled ||
+            _testWindow is not null || _settingsPage is not null || _historyPage is not null) return;
+        ProductCatalog.IsHitTestVisible = false;
+        try { await _viewModel.Home.LoadProductFileAsync(path); }
+        finally { if (!_shutdownStarted) ProductCatalog.IsHitTestVisible = true; }
     }
 
     private void ViewModel_ExplicitModelLoaded(ProductModel model)
@@ -315,6 +331,7 @@ public partial class MainWindow : Window
             Show();
 
         LogMemory("MEM TESTWINDOW_CLOSE");
+        _ = RefreshCatalogAsync();
         UpdateProductRemovalGate();
         Activate();
         Focus();

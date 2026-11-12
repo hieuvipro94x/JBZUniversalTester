@@ -560,6 +560,12 @@ internal static partial class Program
             TestProductPickerDebouncedSearch();
             return 0;
         }
+        if (args is ["--test-main-catalog"])
+        {
+            TestMainProductCatalog();
+            Console.WriteLine("PASS: Main catalog scrolling, search, exact-path selection and read-only history");
+            return 0;
+        }
         if (args is ["--test-bcw"])
         {
             TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwHistorySnapshotPreservesRows(); TestBcwThtAutomaticPassLabel(); TestBcwEditableTemplate();
@@ -739,6 +745,7 @@ internal static partial class Program
             ("Fragmented Leak RESULT waits for its sixth measurement", TestLeakResultFragmentedPayload),
             ("Good Master Leak waits for all enabled connectors and retries the full group", TestEarlyGoodMasterLeak),
             ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
+            ("Main catalog scrolls and selects the exact THT path without automatic loading", TestMainProductCatalog),
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
