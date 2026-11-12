@@ -38,6 +38,7 @@
         <SolidColorBrush x:Key="PiProbeButtonBrush" Color="{StaticResource ProbeActionValue}"/>
         <SolidColorBrush x:Key="PiButtonBrush" Color="{StaticResource ButtonNeutralBackgroundValue}"/>
         <SolidColorBrush x:Key="PiBlueTextBrush" Color="{StaticResource AccentBlueValue}"/>
+        <SolidColorBrush x:Key="OperatorIdentityBlueBrush" Color="{StaticResource OperatorIdentityBlueValue}"/>
         <SolidColorBrush x:Key="PiStopButtonBrush" Color="{StaticResource FailTintValue}"/>
         <SolidColorBrush x:Key="PiMaintenanceButtonBrush" Color="{StaticResource ButtonWarningBackgroundValue}"/>
         <SolidColorBrush x:Key="LabelRetryBackground" Color="{StaticResource ButtonWarningBackgroundValue}"/>
@@ -301,7 +302,7 @@
                BasedOn="{StaticResource HtdrvGridCenterTextStyle}">
             <Setter Property="FontSize" Value="{DynamicResource TestIdentityFontSize}"/>
             <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Foreground" Value="{StaticResource PiBlueTextBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource OperatorIdentityBlueBrush}"/>
             <Style.Triggers>
                 <DataTrigger Binding="{Binding KindName}" Value="WrongWiring">
                     <Setter Property="Foreground" Value="{StaticResource PiFailBrush}"/>

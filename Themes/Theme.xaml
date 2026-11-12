@@ -16,6 +16,7 @@
     <Color x:Key="BrandDarkValue">#0F2A47</Color>
     <Color x:Key="BrandBlueValue">#183B61</Color>
     <Color x:Key="AccentBlueValue">#1687C9</Color>
+    <Color x:Key="OperatorIdentityBlueValue">#0000FF</Color>
     <Color x:Key="AccentBlueDarkValue">#1677AD</Color>
     <Color x:Key="AccentTintValue">#EAF4FB</Color>
     <Color x:Key="AccentTintBorderValue">#BCD9EE</Color>
