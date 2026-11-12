@@ -51,10 +51,17 @@ public static class StationDatabaseMigrationService
         }
         string adjacent = Path.Combine(Path.GetFullPath(applicationDirectory), "Data", "JBZUniversalTester.db");
         string legacy = Path.Combine(Path.GetFullPath(applicationDirectory), "Data", "History", "test-history.db");
-        string? source = File.Exists(adjacent) ? adjacent : File.Exists(legacy) ? legacy : null;
+        // Some portable installations keep their existing DB beside the EXE.
+        // Accept that local source before probing unrelated release folders.
+        string portable = Path.Combine(Path.GetFullPath(applicationDirectory), "JBZUniversalTester.db");
+        string? source = File.Exists(adjacent) ? adjacent : File.Exists(legacy) ? legacy : File.Exists(portable) ? portable : null;
         if (source is null)
         {
-            string[] candidates = previousDirectories().Select(path => Path.Combine(Path.GetFullPath(path), "Data", "JBZUniversalTester.db"))
+            string[] candidates = previousDirectories().SelectMany(path => new[]
+                {
+                    Path.Combine(Path.GetFullPath(path), "Data", "JBZUniversalTester.db"),
+                    Path.Combine(Path.GetFullPath(path), "JBZUniversalTester.db")
+                })
                 .Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (candidates.Length > 0)
             {
@@ -66,7 +73,7 @@ public static class StationDatabaseMigrationService
                     using var connection = OpenReadOnly(candidate);
                     string digest = Fingerprint(connection);
                     if (expected is not null && digest != expected)
-                        throw new IOException("Tìm thấy nhiều database khác nhau. Hãy đặt EXE mới vào thư mục đang vận hành (có Data/JBZUniversalTester.db) rồi mở lại. Giữ nguyên tất cả database: " + string.Join("; ", candidates));
+                        throw new IOException("Tìm thấy nhiều database khác nhau. Hãy đặt EXE mới vào thư mục đang vận hành (có Data/JBZUniversalTester.db hoặc JBZUniversalTester.db cạnh EXE) rồi mở lại. Giữ nguyên tất cả database: " + string.Join("; ", candidates));
                     expected = digest;
                 }
                 source = candidates[0];
@@ -77,7 +84,7 @@ public static class StationDatabaseMigrationService
             // An existing station CFG without a reachable DB must not silently
             // become a new empty station merely because the EXE was moved.
             if (!allowNewDatabase)
-                throw new IOException("Không tìm thấy database cũ. Hãy chạy EXE mới từ thư mục đang vận hành có Data/JBZUniversalTester.db; chưa tạo database trống.");
+                throw new IOException("Không tìm thấy database cũ. Hãy chạy EXE mới từ thư mục đang vận hành có Data/JBZUniversalTester.db hoặc JBZUniversalTester.db cạnh EXE; chưa tạo database trống.");
             return; // Genuinely new installation; repository initializes the empty DB.
         }
         string temporary = destination + ".relocation-" + Guid.NewGuid().ToString("N") + ".tmp";

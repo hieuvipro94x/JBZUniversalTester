@@ -88,3 +88,7 @@ vị trí hiện có. Self-tests cô lập DB mặc định vào thư mục tạ
 History: cột File lấy chiều rộng theo tên file ở mỗi trang nạp; không co lại khi
 cuộn/nạp thêm, giữ dòng32px. Tooltip của ô hiển thị đủ tên file.
 Tooltip History (File, lịch sử kiểm tra, mã vạch đầu ra) chỉ mở khi chữ bị cắt bởi ô hoặc vùng cuộn. Bỏ tooltip chung cả dòng; chỉ đo ô đang rê chuột tại ToolTipOpening, không đo lại bảng khi cuộn.
+
+## V2026.09.429: Nhận database cạnh EXE
+Nếu không có Data/JBZUniversalTester.db hoặc Data/History/test-history.db, nhận JBZUniversalTester.db ngay cạnh EXE trước khi dò thư mục phiên bản cũ. Giữ nguyên ưu tiên nguồn hiện có, kiểm chứng SQLite Backup/WAL và nội dung tất cả bảng; không ghi đè DB ProgramData đã tồn tại, không sửa hoặc xóa DB nguồn.
+Khi dò phiên bản cũ, xét cả DB cạnh EXE để không bỏ sót lịch sử portable; nhiều DB khác nội dung vẫn bị chặn, không tự chọn nguồn.
