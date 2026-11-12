@@ -20,6 +20,7 @@ public sealed class HomeViewModel : ObservableObject
     public MainViewModel Main => _main;
 
     public AsyncRelayCommand LoadModelCommand { get; }
+    public AsyncRelayCommand BrowseModelCommand { get; }
     public RelayCommand StartCommand { get; }
 
     public string ModelName =>
@@ -52,7 +53,8 @@ public sealed class HomeViewModel : ObservableObject
     {
         _main = main;
 
-        LoadModelCommand = new AsyncRelayCommand(LoadModelAsync);
+        LoadModelCommand = new AsyncRelayCommand(() => LoadModelAsync());
+        BrowseModelCommand = new AsyncRelayCommand(() => LoadModelAsync(browseOnly: true));
 
         StartCommand = new RelayCommand(
             () => _main.CurrentPage = _main.Test,
@@ -60,8 +62,9 @@ public sealed class HomeViewModel : ObservableObject
         );
     }
 
-    private async Task LoadModelAsync()
+    private async Task LoadModelAsync(bool browseOnly = false)
     {
+        if (_loadingProduct) return;
         using var dialog = new WinForms.OpenFileDialog
         {
             DefaultExt = ".tht",
@@ -77,16 +80,16 @@ public sealed class HomeViewModel : ObservableObject
             .OfType<Window>()
             .FirstOrDefault(window => window.IsActive)
             ?? Application.Current?.MainWindow;
-        var picker = new ProductPickerWindow(dialog.InitialDirectory);
-        if (owner is not null) picker.Owner = owner;
+        var picker = browseOnly ? null : new ProductPickerWindow(dialog.InitialDirectory);
+        if (owner is not null && picker is not null) picker.Owner = owner;
         string selectedFilePath;
-        if (picker.ShowDialog() == true && picker.SelectedFilePath is string catalogPath)
+        if (picker?.ShowDialog() == true && picker.SelectedFilePath is string catalogPath)
         {
             selectedFilePath = catalogPath;
         }
         else
         {
-            if (!picker.BrowseFileRequested) return;
+            if (!browseOnly && picker?.BrowseFileRequested != true) return;
             WinForms.DialogResult accepted;
             if (owner is not null)
             {

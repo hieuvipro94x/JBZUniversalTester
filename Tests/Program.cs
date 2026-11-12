@@ -2432,7 +2432,7 @@ internal static partial class Program
                    "StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null && !blocked;",
                    StringComparison.Ordinal) &&
                mainWindowSource.Contains(
-                   "SelectModelButton.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;",
+                   "ProductCatalog.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;",
                    StringComparison.Ordinal),
             "Main allows offline UI entry only after product removal; hardware-only actions remain locked");
 
@@ -6798,7 +6798,8 @@ internal static partial class Program
                mainWindowXaml.Contains("Property=\"Background\" Value=\"{StaticResource ExitSolidBackground}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource HistoryButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource SettingsButtonStyle}\"", StringComparison.Ordinal) &&
-               mainWindowXaml.Contains("Style=\"{StaticResource ModelButtonStyle}\"", StringComparison.Ordinal) &&
+               !mainWindowXaml.Contains("x:Name=\"SelectModelButton\"", StringComparison.Ordinal) &&
+               mainWindowXaml.Contains("x:Name=\"ProductCatalog\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource TopologyButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("Style=\"{StaticResource ExitButtonStyle}\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("x:Name=\"InteractionOverlay\"", StringComparison.Ordinal) &&
@@ -6813,7 +6814,7 @@ internal static partial class Program
                 System.Xml.Linq.XName.Get("Name", "http://schemas.microsoft.com/winfx/2006/xaml"))?.Value == "MainActionBar");
         System.Xml.Linq.XElement[] actionColumns = actionBar.Elements()
             .Single(element => element.Name.LocalName == "Grid.ColumnDefinitions").Elements().ToArray();
-        Assert(actionColumns.Length == 7 && actionColumns.All(column =>
+        Assert(actionColumns.Length == 6 && actionColumns.All(column =>
                    column.Attribute("Width")?.Value.EndsWith('*') == true) &&
                mainWindowXaml.Contains("x:Name=\"MainActionBar\"", StringComparison.Ordinal) &&
                mainWindowXaml.Contains("UseLayoutRounding=\"True\"", StringComparison.Ordinal) &&

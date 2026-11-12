@@ -31,7 +31,20 @@ internal static partial class Program
                 var list = (ListBox)panel.FindName("ProductList");
                 var search = (TextBox)panel.FindName("SearchBox");
                 var open = (Button)panel.FindName("OpenButton");
+                var browse = (Button)panel.FindName("BrowseButton");
+                var refresh = (Button)panel.FindName("RefreshButton");
+                int browseRequests = 0;
+                panel.BrowseRequested += () => browseRequests++;
                 window.UpdateLayout();
+                browse.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert(browseRequests == 1 && requested is null &&
+                       refresh.TranslatePoint(new Point(), panel).X >=
+                       browse.TranslatePoint(new Point(), panel).X + browse.ActualWidth,
+                    "Browse sits beside Refresh and requests a file dialog without selecting a catalog item");
+                panel.IsEnabled = false;
+                Assert(!browse.IsEnabled && !open.IsEnabled,
+                    "The catalog safety gate also disables the relocated browse action");
+                panel.IsEnabled = true;
                 Assert(list.Items.Count == 1001 && ((ProductFileEntry)list.SelectedItem).FullPath == duplicate && requested is null,
                     "Startup exposes the complete catalog and marks the active path without loading a model");
                 ScrollViewer? scroll = FindCatalogScroll(list);

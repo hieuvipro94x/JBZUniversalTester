@@ -162,8 +162,7 @@
                 <ColumnDefinition Width="1.25*"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
-            <local:MainProductCatalog x:Name="ProductCatalog" Grid.Column="1" Margin="16,0,0,0"
-                                      IsEnabled="{Binding IsEnabled, ElementName=SelectModelButton}"/>
+            <local:MainProductCatalog x:Name="ProductCatalog" Grid.Column="1" Margin="16,0,0,0"/>
             <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
                 <StackPanel Width="780" MaxWidth="780">
                     <Border Width="452" Height="137" Background="{StaticResource PanelBackground}"
@@ -335,7 +334,6 @@
                 <ColumnDefinition Width="1.25*"/>
                 <ColumnDefinition Width="1.00*"/>
                 <ColumnDefinition Width="1.00*"/>
-                <ColumnDefinition Width="1.05*"/>
                 <ColumnDefinition Width="1.10*"/>
                 <ColumnDefinition Width="1.10*"/>
                 <ColumnDefinition Width="1.35*"/>
@@ -359,23 +357,17 @@
                     Style="{StaticResource SettingsButtonStyle}"
                     Content="CÀI ĐẶT"/>
 
-            <Button x:Name="SelectModelButton"
-                    Grid.Column="3"
-                    Command="{Binding Home.LoadModelCommand}"
-                    Style="{StaticResource ModelButtonStyle}"
-                    Content="CHỌN MÃ HÀNG"/>
-
             <Button x:Name="LearnTopologyButton"
-                    Grid.Column="4"
+                    Grid.Column="3"
                     Click="OpenTopologyLearning_Click"
                     Style="{StaticResource TopologyButtonStyle}"
                     Content="QUÉT / HỌC MÃ"/>
 
-            <Button x:Name="EditThtMainButton" Grid.Column="5"
+            <Button x:Name="EditThtMainButton" Grid.Column="4"
                     Click="OpenThtEditor_Click" Style="{StaticResource SettingsButtonStyle}"
                     Content="SỬA CẤU HÌNH THT"/>
 
-            <Button Grid.Column="6"
+            <Button Grid.Column="5"
                     Command="{Binding ExitCommand}"
                     Style="{StaticResource ExitButtonStyle}"
                     Content="THOÁT ỨNG DỤNG"/>

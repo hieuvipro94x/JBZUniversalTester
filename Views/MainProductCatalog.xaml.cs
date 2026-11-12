@@ -18,6 +18,7 @@ public partial class MainProductCatalog : UserControl, IDisposable
     private bool _loading, _disposed;
     private string _notice = string.Empty;
     public event Action<string>? ProductRequested;
+    public event Action? BrowseRequested;
 
     public MainProductCatalog()
     {
@@ -73,7 +74,7 @@ public partial class MainProductCatalog : UserControl, IDisposable
             {
                 _files = null;
                 ProductList.ItemsSource = null;
-                StatusText.Text = "Chưa đọc được danh mục. Bấm Làm mới hoặc CHỌN MÃ HÀNG để duyệt file.";
+                StatusText.Text = "Chưa đọc được danh mục. Bấm Làm mới hoặc Chọn file khác… để duyệt file.";
             }
         }
         finally
@@ -98,13 +99,17 @@ public partial class MainProductCatalog : UserControl, IDisposable
         _search = SearchBox.Text.Trim();
         _files.Refresh();
         StatusText.Text = _notice + (ProductList.Items.Count == 0
-            ? "Không có mã hàng phù hợp. Dùng CHỌN MÃ HÀNG để duyệt file."
+            ? "Không có mã hàng phù hợp. Bấm Chọn file khác… để duyệt file."
             : $"{ProductList.Items.Count:N0} mã hàng • {_root}");
         UpdateSelection();
     }
 
     private void UpdateSelection() => OpenButton.IsEnabled = !_loading && !(_searchTimer?.IsEnabled ?? false) && ProductList.SelectedItem is ProductFileEntry;
     private void Selection_Changed(object sender, SelectionChangedEventArgs e) => UpdateSelection();
+    private void Browse_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_disposed) BrowseRequested?.Invoke();
+    }
     private async void Refresh_Click(object sender, RoutedEventArgs e) => await LoadAsync(_root, _selectedPath);
     private void Open_Click(object sender, RoutedEventArgs e)
     {

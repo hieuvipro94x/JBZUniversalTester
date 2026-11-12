@@ -39,6 +39,7 @@ public partial class MainWindow : Window
         _viewModel.Test.PropertyChanged += TestViewModel_PropertyChanged;
         DataContext = _viewModel;
         ProductCatalog.ProductRequested += OpenCatalogProduct;
+        ProductCatalog.BrowseRequested += BrowseCatalogFile;
         Closed += (_, _) => ProductCatalog.Dispose();
         ContentRendered += MainWindow_ContentRendered;
         UpdateProductRemovalGate();
@@ -64,11 +65,18 @@ public partial class MainWindow : Window
 
     private async void OpenCatalogProduct(string path)
     {
-        if (_shutdownStarted || !SelectModelButton.IsEnabled || !MainActionBar.IsEnabled ||
+        if (_shutdownStarted || !ProductCatalog.IsEnabled || !MainActionBar.IsEnabled ||
             _testWindow is not null || _settingsPage is not null || _historyPage is not null) return;
         ProductCatalog.IsHitTestVisible = false;
         try { await _viewModel.Home.LoadProductFileAsync(path); }
         finally { if (!_shutdownStarted) ProductCatalog.IsHitTestVisible = true; }
+    }
+
+    private void BrowseCatalogFile()
+    {
+        if (_shutdownStarted || !ProductCatalog.IsEnabled || !MainActionBar.IsEnabled ||
+            _testWindow is not null || _settingsPage is not null || _historyPage is not null) return;
+        _viewModel.Home.BrowseModelCommand.Execute(null);
     }
 
     private void ViewModel_ExplicitModelLoaded(ProductModel model)
@@ -89,7 +97,7 @@ public partial class MainWindow : Window
         // Loaded có thể xảy ra trước ContentRendered. Chỉ khóa các nút phụ thuộc
         // hardware ở đây; tuyệt đối không chạy FTDI/model/printer trước frame đầu.
         StartTestButton.IsEnabled = false;
-        SelectModelButton.IsEnabled = false;
+        ProductCatalog.IsEnabled = false;
     }
 
     // Called by App only after the splash has painted; later ContentRendered
@@ -364,7 +372,7 @@ public partial class MainWindow : Window
             !_viewModel.Test.IsDeviceFault;
         ProductRemovalNotice.Visibility = blocked ? Visibility.Visible : Visibility.Collapsed;
         StartTestButton.IsEnabled = (hardwareReady || offlineUiAvailable) && _viewModel.Model is not null && !blocked;
-        SelectModelButton.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;
+        ProductCatalog.IsEnabled = (hardwareReady || offlineUiAvailable) && !blocked;
         LearnTopologyButton.IsEnabled = hardwareReady;
     }
 
