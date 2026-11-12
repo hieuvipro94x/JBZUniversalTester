@@ -12628,8 +12628,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
             string batchKey = _lotSequence.HistoryBatchKey;
             DateTime statisticsNow = DateTime.Now;
             _productionSettings.LotSettingsByProduct.TryGetValue(ProductionConfigService.GetLotProductKey(model), out ProductLotSettings? productLot);
-            bool useDailyPassOffset = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId) &&
-                productLot.LastStartChangedDate == statisticsNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            bool useDailyPassOffset = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId);
             Task<ProductionStatisticsSnapshot> statisticsTask =
                 ProductionPersistence.GetFileStatisticsAsync(
                     TestHistoryStore.ThtStatisticsFileName(model.SourcePath, model.ModelName), statisticsNow, _lifetimeToken);
@@ -13520,6 +13519,33 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         try
         {
+            ProductModel? model = _model;
+            long generation = Volatile.Read(ref _runtimeGeneration);
+            RefreshProductionCounterPeriod();
+            await _statisticsLoadTask;
+            if (model is null || !ReferenceEquals(model, _model) ||
+                generation != Volatile.Read(ref _runtimeGeneration) || IsPersistenceFault)
+                return;
+
+            lock (_labelStateGate)
+                context = _lastSuccessfulLabelPrint;
+            if (context is null) return;
+            if (!string.Equals(context.Request.Data.PartNumber, model.PartNumber, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Tem bản sao không thuộc mã hàng đang chọn.");
+
+            // TestView copies follow the current base and committed progress.
+            // Keep historical payloads intact; BCW retains its reserved serial.
+            if (Pass > 0 && context.Request.Profile.Id != LabelSettings.BcwTemplate &&
+                context.Request.Data.LotNo != _lotSequence.NextLot)
+            {
+                context = context with { Request = LabelPrintRequest.Capture(new TestHistoryRecord
+                {
+                    CycleId = context.Request.CycleId,
+                    LotNo = _lotSequence.NextLot,
+                    Finished = DateTime.Now
+                }, model, _productionSettings.Label) };
+            }
+
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
                 context.Request, _lifetimeToken, explicitReprint: true);
             if (!result.Printed)
@@ -13535,7 +13561,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 context.HistoryId,
                 context.Request.CycleId,
                 DateTime.Now,
-                result.Message,
+                $"LOT bản sao {context.Request.Data.LotNo}; {result.Message}",
                 _lifetimeToken);
             InvokeUi(() => LabelStatusText = $"TEM: ĐÃ GỬI LẠI LOT {context.Request.Data.LotNo}");
             AddLog($"LABEL REPRINT SENT: cycle {context.Request.CycleId}; LOT {context.Request.Data.LotNo}; không tăng LOT.");
@@ -13543,9 +13569,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         catch (Exception ex)
         {
             AddLog($"LABEL REPRINT ERROR: {ex}");
-            InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}");
+            InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context?.Request.Data.LotNo}");
             ShowLabelWarning(
-                $"Chưa in lại được tem LOT {context.Request.Data.LotNo}. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
+                $"Chưa in lại được tem LOT {context?.Request.Data.LotNo}. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
         }
     }
 

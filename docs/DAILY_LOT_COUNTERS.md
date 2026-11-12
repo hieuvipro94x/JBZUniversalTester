@@ -7,3 +7,7 @@ Khi ngày Windows thay đổi (tự động qua ngày, chỉnh ngày tiến ho�
 Màn hình test kiểm tra đổi ngày bằng timer đồng hồ hiện có; START cũng kiểm tra trước khi cho chu kỳ reserve LOT. Kết quả tải thống kê của ngày/đợt cũ không được ghi đè đợt mới. Reservation chưa commit giữ nguyên chu kỳ hiện tại; chuyển ngày sau khi reservation được giải quyết.
 
 Reset chỉ đổi cấu hình/bộ đếm hiển thị và phạm vi truy vấn. Không xóa hoặc sửa LOT, timestamp, sản lượng hay bản ghi lịch sử cũ. Các bản ghi sai LOT đã lưu ở phiên cũ được giữ nguyên để bảo toàn truy vết. History và export tiếp tục truy vấn các bản ghi cũ.
+
+Từ V2026.09.420, sau khi operator sửa LOT bắt đầu của mã hàng, LOT hiện tại luôn bằng `StartLotNo + PASS` của ngày được chọn, kể cả khi ngày sửa cấu hình khác ngày đang xem. LOT bắt đầu được lưu riêng theo mã hàng; sang ngày chưa có sản lượng vẫn dùng mức bắt đầu đó, PASS đầu tiên cộng 1. Cấu hình cũ chưa có đợt sửa LOT vẫn khôi phục theo LOT lịch sử để giữ tương thích.
+
+Nút in bản sao trên TestView chờ nạp xong thống kê và dùng LOT hiện tại khi LOT đã đổi so với tem gửi thành công trước đó. Ví dụ sửa 2000 thành 5000 khi ngày đó đã có 101 PASS thì bản sao in 5101. Thao tác này không cộng PASS/LOT, không sửa payload hoặc LOT của bản ghi gốc; thông tin in lại ghi LOT bản sao. BCW tiếp tục dùng serial đã cấp cho tem gốc. In lại từ History và retry tem lỗi vẫn giữ snapshot gốc.

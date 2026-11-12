@@ -101,6 +101,40 @@ internal static partial class Program
                 Assert(vm.Lot == "7101" && vm.Pass == 101, "Restart/reselect restores the edited base plus progress without double counting");
                 await SaveBase(2000);
                 Assert(vm.Lot == "2101" && vm.Pass == 101, "Lowering the base retains all 101 PASS");
+                long printedHistoryId = (long)context.GetType().GetProperty("HistoryId")!.GetValue(context)!;
+                await persistence.UpdateLabelPrintOutcomeAsync(printedHistoryId, captured.CycleId,
+                    LabelPrintStatus.Printed, now, "File transport accepted the original label", captured.Data.Barcode);
+                typeof(TestViewModel).GetMethod("SetSuccessfulLabelContext", flags)!.Invoke(vm, [context]);
+                await SaveBase(5000);
+                settings.Label.RawDestination = Path.Combine(root, "copy-5101.epl");
+                await ((Task)typeof(TestViewModel).GetMethod("ReprintLastSuccessfulLabelAsync", flags)!
+                    .Invoke(vm, null)!).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert(File.ReadAllText(settings.Label.RawDestination).Contains("5101", StringComparison.Ordinal) &&
+                       vm.LabelStatusText.Contains("5101", StringComparison.Ordinal) && vm.Pass == 101 && vm.Lot == "5101" &&
+                       ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='next-101' AND Lot=7101 AND ReprintCount=1 AND LabelPayload LIKE '%7101%';") == 1,
+                    "TestView copy prints the edited 5000 base plus all 101 PASS without changing original history or production counts");
+
+                // Reopening a date with results from before the base correction
+                // must still use the saved base, even if it was edited another day.
+                settings.LotSettingsByProduct[model.PartNumber].LastStartChangedDate = now.AddDays(-1).ToString("yyyy-MM-dd");
+                ProductionConfigService.SaveLegacyCfg(settings, cfg);
+                ProductionConfigService.CopyInto(settings, ProductionConfigService.LoadSavedSettings(cfg));
+                vm.SetModel(model); await Loaded();
+                Assert(vm.Lot == "5101" && vm.Pass == 101 && settings.LotSettingsByProduct[model.PartNumber].StartLotNo == 5000,
+                    "A saved per-product base remains authoritative after its edit date instead of recovering an old historical LOT");
+
+                DateTime lotDate = now;
+                var dateLots = new LotSequenceService(settings, saved => ProductionConfigService.SaveLegacyCfg(saved, cfg), () => lotDate);
+                dateLots.SelectProduct(model.PartNumber, false);
+                ProductionConfigService.SetProductLot(settings, "OTHER-PART", 8000, now.ToString("yyyy-MM-dd"));
+                lotDate = now.AddDays(1);
+                Assert(dateLots.NextLot == 5000 && dateLots.StartLot == 5000,
+                    "Next production day retains this product's saved starting LOT");
+                dateLots.SelectProduct("OTHER-PART", false);
+                Assert(dateLots.NextLot == 8000, "Another part retains its independent starting LOT across dates");
+                dateLots.SelectProduct(model.PartNumber, false);
+                Assert(dateLots.NextLot == 5000 && dateLots.ReserveForCycle("tomorrow") == 5001,
+                    "Switching back uses the same saved 5000 base and reserves 5001 for the first new-day PASS");
                 Assert(ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId LIKE 'old-%';") == 103 &&
                        ScalarInt(db, "SELECT SUM(Lot) FROM Tests WHERE CycleId LIKE 'old-%';") == 5350 &&
                        ScalarInt(db, "SELECT COUNT(*) FROM Tests;") == 104,
