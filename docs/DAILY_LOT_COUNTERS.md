@@ -30,3 +30,11 @@ Không có migration SQLite, không sửa/xóa history hoặc timestamp. Reset b
 khi còn reservation chưa commit. Kết quả thống kê cũ vẫn chịu guard mã/ngày/batch;
 lưu CFG thất bại hoàn tác cả LOT và cờ ngày. Kiểm thử dùng CFG/SQLite tạm và kiểm
 tra integrity_check cùng các LOT lịch sử trước/sau.
+
+
+## V2026.09.424: ngày chỉ có FAIL vẫn LOT 0
+
+Điều kiện khởi đầu từ 0 dựa trên PASS trong ngày bằng 0, kể cả Tổng/FAIL đã lớn
+hơn 0. Trường hợp WH321331 trên log V423 (Tổng 1, PASS 0, FAIL 1) không được
+khôi phục base 123456. PASS đầu tiếp theo dùng LOT 1. Số FAIL và LOT đã ghi trong
+lịch sử cũ được giữ nguyên; chỉ đồng bộ LOT đang chạy và cờ ngày trong CFG.

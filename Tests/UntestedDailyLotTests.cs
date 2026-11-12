@@ -24,6 +24,10 @@ internal static partial class Program
             { StartLotNo = 7000, LotNo = 7001, LotNoDate = date, HistoryBatchId = "B-BASE" };
             var model = Model(("PAIR", new[] { 1, 2 })); model.PartNumber = "WH321334"; model.SourcePath = Path.Combine(root, "A.tht");
             var other = Model(("PAIR", new[] { 1, 2 })); other.PartNumber = "OTHER"; other.SourcePath = Path.Combine(root, "B.tht");
+            settings.LotSettingsByProduct["WH321331"] = new ProductLotSettings
+            { StartLotNo = 123456, LotNo = 123456, LotNoDate = date, HistoryBatchId = "FAIL-BASE" };
+            var failOnly = Model(("PAIR", new[] { 1, 2 })); failOnly.PartNumber = "WH321331";
+            failOnly.SourcePath = Path.Combine(root, "WH321331.tht");
             var store = new TestHistoryStore(db);
             await using var persistence = new ProductionPersistenceService(store, settings, "SELFTEST");
             await persistence.Initialization;
@@ -34,6 +38,7 @@ internal static partial class Program
                     Result = passed ? "PASS" : "FAIL", InspectionType = HistoryInspectionType.Product, LotNo = lot },
                     product, settings, [], [], null, ProgramIdentityService.VersionText), null);
             Commit("old-A", model, now.AddDays(-1), 123456); Commit("today-B", other, now, 7001);
+            Commit("today-fail-only", failOnly, now, 123456, passed: false);
             var vm = CreateTestViewModel(settings, out FakeBoard board);
             var lots = new LotSequenceService(settings, saved => ProductionConfigService.SaveLegacyCfg(saved, cfg));
             void Set(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
@@ -46,6 +51,20 @@ internal static partial class Program
             }
             try
             {
+                await Load(failOnly);
+                Assert(vm.Lot == "0" && vm.Total == 1 && vm.Pass == 0 && vm.Fail == 1 && lots.StartLot == 0,
+                    "V423 LAN regression: WH321331 with FAIL1/PASS0 cannot restore configured LOT123456");
+                Assert(settings.LotSettingsByProduct["WH321331"].StartLotNo == 123456 &&
+                       settings.LotSettingsByProduct["WH321331"].DailyLotStartsAtZero,
+                    "FAIL-only reset preserves configured base and persists zero-day metadata");
+                long afterFail = lots.ReserveForCycle("after-fail");
+                Assert(afterFail == 1, "First PASS after a FAIL-only day reserves LOT1");
+                Commit("after-fail", failOnly, now, afterFail);
+                Assert((await lots.CommitSuccessfulPassAsync("after-fail", afterFail)).Success,
+                    "PASS after FAIL-only recovery commits LOT1");
+                await Load(other); await Load(failOnly);
+                Assert(vm.Lot == "1" && vm.Total == 2 && vm.Pass == 1 && vm.Fail == 1,
+                    "Reload preserves FAIL count and committed LOT1 without adding the saved base");
                 await Load(model);
                 Assert(vm.Lot == "0" && vm.Total == 0 && vm.Pass == 0 && vm.Fail == 0 && lots.StartLot == 0,
                     "A product with yesterday's LOT123456 and no tests today starts at LOT0");
@@ -84,7 +103,8 @@ internal static partial class Program
                 Assert(!activeLots.TryReconcileCommittedLot(0, out _, activeLots.HistoryBatchKey,
                            restoreSelectedDate: true, resetUntestedDay: true) && activeLots.IsCommitCandidate("active-cycle", reserved),
                     "An uncommitted product reservation cannot be discarded by an empty-day reset");
-                Assert(ScalarInt(db, "SELECT COUNT(*) FROM Tests;") == 3 &&
+                Assert(ScalarInt(db, "SELECT COUNT(*) FROM Tests;") == 5 &&
+                       ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='today-fail-only' AND Lot=123456 AND Passed=0;") == 1 &&
                        ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='old-A' AND Lot=123456;") == 1 &&
                        ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='today-B' AND Lot=7001;") == 1,
                     "Old and other-product history rows, LOT values and counts remain untouched");

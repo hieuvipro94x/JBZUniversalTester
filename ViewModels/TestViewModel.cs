@@ -12669,17 +12669,18 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             // Editing the base retains every PASS already produced today.
             // Do not reset progress or derive it from an old printed LOT range.
-            bool untestedDay = snapshot.Stats.DailyTotal == 0;
+            // FAIL does not commit a LOT: a FAIL-only day must also start at zero.
+            bool noPassToday = snapshot.Stats.DailyPass == 0;
             bool zeroStartDay = productLot?.DailyLotStartsAtZero == true;
-            long selectedDateLot = untestedDay ? 0
+            long selectedDateLot = noPassToday ? 0
                 : useDailyPassOffset && !zeroStartDay
                     ? checked(_lotSequence.StartLot + snapshot.Stats.DailyPass)
                     : snapshot.Stats.DailyPass > 0 ? snapshot.Stats.LastLotNo : 0;
-            if (selectedDateLot != _lotSequence.NextLot || (untestedDay && !zeroStartDay))
+            if (selectedDateLot != _lotSequence.NextLot || (noPassToday && !zeroStartDay))
             {
                 long previousLot = _lotSequence.NextLot;
                 var reconciled = await PersistLotWithoutBlockingUiAsync(() =>
-                    _lotSequence.ReconcileCommittedLotAsync(selectedDateLot, batchKey, restoreSelectedDate: true, resetUntestedDay: untestedDay));
+                    _lotSequence.ReconcileCommittedLotAsync(selectedDateLot, batchKey, restoreSelectedDate: true, resetUntestedDay: noPassToday));
                 if (!reconciled.Success)
                 {
                     throw new InvalidOperationException(
