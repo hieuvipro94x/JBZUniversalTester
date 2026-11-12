@@ -3,6 +3,8 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Controls.Primitives;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using Microsoft.Win32;
@@ -112,6 +114,7 @@ public partial class HistoryPage : UserControl
             _activeCriteria = criteria;
             _records.Clear();
             _passOrdinalsByProduct.Clear();
+            FileColumn.Width = new DataGridLength(180);
             Task<HistorySummary> summaryTask = Task.Run(() => GetStore().GetHistorySummary(criteria));
             Task<IReadOnlyList<TestHistoryRecord>> pageTask = Task.Run(() =>
                 GetStore().Search(criteria with { MaxRows = PageSize, Offset = 0 }));
@@ -121,6 +124,7 @@ public partial class HistoryPage : UserControl
 
             _summary = summaryTask.Result;
             IReadOnlyList<TestHistoryRecord> rows = pageTask.Result;
+            ExpandFileColumnForRows(rows);
             HistoryPresentation.AssignProductOrdinals(rows, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in rows)
                 _records.Add(row);
@@ -177,6 +181,7 @@ public partial class HistoryPage : UserControl
             IReadOnlyList<TestHistoryRecord> page = await Task.Run(() => GetStore().Search(pageCriteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
+            ExpandFileColumnForRows(page);
             HistoryPresentation.AssignProductOrdinals(page, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in page)
                 _records.Add(row);
@@ -195,6 +200,65 @@ public partial class HistoryPage : UserControl
             if (!_released && generation == Volatile.Read(ref _reloadGeneration))
                 LoadMoreButton.IsEnabled = _records.Count < _summary.Total;
         }
+    }
+
+    private void ExpandFileColumnForRows(IReadOnlyList<TestHistoryRecord> rows)
+    {
+        // Bound each glyph by more than one em: no text shaping or Auto/SizeToCells
+        // measurement on scroll. A page expands the fixed width at most once.
+        int longest = rows.Count == 0 ? 0 : rows.Max(row => row.ExportModelFileName.Length);
+        double required = Math.Max(180, longest * HistoryGrid.FontSize * 1.25 + 24);
+        if (required > FileColumn.Width.Value) FileColumn.Width = new DataGridLength(required);
+    }
+
+    private void HistoryGrid_ToolTipOpening(object sender, ToolTipEventArgs e)
+    {
+        // Keep the full-value bindings; only shape the hovered cell's text when
+        // WPF is about to open its tooltip. No scroll/layout observers are needed.
+        e.Handled = e.OriginalSource is not TextBlock text || !IsHistoryTextClipped(text);
+    }
+
+    internal static bool IsHistoryTextClipped(TextBlock text)
+    {
+        if (string.IsNullOrEmpty(text.Text) || text.ActualWidth <= 0 || text.ActualHeight <= 0)
+            return false;
+
+        var formatted = new FormattedText(text.Text, text.Language.GetSpecificCulture(), text.FlowDirection,
+            new Typeface(text.FontFamily, text.FontStyle, text.FontWeight, text.FontStretch), text.FontSize,
+            Brushes.Black, VisualTreeHelper.GetDpi(text).PixelsPerDip);
+        double width = formatted.WidthIncludingTrailingWhitespace;
+        double available = Math.Max(0, text.ActualWidth - text.Padding.Left - text.Padding.Right);
+        double offset = text.TextAlignment switch
+        {
+            TextAlignment.Center => Math.Max(0, (available - width) / 2),
+            TextAlignment.Right => Math.Max(0, available - width),
+            _ => 0
+        };
+        var content = new Rect(text.Padding.Left + offset, text.Padding.Top, width, formatted.Height);
+        var visible = new Rect(new Point(), text.RenderSize);
+        // A cell can fit its text yet be partly hidden by the horizontal viewport
+        // or frozen columns. Intersect ancestor clips in this TextBlock's space.
+        for (Visual? ancestor = text; ancestor is not null; ancestor = VisualTreeHelper.GetParent(ancestor) as Visual)
+        {
+            GeneralTransform? transform = ancestor == text ? null : ancestor.TransformToDescendant(text);
+            if (ancestor is FrameworkElement element)
+            {
+                if (element.ClipToBounds || element is ScrollContentPresenter || element is DataGridCell)
+                {
+                    var bounds = new Rect(new Point(), element.RenderSize);
+                    visible.Intersect(transform?.TransformBounds(bounds) ?? bounds);
+                }
+                Geometry? layoutClip = LayoutInformation.GetLayoutClip(element);
+                if (layoutClip is not null)
+                    visible.Intersect(transform?.TransformBounds(layoutClip.Bounds) ?? layoutClip.Bounds);
+            }
+            Geometry? clip = (ancestor as UIElement)?.Clip ?? VisualTreeHelper.GetClip(ancestor);
+            if (clip is not null)
+                visible.Intersect(transform?.TransformBounds(clip.Bounds) ?? clip.Bounds);
+        }
+        const double tolerance = 0.5; // Device-independent layout rounding.
+        return visible.IsEmpty || content.Left < visible.Left - tolerance || content.Top < visible.Top - tolerance ||
+               content.Right > visible.Right + tolerance || content.Bottom > visible.Bottom + tolerance;
     }
 
     private HistorySearchCriteria CreateSearchCriteria()

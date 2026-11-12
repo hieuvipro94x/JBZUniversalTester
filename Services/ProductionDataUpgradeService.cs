@@ -42,7 +42,8 @@ public static class ProductionDataUpgradeService
 
     public static IReadOnlyList<string> MigrateDeferredProductionDataForCurrentVersion()
     {
-        return MigrateCurrentVersionFiles(ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase));
+        return MigrateCurrentVersionFiles(ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase)
+            .Where(path => !path.Equals(Path.Combine("Data", "JBZUniversalTester.db"), StringComparison.OrdinalIgnoreCase)));
     }
 
     private static IReadOnlyList<string> MigrateCurrentVersionFiles(IEnumerable<string> relativePaths)
@@ -98,7 +99,7 @@ public static class ProductionDataUpgradeService
         return migrated;
     }
 
-    private static IEnumerable<string> FindPreviousVersionDirectories(string targetDirectory)
+    internal static IEnumerable<string> FindPreviousVersionDirectories(string targetDirectory)
     {
         DirectoryInfo target = new(targetDirectory);
         Version? targetVersion = ParseVersionDirectory(target.Name);

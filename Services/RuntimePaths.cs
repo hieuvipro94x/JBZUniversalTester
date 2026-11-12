@@ -13,7 +13,10 @@ public static class RuntimePaths
     public static string PartCounterFile => Path.Combine(AppDirectory, "PartCnt.txt");
     public static string LogFile => Path.Combine(AppDirectory, "JBZUniversalTester.log");
     public static string DataDirectory => Path.Combine(AppDirectory, "Data");
-    public static string DatabaseFile => Path.Combine(DataDirectory, "JBZUniversalTester.db");
+    public static string SharedDatabaseFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "JBZUniversalTester", "Data", "JBZUniversalTester.db");
+    // Self-tests isolate default repository consumers from real station history.
+    public static string DatabaseFile => AppContext.GetData("JBZUniversalTester.SelfTest.DatabaseFile") as string ?? SharedDatabaseFile;
     public static string CrashDirectory => Path.Combine(AppDirectory, "Crash");
     public static string CrashReportFile => Path.Combine(CrashDirectory, "JBZUniversalTester.RPT");
     public static string ItemDirectory => @"C:\ITEM";

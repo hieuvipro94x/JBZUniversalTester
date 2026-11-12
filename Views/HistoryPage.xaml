@@ -508,14 +508,14 @@
                       EnableRowVirtualization="True"
                       EnableColumnVirtualization="True"
                       VirtualizingPanel.IsVirtualizing="True"
-                      VirtualizingPanel.VirtualizationMode="Recycling">
+                      VirtualizingPanel.VirtualizationMode="Recycling"
+                      ToolTipOpening="HistoryGrid_ToolTipOpening">
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
                         <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
                         <Setter Property="BorderThickness" Value="0,0,0,1"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
                         <Setter Property="Height" Value="32"/>
-                        <Setter Property="ToolTip" Value="{Binding HistoryTestLogText}"/>
                         <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
                     </Style>
                 </DataGrid.RowStyle>
@@ -544,7 +544,16 @@
                     <DataGridTextColumn Header="Kết quả" Binding="{Binding HistoryResultText}" Width="170" CellStyle="{StaticResource HistoryResultCellStyle}" ElementStyle="{StaticResource ResultCellText}"/>
 
                     <!-- ===== Nhóm cuộn ===== -->
-                    <DataGridTextColumn Header="File" Binding="{Binding ExportModelFileName}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
+                    <DataGridTextColumn x:Name="FileColumn" Header="File" Binding="{Binding ExportModelFileName}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
+                                <Setter Property="TextWrapping" Value="NoWrap"/>
+                                <Setter Property="ToolTip" Value="{Binding ExportModelFileName}"/>
+                                <Setter Property="ToolTipService.InitialShowDelay" Value="150"/>
+                                <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
                     <DataGridTextColumn Header="Loại kiểm tra" Binding="{Binding InspectionTypeText}" Width="200" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
@@ -560,11 +569,13 @@
                     <DataGridTextColumn Header="LOT" Binding="{Binding ExportLotText}" Width="110" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="KẾT QUẢ" Binding="{Binding ExportProgressText}" Width="100" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
                     <DataGridTextColumn Header="Số đếm PASS" Binding="{Binding ExportPassCountText}" Width="115" CellStyle="{StaticResource HistoryCenterCellStyle}" ElementStyle="{StaticResource CenterCellText}"/>
-                    <!-- Thu từ 1200 xuống 420: nội dung đầy đủ đã có ở tooltip của dòng -->
+                    <!-- Thu từ 1200 xuống 420: nội dung đầy đủ có ở tooltip khi ô bị cắt -->
                     <DataGridTemplateColumn Header="Lịch sử kiểm tra" Width="420" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>
                                 <TextBlock Text="{Binding HistoryTestLogSingleLineText}"
+                                           ToolTip="{Binding HistoryTestLogText}"
+                                           ToolTipService.ShowDuration="60000"
                                            HorizontalAlignment="Stretch"
                                            VerticalAlignment="Center"
                                            TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"

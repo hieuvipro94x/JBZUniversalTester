@@ -5,12 +5,15 @@ namespace JBZUniversalTester.Services;
 
 public static class StartupBootstrapService
 {
+    private static bool _allowNewDatabase;
     public static void EnsureFastConfiguration()
     {
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
         {
+            bool existed = File.Exists(RuntimePaths.ConfigFile);
             IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateFastConfigurationForCurrentVersion();
+            _allowNewDatabase = !existed && migrated.Count == 0;
             if (migrated.Count > 0)
                 log.Application($"Fast configuration inherited: {string.Join(", ", migrated)}");
 
@@ -35,6 +38,7 @@ public static class StartupBootstrapService
         AsyncFileLogService log = AsyncFileLogService.Current;
         try
         {
+            StationDatabaseMigrationService.EnsureForCurrentInstallation(_allowNewDatabase);
             IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateDeferredProductionDataForCurrentVersion();
             if (migrated.Count > 0)
                 log.Application($"Deferred production data inherited: {string.Join(", ", migrated)}");
@@ -43,7 +47,6 @@ public static class StartupBootstrapService
             ProductionConfigService.EnsureSavedOnStartup(production);
             log.Application($"configuration ready: {RuntimePaths.ConfigFile}");
 
-            MigrateLocalLegacyDatabase(log);
             var repository = new TestHistoryStore(RuntimePaths.DatabaseFile);
             log.Application($"database ready: {RuntimePaths.DatabaseFile}");
 
@@ -69,27 +72,6 @@ public static class StartupBootstrapService
         }
 
         return Task.CompletedTask;
-    }
-
-    private static void MigrateLocalLegacyDatabase(AsyncFileLogService log)
-    {
-        if (File.Exists(RuntimePaths.DatabaseFile) || !File.Exists(RuntimePaths.LegacyDatabaseFile))
-            return;
-
-        Directory.CreateDirectory(RuntimePaths.DataDirectory);
-        string temporaryPath = RuntimePaths.DatabaseFile + ".migration.tmp";
-        try
-        {
-            File.Copy(RuntimePaths.LegacyDatabaseFile, temporaryPath, overwrite: false);
-            File.Move(temporaryPath, RuntimePaths.DatabaseFile, overwrite: false);
-            log.Application(
-                $"DATABASE_MIGRATION {RuntimePaths.LegacyDatabaseFile} -> {RuntimePaths.DatabaseFile}");
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
     }
 
 }

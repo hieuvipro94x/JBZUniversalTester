@@ -20,6 +20,17 @@ internal static partial class Program
 {
     private static int Main(string[] args)
     {
+        AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
+            "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-history-tooltips"])
+        { TestHistoryClippedTooltips(); Console.WriteLine("PASS: History tooltips follow actual visible text bounds"); return 0; }
+        if (args is ["--test-history-long-file-names"])
+        { TestHistoryLongFileNames(); Console.WriteLine("PASS: full long History filenames and stable column width"); return 0; }
+        if (args is ["--test-station-database"])
+        {
+            TestStationDatabaseRelocation();
+            Console.WriteLine("PASS: verified ProgramData relocation, WAL and history preservation"); return 0;
+        }
         if (args is ["--test-grouped-leak"])
         {
             TestGroupedLeakCycle(); TestEarlyGoodMasterLeak(); TestLeakFailureSummary();
@@ -771,6 +782,9 @@ internal static partial class Program
             ("THT wire search locates all IO without changing rows or dirty state", TestEditorWireSearch),
             ("Exit cleanup deletes saved THT backup folders without touching production files", TestThtBackupExitCleanup),
             ("Database exit cleanup removes only migration backups after integrity validation", TestDatabaseBackupExitCleanup),
+            ("Station database relocates atomically with WAL, all rows and source preservation", TestStationDatabaseRelocation),
+            ("History shows long filenames without width changes during scrolling", TestHistoryLongFileNames),
+            ("History tooltips open only for text clipped by cell or viewport", TestHistoryClippedTooltips),
             ("Editor arrow navigation retains edits and leaves search safely", TestEditorArrowNavigation),
             ("Discard learning dialog closes and returns learned IOs", TestDiscardLearningDialog),
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
@@ -8531,7 +8545,8 @@ internal static partial class Program
                    historyXaml.Contains("FrozenColumnCount=\"4\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Header=\"Lịch sử kiểm tra\" Width=\"420\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Text=\"{Binding HistoryTestLogSingleLineText}\"", StringComparison.Ordinal) &&
-                   historyXaml.Contains("Property=\"ToolTip\" Value=\"{Binding HistoryTestLogText}\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("ToolTip=\"{Binding HistoryTestLogText}\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("ToolTipOpening=\"HistoryGrid_ToolTipOpening\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("x:Name=\"LoadMoreButton\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("x:Key=\"HistoryLoadMoreButtonStyle\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("Content=\"XEM THÊM LỊCH SỬ\"", StringComparison.Ordinal) &&

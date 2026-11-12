@@ -62,3 +62,29 @@ Chỉ xóa khi database chính còn tồn tại, integrity_check đạt và sche
 hợp lệ. Không xóa DB chính, WAL/SHM, backup thủ công, cấu hình hoặc lịch sử.
 Database lỗi/mất, đường dẫn liên kết hoặc file backup bị khóa được giữ lại và
 lỗi được ghi log. Không thay đổi đường dẫn RuntimePaths trong bản này.
+
+
+## V2026.09.428: History dùng ProgramData cố định
+
+Database sản xuất chuyển sang %ProgramData%\JBZUniversalTester\Data\JBZUniversalTester.db.
+Startup worker tự sao lưu SQLite từ Data/JBZUniversalTester.db cạnh EXE (hoặc
+Data/History/test-history.db cũ) nếu đích chưa tồn tại. Bao gồm WAL, không copy
+riêng file DB đang mở. So sánh đầy đủ nội dung mọi bảng và integrity_check trước
+khi đổi tên file staging thành DB đích. File nguồn được giữ nguyên. Không đổi
+CycleId, khóa ngoại, LOT, timestamps, dữ liệu Master/Leak/đo điện trở.
+
+Nếu không có nguồn cạnh EXE, kiểm tra các thư mục phiên bản cũ: chỉ tự chọn khi
+có một nguồn hoặc tất cả nguồn có nội dung giống nhau. Database khác nhau sẽ
+chặn startup và yêu cầu chạy EXE mới từ thư mục đang vận hành; không chọn theo
+size/ngày sửa, không tự gộp hoặc bỏ lịch sử. Máy đã có CFG nhưng mất nguồn DB
+không tự tạo DB rỗng. Cài mới thật sự vẫn được tạo schema mới.
+
+Đích đã tồn tại luôn được giữ nguyên, không dò/nhập lại bản cũ. Thư mục Data
+riêng của ứng dụng được cấp Modify cho Windows Users; không sửa quyền chung
+của ProgramData. Không đủ quyền hoặc chuyển lỗi thì báo lỗi startup, không chạy
+sang một DB rỗng ở đường dẫn khác. CFG, log, PartCnt và nhật ký BCW tiếp tục dùng
+vị trí hiện có. Self-tests cô lập DB mặc định vào thư mục tạm.
+
+History: cột File lấy chiều rộng theo tên file ở mỗi trang nạp; không co lại khi
+cuộn/nạp thêm, giữ dòng32px. Tooltip của ô hiển thị đủ tên file.
+Tooltip History (File, lịch sử kiểm tra, mã vạch đầu ra) chỉ mở khi chữ bị cắt bởi ô hoặc vùng cuộn. Bỏ tooltip chung cả dòng; chỉ đo ô đang rê chuột tại ToolTipOpening, không đo lại bảng khi cuộn.
