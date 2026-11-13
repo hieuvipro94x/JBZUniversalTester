@@ -66,20 +66,28 @@ public partial class FaultConfirmationWindow : Window
 
     private void PositionBelowFaultRows(object sender, RoutedEventArgs e)
     {
-        if (Owner is null)
-            return;
-
-        Owner.UpdateLayout();
-        var source = PresentationSource.FromVisual(Owner);
+        Window anchor = Owner ?? this;
+        anchor.UpdateLayout();
+        var source = PresentationSource.FromVisual(this);
         if (source?.CompositionTarget is null)
             return;
 
         // PointToScreen returns physical pixels; Window positions use WPF units.
         Matrix fromDevice = source.CompositionTarget.TransformFromDevice;
-        Point ownerTop = fromDevice.Transform(Owner.PointToScreen(new Point(0, 0)));
-        double bottom = ownerTop.Y + Owner.ActualHeight;
-        double desiredTop = ownerTop.Y + (Owner.ActualHeight - ActualHeight) / 2;
-        DataGrid? grid = FindFaultGrid(Owner);
+        var screen = System.Windows.Forms.Screen.FromHandle(
+            new System.Windows.Interop.WindowInteropHelper(anchor).Handle);
+        var workArea = new Rect(
+            fromDevice.Transform(new Point(screen.WorkingArea.Left, screen.WorkingArea.Top)),
+            fromDevice.Transform(new Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom)));
+        // Keep the footer outside the scrollable fault list, within this monitor's usable area.
+        MinHeight = Math.Min(260, workArea.Height);
+        MaxHeight = Math.Min(680, workArea.Height);
+        Width = Math.Min(560, workArea.Width);
+        UpdateLayout();
+        Point ownerTop = fromDevice.Transform(anchor.PointToScreen(new Point(0, 0)));
+        double bottom = Math.Min(workArea.Bottom, ownerTop.Y + anchor.ActualHeight);
+        double desiredTop = ownerTop.Y + (anchor.ActualHeight - ActualHeight) / 2;
+        DataGrid? grid = FindFaultGrid(anchor);
         if (grid is not null && grid.IsVisible)
         {
             Point gridTop = fromDevice.Transform(grid.PointToScreen(new Point(0, 0)));
@@ -105,8 +113,10 @@ public partial class FaultConfirmationWindow : Window
             UpdateLayout();
         }
 
-        Left = ownerTop.X + Math.Max(0, (Owner.ActualWidth - ActualWidth) / 2);
-        Top = Math.Max(ownerTop.Y, Math.Min(desiredTop, bottom - ActualHeight - 12));
+        Left = Math.Clamp(ownerTop.X + (anchor.ActualWidth - ActualWidth) / 2,
+            workArea.Left, Math.Max(workArea.Left, workArea.Right - ActualWidth));
+        Top = Math.Clamp(Math.Min(desiredTop, bottom - ActualHeight - 12),
+            workArea.Top, Math.Max(workArea.Top, workArea.Bottom - ActualHeight));
     }
 
     private static DataGrid? FindFaultGrid(DependencyObject parent)
