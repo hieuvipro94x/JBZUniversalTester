@@ -39,12 +39,23 @@ internal static partial class Program
             root.UpdateLayout();
             var items = (ItemsControl)popup.FindName("FaultItemsControl");
             string[] visibleDetails = Descendants(root).OfType<TextBlock>()
-                .Select(block => new TextRange(block.ContentStart, block.ContentEnd).Text.Trim()).ToArray();
-            Assert(items.Items.Count == faults.Length && faults.All(fault => visibleDetails.Contains(
-                    FaultDisplayFormatter.FormatCompactOperator(fault).Summary.Trim())),
-                "The real popup renders every physical IO pair even when wire/housing metadata is missing");
-            Assert(visibleDetails.Contains("LỖI SAI DÂY") && visibleDetails.Contains("LỖI CHẬP MẠCH"),
-                "Mixed fault types retain individual titles instead of a generic unsuccessful result");
+                .Select(block => new TextRange(block.ContentStart, block.ContentEnd).Text.Replace("\r\n", "\n").Trim()).ToArray();
+            Assert(items.Items.Count == 2 &&
+                   visibleDetails.Contains("Đã có lỗi sai dây.\nVui lòng kiểm tra và xử lý.") &&
+                   visibleDetails.Contains("Đã có lỗi chập mạch.\nVui lòng kiểm tra và xử lý.") &&
+                   !visibleDetails.Any(text => text.Contains("IO 1") || text.Contains("IO 40")),
+                "The real popup shows short notices per fault type without physical IO details");
+            foreach (string language in new[] { "vi", "ko" })
+            {
+                var many = new FaultConfirmationWindow(Enumerable.Range(0, 100).Select(_ => new FaultDetail
+                    { Type = ProductFaultType.WrongWiring, WireName = new string('W', 1000), WireColor = "Br",
+                      PinFrom = "123", ActualPinTo = "456", ExpectedSourceIo = 1, ExpectedTargetIo = 2,
+                      ActualSourceIo = 1, ActualTargetIo = 3 }).ToArray(), "", language: language);
+                var notices = (ItemsControl)many.FindName("FaultItemsControl");
+                Assert(notices.Items.Count == 1 && (string)notices.Items[0] == TestViewText.Translate(
+                    "Đã có lỗi sai dây.\nVui lòng kiểm tra và xử lý.", language),
+                    "A hundred long wrong-wire details produce just one localized short notice");
+            }
 
             var settingsVm = new ProductionSettingsViewModel();
             settingsVm.Settings.Label.PrinterCom = "COM9876";

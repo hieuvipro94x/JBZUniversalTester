@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -396,6 +396,12 @@ internal static partial class Program
         {
             TestMasterClipReinstallation();
             Console.WriteLine("PASS: Removed incomplete Masters and sample transitions require fresh AO/aN connections");
+            return 0;
+        }
+        if (args is ["--test-fault-popup"])
+        {
+            TestDiagnosticUiAudit();
+            Console.WriteLine("PASS: Concise localized fault notices preserve TestView diagnostics");
             return 0;
         }
         if (args is ["--test-ui-status-audit"])
@@ -802,7 +808,7 @@ internal static partial class Program
             ("Discard sensor automatically learns arbitrary IO from activation and release", TestDiscardContactLearning),
             ("Discard-only Settings edits persist through Save and reopen", TestDiscardSettingsSave),
             ("Discard configuration notices and persistent MainWindow status", TestDiscardConfigurationStatus),
-            ("Diagnostic fault popup retains every physical IO detail", TestDiagnosticUiAudit),
+            ("Fault popup shows short notices without physical wire details", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
@@ -6730,24 +6736,12 @@ internal static partial class Program
             Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml"));
         string faultDialogSource = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "FaultConfirmationWindow.xaml.cs"));
-        int faultItemsStart = faultDialogXaml.IndexOf("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal);
-        int faultItemsTagEnd = faultItemsStart < 0
-            ? -1
-            : faultDialogXaml.IndexOf('>', faultItemsStart);
-        string faultItemsOpeningTag = faultItemsStart < 0 || faultItemsTagEnd < 0
-            ? string.Empty
-            : faultDialogXaml[faultItemsStart..faultItemsTagEnd];
-        Assert(faultDialogXaml.Contains("SizeToContent=\"Height\"", StringComparison.Ordinal) &&
-               faultDialogXaml.Contains("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal) &&
-               faultDialogXaml.Contains("Loaded=\"FaultSummary_Loaded\"", StringComparison.Ordinal) &&
-               faultDialogSource.Contains("new Run(item.Summary)", StringComparison.Ordinal) &&
-               !faultItemsOpeningTag.Contains("Visibility=\"Collapsed\"", StringComparison.Ordinal) &&
-               !faultDialogXaml.Contains("x:Name=\"FaultTypeText\"", StringComparison.Ordinal) &&
-               !faultDialogXaml.Contains("x:Name=\"SummaryText\"", StringComparison.Ordinal) &&
-               faultDialogSource.Contains(".Select(FaultDisplayFormatter.FormatCompactOperator)", StringComparison.Ordinal) &&
-               !faultDialogSource.Contains("BuildShortSummary", StringComparison.Ordinal),
-            "FAIL dialog renders every fault as a concise item instead of hiding all but the first fault");
-
+        Assert(faultDialogXaml.Contains("x:Name=\"FaultItemsControl\"", StringComparison.Ordinal) &&
+               faultDialogSource.Contains(".GroupBy(fault => fault.Type)", StringComparison.Ordinal) &&
+               !faultDialogXaml.Contains("FaultSummary_Loaded", StringComparison.Ordinal) &&
+               !faultDialogSource.Contains("FormatCompactOperator", StringComparison.Ordinal) &&
+               !faultDialogSource.Contains("AddWire(", StringComparison.Ordinal),
+            "FAIL popup groups short notices by type; physical wire details remain in TestView and history");
         FaultDetail[] popupFaults =
         [
             new FaultDetail
@@ -6786,7 +6780,7 @@ internal static partial class Program
                popupDisplays[0].Title == "LỖI SAI DÂY" &&
                popupDisplays[0].Summary.Contains("IO 43 [JIG 2 - Chân 11]", StringComparison.Ordinal) &&
                popupDisplays[1].Summary.Contains("IO 44 [JIG 2 - Chân 12]", StringComparison.Ordinal),
-            "FAIL popup keeps every confirmed wrong-wire pair in a short operator summary");
+            "The diagnostic formatter preserves every confirmed wrong-wire pair independently of popup presentation");
 
         string mainWindowXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "MainWindow.xaml"));

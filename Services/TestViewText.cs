@@ -10,6 +10,13 @@ public static class TestViewText
 
     private static readonly Dictionary<string, string> Korean = new(StringComparer.Ordinal)
     {
+        ["Đã có lỗi sai dây.\nVui lòng kiểm tra và xử lý."] = "오배선이 발생했습니다.\n확인 후 조치하세요.",
+        ["Đã có lỗi chập mạch.\nVui lòng kiểm tra và xử lý."] = "합선이 발생했습니다.\n확인 후 조치하세요.",
+        ["Đã có lỗi đứt dây / tuột tuýt.\nVui lòng kiểm tra và xử lý."] = "단선 / 핀 빠짐이 발생했습니다.\n확인 후 조치하세요.",
+        ["Đã có lỗi điện trở.\nVui lòng kiểm tra và xử lý."] = "저항 불량이 발생했습니다.\n확인 후 조치하세요.",
+        ["Đã có lỗi kín nước.\nVui lòng kiểm tra và xử lý."] = "기밀 불량이 발생했습니다.\n확인 후 조치하세요.",
+        ["Đã có lỗi thiết bị.\nVui lòng kiểm tra và xử lý."] = "장비 오류가 발생했습니다.\n확인 후 조치하세요.",
+        ["Sản phẩm không đạt.\nVui lòng kiểm tra và xử lý."] = "제품이 불합격입니다.\n확인 후 조치하세요.",
         [TesterConnectionNotice.Message] = "검사기가 연결되지 않았습니다!",
         ["TRANG CHÍNH"] = "메인으로", ["Số LOT"] = "LOT 번호",
         ["Số lỗi hở mạch"] = "단선 수", ["Số lỗi đấu sai"] = "오배선 수", ["Số lỗi"] = "검출 오류 수",

@@ -1,8 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Media;
-using JBZUniversalTester.Converters;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 
@@ -11,12 +9,9 @@ namespace JBZUniversalTester.Views;
 public partial class FaultConfirmationWindow : Window
 {
     private readonly string? _requiredDiscardPassword;
-    private readonly ProductModel? _model;
     private bool _authorized;
     private readonly string _language;
     private string T(string text) => TestViewText.Translate(text, _language);
-
-    private sealed record FaultItem(FaultDetail Fault, string Title, string Summary);
 
     public FaultConfirmationWindow(
         IReadOnlyList<FaultDetail> faults,
@@ -30,7 +25,6 @@ public partial class FaultConfirmationWindow : Window
         InitializeComponent();
 
         _requiredDiscardPassword = requiredDiscardPassword;
-        _model = model;
         if (!string.IsNullOrWhiteSpace(windowHeader))
         {
             Title = windowHeader;
@@ -44,20 +38,24 @@ public partial class FaultConfirmationWindow : Window
             Closing += PreventUnauthorizedClose;
         }
 
-        FaultDetail[] orderedFaults = faults
+        // Product details belong to the live TestView table and persisted history.
+        // One notice per fault type keeps this acknowledgement short even for
+        // hundreds of wrong-wire pairs or very long product metadata.
+        FaultItemsControl.ItemsSource = faults
             .OrderBy(fault => FaultTypeCatalog.Priority(fault.Type))
-            .ThenBy(fault => fault.ActualSourceIo ?? int.MaxValue)
-            .ThenBy(fault => fault.ActualTargetIo ?? int.MaxValue)
-            .ToArray();
-        CompactOperatorFaultDisplay[] displays = orderedFaults
-            .Select(FaultDisplayFormatter.FormatCompactOperator)
-            .ToArray();
-
-        FaultItemsControl.ItemsSource = orderedFaults
-            .Select((fault, index) => new FaultItem(fault,
-                fault.Type == ProductFaultType.SystemDeviceError && fault.Message == TesterConnectionNotice.Message
-                    ? TesterConnectionNotice.Message : displays[index].Title,
-                displays[index].Summary))
+            .GroupBy(fault => fault.Type)
+            .Select(group => T(group.Key switch
+            {
+                ProductFaultType.WrongWiring => "Đã có lỗi sai dây.\nVui lòng kiểm tra và xử lý.",
+                ProductFaultType.ShortCircuit => "Đã có lỗi chập mạch.\nVui lòng kiểm tra và xử lý.",
+                ProductFaultType.OpenCircuit => "Đã có lỗi đứt dây / tuột tuýt.\nVui lòng kiểm tra và xử lý.",
+                ProductFaultType.ResistanceOutOfRange => "Đã có lỗi điện trở.\nVui lòng kiểm tra và xử lý.",
+                ProductFaultType.WaterProofLeak => "Đã có lỗi kín nước.\nVui lòng kiểm tra và xử lý.",
+                ProductFaultType.SystemDeviceError => group.Select(fault => fault.Message)
+                    .FirstOrDefault(message => !string.IsNullOrWhiteSpace(message))
+                    ?? "Đã có lỗi thiết bị.\nVui lòng kiểm tra và xử lý.",
+                _ => "Sản phẩm không đạt.\nVui lòng kiểm tra và xử lý."
+            }))
             .ToArray();
         FooterText.Text = footer ?? string.Empty;
         Loaded += PositionBelowFaultRows;
@@ -131,113 +129,6 @@ public partial class FaultConfirmationWindow : Window
                 return found;
         }
         return null;
-    }
-
-    private void FaultSummary_Loaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is not TextBlock text || text.DataContext is not FaultItem item)
-            return;
-
-        text.Inlines.Clear();
-        text.Tag = "KeepProductData";
-        FaultDetail fault = item.Fault;
-        if (fault.Type != ProductFaultType.WrongWiring)
-        {
-            if (_language != "ko")
-            {
-                text.Inlines.Add(new Run(item.Summary));
-                return;
-            }
-            text.Inlines.Add(new Run(fault.Type == ProductFaultType.WaterProofLeak ? KoreanHistoryFormatter.FormatLeakDetail(fault.Message)
-                : fault.Type == ProductFaultType.SystemDeviceError ? T(fault.Message) : KoreanHistoryFormatter.FormatFault(fault)));
-            return;
-        }
-
-        int[] expected = [fault.ExpectedSourceIo ?? 0, fault.ExpectedTargetIo ?? 0];
-        int unexpectedIo = new[] { fault.ActualSourceIo ?? 0, fault.ActualTargetIo ?? 0 }
-            .FirstOrDefault(io => io > 0 && !expected.Contains(io));
-        PinRecord? sourceRecord = _model?.Pins.FirstOrDefault(pin =>
-            pin.IoNumber == fault.ExpectedSourceIo &&
-            (string.IsNullOrWhiteSpace(fault.ConnectorFrom) ||
-             string.Equals(pin.Connector, fault.ConnectorFrom, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrWhiteSpace(fault.PinFrom) || pin.PinNumber == fault.PinFrom));
-        sourceRecord ??= _model?.Pins.FirstOrDefault(pin => pin.IoNumber == fault.ExpectedSourceIo);
-
-        bool unexpectedIsSource = unexpectedIo > 0 && fault.ActualSourceIo == unexpectedIo;
-        string actualConnector = unexpectedIsSource ? fault.ActualConnectorFrom : fault.ActualConnectorTo;
-        string actualPin = unexpectedIo == 0
-            ? string.Empty
-            : unexpectedIsSource ? fault.ActualPinFrom : fault.ActualPinTo;
-        PinRecord? actualRecord = _model?.Pins.FirstOrDefault(pin =>
-            unexpectedIo > 0 && pin.IoNumber == unexpectedIo &&
-            (string.IsNullOrWhiteSpace(actualConnector) ||
-             string.Equals(pin.Connector, actualConnector, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrWhiteSpace(actualPin) || pin.PinNumber == actualPin));
-        actualRecord ??= _model?.Pins.FirstOrDefault(pin => unexpectedIo > 0 && pin.IoNumber == unexpectedIo);
-        actualPin = string.IsNullOrWhiteSpace(actualPin)
-            ? actualRecord?.PinNumber ?? string.Empty
-            : actualPin.Trim();
-
-        string sourceWire = sourceRecord?.WireName?.Trim() is { Length: > 0 } wireName
-            ? wireName
-            : fault.WireName.Trim();
-        string sourceColor = sourceRecord?.Color?.Trim() is { Length: > 0 } wireColor
-            ? wireColor
-            : fault.WireColor.Trim();
-        string sourcePin = sourceRecord?.PinNumber?.Trim() is { Length: > 0 } pinNumber
-            ? pinNumber
-            : fault.PinFrom.Trim();
-        string actualWire = actualRecord?.WireName?.Trim() ?? string.Empty;
-        string actualColor = actualRecord?.Color?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(sourceWire) ||
-            (string.IsNullOrWhiteSpace(actualPin) &&
-             (string.IsNullOrWhiteSpace(actualWire) ||
-              string.Equals(sourceWire, actualWire, StringComparison.OrdinalIgnoreCase))))
-        {
-            // Missing THT labels must not hide the known physical IO pair.
-            text.Inlines.Add(new Run(_language == "ko" ? KoreanHistoryFormatter.FormatFault(fault) : item.Summary));
-            return;
-        }
-        AddWire(text, sourceWire, sourceColor, sourcePin);
-
-        if (!string.IsNullOrWhiteSpace(actualWire) &&
-            !string.Equals(sourceWire, actualWire, StringComparison.OrdinalIgnoreCase))
-        {
-            text.Inlines.Add(new Run(T(" cắm nhầm với ")));
-            AddWire(text, actualWire, actualColor, actualPin);
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(actualPin))
-            text.Inlines.Add(new Run(T($" cắm nhầm lỗ chân {actualPin}")));
-        else
-            text.Inlines.Add(new Run(T(" cắm nhầm vị trí chưa xác định")));
-    }
-
-    private void AddWire(TextBlock text, string wireName, string color, string housingPosition)
-    {
-        text.Inlines.Add(new Run(string.IsNullOrWhiteSpace(wireName) ? T("Mã dây chưa xác định") : wireName)
-        {
-            Foreground = ThemePalette.Brush("FailRed")
-        });
-        if (!string.IsNullOrWhiteSpace(color))
-        {
-            text.Inlines.Add(new Run(T(" màu ")));
-            AddColorCode(text, color);
-        }
-        if (!string.IsNullOrWhiteSpace(housingPosition))
-            text.Inlines.Add(new Run(T($" vị trí Housing: {housingPosition}")));
-    }
-
-    private static void AddColorCode(TextBlock text, string code)
-    {
-        Brush brush = WireColorToBrushConverter.ToBrush(code);
-        var run = new Run(code) { Foreground = brush };
-        if (code.Equals("W", StringComparison.OrdinalIgnoreCase) ||
-            code.Equals("WH", StringComparison.OrdinalIgnoreCase) ||
-            code.Equals("WHITE", StringComparison.OrdinalIgnoreCase))
-            run.Background = ThemePalette.Brush("TextSecondary");
-        text.Inlines.Add(run);
     }
 
     private void Confirm_Click(object sender, RoutedEventArgs e)

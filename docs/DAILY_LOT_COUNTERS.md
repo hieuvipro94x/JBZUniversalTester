@@ -108,3 +108,7 @@ Cờ đang lưu chỉ chặn thực thi lệnh Manual, không đưa vào CanExec
 ### V2026.09.433 — Manual button presentation
 
 Manual Leak, resistance and relay commands keep their enabled appearance during a pending manual operation. AsyncRelayCommand opts in per command; other commands retain their existing busy/disabled behavior. Duplicate and conflicting clicks are rejected immediately at execution, never queued. Closing, device faults, access permissions and invalid Leak configuration still disable unavailable controls. Cancellation and physical cleanup are unchanged.
+
+### V2026.09.435 — Concise product fault popup
+
+Product FAIL acknowledgement shows one short notice per fault type, without wire names, colors, housing positions or IO pairs. TestView continues to show live fault locations and history retains full diagnostics. Hardware/device error instructions remain available. Confirming the popup does not reset the cycle: all physical connections must clear through the existing validated full-removal gate (and NG-bin interlock where configured) before installation is re-armed.
