@@ -245,6 +245,29 @@ public sealed class ResistanceResult : ObservableObject
     }
     public int SampleCount { get; set; }
     public long StabilizationTimeMs { get; set; }
+    internal void ApplyMeasurement(ResistanceResult update)
+    {
+        bool displayChanged = !Nullable.Equals(_valueOhm, update._valueOhm) ||
+            _isOpen != update._isOpen || _isMeasured != update._isMeasured;
+        bool resultChanged = displayChanged || _isStable != update._isStable ||
+            _passed != update._passed || _measurementStatus != update._measurementStatus;
+        Set(ref _valueOhm, update._valueOhm, nameof(ValueOhm));
+        Set(ref _isOpen, update._isOpen, nameof(IsOpen));
+        Set(ref _isStable, update._isStable, nameof(IsStable));
+        Set(ref _passed, update._passed, nameof(Passed));
+        Set(ref _measurementStatus, update._measurementStatus, nameof(MeasurementStatus));
+        SampleCount = update.SampleCount;
+        StabilizationTimeMs = update.StabilizationTimeMs;
+        _isMeasured = update._isMeasured;
+        if (displayChanged)
+        {
+            Raise(nameof(Display));
+            Raise(nameof(MinDisplayText));
+            Raise(nameof(MaxDisplayText));
+            Raise(nameof(DisplayUnitText));
+        }
+        if (resultChanged) Raise(nameof(ResultText));
+    }
     public string MinDisplayText => !string.IsNullOrWhiteSpace(MinDisplayTextOverride)
         ? MinDisplayTextOverride
         : FormatOhm(MinOhm, DisplayScale);

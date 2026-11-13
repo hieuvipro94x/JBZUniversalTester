@@ -8411,19 +8411,19 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         RefreshDailyMasterRequirementCore(false);
     }
 
-    private void RefreshProductionCounterPeriod()
+    private void RefreshProductionCounterPeriod(bool forceReload = false)
     {
         ProductModel? model = _model;
         if (model is null || _lifetimeCts.IsCancellationRequested)
             return;
         string batchKey = _lotSequence.HistoryBatchKey;
-        if (string.Equals(batchKey, _statisticsBatchKey, StringComparison.Ordinal))
+        if (!forceReload && string.Equals(batchKey, _statisticsBatchKey, StringComparison.Ordinal))
             return;
 
         Total = Pass = Fail = 0;
         DailyTestCount = 0;
         UpdateDailyLotDisplay();
-        AddLog($"PRODUCTION COUNTER DATE CHANGED batch={batchKey}; đang nạp sản lượng và LOT của ngày được chọn.");
+        AddLog($"PRODUCTION COUNTER {(forceReload ? "RELOAD" : "DATE CHANGED")} batch={batchKey}; đang nạp sản lượng và LOT của ngày được chọn.");
         ScheduleStatisticsLoadForModel(model);
     }
 
@@ -12248,7 +12248,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         _lotSequence.RefreshActiveProduct();
         if (_model is not null)
             ProductionConfigService.ApplyProductLabelTemplate(_productionSettings, ProductionConfigService.GetLotProductKey(_model));
-        RefreshProductionCounterPeriod();
+        // An open Settings editor can save a counter snapshot older than the
+        // latest SQLite reconciliation. Reconcile it before the next cycle,
+        // even when the product/date/base batch itself has not changed.
+        RefreshProductionCounterPeriod(forceReload:
+            !long.TryParse(Lot, out long displayedLot) || displayedLot != _lotSequence.NextLot);
         // RuntimePaths.DatabaseFile is fixed for this process. Retain the same
         // repository used by ProductionPersistence and recorded cycle contexts.
         UpdateDailyLotDisplay();

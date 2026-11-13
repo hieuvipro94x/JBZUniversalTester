@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -443,6 +443,10 @@ internal static partial class Program
             Console.WriteLine("PASS: Fragmented Leak RESULT waits for six numeric values");
             return 0;
         }
+        if (args is ["--test-late-lot-base"])
+        { TestLateLotBaseActivation(); Console.WriteLine("PASS: late LOT base activates 7000 + 20 + 1 = 7021"); return 0; }
+        if (args is ["--test-settings-manual-ui"])
+        { TestSettingsManualStablePresentation(); Console.WriteLine("PASS: stable manual settings layout and inline errors"); return 0; }
         if (args is ["--test-settings-opening"])
         {
             TestSettingsOpeningResponsiveness();
@@ -765,6 +769,8 @@ internal static partial class Program
             ("Combined inspection table retains Leak and resistance results", TestCombinedInspectionResults),
             ("Main catalog scrolls and selects the exact THT path without automatic loading", TestMainProductCatalog),
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
+            ("Manual settings keep panel geometry, input and result rows stable", TestSettingsManualStablePresentation),
+            ("Late LOT base activation preserves twenty PASS and prints 7021", TestLateLotBaseActivation),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
             ("Discard confirmation silences removed-product alarm and acknowledges with DRIP", TestDiscardConfirmationSound),

@@ -92,3 +92,8 @@ Tooltip History (File, lịch sử kiểm tra, mã vạch đầu ra) chỉ mở 
 ## V2026.09.429: Nhận database cạnh EXE
 Nếu không có Data/JBZUniversalTester.db hoặc Data/History/test-history.db, nhận JBZUniversalTester.db ngay cạnh EXE trước khi dò thư mục phiên bản cũ. Giữ nguyên ưu tiên nguồn hiện có, kiểm chứng SQLite Backup/WAL và nội dung tất cả bảng; không ghi đè DB ProgramData đã tồn tại, không sửa hoặc xóa DB nguồn.
 Khi dò phiên bản cũ, xét cả DB cạnh EXE để không bỏ sót lịch sử portable; nhiều DB khác nội dung vẫn bị chặn, không tự chọn nguồn.
+
+## V2026.09.430: LOT bắt đầu theo mã hàng và Manual ổn định
+Cài đặt hiển thị số nền LOT đang dùng của đúng mã hàng, không hiển thị số nền legacy đang bị bỏ qua khi chạy từ 0. Nhập lại số nền cũ phải kích hoạt lựa chọn rõ ràng của người vận hành và lưu UseConfiguredStartLot theo mã hàng trong CFG. Có 20 PASS rồi đặt 7000: hiển thị 7020, PASS kế tiếp ghi lịch sử và tạo payload tem 7021. Lưu tiếp các mục khác không biến LOT hiện tại thành số nền, không cộng tiến độ hai lần; đổi mã/khởi động lại giữ số nền riêng. Không viết lại LOT của lịch sử cũ.
+Manual Leak/relay/điện trở giữ vùng trạng thái và kết quả ổn định; lỗi lệnh hiện tại chỗ, không mở hộp thoại khóa trang. Các lệnh phần cứng xung đột vẫn tuần tự; đóng trang vẫn chờ hủy và RESET an toàn. Số đo điện trở cập nhật dòng hiện có, bỏ qua giá trị trùng.
+Khi lưu tiếp từ cùng trang đang mở, ô LOT vẫn giữ số nền; nếu snapshot bộ đếm cũ khác LOT đang hiển thị, runtime nạp lại thống kê/LOT từ SQLite trước khi ARM thay vì áp lại số cũ.

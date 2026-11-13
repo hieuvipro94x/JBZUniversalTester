@@ -10,14 +10,17 @@ public sealed class AsyncRelayCommand : ICommand
 {
     private readonly Func<Task> _run;
     private readonly Func<bool>? _can;
+    private readonly Action<Exception>? _onError;
     private bool _busy;
 
     public AsyncRelayCommand(
         Func<Task> run,
-        Func<bool>? can = null)
+        Func<bool>? can = null,
+        Action<Exception>? onError = null)
     {
         _run = run;
         _can = can;
+        _onError = onError;
     }
 
     public bool CanExecute(object? parameter)
@@ -50,6 +53,11 @@ public sealed class AsyncRelayCommand : ICommand
             // thoát khỏi đây WPF Dispatcher có thể kết thúc toàn bộ ứng dụng.
             // Chặn tại biên command, ghi log và báo rõ để app tiếp tục chạy.
             AsyncFileLogService.Current.Error($"COMMAND ERROR: {ex}");
+            if (_onError is not null)
+            {
+                _onError(ex);
+                return;
+            }
             MessageBox.Show(
                 string.IsNullOrWhiteSpace(ex.Message)
                     ? "Thao tác không thực hiện được. Hãy kiểm tra kết nối thiết bị và thử lại."

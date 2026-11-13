@@ -69,6 +69,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
     private readonly TestViewModel? _test;
     private readonly Action<ProductionSettings> _saveSettings;
+    private long _openedLotStart;
     private SettingsAccessSession _accessSession = SettingsAccessSession.Administrator;
     private string _deniedSettingsSnapshot = string.Empty;
     private string _deniedEditorsSnapshot = string.Empty;
@@ -280,7 +281,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             migrateCurrentLot: true);
         // Trường trên màn Cài đặt là LOTNO bắt đầu, không phải LOT kế tiếp đã
         // tăng trong quá trình sản xuất.
-        Settings.LotNo = productLot.StartLotNo;
+        Settings.LotNo = productLot.DailyLotStartsAtZero && !productLot.UseConfiguredStartLot
+            ? 0 : productLot.StartLotNo;
+        _openedLotStart = Settings.LotNo;
         Settings.LotNoDate = productLot.LotNoDate;
         ProductionConfigService.ApplyProductLabelTemplate(Settings, _lotProductKey);
         _printLabelForCurrentProduct = ProductionConfigService.IsProductLabelPrintingEnabled(Settings, _lotProductKey);
@@ -338,25 +341,32 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, true)),
-            CanUseManualRelay);
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
         ManualRelay1OffCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, false)),
-            CanUseManualRelay);
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
         ManualRelay2OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, true)),
-            CanUseManualRelay);
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
         ManualRelay2OffCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, false)),
-            CanUseManualRelay);
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
         ManualResetCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualResetAsync()),
-            CanUseManualRelay);
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
         ManualMeasureResistanceCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(RunManualResistanceAsync),
-            CanUseManualResistance);
+            CanUseManualResistance, ex => ReportManualError(ex, text => ManualResistanceStatus = text));
         ManualWaterProofTestCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(RunManualWaterProofAsync),
-            CanUseManualWaterProof);
+            CanUseManualWaterProof, ex => ReportManualError(ex, text => ManualWaterProofStatus = text));
+    }
+
+    private void ReportManualError(Exception error, Action<string> showStatus)
+    {
+        // Manual commands report locally without a modal window or a page switch.
+        // The runtime's DeviceFault and hardware ownership guards remain active.
+        if (!_manualControlsClosing) showStatus(error.Message);
     }
 
     private static IReadOnlyList<string> LoadWaterProofConnectorOptions(
@@ -541,11 +551,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             WaterProofStage.Evaluating => "ĐANG ĐÁNH GIÁ",
             _ => "ĐANG TEST"
         };
-        string values = progress.Values.Count == 0
-            ? string.Empty
-            : " • " + string.Join(" / ", progress.Values.Select(value =>
-                value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)));
-        ManualWaterProofStatus = $"{stage} {portName}{values}";
+        // Numeric readings already have dedicated cells. Keep the status headline
+        // stable instead of rewrapping it for every serial progress value.
+        ManualWaterProofStatus = $"{stage} {portName}";
 
         if (progress.Stage is not (WaterProofStage.Pressurizing or WaterProofStage.Waiting))
             return;
@@ -767,14 +775,14 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                 if (current.ResultText is not ("ĐANG ĐO" or "CHỜ ĐO"))
                     continue;
 
-                ManualResistanceResults[index] = new ResistanceResult
+                current.ApplyMeasurement(new ResistanceResult
                 {
                     Name = current.Name,
                     Channel = current.Channel,
                     MinOhm = current.MinOhm,
                     MaxOhm = current.MaxOhm,
                     MeasurementStatus = "LỖI"
-                };
+                });
             }
 
             // Lỗi bo/relay thật vẫn giữ DeviceFault toàn cục.
@@ -811,7 +819,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
 
         if (index >= 0)
-            ManualResistanceResults[index] = update;
+            ManualResistanceResults[index].ApplyMeasurement(update);
         else
             ManualResistanceResults.Add(update);
 
@@ -867,11 +875,15 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                 Settings, _modelPath, MasterFaultRequiredCount);
             ProductionConfigService.SetMasterSelectedFaultSamplesForPath(Settings, _modelPath, MasterSelectedFaultSamples);
             ProductionConfigService.SetMasterOpenFaultRequiredCountForPath(Settings, _modelPath, MasterOpenFaultRequiredCount);
+            bool lotStartEdited = Settings.LotNo != _openedLotStart;
+            ProductLotSettings productLot = ProductionConfigService.GetOrCreateProductLot(
+                Settings, _lotProductKey, migrateCurrentLot: false);
             ProductionConfigService.SetProductLot(
                 Settings,
                 _lotProductKey,
-                Settings.LotNo,
-                DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture));
+                lotStartEdited ? Settings.LotNo : productLot.StartLotNo,
+                DateTime.Today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                activateConfiguredStart: lotStartEdited);
         }
         if (_accessSession.Allows(SettingsPermission.Leak) && !HasWaterProofConfigurationError)
             ProductionConfigService.SetWaterProofProfileForPath(Settings, _modelPath, WaterProof);
@@ -887,6 +899,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         var discard = CaptureDiscardEdit();
         SaveDiscardEdit(discard);
         _saveSettings(Settings);
+        RestoreLotEditorInput();
         Task applying = AcceptDiscardEditAsync(discard);
         if (applying.IsCompleted) applying.GetAwaiter().GetResult();
         else _ = ObserveDiscardApplyAsync(applying);
@@ -902,7 +915,19 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             JsonSerializer.SerializeToUtf8Bytes(Settings))!;
         await Task.Run(() => { SaveDiscardEdit(discard); _saveSettings(snapshot); });
         ProductionConfigService.CopyInto(Settings, snapshot);
+        RestoreLotEditorInput();
         await AcceptDiscardEditAsync(discard);
+    }
+
+    private void RestoreLotEditorInput()
+    {
+        // CFG keeps the compatibility current LOT, but the editor always shows
+        // the product's base. Never reinterpret current progress as a new base
+        // when another setting is saved from the same open page.
+        if (!Settings.LotSettingsByProduct.TryGetValue(_lotProductKey, out ProductLotSettings? lot)) return;
+        Settings.LotNo = lot.DailyLotStartsAtZero && !lot.UseConfiguredStartLot ? 0 : lot.StartLotNo;
+        Settings.LotNoDate = lot.LotNoDate;
+        _openedLotStart = Settings.LotNo;
     }
 
     private (int First, int Second)? CaptureDiscardEdit()

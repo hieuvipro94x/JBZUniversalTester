@@ -353,19 +353,21 @@ public static class ProductionConfigService
         ProductionSettings settings,
         string productKey,
         long startLotNo,
-        string lotNoDate)
+        string lotNoDate,
+        bool activateConfiguredStart = false)
     {
         ProductLotSettings lot = GetOrCreateProductLot(settings, productKey, migrateCurrentLot: false);
         long normalizedStart = Math.Max(0, startLotNo);
         string normalizedDate = (lotNoDate ?? string.Empty).Trim();
         bool startChanged = normalizedStart != lot.StartLotNo;
-        if (startChanged || !string.Equals(normalizedDate, lot.LotNoDate, StringComparison.Ordinal))
+        bool startActivated = activateConfiguredStart && (!lot.UseConfiguredStartLot || lot.DailyLotStartsAtZero);
+        if (startChanged || startActivated || !string.Equals(normalizedDate, lot.LotNoDate, StringComparison.Ordinal))
         {
             // Giá trị nhập là số nền. Runtime sẽ cộng số PASS của ngày được
             // chọn; lưu các cài đặt độc lập không cộng lại tiến độ lần nữa.
             lot.DailyLotStartsAtZero = false;
             lot.StartLotNo = normalizedStart;
-            if (startChanged)
+            if (startChanged || startActivated)
             {
                 lot.UseConfiguredStartLot = true;
                 lot.HistoryBatchId = Guid.NewGuid().ToString("N");

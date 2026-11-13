@@ -315,7 +315,7 @@
                                     <TextBlock Grid.Row="5" Text="Độ trễ USB" Style="{StaticResource FieldLabelStyle}"/>
                                     <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding Settings.UsbDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     <TextBlock Grid.Row="6" Text="LOTNO bắt đầu" Style="{StaticResource FieldLabelStyle}"/>
-                                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.LotNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="LOTNO của sản phẩm PASS kế tiếp; cùng số này được ghi vào lịch sử test và in trên tem."/>
+                                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding Settings.LotNo, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Số nền riêng của mã hàng. LOT bằng số nền cộng số PASS hôm nay; sản phẩm PASS tiếp theo cộng thêm 1 và dùng cùng LOT trong lịch sử và tem."/>
                                     <TextBlock Grid.Row="7" Text="Tên thiết bị" Style="{StaticResource FieldLabelStyle}"/>
                                     <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.DeviceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     <TextBlock Grid.Row="8" Text="Số thiết bị" Style="{StaticResource FieldLabelStyle}"/>
@@ -368,7 +368,7 @@
                         <!-- ================= CỘT 2: RELAY / LEAK ================= -->
                         <Border x:Name="RelayLeakMainPanel" HorizontalAlignment="Stretch" Style="{StaticResource SettingsPanelStyle}" Grid.Column="1" Grid.Row="0" Grid.RowSpan="2" Margin="8" VerticalAlignment="Stretch">
                             <StackPanel x:Name="RelayLeakSettingsColumn" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Margin="0">
-                                <Border x:Name="RelaySettingsPanel" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="0,0,0,8" Padding="0" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" CornerRadius="0">
+                                <Border x:Name="RelaySettingsPanel" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="0,0,0,4" Padding="0" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" CornerRadius="0">
                                     <StackPanel>
                                         <TextBlock Text="RELAY / BẢO TRÌ" Style="{StaticResource SectionTitleStyle}"/>
                                         <Grid>
@@ -377,34 +377,34 @@
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
                                             <Grid.RowDefinitions>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
-                                                <RowDefinition Height="30"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
+                                                <RowDefinition Height="26"/>
                                             </Grid.RowDefinitions>
                                             <TextBlock Text="Chu kỳ thay PIN" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Column="1" Text="{Binding ProbeReplacementThresholdText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Số chu kỳ kiểm tra trước khi thay PIN. Mặc định 200.000; áp dụng cho các mã hàng, giữ nguyên số chu kỳ đã chạy."/>
+                                            <TextBox Margin="0" Grid.Column="1" Text="{Binding ProbeReplacementThresholdText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Số chu kỳ kiểm tra trước khi thay PIN. Mặc định 200.000; áp dụng cho các mã hàng, giữ nguyên số chu kỳ đã chạy."/>
                                             <TextBlock Grid.Row="1" Text="R1 Delay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
+                                            <TextBox Margin="0" Grid.Row="1" Grid.Column="1" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
                                             <TextBlock Grid.Row="2" Text="R2 Delay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding Settings.Relay2MarkingPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
+                                            <TextBox Margin="0" Grid.Row="2" Grid.Column="1" Text="{Binding Settings.Relay2MarkingPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
                                             <TextBlock Grid.Row="3" Text="PASS MARK - JIG" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: Relay thứ nhất OFF → Relay thứ hai ON khoảng 430 ms."/>
+                                            <TextBox Margin="0" Grid.Row="3" Grid.Column="1" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: Relay thứ nhất OFF → Relay thứ hai ON khoảng 430 ms."/>
                                             <TextBlock Grid.Row="4" Text="Bật mở JIG" Style="{StaticResource FieldLabelStyle}"/>
-                                            <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding Settings.JigEjectRelayEnabled, Mode=TwoWay}"/>
+                                            <CheckBox Margin="0" Grid.Row="4" Grid.Column="1" IsChecked="{Binding Settings.JigEjectRelayEnabled, Mode=TwoWay}"/>
                                             <TextBlock Grid.Row="5" Text="MARKING PASS" Style="{StaticResource FieldLabelStyle}"/>
-                                            <CheckBox Grid.Row="5" Grid.Column="1" IsChecked="{Binding Settings.PassMarkingRelayEnabled, Mode=TwoWay}"/>
+                                            <CheckBox Margin="0" Grid.Row="5" Grid.Column="1" IsChecked="{Binding Settings.PassMarkingRelayEnabled, Mode=TwoWay}"/>
                                             <TextBlock Grid.Row="6" Text="Kiểu đấu Relay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <ComboBox x:Name="RelayWiringModeComboBox" Grid.Row="6" Grid.Column="1" DisplayMemberPath="Display" SelectedValuePath="Mode" SelectedValue="{Binding Settings.RelayWiringMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Thử tay Relay 1/2 rồi chọn đúng chức năng thực tế. PASS luôn MARKING trước mở JIG; xác nhận FAIL chỉ mở JIG."/>
+                                            <ComboBox Margin="0" x:Name="RelayWiringModeComboBox" Grid.Row="6" Grid.Column="1" DisplayMemberPath="Display" SelectedValuePath="Mode" SelectedValue="{Binding Settings.RelayWiringMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Thử tay Relay 1/2 rồi chọn đúng chức năng thực tế. PASS luôn MARKING trước mở JIG; xác nhận FAIL chỉ mở JIG."/>
                                             <TextBlock Grid.Row="7" Text="Resistance delay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBox Margin="0" Grid.Row="7" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <TextBlock Grid.Row="8" Text="Scroll delay (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBox Margin="0" Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                         </Grid>
                                     </StackPanel>
                                 </Border>
@@ -486,12 +486,12 @@
                                                     <TextBox Height="26" Text="{Binding WaterProof.PressTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                                     <TextBox Grid.Column="2" Height="26" Text="{Binding WaterProof.WaitTimeMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                                 </Grid>
-                                                <TextBlock x:Name="ManualLeakStatusText" Grid.Row="6" Grid.ColumnSpan="3" Margin="0,5,0,1" Text="{Binding ManualWaterProofStatus}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource BrandBlue}" TextWrapping="Wrap">
+                                                <TextBlock x:Name="ManualLeakStatusText" Height="24" TextTrimming="CharacterEllipsis" ToolTip="{Binding ManualWaterProofStatus}" Grid.Row="6" Grid.ColumnSpan="3" Margin="0,5,0,1" Text="{Binding ManualWaterProofStatus}" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource BrandBlue}" TextWrapping="NoWrap">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding ManualWaterProofStatus}" Value="Chọn COM và bấm CHẠY TEST">
-                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    <Setter Property="Visibility" Value="Hidden"/>
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -560,12 +560,12 @@
                                         <TextBlock Grid.Row="1" Grid.Column="3" Text="{Binding ManualRelay2Status}" FontWeight="Bold" HorizontalAlignment="Center"/>
                                         <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="1" Content="TẮT TẤT CẢ" Command="{Binding ManualRelay1OffCommand}" Style="{StaticResource SettingsExitButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                         <Button Margin="3,2,3,2" Grid.Row="2" Grid.Column="2" Content="RESET" Command="{Binding ManualResetCommand}" Style="{StaticResource SettingsWarningButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
-                                        <TextBlock x:Name="ManualRelayStatusText" Grid.Row="3" Grid.ColumnSpan="4" Text="{Binding ManualStatus}" Foreground="{StaticResource TextMuted}" FontSize="14">
+                                        <TextBlock x:Name="ManualRelayStatusText" Height="24" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding ManualStatus}" Grid.Row="3" Grid.ColumnSpan="4" Text="{Binding ManualStatus}" Foreground="{StaticResource TextMuted}" FontSize="14">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding ManualStatus}" Value="Sẵn sàng thao tác tay - không cần lưu cài đặt">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Setter Property="Visibility" Value="Hidden"/>
                                                         </DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
@@ -757,15 +757,15 @@
                                                     <ColumnDefinition Width="80"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="{Binding Label}" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
-                                                <CheckBox Grid.Column="1" HorizontalAlignment="Center" IsChecked="{Binding Enabled, Mode=TwoWay}"/>
-                                                <ComboBox Grid.Column="2" Margin="0,2,7,2" ItemsSource="{Binding DataContext.ChannelOptions, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding ChannelSelection, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                                <TextBox Grid.Column="3" Margin="0,2,7,2" Text="{Binding MinOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                                <TextBox Grid.Column="4" Margin="0,2,0,2" Text="{Binding MaxOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <CheckBox Grid.Column="1" Margin="0" HorizontalAlignment="Center" IsChecked="{Binding Enabled, Mode=TwoWay}"/>
+                                                <ComboBox Grid.Column="2" Margin="0,0,7,0" ItemsSource="{Binding DataContext.ChannelOptions, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding ChannelSelection, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <TextBox Grid.Column="3" Margin="0,0,7,0" Text="{Binding MinOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <TextBox Grid.Column="4" Margin="0" Text="{Binding MaxOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <Border Grid.Row="3" Margin="0,8,0,0" Padding="8" Background="{StaticResource InfoPanelBackground}" BorderBrush="{StaticResource InfoPanelBorder}" BorderThickness="1" CornerRadius="6">
+                                <Border Grid.Row="3" Margin="0,6,0,0" Padding="8" Background="{StaticResource InfoPanelBackground}" BorderBrush="{StaticResource InfoPanelBorder}" BorderThickness="1" CornerRadius="6">
                                     <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
@@ -782,13 +782,13 @@
                                             <ComboBox ItemsSource="{Binding ManualResistanceOptions}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding SelectedManualResistanceChannel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="TẤT CẢ đo các dòng R đang tích BẬT; chọn CH để đo riêng kênh vật lý đó."/>
                                             <Button Grid.Column="1" Height="26" Margin="7,2,0,2" Padding="4,0" FontSize="14" Content="CHẠY ĐO" Command="{Binding ManualMeasureResistanceCommand}" Style="{StaticResource SettingsActionButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                         </Grid>
-                                        <TextBlock x:Name="ManualResistanceStatusText" Grid.Row="2" Text="{Binding ManualResistanceStatus}" MinHeight="26" Margin="0,2" FontSize="16" FontWeight="Bold" TextWrapping="Wrap">
+                                        <TextBlock x:Name="ManualResistanceStatusText" Height="26" TextTrimming="CharacterEllipsis" ToolTip="{Binding ManualResistanceStatus}" Grid.Row="2" Text="{Binding ManualResistanceStatus}" MinHeight="26" Margin="0,2" FontSize="16" FontWeight="Bold" TextWrapping="NoWrap">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding ManualResistanceStatus}" Value="Chọn TẤT CẢ hoặc một CH để đo">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Setter Property="Visibility" Value="Hidden"/>
                                                         </DataTrigger>
                                                         <DataTrigger Binding="{Binding ManualResistanceStatus}" Value="KHÔNG KẾT NỐI ĐƯỢC KEYSIGHT 34461A">
                                                             <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
@@ -797,49 +797,42 @@
                                                 </Style>
                                             </TextBlock.Style>
                                         </TextBlock>
-                                        <ItemsControl x:Name="ManualResistanceResultLines" Grid.Row="3" Margin="0,4,0,0" ItemsSource="{Binding ManualResistanceResults}">
-                                            <ItemsControl.Style>
-                                                <Style TargetType="ItemsControl">
-                                                    <Style.Triggers>
-                                                        <Trigger Property="HasItems" Value="False">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                        </Trigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </ItemsControl.Style>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate>
-                                                    <TextBlock Margin="0,2" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap">
-                                                        <TextBlock.Style>
-                                                            <Style TargetType="TextBlock">
-                                                                <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
-                                                                <Style.Triggers>
-                                                                    <DataTrigger Binding="{Binding ResultText}" Value="PASS">
-                                                                        <Setter Property="Foreground" Value="{StaticResource PassGreen}"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding ResultText}" Value="FAIL">
-                                                                        <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding ResultText}" Value="LỖI">
-                                                                        <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding ResultText}" Value="UNSTABLE">
-                                                                        <Setter Property="Foreground" Value="{StaticResource PendingAmber}"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding ResultText}" Value="ĐANG ĐO">
-                                                                        <Setter Property="Foreground" Value="{StaticResource PendingAmber}"/>
-                                                                    </DataTrigger>
-                                                                    <DataTrigger Binding="{Binding ResultText}" Value="CHỜ ĐO">
-                                                                        <Setter Property="Foreground" Value="{StaticResource PendingAmber}"/>
-                                                                    </DataTrigger>
-                                                                </Style.Triggers>
-                                                            </Style>
-                                                        </TextBlock.Style>
-                                                    <Run Text="{Binding ChannelText, Mode=OneWay}"/><Run Text=": "/><Run Text="{Binding Display, Mode=OneWay}"/><Run Text=" — "/><Run Text="{Binding ResultText, Mode=OneWay}"/>
-                                                    </TextBlock>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
+                                        <ScrollViewer x:Name="ManualResistanceViewport" Grid.Row="3" Height="48" Margin="0,4,0,0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl x:Name="ManualResistanceResultLines" ItemsSource="{Binding ManualResistanceResults}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Height="24" FontSize="16" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding ResultText}" Value="PASS">
+                                                                            <Setter Property="Foreground" Value="{StaticResource PassGreen}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding ResultText}" Value="FAIL">
+                                                                            <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding ResultText}" Value="LỖI">
+                                                                            <Setter Property="Foreground" Value="{StaticResource FailRed}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding ResultText}" Value="UNSTABLE">
+                                                                            <Setter Property="Foreground" Value="{StaticResource PendingAmber}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding ResultText}" Value="ĐANG ĐO">
+                                                                            <Setter Property="Foreground" Value="{StaticResource PendingAmber}"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding ResultText}" Value="CHỜ ĐO">
+                                                                            <Setter Property="Foreground" Value="{StaticResource PendingAmber}"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        <Run Text="{Binding ChannelText, Mode=OneWay}"/><Run Text=": "/><Run Text="{Binding Display, Mode=OneWay}"/><Run Text=" — "/><Run Text="{Binding ResultText, Mode=OneWay}"/>
+                                                        </TextBlock>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
                                     </Grid>
                                 </Border>
                             </Grid>

@@ -66,10 +66,13 @@ internal static partial class Program
                 })
                 {
                     var status = (TextBlock)page.FindName(name);
-                    Assert(status.Visibility == Visibility.Collapsed, "Idle manual hints do not consume Settings height");
+                    double reservedHeight = status.ActualHeight;
+                    Assert(status.Visibility == Visibility.Hidden && reservedHeight > 0,
+                        "Idle manual hints reserve their bounded status area so starting a command cannot shift other panels");
                     typeof(ProductionSettingsViewModel).GetProperty(property)!.SetValue(vm, "LỖI KẾT NỐI THIẾT BỊ");
                     page.UpdateLayout();
-                    Assert(status.Visibility == Visibility.Visible && status.Text == "LỖI KẾT NỐI THIẾT BỊ",
+                    Assert(status.Visibility == Visibility.Visible && status.Text == "LỖI KẾT NỐI THIẾT BỊ" &&
+                           status.ActualHeight == reservedHeight,
                         "Manual device errors remain visible when idle hints are hidden");
                     typeof(ProductionSettingsViewModel).GetProperty(property)!.SetValue(vm, idle);
                 }
@@ -100,8 +103,12 @@ internal static partial class Program
                     if (size.Height <= 768)
                         Assert(scroll.ScrollableHeight > 0, "Small screens provide scrolling instead of shrinking settings");
                     if (size.Width >= 1920 && size.Height >= 1040)
+                    {
+                        if (scroll.ScrollableHeight >= 1)
+                            Console.WriteLine($"SETTINGS_LAYOUT_OVERFLOW size={size} extent={scroll.ExtentHeight:0.##} viewport={scroll.ViewportHeight:0.##} panels={string.Join("/", panels.Select(panel => $"{panel.Name}:{panel.ActualHeight:0.##}"))}");
                         Assert(scroll.ScrollableHeight < 1,
                             $"All Settings controls fit without vertical scrolling at {size}; overflow={scroll.ScrollableHeight:0.##}");
+                    }
                     var resultText = (TextBlock)page.FindName("DiscardLearningResultText");
                     Rect PanelBounds(Border panel) => new(panel.TranslatePoint(new Point(), page),
                         panel.TranslatePoint(new Point(panel.ActualWidth, panel.ActualHeight), page));
