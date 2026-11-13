@@ -468,8 +468,8 @@ public partial class ProductionSettingsPage : UserControl
             Owner = HostWindow,
             Width = 900,
             Height = 680,
-            MinWidth = 640,
-            MinHeight = 420,
+            ResizeMode = ResizeMode.NoResize,
+            SizeToContent = SizeToContent.Manual,
             ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner
         };
