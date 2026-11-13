@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -44,6 +45,14 @@ internal static partial class Program
                 Layout(); await page.PrepareForDisplayAsync(); Layout();
                 var scroll = (ScrollViewer)page.FindName("SettingsScrollViewer");
                 var save = (Button)page.FindName("SaveSettingsButton");
+                var leak = (Button)page.FindName("ManualLeakTestButton");
+                var resistance = (Button)page.FindName("ManualResistanceMeasureButton");
+                Assert(leak.IsEnabled && resistance.IsEnabled, "Both manual controls start available in the fixture");
+                int enabledTransitions = 0;
+                var enabled = DependencyPropertyDescriptor.FromProperty(UIElement.IsEnabledProperty, typeof(Button));
+                EventHandler enabledChanged = (_, _) => enabledTransitions++;
+                enabled.AddValueChanged(leak, enabledChanged);
+                enabled.AddValueChanged(resistance, enabledChanged);
                 var status = (TextBlock)page.FindName("SettingsSavedStatusText");
                 var input = Descendants(page).OfType<TextBox>().Single(text =>
                     text.GetBindingExpression(TextBox.TextProperty)?.ParentBinding.Path?.Path == "Settings.DeviceName");
@@ -67,8 +76,14 @@ internal static partial class Program
                 save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 await entered.Task.WaitAsync(TimeSpan.FromSeconds(5)); Layout();
                 Assert(page.IsEnabled && scroll.IsEnabled && !save.IsEnabled && vm.Settings.DeviceName == "EDITED-SAVE" &&
-                       !vm.ManualRelay1OnCommand.CanExecute(null) && !vm.ManualWaterProofTestCommand.CanExecute(null),
-                    "A blocked disk write leaves the page and scrolling active but guards duplicate save/manual commands");
+                       leak.IsEnabled && resistance.IsEnabled && enabledTransitions == 0,
+                    "A blocked disk write leaves manual button appearance, page and scrolling unchanged while guarding duplicate save");
+                int manualExecutions = 0;
+                async Task AttemptManual() => await (Task)typeof(ProductionSettingsViewModel).GetMethod("RunManualOperationAsync", flags)!
+                    .Invoke(vm, [new Func<CancellationToken, Task>(_ => { manualExecutions++; return Task.CompletedTask; })])!;
+                await AttemptManual();
+                Assert(manualExecutions == 0 && !vm.IsManualOperationRunning,
+                    "Even a direct manual execution attempt is rejected before hardware work while writing settings");
                 var editClick = new MouseButtonEventArgs(Mouse.PrimaryDevice, 0, MouseButton.Left)
                     { RoutedEvent = Mouse.PreviewMouseDownEvent, Source = input };
                 typeof(ProductionSettingsPage).GetMethod("Settings_PreviewMouseDown", flags)!.Invoke(page, [page, editClick]);
@@ -82,8 +97,10 @@ internal static partial class Program
                 release.TrySetResult();
                 await applyEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 await Dispatcher.Yield(DispatcherPriority.Input);
-                Assert(page.IsEnabled && !save.IsEnabled && !vm.ManualRelay1OnCommand.CanExecute(null),
-                    "UI remains responsive while board/LOT application is pending; manual commands cannot race that apply");
+                await AttemptManual();
+                Assert(page.IsEnabled && !save.IsEnabled && leak.IsEnabled && resistance.IsEnabled &&
+                       enabledTransitions == 0 && manualExecutions == 0,
+                    "Board/LOT apply keeps manual button appearance stable while the execution guard still rejects hardware work");
                 applyRelease.TrySetResult();
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 while ((int)typeof(ProductionSettingsPage).GetField("_saveInProgress", flags)!.GetValue(page)! != 0)
@@ -91,11 +108,16 @@ internal static partial class Program
                 await Dispatcher.Yield(DispatcherPriority.Background); Layout();
                 Assert(writes == 1 && applied == 1 && closed == 0 && save.IsEnabled &&
                        input.Text == "NORMALIZED-SAVE" && inputRanDuringRefresh &&
-                       ReferenceEquals(page.DataContext, vm) && panels.Select(Bounds).Append(Bounds(save)).SequenceEqual(before),
+                       ReferenceEquals(page.DataContext, vm) && panels.Select(Bounds).Append(Bounds(save)).SequenceEqual(before) &&
+                       enabledTransitions == 0,
                     "Save yields during binding refresh, shows normalized values and stays on the same settings page");
                 save.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 await Dispatcher.Yield(DispatcherPriority.Background);
                 Assert(writes == 1 && applied == 1 && closed == 0, "Saving unchanged settings neither writes again nor navigates away");
+                await AttemptManual();
+                Assert(manualExecutions == 1, "Manual execution becomes available normally after save/apply completes");
+                enabled.RemoveValueChanged(leak, enabledChanged);
+                enabled.RemoveValueChanged(resistance, enabledChanged);
             }
             finally { release.TrySetResult(); applyRelease.TrySetResult(); page.ReleasePageResources(); }
 

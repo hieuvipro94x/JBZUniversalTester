@@ -411,7 +411,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
 
     private bool CanUseManualControls() =>
-        !_manualOperationRunning && !_manualControlsClosing && !_settingsSaveInProgress &&
+        !_manualOperationRunning && !_manualControlsClosing &&
         _test is not null &&
         !_test.IsDeviceFault &&
         !_manualResistanceRunning &&
@@ -421,7 +421,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public void SetSettingsSaveInProgress(bool saving)
     {
         _settingsSaveInProgress = saving;
-        RefreshManualCommands();
+        // Re-evaluate real hardware/permission changes after apply, without
+        // making the save flag itself a disabled visual state.
+        if (!saving) RefreshManualCommands();
     }
 
     private bool CanUseManualRelay() => _accessSession.Allows(SettingsPermission.Relay) && CanUseManualControls();
@@ -432,6 +434,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
     private async Task RunManualOperationAsync(Func<CancellationToken, Task> operation)
     {
+        // Saving must not repaint every manual button as disabled/enabled.
+        // Guard execution here as well as the page input guard; do not queue a
+        // stale hardware request to run automatically after settings are saved.
+        if (_settingsSaveInProgress) return;
         if (_manualOperationRunning || _manualControlsClosing)
             throw new InvalidOperationException("Đang xử lý thao tác tay hoặc đang đóng Cài đặt.");
         _manualOperationRunning = true;

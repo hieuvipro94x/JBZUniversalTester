@@ -101,3 +101,6 @@ Khi lưu tiếp từ cùng trang đang mở, ô LOT vẫn giữ số nền; nế
 ## V2026.09.431: Lưu tại chỗ và mẫu tem dùng chung
 LƯU CÀI ĐẶT giữ nguyên trang/vị trí cuộn, không tự đóng trang hoặc vô hiệu hóa cả cây giao diện. Vùng thông báo cố định, lỗi hiện tại chỗ. Khi ghi, chặn nhập sửa/lệnh Manual mới để bảo vệ snapshot; vẫn cho cuộn và xử lý input/render. Cập nhật binding sau lưu chia lượt trên Dispatcher; thoát vẫn chờ hoàn tất ghi/hủy Manual và RESET.
 Mẫu tem sửa trong Cài đặt lưu chung trong các trường override hiện có của CFG, theo từng loại tem. Mã hàng khác dùng cùng loại tem phải dùng tọa độ/bố cục đã lưu thay vì lệnh tem cũ trong THT. Giữ riêng LOT và lựa chọn loại tem theo mã hàng; không sửa dữ liệu THT gốc. Khôi phục mặc định trả về quy tắc template cũ.
+
+## V2026.09.432: Nút Manual không nhấp nháy khi lưu
+Cờ đang lưu chỉ chặn thực thi lệnh Manual, không đưa vào CanExecute/không đổi IsEnabled của các nút Leak, điện trở và relay chỉ vì bấm Lưu. Giữ chặn input của trang và chặn cả yêu cầu gọi trực tiếp trong lúc ghi/áp dụng cấu hình; không xếp hàng chạy lệnh sau khi lưu. Khóa do thao tác Manual thực sự, đóng trang hoặc lỗi thiết bị vẫn giữ nguyên.

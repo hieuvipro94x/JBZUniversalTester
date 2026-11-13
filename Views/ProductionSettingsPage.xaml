@@ -452,7 +452,7 @@
                                                 <ComboBox x:Name="WaterProofComComboBox" Grid.Column="1" Height="26" Margin="0,2,6,2" IsEditable="True" Text="{Binding Settings.WaterProofMachine.PortName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                                 <Button Grid.Column="2" Content="LÀM MỚI" Height="26" Margin="3,2,0,2" FontSize="14" Padding="1,0" Style="{StaticResource SettingsInfoButtonStyle}" Click="RefreshWaterProofPorts_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                                 <TextBlock Grid.Row="1" Text="Test máy Leak" Style="{StaticResource FieldLabelStyle}"/>
-                                                <Button Grid.Row="1" Grid.Column="1" Height="26" Margin="0,2,0,2" Content="CHẠY TEST" Command="{Binding ManualWaterProofTestCommand}" Style="{StaticResource SettingsActionButtonStyle}" ToolTip="Chạy thử máy Leak bằng COM và thông số đang chọn; không tăng sản lượng và không chạy relay." HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                                <Button x:Name="ManualLeakTestButton" Grid.Row="1" Grid.Column="1" Height="26" Margin="0,2,0,2" Content="CHẠY TEST" Command="{Binding ManualWaterProofTestCommand}" Style="{StaticResource SettingsActionButtonStyle}" ToolTip="Chạy thử máy Leak bằng COM và thông số đang chọn; không tăng sản lượng và không chạy relay." HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
 
                                                 <Grid x:Name="WaterProofChannelRows" Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3">
                                                     <Grid.ColumnDefinitions>
@@ -780,7 +780,7 @@
                                                 <ColumnDefinition Width="104"/>
                                             </Grid.ColumnDefinitions>
                                             <ComboBox ItemsSource="{Binding ManualResistanceOptions}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding SelectedManualResistanceChannel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="TẤT CẢ đo các dòng R đang tích BẬT; chọn CH để đo riêng kênh vật lý đó."/>
-                                            <Button Grid.Column="1" Height="26" Margin="7,2,0,2" Padding="4,0" FontSize="14" Content="CHẠY ĐO" Command="{Binding ManualMeasureResistanceCommand}" Style="{StaticResource SettingsActionButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
+                                            <Button x:Name="ManualResistanceMeasureButton" Grid.Column="1" Height="26" Margin="7,2,0,2" Padding="4,0" FontSize="14" Content="CHẠY ĐO" Command="{Binding ManualMeasureResistanceCommand}" Style="{StaticResource SettingsActionButtonStyle}" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                         </Grid>
                                         <TextBlock x:Name="ManualResistanceStatusText" Height="26" TextTrimming="CharacterEllipsis" ToolTip="{Binding ManualResistanceStatus}" Grid.Row="2" Text="{Binding ManualResistanceStatus}" MinHeight="26" Margin="0,2" FontSize="16" FontWeight="Bold" TextWrapping="NoWrap">
                                             <TextBlock.Style>
