@@ -15,11 +15,12 @@ public static class LabelTemplateProvider
     {
         ArgumentNullException.ThrowIfNull(profile);
 
-        bool forceSelectedSqdzTemplate =
+        bool forceSelectedBuiltInTemplate =
             (profile.Id.Equals(LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase) ||
-             profile.Id.Equals(LabelSettings.BcwTemplate, StringComparison.OrdinalIgnoreCase)) &&
+             profile.Id.Equals(LabelSettings.BcwTemplate, StringComparison.OrdinalIgnoreCase) ||
+             !string.IsNullOrWhiteSpace(profile.InlineTemplate)) &&
             BuiltInLabelTemplateStore.IsReference(profile.TemplatePath);
-        if (!forceSelectedSqdzTemplate && !string.IsNullOrWhiteSpace(embeddedTemplate))
+        if (!forceSelectedBuiltInTemplate && !string.IsNullOrWhiteSpace(embeddedTemplate))
             return embeddedTemplate;
 
         if (!string.IsNullOrWhiteSpace(profile.InlineTemplate))

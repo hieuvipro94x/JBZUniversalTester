@@ -504,6 +504,7 @@ public partial class MainWindow : Window
         {
             BoardCapacity previousCapacity = _viewModel.CurrentBoardCapacity;
             await _viewModel.ReloadProductionSettingsAsync();
+            await _viewModel.Test.WaitForLotConfigurationWritesAsync();
 
             BoardCapacity currentCapacity = _viewModel.CurrentBoardCapacity;
             bool capacityChanged =
@@ -516,8 +517,8 @@ public partial class MainWindow : Window
                     $"{currentCapacity.ScanCardCount}. CÓ THỂ CHỌN MÃ HÀNG NGAY.";
             }
 
-            // The page requests navigation only after settings are saved and applied.
-            // Save and Back both use the existing safe settings-close path.
+            // Save stays on the page; its guard ends only after board/LOT apply.
+            // Explicit Back still uses the safe settings-close path.
         }
         catch (Exception ex)
         {

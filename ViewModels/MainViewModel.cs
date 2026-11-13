@@ -377,9 +377,11 @@ public sealed class MainViewModel : ObservableObject
             Test.RefreshProductionSettingsOnly();
 
         RefreshSettingsBindings();
-        _ = ObserveSettingsApplyAsync(
-            hardwareApplyTask,
-            Test.AutoConnectLabelPrinterAsync());
+        // Settings now stays open after Save. Keep its manual-command guard
+        // until the board configuration has finished applying; printer COM
+        // recovery remains independent and continues in the background.
+        _ = ObserveSettingsApplyAsync(Task.CompletedTask, Test.AutoConnectLabelPrinterAsync());
+        await hardwareApplyTask;
     }
 
     private static async Task ObserveSettingsApplyAsync(

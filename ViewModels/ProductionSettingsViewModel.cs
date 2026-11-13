@@ -106,6 +106,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private Task _manualOperationCompletion = Task.CompletedTask;
     private bool _manualOperationRunning;
     private bool _manualControlsClosing;
+    private bool _settingsSaveInProgress;
     public bool IsManualOperationRunning => _manualOperationRunning;
     private readonly string _modelPath;
     private readonly string _lotProductKey;
@@ -410,12 +411,18 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
 
     private bool CanUseManualControls() =>
-        !_manualOperationRunning && !_manualControlsClosing &&
+        !_manualOperationRunning && !_manualControlsClosing && !_settingsSaveInProgress &&
         _test is not null &&
         !_test.IsDeviceFault &&
         !_manualResistanceRunning &&
         !_manualWaterProofRunning &&
         (_test.IsManualModeActive || _test.CanEnterManualMode);
+
+    public void SetSettingsSaveInProgress(bool saving)
+    {
+        _settingsSaveInProgress = saving;
+        RefreshManualCommands();
+    }
 
     private bool CanUseManualRelay() => _accessSession.Allows(SettingsPermission.Relay) && CanUseManualControls();
     private bool CanUseManualResistance() => _accessSession.Allows(SettingsPermission.Resistance) && CanUseManualControls();

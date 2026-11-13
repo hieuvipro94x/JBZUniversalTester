@@ -11,6 +11,7 @@ using System.Windows.Shapes;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
@@ -480,7 +481,7 @@ public partial class ProductionSettingsPage : UserControl
 
         var note = new TextBlock
         {
-            Text = "Nội dung sửa sẽ được lưu cùng Cài đặt. Dùng KHÔI PHỤC MẶC ĐỊNH để bỏ bản tùy chỉnh." +
+            Text = "Mẫu chỉnh sửa dùng chung cho mọi mã hàng sử dụng loại tem này. Bấm ÁP DỤNG rồi LƯU CÀI ĐẶT để lưu thay đổi. Dùng KHÔI PHỤC MẶC ĐỊNH để bỏ bản tùy chỉnh." +
                 (templateType == LabelSettings.BcwTemplate ?
                     "\nBCW: chỉnh vị trí, font và kích thước bằng EPL. Giữ {PART_NUMBER}, {BCW_POSITION}, {BCW_QR}; không dùng lệnh lưu/xóa form." : ""),
             TextWrapping = TextWrapping.Wrap,
@@ -547,10 +548,7 @@ public partial class ProductionSettingsPage : UserControl
         else
             BuiltInLabelTemplateStore.SaveOverride(_vm.Settings.Label, templateType, textBox.Text);
 
-        ShowMessage(
-            "Đã áp dụng mẫu tem. Bấm LƯU CÀI ĐẶT để hoàn tất.",
-            "CHỈNH TEM",
-            MessageBoxImage.Information);
+        SetSaveStatus("Đã áp dụng mẫu dùng chung. Bấm LƯU CÀI ĐẶT để hoàn tất.", error: false);
     }
 
     private async void PreviewLabel_Click(object sender, RoutedEventArgs e)
@@ -1821,31 +1819,43 @@ public partial class ProductionSettingsPage : UserControl
         return false;
     }
 
-    private static void RefreshSavedEditorValues(DependencyObject parent)
+    private async Task RefreshSavedEditorValuesAsync()
     {
-        // Settings normalization can change plain DTO properties without a
-        // PropertyChanged notification. Reflect saved values back into editors
-        // so the next UpdateSource cannot restore their pre-save text.
-        switch (parent)
+        var pending = new Stack<DependencyObject>();
+        pending.Push(this);
+        int visited = 0;
+        while (pending.Count > 0)
         {
-            case TextBox textBox:
-                textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateTarget();
-                break;
-            case ComboBox comboBox:
-                if (comboBox.Name == nameof(PrinterComComboBox) && comboBox.SelectedItem is null)
+            DependencyObject parent = pending.Pop();
+            // Settings normalization can change plain DTO properties without a
+            // PropertyChanged notification. Reflect saved values back into editors
+            // so the next UpdateSource cannot restore their pre-save text.
+            switch (parent)
+            {
+                case TextBox textBox:
+                    textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateTarget();
                     break;
-                comboBox.GetBindingExpression(Selector.SelectedValueProperty)?.UpdateTarget();
-                comboBox.GetBindingExpression(Selector.SelectedItemProperty)?.UpdateTarget();
-                comboBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateTarget();
-                break;
-            case ToggleButton toggleButton:
-                toggleButton.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateTarget();
-                break;
-        }
+                case ComboBox comboBox:
+                    if (comboBox.Name == nameof(PrinterComComboBox) && comboBox.SelectedItem is null)
+                        break;
+                    comboBox.GetBindingExpression(Selector.SelectedValueProperty)?.UpdateTarget();
+                    comboBox.GetBindingExpression(Selector.SelectedItemProperty)?.UpdateTarget();
+                    comboBox.GetBindingExpression(ComboBox.TextProperty)?.UpdateTarget();
+                    break;
+                case ToggleButton toggleButton:
+                    toggleButton.GetBindingExpression(ToggleButton.IsCheckedProperty)?.UpdateTarget();
+                    break;
+            }
 
-        int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
-        for (int index = 0; index < childCount; index++)
-            RefreshSavedEditorValues(System.Windows.Media.VisualTreeHelper.GetChild(parent, index));
+            int childCount = System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent);
+            for (int index = 0; index < childCount; index++)
+                pending.Push(System.Windows.Media.VisualTreeHelper.GetChild(parent, index));
+            if (++visited % 32 == 0)
+            {
+                await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Background);
+                if (IsReleased) return;
+            }
+        }
     }
 
     private void SyncCompatibilityFields()
@@ -1882,6 +1892,7 @@ public partial class ProductionSettingsPage : UserControl
         }
 
         _savedConfirmationTimer.Stop();
+        SetSaveStatus("Đã lưu cài đặt", error: false);
         SettingsSavedStatusText.Visibility = Visibility.Visible;
         _savedConfirmationTimer.Start();
     }
@@ -1890,7 +1901,42 @@ public partial class ProductionSettingsPage : UserControl
     {
         _savedConfirmationTimer?.Stop();
         if (!IsReleased)
-            SettingsSavedStatusText.Visibility = Visibility.Collapsed;
+            SettingsSavedStatusText.Visibility = Visibility.Hidden;
+    }
+
+    private void SetSaveStatus(string text, bool error)
+    {
+        _savedConfirmationTimer?.Stop();
+        SettingsSavedStatusText.Text = text;
+        SettingsSavedStatusText.Foreground = (Brush)FindResource(error ? "FailText" : "PassText");
+        SettingsSavedStatusText.Visibility = Visibility.Visible;
+    }
+
+    private bool IsSaveScrollInput(object source)
+    {
+        for (DependencyObject? item = source as DependencyObject; item is not null && !ReferenceEquals(item, this);)
+        {
+            if (item is ScrollBar) return true;
+            item = item is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(item) : LogicalTreeHelper.GetParent(item);
+        }
+        return false;
+    }
+
+    private void Settings_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_saveInProgress != 0 && !IsSaveScrollInput(e.OriginalSource)) e.Handled = true;
+    }
+
+    private void Settings_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (_saveInProgress != 0 && !IsSaveScrollInput(e.OriginalSource) &&
+            e.Key is not (Key.Tab or Key.PageUp or Key.PageDown)) e.Handled = true;
+    }
+
+    private void Settings_PreviewTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (_saveInProgress != 0) e.Handled = true;
     }
 
     private string CaptureEditableSettingsSnapshot() => JsonSerializer.Serialize(new
@@ -1913,6 +1959,9 @@ public partial class ProductionSettingsPage : UserControl
             return false;
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _saveCompletion = completion;
+        bool saveHadError = false;
+        _vm.SetSettingsSaveInProgress(true);
+        SaveSettingsButton.IsEnabled = false;
 
         try
         {
@@ -1920,13 +1969,14 @@ public partial class ProductionSettingsPage : UserControl
             _vm.ValidateAccessForSave();
             if (HasEditorValidationErrors(this))
             {
-                ShowMessage("Hãy sửa các ô nhập chưa hợp lệ trước khi lưu.",
-                    "Cấu hình chưa hợp lệ", MessageBoxImage.Warning);
+                saveHadError = true;
+                SetSaveStatus("Hãy sửa các ô nhập chưa hợp lệ trước khi lưu.", error: true);
                 return false;
             }
             if (!ValidateSettings(out string error))
             {
-                ShowMessage(error, "Cấu hình chưa hợp lệ", MessageBoxImage.Warning);
+                saveHadError = true;
+                SetSaveStatus(error, error: true);
                 return false;
             }
 
@@ -1938,9 +1988,7 @@ public partial class ProductionSettingsPage : UserControl
             if (!LastSaveChanged)
                 return true;
 
-            IsEnabled = false;
-            SettingsSavedStatusText.Text = "ĐANG LƯU CÀI ĐẶT...";
-            SettingsSavedStatusText.Visibility = Visibility.Visible;
+            SetSaveStatus("ĐANG LƯU CÀI ĐẶT...", error: false);
             await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
             long saveStarted = Stopwatch.GetTimestamp();
             await ReleaseManualOutputsAsync(closing: false);
@@ -1951,7 +1999,7 @@ public partial class ProductionSettingsPage : UserControl
                 $"SETTINGS_PERF phase=SAVE_FILE elapsed_ms={Stopwatch.GetElapsedTime(saveStarted).TotalMilliseconds:0.###}");
             if (IsReleased) return false;
             _suppressPrinterPortSelection = true;
-            try { RefreshSavedEditorValues(this); }
+            try { await RefreshSavedEditorValuesAsync(); }
             finally { _suppressPrinterPortSelection = false; }
             string savedSnapshot = CaptureEditableSettingsSnapshot();
             await NotifySettingsSavedAsync();
@@ -1960,27 +2008,26 @@ public partial class ProductionSettingsPage : UserControl
         }
         catch (UnauthorizedAccessException)
         {
-            ShowMessage("Bạn chưa được cấp quyền để lưu thay đổi này. Hãy đóng và mở lại Cài đặt bằng quyền phù hợp.",
-                "CHƯA ĐƯỢC CẤP QUYỀN", MessageBoxImage.Warning);
+            saveHadError = true;
+            SetSaveStatus("Bạn chưa được cấp quyền để lưu thay đổi này.", error: true);
             return false;
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Save production settings failed: {ex}");
-            ShowMessage(
-                "Chưa hoàn tất lưu/áp dụng Cài đặt. Dữ liệu đang nhập vẫn được giữ nguyên.",
-                "CHƯA LƯU ĐƯỢC",
-                MessageBoxImage.Error);
+            saveHadError = true;
+            SetSaveStatus("Chưa lưu/áp dụng được. Dữ liệu đang nhập vẫn được giữ nguyên.", error: true);
             return false;
         }
         finally
         {
             Interlocked.Exchange(ref _saveInProgress, 0);
+            _vm.SetSettingsSaveInProgress(false);
             completion.TrySetResult();
             if (!IsReleased)
             {
-                IsEnabled = true;
-                SettingsSavedStatusText.Visibility = Visibility.Collapsed;
+                SaveSettingsButton.IsEnabled = _accessSession.IsAdmin || _accessSession.Permissions != SettingsPermission.None;
+                if (!saveHadError) SettingsSavedStatusText.Visibility = Visibility.Hidden;
             }
         }
     }
@@ -2225,16 +2272,15 @@ public partial class ProductionSettingsPage : UserControl
     {
         if (Volatile.Read(ref _batchPrintInProgress) != 0)
         {
-            ShowMessage("Đang in hàng loạt. Vui lòng chờ in xong trước khi lưu.",
-                "IN HÀNG LOẠT", MessageBoxImage.Warning);
+            SetSaveStatus("Đang in hàng loạt. Vui lòng chờ in xong trước khi lưu.", error: true);
             return;
         }
 
         _savedConfirmationTimer?.Stop();
-        SettingsSavedStatusText.Visibility = Visibility.Collapsed;
+        SettingsSavedStatusText.Visibility = Visibility.Hidden;
         if (await PersistSettingsAsync())
         {
-            RequestClose?.Invoke(this, EventArgs.Empty);
+            ShowSavedConfirmation();
         }
     }
 

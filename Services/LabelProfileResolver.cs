@@ -15,10 +15,14 @@ public static class LabelProfileResolver
         string encoding = string.IsNullOrWhiteSpace(settings.EncodingName)
             ? "us-ascii"
             : settings.EncodingName.Trim();
+        string sharedTemplate = BuiltInLabelTemplateStore.LoadOverride(settings, templateType);
 
         // TEM_TO_SQDZ is an explicit operator-selected built-in format. It must
         // not silently fall back to an older EPL payload embedded in the THT.
-        if (settings.PreferSelectedTemplate || templateType is LabelSettings.LargeSqdzTemplate or LabelSettings.BcwTemplate)
+        // A template edited in Settings is shared for this label type. A new
+        // product's older inline THT layout must not discard that operator edit.
+        if (settings.PreferSelectedTemplate || !string.IsNullOrEmpty(sharedTemplate) ||
+            templateType is LabelSettings.LargeSqdzTemplate or LabelSettings.BcwTemplate)
         {
             return new LabelProfile(
                 templateType,
@@ -26,7 +30,7 @@ public static class LabelProfileResolver
                 TemplatePath: ResolveBuiltInTemplatePath(templateType),
                 EncodingName: encoding,
                 Copies: 1,
-                InlineTemplate: BuiltInLabelTemplateStore.LoadOverride(settings, templateType));
+                InlineTemplate: sharedTemplate);
         }
 
         if (!string.IsNullOrWhiteSpace(model.LabelTemplate.RawTemplate))

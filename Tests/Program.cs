@@ -445,6 +445,10 @@ internal static partial class Program
         }
         if (args is ["--test-late-lot-base"])
         { TestLateLotBaseActivation(); Console.WriteLine("PASS: late LOT base activates 7000 + 20 + 1 = 7021"); return 0; }
+        if (args is ["--test-shared-label-layout"])
+        { TestSharedLabelCoordinates(); Console.WriteLine("PASS: shared label coordinates across products and CFG reload"); return 0; }
+        if (args is ["--test-settings-save-ui"])
+        { TestSettingsSaveStablePresentation(); Console.WriteLine("PASS: stable nonmodal save without settings navigation"); return 0; }
         if (args is ["--test-settings-manual-ui"])
         { TestSettingsManualStablePresentation(); Console.WriteLine("PASS: stable manual settings layout and inline errors"); return 0; }
         if (args is ["--test-settings-opening"])
@@ -770,6 +774,8 @@ internal static partial class Program
             ("Main catalog scrolls and selects the exact THT path without automatic loading", TestMainProductCatalog),
             ("Settings opening yields between editor panels and rejects stale initialization", TestSettingsOpeningResponsiveness),
             ("Manual settings keep panel geometry, input and result rows stable", TestSettingsManualStablePresentation),
+            ("Settings save preserves layout, scrolling and input responsiveness", TestSettingsSaveStablePresentation),
+            ("Edited label coordinates are shared across products without changing LOTs", TestSharedLabelCoordinates),
             ("Late LOT base activation preserves twenty PASS and prints 7021", TestLateLotBaseActivation),
             ("Good Master wiring TESTPOINT and sound ownership", TestGoodMasterWiringSound),
             ("Electrical TESTPOINT stays latched until full clean removal", TestPersistentElectricalAlarm),
