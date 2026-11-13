@@ -121,9 +121,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private string _manualRelay2Status = "OFF";
     private string _manualStatus = "Manual OFF";
     private int _selectedManualResistanceChannel;
-    private bool _manualResistanceRunning;
     private string _manualResistanceStatus = "Chọn TẤT CẢ hoặc một CH để đo";
-    private bool _manualWaterProofRunning;
     private string _manualWaterProofStatus = "Chọn COM và bấm CHẠY TEST";
     private readonly double?[] _manualWaterProofPressBaseline = new double?[3];
 
@@ -342,25 +340,25 @@ public sealed class ProductionSettingsViewModel : ObservableObject
 
         ManualRelay1OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, true)),
-            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text), disableWhileRunning: false);
         ManualRelay1OffCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(1, false)),
-            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text), disableWhileRunning: false);
         ManualRelay2OnCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, true)),
-            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text), disableWhileRunning: false);
         ManualRelay2OffCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualRelayCommandAsync(2, false)),
-            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text), disableWhileRunning: false);
         ManualResetCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(_ => RunManualResetAsync()),
-            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text));
+            CanUseManualRelay, ex => ReportManualError(ex, text => ManualStatus = text), disableWhileRunning: false);
         ManualMeasureResistanceCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(RunManualResistanceAsync),
-            CanUseManualResistance, ex => ReportManualError(ex, text => ManualResistanceStatus = text));
+            CanUseManualResistance, ex => ReportManualError(ex, text => ManualResistanceStatus = text), disableWhileRunning: false);
         ManualWaterProofTestCommand = new AsyncRelayCommand(
             () => RunManualOperationAsync(RunManualWaterProofAsync),
-            CanUseManualWaterProof, ex => ReportManualError(ex, text => ManualWaterProofStatus = text));
+            CanUseManualWaterProof, ex => ReportManualError(ex, text => ManualWaterProofStatus = text), disableWhileRunning: false);
     }
 
     private void ReportManualError(Exception error, Action<string> showStatus)
@@ -411,12 +409,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
 
     private bool CanUseManualControls() =>
-        !_manualOperationRunning && !_manualControlsClosing &&
+        !_manualControlsClosing &&
         _test is not null &&
         !_test.IsDeviceFault &&
-        !_manualResistanceRunning &&
-        !_manualWaterProofRunning &&
-        (_test.IsManualModeActive || _test.CanEnterManualMode);
+        (_manualOperationRunning || _test.IsManualModeActive || _test.CanEnterManualMode);
 
     public void SetSettingsSaveInProgress(bool saving)
     {
@@ -437,9 +433,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         // Saving must not repaint every manual button as disabled/enabled.
         // Guard execution here as well as the page input guard; do not queue a
         // stale hardware request to run automatically after settings are saved.
-        if (_settingsSaveInProgress) return;
-        if (_manualOperationRunning || _manualControlsClosing)
-            throw new InvalidOperationException("Đang xử lý thao tác tay hoặc đang đóng Cài đặt.");
+        if (_settingsSaveInProgress || _manualOperationRunning || _manualControlsClosing) return;
         _manualOperationRunning = true;
         using var cancellation = new CancellationTokenSource();
         _manualOperationCts = cancellation;
@@ -506,8 +500,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             WriteTimeoutMs = Settings.WaterProofMachine.WriteTimeoutMs
         };
         WaterProofModelSettings profile = WaterProof.Clone();
-
-        _manualWaterProofRunning = true;
         ResetManualWaterProofResults(profile);
         ManualWaterProofStatus = $"ĐANG KẾT NỐI {portName} • 115200 8N1...";
         RefreshManualCommands();
@@ -549,7 +541,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
         finally
         {
-            _manualWaterProofRunning = false;
             ManualRuntimeActive = _test.IsManualModeActive;
             RefreshManualCommands();
         }
@@ -730,8 +721,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                 ? "Chưa bật kênh điện trở nào. Hãy tích BẬT cho ít nhất một dòng R."
                 : $"CH{SelectedManualResistanceChannel} chưa được gán cho dòng R nào.");
         }
-
-        _manualResistanceRunning = true;
         ManualResistanceResults.Clear();
         for (int index = 0; index < steps.Count; index++)
         {
@@ -811,7 +800,6 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         }
         finally
         {
-            _manualResistanceRunning = false;
             ManualRuntimeActive = _test.IsManualModeActive;
             RefreshManualCommands();
         }

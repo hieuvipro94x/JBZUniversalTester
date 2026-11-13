@@ -11,33 +11,38 @@ public sealed class AsyncRelayCommand : ICommand
     private readonly Func<Task> _run;
     private readonly Func<bool>? _can;
     private readonly Action<Exception>? _onError;
+    private readonly bool _disableWhileRunning;
     private bool _busy;
 
     public AsyncRelayCommand(
         Func<Task> run,
         Func<bool>? can = null,
-        Action<Exception>? onError = null)
+        Action<Exception>? onError = null,
+        bool disableWhileRunning = true)
     {
         _run = run;
         _can = can;
         _onError = onError;
+        _disableWhileRunning = disableWhileRunning;
     }
 
     public bool CanExecute(object? parameter)
     {
-        return !_busy &&
+        return (!_disableWhileRunning || !_busy) &&
                (_can?.Invoke() ?? true);
     }
 
     public async void Execute(object? parameter)
     {
-        if (!CanExecute(parameter))
+        // Execution is always serialized, even when a caller keeps the button's
+        // visual state stable during a pending operation.
+        if (_busy || !CanExecute(parameter))
         {
             return;
         }
 
         _busy = true;
-        RaiseCanExecuteChanged();
+        if (_disableWhileRunning) RaiseCanExecuteChanged();
 
         try
         {
@@ -70,7 +75,7 @@ public sealed class AsyncRelayCommand : ICommand
         finally
         {
             _busy = false;
-            RaiseCanExecuteChanged();
+            if (_disableWhileRunning) RaiseCanExecuteChanged();
         }
     }
 

@@ -116,9 +116,11 @@ internal static partial class Program
             int commands = board.Commands.Count;
             Task running = (Task)typeof(ProductionSettingsViewModel).GetMethod("RunManualOperationAsync", flags)!
                 .Invoke(vm, [operation])!;
-            Assert(vm.IsManualOperationRunning && !vm.ManualRelay1OnCommand.CanExecute(null) &&
-                   !vm.ManualRelay2OnCommand.CanExecute(null) && !vm.ManualWaterProofTestCommand.CanExecute(null),
-                "One settings operation immediately locks every other manual command");
+            vm.ManualRelay1OnCommand.Execute(null);
+            vm.ManualRelay2OnCommand.Execute(null);
+            vm.ManualWaterProofTestCommand.Execute(null);
+            Assert(vm.IsManualOperationRunning && board.Commands.Count == commands,
+                "One settings operation rejects every conflicting manual execution without relying on disabled visuals");
             Task closing = vm.StopManualOperationsAsync(closing: true);
             Assert(operationToken.IsCancellationRequested && !closing.IsCompleted,
                 "Settings close cancels the operation and still waits for its physical cleanup");

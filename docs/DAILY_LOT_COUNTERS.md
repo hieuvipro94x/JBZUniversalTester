@@ -104,3 +104,7 @@ Mẫu tem sửa trong Cài đặt lưu chung trong các trường override hiệ
 
 ## V2026.09.432: Nút Manual không nhấp nháy khi lưu
 Cờ đang lưu chỉ chặn thực thi lệnh Manual, không đưa vào CanExecute/không đổi IsEnabled của các nút Leak, điện trở và relay chỉ vì bấm Lưu. Giữ chặn input của trang và chặn cả yêu cầu gọi trực tiếp trong lúc ghi/áp dụng cấu hình; không xếp hàng chạy lệnh sau khi lưu. Khóa do thao tác Manual thực sự, đóng trang hoặc lỗi thiết bị vẫn giữ nguyên.
+
+### V2026.09.433 — Manual button presentation
+
+Manual Leak, resistance and relay commands keep their enabled appearance during a pending manual operation. AsyncRelayCommand opts in per command; other commands retain their existing busy/disabled behavior. Duplicate and conflicting clicks are rejected immediately at execution, never queued. Closing, device faults, access permissions and invalid Leak configuration still disable unavailable controls. Cancellation and physical cleanup are unchanged.

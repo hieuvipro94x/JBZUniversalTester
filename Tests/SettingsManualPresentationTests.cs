@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -37,6 +38,12 @@ internal static partial class Program
                     Rect Bounds(FrameworkElement element) => new(element.TranslatePoint(new Point(), page), element.RenderSize);
                     Rect[] before = panels.Select(Bounds).ToArray();
                     double offset = scroll.VerticalOffset, extent = scroll.ExtentHeight;
+                    var buttons = new[] { "ManualLeakTestButton", "ManualResistanceMeasureButton" }
+                        .Select(name => (Button)page.FindName(name)).ToArray();
+                    int enabledTransitions = 0;
+                    var enabled = DependencyPropertyDescriptor.FromProperty(UIElement.IsEnabledProperty, typeof(Button));
+                    EventHandler enabledChanged = (_, _) => enabledTransitions++;
+                    foreach (var button in buttons) enabled.AddValueChanged(button, enabledChanged);
                     foreach (string status in new[] { "ManualStatus", "ManualWaterProofStatus", "ManualResistanceStatus" })
                         typeof(ProductionSettingsViewModel).GetProperty(status)!.SetValue(vm, new string('W', 500));
                     for (int channel = 1; channel <= 10; channel++)
@@ -74,10 +81,22 @@ internal static partial class Program
                         await Dispatcher.Yield(DispatcherPriority.Input);
                         Assert(vm.IsManualOperationRunning && page.IsEnabled && scroll.IsEnabled &&
                                page.FindName("ModelEditorHost") is ContentControl { Visibility: Visibility.Collapsed } &&
-                               !vm.ManualRelay1OnCommand.CanExecute(null) && !vm.ManualMeasureResistanceCommand.CanExecute(null),
-                            "A pending manual operation retains the settings view and responsive page while rejecting conflicting hardware commands");
+                               buttons.All(button => button.IsEnabled) && enabledTransitions == 0,
+                            "A pending manual operation retains the settings view without toggling manual button appearance");
+                        int commands = board.Commands.Count;
+                        foreach (var manualCommand in new[] { vm.ManualRelay1OnCommand, vm.ManualRelay2OffCommand,
+                            vm.ManualResetCommand, vm.ManualMeasureResistanceCommand, vm.ManualWaterProofTestCommand })
+                            manualCommand.Execute(null);
+                        await Dispatcher.Yield(DispatcherPriority.Background);
+                        Assert(board.Commands.Count == commands && vm.IsManualOperationRunning &&
+                               buttons.All(button => button.IsEnabled) && enabledTransitions == 0,
+                            "Repeated/cross-command clicks cause no hardware work, queued work or disabled button flashes");
                     }
                     finally { finish.TrySetResult(); await running; }
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    Assert(buttons.All(button => button.IsEnabled) && enabledTransitions == 0,
+                        "Completing a manual operation does not toggle manual buttons");
+                    foreach (var button in buttons) enabled.RemoveValueChanged(button, enabledChanged);
                 }
                 finally { page.ReleasePageResources(); }
             }
@@ -90,6 +109,20 @@ internal static partial class Program
             await Dispatcher.Yield(DispatcherPriority.Background);
             Assert(reported is IOException && command.CanExecute(null),
                 "Inline command error reporting completes without a modal dialog or a permanently disabled command");
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int executions = 0, changes = 0;
+            var stable = new AsyncRelayCommand(async () => { executions++; await release.Task; },
+                disableWhileRunning: false);
+            stable.CanExecuteChanged += (_, _) => changes++;
+            stable.Execute(null); stable.Execute(null);
+            Assert(stable.CanExecute(null) && executions == 1 && changes == 0,
+                "Stable command keeps its appearance while rejecting duplicate execution inside the command itself");
+            release.SetResult();
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            while ((bool)typeof(AsyncRelayCommand).GetField("_busy", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(stable)!)
+                await Task.Delay(10, deadline.Token);
+            stable.Execute(null); await Dispatcher.Yield(DispatcherPriority.Background);
+            Assert(executions == 2 && changes == 0, "Stable command accepts a new explicit click after completion");
         });
     }
 }
