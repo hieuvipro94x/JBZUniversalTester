@@ -22,6 +22,12 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-safe-application-exit"])
+        {
+            TestSafeApplicationExit();
+            Console.WriteLine("PASS: safe Alt+F4/Close confirmation, product gates and single async cleanup");
+            return 0;
+        }
         if (args is ["--test-model-relay"])
         { TestModelRelayWiring(); Console.WriteLine("PASS: per-THT relay configuration, PASS/FAIL/Master mapping and history snapshots"); return 0; }
         if (args is ["--test-history-ui-safety"])
@@ -685,6 +691,7 @@ internal static partial class Program
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
             ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
+            ("Application close confirms, guards products and waits for cleanup", TestSafeApplicationExit),
             ("History export failures preserve old files", TestHistoryExportFailureSafety),
             ("History filters and export respect page lifecycle", TestHistoryFiltersAndExportLifecycle),
             ("Auxiliary windows fit the current monitor and DPI", TestAuxiliaryWindowViewport),

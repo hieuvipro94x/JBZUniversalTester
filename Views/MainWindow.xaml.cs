@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -21,15 +21,25 @@ public partial class MainWindow : Window
     private HistoryPage? _historyPage;
     private bool _shutdownStarted;
     private bool _shutdownComplete;
+    private bool _exitConfirmationOpen;
+    private readonly Func<bool> _confirmExit;
+    private readonly Action _showExitProductBlock;
+    private readonly Func<Task> _shutdownApplication;
     private bool _startupStarted;
     private long _internalPageGeneration;
     private UiStallWatchdog? _uiStallWatchdog;
 
     public MainWindow() : this(new MainViewModel()) { }
 
-    public MainWindow(MainViewModel viewModel)
+    public MainWindow(MainViewModel viewModel) : this(viewModel, null, null, null) { }
+
+    internal MainWindow(MainViewModel viewModel, Func<bool>? confirmExit,
+        Action? showExitProductBlock, Func<Task>? shutdownApplication)
     {
         InitializeComponent();
+        _confirmExit = confirmExit ?? ConfirmApplicationExit;
+        _showExitProductBlock = showExitProductBlock ?? ShowExitBlockedByProduct;
+        _shutdownApplication = shutdownApplication ?? ShutdownApplicationAsync;
         StartupPerformanceTrace.Mark("T1 MainWindow constructed");
         Title = $"UniversalTester {AppVersion.DisplayVersion} - JBZ Production";
         AppVersionText.Text = $"JBZ Universal : {AppVersion.DisplayVersion}";
@@ -675,10 +685,22 @@ public partial class MainWindow : Window
         // Không cho WPF hủy cửa sổ trước khi worker D2XX/VISA được dừng.
         e.Cancel = true;
 
-        if (_shutdownStarted)
+        if (_shutdownStarted || _exitConfirmationOpen)
             return;
 
+        // Closing the owner must never bypass TestView's removal/StopView gates
+        // or implicitly destroy an auxiliary window that still owns device work.
+        if (!CanRequestApplicationExit()) return;
+        _exitConfirmationOpen = true;
+        bool confirmed;
+        try { confirmed = _confirmExit(); }
+        finally { _exitConfirmationOpen = false; }
+        // MessageBox pumps the Dispatcher: product/device state can change while
+        // the operator is deciding. Check the live state again after confirmation.
+        if (!confirmed || !CanRequestApplicationExit()) return;
+
         _shutdownStarted = true;
+        ProductCatalog.IsEnabled = false;
         MainActionBar.IsEnabled = false;
         _viewModel.Status = "ĐANG THOÁT ỨNG DỤNG...";
         await System.Windows.Threading.Dispatcher.Yield(System.Windows.Threading.DispatcherPriority.Render);
@@ -700,11 +722,7 @@ public partial class MainWindow : Window
             _uiStallWatchdog = null;
             _viewModel.ExplicitModelLoaded -= ViewModel_ExplicitModelLoaded;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
-            await _viewModel.ShutdownAsync();
-            await ThtBackupCleanupService.Current.CleanupAsync();
-            await DatabaseBackupCleanupService.Current.CleanupAsync();
-            AsyncFileLogService.Current.Application("SHUTDOWN cleanup complete");
-            await AsyncFileLogService.Current.DisposeAsync();
+            await _shutdownApplication();
         }
         finally
         {
@@ -713,6 +731,46 @@ public partial class MainWindow : Window
             // Đóng lần hai sau khi mọi handle đã được giải phóng.
             _ = Dispatcher.BeginInvoke(new Action(Close));
         }
+    }
+
+    private bool CanRequestApplicationExit()
+    {
+        if (_testWindow is not null)
+        {
+            _viewModel.Status = "Hãy trở về trang chính từ màn hình kiểm tra trước khi thoát.";
+            _testWindow.Activate();
+            return false;
+        }
+        Window? activeDialog = OwnedWindows.Cast<Window>().FirstOrDefault(window => window.IsVisible);
+        if (activeDialog is not null)
+        {
+            activeDialog.Activate();
+            return false;
+        }
+        if (_viewModel.Test.HasProductOnTestTable)
+        {
+            _showExitProductBlock();
+            return false;
+        }
+        return true;
+    }
+
+    private bool ConfirmApplicationExit() => MessageBox.Show(this,
+        "Bạn có muốn thoát ứng dụng an toàn?\nPhần mềm sẽ dừng kiểm tra, chờ lưu dữ liệu và giải phóng thiết bị trước khi đóng.",
+        "THOÁT ỨNG DỤNG", MessageBoxButton.YesNo, MessageBoxImage.Question,
+        MessageBoxResult.No) == MessageBoxResult.Yes;
+
+    private void ShowExitBlockedByProduct() => MessageBox.Show(this,
+        "VUI LÒNG THÁO SẢN PHẨM TRƯỚC KHI THOÁT!",
+        "CHƯA THỂ THOÁT ỨNG DỤNG", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+    private async Task ShutdownApplicationAsync()
+    {
+        await _viewModel.ShutdownAsync();
+        await ThtBackupCleanupService.Current.CleanupAsync();
+        await DatabaseBackupCleanupService.Current.CleanupAsync();
+        AsyncFileLogService.Current.Application("SHUTDOWN cleanup complete");
+        await AsyncFileLogService.Current.DisposeAsync();
     }
 
 }
