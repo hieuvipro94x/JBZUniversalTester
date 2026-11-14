@@ -168,7 +168,7 @@
                     <Border Width="452" Height="137" Background="{StaticResource PanelBackground}"
                             HorizontalAlignment="Center" BorderBrush="{StaticResource BorderColor}"
                             BorderThickness="1" CornerRadius="8">
-                        <Image Source="/Assets/mainlogo.gif" Stretch="Uniform"
+                        <Image Source="/Assets/jabez-vina-logo.png" Stretch="Uniform"
                                SnapsToDevicePixels="True" Margin="6"/>
                     </Border>
 

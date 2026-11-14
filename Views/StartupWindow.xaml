@@ -73,7 +73,7 @@
                             <DropShadowEffect Color="{StaticResource InkBlackValue}" Opacity="0.25" BlurRadius="14" ShadowDepth="3" Direction="270"/>
                         </Border.Effect>
                         <Image x:Name="LogoImage"
-                               Source="pack://application:,,,/JBZUniversalTester;component/Assets/mainlogo.gif"
+                               Source="pack://application:,,,/JBZUniversalTester;component/Assets/jabez-vina-logo.png"
                                Width="170" Height="52" Stretch="Uniform"/>
                     </Border>
 

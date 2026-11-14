@@ -74,6 +74,8 @@
   <!-- Icon -->
   <ItemGroup>
     <None Remove="Assets\mainlogo.gif" />
+    <None Remove="Assets\jabez-vina-logo.png" />
+    <Resource Include="Assets\jabez-vina-logo.png" />
     <None Remove="Assets\000_JPG_BACKJPG_1042.jpg" />
     <Resource Include="Assets\000_JPG_BACKJPG_1042.jpg" />
     <None Remove="Assets\reset_probe_cycle.png" />

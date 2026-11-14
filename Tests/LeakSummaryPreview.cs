@@ -61,7 +61,7 @@ internal static partial class Program
                 ((System.Windows.Controls.Button)window.FindName(name)).IsEnabled = true;
             ((UIElement)window.FindName("ProductCatalog")).IsEnabled = true;
             Descendants(root).OfType<System.Windows.Controls.Image>().First().Source = new BitmapImage(
-                new Uri("pack://application:,,,/JBZUniversalTester;component/Assets/mainlogo.gif", UriKind.Absolute));
+                new Uri("pack://application:,,,/JBZUniversalTester;component/Assets/jabez-vina-logo.png", UriKind.Absolute));
             const int width = 1440, height = 900;
             using var source = new HwndSource(new HwndSourceParameters("MainLabelPreview")
                 { Width = width, Height = height, WindowStyle = unchecked((int)0x80000000) });
