@@ -202,6 +202,9 @@ public sealed class ProductionSettings
     /// </summary>
     public int RelayWiringMode { get; set; }
 
+    public Dictionary<string, int> RelayWiringModesByModel { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Relay vật lý thực sự mở JIG sau khi người vận hành xác nhận sản phẩm lỗi.
     /// Một số máy đấu ngược R1/R2 nên giá trị này phải được xác nhận bằng nút thử relay.

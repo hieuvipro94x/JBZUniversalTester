@@ -2,6 +2,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using JBZUniversalTester.Services;
 
 namespace JBZUniversalTester.Models;
 
@@ -88,8 +89,9 @@ public sealed record ProductionConfigSnapshot(
 {
     public static ProductionConfigSnapshot Capture(
         ProductionSettings settings,
-        string appVersion)
+        string appVersion, string? modelPath = null)
     {
+        int relayWiringMode = ProductionConfigService.GetRelayWiringModeForPath(settings, modelPath ?? settings.LastThtPath);
         string resistance = CanonicalJson(settings.ResistanceChannels ?? []);
         string waterproof = CanonicalJson(new
         {
@@ -112,7 +114,7 @@ public sealed record ProductionConfigSnapshot(
             settings.ExpansionCardCount,
             settings.StartCardNumber,
             settings.UsbDelay,
-            settings.RelayWiringMode,
+            RelayWiringMode = relayWiringMode,
             settings.JigEjectRelayEnabled,
             settings.PassMarkingRelayEnabled,
             settings.MasterFaultRequiredCount,
@@ -130,7 +132,7 @@ public sealed record ProductionConfigSnapshot(
             settings.ExpansionCardCount,
             settings.StartCardNumber,
             settings.UsbDelay,
-            settings.RelayWiringMode,
+            relayWiringMode,
             settings.JigEjectRelayEnabled,
             settings.PassMarkingRelayEnabled,
             settings.MasterFaultRequiredCount,
@@ -252,7 +254,7 @@ public sealed record ProductionResultCommitRequest(
             immutableHistory,
             PartIdentitySnapshot.Capture(model),
             ModelIdentitySnapshot.Capture(model),
-            ProductionConfigSnapshot.Capture(settings, appVersion),
+            ProductionConfigSnapshot.Capture(settings, appVersion, model.SourcePath),
             faults
                 .Select(FaultPersistenceSnapshot.Capture)
                 .DistinctBy(item => new

@@ -70,6 +70,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private readonly TestViewModel? _test;
     private readonly Action<ProductionSettings> _saveSettings;
     private long _openedLotStart;
+    private readonly int _legacyRelayWiringMode;
     private SettingsAccessSession _accessSession = SettingsAccessSession.Administrator;
     private string _deniedSettingsSnapshot = string.Empty;
     private string _deniedEditorsSnapshot = string.Empty;
@@ -270,6 +271,8 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         _saveSettings = saveSettings ?? ProductionConfigService.Save;
         Settings = initialSettings ?? ProductionConfigService.Load();
         _modelPath = test?.CurrentModelPath ?? Settings.LastThtPath;
+        _legacyRelayWiringMode = Settings.RelayWiringMode;
+        Settings.RelayWiringMode = ProductionConfigService.GetRelayWiringModeForPath(Settings, _modelPath);
         _lotProductKey = ProductionConfigService.GetLotProductKey(
             test?.PartNumber,
             _modelPath,
@@ -834,6 +837,12 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private void PrepareSettingsForSave()
     {
         ValidateAccessForSave();
+        if (_accessSession.Allows(SettingsPermission.Relay) && !string.IsNullOrWhiteSpace(_modelPath))
+        {
+            Settings.RelayWiringModesByModel[ProductionConfigService.GetMasterModelKeyFromPath(_modelPath)] = Settings.RelayWiringMode;
+        }
+        else if (_accessSession.Allows(SettingsPermission.Relay) && Settings.RelayWiringMode != _legacyRelayWiringMode)
+            throw new InvalidOperationException("Hãy chọn file THT trước khi lưu kiểu đấu relay.");
         if (!IsProbeReplacementThresholdValid)
             throw new InvalidOperationException("Chu kỳ thay PIN phải là số nguyên lớn hơn 0, ví dụ 200.000.");
         if (_accessSession.Allows(SettingsPermission.Io))
@@ -899,7 +908,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         PrepareSettingsForSave();
         var discard = CaptureDiscardEdit();
         SaveDiscardEdit(discard);
-        _saveSettings(Settings);
+        ProductionSettings snapshot = CaptureSettingsForSave();
+        _saveSettings(snapshot);
+        ProductionConfigService.CopyInto(Settings, snapshot);
+        Settings.RelayWiringMode = ProductionConfigService.GetRelayWiringModeForPath(Settings, _modelPath);
         RestoreLotEditorInput();
         Task applying = AcceptDiscardEditAsync(discard);
         if (applying.IsCompleted) applying.GetAwaiter().GetResult();
@@ -912,12 +924,22 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         var discard = CaptureDiscardEdit();
         // Freeze the editor DTO before the disk worker normalizes/writes it.
         // No WPF binding or shared runtime settings are accessed by that worker.
-        ProductionSettings snapshot = JsonSerializer.Deserialize<ProductionSettings>(
-            JsonSerializer.SerializeToUtf8Bytes(Settings))!;
+        ProductionSettings snapshot = CaptureSettingsForSave();
         await Task.Run(() => { SaveDiscardEdit(discard); _saveSettings(snapshot); });
         ProductionConfigService.CopyInto(Settings, snapshot);
+        Settings.RelayWiringMode = ProductionConfigService.GetRelayWiringModeForPath(Settings, _modelPath);
         RestoreLotEditorInput();
         await AcceptDiscardEditAsync(discard);
+    }
+
+    private ProductionSettings CaptureSettingsForSave()
+    {
+        ProductionSettings snapshot = JsonSerializer.Deserialize<ProductionSettings>(
+            JsonSerializer.SerializeToUtf8Bytes(Settings))!;
+        // Retain the legacy default for THTs not configured yet. Saving A must
+        // never change the fallback wiring of B or any older station config.
+        snapshot.RelayWiringMode = _legacyRelayWiringMode;
+        return snapshot;
     }
 
     private void RestoreLotEditorInput()

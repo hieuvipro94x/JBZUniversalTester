@@ -1996,8 +1996,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         bool jigEnabled = _productionSettings.JigEjectRelayEnabled;
         bool markingEnabled = _productionSettings.PassMarkingRelayEnabled;
-        int jigRelay = _productionSettings.RelayWiringMode == 1 ? 2 : 1;
-        int markingRelay = _productionSettings.RelayWiringMode == 1 ? 1 : 2;
+        int wiringMode = ProductionConfigService.GetRelayWiringModeForPath(_productionSettings, _model?.SourcePath);
+        int jigRelay = wiringMode == 1 ? 2 : 1;
+        int markingRelay = wiringMode == 1 ? 1 : 2;
 
         if (!jigEnabled && !markingEnabled)
             return "PASS không kích relay theo cấu hình";
@@ -2011,7 +2012,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private string FaultJigRelayText()
     {
-        int relay = _productionSettings.RelayWiringMode == 1 ? 2 : 1;
+        int relay = ProductionConfigService.GetRelayWiringModeForPath(_productionSettings, _model?.SourcePath) == 1 ? 2 : 1;
         int pulseMs = relay == 2
             ? _productionSettings.Relay2MarkingPulseMs
             : _productionSettings.Relay1JigPulseMs;

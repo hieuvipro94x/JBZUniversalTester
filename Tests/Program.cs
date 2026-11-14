@@ -22,6 +22,8 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-model-relay"])
+        { TestModelRelayWiring(); Console.WriteLine("PASS: per-THT relay configuration, PASS/FAIL/Master mapping and history snapshots"); return 0; }
         if (args is ["--test-history-tooltips"])
         { TestHistoryClippedTooltips(); Console.WriteLine("PASS: History tooltips follow actual visible text bounds"); return 0; }
         if (args is ["--test-history-long-file-names"])
@@ -720,6 +722,7 @@ internal static partial class Program
             ("Blank THT IO mapping compatibility", TestBlankThtIoMappingCompatibility),
             ("Learned diagnostic topology normalization and persistence", TestLearnedTopology),
             ("Relay PASS/FAIL safe ordering", TestRelayOrdering),
+            ("Relay wiring follows the selected THT filename and preserves legacy defaults", TestModelRelayWiring),
             ("History SQLite/search/CSV/XLSX native types", TestHistory),
             ("Original History export columns preserve THT metadata and existing database", TestOriginalHistoryExportColumns),
             ("Tester connection notice is consistent across startup, manual actions and actual device loss", TestUnifiedTesterConnectionNotice),

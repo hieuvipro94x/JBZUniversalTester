@@ -202,6 +202,10 @@ public static class ProductionConfigService
             $"[LabelExternalPrintFile]{settings.Label.ExternalPrintFile}"
         };
 
+        foreach ((string modelKey, int mode) in settings.RelayWiringModesByModel
+                     .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
+            lines.Add($"[RelayWiring.Model.{Uri.EscapeDataString(modelKey)}]{mode}");
+
         foreach ((string productKey, string template) in settings.LabelTemplateTypesByProduct
                      .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase))
             lines.Add($"[Label.Product.{Uri.EscapeDataString(productKey)}]{NormalizeProductLabel(template)}");
@@ -388,6 +392,11 @@ public static class ProductionConfigService
         string file = Path.GetFileNameWithoutExtension(path.Trim());
         return string.IsNullOrWhiteSpace(file) ? "DEFAULT" : file.Trim();
     }
+
+    public static int GetRelayWiringModeForPath(ProductionSettings settings, string? path) =>
+        !string.IsNullOrWhiteSpace(path) && settings.RelayWiringModesByModel.TryGetValue(
+            GetMasterModelKeyFromPath(path), out int mode)
+            ? Math.Clamp(mode, 0, 1) : Math.Clamp(settings.RelayWiringMode, 0, 1);
 
     public static int GetMasterFaultRequiredCount(ProductionSettings settings, ProductModel model)
     {
@@ -686,6 +695,16 @@ public static class ProductionConfigService
         settings.PassMarkingRelayEnabled = B(map, "PassMarkingRelayEnabled", settings.PassMarkingRelayEnabled);
         settings.PassJigRelayFirst = B(map, "PassJigRelayFirst", settings.PassJigRelayFirst);
         settings.FaultJigRelayNumber = I(map, "FaultJigRelayNumber", settings.FaultJigRelayNumber);
+        foreach ((string key, string value) in map)
+        {
+            const string prefix = "RelayWiring.Model.";
+            if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int mode))
+            {
+                string modelKey = Uri.UnescapeDataString(key[prefix.Length..]);
+                if (!string.IsNullOrWhiteSpace(modelKey)) settings.RelayWiringModesByModel[modelKey] = Math.Clamp(mode, 0, 1);
+            }
+        }
         settings.RelayWiringMode = map.ContainsKey("RelayWiringMode")
             ? I(map, "RelayWiringMode", settings.RelayWiringMode)
             : settings.PassJigRelayFirst || settings.FaultJigRelayNumber == 2
@@ -800,6 +819,10 @@ public static class ProductionConfigService
 
     private static void Normalize(ProductionSettings settings)
     {
+        settings.RelayWiringModesByModel = new(settings.RelayWiringModesByModel ?? new(), StringComparer.OrdinalIgnoreCase);
+        foreach (string key in settings.RelayWiringModesByModel.Keys.ToArray())
+            if (string.IsNullOrWhiteSpace(key)) settings.RelayWiringModesByModel.Remove(key);
+            else settings.RelayWiringModesByModel[key] = Math.Clamp(settings.RelayWiringModesByModel[key], 0, 1);
         settings.TestViewLanguage = TestViewText.NormalizeLanguage(settings.TestViewLanguage);
         settings.AutoPrintLabelOnPass = true;
         settings.MissingConnectionConfirmationSeconds = Math.Clamp(settings.MissingConnectionConfirmationSeconds, 1, 120);

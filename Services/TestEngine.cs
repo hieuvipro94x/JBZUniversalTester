@@ -3351,8 +3351,8 @@ public sealed class TestEngine : IDisposable
         return PulseRelaySafeAsync(relay, PulseDurationForRelay(relay), $"R{relay} MANUAL", ct);
     }
 
-    private int ConfiguredJigRelay => _production.RelayWiringMode == 1 ? 2 : 1;
-    private int ConfiguredMarkingRelay => _production.RelayWiringMode == 1 ? 1 : 2;
+    private int ConfiguredJigRelay => ProductionConfigService.GetRelayWiringModeForPath(_production, _model?.SourcePath) == 1 ? 2 : 1;
+    private int ConfiguredMarkingRelay => ProductionConfigService.GetRelayWiringModeForPath(_production, _model?.SourcePath) == 1 ? 1 : 2;
     private int PulseDurationForRelay(int relay) => relay == 2
         ? _production.Relay2MarkingPulseMs
         : _production.Relay1JigPulseMs;
