@@ -16,7 +16,7 @@ public static class ProductionConfigService
         WriteIndented = true
     };
 
-    public static string ConfigDirectory => RuntimePaths.AppDirectory;
+    public static string ConfigDirectory => Path.GetDirectoryName(ConfigPath)!;
     public static string ConfigPath => RuntimePaths.ConfigFile;
     public static string JsonPath => RuntimePaths.LegacyProductionJson;
     public static string LegacyCfgPath => RuntimePaths.LegacyConfigFile;

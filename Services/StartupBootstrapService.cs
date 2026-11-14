@@ -30,6 +30,7 @@ public static class StartupBootstrapService
         catch (Exception ex)
         {
             log.Error($"Fast configuration inheritance failed: {ex}");
+            throw; // Never replace an unresolved station configuration with defaults.
         }
     }
 

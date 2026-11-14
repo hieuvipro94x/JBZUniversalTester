@@ -37,7 +37,38 @@ public static class ProductionDataUpgradeService
 
     public static IReadOnlyList<string> MigrateFastConfigurationForCurrentVersion()
     {
-        return MigrateCurrentVersionFiles(FastConfigurationFiles);
+        return MigrateStationConfiguration(RuntimePaths.ConfigFile, RuntimePaths.AppDirectory,
+            () => FindPreviousVersionDirectories(RuntimePaths.AppDirectory));
+    }
+
+    /// <summary>Copy the station CFG beside its DB once; retain every legacy source.</summary>
+    public static IReadOnlyList<string> MigrateStationConfiguration(
+        string destinationPath, string applicationDirectory, Func<IEnumerable<string>> previousDirectories)
+    {
+        string destination = Path.GetFullPath(destinationPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        using var migrationLock = new FileStream(destination + ".relocation.lock", FileMode.OpenOrCreate,
+            FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        if (File.Exists(destination)) return [];
+
+        string adjacent = Path.Combine(Path.GetFullPath(applicationDirectory), "JBZUniversalTester.cfg");
+        string? source = File.Exists(adjacent) ? adjacent : null;
+        if (source is null)
+        {
+            string[] candidates = previousDirectories()
+                .Select(path => Path.Combine(Path.GetFullPath(path), "JBZUniversalTester.cfg"))
+                .Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (candidates.Length > 0)
+            {
+                byte[] expected = File.ReadAllBytes(candidates[0]);
+                if (candidates.Skip(1).Any(path => !File.ReadAllBytes(path).SequenceEqual(expected)))
+                    throw new IOException("Tìm thấy nhiều CFG khác nhau. Hãy đặt CFG của máy đang vận hành cạnh EXE rồi mở lại. Giữ nguyên tất cả CFG: " + string.Join("; ", candidates));
+                source = candidates[0];
+            }
+        }
+        if (source is null) return [];
+        CopyWithoutOverwrite(source, destination);
+        return [destination];
     }
 
     public static IReadOnlyList<string> MigrateDeferredProductionDataForCurrentVersion()

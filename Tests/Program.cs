@@ -750,6 +750,7 @@ internal static partial class Program
             ("Scan restarts after unmonitored capacity/manual sessions", TestScanRestartAfterUnmonitoredSession),
             ("Scan freshness rejects duplicates and preserves timeout diagnostics", TestScanSessionFreshnessAndWatchdogDiagnostics),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
+            ("Station CFG follows DB, preserves sources and rejects ambiguous migration", TestStationConfigurationRelocation),
             ("Production/probe decoder separation", TestDecoderModes),
             ("Settings Admin credentials and group permissions persist securely", TestSettingsCredentialsAndPermissions),
             ("Settings Leak editing uses its per-product profile independently of legacy sidecars", TestSettingsInvalidLeakLayoutRecovery),

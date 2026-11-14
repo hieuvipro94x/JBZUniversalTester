@@ -9,7 +9,7 @@ namespace JBZUniversalTester.Services;
 public static class RuntimePaths
 {
     public static string AppDirectory => Path.GetFullPath(AppContext.BaseDirectory);
-    public static string ConfigFile => Path.Combine(AppDirectory, "JBZUniversalTester.cfg");
+    public static string ConfigFile => Path.Combine(Path.GetDirectoryName(DatabaseFile)!, "JBZUniversalTester.cfg");
     public static string PartCounterFile => Path.Combine(AppDirectory, "PartCnt.txt");
     public static string LogFile => Path.Combine(AppDirectory, "JBZUniversalTester.log");
     public static string DataDirectory => Path.Combine(AppDirectory, "Data");
