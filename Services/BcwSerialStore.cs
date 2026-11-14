@@ -6,16 +6,16 @@ using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.Services;
 
-/// <summary>Independent label journal: never migrates or resets production History/LOT.</summary>
+/// <summary>BCW label journal in the station DB; independent of production History/LOT counters.</summary>
 public sealed class BcwSerialStore
 {
     private readonly string _path;
-    private readonly bool _inheritPreviousVersion;
+    private readonly bool _useSharedDatabase;
     private static readonly object InheritanceGate = new();
     public BcwSerialStore(string? path = null)
     {
-        _path = path ?? Path.Combine(RuntimePaths.DataDirectory, "BCW-labels.db");
-        _inheritPreviousVersion = path is null;
+        _path = path ?? RuntimePaths.DatabaseFile;
+        _useSharedDatabase = path is null;
     }
 
     private SqliteConnection Open()
@@ -25,10 +25,9 @@ public sealed class BcwSerialStore
 
     private SqliteConnection OpenCore()
     {
-        if (_inheritPreviousVersion)
+        if (_useSharedDatabase)
         {
-            lock (InheritanceGate)
-                if (!File.Exists(_path)) ProductionDataUpgradeService.MigrateBcwForCurrentVersion();
+            BcwDatabaseMigrationService.EnsureForCurrentInstallation();
         }
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder

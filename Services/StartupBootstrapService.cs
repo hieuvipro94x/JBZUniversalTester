@@ -49,6 +49,7 @@ public static class StartupBootstrapService
             log.Application($"configuration ready: {RuntimePaths.ConfigFile}");
 
             var repository = new TestHistoryStore(RuntimePaths.DatabaseFile);
+            BcwDatabaseMigrationService.EnsureForCurrentInstallation();
             log.Application($"database ready: {RuntimePaths.DatabaseFile}");
 
             var partCounter = new PartCounterStore(RuntimePaths.PartCounterFile);

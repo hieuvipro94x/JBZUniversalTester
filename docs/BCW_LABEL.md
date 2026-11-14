@@ -68,9 +68,9 @@ Yêu cầu đã chụp giữ nguyên mẫu trước đó dù sau này sửa/khô
 
 ## Lưu serial và lỗi in
 
-Nhật ký riêng `Data\BCW-labels.db` lưu CycleId, phạm vi ngày/mã xe/vị trí, serial, trạng thái, snapshot yêu cầu và thông báo. Cùng ngày + mã xe + vị trí dùng chung serial, kể cả đổi PartNumber, vì PartNumber không nằm trong QR; điều này tránh trùng QR giữa hai mã hàng cùng nhóm. Ngày mới hoặc nhóm xe/vị trí khác bắt đầu 00001; quay lại ngày cũ đọc số đã lưu của ngày đó.
+Từ V2026.09.448, bảng `BcwPrints` trong DB chung `%ProgramData%\JBZUniversalTester\Data\JBZUniversalTester.db` lưu CycleId, phạm vi ngày/mã xe/vị trí, serial, trạng thái, snapshot yêu cầu và thông báo. Cùng ngày + mã xe + vị trí dùng chung serial, kể cả đổi PartNumber, vì PartNumber không nằm trong QR; điều này tránh trùng QR giữa hai mã hàng cùng nhóm. Ngày mới hoặc nhóm xe/vị trí khác bắt đầu 00001; quay lại ngày cũ đọc số đã lưu của ngày đó.
 
-Serial được giữ trong transaction SQLite trước khi gửi, nhưng chỉ tiến sau khi transport báo gửi thành công. Khóa gửi hiện có và unique constraints ngăn hai request tự động nhận cùng serial. Cùng CycleId đã gửi được chặn gửi lặp tự động. Nhật ký BCW được kế thừa khi chuyển thư mục phiên bản, không ghi đè file đích đã tồn tại; sao chép bằng SQLite backup và kiểm tra integrity.
+Serial được giữ trong transaction SQLite trước khi gửi, nhưng chỉ tiến sau khi transport báo gửi thành công. Khóa gửi hiện có và unique constraints ngăn hai request tự động nhận cùng serial. Cùng CycleId đã gửi được chặn gửi lặp tự động. Nhật ký BCW cũ được gộp một lần vào DB chung, có SQLite backup, transaction và kiểm tra integrity; giữ nguyên DB nguồn, dừng khi dữ liệu xung đột. Không tạo DB BCW riêng ở thư mục phiên bản mới. Xem `BCW_SHARED_DATABASE.md`.
 
 Gửi lỗi/mất kết nối hoặc trạng thái chưa rõ: không tiến serial, giữ snapshot và chặn serial mới **trong cùng nhóm** cho đến khi xử lý tem đang giữ. Điều này chỉ chặn in BCW của nhóm đó, không giữ LOT Production, không đổi PASS thành FAIL và không dừng vòng kiểm tra sản phẩm.
 
@@ -80,7 +80,7 @@ Log phân biệt BCW_PREPARED, BCW_STATE và kết quả transport. `Sent`/Print
 
 ## Lịch sử và dữ liệu
 
-Không đổi schema/version SQLite History. Trước gửi tem production BCW, snapshot QR và payload cuối được ghi vào các cột label có sẵn, chỉ đúng Id/CycleId và loại BCW. Kết quả in vẫn đi qua pipeline lịch sử hiện có. Không sửa topology THT, quét IO, bắt lỗi, relay, Leak hoặc Keysight.
+Không đổi cấu trúc các bảng History hoặc version schema History; thêm bảng nhật ký BCW vào DB chung. Trước gửi tem production BCW, snapshot QR và payload cuối được ghi vào các cột label có sẵn, chỉ đúng Id/CycleId và loại BCW. Kết quả in vẫn đi qua pipeline lịch sử hiện có. Không sửa topology THT, quét IO, bắt lỗi, relay, Leak hoặc Keysight.
 
 In thử/hàng loạt/in lại tại Cài đặt được ghi trong nhật ký BCW, không tạo kết quả test giả và không sửa sản lượng. Nút in lại tem trong TestView vẫn dùng pipeline reprint History hiện có.
 

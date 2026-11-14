@@ -16,7 +16,6 @@ public static class ProductionDataUpgradeService
     [
         "JBZUniversalTester.cfg",
         Path.Combine("Data", "JBZUniversalTester.db"),
-        Path.Combine("Data", "BCW-labels.db"),
         "PartCnt.txt"
     ];
 
@@ -32,7 +31,7 @@ public static class ProductionDataUpgradeService
 
     public static void MigrateBcwForCurrentVersion()
     {
-        MigrateCurrentVersionFiles([Path.Combine("Data", "BCW-labels.db")]);
+        BcwDatabaseMigrationService.EnsureForCurrentInstallation();
     }
 
     public static IReadOnlyList<string> MigrateFastConfigurationForCurrentVersion()

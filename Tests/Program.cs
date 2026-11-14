@@ -22,6 +22,15 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-bcw-shared-db"])
+        {
+            TestBcwPersistentSerialAndTransport();
+            TestBcwSharedDatabaseMigration();
+            TestBcwSharedDatabaseConflicts();
+            TestBcwSharedDatabaseDefaultStore();
+            Console.WriteLine("PASS: shared BCW database migration, History preservation, rollback and default routing");
+            return 0;
+        }
         if (args is ["--test-printer-command-export"])
         {
             TestExcelSavedPrinterCommands();
@@ -751,6 +760,9 @@ internal static partial class Program
             ("Scan freshness rejects duplicates and preserves timeout diagnostics", TestScanSessionFreshnessAndWatchdogDiagnostics),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Station CFG follows DB, preserves sources and rejects ambiguous migration", TestStationConfigurationRelocation),
+            ("BCW merges legacy journals once without changing History or source files", TestBcwSharedDatabaseMigration),
+            ("BCW merge rejects conflicting or corrupt sources transactionally", TestBcwSharedDatabaseConflicts),
+            ("Default BCW operations use only the shared station database", TestBcwSharedDatabaseDefaultStore),
             ("Production/probe decoder separation", TestDecoderModes),
             ("Settings Admin credentials and group permissions persist securely", TestSettingsCredentialsAndPermissions),
             ("Settings Leak editing uses its per-product profile independently of legacy sidecars", TestSettingsInvalidLeakLayoutRecovery),

@@ -236,11 +236,16 @@ internal static partial class Program
             Directory.CreateDirectory(Path.Combine(previous,"Data"));
             File.Copy(Path.Combine(root,"bcw.db"),Path.Combine(previous,"Data","BCW-labels.db"));
             ProductionDataUpgradeService.MigrateMissingProductionData(upgraded,[previous]);
-            var inherited = new BcwSerialStore(Path.Combine(upgraded,"Data","BCW-labels.db"));
+            string shared = Path.Combine(root, "Shared", "JBZUniversalTester.db");
+            _ = new TestHistoryStore(shared);
+            BcwDatabaseMigrationService.Ensure(shared, () => [Path.Combine(previous,"Data","BCW-labels.db")]);
+            var inherited = new BcwSerialStore(shared);
             Assert(inherited.Peek(new DateTime(2026,10,15),"09","LH")==14,
-                "Publishing a new version inherits BCW serial history without resetting same-day serials");
+                "Publishing a new version merges BCW into the shared DB without resetting same-day serials");
+            Assert(!File.Exists(Path.Combine(upgraded,"Data","BCW-labels.db")),
+                "Publishing no longer copies a separate BCW database into the new version");
         }
-        finally { Directory.Delete(root,recursive:true); }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(root,recursive:true); }
     }
 
     private static void TestBcwHistorySnapshotPreservesRows()
