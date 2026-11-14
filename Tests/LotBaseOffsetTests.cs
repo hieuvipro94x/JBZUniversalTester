@@ -96,6 +96,31 @@ internal static partial class Program
                        ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='next-101' AND Lot=7101 AND Passed=1 AND LabelPayload LIKE '%7101%';") == 1,
                     "The 101st PASS atomically records and prepares LOT 7101; its captured printer payload retains that LOT");
 
+                // Save a different format without advancing LOT, then exercise
+                // the TestView retry command through the real file transport.
+                var labelEditor = new ProductionSettingsViewModel(vm,
+                    saved => ProductionConfigService.SaveLegacyCfg(saved, cfg),
+                    JsonSerializer.Deserialize<ProductionSettings>(JsonSerializer.Serialize(settings))!);
+                labelEditor.Settings.Label.TemplateType = LabelSettings.LargeTemplate;
+                await labelEditor.SaveAsync();
+                ProductionConfigService.CopyInto(settings, ProductionConfigService.LoadSavedSettings(cfg));
+                vm.RefreshProductionSettingsOnly(); await Loaded();
+                settings.Label.RawDestination = Path.Combine(root, "retry-ketn.epl");
+                var expectedRetry = LabelPrintRequest.Capture(new TestHistoryRecord
+                {
+                    CycleId = captured.CycleId, LotNo = captured.Data.LotNo,
+                    Finished = captured.Data.TestedAt
+                }, model, settings.Label);
+                await ((Task)typeof(TestViewModel).GetMethod("RetryLastFailedLabelAsync", flags)!
+                    .Invoke(vm, null)!).WaitAsync(TimeSpan.FromSeconds(5));
+                Assert(expectedRetry.Profile.Id == LabelSettings.LargeTemplate &&
+                       captured.Profile.Id == LabelSettings.LargeSqdzTemplate &&
+                       File.ReadAllText(settings.Label.RawDestination) == expectedRetry.Payload &&
+                       expectedRetry.Payload != captured.Payload && vm.Pass == 101 && vm.Lot == "7101",
+                    "Saving SQDZ to KETN makes TestView retry use the new layout at the same LOT without another PASS");
+                Assert(ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='next-101' AND Lot=7101 AND LabelTemplateType='TEM_TO_SQDZ' AND LabelPayload LIKE '%7101%';") == 1,
+                    "Manual format changes preserve the original production label snapshot and cycle");
+
                 ProductionConfigService.CopyInto(settings, ProductionConfigService.LoadSavedSettings(cfg));
                 vm.SetModel(model); await Loaded();
                 Assert(vm.Lot == "7101" && vm.Pass == 101, "Restart/reselect restores the edited base plus progress without double counting");
@@ -113,6 +138,19 @@ internal static partial class Program
                        vm.LabelStatusText.Contains("5101", StringComparison.Ordinal) && vm.Pass == 101 && vm.Lot == "5101" &&
                        ScalarInt(db, "SELECT COUNT(*) FROM Tests WHERE CycleId='next-101' AND Lot=7101 AND ReprintCount=1 AND LabelPayload LIKE '%7101%';") == 1,
                     "TestView copy prints the edited 5000 base plus all 101 PASS without changing original history or production counts");
+
+                settings.Label.TemplateType = LabelSettings.SmallTemplate;
+                settings.LabelTemplateTypesByProduct[ProductionConfigService.GetLotProductKey(model)] = LabelSettings.SmallTemplate;
+                vm.RefreshProductionSettingsOnly(); await Loaded();
+                settings.Label.RawDestination = Path.Combine(root, "copy-new-format-same-lot.epl");
+                await ((Task)typeof(TestViewModel).GetMethod("ReprintLastSuccessfulLabelAsync", flags)!
+                    .Invoke(vm, null)!).WaitAsync(TimeSpan.FromSeconds(5));
+                string copyOutput = File.ReadAllText(settings.Label.RawDestination);
+                Assert(copyOutput.Contains("5101", StringComparison.Ordinal) &&
+                       copyOutput != File.ReadAllText(Path.Combine(root, "copy-5101.epl")) &&
+                       vm.Pass == 101 && vm.Lot == "5101" &&
+                       ScalarInt(db, "SELECT ReprintCount FROM Tests WHERE CycleId='next-101';") == 2,
+                    "TestView additional copy also follows the new format when LOT remains unchanged");
 
                 // Reopening a date with results from before the base correction
                 // must still use the saved base, even if it was edited another day.

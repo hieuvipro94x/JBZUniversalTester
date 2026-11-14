@@ -13466,7 +13466,47 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (context is null)
             return;
 
-        await PrintPassLabelSafeAsync(context.Request, context.HistoryStore, context.HistoryId, explicitBcwReprint: true);
+        try
+        {
+            ProductModel? model = _model;
+            if (model is null) return;
+            LabelPrintRequest request = CaptureManualLabelRequest(context.Request, model, context.Request.Data.LotNo);
+            await PrintPassLabelSafeAsync(request, context.HistoryStore, context.HistoryId, explicitBcwReprint: true);
+        }
+        catch (Exception ex)
+        {
+            AddLog($"LABEL RETRY ERROR: {ex}");
+            ShowLabelWarning($"Chưa tạo lại được tem: {ex.Message}");
+        }
+    }
+
+    private LabelPrintRequest CaptureManualLabelRequest(LabelPrintRequest previous, ProductModel model, long lotNo)
+    {
+        if (!string.Equals(previous.Data.PartNumber, model.PartNumber, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Tem in lại không thuộc mã hàng đang chọn.");
+
+        // Manual printing uses the saved, currently selected format even when
+        // LOT is unchanged. Automatic PASS requests remain immutable snapshots.
+        // An existing BCW label keeps its allocated serial and exact payload.
+        if (previous.Profile.Id == LabelSettings.BcwTemplate &&
+            LabelProfileResolver.NormalizeTemplateType(_productionSettings.Label.TemplateType) == LabelSettings.BcwTemplate)
+            return previous with
+            {
+                PrinterName = _productionSettings.Label.PrinterName,
+                PrinterCom = _productionSettings.Label.PrinterCom,
+                RawDestination = _productionSettings.Label.RawDestination,
+                BaudRate = _productionSettings.Label.BaudRate,
+                WriteTimeoutMs = _productionSettings.Label.WriteTimeoutMs
+            };
+
+        return LabelPrintRequest.Capture(new TestHistoryRecord
+        {
+            CycleId = previous.CycleId,
+            ModelName = previous.ModelName,
+            ModelFile = previous.ModelFile,
+            LotNo = lotNo,
+            Finished = lotNo == previous.Data.LotNo ? previous.Data.TestedAt : DateTime.Now
+        }, model, _productionSettings.Label);
     }
 
     private async Task ReprintLastSuccessfulLabelAsync()
@@ -13496,16 +13536,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
             // TestView copies follow the current base and committed progress.
             // Keep historical payloads intact; BCW retains its reserved serial.
-            if (Pass > 0 && context.Request.Profile.Id != LabelSettings.BcwTemplate &&
-                context.Request.Data.LotNo != _lotSequence.NextLot)
-            {
-                context = context with { Request = LabelPrintRequest.Capture(new TestHistoryRecord
-                {
-                    CycleId = context.Request.CycleId,
-                    LotNo = _lotSequence.NextLot,
-                    Finished = DateTime.Now
-                }, model, _productionSettings.Label) };
-            }
+            long copyLot = Pass > 0 && context.Request.Profile.Id != LabelSettings.BcwTemplate
+                ? _lotSequence.NextLot : context.Request.Data.LotNo;
+            context = context with { Request = CaptureManualLabelRequest(context.Request, model, copyLot) };
 
             LabelPrintTransportResult result = await _labelPrintService.PrintPassLabelAsync(
                 context.Request, _lifetimeToken, explicitReprint: true);
