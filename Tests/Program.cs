@@ -22,6 +22,19 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-printer-command-export"])
+        {
+            TestExcelSavedPrinterCommands();
+            Console.WriteLine("PASS: exact saved BarWrite command blocks in Excel/CSV, without barcode-only fallback");
+            return 0;
+        }
+        if (args is ["--preview-printer-command-export", var outputPath])
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
+            HistoryExportService.ExportXlsx(outputPath, PrinterCommandExportSamples().Take(4));
+            Console.WriteLine(Path.GetFullPath(outputPath));
+            return 0;
+        }
         if (args is ["--test-scan-session-watchdog"])
         {
             TestScanRestartAfterUnmonitoredSession();
@@ -713,6 +726,7 @@ internal static partial class Program
             ("Board USB loss exits and restores the exact THT on restart", TestBoardDisconnectExitsAndRestores),
             ("Board fault safe exit bypasses only operator close guards", TestBoardFaultSafeApplicationExit),
             ("History export failures preserve old files", TestHistoryExportFailureSafety),
+            ("Excel preserves exact saved printer command blocks without barcode fallback", TestExcelSavedPrinterCommands),
             ("History filters and export respect page lifecycle", TestHistoryFiltersAndExportLifecycle),
             ("Auxiliary windows fit the current monitor and DPI", TestAuxiliaryWindowViewport),
             ("Center Vietnamese/Korean messages and PASS fit narrow TestView", TestCenterResultViewport),

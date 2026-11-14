@@ -43,7 +43,10 @@ public static class HistoryExportService
         new("합격", 16, HistoryCellType.Text, r => r.ExportPassCountText),
         new("검사기록", 80, HistoryCellType.Text, r => r.ExportTestLogSingleLineText, true),
         new("바코드입력", 24, HistoryCellType.Text, r => r.ExportBarcodeInputText),
-        new("바코드출력", 34, HistoryCellType.Text, r => r.ExportBarcodeText),
+        // Match original BarWrite: the exact saved printer payload, never a
+        // barcode-only fallback or commands rebuilt from current settings.
+        new("바코드출력", 34, HistoryCellType.Text,
+            r => r.IsProductionRecord && r.Passed ? r.LabelPayload : string.Empty),
         new("측정", 30, HistoryCellType.Text, r => r.ExportResistanceText),
         new(ProgramIdentityService.ProgramName, 30, HistoryCellType.Text, _ => $"V{ProgramIdentityService.VersionText}"),
         new("내용", 40, HistoryCellType.Text, r => r.ExportContentText),
