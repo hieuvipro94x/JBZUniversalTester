@@ -43,6 +43,9 @@ public sealed class ScanSupervisor
     private long _lastCompleteFrameAt = -1;
     private long _lastCompleteFrameSequence;
     private long _lastObservedScanGeneration;
+    // Track transport sessions even while suspended or rejecting capacity/partial
+    // frames. Monitoring may never have started in the preceding scan session.
+    private long _latestReceivedScanGeneration;
     private long _previousScanGeneration;
     private long _baselineCompleteFrames;
     private long _baselineCompleteFrameSequence;
@@ -253,7 +256,7 @@ public sealed class ScanSupervisor
             _stateEnteredAt = now;
             _firstFrameWaiter?.TrySetCanceled();
             _firstFrameWaiter = null;
-            stalled = SnapshotUnsafe(now);
+            stalled = stalled with { State = ScanHealthState.Recovering, Reason = _healthReason };
             return true;
         }
     }
@@ -351,7 +354,7 @@ public sealed class ScanSupervisor
             long baseline = _board.CompleteFramesReceived;
             TaskCompletionSource<ScanFrame> firstFrame = BeginFirstFrameWait(
                 mode,
-                requireNewGeneration: false,
+                requireNewGeneration: true,
                 recovering: true,
                 baseline,
                 _board.Capacity,
@@ -418,7 +421,7 @@ public sealed class ScanSupervisor
             _firstFrameWaiter?.TrySetCanceled();
             _firstFrameWaiter = waiter;
             _expectedMode = mode;
-            _previousScanGeneration = _lastObservedScanGeneration;
+            _previousScanGeneration = Math.Max(_lastObservedScanGeneration, _latestReceivedScanGeneration);
             _baselineCompleteFrames = Math.Max(
                 baselineCompleteFrames,
                 _board.CompleteFramesReceived);
@@ -466,32 +469,26 @@ public sealed class ScanSupervisor
 
     private void OnFrameReceived(object? sender, ScanFrame frame)
     {
-        if (frame.Mode != _expectedMode ||
-            !frame.Complete ||
-            frame.UnknownBytes != 0 ||
-            !frame.TerminatorKnown ||
-            !HasExpectedCoverage(frame, _expectedCapacity))
-        {
-            return;
-        }
-
         TaskCompletionSource<ScanFrame>? completedWaiter = null;
         double firstFrameLatencyMs = 0;
         lock (_healthGate)
         {
+            _latestReceivedScanGeneration = Math.Max(_latestReceivedScanGeneration, frame.ScanGeneration);
+            if (frame.Mode != _expectedMode ||
+                !frame.Complete || frame.UnknownBytes != 0 || !frame.TerminatorKnown ||
+                !HasExpectedCoverage(frame, _expectedCapacity)) return;
+
             if (_healthState is ScanHealthState.Starting or ScanHealthState.Recovering)
             {
-                bool generationAccepted = !_requireNewGeneration ||
-                                          frame.ScanGeneration == 0 ||
-                                          _previousScanGeneration == 0 ||
-                                          frame.ScanGeneration != _previousScanGeneration;
+                bool generationAccepted = frame.ScanGeneration == 0 || _previousScanGeneration == 0 ||
+                    (_requireNewGeneration
+                        ? frame.ScanGeneration > _previousScanGeneration
+                        : frame.ScanGeneration == _previousScanGeneration);
                 // D2XX resets the frame sequence to 1 after a real STOP/START.
                 // A new hardware generation is therefore the freshness proof for
                 // hard restart; sequence monotonicity applies only to keep-alive.
-                bool freshFrameAccepted = _requireNewGeneration &&
-                                          frame.ScanGeneration != 0 &&
-                                          _previousScanGeneration != 0
-                    ? frame.ScanGeneration != _previousScanGeneration
+                bool freshFrameAccepted = _requireNewGeneration && frame.ScanGeneration > 0
+                    ? frame.ScanGeneration > _previousScanGeneration
                     : frame.Sequence > 0
                         ? frame.Sequence > _baselineCompleteFrameSequence
                         : _board.CompleteFramesReceived > _baselineCompleteFrames;
@@ -521,6 +518,8 @@ public sealed class ScanSupervisor
                     return;
                 }
 
+                // Replayed/duplicate callbacks are not new hardware progress.
+                if (frame.Sequence > 0 && frame.Sequence <= _lastCompleteFrameSequence) return;
                 _lastCompleteFrameAt = _timeProvider.GetTimestamp();
                 _lastCompleteFrameSequence = frame.Sequence;
             }

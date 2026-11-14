@@ -2760,8 +2760,9 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
                             $"state_age_ms={stalled.StateAgeMilliseconds:0.###} " +
                             $"generation={stalled.ScanGeneration} reason={stalled.Reason}");
                         EnterDeviceFault(new TimeoutException(
-                            $"Bo D2XX ngừng gửi frame hợp lệ: state={stalled.State}; age={stalled.CompleteFrameAgeMilliseconds:0} ms."),
-                            "ScanWatchdog.BoardDisconnected");
+                            $"Luồng quét bo D2XX không sẵn sàng: reason={stalled.Reason}; " +
+                            $"state_age={stalled.StateAgeMilliseconds:0} ms; frame_age={stalled.CompleteFrameAgeMilliseconds:0} ms."),
+                            "ScanWatchdog.ScanUnavailable");
                         break;
                     }
                 }

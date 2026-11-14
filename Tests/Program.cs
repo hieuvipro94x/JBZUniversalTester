@@ -22,6 +22,15 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-scan-session-watchdog"])
+        {
+            TestScanRestartAfterUnmonitoredSession();
+            TestScanSessionFreshnessAndWatchdogDiagnostics();
+            TestScanWatchdogRecovery();
+            TestBoardDisconnectExitsAndRestores();
+            Console.WriteLine("PASS: restart session freshness, real stall detection and USB-loss recovery history");
+            return 0;
+        }
         if (args is ["--test-board-fault-recovery"])
         {
             TestBoardFaultRecoveryStorage();
@@ -724,6 +733,8 @@ internal static partial class Program
             ("Disconnected D2XX operator actions never enter fatal device fault", TestDisconnectedBoardOperatorActions),
             ("Production scan accepts first frame after decoder sequence reset", TestProductionScanFirstFrameAfterSequenceReset),
             ("Scan watchdog intentional pause and staged recovery", TestScanWatchdogRecovery),
+            ("Scan restarts after unmonitored capacity/manual sessions", TestScanRestartAfterUnmonitoredSession),
+            ("Scan freshness rejects duplicates and preserves timeout diagnostics", TestScanSessionFreshnessAndWatchdogDiagnostics),
             ("New version inherits station production data without overwrite", TestProductionDataUpgrade),
             ("Production/probe decoder separation", TestDecoderModes),
             ("Settings Admin credentials and group permissions persist securely", TestSettingsCredentialsAndPermissions),
@@ -2128,7 +2139,7 @@ internal static partial class Program
         Assert(d2xxSource.Contains(
                    "readGeneration != Volatile.Read(ref _scanGeneration)",
                    StringComparison.Ordinal) &&
-               supervisorSource.Contains("frame.ScanGeneration != _previousScanGeneration", StringComparison.Ordinal),
+               supervisorSource.Contains("frame.ScanGeneration > _previousScanGeneration", StringComparison.Ordinal),
             "Stale scan generations remain rejected by transport and ScanSupervisor gates");
 
         void AssertWaiting(string scenario, ScanFrame frame)
