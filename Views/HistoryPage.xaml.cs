@@ -27,6 +27,8 @@ public partial class HistoryPage : UserControl
     private HistorySummary _summary = new(0, 0, 0, 0, 0, 0);
     private bool _loadingPage;
     private bool _released;
+    private bool _searching;
+    private bool _exporting;
 
     public event EventHandler? RequestClose;
 
@@ -106,15 +108,20 @@ public partial class HistoryPage : UserControl
 
     private async void Reload()
     {
-        if (_released) return;
+        if (_released || _searching) return;
+        HistorySearchCriteria criteria;
+        try { criteria = CreateSearchCriteria(); }
+        catch (ArgumentException ex) { ShowMessage(ex.Message, "KIỂM TRA BỘ LỌC", MessageBoxImage.Warning); return; }
+        _searching = true;
+        SetExportButtons();
+        LoadMoreButton.IsEnabled = false;
         int generation = Interlocked.Increment(ref _reloadGeneration);
         try
         {
-            HistorySearchCriteria criteria = CreateSearchCriteria();
-            _activeCriteria = criteria;
+            _activeCriteria = null;
             _records.Clear();
             _passOrdinalsByProduct.Clear();
-            FileColumn.Width = new DataGridLength(180);
+            SummaryText.Text = "Đang đọc lịch sử...";
             Task<HistorySummary> summaryTask = Task.Run(() => GetStore().GetHistorySummary(criteria));
             Task<IReadOnlyList<TestHistoryRecord>> pageTask = Task.Run(() =>
                 GetStore().Search(criteria with { MaxRows = PageSize, Offset = 0 }));
@@ -124,7 +131,7 @@ public partial class HistoryPage : UserControl
 
             _summary = summaryTask.Result;
             IReadOnlyList<TestHistoryRecord> rows = pageTask.Result;
-            ExpandFileColumnForRows(rows);
+            _activeCriteria = criteria;
             HistoryPresentation.AssignProductOrdinals(rows, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in rows)
                 _records.Add(row);
@@ -141,9 +148,6 @@ public partial class HistoryPage : UserControl
             LoadMoreButton.IsEnabled = _records.Count < _summary.Total;
 
             SummaryText.Text =
-                $"{rows.Count:N0} bản ghi | SẢN PHẨM {productCount:N0} " +
-                $"(PASS {pass:N0} / FAIL {fail:N0}) | 기밀 검사 시작 {leakRetest:N0} | MASTER {master:N0}";
-            SummaryText.Text =
                 $"Đang hiển thị {_records.Count:N0} / {_summary.Total:N0} bản ghi | " +
                 $"SẢN PHẨM {productCount:N0} (PASS {pass:N0} / FAIL {fail:N0}, {_summary.ProductPassRate:0.00}%) | " +
                 $"기밀 검사 시작 {leakRetest:N0} | MASTER {master:N0}";
@@ -158,11 +162,16 @@ public partial class HistoryPage : UserControl
             SummaryText.Text = "Không thể đọc dữ liệu lịch sử.";
             ShowMessage("Chưa đọc được lịch sử kiểm tra. Vui lòng thử lại.", "CHƯA ĐỌC ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
         }
+        finally
+        {
+            _searching = false;
+            if (!_released) SetExportButtons();
+        }
     }
 
     private async void LoadMore_Click(object sender, RoutedEventArgs e)
     {
-        if (_released || _loadingPage || _activeCriteria is null || _records.Count == 0 || _records.Count >= _summary.Total)
+        if (_released || _searching || _loadingPage || _activeCriteria is null || _records.Count == 0 || _records.Count >= _summary.Total)
             return;
 
         _loadingPage = true;
@@ -181,7 +190,7 @@ public partial class HistoryPage : UserControl
             IReadOnlyList<TestHistoryRecord> page = await Task.Run(() => GetStore().Search(pageCriteria));
             if (generation != Volatile.Read(ref _reloadGeneration))
                 return;
-            ExpandFileColumnForRows(page);
+
             HistoryPresentation.AssignProductOrdinals(page, _passOrdinalsByProduct);
             foreach (TestHistoryRecord row in page)
                 _records.Add(row);
@@ -200,15 +209,6 @@ public partial class HistoryPage : UserControl
             if (!_released && generation == Volatile.Read(ref _reloadGeneration))
                 LoadMoreButton.IsEnabled = _records.Count < _summary.Total;
         }
-    }
-
-    private void ExpandFileColumnForRows(IReadOnlyList<TestHistoryRecord> rows)
-    {
-        // Bound each glyph by more than one em: no text shaping or Auto/SizeToCells
-        // measurement on scroll. A page expands the fixed width at most once.
-        int longest = rows.Count == 0 ? 0 : rows.Max(row => row.ExportModelFileName.Length);
-        double required = Math.Max(180, longest * HistoryGrid.FontSize * 1.25 + 24);
-        if (required > FileColumn.Width.Value) FileColumn.Width = new DataGridLength(required);
     }
 
     private void HistoryGrid_ToolTipOpening(object sender, ToolTipEventArgs e)
@@ -264,8 +264,19 @@ public partial class HistoryPage : UserControl
     private HistorySearchCriteria CreateSearchCriteria()
     {
         DateTime? from = FromDatePicker.SelectedDate?.Date;
-        DateTime? to = ToDatePicker.SelectedDate?.Date.AddDays(1);
-        long? lot = long.TryParse(LotTextBox.Text?.Trim(), out long n) ? n : null;
+        DateTime? end = ToDatePicker.SelectedDate?.Date;
+        if (from > end) throw new ArgumentException("Từ ngày phải nhỏ hơn hoặc bằng Đến ngày.");
+        if (end == DateTime.MaxValue.Date) throw new ArgumentException("Ngày kết thúc vượt phạm vi cho phép.");
+        DateTime? to = end?.AddDays(1);
+        string lotText = LotTextBox.Text.Trim();
+        long? lot = null;
+        if (lotText.Length > 0)
+        {
+            if (!long.TryParse(lotText, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out long n))
+                throw new ArgumentException("Số đếm PASS phải là số nguyên từ 0 trở lên.");
+            lot = n;
+        }
         string result = (ResultComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "ALL";
         string inspectionType =
             (InspectionTypeComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? string.Empty;
@@ -278,69 +289,69 @@ public partial class HistoryPage : UserControl
             InspectionType: inspectionType);
     }
 
-    private async void ExportCsv_Click(object sender, RoutedEventArgs e)
+    private async void ExportCsv_Click(object sender, RoutedEventArgs e) => await ExportAsync(false);
+    private async void ExportXlsx_Click(object sender, RoutedEventArgs e) => await ExportAsync(true);
+
+    private void SetExportButtons()
     {
-        var dialog = new SaveFileDialog
-        {
-            Title = "Xuất lịch sử CSV",
-            Filter = "CSV (*.csv)|*.csv",
-            FileName = $"JBZ_TestHistory_{DateTime.Now:yyyyMMdd_HHmmss}.csv"
-        };
-
-        bool? result = HostWindow is Window owner ? dialog.ShowDialog(owner) : dialog.ShowDialog();
-        if (result != true)
-            return;
-
-        HistorySearchCriteria criteria = CreateSearchCriteria();
-        try
-        {
-            int exportedCount = await Task.Run(() =>
-            {
-                IEnumerable<TestHistoryRecord> rows = GetStore().EnumerateForExport(criteria);
-                return HistoryExportService.ExportCsv(dialog.FileName, rows);
-            });
-            ShowMessage(
-                $"Đã xuất toàn bộ {exportedCount:N0} bản ghi theo mã hàng và ngày/giờ.\n\n{dialog.FileName}",
-                "JBZ",
-                MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            AsyncFileLogService.Current.Error($"History CSV export failed: {ex}");
-            ShowMessage("Chưa xuất được file CSV. Vui lòng thử lại.", "CHƯA XUẤT ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
-        }
+        CsvExportButton.IsEnabled = ExcelExportButton.IsEnabled =
+            !_released && !_searching && !_exporting && _activeCriteria is not null;
     }
 
-    private async void ExportXlsx_Click(object sender, RoutedEventArgs e)
+    internal HistorySearchCriteria CaptureExportCriteria()
     {
-        var dialog = new SaveFileDialog
-        {
-            Title = "Xuất lịch sử Excel theo mẫu chuẩn",
-            Filter = "Excel Workbook (*.xlsx)|*.xlsx",
-            FileName = $"JBZ_TestHistory_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
-        };
+        if (_activeCriteria is null || CreateSearchCriteria() != _activeCriteria)
+            throw new ArgumentException("Bộ lọc đã thay đổi. Bấm TÌM KIẾM trước khi xuất để file khớp với bảng lịch sử.");
+        return _activeCriteria;
+    }
 
-        bool? result = HostWindow is Window owner ? dialog.ShowDialog(owner) : dialog.ShowDialog();
-        if (result != true)
-            return;
-
-        HistorySearchCriteria criteria = CreateSearchCriteria();
+    private async Task ExportAsync(bool excel)
+    {
+        if (_released || _searching || _exporting || _activeCriteria is null) return;
+        HistorySearchCriteria criteria;
+        try { criteria = CaptureExportCriteria(); }
+        catch (ArgumentException ex) { ShowMessage(ex.Message, "KIỂM TRA BỘ LỌC", MessageBoxImage.Warning); return; }
+        _exporting = true;
+        SetExportButtons();
+        int generation = Volatile.Read(ref _reloadGeneration);
+        string previousSummary = SummaryText.Text;
         try
         {
+            var dialog = new SaveFileDialog
+            {
+                Title = excel ? "Xuất lịch sử Excel" : "Xuất lịch sử CSV",
+                Filter = excel ? "Excel Workbook (*.xlsx)|*.xlsx" : "CSV (*.csv)|*.csv",
+                FileName = $"JBZ_TestHistory_{DateTime.Now:yyyyMMdd_HHmmss}.{(excel ? "xlsx" : "csv")}",
+                OverwritePrompt = true
+            };
+            bool? result = HostWindow is Window owner ? dialog.ShowDialog(owner) : dialog.ShowDialog();
+            if (result != true || _released) return;
+            SummaryText.Text = "Đang xuất toàn bộ lịch sử theo bộ lọc...";
             int exportedCount = await Task.Run(() =>
             {
                 IEnumerable<TestHistoryRecord> rows = GetStore().EnumerateForExport(criteria);
-                return HistoryExportService.ExportXlsx(dialog.FileName, rows);
+                return excel ? HistoryExportService.ExportXlsx(dialog.FileName, rows)
+                    : HistoryExportService.ExportCsv(dialog.FileName, rows);
             });
-            ShowMessage(
-                $"Đã xuất toàn bộ {exportedCount:N0} bản ghi theo mã hàng và ngày/giờ.\n\n{dialog.FileName}",
-                "JBZ",
-                MessageBoxImage.Information);
+            if (!_released && generation == Volatile.Read(ref _reloadGeneration))
+                ShowMessage($"Đã xuất toàn bộ {exportedCount:N0} bản ghi theo bộ lọc.\n\n{dialog.FileName}",
+                    "JBZ", MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
-            AsyncFileLogService.Current.Error($"History Excel export failed: {ex}");
-            ShowMessage("Chưa xuất được file Excel. Vui lòng thử lại.", "CHƯA XUẤT ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
+            AsyncFileLogService.Current.Error($"History export failed: {ex}");
+            if (!_released && generation == Volatile.Read(ref _reloadGeneration))
+                ShowMessage("Chưa xuất được lịch sử. File đích cũ được giữ nguyên. Vui lòng thử lại.",
+                    "CHƯA XUẤT ĐƯỢC LỊCH SỬ", MessageBoxImage.Error);
+        }
+        finally
+        {
+            _exporting = false;
+            if (!_released)
+            {
+                if (generation == Volatile.Read(ref _reloadGeneration)) SummaryText.Text = previousSummary;
+                SetExportButtons();
+            }
         }
     }
 
@@ -349,6 +360,7 @@ public partial class HistoryPage : UserControl
 
     private void ShowMessage(string message, string title, MessageBoxImage image)
     {
+        if (_released) return;
         Window? owner = HostWindow;
         if (owner is not null)
             MessageBox.Show(owner, message, title, MessageBoxButton.OK, image);

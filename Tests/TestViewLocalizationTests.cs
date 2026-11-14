@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -204,7 +204,7 @@ internal static partial class Program
                         await Dispatcher.Yield(DispatcherPriority.Background);
                         Layout();
                         Assert(text.Text == "PASS" && dots.Text.Length == 0 && dots.Visibility == Visibility.Collapsed &&
-                               center.Visibility == Visibility.Visible && ((TextBlock)center.Child).Text == "PASS",
+                               center.Visibility == Visibility.Visible && ((TextBlock)((Viewbox)center.Child).Child).Text == "PASS",
                             "PASS replaces testing text in both views without retained Korean/Vietnamese text or dots");
                     }
                     Assert(board.Commands.Count == commandsBefore, "Status layout transitions never send relay or scan commands");

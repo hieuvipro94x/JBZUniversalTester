@@ -13,6 +13,7 @@ public partial class PartSelectionWindow : Window
     public PartSelectionWindow(IReadOnlyList<ProductModel> models, string preferredPartKey)
     {
         InitializeComponent();
+        DialogViewport.Attach(this);
         _models = models;
         PartList.ItemsSource = models.Select(model => new PartChoice(
             model.PartNumber,

@@ -374,11 +374,11 @@
                             VerticalAlignment="Center"
                             HorizontalAlignment="Right"
                             Margin="0">
-                    <Button Content="CSV"
+                    <Button x:Name="CsvExportButton" IsEnabled="False" Content="CSV"
                             Width="78"
                             Style="{StaticResource HistoryCsvButtonStyle}"
                             Click="ExportCsv_Click"/>
-                    <Button Content="XUẤT EXCEL"
+                    <Button x:Name="ExcelExportButton" IsEnabled="False" Content="XUẤT EXCEL"
                             Width="112"
                             Style="{StaticResource HistoryExcelButtonStyle}"
                             Click="ExportXlsx_Click"/>
@@ -491,7 +491,9 @@
                       CanUserSortColumns="False"
                       ScrollViewer.HorizontalScrollBarVisibility="Visible"
                       ScrollViewer.VerticalScrollBarVisibility="Auto"
-                      GridLinesVisibility="Horizontal"
+                      GridLinesVisibility="All"
+                      VerticalGridLinesBrush="{StaticResource GridLine}"
+                      HorizontalGridLinesBrush="{StaticResource GridLine}"
                       HeadersVisibility="Column"
                       RowHeight="32"
                       ColumnHeaderHeight="40"
@@ -513,7 +515,7 @@
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
                         <Setter Property="BorderBrush" Value="{StaticResource BorderColor}"/>
-                        <Setter Property="BorderThickness" Value="0,0,0,1"/>
+                        <Setter Property="BorderThickness" Value="0"/>
                         <Setter Property="VerticalContentAlignment" Value="Center"/>
                         <Setter Property="Height" Value="32"/>
                         <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
@@ -544,10 +546,11 @@
                     <DataGridTextColumn Header="Kết quả" Binding="{Binding HistoryResultText}" Width="170" CellStyle="{StaticResource HistoryResultCellStyle}" ElementStyle="{StaticResource ResultCellText}"/>
 
                     <!-- ===== Nhóm cuộn ===== -->
-                    <DataGridTextColumn x:Name="FileColumn" Header="File" Binding="{Binding ExportModelFileName}" Width="180" CellStyle="{StaticResource HistoryCenterCellStyle}">
+                    <DataGridTextColumn x:Name="FileColumn" Header="File" Binding="{Binding ExportModelFileName}" Width="260" CellStyle="{StaticResource HistoryCenterCellStyle}">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource CenterCellText}">
                                 <Setter Property="TextWrapping" Value="NoWrap"/>
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
                                 <Setter Property="ToolTip" Value="{Binding ExportModelFileName}"/>
                                 <Setter Property="ToolTipService.InitialShowDelay" Value="150"/>
                                 <Setter Property="ToolTipService.ShowDuration" Value="60000"/>

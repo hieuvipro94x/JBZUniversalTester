@@ -16,6 +16,7 @@ public partial class ProductPrintSetupWindow : Window
     public ProductPrintSetupWindow(ProductModel model, Func<ProductInitialPrintSetup, Task> save)
     {
         InitializeComponent();
+        DialogViewport.Attach(this);
         _save = save;
         MaxHeight = SystemParameters.WorkArea.Height;
         ProductText.Text = ProductionConfigService.GetLotProductKey(model);

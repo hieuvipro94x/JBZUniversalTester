@@ -11,6 +11,7 @@ public partial class DiscardConfigurationNoticeWindow : Window
     public DiscardConfigurationNoticeWindow(ProductModel model)
     {
         InitializeComponent();
+        DialogViewport.Attach(this);
         var display = DiscardConfigurationPresentation.For(model);
         var accent = (Brush)new BrushConverter().ConvertFromString(display.Color)!;
         ConfiguredHeaderText.Text = display.Title;

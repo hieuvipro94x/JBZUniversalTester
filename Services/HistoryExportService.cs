@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.IO.Compression;
 using System.Globalization;
 using System.Security;
@@ -50,7 +50,34 @@ public static class HistoryExportService
         new("메모", 24, HistoryCellType.Text, _ => string.Empty)
     ];
 
-    public static int ExportCsv(string path, IEnumerable<TestHistoryRecord> records)
+    public static int ExportCsv(string path, IEnumerable<TestHistoryRecord> records) =>
+        ExportSafely(path, records, WriteCsv);
+
+    public static int ExportXlsx(string path, IEnumerable<TestHistoryRecord> records) =>
+        ExportSafely(path, records, WriteXlsx);
+
+    private static int ExportSafely(string path, IEnumerable<TestHistoryRecord> records,
+        Func<string, IEnumerable<TestHistoryRecord>, int> write)
+    {
+        string target = Path.GetFullPath(path);
+        string directory = Path.GetDirectoryName(target)!;
+        Directory.CreateDirectory(directory);
+        string temporary = Path.Combine(directory, $".{Path.GetFileName(target)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            int count = write(temporary, records); // Closes the writer/ZIP before replacing the destination.
+            if (File.Exists(target)) File.Replace(temporary, target, null);
+            else File.Move(temporary, target);
+            return count;
+        }
+        finally
+        {
+            try { if (File.Exists(temporary)) File.Delete(temporary); }
+            catch (Exception ex) { AsyncFileLogService.Current.Error($"History export temporary cleanup failed: {ex}"); }
+        }
+    }
+
+    private static int WriteCsv(string path, IEnumerable<TestHistoryRecord> records)
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         Encoding cp949 = Encoding.GetEncoding(
@@ -72,14 +99,11 @@ public static class HistoryExportService
         return count;
     }
 
-    public static int ExportXlsx(string path, IEnumerable<TestHistoryRecord> records)
+    private static int WriteXlsx(string path, IEnumerable<TestHistoryRecord> records)
     {
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
             Directory.CreateDirectory(directory);
-
-        if (File.Exists(path))
-            File.Delete(path);
 
         using FileStream file = new(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         using ZipArchive archive = new(file, ZipArchiveMode.Create, leaveOpen: false);

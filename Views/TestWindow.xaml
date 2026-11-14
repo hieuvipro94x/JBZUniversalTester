@@ -1102,6 +1102,7 @@
                         </Style.Triggers>
                     </Style>
                 </Border.Style>
+                <Viewbox Stretch="Uniform" StretchDirection="DownOnly" Margin="16" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <TextBlock Text="{Binding CenterResultText}"
                            HorizontalAlignment="Center"
                            VerticalAlignment="Center"
@@ -1121,6 +1122,7 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+                </Viewbox>
             </Border>
         </Grid>
     </Grid>

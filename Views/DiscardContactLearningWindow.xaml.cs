@@ -19,7 +19,8 @@ public partial class DiscardContactLearningWindow : Window
 
     public DiscardContactLearningWindow(TestViewModel test, int stableFrames = 2)
     {
-        InitializeComponent(); _test = test; _learner = new(stableFrames);
+        InitializeComponent();
+        DialogViewport.Attach(this); _test = test; _learner = new(stableFrames);
         Loaded += (_, _) => _startup = StartAsync();
         Closing += Window_Closing;
     }

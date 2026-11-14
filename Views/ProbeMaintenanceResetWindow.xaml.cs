@@ -20,6 +20,7 @@ public partial class ProbeMaintenanceResetWindow : Window
         _confirm = confirm;
         _replacementRequired = currentCycles >= Math.Max(1, replacementThreshold);
         InitializeComponent();
+        DialogViewport.Attach(this);
         MaxHeight = SystemParameters.WorkArea.Height;
         if (_replacementRequired)
         {

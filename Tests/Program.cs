@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -24,6 +24,16 @@ internal static partial class Program
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
         if (args is ["--test-model-relay"])
         { TestModelRelayWiring(); Console.WriteLine("PASS: per-THT relay configuration, PASS/FAIL/Master mapping and history snapshots"); return 0; }
+        if (args is ["--test-history-ui-safety"])
+        {
+            TestHistoryExportFailureSafety();
+            TestHistoryFiltersAndExportLifecycle();
+            TestAuxiliaryWindowViewport();
+            TestCenterResultViewport();
+            TestHistoryLongFileNames();
+            Console.WriteLine("PASS: history export failure safety, filters, released-page guards and auxiliary viewport");
+            return 0;
+        }
         if (args is ["--test-history-tooltips"])
         { TestHistoryClippedTooltips(); Console.WriteLine("PASS: History tooltips follow actual visible text bounds"); return 0; }
         if (args is ["--test-history-long-file-names"])
@@ -670,6 +680,10 @@ internal static partial class Program
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
             ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
+            ("History export failures preserve old files", TestHistoryExportFailureSafety),
+            ("History filters and export respect page lifecycle", TestHistoryFiltersAndExportLifecycle),
+            ("Auxiliary windows fit the current monitor and DPI", TestAuxiliaryWindowViewport),
+            ("Center Vietnamese/Korean messages and PASS fit narrow TestView", TestCenterResultViewport),
             ("TestView diagnostics preserve logging, throttles and read-only snapshots", TestTestViewDiagnostics),
             ("D2XX native calls keep UI responsive and retain ownership through cancellation", TestD2xxNativeIoResponsiveness),
             ("BCW journal contention keeps UI responsive and persists send outcome", TestBcwJournalResponsiveness),

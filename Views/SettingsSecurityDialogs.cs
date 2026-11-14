@@ -125,6 +125,7 @@ internal static class SettingsSecurityDialogs
             WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false,
             Background = ThemePalette.Brush("PanelBackground"), FontFamily = new FontFamily("Segoe UI"),
             Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        DialogViewport.Attach(window);
         ThemePalette.Apply(window);
         window.PreviewKeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) window.Close(); };
         return (window, panel, new TextBlock { Foreground = ThemePalette.Brush("FailText"), TextWrapping = TextWrapping.Wrap,

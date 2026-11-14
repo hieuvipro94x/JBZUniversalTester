@@ -27,6 +27,7 @@ public partial class ProductPickerWindow : Window
     public ProductPickerWindow(string root)
     {
         InitializeComponent();
+        DialogViewport.Attach(this);
         _searchTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
             Interval = TimeSpan.FromMilliseconds(150)

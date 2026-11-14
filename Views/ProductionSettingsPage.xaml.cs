@@ -473,6 +473,7 @@ public partial class ProductionSettingsPage : UserControl
             ShowInTaskbar = false,
             WindowStartupLocation = WindowStartupLocation.CenterOwner
         };
+        DialogViewport.Attach(editor);
         ThemePalette.Apply(editor);
         var layout = new Grid { Margin = new Thickness(12) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -596,6 +597,7 @@ public partial class ProductionSettingsPage : UserControl
             Background = Brushes.White
         };
 
+        DialogViewport.Attach(previewWindow);
         ThemePalette.Apply(previewWindow);
         var root = new Grid { Margin = new Thickness(14) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -2408,6 +2410,7 @@ public partial class ProductionSettingsPage : UserControl
                 ? WindowStartupLocation.CenterScreen
                 : WindowStartupLocation.CenterOwner
         };
+        DialogViewport.Attach(dialog);
         ThemePalette.Apply(dialog);
         var layout = new Grid { Margin = new Thickness(24) };
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
