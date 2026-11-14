@@ -48,21 +48,12 @@ internal static partial class Program
                 "Explicit saving migrates both native tables to Interlock while preserving IO, product topology and backup");
             File.Delete(legacyPath);
             File.Delete(legacyBackup);
-            foreach (int offset in new[] { 20, 32, 33 })
+            foreach (int offset in new[] { 16, 20, 24, 32, 33, 64, 102, 128, 256, 1024, 4095 })
             {
                 string variantRoot = Path.Combine(root, "ThtBackups", $"header-{offset}");
                 Directory.CreateDirectory(variantRoot);
                 string variant = CreateDiscardSettingsTht(variantRoot, "product", offset);
                 byte[] variantOriginal = File.ReadAllBytes(variant);
-                if (offset == 33)
-                {
-                    bool rejected = false;
-                    try { parser.SaveDiscardContacts(variant, 97, 98); }
-                    catch (InvalidDataException) { rejected = true; }
-                    Assert(rejected && File.ReadAllBytes(variant).SequenceEqual(variantOriginal),
-                        "Unknown inner header conventions remain rejected without changing the file");
-                    continue;
-                }
                 string variantBackup = parser.SaveDiscardContacts(variant, 97, 98)!;
                 var readerType = typeof(ThtModelParser).GetNestedType("CompoundFileReader", BindingFlags.NonPublic)!;
                 var reader = Activator.CreateInstance(readerType, new object[] { File.ReadAllBytes(variant) })!;
@@ -71,11 +62,40 @@ internal static partial class Program
                        File.ReadAllBytes(variantBackup).SequenceEqual(variantOriginal) &&
                        BinaryPrimitives.ReadUInt32LittleEndian(contents) == contents.Length - 8 &&
                        BinaryPrimitives.ReadUInt32LittleEndian(contents.AsSpan(4)) == contents.Length - offset,
-                    "Both native inner header conventions survive a verified discard write with exact backup");
+                    "Variable native inner header conventions survive a verified discard write with exact backup");
                 parser.SaveDiscardContacts(variant, 41, 86);
                 parser.SaveDiscardContacts(variant, 0, 0);
                 Assert(parser.Load(variant).DiscardContactIo.Count == 0,
                     "Native header variants support subsequent updates and clearing the pair");
+            }
+            foreach (int outerOffset in new[] { 0, 4, 16, 102 })
+            {
+                string variantRoot = Path.Combine(root, "ThtBackups", $"outer-{outerOffset}");
+                Directory.CreateDirectory(variantRoot);
+                string variant = CreateDiscardSettingsTht(variantRoot, "product", 102);
+                byte[] bytes = File.ReadAllBytes(variant);
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(1536), (uint)(4096 - outerOffset));
+                File.WriteAllBytes(variant, bytes);
+                parser.SaveDiscardContacts(variant, 97, 98);
+                byte[] contents = JBZUniversalTester.ModelEditor.Services.ThtFileService.ReadContentsForTest(variant);
+                Assert(BinaryPrimitives.ReadUInt32LittleEndian(contents) == contents.Length - outerOffset &&
+                       BinaryPrimitives.ReadUInt32LittleEndian(contents.AsSpan(4)) == contents.Length - 102 &&
+                       parser.Load(variant).DiscardContactIo.SequenceEqual([97, 98]),
+                    "Variable outer/inner length offsets are preserved together instead of normalized");
+            }
+            foreach (bool invalidOuter in new[] { false, true })
+            {
+                string variantRoot = Path.Combine(root, "ThtBackups", $"invalid-{invalidOuter}");
+                Directory.CreateDirectory(variantRoot);
+                string variant = CreateDiscardSettingsTht(variantRoot, "product", 102);
+                byte[] bytes = File.ReadAllBytes(variant);
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(invalidOuter ? 1536 : 1540), uint.MaxValue);
+                File.WriteAllBytes(variant, bytes);
+                bool rejected = false;
+                try { parser.SaveDiscardContacts(variant, 97, 98); }
+                catch (InvalidDataException) { rejected = true; }
+                Assert(rejected && File.ReadAllBytes(variant).SequenceEqual(bytes),
+                    "Out-of-bounds headers are still rejected without modifying the source THT");
             }
             ProductModel before = parser.Load(path);
             string backup = parser.EnsureDiscardContacts(path, 97, 98)!;
@@ -164,6 +184,45 @@ internal static partial class Program
                 Directory.Delete(root, recursive: true);
         }
     }
+    private static void TestDiscardNativeHeaderCopies(string directory)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "JBZ-native-discard-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var parser = new ThtModelParser();
+            foreach (string source in Directory.EnumerateFiles(directory, "*.tht", SearchOption.TopDirectoryOnly))
+            {
+                byte[] original = File.ReadAllBytes(source);
+                string copyRoot = Path.Combine(root, Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(copyRoot);
+                string copy = Path.Combine(copyRoot, Path.GetFileName(source));
+                File.WriteAllBytes(copy, original);
+                var before = parser.LoadAll(copy);
+                var used = before.SelectMany(model => model.Pins).Select(pin => pin.IoNumber).ToHashSet();
+                int[] free = Enumerable.Range(1, BoardCapacity.MaxGlobalIo).Reverse().Where(io => !used.Contains(io)).Take(2).ToArray();
+                Assert(free.Length == 2, "Native test copy has two unused IOs");
+                byte[] contents = JBZUniversalTester.ModelEditor.Services.ThtFileService.ReadContentsForTest(copy);
+                uint outer = BinaryPrimitives.ReadUInt32LittleEndian(contents), inner = BinaryPrimitives.ReadUInt32LittleEndian(contents.AsSpan(4));
+                string? backup = parser.SaveDiscardContacts(copy, free[0], free[1]);
+                Assert(parser.LoadAll(copy).All(model => model.DiscardContactIo.Order().SequenceEqual(free.Order())),
+                    "Actual native file copy saves and reloads its interlock IOs");
+                Assert(backup is null || File.ReadAllBytes(backup).SequenceEqual(original), "Native file backup is byte-identical");
+                byte[] after = JBZUniversalTester.ModelEditor.Services.ThtFileService.ReadContentsForTest(copy);
+                long delta = after.Length - (long)contents.Length;
+                Assert(BinaryPrimitives.ReadUInt32LittleEndian(after) == (outer == 0 ? 0 : outer + delta) &&
+                       BinaryPrimitives.ReadUInt32LittleEndian(after.AsSpan(4)) == (inner == 0 ? 0 : inner + delta),
+                    "Actual native file retains its own length conventions");
+                parser.SaveDiscardContacts(copy, free[1], free[0]);
+                parser.SaveDiscardContacts(copy, 0, 0);
+                Assert(parser.LoadAll(copy).All(model => model.DiscardContactIo.Count == 0) &&
+                       File.ReadAllBytes(source).SequenceEqual(original), "Clearing native copy preserves source bytes");
+                Console.WriteLine($"PASS NATIVE DISCARD: {Path.GetFileName(source)} Contents={contents.Length} Outer={outer} Inner={inner}");
+            }
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
 }
 
 

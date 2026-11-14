@@ -239,6 +239,11 @@ internal static partial class Program
             Console.WriteLine("PASS: configured/unconfigured/invalid discard notices and live MainWindow status");
             return 0;
         }
+        if (args is ["--test-discard-native-copies", var nativeDirectory])
+        {
+            TestDiscardNativeHeaderCopies(nativeDirectory);
+            return 0;
+        }
         if (args is ["--test-tht-discard-editor"])
         {
             TestThtDiscardEditor();

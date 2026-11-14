@@ -39,8 +39,8 @@ internal static partial class Program
             {
                 string cfg = Path.Combine(root, "settings.cfg");
                 int writes = 0;
-                // Match the native inner-header convention from the station's 2.tht.
-                string product = CreateDiscardSettingsTht(root, "A", innerHeaderOffset: 32);
+                // Exercise the native variable header convention from original HarnProg files.
+                string product = CreateDiscardSettingsTht(root, "A", innerHeaderOffset: 102);
                 string other = CreateDiscardSettingsTht(root, "B");
                 byte[] untouched = File.ReadAllBytes(other);
                 var parser = new ThtModelParser();
