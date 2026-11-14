@@ -1071,7 +1071,8 @@ public sealed class TestHistoryStore
                 PartNumber=excluded.PartNumber,
                 ModelPath=excluded.ModelPath,
                 Stage=excluded.Stage,
-                UpdatedAt=excluded.UpdatedAt;
+                UpdatedAt=excluded.UpdatedAt
+            WHERE ActiveTestCycles.Stage NOT LIKE 'BOARD_%';
             """;
         command.Parameters.AddWithValue("$Cycle", cycleId.Trim());
         command.Parameters.AddWithValue("$Part", partNumber?.Trim() ?? string.Empty);
@@ -1080,6 +1081,65 @@ public sealed class TestHistoryStore
         command.Parameters.AddWithValue("$Stage", stage?.Trim() ?? string.Empty);
         command.Parameters.AddWithValue("$Updated", DateTime.Now.ToString("O", CultureInfo.InvariantCulture));
         command.ExecuteNonQuery();
+    }
+
+    // Reuse the existing runtime checkpoint table; production history/schema are preserved.
+    public void SaveBoardFaultRecovery(BoardFaultRecovery recovery, long? runId = null)
+    {
+        using SqliteConnection connection = Open();
+        using SqliteTransaction transaction = connection.BeginTransaction();
+        using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("$Cycle", recovery.Checkpoint.CycleId);
+        command.CommandText = "SELECT COUNT(*) FROM ActiveTestCycles WHERE CycleId=$Cycle AND Stage LIKE 'BOARD_RECOVERY_ACK:%';";
+        bool acknowledged = Convert.ToInt64(command.ExecuteScalar()) > 0;
+        if (recovery.InterruptedTest is not null && FindTestId(connection, transaction, recovery.InterruptedTest.History.CycleId) == 0)
+            _ = CommitCore(connection, transaction, recovery.InterruptedTest, runId, null);
+        command.Parameters.AddWithValue("$Part", recovery.Checkpoint.PartNumber);
+        command.Parameters.AddWithValue("$Path", recovery.Checkpoint.ModelPath);
+        command.Parameters.AddWithValue("$At", recovery.Checkpoint.InterruptedAt.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$Stage", "BOARD_DISCONNECTED:" + recovery.Checkpoint.PartKey);
+        if (!acknowledged)
+        {
+            command.CommandText = "SELECT COUNT(*) FROM ActiveTestCycles WHERE Stage LIKE 'BOARD_DISCONNECTED:%' AND UpdatedAt>$At;";
+            if (Convert.ToInt64(command.ExecuteScalar()) == 0)
+            {
+                // Superseded runtime markers become receipts. Replaying an old
+                // durable journal must never switch the station back to an older product.
+                command.CommandText = """
+                    UPDATE ActiveTestCycles SET Stage='BOARD_RECOVERY_ACK:' || substr(Stage,20)
+                    WHERE Stage LIKE 'BOARD_DISCONNECTED:%' AND CycleId<>$Cycle;
+                    INSERT INTO ActiveTestCycles(CycleId,PartNumber,ModelPath,StartedAt,Stage,UpdatedAt)
+                    VALUES($Cycle,$Part,$Path,$At,$Stage,$At)
+                    ON CONFLICT(CycleId) DO UPDATE SET PartNumber=$Part,ModelPath=$Path,Stage=$Stage,UpdatedAt=$At;
+                    """;
+                command.ExecuteNonQuery();
+            }
+        }
+        transaction.Commit();
+    }
+
+    public BoardFaultCheckpoint? GetBoardFaultCheckpoint()
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT CycleId,ModelPath,PartNumber,Stage,UpdatedAt FROM ActiveTestCycles
+            WHERE Stage LIKE 'BOARD_DISCONNECTED:%' ORDER BY UpdatedAt DESC,CycleId DESC LIMIT 1;
+            """;
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? new BoardFaultCheckpoint(reader.GetString(0),reader.GetString(1),reader.GetString(2),
+            reader.GetString(3)["BOARD_DISCONNECTED:".Length..],
+            DateTime.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)) : null;
+    }
+
+    public void AcceptBoardFaultCheckpoint(string cycleId)
+    {
+        using SqliteConnection connection = Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "UPDATE ActiveTestCycles SET Stage='BOARD_RECOVERY_ACK:' || substr(Stage,20) WHERE CycleId=$Cycle AND Stage LIKE 'BOARD_DISCONNECTED:%';";
+        command.Parameters.AddWithValue("$Cycle", cycleId);
+        command.ExecuteNonQuery(); // Keeps an acknowledgment receipt for crash-safe journal replay; no history row is changed.
     }
 
     private static long UpsertPart(
@@ -2137,7 +2197,8 @@ public sealed class TestHistoryStore
                 COALESCE(SUM(CASE WHEN t.InspectionType='PRODUCT' AND t.Passed=1 THEN 1 ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN t.InspectionType='PRODUCT' AND t.Passed=0 THEN 1 ELSE 0 END),0),
                 COALESCE(SUM(CASE WHEN t.InspectionType IN ('MASTER_GOOD','MASTER_BAD') THEN 1 ELSE 0 END),0),
-                COALESCE(SUM(CASE WHEN t.InspectionType='LEAK_RETEST' THEN 1 ELSE 0 END),0)
+                COALESCE(SUM(CASE WHEN t.InspectionType='LEAK_RETEST' THEN 1 ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN t.InspectionType='INTERRUPTED' THEN 1 ELSE 0 END),0)
             FROM Tests t
             JOIN Parts p ON p.Id=t.PartId
             JOIN Models m ON m.Id=t.ModelId
@@ -2147,7 +2208,7 @@ public sealed class TestHistoryStore
         return reader.Read()
             ? new HistorySummary(
                 reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2),
-                reader.GetInt64(3), reader.GetInt64(4), reader.GetInt64(5))
+                reader.GetInt64(3), reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6))
             : new HistorySummary(0, 0, 0, 0, 0, 0);
     }
 
@@ -2271,8 +2332,9 @@ public sealed class TestHistoryStore
         if (!string.IsNullOrWhiteSpace(criteria.Result) && !criteria.Result.Equals("ALL", StringComparison.OrdinalIgnoreCase))
         {
             string value = criteria.Result.Trim().ToUpperInvariant();
-            if (value == "PASS") clauses.Add("t.Passed=1");
-            else if (value == "FAIL") clauses.Add("t.Passed=0");
+            if (value == "INTERRUPTED") clauses.Add("t.InspectionType='INTERRUPTED'");
+            else if (value == "PASS") clauses.Add("t.Passed=1 AND t.InspectionType<>'INTERRUPTED'");
+            else if (value == "FAIL") clauses.Add("t.Passed=0 AND t.InspectionType<>'INTERRUPTED'");
             else if (TryMapHistoryFaultFilter(value, out string code))
             {
                 clauses.Add("(REPLACE(UPPER(t.ResultCode),' ','_')=$ResultFault OR " +

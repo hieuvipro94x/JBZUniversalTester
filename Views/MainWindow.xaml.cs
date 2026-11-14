@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -21,8 +21,7 @@ public partial class MainWindow : Window
     private HistoryPage? _historyPage;
     private bool _shutdownStarted;
     private bool _shutdownComplete;
-    private bool _exitConfirmationOpen;
-    private readonly Func<bool> _confirmExit;
+    private bool _boardFaultExitAuthorized;
     private readonly Action _showExitProductBlock;
     private readonly Func<Task> _shutdownApplication;
     private bool _startupStarted;
@@ -31,13 +30,12 @@ public partial class MainWindow : Window
 
     public MainWindow() : this(new MainViewModel()) { }
 
-    public MainWindow(MainViewModel viewModel) : this(viewModel, null, null, null) { }
+    public MainWindow(MainViewModel viewModel) : this(viewModel, null, null) { }
 
-    internal MainWindow(MainViewModel viewModel, Func<bool>? confirmExit,
-        Action? showExitProductBlock, Func<Task>? shutdownApplication)
+    internal MainWindow(MainViewModel viewModel, Action? showExitProductBlock,
+        Func<Task>? shutdownApplication)
     {
         InitializeComponent();
-        _confirmExit = confirmExit ?? ConfirmApplicationExit;
         _showExitProductBlock = showExitProductBlock ?? ShowExitBlockedByProduct;
         _shutdownApplication = shutdownApplication ?? ShutdownApplicationAsync;
         StartupPerformanceTrace.Mark("T1 MainWindow constructed");
@@ -46,6 +44,7 @@ public partial class MainWindow : Window
 
         _viewModel = viewModel;
         _viewModel.ExplicitModelLoaded += ViewModel_ExplicitModelLoaded;
+        _viewModel.Test.BoardFaultExitRequested += ViewModel_BoardFaultExitRequested;
         _viewModel.Test.PropertyChanged += TestViewModel_PropertyChanged;
         DataContext = _viewModel;
         ProductCatalog.ProductRequested += OpenCatalogProduct;
@@ -673,7 +672,7 @@ public partial class MainWindow : Window
 
         // Alt+F4 on an internal page follows the same Back/unsaved-edit and
         // manual-output cleanup path, rather than closing a second window.
-        if (!_shutdownStarted && (_settingsPage is not null || _historyPage is not null))
+        if (!_shutdownStarted && !_boardFaultExitAuthorized && (_settingsPage is not null || _historyPage is not null))
         {
             e.Cancel = true;
             if (_settingsPageCloseInProgress) return;
@@ -685,19 +684,12 @@ public partial class MainWindow : Window
         // Không cho WPF hủy cửa sổ trước khi worker D2XX/VISA được dừng.
         e.Cancel = true;
 
-        if (_shutdownStarted || _exitConfirmationOpen)
+        if (_shutdownStarted)
             return;
 
         // Closing the owner must never bypass TestView's removal/StopView gates
         // or implicitly destroy an auxiliary window that still owns device work.
-        if (!CanRequestApplicationExit()) return;
-        _exitConfirmationOpen = true;
-        bool confirmed;
-        try { confirmed = _confirmExit(); }
-        finally { _exitConfirmationOpen = false; }
-        // MessageBox pumps the Dispatcher: product/device state can change while
-        // the operator is deciding. Check the live state again after confirmation.
-        if (!confirmed || !CanRequestApplicationExit()) return;
+        if (!_boardFaultExitAuthorized && !CanRequestApplicationExit()) return;
 
         _shutdownStarted = true;
         ProductCatalog.IsEnabled = false;
@@ -722,6 +714,7 @@ public partial class MainWindow : Window
             _uiStallWatchdog = null;
             _viewModel.ExplicitModelLoaded -= ViewModel_ExplicitModelLoaded;
             _viewModel.Test.PropertyChanged -= TestViewModel_PropertyChanged;
+            _viewModel.Test.BoardFaultExitRequested -= ViewModel_BoardFaultExitRequested;
             await _shutdownApplication();
         }
         finally
@@ -731,6 +724,16 @@ public partial class MainWindow : Window
             // Đóng lần hai sau khi mọi handle đã được giải phóng.
             _ = Dispatcher.BeginInvoke(new Action(Close));
         }
+    }
+
+    private void ViewModel_BoardFaultExitRequested(object? sender, EventArgs e)
+    {
+        if (!ReferenceEquals(sender, _viewModel.Test) || !_viewModel.Test.CanCloseAfterBoardFault) return;
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            _boardFaultExitAuthorized = true;
+            Close(); // Still awaits the complete MainViewModel shutdown before closing the owner/TestView.
+        }));
     }
 
     private bool CanRequestApplicationExit()
@@ -754,11 +757,6 @@ public partial class MainWindow : Window
         }
         return true;
     }
-
-    private bool ConfirmApplicationExit() => MessageBox.Show(this,
-        "Bạn có muốn thoát ứng dụng an toàn?\nPhần mềm sẽ dừng kiểm tra, chờ lưu dữ liệu và giải phóng thiết bị trước khi đóng.",
-        "THOÁT ỨNG DỤNG", MessageBoxButton.YesNo, MessageBoxImage.Question,
-        MessageBoxResult.No) == MessageBoxResult.Yes;
 
     private void ShowExitBlockedByProduct() => MessageBox.Show(this,
         "VUI LÒNG THÁO SẢN PHẨM TRƯỚC KHI THOÁT!",

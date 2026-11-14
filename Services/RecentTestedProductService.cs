@@ -33,7 +33,7 @@ public static class RecentTestedProductService
             SELECT m.FilePath, t.ResultAt
             FROM Models m JOIN Tests t ON t.Id=(
                 SELECT latest.Id FROM Tests latest
-                WHERE latest.ModelId=m.Id AND latest.InspectionType='PRODUCT'
+                WHERE latest.ModelId=m.Id AND latest.InspectionType IN ('PRODUCT','INTERRUPTED')
                 ORDER BY latest.ResultAt DESC, latest.Id DESC LIMIT 1
             )
             ORDER BY t.ResultAt DESC, t.Id DESC;

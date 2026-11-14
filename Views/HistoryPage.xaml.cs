@@ -150,7 +150,7 @@ public partial class HistoryPage : UserControl
             SummaryText.Text =
                 $"Đang hiển thị {_records.Count:N0} / {_summary.Total:N0} bản ghi | " +
                 $"SẢN PHẨM {productCount:N0} (PASS {pass:N0} / FAIL {fail:N0}, {_summary.ProductPassRate:0.00}%) | " +
-                $"기밀 검사 시작 {leakRetest:N0} | MASTER {master:N0}";
+                $"기밀 검사 시작 {leakRetest:N0} | MASTER {master:N0} | GIÁN ĐOẠN {_summary.InterruptedTotal:N0}";
         }
         catch (Exception ex)
         {

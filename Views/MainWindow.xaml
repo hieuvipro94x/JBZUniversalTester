@@ -249,6 +249,12 @@
                                 </StackPanel>
                                 <TextBlock x:Name="MainInspectionModeText" Text="{Binding Test.HomeInspectionModeText, StringFormat=KIỂM TRA: {0}}"
                                            FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Test.BoardRecoveryNotice}" Foreground="{StaticResource TextSecondary}"
+                                           FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,8">
+                                    <TextBlock.Style><Style TargetType="TextBlock"><Style.Triggers>
+                                        <DataTrigger Binding="{Binding Test.BoardRecoveryNotice}" Value=""><Setter Property="Visibility" Value="Collapsed"/></DataTrigger>
+                                    </Style.Triggers></Style></TextBlock.Style>
+                                </TextBlock>
                                 <TextBlock x:Name="MainDiscardStatusText" Text="{Binding Test.HomeDiscardConfigurationText}"
                                            FontSize="13" FontWeight="SemiBold" Foreground="{Binding Test.HomeDiscardConfigurationColor}"
                                            Margin="0,0,0,13" TextWrapping="Wrap"/>
@@ -425,7 +431,7 @@
                           CanUserResizeColumns="False" HeadersVisibility="Column"
                           RowHeaderWidth="0" FontSize="26" FontWeight="SemiBold" MinRowHeight="64"
                           Background="{StaticResource PanelBackground}" RowBackground="{StaticResource PanelBackground}" AlternatingRowBackground="{StaticResource PanelBackground}"
-                          Foreground="{StaticResource WarningText}" GridLinesVisibility="Horizontal"
+                          Foreground="{StaticResource TextSecondary}" GridLinesVisibility="Horizontal"
                           HorizontalGridLinesBrush="{StaticResource DividerColor}" BorderBrush="{StaticResource BorderColor}"
                           EnableRowVirtualization="True" ScrollViewer.VerticalScrollBarVisibility="Auto">
                     <DataGrid.RowStyle>

@@ -278,6 +278,10 @@
                TargetType="DataGridCell"
                BasedOn="{StaticResource HistoryCenterCellStyle}">
             <Style.Triggers>
+                <DataTrigger Binding="{Binding HistoryResultText}" Value="중단">
+                    <Setter Property="Background" Value="{StaticResource AccentTint}"/>
+                    <Setter Property="Foreground" Value="{StaticResource BrandBlue}"/>
+                </DataTrigger>
                 <DataTrigger Binding="{Binding HistoryResultText}" Value="PASS">
                     <Setter Property="Background" Value="{StaticResource HistoryPassSoft}"/>
                     <Setter Property="Foreground" Value="{StaticResource HistoryPassText}"/>
@@ -432,6 +436,7 @@
                         <ComboBoxItem Content="ALL"/>
                         <ComboBoxItem Content="PASS"/>
                         <ComboBoxItem Content="FAIL"/>
+                        <ComboBoxItem Content="INTERRUPTED"/>
                         <ComboBoxItem Content="DÂY CHƯA KẾT NỐI"/>
                         <ComboBoxItem Content="ĐẤU SAI"/>
                         <ComboBoxItem Content="CHẬP MẠCH"/>
@@ -447,6 +452,7 @@
                               SelectedIndex="0">
                         <ComboBoxItem Content="TẤT CẢ" Tag=""/>
                         <ComboBoxItem Content="PRODUCTION" Tag="PRODUCT"/>
+                        <ComboBoxItem Content="GIÁN ĐOẠN (검사 중단)" Tag="INTERRUPTED"/>
                         <ComboBoxItem Content="MẪU TỐT (정상 마스터)" Tag="MASTER_GOOD"/>
                         <ComboBoxItem Content="MẪU XẤU (불량 마스터)" Tag="MASTER_BAD"/>
                         <ComboBoxItem Content="KIỂM TRA KÍN KHÍ (기밀 검사 시작)" Tag="LEAK_RETEST"/>

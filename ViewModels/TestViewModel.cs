@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -39,7 +39,7 @@ public enum ProductionPresentationMode
     LiveTopology = 3
 }
 
-public sealed class TestViewModel : ObservableObject, IProductionPresentationState
+public sealed partial class TestViewModel : ObservableObject, IProductionPresentationState
 {
     // Lỗi Keysight trong phép đo điện trở BẰNG TAY là lỗi thiết bị đo phụ.
     // Không được nâng thành DeviceFault của bo D2XX vì DeviceFault sẽ khóa phần cứng
@@ -2033,7 +2033,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         bool firstTransition = Interlocked.Exchange(ref _deviceFault, 1) == 0;
         if (firstTransition)
+        {
             Interlocked.Increment(ref _deviceFaultTransitionCount);
+            Interlocked.Increment(ref _modelLoadGeneration);
+            Interlocked.Increment(ref _statisticsLoadGeneration);
+        }
 
         string diagnostic =
             $"DEVICE FAULT [{source}]{Environment.NewLine}" +
@@ -2060,6 +2064,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
         _writeHardwareFaultReport(exception, $"Hardware.DeviceFault.{source}", diagnostic);
 
+        _deviceFaultPersistenceTask = PersistBoardFaultAsync(exception, source);
         _deviceFaultMessage = TesterConnectionNotice.Message;
         BoardConnectionMessage = _deviceFaultMessage;
         HardwareStatus = TesterConnectionNotice.Message;
@@ -2178,50 +2183,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private void ShowDeviceFaultDialogOnce()
     {
-        if (Interlocked.Exchange(ref _deviceFaultDialogShown, 1) != 0)
-            return;
-
+        // One fault notification/exit request. No modal acknowledgment or reconnect
+        // can hold the application in a half-disconnected production session.
+        if (Interlocked.Exchange(ref _deviceFaultDialogShown, 1) != 0) return;
         Interlocked.Increment(ref _deviceFaultDialogCount);
-        var dispatcher = Application.Current?.Dispatcher;
-        if (dispatcher is null)
-            return;
-
-        dispatcher.BeginInvoke(new Action(async () =>
-        {
-            var dialog = new JBZUniversalTester.Views.FaultConfirmationWindow(
-                [new FaultDetail
-                {
-                    Type = ProductFaultType.SystemDeviceError,
-                    Message = _deviceFaultMessage
-                }],
-                "Bấm XÁC NHẬN để đóng chương trình.",
-                windowHeader: TesterConnectionNotice.Message, language: TestViewLanguage);
-            Window? owner = ResolveOperatorDialogOwner();
-            if (owner is not null)
-                dialog.Owner = owner;
-            dialog.ShowDialog();
-
-            await ExitApplicationAfterDeviceFaultAsync();
-        }));
-    }
-
-    private async Task ExitApplicationAfterDeviceFaultAsync()
-    {
-        try
-        {
-            await _deviceFaultHardwareLockTask;
-            await ShutdownAsync();
-        }
-        catch (Exception ex)
-        {
-            AsyncFileLogService.Current.Error($"DeviceFault shutdown failed: {ex}");
-        }
-
-        Application? application = Application.Current;
-        if (application?.MainWindow is Window mainWindow)
-            mainWindow.Close();
-        else
-            application?.Shutdown(1);
+        _ = ObserveDetachedTaskAsync(CompleteBoardFaultExitAsync(), "BoardFault.SafeExit");
     }
 
     private void RaiseDeviceFaultState()
@@ -2559,6 +2525,11 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         }
         catch (Exception ex)
         {
+            if (!_board.IsConnected)
+            {
+                EnterDeviceFault(ex, "EnsureProductionScan.Disconnected");
+                return;
+            }
             _scanSupervisor.BeginRecovery("ensure-production-failed");
             if (!await RecoverProductionScanAsync(
                     "EnsureProductionScan",
@@ -2700,13 +2671,14 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
 
     private async Task<bool> RecoverProductionScanAsync(
         string reason,
-        bool allowTransportReopen = true)
+        bool allowTransportReopen = false)
     {
         bool recoveryGateEntered = false;
         try
         {
             await _scanRecoveryGate.WaitAsync(_lifetimeToken);
             recoveryGateEntered = true;
+            if (IsDeviceFault || !_board.IsConnected) return false;
             if (_scanSupervisor.HealthSnapshot.State == ScanHealthState.Monitoring &&
                 _board.IsConnected &&
                 _board.IsScanning)
@@ -2725,25 +2697,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 return true;
             }
 
-            if (!allowTransportReopen)
-            {
-                _scanSupervisor.Suspend($"soft-recovery-failed:{reason}");
-                return false;
-            }
+            _scanSupervisor.Suspend($"soft-recovery-failed:{reason}");
+            return false; // Main tester never reopens a USB handle within this application session.
 
-            bool reopened = await _scanSupervisor.RecoverReopenAsync(
-                maxIo,
-                resumeMode,
-                _lifetimeToken);
-            if (reopened)
-            {
-                BoardConnectionMessage = string.Empty;
-                HardwareStatus = "Bo: đã tự phục hồi kết nối";
-                Raise(nameof(IsBoardConnected));
-                InvokeUi(UpdateCardScanningState);
-                AddLog($"SCAN_RECOVERY hoàn tất sau {reason}; giữ nguyên lifecycle sản phẩm hiện tại.");
-            }
-            return reopened;
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
@@ -2776,18 +2732,9 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 if (!_board.IsConnected)
                 {
                     _productPresenceStability.Reset();
-                    if (_scanSupervisor.TryBeginDisconnectedRecovery(out ScanHealthSnapshot disconnected))
-                    {
-                        AsyncFileLogService.Current.Performance(
-                            $"SCAN_WATCHDOG disconnected state={disconnected.State} reason={disconnected.Reason}");
-                        if (!await RecoverProductionScanAsync("HardwareMonitor.Disconnected"))
-                        {
-                            EnterDeviceFault(
-                                new IOException("Bo D2XX mất kết nối và cả soft/reopen recovery đều thất bại."),
-                                "HardwareMonitor.Disconnected");
-                            break;
-                        }
-                    }
+                    EnterDeviceFault(new IOException("Bo D2XX mất kết nối USB. Phải mở lại phần mềm để kết nối lại."),
+                        "HardwareMonitor.Disconnected");
+                    break;
                 }
 
                 ScanHealthSnapshot health = _scanSupervisor.HealthSnapshot;
@@ -2812,15 +2759,10 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                             $"SCAN_WATCHDOG stall_age_ms={stalled.CompleteFrameAgeMilliseconds:0.###} " +
                             $"state_age_ms={stalled.StateAgeMilliseconds:0.###} " +
                             $"generation={stalled.ScanGeneration} reason={stalled.Reason}");
-                        if (!await RecoverProductionScanAsync("ScanWatchdog"))
-                        {
-                            EnterDeviceFault(
-                                new TimeoutException(
-                                    $"Scan stall không phục hồi được: state={stalled.State}, " +
-                                    $"age={stalled.CompleteFrameAgeMilliseconds:0} ms."),
-                                "ScanWatchdog.RecoveryFailed");
-                            break;
-                        }
+                        EnterDeviceFault(new TimeoutException(
+                            $"Bo D2XX ngừng gửi frame hợp lệ: state={stalled.State}; age={stalled.CompleteFrameAgeMilliseconds:0} ms."),
+                            "ScanWatchdog.BoardDisconnected");
+                        break;
                     }
                 }
             }
@@ -3102,14 +3044,22 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
     {
         try
         {
-            string savedPath = _productionSettings.LastThtPath;
+            _startupBoardRecovery = await Task.Run(() =>
+            {
+                string database = ResolveHistoryDatabasePath(_productionSettings);
+                if (!File.Exists(database) && !File.Exists(BoardFaultRecoveryJournal.JournalPath(database))) return null;
+                var store = new TestHistoryStore(database);
+                BoardFaultRecoveryJournal.Replay(store);
+                return store.GetBoardFaultCheckpoint();
+            });
+            string savedPath = _startupBoardRecovery?.ModelPath ?? _productionSettings.LastThtPath;
             if (string.IsNullOrWhiteSpace(savedPath))
             {
                 AddLog("Chưa có file model được kiểm tra gần nhất.");
                 return null;
             }
             string fullPath = ResolveModelPath(savedPath);
-            string partKey = _productionSettings.LastThtPartKey;
+            string partKey = _startupBoardRecovery?.PartKey ?? _productionSettings.LastThtPartKey;
             int generation = Volatile.Read(ref _modelLoadGeneration);
             return await Task.Run(() =>
             {
@@ -3161,6 +3111,17 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
                 NotifyDiscardConfiguration(startup.Model, generation, deferred: true);
                 StartupPerformanceTrace.Mark("T10 MODEL_UI_READY");
                 AddLog($"Đã tự tải model gần nhất: {Path.GetFileName(startup.FullPath)}");
+                if (_startupBoardRecovery is not null)
+                {
+                    _boardRestartRemovalRequired = 1;
+                    _boardRestartEmptyFrames = 0;
+                    BoardRecoveryNotice = $"ĐÃ KHÔI PHỤC {Path.GetFileName(startup.FullPath)} • " +
+                        $"Phiên trước mất kết nối lúc {_startupBoardRecovery.InterruptedAt:dd/MM HH:mm:ss}. " +
+                        "Sản lượng/LOTNO đã lưu được giữ nguyên. Tháo sản phẩm rồi lắp lại để kiểm tra từ đầu.";
+                    await PersistSelectedModelPathAsync(startup.FullPath);
+                    await Task.Run(() => new TestHistoryStore(ResolveHistoryDatabasePath(_productionSettings))
+                        .AcceptBoardFaultCheckpoint(_startupBoardRecovery.CycleId));
+                }
             }
             else
             {
@@ -4610,6 +4571,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (IsDeviceFault || !_board.IsConnected || Volatile.Read(ref _deferredResistanceRecoveryActive) != 0)
             return;
 
+        if (HandleBoardRestartRemoval(frame)) return;
         if (TryHandleContinuityPreviewFrame(frame))
             return;
 
@@ -7031,6 +6993,7 @@ public sealed class TestViewModel : ObservableObject, IProductionPresentationSta
         if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0)
             return;
 
+        await _deviceFaultPersistenceTask;
         SwitchRuntimeMode(RuntimeMode.ShuttingDown);
         _scanSupervisor.Suspend("Shutdown");
         Interlocked.Increment(ref _modelLoadGeneration);

@@ -97,6 +97,7 @@ public sealed class TestHistoryRecord
     public string ExportPassCountText => IsProductionRecord && Passed
         ? Math.Max(0, LotNo).ToString(System.Globalization.CultureInfo.InvariantCulture)
         : string.Empty;
+    public bool IsInterruptedRecord => InspectionType == HistoryInspectionType.Interrupted;
     public bool IsProductionRecord => HistoryInspectionType.IsProduct(InspectionType);
     public bool IsMasterRecord => HistoryInspectionType.IsMaster(InspectionType);
     public string InspectionTypeText => IsMasterRecord
@@ -115,8 +116,8 @@ public sealed class TestHistoryRecord
     public string ExportTestLogSingleLineText => SingleLineLog(ExportTestLogText);
     private static string SingleLineLog(string text) => string.Join(" | ",
         text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-    public string ExportProgressText => Passed ? "PASS" : "NG";
-    public string ExportResultText => Passed ? "합격" : "불량";
+    public string ExportProgressText => IsInterruptedRecord ? "INTERRUPTED" : Passed ? "PASS" : "NG";
+    public string ExportResultText => IsInterruptedRecord ? "중단" : Passed ? "합격" : "불량";
     public long? ExportAcceptedLotNo => IsProductionRecord && Passed && LotNo > 0 ? LotNo : null;
     public long? ExportSequenceNo => IsProductionRecord && Passed
         ? ExportAcceptedLotNo ?? (ProductionCounter > 0 ? ProductionCounter : null)
@@ -253,6 +254,7 @@ public sealed class TestHistoryRecord
 public static class HistoryInspectionType
 {
     public const string Product = "PRODUCT";
+    public const string Interrupted = "INTERRUPTED";
     public const string LeakRetest = "LEAK_RETEST";
     public const string MasterGood = "MASTER_GOOD";
     public const string MasterBad = "MASTER_BAD";
@@ -269,6 +271,7 @@ public static class HistoryInspectionType
 
     public static string KoreanName(string? value) => value?.Trim().ToUpperInvariant() switch
     {
+        Interrupted => "검사 중단",
         MasterGood => "마스터 합격품",
         MasterBad => "마스터 불량품",
         LeakRetest => "기밀 검사 시작",
@@ -299,7 +302,8 @@ public sealed record HistorySummary(
     long ProductPass,
     long ProductFail,
     long MasterTotal,
-    long LeakRetestTotal)
+    long LeakRetestTotal,
+    long InterruptedTotal = 0)
 {
     public double ProductPassRate => ProductTotal == 0
         ? 0
@@ -606,3 +610,6 @@ public sealed record LabelPrintTransportResult(bool Printed, string Message)
 }
 
 public sealed record LabelPrinterConnectionResult(bool Connected, string Message);
+
+public sealed record BoardFaultCheckpoint(string CycleId, string ModelPath, string PartNumber, string PartKey, DateTime InterruptedAt);
+public sealed record BoardFaultRecovery(BoardFaultCheckpoint Checkpoint, ProductionResultCommitRequest? InterruptedTest);

@@ -60,6 +60,12 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
             () => _repository.CommitResult(request, CurrentRunId),
             cancellationToken);
 
+    public Task<bool> SaveBoardFaultRecoveryAsync(BoardFaultRecovery recovery) => EnqueueAsync(() =>
+    {
+        _repository.SaveBoardFaultRecovery(recovery, CurrentRunId);
+        return true;
+    });
+
     public Task<bool> UpsertActiveCycleAsync(
         string cycleId,
         string partNumber,

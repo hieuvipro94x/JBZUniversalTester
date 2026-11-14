@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -22,6 +22,14 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-board-fault-recovery"])
+        {
+            TestBoardFaultRecoveryStorage();
+            TestBoardDisconnectExitsAndRestores();
+            TestBoardFaultSafeApplicationExit();
+            Console.WriteLine("PASS: tester USB fault exits without reconnect, preserves interrupted history and restores last THT");
+            return 0;
+        }
         if (args is ["--test-safe-application-exit"])
         {
             TestSafeApplicationExit();
@@ -691,7 +699,10 @@ internal static partial class Program
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
             ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
-            ("Application close confirms, guards products and waits for cleanup", TestSafeApplicationExit),
+            ("Application close skips confirmation, guards products and waits for cleanup", TestSafeApplicationExit),
+            ("Board fault checkpoints preserve history and replay exactly once", TestBoardFaultRecoveryStorage),
+            ("Board USB loss exits and restores the exact THT on restart", TestBoardDisconnectExitsAndRestores),
+            ("Board fault safe exit bypasses only operator close guards", TestBoardFaultSafeApplicationExit),
             ("History export failures preserve old files", TestHistoryExportFailureSafety),
             ("History filters and export respect page lifecycle", TestHistoryFiltersAndExportLifecycle),
             ("Auxiliary windows fit the current monitor and DPI", TestAuxiliaryWindowViewport),
@@ -1079,11 +1090,11 @@ internal static partial class Program
         Assert(
             System.Text.RegularExpressions.Regex.Matches(
                 testViewModelSource,
-                "new JBZUniversalTester\\.Views\\.FaultConfirmationWindow\\(").Count == 2 &&
+                "new JBZUniversalTester\\.Views\\.FaultConfirmationWindow\\(").Count == 1 &&
             System.Text.RegularExpressions.Regex.Matches(
                 testViewModelSource,
                 "ShowFaultConfirmationDialog\\(").Count == 4,
-            "Non-Leak product FAIL and device communication faults use the shared confirmation window");
+            "Non-Leak product FAIL retains its shared confirmation window; device faults now exit automatically");
 
         int confirmationStart = testViewModelSource.IndexOf(
             "private void ShowFaultConfirmationDialog(",
@@ -2799,12 +2810,14 @@ internal static partial class Program
         Assert(deviceFaultVm.DeviceFaultMessage ==
                TesterConnectionNotice.Message,
             "The board-fault message matches the shared tester connection notice");
-        Assert(testViewModelSource.Contains("ExitApplicationAfterDeviceFaultAsync", StringComparison.Ordinal) &&
-               testViewModelSource.Contains("await _deviceFaultHardwareLockTask;", StringComparison.Ordinal) &&
-               testViewModelSource.Contains("mainWindow.Close();", StringComparison.Ordinal) &&
-               testViewModelSource.Contains("windowHeader: TesterConnectionNotice.Message", StringComparison.Ordinal) &&
+        string boardRecoverySource = File.ReadAllText(Path.Combine(Environment.CurrentDirectory,
+            "ViewModels", "TestViewModel.BoardFaultRecovery.cs"));
+        Assert(testViewModelSource.Contains("ShowDeviceFaultDialogOnce()", StringComparison.Ordinal) &&
+               testViewModelSource.Contains("SafeLockHardwareForDeviceFaultAsync()", StringComparison.Ordinal) &&
+               boardRecoverySource.Contains("BoardFaultExitRequested?.Invoke", StringComparison.Ordinal) &&
+               boardRecoverySource.Contains("await _deviceFaultPersistenceTask", StringComparison.Ordinal) &&
                testWindowSource.Contains("deviceFaultViewModel.IsDeviceFault", StringComparison.Ordinal),
-            "DeviceFault uses the shared fault confirmation window, then safely locks hardware and exits");
+            "DeviceFault secures the interrupted cycle before its one automatic safe-exit request");
 
         string testWindowXaml = File.ReadAllText(
             Path.Combine(Environment.CurrentDirectory, "Views", "TestWindow.xaml"));
