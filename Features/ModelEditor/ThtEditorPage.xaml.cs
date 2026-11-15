@@ -45,6 +45,36 @@ public partial class ThtEditorPage : UserControl
         InputBindings.Add(new KeyBinding(ApplicationCommands.Save, Key.S, ModifierKeys.Control));
     }
 
+    private void RefreshParts()
+    {
+        _loading = true;
+        try
+        {
+            var rows = ThtFileService.ProductRowsForSave(_document);
+            PartPanel.Visibility = rows.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+            PartCombo.ItemsSource = rows.Select((r, i) => $"{i + 1}. {r[1]} — {r[4]} | ECO: {r[2]} | ALC: {r[3]} | Option: {r[5]}").ToList();
+            PartCombo.SelectedIndex = _document.SelectedPartIndex;
+        }
+        finally { _loading = false; }
+    }
+
+    private void Part_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || _busy || PartCombo.SelectedIndex < 0 || PartCombo.SelectedIndex == _document.SelectedPartIndex) return;
+        int previous = _document.SelectedPartIndex;
+        try
+        {
+            Commit();
+            ThtFileService.SelectPart(_document, PartCombo.SelectedIndex);
+            ShowPage(_page);
+        }
+        catch (Exception ex)
+        {
+            _loading = true; PartCombo.SelectedIndex = previous; _loading = false;
+            ShowError("Chưa đổi được part", ex);
+        }
+    }
+
     private void DocumentChanged(object? sender, EventArgs e)
     {
         if (!_loading) { SaveButton.Tag = null; StatusText.Text = "Đã thay đổi — bấm LƯU THT để lưu."; }
@@ -147,7 +177,7 @@ public partial class ThtEditorPage : UserControl
             var loaded = await loading;
             _document = loaded.Doc; _hash = loaded.Hash; _rebuild = false;
             SaveButton.Tag = null;
-            _changes.MarkSaved(_document); PathText.Text = Path.GetFullPath(path); ShowPage(0);
+            _changes.MarkSaved(_document); PathText.Text = Path.GetFullPath(path); RefreshParts(); ShowPage(0);
             StatusText.Text = $"Đã mở {_document.Connectors.Count} connector, {_document.Pins.Count} chân. THT gốc được giữ nguyên đến khi Lưu.";
         }
         catch (Exception ex) { ShowError("Chưa mở được THT", ex); }
@@ -197,7 +227,10 @@ public partial class ThtEditorPage : UserControl
                 });
                 _diskWork = saving;
                 var saved = await saving;
-                _document = saved.Doc; _hash = saved.Hash; _changes.MarkSaved(_document);
+                int selectedPart = _document.SelectedPartIndex;
+                _document = saved.Doc;
+                ThtFileService.SelectPart(_document, selectedPart);
+                _hash = saved.Hash; _changes.MarkSaved(_document); RefreshParts();
                 SavedPaths.Add(Path.GetFullPath(target)); PathText.Text = target; ShowPage(_page);
             }
             StatusText.Text = "ĐÃ LƯU THT — ThtBackups sẽ tự xóa khi thoát phần mềm.";
@@ -260,7 +293,7 @@ public partial class ThtEditorPage : UserControl
     {
         if (!await ConfirmCloseAsync()) return;
         _document = new() { SourceFormat = "tht", Base = new() };
-        _hash = null; _rebuild = false; _changes.Reset(_document); ShowPage(0); PathText.Text = "THT mới";
+        _hash = null; _rebuild = false; _changes.Reset(_document); RefreshParts(); ShowPage(0); PathText.Text = "THT mới";
     }
     private async void Save_Click(object sender, RoutedEventArgs e) => await SaveAsync();
     private async void Delete_Click(object sender, RoutedEventArgs e)
@@ -280,7 +313,7 @@ public partial class ThtEditorPage : UserControl
             _diskWork = deleting; await deleting;
             SavedPaths.Remove(path);
             _document = new() { SourceFormat = "tht", Base = new() };
-            _hash = null; _rebuild = false; _changes.Reset(_document); ShowPage(0); PathText.Text = "THT mới";
+            _hash = null; _rebuild = false; _changes.Reset(_document); RefreshParts(); ShowPage(0); PathText.Text = "THT mới";
             StatusText.Text = "Đã chuyển file vào ThtBackups.";
         }
         catch (Exception ex) { ShowError("Chưa xóa được THT", ex); }

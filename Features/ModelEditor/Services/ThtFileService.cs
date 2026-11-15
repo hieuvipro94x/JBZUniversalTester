@@ -126,6 +126,7 @@ public static class ThtFileService
             Version = parsed.Version,
             Token = parsed.Token,
             ProductRow = [.. tables.Product],
+            ProductRows = tables.Products.Select(r => new List<string>(r)).ToList(),
             ConnectorRows = tables.ConnectorRows.Select(r => new List<string>(r)).ToList(),
             PinRows = tables.PinRows.Select(r => new List<string>(r)).ToList(),
             WireRows = tables.WireRows.Select(r => new List<string>(r)).ToList(),
@@ -182,7 +183,7 @@ public static class ThtFileService
         // chuyển sang representation đặc biệt của HarnProg.
         ModelLogic.NormalizeHarnProgClip(document.Pins);
         ValidateThtTextFields(document);
-        var product = MergeProduct(document); var connectors = MergeConnectors(document); var pins = MergePins(document); var wires = MergeWires(document);
+        var connectors = MergeConnectors(document); var pins = MergePins(document); var wires = MergeWires(document);
         ValidateClipPinTypeColumn(document, pins);
         var lines = new List<string>();
         void Section(string[] headers, IEnumerable<List<string>> rows)
@@ -190,7 +191,7 @@ public static class ThtFileService
             lines.Add(string.Join('\t', headers) + "\t");
             foreach (var row in rows) lines.Add(string.Join('\t', Fit(row, headers.Length)) + "\t");
         }
-        Section(ProductHeaders, [product]); lines.Add("");
+        Section(ProductHeaders, ProductRowsForSave(document)); lines.Add("");
         Section(ConnectorHeaders, connectors); lines.Add("");
         Section(PinHeaders, pins); lines.Add("");
         Section(WireHeaders, wires); lines.Add("");
@@ -211,6 +212,9 @@ public static class ThtFileService
         Reject("Loại xe", document.Base.Kind);
         Reject("EO No", document.Base.EoNo);
         Reject("ALC", document.Base.Customer);
+        // Edits to a previously selected part remain pending when another part is shown.
+        foreach (var row in document.ThtState?.ProductRows ?? [])
+            foreach (var value in row) Reject("Thông tin part", value);
         foreach (var connector in document.Connectors)
             Reject($"Tên connector {connector.Name}", connector.Name);
         foreach (var pin in document.Pins)
@@ -785,9 +789,30 @@ public static class ThtFileService
         }
     }
 
+    public static List<List<string>> ProductRowsForSave(ModelDocument document)
+    {
+        var rows = document.ThtState?.ProductRows.Select(r => new List<string>(r)).ToList() ?? [];
+        if (rows.Count == 0) rows.Add(MergeProduct(document));
+        else rows[document.SelectedPartIndex] = MergeProduct(document);
+        return rows;
+    }
+
+    public static void SelectPart(ModelDocument document, int index)
+    {
+        var rows = ProductRowsForSave(document);
+        if (index < 0 || index >= rows.Count) throw new ArgumentOutOfRangeException(nameof(index));
+        if (document.ThtState is null) throw new InvalidOperationException("Chưa mở THT.");
+        document.ThtState.ProductRows = rows;
+        document.SelectedPartIndex = index;
+        var row = rows[index];
+        document.Base = new BaseInfo { Model = document.Base.Model, Number = row[1], Kind = row[2],
+            Customer = row[3], Name = row[4], EoNo = row[5], UseCustomer = document.Base.UseCustomer };
+    }
+
     private static List<string> MergeProduct(ModelDocument document)
     {
-        var product = document.ThtState is not null ? Fit(document.ThtState.ProductRow, ProductHeaders.Length) : Enumerable.Repeat("", ProductHeaders.Length).ToList();
+        var rows = document.ThtState?.ProductRows;
+        var product = rows is { Count: > 0 } ? Fit(rows[document.SelectedPartIndex], ProductHeaders.Length) : document.ThtState is not null ? Fit(document.ThtState.ProductRow, ProductHeaders.Length) : Enumerable.Repeat("", ProductHeaders.Length).ToList();
         product[1] = Safe(document.Base.Number).Length > 0 ? Safe(document.Base.Number) : Safe(document.Base.Model);
         product[2] = Safe(document.Base.Kind); product[4] = Safe(document.Base.Name); product[5] = Safe(document.Base.EoNo); product[3] = Safe(document.Base.Customer); return product;
     }
@@ -1528,7 +1553,7 @@ public static class ThtFileService
     {
         var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n'); var sections = normalized.Split("\n\n", StringSplitOptions.None).ToList(); while (sections.Count > 0 && string.IsNullOrWhiteSpace(sections[^1])) sections.RemoveAt(sections.Count - 1); if (sections.Count < 4) throw new ThtFormatException($"THT thiếu 4 bảng Product/Connector/Pin/Wire (tìm thấy {sections.Count}).");
         List<List<string>> Rows(string s) { var r = new List<List<string>>(); foreach (var line in s.Split('\n')) { if (line.Length == 0) continue; var cols = line.Split('\t').ToList(); if (cols.Count > 0 && cols[^1] == "") cols.RemoveAt(cols.Count - 1); r.Add(cols); } return r; }
-        var pr = Rows(sections[0]); var cr = Rows(sections[1]); var pir = Rows(sections[2]); var wr = Rows(sections[3]); if (pr.Count < 2) throw new ThtFormatException("Bảng Product không có dòng dữ liệu."); return new(Fit(pr[1], ProductHeaders.Length), cr.Skip(1).Select(r => Fit(r, ConnectorHeaders.Length)).ToList(), pir.Skip(1).Select(r => Fit(r, PinHeaders.Length)).ToList(), wr.Skip(1).Select(r => Fit(r, WireHeaders.Length)).ToList());
+        var pr = Rows(sections[0]); var cr = Rows(sections[1]); var pir = Rows(sections[2]); var wr = Rows(sections[3]); if (pr.Count < 2) throw new ThtFormatException("Bảng Product không có dòng dữ liệu."); return new(pr.Skip(1).Select(r => Fit(r, ProductHeaders.Length)).ToList(), cr.Skip(1).Select(r => Fit(r, ConnectorHeaders.Length)).ToList(), pir.Skip(1).Select(r => Fit(r, PinHeaders.Length)).ToList(), wr.Skip(1).Select(r => Fit(r, WireHeaders.Length)).ToList());
     }
 
     private static byte[] BuildCompoundFile(byte[] contents, byte[] summary)
@@ -1553,7 +1578,8 @@ public static class ThtFileService
     private static ushort U16(byte[] b, int o) => BinaryPrimitives.ReadUInt16LittleEndian(b.AsSpan(o, 2)); private static uint U32(byte[] b, int o) => BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(o, 4)); private static void W16(byte[] b, int o, ushort v) => BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(o, 2), v); private static void W32(byte[] b, int o, uint v) => BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(o, 4), v); private static void W32(byte[] b, int o, int v) => W32(b, o, (uint)v);
 
     private sealed record ParsedContents(string Version, uint Token, string Text, byte[] Tail);
-    private sealed record ParsedTables(List<string> Product, List<List<string>> ConnectorRows, List<List<string>> PinRows, List<List<string>> WireRows);
+    private sealed record ParsedTables(List<List<string>> Products, List<List<string>> ConnectorRows, List<List<string>> PinRows, List<List<string>> WireRows)
+    { public List<string> Product => Products[0]; }
 
     private sealed class CompoundFileReader
     {

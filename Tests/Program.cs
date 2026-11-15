@@ -1,4 +1,4 @@
-﻿using System.IO.Compression;
+using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -258,6 +258,12 @@ internal static partial class Program
         {
             TestTestViewDiagnostics();
             Console.WriteLine("PASS: TestView diagnostics preserve log semantics and skip disabled table work");
+            return 0;
+        }
+        if (args is ["--test-multipart-tht-editor", var multiPartSource])
+        {
+            TestMultiPartThtEditorFile(multiPartSource);
+            Console.WriteLine("PASS: multi-part editor round-trip, UI selection/save, option preservation; source unchanged");
             return 0;
         }
         if (args is ["--test-integrated-tht-editor"])
@@ -881,6 +887,7 @@ internal static partial class Program
             ("Editor sorts connector/PIN labels naturally without changing native addresses", TestEditorConnectorPinOrdering),
             ("Connector Delete works from the final row upward and preserves retained edits", TestConnectorDeleteLastRow),
             ("Connector PIN edits fill automatic IO starts and preserve manual ranges", TestConnectorAutomaticStartIo),
+            ("Multi-part THT editor preserves every part and option on UI save", TestMultiPartThtEditor),
             ("Integrated native THT editor preserves topology and saves actual UI edits", TestIntegratedThtEditor),
             ("Legacy unnamed CLIP branches stay blank through THT saves", TestLegacyClipBlankPinTypes),
             ("THT PIN presentation resolves contacts without changing editable data", TestEditorPinPresentation),

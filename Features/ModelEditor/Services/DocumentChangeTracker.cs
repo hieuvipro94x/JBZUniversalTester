@@ -27,7 +27,9 @@ public sealed class DocumentChangeTracker
 
     private static string Snapshot(ModelDocument document) => JsonSerializer.Serialize(new
     {
-        document.Base,
+        Model = document.Base.Model,
+        document.Base.UseCustomer,
+        Parts = ThtFileService.ProductRowsForSave(document),
         document.UseImage,
         document.ImageFile,
         document.Connectors,

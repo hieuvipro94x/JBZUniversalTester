@@ -82,6 +82,7 @@ public sealed class ThtState
     public string Version { get; set; } = "V1.110";
     public uint Token { get; set; } = 0x389DEFB9;
     public List<string> ProductRow { get; set; } = [];
+    public List<List<string>> ProductRows { get; set; } = [];
     public List<List<string>> ConnectorRows { get; set; } = [];
     public List<List<string>> PinRows { get; set; } = [];
     public List<List<string>> WireRows { get; set; } = [];
@@ -99,6 +100,7 @@ public sealed class ThtState
         Version = Version,
         Token = Token,
         ProductRow = [.. ProductRow],
+        ProductRows = ProductRows.Select(r => new List<string>(r)).ToList(),
         ConnectorRows = ConnectorRows.Select(r => new List<string>(r)).ToList(),
         PinRows = PinRows.Select(r => new List<string>(r)).ToList(),
         WireRows = WireRows.Select(r => new List<string>(r)).ToList(),
@@ -113,6 +115,7 @@ public sealed class ThtState
 public sealed class ModelDocument
 {
     public BaseInfo Base { get; set; } = new();
+    public int SelectedPartIndex { get; set; }
     public List<Connector> Connectors { get; set; } = [];
     public List<Pin> Pins { get; set; } = [];
     public bool UseImage { get; set; }
@@ -125,6 +128,7 @@ public sealed class ModelDocument
     public ModelDocument Clone() => new()
     {
         Base = Base.Clone(),
+        SelectedPartIndex = SelectedPartIndex,
         Connectors = Connectors.Select(c => c.Clone()).ToList(),
         Pins = Pins.Select(p => p.Clone()).ToList(),
         UseImage = UseImage,

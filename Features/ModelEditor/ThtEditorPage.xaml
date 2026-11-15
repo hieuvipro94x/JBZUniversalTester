@@ -79,6 +79,11 @@
             <ToggleButton x:Name="PinNav" Grid.Row="2" Content="PIN" Style="{StaticResource CompactNav}" Tag="2" Click="Nav_Click"/>
             <ToggleButton x:Name="LineNav" Grid.Row="3" Content="DÂY" Style="{StaticResource CompactNav}" Tag="3" Click="Nav_Click"/>
             <ToggleButton x:Name="ColorNav" Grid.Row="4" Content="CÀI ĐẶT MÀU" Style="{StaticResource CompactNav}" Tag="4" Click="Nav_Click"/>
+            <StackPanel x:Name="PartPanel" Grid.Row="5" Margin="0,8,0,0" VerticalAlignment="Top" Visibility="Collapsed">
+              <TextBlock Text="CHỌN PART / 파트 선택" FontSize="13" FontWeight="Bold" Margin="0,0,0,6"/>
+              <ComboBox x:Name="PartCombo" FontSize="14" Height="36" SelectionChanged="Part_SelectionChanged" ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}"/>
+              <TextBlock Text="Connector, PIN và dây dùng chung toàn file. Tùy chọn A/B/C được giữ nguyên. / 공통 배선, 옵션 유지" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"/>
+            </StackPanel>
             <TextBlock x:Name="StatusText" Grid.Row="5" TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" FontSize="12" Margin="0,12,0,12" VerticalAlignment="Bottom"/>
             <Button Grid.Row="6" Content="TRỞ VỀ" Style="{StaticResource CompactButton}" Click="Back_Click"/>
         </Grid>
