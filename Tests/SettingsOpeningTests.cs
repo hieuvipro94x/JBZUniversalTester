@@ -127,6 +127,25 @@ internal static partial class Program
                         Assert(panels.Select(PanelBounds).SequenceEqual(originalBounds),
                             "Learning completion/clear messages cannot resize or rescale any Settings panel after the dialog closes");
                     }
+                    var templatePicker = (ComboBox)page.FindName("LabelTemplateTypeComboBox");
+                    var bcwSummary = (TextBlock)page.FindName("BcwInfoText");
+                    var actions = (Grid)page.FindName("LabelPrintActionsPanel");
+                    double actionHeight = actions.ActualHeight;
+                    string originalTemplate = vm.Settings.Label.TemplateType;
+                    foreach (string type in new[] { "BCW", "TEM_TO_KETN", "BCW", originalTemplate })
+                    {
+                        templatePicker.SelectedValue = type;
+                        foreach (string summary in new[] { "Serial: 00001 | QR: 26319D9PL00001", new string('W', 1000) + "\n" + new string('X', 1000) })
+                        {
+                            bcwSummary.Text = summary;
+                            page.UpdateLayout();
+                            Assert(panels.Select(PanelBounds).SequenceEqual(originalBounds) && actions.ActualHeight == actionHeight,
+                                $"Changing BCW/ordinary templates and long summaries cannot resize or move any Settings panel at {size}");
+                        }
+                        Assert((((FrameworkElement)page.FindName("BcwSettingsPanel")).Visibility == Visibility.Visible) == (type == "BCW") &&
+                               (((FrameworkElement)page.FindName("SingleLotPanel")).Visibility == Visibility.Visible) == (type != "BCW"),
+                            "Fixed label rows expose only controls for the selected template");
+                    }
                     foreach (Border panel in panels)
                     {
                         Point top = panel.TranslatePoint(new Point(), page);

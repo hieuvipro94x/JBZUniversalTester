@@ -611,17 +611,17 @@
                                           Content="IN TEM CHO MÃ HÀNG NÀY" VerticalAlignment="Center"
                                           IsChecked="{Binding PrintLabelForCurrentProduct, Mode=TwoWay}"/>
                                 </Grid>
-                                <Grid x:Name="LabelPrintActionsPanel" Grid.Row="2" Margin="0,6,0,0">
+                                <Grid x:Name="LabelPrintActionsPanel" Grid.Row="2" Margin="0">
                                     <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="30"/>
+                                        <RowDefinition Height="30"/>
+                                        <RowDefinition Height="30"/>
+                                        <RowDefinition Height="30"/>
+                                        <RowDefinition Height="30"/>
+                                        <RowDefinition Height="30"/>
+                                        <RowDefinition Height="30"/>
                                     </Grid.RowDefinitions>
-                                    <Grid Grid.Row="0" Margin="0,6,0,0">
+                                    <Grid Grid.Row="0" Margin="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="170"/>
                                             <ColumnDefinition Width="*"/>
@@ -660,7 +660,7 @@
                                         <Button Content="XEM TRƯỚC" Height="26" Margin="1,2,1,2" Padding="2,0" FontSize="13" Style="{StaticResource SettingsInfoButtonStyle}" Click="PreviewLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                         <Button Content="IN THỬ" Height="26" Margin="1,2,1,2" Padding="2,0" FontSize="13" Style="{StaticResource SettingsWarningButtonStyle}" Click="TestPrintLabel_Click" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"/>
                                     </UniformGrid>
-                                    <Grid x:Name="SingleLotPanel" Grid.Row="2" Margin="0,4,0,0">
+                                    <Grid x:Name="SingleLotPanel" Grid.Row="2" Margin="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="170"/>
                                             <ColumnDefinition Width="*"/>
@@ -669,7 +669,7 @@
                                         <TextBlock Text="LOT in thử" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
                                         <TextBox x:Name="SinglePrintLotTextBox" Grid.Column="1" Margin="0,2,6,2" Height="26" TextAlignment="Center" VerticalContentAlignment="Center" ToolTip="LOTNO dùng riêng khi xem trước hoặc in thử; không đổi LOT Production."/>
                                     </Grid>
-                                    <Grid x:Name="BatchLotPanel" Grid.Row="3" Margin="0,4,0,0">
+                                    <Grid x:Name="BatchLotPanel" Grid.Row="3" Margin="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="170"/>
                                             <ColumnDefinition Width="*"/>
@@ -682,11 +682,11 @@
                                         <TextBlock Grid.Column="2" Text="→" TextAlignment="Center" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
                                         <TextBox x:Name="BatchPrintEndLotTextBox" Grid.Column="3" Margin="0,2,6,2" Height="26" TextAlignment="Center" VerticalContentAlignment="Center" ToolTip="LOTNO cuối cùng cần in (tính cả LOT này)."/>
                                     </Grid>
-                                    <UniformGrid Grid.Row="4" Columns="2" Margin="0,4,0,0">
+                                    <UniformGrid Grid.Row="4" Columns="2" Margin="0">
                                         <Button x:Name="BatchPrintLabelButton" Content="IN HÀNG LOẠT" Height="26" Margin="0,2,3,2" Padding="3,0" FontSize="13" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchPrintLabel_Click"/>
                                         <Button x:Name="BatchStopPrintButton" Content="DỪNG IN" Height="26" Margin="3,2,0,2" Padding="3,0" FontSize="13" IsEnabled="False" Style="{StaticResource SettingsWarningButtonStyle}" Click="BatchStopPrint_Click"/>
                                     </UniformGrid>
-                                    <Grid Grid.Row="5" Margin="0,4,0,0">
+                                    <Grid Grid.Row="5" Margin="0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="170"/>
                                             <ColumnDefinition Width="*"/>
@@ -701,15 +701,16 @@
                                         </ComboBox>
                                         <TextBlock Grid.Column="2" Text="ms" Margin="6,0,0,0" VerticalAlignment="Center" Style="{StaticResource FieldLabelStyle}"/>
                                     </Grid>
-                                    <StackPanel x:Name="BcwSettingsPanel" Grid.Row="6" Visibility="Collapsed" Margin="0,6,0,0">
-                                        <Grid>
+                                    <StackPanel x:Name="BcwSettingsPanel" Grid.Row="2" Grid.RowSpan="2" Visibility="Hidden" Margin="0">
+                                        <!-- Reuse the two LOT rows; changing template never adds another form block. -->
+                                        <Grid Height="30">
                                             <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="100"/>
+                                                <ColumnDefinition Width="170"/>
                                                 <ColumnDefinition Width="*"/>
                                                 <ColumnDefinition Width="70"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Mã xe dự phòng" ToolTip="Chỉ dùng cho THT cũ chưa khai báo ECO. Có ECO/ALC thì lấy đúng dữ liệu từ dòng THT đã chọn."/>
+                                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Mã xe dự phòng" ToolTip="Chỉ dùng cho THT cũ chưa khai báo ECO. Có ECO/ALC thì lấy đúng dữ liệu từ dòng THT đã chọn."/>
                                             <TextBox x:Name="BcwVehicleTextBox" Grid.Column="1" MaxLength="2" Text="{Binding Settings.Label.BcwVehicleCode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" TextChanged="BcwInput_Changed"/>
                                             <TextBlock Grid.Column="2" Text="RH / LH" Margin="8,0,0,0"/>
                                             <ComboBox Grid.Column="3" SelectedValuePath="Tag" SelectedValue="{Binding Settings.Label.BcwPosition, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" SelectionChanged="BcwPosition_Changed">
@@ -717,17 +718,22 @@
                                                 <ComboBoxItem Content="RH" Tag="RH"/>
                                             </ComboBox>
                                         </Grid>
-                                        <Grid>
+                                        <Grid Height="30">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="170"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
-                                            <TextBlock Text="Số lượng tem BCW"/>
+                                            <TextBlock Style="{StaticResource FieldLabelStyle}" Text="Số lượng tem BCW"/>
                                             <TextBox x:Name="BcwQuantityTextBox" Grid.Column="1" Text="1"/>
                                         </Grid>
-                                        <TextBlock x:Name="BcwInfoText" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,4"/>
-                                        <Button Content="IN LẠI BCW ĐÃ LƯU" Click="BcwReprint_Click" Style="{StaticResource SettingsWarningButtonStyle}" Height="26"/>
+
                                     </StackPanel>
+                                    <Grid x:Name="BcwDetailsPanel" Grid.Row="6" Visibility="Hidden" Margin="0">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="190"/></Grid.ColumnDefinitions>
+                                        <TextBlock x:Name="BcwInfoText" Height="26" ClipToBounds="True" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" FontSize="12" Margin="0,2,8,2"
+                                                   ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                                        <Button Grid.Column="1" Content="IN LẠI BCW ĐÃ LƯU" Click="BcwReprint_Click" Style="{StaticResource SettingsWarningButtonStyle}" Height="26" Margin="0,2" FontSize="13" Padding="3,0"/>
+                                    </Grid>
                                 </Grid>
                             </Grid>
                         </Border>

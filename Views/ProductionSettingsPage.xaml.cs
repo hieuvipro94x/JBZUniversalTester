@@ -1343,8 +1343,8 @@ public partial class ProductionSettingsPage : UserControl
     {
         if (BcwSettingsPanel is null) return;
         bool bcw = _vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate;
-        BcwSettingsPanel.Visibility = bcw ? Visibility.Visible : Visibility.Collapsed;
-        SingleLotPanel.Visibility = BatchLotPanel.Visibility = bcw ? Visibility.Collapsed : Visibility.Visible;
+        BcwSettingsPanel.Visibility = BcwDetailsPanel.Visibility = bcw ? Visibility.Visible : Visibility.Hidden;
+        SingleLotPanel.Visibility = BatchLotPanel.Visibility = bcw ? Visibility.Hidden : Visibility.Visible;
         if (bcw) _bcwSummaryTask = UpdateBcwInfoAsync();
     }
 
@@ -1371,7 +1371,7 @@ public partial class ProductionSettingsPage : UserControl
                 var request = LabelPrintRequest.Capture(new TestHistoryRecord { Finished = now }, model, settings);
                 long serial = new BcwSerialStore().Peek(now, request.Data);
                 string qr = BcwLabelService.Qr(now, request.Data, serial);
-                return $"Part: {model.PartNumber} | ECO: {model.Eco} | ALC: {model.Alc}\nSerial: {serial:D5} | QR: {qr}";
+                return $"Serial: {serial:D5} | QR: {qr} | Part: {model.PartNumber} | ECO: {model.Eco} | ALC: {model.Alc}";
             }, _pageLifetime.Token);
             if (!IsReleased && generation == _bcwSummaryGeneration) BcwInfoText.Text = summary;
         }
