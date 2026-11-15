@@ -15,6 +15,23 @@ public static class LabelProfileResolver
         string encoding = string.IsNullOrWhiteSpace(settings.EncodingName)
             ? "us-ascii"
             : settings.EncodingName.Trim();
+        string sharedTemplate = BuiltInLabelTemplateStore.LoadOverride(settings, templateType);
+
+        // TEM_TO_SQDZ is an explicit operator-selected built-in format. It must
+        // not silently fall back to an older EPL payload embedded in the THT.
+        // A template edited in Settings is shared for this label type. A new
+        // product's older inline THT layout must not discard that operator edit.
+        if (settings.PreferSelectedTemplate || !string.IsNullOrEmpty(sharedTemplate) ||
+            templateType is LabelSettings.LargeSqdzTemplate or LabelSettings.BcwTemplate)
+        {
+            return new LabelProfile(
+                templateType,
+                LabelPrintMode.ExternalTemplate,
+                TemplatePath: ResolveBuiltInTemplatePath(templateType),
+                EncodingName: encoding,
+                Copies: 1,
+                InlineTemplate: sharedTemplate);
+        }
 
         if (!string.IsNullOrWhiteSpace(model.LabelTemplate.RawTemplate))
         {
@@ -43,21 +60,22 @@ public static class LabelProfileResolver
         if (string.IsNullOrWhiteSpace(model.LabelTemplate.ProfileId))
         {
             string builtInTemplate = ResolveBuiltInTemplatePath(templateType);
-            if (File.Exists(builtInTemplate))
-            {
-                return new LabelProfile(
-                    templateType,
-                    LabelPrintMode.ExternalTemplate,
-                    TemplatePath: builtInTemplate,
-                    EncodingName: encoding,
-                    Copies: 1);
-            }
+            return new LabelProfile(
+                templateType,
+                LabelPrintMode.ExternalTemplate,
+                TemplatePath: builtInTemplate,
+                EncodingName: encoding,
+                Copies: 1,
+                InlineTemplate: BuiltInLabelTemplateStore.LoadOverride(settings, templateType));
         }
 
         string discovered = FindExactProfileTemplate(profileId);
         if (!string.IsNullOrWhiteSpace(discovered))
         {
             string helper = ResolvePath(settings.ExternalHelperPath);
+            string inlineTemplate = BuiltInLabelTemplateStore.IsReference(discovered)
+                ? BuiltInLabelTemplateStore.LoadOverride(settings, profileId)
+                : string.Empty;
             return new LabelProfile(
                 profileId,
                 string.IsNullOrWhiteSpace(helper) ? LabelPrintMode.ExternalTemplate : LabelPrintMode.ExternalHelper,
@@ -66,7 +84,8 @@ public static class LabelProfileResolver
                 ExternalHelperArgument: settings.ExternalHelperArgument ?? string.Empty,
                 ExternalPrintFile: settings.ExternalPrintFile ?? string.Empty,
                 EncodingName: encoding,
-                Copies: ResolveCopies(model, settings));
+                Copies: ResolveCopies(model, settings),
+                InlineTemplate: inlineTemplate);
         }
 
         return new LabelProfile(
@@ -93,23 +112,28 @@ public static class LabelProfileResolver
     public static string NormalizeTemplateType(string? value)
     {
         string normalized = value?.Trim() ?? string.Empty;
-        if (string.Equals(normalized, LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase))
+        if (normalized.Equals(LabelSettings.BcwTemplate, StringComparison.OrdinalIgnoreCase)) return LabelSettings.BcwTemplate;
+        if (string.Equals(normalized, LabelSettings.SmallTemplate, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "TEM_BE", StringComparison.OrdinalIgnoreCase))
             return LabelSettings.SmallTemplate;
-        if (string.Equals(normalized, LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(normalized, LabelSettings.LargeSqdzTemplate, StringComparison.OrdinalIgnoreCase))
+            return LabelSettings.LargeSqdzTemplate;
+        if (string.Equals(normalized, LabelSettings.SmallQrTemplate, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "TEM_BE_QR", StringComparison.OrdinalIgnoreCase))
             return LabelSettings.SmallQrTemplate;
         return LabelSettings.LargeTemplate;
     }
 
     public static string ResolveBuiltInTemplatePath(string? templateType) =>
-        Path.Combine(
-            AppContext.BaseDirectory,
-            "Labels",
-            NormalizeTemplateType(templateType) + ".txt");
+        BuiltInLabelTemplateStore.ReferenceFor(templateType);
 
     private static string FindExactProfileTemplate(string profileId)
     {
         if (string.IsNullOrWhiteSpace(profileId))
             return string.Empty;
+
+        if (BuiltInLabelTemplateStore.TryReferenceForProfile(profileId, out string builtInReference))
+            return builtInReference;
 
         string[] candidates =
         [

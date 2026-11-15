@@ -1,6 +1,7 @@
 using System.IO;
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 
 namespace JBZUniversalTester.Services;
 
@@ -13,47 +14,74 @@ public static class ProductionDataUpgradeService
 {
     private static readonly string[] ProductionFiles =
     [
-        "appsettings.json",
-        "production.settings.json",
-        "UniversalTester.cfg",
-        "production.statistics.json",
-        "production.statistics.json.bak",
-        "PartCnt.txt",
-        Path.Combine("Data", "History", "test-history.db"),
-        Path.Combine("Data", "LastBarcode.txt")
+        "JBZUniversalTester.cfg",
+        Path.Combine("Data", "JBZUniversalTester.db"),
+        "PartCnt.txt"
     ];
 
     private static readonly string[] FastConfigurationFiles =
     [
-        "appsettings.json",
-        "production.settings.json",
-        "UniversalTester.cfg"
+        "JBZUniversalTester.cfg"
     ];
 
     public static IReadOnlyList<string> MigrateForCurrentVersion()
     {
-        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        return MigrateMissingProductionData(
-            targetDirectory,
-            FindPreviousVersionDirectories(targetDirectory));
+        return MigrateCurrentVersionFiles(ProductionFiles);
+    }
+
+    public static void MigrateBcwForCurrentVersion()
+    {
+        BcwDatabaseMigrationService.EnsureForCurrentInstallation();
     }
 
     public static IReadOnlyList<string> MigrateFastConfigurationForCurrentVersion()
     {
-        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        return MigrateMissingProductionData(
-            targetDirectory,
-            FindPreviousVersionDirectories(targetDirectory),
-            FastConfigurationFiles);
+        return MigrateStationConfiguration(RuntimePaths.ConfigFile, RuntimePaths.AppDirectory,
+            () => FindPreviousVersionDirectories(RuntimePaths.AppDirectory));
+    }
+
+    /// <summary>Copy the station CFG beside its DB once; retain every legacy source.</summary>
+    public static IReadOnlyList<string> MigrateStationConfiguration(
+        string destinationPath, string applicationDirectory, Func<IEnumerable<string>> previousDirectories)
+    {
+        string destination = Path.GetFullPath(destinationPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        using var migrationLock = new FileStream(destination + ".relocation.lock", FileMode.OpenOrCreate,
+            FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
+        if (File.Exists(destination)) return [];
+
+        string adjacent = Path.Combine(Path.GetFullPath(applicationDirectory), "JBZUniversalTester.cfg");
+        string? source = File.Exists(adjacent) ? adjacent : null;
+        if (source is null)
+        {
+            string[] candidates = previousDirectories()
+                .Select(path => Path.Combine(Path.GetFullPath(path), "JBZUniversalTester.cfg"))
+                .Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (candidates.Length > 0)
+            {
+                byte[] expected = File.ReadAllBytes(candidates[0]);
+                if (candidates.Skip(1).Any(path => !File.ReadAllBytes(path).SequenceEqual(expected)))
+                    throw new IOException("Tìm thấy nhiều CFG khác nhau. Hãy đặt CFG của máy đang vận hành cạnh EXE rồi mở lại. Giữ nguyên tất cả CFG: " + string.Join("; ", candidates));
+                source = candidates[0];
+            }
+        }
+        if (source is null) return [];
+        CopyWithoutOverwrite(source, destination);
+        return [destination];
     }
 
     public static IReadOnlyList<string> MigrateDeferredProductionDataForCurrentVersion()
     {
-        string targetDirectory = Path.GetFullPath(AppContext.BaseDirectory);
-        return MigrateMissingProductionData(
-            targetDirectory,
-            FindPreviousVersionDirectories(targetDirectory),
-            ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase));
+        return MigrateCurrentVersionFiles(ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase)
+            .Where(path => !path.Equals(Path.Combine("Data", "JBZUniversalTester.db"), StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static IReadOnlyList<string> MigrateCurrentVersionFiles(IEnumerable<string> relativePaths)
+    {
+        string target = Path.GetFullPath(AppContext.BaseDirectory);
+        string[] missing = relativePaths.Where(path => !File.Exists(Path.Combine(target, path))).ToArray();
+        // Warm launches need no sibling-directory enumeration or source probing.
+        return missing.Length == 0 ? [] : MigrateMissingProductionData(target, FindPreviousVersionDirectories(target), missing);
     }
 
     public static IReadOnlyList<string> MigrateMissingProductionData(
@@ -70,6 +98,8 @@ public static class ProductionDataUpgradeService
         ArgumentNullException.ThrowIfNull(candidateDirectories);
 
         string targetRoot = Path.GetFullPath(targetDirectory);
+        string[] missing = relativePaths.Where(path => !File.Exists(Path.Combine(targetRoot, path))).ToArray();
+        if (missing.Length == 0) return [];
         string[] sources = candidateDirectories
             .Select(Path.GetFullPath)
             .Where(path => !string.Equals(path, targetRoot, StringComparison.OrdinalIgnoreCase))
@@ -78,7 +108,7 @@ public static class ProductionDataUpgradeService
             .ToArray();
 
         var migrated = new List<string>();
-        foreach (string relativePath in relativePaths)
+        foreach (string relativePath in missing)
         {
             string targetPath = Path.Combine(targetRoot, relativePath);
             if (File.Exists(targetPath))
@@ -99,7 +129,7 @@ public static class ProductionDataUpgradeService
         return migrated;
     }
 
-    private static IEnumerable<string> FindPreviousVersionDirectories(string targetDirectory)
+    internal static IEnumerable<string> FindPreviousVersionDirectories(string targetDirectory)
     {
         DirectoryInfo target = new(targetDirectory);
         Version? targetVersion = ParseVersionDirectory(target.Name);
@@ -138,7 +168,18 @@ public static class ProductionDataUpgradeService
         string temporaryPath = targetPath + ".migration-" + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.Copy(sourcePath, temporaryPath, overwrite: false);
+            if (Path.GetFileName(sourcePath).Equals("BCW-labels.db", StringComparison.OrdinalIgnoreCase))
+            {
+                using var source = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = sourcePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+                using var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = temporaryPath, Pooling = false }.ToString());
+                source.Open(); destination.Open(); source.BackupDatabase(destination);
+                using var integrity = destination.CreateCommand(); integrity.CommandText = "PRAGMA integrity_check;";
+                if (!string.Equals(integrity.ExecuteScalar() as string, "ok", StringComparison.Ordinal))
+                    throw new InvalidDataException("BCW label journal upgrade integrity check failed.");
+            }
+            else File.Copy(sourcePath, temporaryPath, overwrite: false);
             File.Move(temporaryPath, targetPath, overwrite: false);
         }
         finally

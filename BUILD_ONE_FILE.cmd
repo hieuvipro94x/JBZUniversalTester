@@ -5,8 +5,15 @@ title JBZUniversalTester - Build + Smart Version + GitHub
 
 set "ROOT=%~dp0"
 set "PS_SCRIPT=%ROOT%Scripts\Publish-OneFile.ps1"
+set "SIGN_VERIFY_SCRIPT=%ROOT%Scripts\Verify-JBZSignature.ps1"
 set "VERSION_RESOLVER=%ROOT%Scripts\Resolve-BuildVersion.ps1"
+set "DAILY_BRANCH_SCRIPT=%ROOT%Scripts\Set-DailyBuildBranch.ps1"
+set "SOURCE_SYNC_SCRIPT=%ROOT%Scripts\Sync-BuildSource.ps1"
 set "VERSION_FILE=%ROOT%Version.props"
+set "PROJECT_NAME=JBZUniversalTester"
+set "PROJECT_FILE_NAME=JBZUniversalTester.csproj"
+set "TARGET_REPO_URL=https://github.com/hieuvipro94x/JBZUniversalTester.git"
+set "BUILD_REMOTE=build-target"
 
 pushd "%ROOT%" >nul 2>&1
 if errorlevel 1 (
@@ -21,9 +28,27 @@ echo JBZUniversalTester - BUILD + KIỂM TRA VERSION + GITHUB
 echo ============================================================
 echo.
 
+rem ============================================================
+rem KIỂM TRA ĐÚNG PROJECT TRƯỚC KHI FETCH/PUSH
+rem ============================================================
+if not exist "%ROOT%JBZUniversalTester.csproj" (
+    echo [LỖI AN TOÀN] File BUILD_ONE_FILE này không thuộc project hiện tại.
+    echo Project yêu cầu : JBZUniversalTester
+    echo File cần có      : JBZUniversalTester.csproj
+    echo Thư mục hiện tại : %ROOT%
+    echo Dừng để tránh fetch/push nhầm repository.
+    goto :FAIL
+)
+
 if not exist "%PS_SCRIPT%" (
     echo [LỖI] Không tìm thấy:
     echo %PS_SCRIPT%
+    goto :FAIL
+)
+
+if not exist "%SIGN_VERIFY_SCRIPT%" (
+    echo [LỖI] Không tìm thấy script xác minh chữ ký:
+    echo %SIGN_VERIFY_SCRIPT%
     goto :FAIL
 )
 
@@ -34,95 +59,211 @@ if not exist "%VERSION_FILE%" (
 )
 
 if not exist "%VERSION_RESOLVER%" (
-    echo [LOI] Khong tim thay:
+    echo [LỖI] Không tìm thấy:
     echo %VERSION_RESOLVER%
+    goto :FAIL
+)
+
+if not exist "%DAILY_BRANCH_SCRIPT%" (
+    echo [LOI] Khong tim thay script dat ten nhanh theo ngay:
+    echo %DAILY_BRANCH_SCRIPT%
+    goto :FAIL
+)
+
+if not exist "%SOURCE_SYNC_SCRIPT%" (
+    echo [LỖI] Không tìm thấy script kiểm tra và lấy code mới:
+    echo %SOURCE_SYNC_SCRIPT%
     goto :FAIL
 )
 
 if not exist "%ROOT%.gitignore" (
     echo [LỖI] Không tìm thấy .gitignore tai:
     echo %ROOT%.gitignore
-    echo Dung lai de tranh day nham file runtime/build len GitHub.
+    echo Dừng lại để tránh đẩy nhầm file runtime/build lên GitHub.
     goto :FAIL
 )
 
 where git >nul 2>&1
 if errorlevel 1 (
-    echo [LỖI GIT] Chưa cài Git hoac Git chua co trong PATH.
+    echo [LỖI GIT] Chưa cài Git hoặc Git chưa có trong PATH.
     goto :FAIL
 )
 
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
-    echo [LỖI GIT] Thư mục nay khong phai repository Git.
+    echo [LỖI GIT] Thư mục này không phải repository Git.
     goto :FAIL
 )
 
 for /f "delims=" %%B in ('git branch --show-current') do set "CURRENT_BRANCH=%%B"
-if /I not "%CURRENT_BRANCH%"=="main" (
-    echo [LỖI GIT] Nhánh hiện tại: %CURRENT_BRANCH%
-    echo Chỉ cho phép chay tren nhanh main.
-    echo Hãy chạy: git switch main
+if not defined CURRENT_BRANCH (
+    echo [LỖI GIT] Đang ở detached HEAD. Hãy chuyển sang một branch trước khi build.
     goto :FAIL
 )
 
-git remote get-url origin >nul 2>&1
+rem Cho phép Git for Windows xử lý đường dẫn dài.
+git config core.longpaths true >nul 2>&1
+
+rem Remote build riêng cho đúng project; KHÔNG phụ thuộc origin/upstream hiện tại.
+git remote get-url "%BUILD_REMOTE%" >nul 2>&1
 if errorlevel 1 (
-    echo [LỖI GIT] Chưa cấu hình remote origin.
+    echo [GIT] Tạo remote riêng "%BUILD_REMOTE%" cho đúng project.
+    git remote add "%BUILD_REMOTE%" "%TARGET_REPO_URL%"
+    if errorlevel 1 (
+        echo [LỖI GIT] Không thể tạo remote "%BUILD_REMOTE%".
+        goto :FAIL
+    )
+) else (
+    rem Luôn ép build-target về đúng repository của project hiện tại.
+    git remote set-url "%BUILD_REMOTE%" "%TARGET_REPO_URL%"
+    if errorlevel 1 (
+        echo [LỖI GIT] Không thể cấu hình remote "%BUILD_REMOTE%".
+        goto :FAIL
+    )
+)
+
+set "VERIFIED_BUILD_URL="
+for /f "delims=" %%U in ('git remote get-url "%BUILD_REMOTE%"') do set "VERIFIED_BUILD_URL=%%U"
+if /I not "%VERIFIED_BUILD_URL%"=="%TARGET_REPO_URL%" (
+    echo [LỖI AN TOÀN] Remote build không đúng repository yêu cầu.
+    echo Đang có : %VERIFIED_BUILD_URL%
+    echo Cần đúng : %TARGET_REPO_URL%
     goto :FAIL
 )
 
-echo [GIT] Nhánh hiện tại: main
+echo [GIT] Project hiện tại : JBZUniversalTester
+echo [GIT] Nhánh hiện tại   : %CURRENT_BRANCH%
+echo [GIT] Repository đích  : %TARGET_REPO_URL%
+echo [GIT] Remote sử dụng   : %BUILD_REMOTE%
 echo [GIT] Mọi file được stage sẽ tuân theo .gitignore.
+echo.
+
+rem ============================================================
+rem B0 - DONG BO SOURCE TRUOC KHI GAN VERSION VA BUILD
+rem ============================================================
+echo ============================================================
+echo BƯỚC 0/3 - KIỂM TRA VERSION MỚI NHẤT VÀ LẤY CODE
+echo ============================================================
+
+rem CMD parses this entire block before Git can replace this running file.
+rem Exit 10 means source changed: run the updated launcher, never stale code.
+(
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+      -File "%SOURCE_SYNC_SCRIPT%" -RepositoryPath "%ROOT%." -Remote "%BUILD_REMOTE%" ^
+      -ExpectedRepositoryUrl "%TARGET_REPO_URL%"
+    if errorlevel 11 goto :FAIL
+    if errorlevel 10 (
+        call "%ROOT%BUILD_ONE_FILE.cmd"
+        if errorlevel 1 (exit /b 1)
+        exit /b 0
+    )
+    if errorlevel 1 goto :FAIL
+)
+
+rem Doi ten nhanh hien tai theo ngay local, giu nguyen commit va thay doi dang lam.
+set "DAILY_BRANCH_RESULT=%TEMP%\JBZ_DailyBranch_%RANDOM%_%RANDOM%.txt"
+set "DAILY_BRANCH_ERROR=%TEMP%\JBZ_DailyBranchError_%RANDOM%_%RANDOM%.txt"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%DAILY_BRANCH_SCRIPT%" -RepositoryPath "%ROOT%." -Remote "%BUILD_REMOTE%" ^
+  1>"%DAILY_BRANCH_RESULT%" 2>"%DAILY_BRANCH_ERROR%"
+if errorlevel 1 (
+    echo [LOI GIT] Khong the dat ten nhanh build theo ngay.
+    if exist "%DAILY_BRANCH_ERROR%" type "%DAILY_BRANCH_ERROR%"
+    del /Q "%DAILY_BRANCH_RESULT%" "%DAILY_BRANCH_ERROR%" >nul 2>&1
+    goto :FAIL
+)
+set "CURRENT_BRANCH="
+for /f "usebackq delims=" %%B in ("%DAILY_BRANCH_RESULT%") do set "CURRENT_BRANCH=%%B"
+del /Q "%DAILY_BRANCH_RESULT%" "%DAILY_BRANCH_ERROR%" >nul 2>&1
+if not defined CURRENT_BRANCH (
+    echo [LOI GIT] Script khong tra ve ten nhanh build.
+    goto :FAIL
+)
+echo [GIT] Nhanh build theo ngay: %CURRENT_BRANCH%
+
+set "REMOTE_BEFORE_BUILD=NONE"
+git show-ref --verify --quiet "refs/remotes/%BUILD_REMOTE%/%CURRENT_BRANCH%"
+if errorlevel 1 (
+    echo [GIT] Branch %BUILD_REMOTE%/%CURRENT_BRANCH% chưa tồn tại; sẽ tạo khi push lần đầu.
+) else (
+    for /f "delims=" %%C in ('git rev-parse "refs/remotes/%BUILD_REMOTE%/%CURRENT_BRANCH%"') do set "REMOTE_BEFORE_BUILD=%%C"
+
+    rem Không dùng rebase --autostash vì working tree có thể đang có thay đổi
+    rem và project có file đường dẫn dài. Chỉ kiểm tra remote có đi trước local hay không.
+    git merge-base --is-ancestor "%BUILD_REMOTE%/%CURRENT_BRANCH%" HEAD
+    if errorlevel 1 (
+        echo [LỖI GIT] Repository đích có commit mới hoặc lịch sử đã tách nhánh.
+        echo Script sẽ KHÔNG tự rebase/autostash để tránh mất thay đổi đang làm.
+        echo Hãy đồng bộ source trước rồi chạy lại BUILD_ONE_FILE.cmd.
+        goto :FAIL
+    )
+)
+
+echo [GIT] Source đã kiểm tra với đúng repository trước build.
 echo.
 
 rem ============================================================
 rem B1 - XAC NHAN VERSION, CHI TU TANG KHI SOURCE DOI MA VERSION CHUA TANG
 rem ============================================================
 echo ============================================================
-echo BUOC 1/3 - KIEM TRA PHIEN BAN
+echo BƯỚC 1/3 - KIỂM TRA PHIÊN BẢN
 echo ============================================================
 
 set "VERSION_BACKUP=%TEMP%\JBZUniversalTester_Version_%RANDOM%_%RANDOM%.props"
 copy /Y "%VERSION_FILE%" "%VERSION_BACKUP%" >nul
 if errorlevel 1 (
-    echo [LỖI] Không thể tao bản tạm Version.props.
+    echo [LỖI] Không thể tạo bản tạm Version.props.
     goto :FAIL
 )
 
 set "NEW_VERSION="
 set "VERSION_ACTION="
+set "VERSION_RESULT=%TEMP%\JBZ_VersionResult_%RANDOM%_%RANDOM%.txt"
+set "VERSION_ERROR=%TEMP%\JBZ_VersionError_%RANDOM%_%RANDOM%.txt"
 
-for /f "tokens=1,2 delims=|" %%V in ('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%VERSION_RESOLVER%"') do (
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%VERSION_RESOLVER%" 1>"%VERSION_RESULT%" 2>"%VERSION_ERROR%"
+set "VERSION_EXIT=%ERRORLEVEL%"
+
+if not "%VERSION_EXIT%"=="0" (
+    echo [LỖI VERSION] Không thể xác nhận Version.props.
+    if exist "%VERSION_ERROR%" type "%VERSION_ERROR%"
+    copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
+    del /Q "%VERSION_BACKUP%" "%VERSION_RESULT%" "%VERSION_ERROR%" >nul 2>&1
+    goto :FAIL
+)
+
+for /f "usebackq tokens=1,2 delims=|" %%V in ("%VERSION_RESULT%") do (
     set "NEW_VERSION=%%V"
     set "VERSION_ACTION=%%W"
 )
 
+del /Q "%VERSION_RESULT%" "%VERSION_ERROR%" >nul 2>&1
+
 if not defined NEW_VERSION (
-    echo [LOI VERSION] Khong the xac nhan Version.props.
+    echo [LỖI VERSION] Resolve-BuildVersion.ps1 không trả về phiên bản hợp lệ.
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
     goto :FAIL
 )
 
 if /I "%VERSION_ACTION%"=="AUTO_INCREMENTED" (
-    echo [VERSION] Source da thay doi va version chua tang: da tu tang mot lan.
+    echo [VERSION] Source đã thay đổi và version chưa tăng: đã tự tăng một lần.
 ) else if /I "%VERSION_ACTION%"=="ALREADY_INCREMENTED" (
-    echo [VERSION] Version da duoc tang khi sua source: giu nguyen, khong tang tiep.
+    echo [VERSION] Version đã được tăng khi sửa source: giữ nguyên, không tăng tiếp.
 ) else if /I "%VERSION_ACTION%"=="UNCHANGED_REBUILD" (
-    echo [VERSION] Source khong doi: build lai dung version hien tai.
+    echo [VERSION] Source không đổi: build lại đúng version hiện tại.
 ) else (
-    echo [LOI VERSION] Trang thai khong hop le: %VERSION_ACTION%
+    echo [LỖI VERSION] Trạng thái không hợp lệ: %VERSION_ACTION%
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
     goto :FAIL
 )
 
 set "VERSION_TAG=%NEW_VERSION:.=_%"
-set "EXPECTED_EXE=%ROOT%PublishSingle\V%NEW_VERSION%\JBZUniversalTester_V%VERSION_TAG%.exe"
+set "EXPECTED_EXE=%ROOT%PublishSingle\V%NEW_VERSION%\JBZUniversalTester.exe"
 
 echo Phiên bản build: V%NEW_VERSION%
-echo File EXE       : JBZUniversalTester_V%VERSION_TAG%.exe
+echo File EXE       : JBZUniversalTester.exe
 echo Thư mục        : PublishSingle\V%NEW_VERSION%\
 echo.
 
@@ -152,7 +293,7 @@ set "BUILD_EXIT=%ERRORLEVEL%"
 if not "%BUILD_EXIT%"=="0" (
     echo.
     echo [LỖI] BUILD/PUBLISH THẤT BẠI.
-    echo Khôi phục Version.props cu.
+    echo Khôi phục Version.props cũ.
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
     goto :FAIL
@@ -160,7 +301,7 @@ if not "%BUILD_EXIT%"=="0" (
 
 if not exist "%EXPECTED_EXE%" (
     echo.
-    echo [LỖI] Publish thành công nhung không tìm thấy EXE:
+    echo [LỖI] Publish thành công nhưng không tìm thấy EXE:
     echo %EXPECTED_EXE%
     copy /Y "%VERSION_BACKUP%" "%VERSION_FILE%" >nul
     del /Q "%VERSION_BACKUP%" >nul 2>&1
@@ -169,21 +310,104 @@ if not exist "%EXPECTED_EXE%" (
 
 del /Q "%VERSION_BACKUP%" >nul 2>&1
 
-echo.
-echo BUILD THÀNH CÔNG: V%NEW_VERSION%
-echo EXE: %EXPECTED_EXE%
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%SIGN_VERIFY_SCRIPT%" ^
+  -ExePath "%EXPECTED_EXE%"
+if errorlevel 1 (
+    echo [LỖI] Chữ ký EXE cuối cùng không hợp lệ. BUILD thất bại.
+    goto :FAIL
+)
 echo.
 
 rem ============================================================
+rem B2B - COPY TOAN BO THU MUC VERSION LEN MANG LAN
+rem Chi thuc hien sau khi build thanh cong va xac minh chu ky EXE.
+rem Copy truoc buoc GitHub: van copy neu nguoi dung huy commit/push.
+rem ============================================================
+set "LOCAL_VERSION_DIR=%ROOT%PublishSingle\V%NEW_VERSION%"
+set "LAN_RELEASE_ROOT=\\192.168.10.150\public\NAM"
+set "LAN_VERSION_DIR=%LAN_RELEASE_ROOT%\V%NEW_VERSION%"
+set "LAN_COPY_STATUS=BO QUA"
+
+echo ============================================================
+echo BUOC 2B - SAO CHEP TOAN BO V%NEW_VERSION% LEN LAN
+echo ============================================================
+echo [LAN] Nguon : %LOCAL_VERSION_DIR%
+echo [LAN] Dich  : %LAN_VERSION_DIR%
+echo.
+
+if not exist "%LOCAL_VERSION_DIR%\" (
+    echo [LOI LAN] Khong tim thay thu muc version sau khi build.
+    goto :FAIL
+)
+
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%ROOT%Scripts\Test-LanReleasePath.ps1" -Path "%LAN_RELEASE_ROOT%" -TimeoutSeconds 5
+if errorlevel 1 (
+    echo [CANH BAO LAN] Khong truy cap duoc LAN trong 5 giay. Bo qua sao chep, tiep tuc Git.
+    goto :GIT_RELEASE
+)
+
+rem /E: copy tat ca file, thu muc con va ca thu muc rong.
+rem /COPY:DAT va /DCOPY:DAT: giu nguyen du lieu, thuoc tinh, thoi gian.
+rem /XJ: khong lan theo junction, tranh sao chep vong lap.
+rem /R:0 /W:0: khong thu lai khi mang LAN co loi; tiep tuc Git.
+rem KHONG dung /MIR: tranh xoa nham du lieu san co tren LAN.
+robocopy "%LOCAL_VERSION_DIR%" "%LAN_VERSION_DIR%" /E /COPY:DAT /DCOPY:DAT /XJ /R:0 /W:0 /NP
+set "LAN_COPY_EXIT=%ERRORLEVEL%"
+
+rem Robocopy: exit code 0..7 la thanh cong; 8 tro len la loi.
+if %LAN_COPY_EXIT% GEQ 8 (
+    echo [LOI LAN] Robocopy that bai, ma loi: %LAN_COPY_EXIT%.
+    echo [LAN] Ban build tren may van giu nguyen tai: %LOCAL_VERSION_DIR%
+    goto :GIT_RELEASE
+)
+
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%ROOT%Scripts\Test-LanReleasePath.ps1" -Path "%LAN_VERSION_DIR%\JBZUniversalTester.exe" -PathType Leaf -TimeoutSeconds 5
+if errorlevel 1 (
+    echo [LOI LAN] Khong tim thay JBZUniversalTester.exe tai thu muc LAN.
+    goto :GIT_RELEASE
+)
+
+set "LAN_COPY_STATUS=DA SAO CHEP"
+echo [LAN] DA SAO CHEP THANH CONG TOAN BO THU MUC V%NEW_VERSION%.
+echo [LAN] %LAN_VERSION_DIR%
+echo.
+
+rem ============================================================
+:GIT_RELEASE
 rem B3 - GIT
 rem ============================================================
 echo ============================================================
 echo BƯỚC 3/3 - TỔNG HỢP SOURCE THEO .GITIGNORE
 echo ============================================================
 
-git add -A
+rem Remote co the thay doi trong vai phut build. Neu co, dung lai de EXE
+rem khong bi lech source/version so voi commit sap push.
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%SOURCE_SYNC_SCRIPT%" -RepositoryPath "%ROOT%." -Remote "%BUILD_REMOTE%" ^
+  -ExpectedRepositoryUrl "%TARGET_REPO_URL%" -VerifyCurrent
 if errorlevel 1 (
-    echo [LỖI GIT] git add -A that bai.
+    echo [LỖI GIT] Chưa xác minh được source mới nhất sau build. Dừng commit/push.
+    goto :FAIL
+)
+
+set "REMOTE_AFTER_BUILD=NONE"
+git show-ref --verify --quiet "refs/remotes/%BUILD_REMOTE%/%CURRENT_BRANCH%"
+if not errorlevel 1 (
+    for /f "delims=" %%C in ('git rev-parse "refs/remotes/%BUILD_REMOTE%/%CURRENT_BRANCH%"') do set "REMOTE_AFTER_BUILD=%%C"
+)
+
+if /I not "%REMOTE_AFTER_BUILD%"=="%REMOTE_BEFORE_BUILD%" (
+    echo [LỖI GIT] %BUILD_REMOTE%/%CURRENT_BRANCH% đã thay đổi trong lúc build.
+    echo Chạy lại BUILD_ONE_FILE.cmd để đồng bộ và build đúng source mới nhất.
+    goto :FAIL
+)
+
+git -c core.longpaths=true add -A
+if errorlevel 1 (
+    echo [LỖI GIT] git add -A thất bại.
     goto :FAIL
 )
 
@@ -194,7 +418,7 @@ git status --short
 echo ------------------------------------------------------------
 echo.
 
-choice /C YN /N /M "Commit và đẩy source lên GitHub main? [Y/N]: "
+choice /C YN /N /M "Commit và đẩy source lên GitHub branch %CURRENT_BRANCH%? [Y/N]: "
 if errorlevel 2 (
     echo Đã hủy push. File build V%NEW_VERSION% vẫn được giữ trên máy.
     goto :CANCEL
@@ -204,60 +428,61 @@ git diff --cached --quiet
 if errorlevel 1 (
     git commit -m "Release V%NEW_VERSION% - auto publish"
     if errorlevel 1 (
-        echo [LỖI GIT] git commit that bai.
+        echo [LỖI GIT] git commit thất bại.
         goto :FAIL
     )
 ) else (
-    echo Không có thay doi moi can commit.
+    echo Không có thay đổi mới cần commit.
 )
 
 echo.
-echo Đang fetch origin...
-git fetch origin
-if errorlevel 1 (
-    echo [LỖI GIT] git fetch that bai.
-    goto :FAIL
-)
-
-echo Đang rebase với origin/main...
-git rebase --autostash origin/main
-if errorlevel 1 (
-    echo [LỖI GIT] REBASE THẤT BẠI. Có thể có xung đột code.
-    echo Xử lý xung đột rồi chạy:
-    echo git rebase --continue
-    echo git push origin main
-    goto :FAIL
-)
-
 echo.
 echo Các commit đang chờ push:
-git log --oneline origin/main..HEAD
+if "%REMOTE_AFTER_BUILD%"=="NONE" (
+    git log --oneline -5 HEAD
+) else (
+    git log --oneline "%BUILD_REMOTE%/%CURRENT_BRANCH%..HEAD"
+)
 echo.
 
-choice /C YN /N /M "Xác nhận PUSH lên origin/main ngay bây giờ? [Y/N]: "
+echo Repository đích: %TARGET_REPO_URL%
+choice /C YN /N /M "Xác nhận PUSH branch %CURRENT_BRANCH% lên repository trên ngay bây giờ? [Y/N]: "
 if errorlevel 2 (
-    echo Đã hủy PUSH. Commit van an toan tren may.
+    echo Đã hủy PUSH. Commit vẫn an toàn trên máy.
     goto :CANCEL
 )
 
-git push origin main
+git -c core.longpaths=true push -u "%BUILD_REMOTE%" HEAD:"%CURRENT_BRANCH%"
 if errorlevel 1 (
     echo [LỖI GIT] PUSH thất bại.
     goto :FAIL
 )
 
+goto :SUCCESS
+
+:SUCCESS
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%SIGN_VERIFY_SCRIPT%" ^
+  -ExePath "%EXPECTED_EXE%"
+if errorlevel 1 (
+    echo [LỖI] Xác minh chữ ký cuối cùng thất bại.
+    goto :FAIL
+)
 echo.
 echo ============================================================
 echo HOÀN TẤT THÀNH CÔNG
 echo Version : V%NEW_VERSION%
-echo GitHub  : origin/main đã cập nhật
+echo GitHub  : %TARGET_REPO_URL%
+echo LAN     : %LAN_COPY_STATUS% - %LAN_VERSION_DIR%
 echo ============================================================
 git status -sb
+set "FINAL_EXIT=0"
 goto :DONE
 
 :CANCEL
 echo.
-echo Đã hủy theo yeu cau. Không có source nao bi xoa.
+echo Đã hủy theo yêu cầu. Không có source nào bị xóa.
+set "FINAL_EXIT=0"
 goto :DONE
 
 :FAIL
@@ -266,10 +491,11 @@ echo ============================================================
 echo ĐÃ DỪNG DO CÓ LỖI
 echo Cửa sổ sẽ KHÔNG tự động đóng.
 echo ============================================================
+set "FINAL_EXIT=1"
 goto :DONE
 
 :DONE
 echo.
 pause
 popd >nul
-exit /b 0
+exit /b %FINAL_EXIT%

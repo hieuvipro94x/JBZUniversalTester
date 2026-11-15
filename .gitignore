@@ -30,6 +30,9 @@ coverage.*
 [Bb]ackup/
 [Bb]ackups/
 *.log
+*.[Rr][Pp][Tt]
+*.dmp
+*.mdmp
 *.tmp
 *.temp
 *.bak
@@ -101,3 +104,9 @@ Desktop.ini
 *.backup
 *.old
 *.orig
+# Licensing administrator secrets and runtime receipts never belong in source control
+*.jbzvault
+issuer.dat
+activation.dat
+installation.dat
+PrivateVault/

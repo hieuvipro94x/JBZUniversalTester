@@ -9,8 +9,10 @@ namespace JBZUniversalTester.Models;
 /// </summary>
 public sealed class WaterProofMachineSettings
 {
+    public const int DefaultBaudRate = 115200;
+
     public string PortName { get; set; } = string.Empty;
-    public int BaudRate { get; set; } = 115200;
+    public int BaudRate { get; set; } = DefaultBaudRate;
     public bool AutoConnect { get; set; } = true;
     public int ReadTimeoutMs { get; set; } = 1000;
     public int WriteTimeoutMs { get; set; } = 1000;
@@ -91,6 +93,7 @@ public sealed class WaterProofChannelResult : ObservableObject
     private double? _secondResultPressure;
     private double? _leak;
     private double? _leakLimit;
+    private double? _liveMachineValue;
     private bool _isMeasured;
     private bool _passed;
 
@@ -164,13 +167,31 @@ public sealed class WaterProofChannelResult : ObservableObject
         }
     }
 
+    /// <summary>
+    /// Giá trị mới nhất nhận trực tiếp từ kênh máy Leak để hiển thị realtime.
+    /// Giá trị này chỉ phục vụ giao diện; PASS/FAIL vẫn chỉ dùng :RESULT cuối.
+    /// </summary>
+    public double? LiveMachineValue
+    {
+        get => _liveMachineValue;
+        set
+        {
+            if (Set(ref _liveMachineValue, value))
+                Raise(nameof(LiveMachineValueText));
+        }
+    }
+
     public bool IsMeasured
     {
         get => _isMeasured;
         set
         {
             if (Set(ref _isMeasured, value))
+            {
                 Raise(nameof(ResultText));
+                Raise(nameof(LiveCellBackground));
+                Raise(nameof(LiveCellForeground));
+            }
         }
     }
 
@@ -180,7 +201,11 @@ public sealed class WaterProofChannelResult : ObservableObject
         set
         {
             if (Set(ref _passed, value))
+            {
                 Raise(nameof(ResultText));
+                Raise(nameof(LiveCellBackground));
+                Raise(nameof(LiveCellForeground));
+            }
         }
     }
 
@@ -204,7 +229,20 @@ public sealed class WaterProofChannelResult : ObservableObject
         ? LeakLimit.Value.ToString("0.0##", CultureInfo.InvariantCulture)
         : "---";
 
-    public string ResultText => !IsMeasured ? "---" : Passed ? "PASS" : "FAIL";
+    public string LiveMachineValueText => LiveMachineValue.HasValue
+        ? LiveMachineValue.Value.ToString("0.0##", CultureInfo.InvariantCulture)
+        : "---";
+
+    public string LiveCellBackground => !IsMeasured
+        ? "#FFFFFF"
+        : Passed
+            ? "#2AA84A"
+            : "#C62828";
+
+    public string LiveCellForeground => IsMeasured ? "#FFFFFF" : "#0F172A";
+
+    public string? ResultTextOverride { get; init; }
+    public string ResultText => ResultTextOverride ?? (!IsMeasured ? "---" : Passed ? "PASS" : "FAIL");
 
     private void RaiseDisplay()
     {

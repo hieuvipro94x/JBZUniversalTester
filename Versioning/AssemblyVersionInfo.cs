@@ -20,7 +20,7 @@ public sealed record AssemblyVersionInfo(
 
     public string FileTag => ProductVersion.Replace('.', '_');
 
-    public string VersionedExeName => $"JBZUniversalTester_V{FileTag}.exe";
+    public string VersionedExeName => "JBZUniversalTester.exe";
 
     private static AssemblyVersionInfo Read(Assembly assembly)
     {

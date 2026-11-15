@@ -1,8 +1,11 @@
-﻿using System;
+using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Threading;
+using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using JBZUniversalTester.ViewModels;
 using JBZUniversalTester.Versioning;
@@ -19,28 +22,107 @@ public partial class TestWindow : Window
     private bool _closeInProgress;
     private readonly bool _autoStartProduction;
     private readonly DispatcherTimer _clockTimer;
+    private readonly DispatcherTimer _testingDotsTimer;
+    private int _testingDotsStep;
+    private readonly DispatcherTimer _yellowPulseTimer;
+    private readonly DispatcherTimer _whitePulseTimer;
+    private readonly DispatcherTimer _greenPulseTimer;
     private NotifyCollectionChangedEventHandler? _faultsChangedHandler;
-    private CancellationTokenSource? _scrollCts;
+    private readonly CancellationTokenSource _viewLifetimeCts = new();
+    private int _scrollDispatchQueued;
+    private readonly object _statusFrameGate = new();
+    private readonly StatusLedFrameTracker _statusFrameTracker = new();
 
-    public TestWindow(TestViewModel viewModel, bool autoStartProduction = true)
+    public event EventHandler? ReturningToMain;
+    private int _statusLedHandlersAttached;
+    private int _statusPulseDispatchQueued;
+    private int _statusStateDispatchQueued;
+    private int _yellowPulsePending;
+    private int _whitePulsePending;
+    private int _greenPulsePending;
+    private bool _passLedsHeld;
+    private bool _probeMaintenanceDialogOpen;
+    private int _probeMaintenancePromptQueued;
+    private string _lastProbeMaintenancePromptKey = string.Empty;
+    private bool _wiringFaultLedsHeld;
+    private WaterProofTestWindow? _waterProofWindow;
+
+    private static readonly Brush YellowLedOffBrush = CreateFrozenBrush(0x6B, 0x62, 0x40);
+    private static readonly Brush YellowLedOnBrush = CreateFrozenBrush(0xFF, 0xD4, 0x00);
+    private static readonly Brush WhiteLedOffBrush = CreateFrozenBrush(0x9C, 0xA3, 0xAF);
+    private static readonly Brush WhiteLedOnBrush = CreateFrozenBrush(0xFF, 0xFF, 0xFF);
+    private static readonly Brush GreenLedOffBrush = CreateFrozenBrush(0x31, 0x54, 0x3B);
+    private static readonly Brush GreenLedOnBrush = CreateFrozenBrush(0x22, 0xC5, 0x5E);
+    private static readonly Brush RedLedOffBrush = CreateFrozenBrush(0x5A, 0x30, 0x30);
+    private static readonly Brush RedLedOnBrush = CreateFrozenBrush(0xEF, 0x44, 0x44);
+
+    public TestWindow(
+        TestViewModel viewModel,
+        bool autoStartProduction = true)
     {
         InitializeComponent();
         Title = $"UniversalTester {AppVersion.DisplayVersion} - Màn hình kiểm tra";
         TestAppVersionText.Text = AppVersion.DisplayVersion;
         DataContext = viewModel;
+        TestViewLocalization.Apply(this, viewModel.TestViewLanguage);
+        foreach (var column in new[] { FaultIoColumn, FaultIoCnPnColumn })
+            System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
+                new System.Windows.Data.Binding(nameof(TestViewModel.ShowFaultIoColumns))
+                { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });
+        // DataGridColumn is outside the visual tree; bind its visibility with
+        // an explicit source so unused measurement columns collapse reliably.
+        foreach (var column in new[] { ResistanceMinColumn, ResistanceValueColumn, ResistanceMaxColumn })
+            System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
+                new System.Windows.Data.Binding(nameof(TestViewModel.HasResistanceResultRows))
+                { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });
+        foreach (var column in new[] { LeakSuctionColumn, LeakHoldColumn, LeakValueColumn })
+            System.Windows.Data.BindingOperations.SetBinding(column, System.Windows.Controls.DataGridColumn.VisibilityProperty,
+                new System.Windows.Data.Binding(nameof(TestViewModel.HasLeakResultRows))
+                { Source = viewModel, Converter = new System.Windows.Controls.BooleanToVisibilityConverter() });
         _autoStartProduction = autoStartProduction;
 
-        if (!_autoStartProduction)
+        if (!_autoStartProduction && viewModel.IsBoardConnected)
             viewModel.State = "CẤU HÌNH CARD KHÔNG ĐỦ";
 
         _clockTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(1)
         };
-        _clockTimer.Tick += (_, _) => UpdateClock();
+        _clockTimer.Tick += ClockTimer_Tick;
+
+        _testingDotsTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(400)
+        };
+        _testingDotsTimer.Tick += TestingDotsTimer_Tick;
+
+        _yellowPulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(200)
+        };
+        _yellowPulseTimer.Tick += YellowPulseTimer_Tick;
+
+        _whitePulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(100)
+        };
+        _whitePulseTimer.Tick += WhitePulseTimer_Tick;
+
+        _greenPulseTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(50)
+        };
+        _greenPulseTimer.Tick += GreenPulseTimer_Tick;
 
         UpdateClock();
         ContentRendered += TestWindow_ContentRendered;
+    }
+
+    private static Brush CreateFrozenBrush(byte red, byte green, byte blue)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(red, green, blue));
+        brush.Freeze();
+        return brush;
     }
 
     private void TestWindow_ContentRendered(object? sender, EventArgs e)
@@ -49,7 +131,49 @@ public partial class TestWindow : Window
         StartupPerformanceTrace.Mark("T9 TestWindow first rendered");
     }
 
-    private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("yyyy/MM/dd  HH:mm:ss");
+    private void UpdateClock() => CurrentTimeText.Text = DateTime.Now.ToString("HH:mm:ss");
+
+    private void ClockTimer_Tick(object? sender, EventArgs e)
+    {
+        (DataContext as TestViewModel)?.CheckMissingConnectionTimeout();
+        if (DataContext is TestViewModel { ProbeMaintenanceDue: true } && !_probeMaintenanceDialogOpen)
+            QueueProbeMaintenancePrompt();
+        UpdateClock();
+        if (DataContext is TestViewModel viewModel)
+            viewModel.RefreshDailyMasterRequirement();
+    }
+
+    private void UpdateTestingDots(TestViewModel viewModel)
+    {
+        if (viewModel.ResultStatusText == "ĐANG KIỂM TRA")
+        {
+            if (!_testingDotsTimer.IsEnabled)
+            {
+                _testingDotsStep = 0;
+                TestingStatusDots.Text = string.Empty;
+                _testingDotsTimer.Start();
+            }
+        }
+        else
+        {
+            _testingDotsTimer.Stop();
+            _testingDotsStep = 0;
+            TestingStatusDots.Text = string.Empty;
+        }
+    }
+
+    private void TestingDotsTimer_Tick(object? sender, EventArgs e)
+    {
+        if (DataContext is not TestViewModel viewModel || viewModel.ResultStatusText != "ĐANG KIỂM TRA")
+        {
+            _testingDotsTimer.Stop();
+            TestingStatusDots.Text = string.Empty;
+            return;
+        }
+
+        _testingDotsStep = (_testingDotsStep + 1) % 4;
+        TestingStatusDots.Text = new string('.', _testingDotsStep);
+    }
 
     private void TestWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
@@ -78,6 +202,7 @@ public partial class TestWindow : Window
 
         Resources["TestGridBaseFontSize"] = ResponsiveValue(18, scale);
         Resources["TestFaultGridFontSize"] = ResponsiveValue(20, scale);
+        Resources["TestIdentityFontSize"] = ResponsiveValue(24, scale);
         Resources["TestGridHeaderFontSize"] = ResponsiveValue(18, scale);
         Resources["TestFaultGridHeaderFontSize"] = ResponsiveValue(20, scale);
         Resources["TestGridRowHeight"] = ResponsiveValue(34, scale);
@@ -97,71 +222,457 @@ public partial class TestWindow : Window
             return;
 
         _clockTimer.Start();
+        AttachStatusLedHandlers(viewModel);
         ModelTitleText.Visibility = viewModel.ShowTitle ? Visibility.Visible : Visibility.Collapsed;
         ConnectorColumn.Visibility = Visibility.Visible;
 
-        _faultsChangedHandler = (_, _) => ScheduleScrollToFirstFault(viewModel);
+        // Keep the test grid virtualized even when the model exposes hundreds
+        // of rows. Recycling avoids a full visual-tree rebuild when the VM
+        // applies a Reset/delta after one Production frame.
+        FaultGrid.EnableRowVirtualization = true;
+        FaultGrid.EnableColumnVirtualization = true;
+        System.Windows.Controls.VirtualizingPanel.SetIsVirtualizing(FaultGrid, true);
+        System.Windows.Controls.VirtualizingPanel.SetVirtualizationMode(
+            FaultGrid,
+            System.Windows.Controls.VirtualizationMode.Recycling);
+        System.Windows.Controls.ScrollViewer.SetCanContentScroll(FaultGrid, true);
+
+        _faultsChangedHandler = (_, args) =>
+        {
+            if (ShouldAutoScrollToFirstFault(args, viewModel))
+                ScheduleScrollToFirstFault(viewModel);
+        };
         viewModel.Faults.CollectionChanged += _faultsChangedHandler;
 
         try
         {
             await Dispatcher.Yield(DispatcherPriority.Background);
             if (_autoStartProduction)
-                await viewModel.StartProductionTestAsync();
+                await viewModel.StartProductionTestAsync(_viewLifetimeCts.Token);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, $"Màn hình Test đã mở nhưng có lỗi khi khởi tạo.\n\n{ex.Message}",
-                "Cảnh báo khởi tạo", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (viewModel.IsDeviceFault)
+                return;
+
+            AsyncFileLogService.Current.Error($"TestWindow initialization failed: {ex}");
+            LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this), this,
+                "Chưa thể bắt đầu kiểm tra. Vui lòng quay về trang chính và thử lại.",
+                "CHƯA BẮT ĐẦU KIỂM TRA", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
+    private void AttachStatusLedHandlers(TestViewModel viewModel)
+    {
+        if (Interlocked.Exchange(ref _statusLedHandlersAttached, 1) != 0)
+            return;
+
+        viewModel.BoardFrameActivity += ViewModel_BoardFrameActivity;
+        viewModel.PropertyChanged += ViewModel_StatusPropertyChanged;
+        viewModel.WaterProofWindowOpenRequested += ViewModel_WaterProofWindowOpenRequested;
+        viewModel.WaterProofWindowCloseRequested += ViewModel_WaterProofWindowCloseRequested;
+        ResetActivityLeds();
+        ApplyStatusLedState(viewModel);
+        QueueProbeMaintenancePrompt();
+    }
+
+    private void ViewModel_WaterProofWindowOpenRequested(object? sender, WaterProofTestViewModel viewModel)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(() => ViewModel_WaterProofWindowOpenRequested(sender, viewModel));
+            return;
+        }
+
+        if (!IsLoaded || !viewModel.IsRunning ||
+            Volatile.Read(ref _statusLedHandlersAttached) == 0)
+            return;
+        if (ReferenceEquals(_waterProofWindow?.DataContext, viewModel))
+            return;
+        CloseWaterProofWindow();
+        _waterProofWindow = new WaterProofTestWindow(viewModel) { Owner = this };
+        PositionWaterProofWindow();
+        LocationChanged += TestWindow_LocationChanged;
+        SizeChanged += TestWindow_LocationChanged;
+        _waterProofWindow.Show();
+    }
+
+    private void ViewModel_WaterProofWindowCloseRequested(object? sender, string reason)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(CloseWaterProofWindow);
+            return;
+        }
+        CloseWaterProofWindow();
+    }
+
+    private void TestWindow_LocationChanged(object? sender, EventArgs e) => PositionWaterProofWindow();
+
+    private void PositionWaterProofWindow()
+    {
+        if (_waterProofWindow is null || ResultStatusHost is null || !IsLoaded)
+            return;
+
+        // Leak chỉ là ba ô số nhỏ. Neo trực tiếp dưới ô trạng thái chính
+        // LẮP SẢN PHẨM / ĐANG KIỂM TRA / PASS.
+        Point screenAnchor = ResultStatusHost.PointToScreen(
+            new Point(0, ResultStatusHost.ActualHeight));
+        Point screenRight = ResultStatusHost.PointToScreen(
+            new Point(ResultStatusHost.ActualWidth, ResultStatusHost.ActualHeight));
+        var transform = PresentationSource.FromVisual(this)?.CompositionTarget?.TransformFromDevice
+            ?? System.Windows.Media.Matrix.Identity;
+        Point anchor = transform.Transform(screenAnchor);
+        Point right = transform.Transform(screenRight);
+
+        System.Windows.Forms.Screen screen = System.Windows.Forms.Screen.FromPoint(
+            new System.Drawing.Point((int)screenAnchor.X, (int)screenAnchor.Y));
+        Point workTopLeft = transform.Transform(
+            new Point(screen.WorkingArea.Left, screen.WorkingArea.Top));
+        Point workBottomRight = transform.Transform(
+            new Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom));
+
+        const double gap = 4;
+        double requestedLeft =
+            (anchor.X + right.X - _waterProofWindow.Width) / 2;
+        double requestedTop = anchor.Y + gap;
+        double maxLeft = Math.Max(workTopLeft.X, workBottomRight.X - _waterProofWindow.Width);
+        double maxTop = Math.Max(workTopLeft.Y, workBottomRight.Y - _waterProofWindow.Height);
+
+        _waterProofWindow.Left = Math.Clamp(requestedLeft, workTopLeft.X, maxLeft);
+        _waterProofWindow.Top = Math.Clamp(requestedTop, workTopLeft.Y, maxTop);
+    }
+
+    private void CloseWaterProofWindow()
+    {
+        LocationChanged -= TestWindow_LocationChanged;
+        SizeChanged -= TestWindow_LocationChanged;
+        WaterProofTestWindow? window = _waterProofWindow;
+        _waterProofWindow = null;
+        window?.CloseOnce();
+    }
+
+    private void ViewModel_BoardFrameActivity(object? sender, ScanFrame frame)
+    {
+        if (Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
+            sender is not TestViewModel viewModel ||
+            !viewModel.IsBoardConnected ||
+            viewModel.IsDeviceFault || viewModel.IsPersistenceFault)
+            return;
+
+        if (!StatusLedFrameTracker.IsCompleteScan(frame))
+            return;
+
+        lock (_statusFrameGate)
+        {
+            bool contactChanged = _statusFrameTracker.Observe(frame);
+            if (contactChanged)
+                Interlocked.Exchange(ref _whitePulsePending, 1);
+            Interlocked.Exchange(ref _greenPulsePending, 1);
+            if (contactChanged && frame.Mode == BoardScanMode.Production)
+                Interlocked.Exchange(ref _yellowPulsePending, 1);
+        }
+
+        if (Interlocked.Exchange(ref _statusPulseDispatchQueued, 1) != 0)
+            return;
+
+        _ = Dispatcher.BeginInvoke(() =>
+        {
+            Interlocked.Exchange(ref _statusPulseDispatchQueued, 0);
+            if (Volatile.Read(ref _statusLedHandlersAttached) == 0 ||
+                DataContext is not TestViewModel currentViewModel ||
+                !ReferenceEquals(currentViewModel, viewModel) ||
+                !currentViewModel.IsBoardConnected ||
+                currentViewModel.IsDeviceFault || currentViewModel.IsPersistenceFault)
+                return;
+
+            ApplyStatusLedState(currentViewModel);
+            if (Interlocked.Exchange(ref _whitePulsePending, 0) != 0)
+                PulseWhiteLed();
+            if (Interlocked.Exchange(ref _yellowPulsePending, 0) != 0)
+                PulseYellowLed();
+            if (Interlocked.Exchange(ref _greenPulsePending, 0) != 0)
+                PulseGreenLed();
+        }, DispatcherPriority.Background);
+    }
+
+    private void ViewModel_StatusPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TestViewModel.ProbeMaintenanceDue))
+        {
+            QueueProbeMaintenancePrompt();
+            return;
+        }
+        if (e.PropertyName is not (nameof(TestViewModel.IsBoardConnected) or
+                                   nameof(TestViewModel.IsDeviceFault) or
+                                   nameof(TestViewModel.IsPersistenceFault) or
+                                   nameof(TestViewModel.State) or
+                                   nameof(TestViewModel.ResultStatusText) or
+                                   nameof(TestViewModel.WiringFaultCount) or
+                                   nameof(TestViewModel.IsPassStatusLedHeld)) ||
+            sender is not TestViewModel viewModel)
+        {
+            return;
+        }
+
+        if (!Dispatcher.CheckAccess())
+        {
+            if (Interlocked.Exchange(ref _statusStateDispatchQueued, 1) != 0)
+                return;
+
+            _ = Dispatcher.BeginInvoke(
+                () =>
+                {
+                    Interlocked.Exchange(ref _statusStateDispatchQueued, 0);
+                    ApplyStatusLedState(viewModel);
+                },
+                DispatcherPriority.DataBind);
+            return;
+        }
+
+        ApplyStatusLedState(viewModel);
+    }
+
+    private void ApplyStatusLedState(TestViewModel viewModel)
+    {
+        if (Volatile.Read(ref _statusLedHandlersAttached) == 0 || DataContext != viewModel)
+            return;
+
+        UpdateTestingDots(viewModel);
+
+        if (!viewModel.IsBoardConnected || viewModel.IsDeviceFault || viewModel.IsPersistenceFault)
+        {
+            ResetActivityLeds();
+            SetRedLed(false);
+            return;
+        }
+
+        bool passWasHeld = _passLedsHeld;
+        bool previouslyHeld = _passLedsHeld || _wiringFaultLedsHeld;
+        _passLedsHeld = viewModel.IsPassStatusLedHeld;
+        // Missing connections are installation instructions, not wrong/short
+        // wiring. Never turn red on merely because installation is incomplete.
+        _wiringFaultLedsHeld = !_passLedsHeld && viewModel.WiringFaultCount > 0;
+        SetRedLed(_wiringFaultLedsHeld);
+
+        if (_passLedsHeld || _wiringFaultLedsHeld || previouslyHeld)
+        {
+            _greenPulseTimer.Stop();
+            _yellowPulseTimer.Stop();
+            SetGreenLed(_passLedsHeld || _wiringFaultLedsHeld);
+            YellowStatusLed.Fill = _passLedsHeld ? YellowLedOnBrush : YellowLedOffBrush;
+        }
+        if (_passLedsHeld || passWasHeld)
+        {
+            _whitePulseTimer.Stop();
+            WhiteStatusLed.Fill = _passLedsHeld ? WhiteLedOnBrush : WhiteLedOffBrush;
+            // Discard contact pulses queued during PASS. Normal activity resumes
+            // from the next scan; a sticky PASS label does not hold these lamps.
+            Interlocked.Exchange(ref _whitePulsePending, 0);
+            Interlocked.Exchange(ref _yellowPulsePending, 0);
+        }
+    }
+
+    private void PulseYellowLed()
+    {
+        if (_passLedsHeld || _wiringFaultLedsHeld)
+            return;
+        // Original CLed::Pulse restarts the timeout on every new activity.
+        _yellowPulseTimer.Stop();
+        YellowStatusLed.Fill = YellowLedOnBrush;
+        _yellowPulseTimer.Start();
+    }
+
+    private void PulseWhiteLed()
+    {
+        if (_passLedsHeld)
+            return;
+        _whitePulseTimer.Stop();
+        WhiteStatusLed.Fill = WhiteLedOnBrush;
+        _whitePulseTimer.Start();
+    }
+
+    private void PulseGreenLed()
+    {
+        if (_passLedsHeld || _wiringFaultLedsHeld)
+            return;
+        _greenPulseTimer.Stop();
+        SetGreenLed(true);
+        _greenPulseTimer.Start();
+    }
+
+    private void YellowPulseTimer_Tick(object? sender, EventArgs e)
+    {
+        _yellowPulseTimer.Stop();
+        YellowStatusLed.Fill = _passLedsHeld ? YellowLedOnBrush : YellowLedOffBrush;
+    }
+
+    private void WhitePulseTimer_Tick(object? sender, EventArgs e)
+    {
+        _whitePulseTimer.Stop();
+        WhiteStatusLed.Fill = _passLedsHeld ? WhiteLedOnBrush : WhiteLedOffBrush;
+    }
+
+    private void GreenPulseTimer_Tick(object? sender, EventArgs e)
+    {
+        _greenPulseTimer.Stop();
+        SetGreenLed(_passLedsHeld || _wiringFaultLedsHeld);
+    }
+
+    private void ResetActivityLeds()
+    {
+        _passLedsHeld = false;
+        _wiringFaultLedsHeld = false;
+        lock (_statusFrameGate)
+        {
+            _statusFrameTracker.Reset();
+            Interlocked.Exchange(ref _yellowPulsePending, 0);
+            Interlocked.Exchange(ref _whitePulsePending, 0);
+            Interlocked.Exchange(ref _greenPulsePending, 0);
+        }
+        _greenPulseTimer.Stop();
+        SetGreenLed(false);
+        _yellowPulseTimer.Stop();
+        _whitePulseTimer.Stop();
+        YellowStatusLed.Fill = YellowLedOffBrush;
+        WhiteStatusLed.Fill = WhiteLedOffBrush;
+    }
+
+    private void SetGreenLed(bool isOn) =>
+        GreenStatusLed.Fill = isOn ? GreenLedOnBrush : GreenLedOffBrush;
+
+    private void SetRedLed(bool isOn) =>
+        RedStatusLed.Fill = isOn ? RedLedOnBrush : RedLedOffBrush;
+
     private void ScheduleScrollToFirstFault(TestViewModel viewModel)
     {
-        _scrollCts?.Cancel();
-        _scrollCts?.Dispose();
-        _scrollCts = new CancellationTokenSource();
-        CancellationToken token = _scrollCts.Token;
+        // Một delta có thể phát vài CollectionChanged liên tiếp. Chỉ giữ một
+        // callback scroll pending để không tạo/hủy CTS và Dispatcher operation
+        // cho từng row trên model 10 card.
+        if (Interlocked.Exchange(ref _scrollDispatchQueued, 1) != 0)
+            return;
 
         _ = Dispatcher.InvokeAsync(async () =>
         {
             try
             {
+                if (_closeInProgress || viewModel.Faults.Count == 0)
+                    return;
+
+                FaultRow firstFault = viewModel.Faults[0];
+                if (IsFaultRowVisible(firstFault))
+                    return;
+
                 int delay = viewModel.ScrollDelay;
                 if (delay > 0)
-                    await Task.Delay(delay, token);
-                if (token.IsCancellationRequested || viewModel.Faults.Count == 0)
+                    await Task.Delay(delay);
+                if (_closeInProgress || viewModel.Faults.Count == 0)
                     return;
-                FaultGrid.ScrollIntoView(viewModel.Faults[0]);
+
+                firstFault = viewModel.Faults[0];
+                if (!IsFaultRowVisible(firstFault))
+                    FaultGrid.ScrollIntoView(firstFault);
             }
-            catch (OperationCanceledException) { }
+            finally
+            {
+                Interlocked.Exchange(ref _scrollDispatchQueued, 0);
+            }
         }, DispatcherPriority.Background);
+    }
+
+    private static bool ShouldAutoScrollToFirstFault(
+        NotifyCollectionChangedEventArgs args,
+        TestViewModel viewModel)
+    {
+        // Normal continuity rows can be added/removed rapidly while the operator
+        // is installing the product. Scrolling on those deltas forces DataGrid
+        // measure/layout and steals time from the real test presentation. Only an
+        // actual product fault is allowed to take scroll ownership.
+        if (viewModel.WiringFaultCount <= 0)
+            return false;
+
+        if (args.Action == NotifyCollectionChangedAction.Reset)
+            return true;
+
+        if (args.Action is not (NotifyCollectionChangedAction.Add or
+            NotifyCollectionChangedAction.Replace))
+        {
+            return false;
+        }
+
+        return args.NewItems?.OfType<FaultRow>().Any(row =>
+            row.ProductFaultType is ProductFaultType.WrongWiring or
+                ProductFaultType.ShortCircuit) == true;
+    }
+
+    private bool IsFaultRowVisible(FaultRow row)
+    {
+        if (FaultGrid.ItemContainerGenerator.ContainerFromItem(row) is not FrameworkElement container ||
+            !container.IsVisible ||
+            container.ActualHeight <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            Point topLeft = container.TranslatePoint(new Point(0, 0), FaultGrid);
+            double bottom = topLeft.Y + container.ActualHeight;
+            return bottom > FaultGrid.ColumnHeaderHeight && topLeft.Y < FaultGrid.ActualHeight;
+        }
+        catch (InvalidOperationException)
+        {
+            // Container có thể vừa bị recycle giữa hai lần cập nhật collection.
+            return false;
+        }
     }
 
     private void ResetProbeCounter_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is not TestViewModel viewModel)
             return;
+        ShowProbeMaintenanceDialog(viewModel);
+    }
 
-        var dialog = new ProbeMaintenanceResetWindow(
-            viewModel.PartNumber,
-            viewModel.ModelName,
-            viewModel.ProbeCycleCount,
-            viewModel.ProbeReplacementThreshold)
+    private void QueueProbeMaintenancePrompt()
+    {
+        if (Interlocked.Exchange(ref _probeMaintenancePromptQueued, 1) != 0) return;
+        _ = Dispatcher.BeginInvoke(() =>
         {
-            Owner = this
-        };
+            Interlocked.Exchange(ref _probeMaintenancePromptQueued, 0);
+            if (_viewLifetimeCts.IsCancellationRequested || _closeInProgress || !IsVisible ||
+                DataContext is not TestViewModel viewModel || viewModel.IsDeviceFault || viewModel.IsPersistenceFault) return;
+            if (OwnedWindows.OfType<FaultConfirmationWindow>().Any(window => window.IsVisible)) return;
+            if (!viewModel.ProbeMaintenanceDue)
+            {
+                _lastProbeMaintenancePromptKey = string.Empty;
+                return;
+            }
+            string key = $"{viewModel.PartNumber}|{viewModel.ModelName}|{viewModel.ProbeCycleCount}|{viewModel.ProbeReplacementThreshold}";
+            if (_probeMaintenanceDialogOpen || key == _lastProbeMaintenancePromptKey) return;
+            _lastProbeMaintenancePromptKey = key;
+            ShowProbeMaintenanceDialog(viewModel);
+        }, DispatcherPriority.Background);
+    }
 
-        if (dialog.ShowDialog() != true)
-            return;
-
-        bool reset = viewModel.TryResetProbeCycle(dialog.AdminPassword, out string message);
-        MessageBox.Show(
-            this,
-            message,
-            reset ? "Đã reset counter Pin" : "Không thể reset counter Pin",
-            MessageBoxButton.OK,
-            reset ? MessageBoxImage.Information : MessageBoxImage.Warning);
+    private void ShowProbeMaintenanceDialog(TestViewModel viewModel)
+    {
+        if (_probeMaintenanceDialogOpen || _viewLifetimeCts.IsCancellationRequested) return;
+        _probeMaintenanceDialogOpen = true;
+        try
+        {
+            var dialog = new ProbeMaintenanceResetWindow(
+                viewModel.PartNumber,
+                viewModel.ModelName,
+                viewModel.ProbeCycleCount,
+                viewModel.ProbeReplacementThreshold,
+                viewModel.TryResetProbeCycleAsync)
+            {
+                Owner = this
+            };
+            dialog.ShowDialog();
+        }
+        finally { _probeMaintenanceDialogOpen = false; }
     }
 
     private async void BackToMain_Click(object sender, RoutedEventArgs e)
@@ -172,14 +683,23 @@ public partial class TestWindow : Window
 
         try
         {
-            if (DataContext is TestViewModel viewModel)
-                await viewModel.StopViewAsync();
-        }
-        catch { }
-        finally
-        {
+            if (DataContext is TestViewModel viewModel &&
+                !await viewModel.StopViewAsync())
+            {
+                ShowProductRemovalRequired();
+                _closeInProgress = false;
+                return;
+            }
+
+            CancelPendingAutoStart();
+            await RevealMainBeforeCloseAsync();
             _allowClose = true;
             Close();
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Return to Main failed: {ex}");
+            _closeInProgress = false;
         }
     }
 
@@ -191,11 +711,26 @@ public partial class TestWindow : Window
             return;
         }
 
+        if (DataContext is TestViewModel deviceFaultViewModel && deviceFaultViewModel.IsDeviceFault &&
+            !deviceFaultViewModel.HasProductOnTestTable)
+        {
+            _allowClose = true;
+            CleanupUiHandlers();
+            return;
+        }
+
         e.Cancel = true;
         if (_closeInProgress)
             return;
 
-        MessageBoxResult result = MessageBox.Show(this,
+        if (DataContext is TestViewModel productViewModel &&
+            productViewModel.HasProductOnTestTable)
+        {
+            ShowProductRemovalRequired();
+            return;
+        }
+
+        MessageBoxResult result = LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this), this,
             "Bạn có muốn dừng kiểm tra và quay về màn hình chọn mã?",
             "Xác nhận", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (result != MessageBoxResult.Yes)
@@ -204,26 +739,93 @@ public partial class TestWindow : Window
         _closeInProgress = true;
         try
         {
-            if (DataContext is TestViewModel viewModel)
-                await viewModel.StopViewAsync();
-        }
-        catch { }
-        finally
-        {
+            if (DataContext is TestViewModel viewModel &&
+                !await viewModel.StopViewAsync())
+            {
+                ShowProductRemovalRequired();
+                _closeInProgress = false;
+                return;
+            }
+
+            CancelPendingAutoStart();
+            await RevealMainBeforeCloseAsync();
             _allowClose = true;
             CleanupUiHandlers();
             Close();
         }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"Close TestWindow failed: {ex}");
+            _closeInProgress = false;
+        }
+    }
+
+    private void ShowProductRemovalRequired()
+    {
+        LocalizedMessageBox.Show(TestViewLocalization.GetLanguage(this),
+            this,
+            "VUI LÒNG THÁO SẢN PHẨM!!",
+            "CHƯA THÁO SẢN PHẨM",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
+    }
+
+    private Task RevealMainBeforeCloseAsync()
+    {
+        EventHandler? returningHandler = ReturningToMain;
+        if (returningHandler is null ||
+            Dispatcher.HasShutdownStarted ||
+            Dispatcher.HasShutdownFinished)
+        {
+            return Task.CompletedTask;
+        }
+
+        // MainWindow luôn còn hiển thị và đã được DWM compose phía sau cửa sổ
+        // test. Chỉ cần cập nhật/activate trước Close(); không chờ các nhịp
+        // CompositionTarget.Rendering toàn cục vì chúng không chứng minh frame
+        // của MainWindow và còn tạo cảm giác chuyển trang chậm.
+        returningHandler(this, EventArgs.Empty);
+        return Task.CompletedTask;
+    }
+
+    private void CancelPendingAutoStart()
+    {
+        if (_viewLifetimeCts.IsCancellationRequested)
+            return;
+
+        try { _viewLifetimeCts.Cancel(); }
+        catch (ObjectDisposedException) { }
     }
 
     private void CleanupUiHandlers()
     {
+        ReturningToMain = null;
+        CancelPendingAutoStart();
+        ContentRendered -= TestWindow_ContentRendered;
         _clockTimer.Stop();
-        _scrollCts?.Cancel();
-        _scrollCts?.Dispose();
-        _scrollCts = null;
-        if (DataContext is TestViewModel vm && _faultsChangedHandler is not null)
-            vm.Faults.CollectionChanged -= _faultsChangedHandler;
+        _testingDotsTimer.Stop();
+        _testingDotsTimer.Tick -= TestingDotsTimer_Tick;
+        _clockTimer.Tick -= ClockTimer_Tick;
+        _yellowPulseTimer.Stop();
+        _yellowPulseTimer.Tick -= YellowPulseTimer_Tick;
+        _whitePulseTimer.Stop();
+        _whitePulseTimer.Tick -= WhitePulseTimer_Tick;
+        _greenPulseTimer.Stop();
+        _greenPulseTimer.Tick -= GreenPulseTimer_Tick;
+        Interlocked.Exchange(ref _scrollDispatchQueued, 0);
+        Interlocked.Exchange(ref _statusLedHandlersAttached, 0);
+        ResetActivityLeds();
+        if (DataContext is TestViewModel vm)
+        {
+            vm.BoardFrameActivity -= ViewModel_BoardFrameActivity;
+            vm.PropertyChanged -= ViewModel_StatusPropertyChanged;
+            vm.WaterProofWindowOpenRequested -= ViewModel_WaterProofWindowOpenRequested;
+            vm.WaterProofWindowCloseRequested -= ViewModel_WaterProofWindowCloseRequested;
+            if (_faultsChangedHandler is not null)
+                vm.Faults.CollectionChanged -= _faultsChangedHandler;
+        }
         _faultsChangedHandler = null;
+        CloseWaterProofWindow();
+        DataContext = null;
     }
 }

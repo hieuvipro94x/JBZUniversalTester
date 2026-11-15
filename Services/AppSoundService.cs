@@ -22,28 +22,75 @@ public sealed class AppSoundService : IDisposable
     private readonly object _gate = new();
 
     private SoundPlayer? _clickPlayer;
+    private SoundPlayer? _productStartPlayer;
     private SoundPlayer? _testOkPlayer;
+    private SoundPlayer? _stageOkPlayer;
     private SoundPlayer? _startupPlayer;
     private SoundPlayer? _testPointContactPlayer;
     private SoundPlayer? _wiringFaultPlayer;
+    private SoundPlayer? _discardContactPlayer;
+    private SoundPlayer? _leakFailPlayer;
 
     // Giữ stream sống trong toàn bộ vòng đời SoundPlayer.
     private MemoryStream? _clickStream;
+    private MemoryStream? _productStartStream;
     private MemoryStream? _testOkStream;
+    private MemoryStream? _stageOkStream;
     private MemoryStream? _startupStream;
     private MemoryStream? _testPointContactStream;
     private MemoryStream? _wiringFaultStream;
+    private MemoryStream? _discardContactStream;
+    private MemoryStream? _leakFailStream;
 
     private bool _initialized;
     private bool _disposed;
     private bool _wiringFaultAlarmActive;
+    private bool _electricalFaultAlarmHeld;
     private bool _testPointContactSoundActive;
 
     private int _globalButtonHandlerRegistered;
     private int _startupPlayed;
     private int _startupPlaybackActive;
+    private int _productStartPlaybackActive;
+    private int _testOkPlaybackActive;
+    private Task _testOkPlaybackTask = Task.CompletedTask;
+    private int _discardContactPlaybackActive;
+    private long _discardContactPlaybackCount;
+    private Task _discardContactPlaybackTask = Task.CompletedTask;
+    private int _clickPlaybackQueued;
+    private int _soundGeneration;
 
     public static AppSoundService Current => LazyInstance.Value;
+
+    public bool IsElectricalFaultAlarmHeld
+    {
+        get { lock (_gate) return _electricalFaultAlarmHeld; }
+    }
+
+    // Only authoritative product-removal evidence may release this hold.
+    // Ordinary UI cleanup and competing WAV requests cannot silence it.
+    public void HoldElectricalFaultAlarm()
+    {
+        EnsureInitialized();
+        lock (_gate)
+        {
+            if (_disposed || _electricalFaultAlarmHeld) return;
+            StopAll(force: true);
+            _electricalFaultAlarmHeld = true;
+            SetWiringFaultAlarm(true);
+        }
+    }
+
+    public void ReleaseElectricalFaultAlarmAfterRemoval()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_electricalFaultAlarmHeld) return;
+            _electricalFaultAlarmHeld = false;
+            _testPointContactSoundActive = false;
+            SetWiringFaultAlarm(false);
+        }
+    }
 
     public bool IsWiringFaultAlarmActive
     {
@@ -75,7 +122,7 @@ public sealed class AppSoundService : IDisposable
     /// Nạp tài nguyên âm thanh và đăng ký tiếng click cho toàn bộ Button WPF.
     /// Nên gọi một lần trong App.OnStartup().
     /// </summary>
-    public void Initialize()
+    public void PreloadResources()
     {
         lock (_gate)
         {
@@ -84,15 +131,24 @@ public sealed class AppSoundService : IDisposable
             if (!_initialized)
             {
                 _clickPlayer = CreatePlayer("CLICK.wav", out _clickStream);
+                _productStartPlayer = CreatePlayer("COMPUTER.wav", out _productStartStream);
                 _testOkPlayer = CreatePlayer("DINGDONG.wav", out _testOkStream);
+                _stageOkPlayer = CreatePlayer("STAGEOK.wav", out _stageOkStream);
                 _startupPlayer = CreatePlayer("START.wav", out _startupStream);
                 _testPointContactPlayer = CreatePlayer("TESTPOINT.wav", out _testPointContactStream);
                 _wiringFaultPlayer = CreatePlayer("TESTPOINT.wav", out _wiringFaultStream);
+                _discardContactPlayer = CreatePlayer("DRIP.wav", out _discardContactStream);
+                _leakFailPlayer = CreatePlayer("NG.wav", out _leakFailStream);
 
                 _initialized = true;
             }
         }
 
+    }
+
+    public void Initialize()
+    {
+        PreloadResources();
         if (Interlocked.Exchange(ref _globalButtonHandlerRegistered, 1) == 0)
         {
             EventManager.RegisterClassHandler(
@@ -122,16 +178,24 @@ public sealed class AppSoundService : IDisposable
             return;
         }
 
-        // SoundPlayer dùng chung thiết bị PlaySound của Windows. Một Stop() từ
-        // luồng reset Probe lúc nạp model có thể cắt START.wav. PlaySync trên
-        // worker đánh dấu một khoảng bảo vệ, không khóa Dispatcher/UI.
-        _ = Task.Run(() =>
+        // PlaySync giữ kênh PlaySound native, khiến StopAll khi vào Manual
+        // chặn UI đến hết START.wav. Phát async nhưng vẫn bảo vệ hết độ dài WAV.
+        double durationMs = GetWaveDurationMs(_startupStream);
+        lock (_gate)
         {
+            if (_disposed)
+                return;
+            if (_electricalFaultAlarmHeld || _wiringFaultAlarmActive)
+                return;
             Interlocked.Exchange(ref _startupPlaybackActive, 1);
+            AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_BEGIN");
+            SafePlay(player);
+        }
+        _ = Task.Run(async () =>
+        {
             try
             {
-                AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_BEGIN");
-                SafePlaySync(player);
+                await Task.Delay(TimeSpan.FromMilliseconds(durationMs)).ConfigureAwait(false);
                 AsyncFileLogService.Current.Application("STARTUP_SOUND PLAY_END");
             }
             finally
@@ -144,15 +208,159 @@ public sealed class AppSoundService : IDisposable
     public void PlayClick()
     {
         EnsureInitialized();
-        if (Volatile.Read(ref _startupPlaybackActive) != 0)
+        if (Volatile.Read(ref _discardContactPlaybackActive) != 0 ||
+            Volatile.Read(ref _startupPlaybackActive) != 0 ||
+            Volatile.Read(ref _productStartPlaybackActive) != 0 ||
+            Volatile.Read(ref _testOkPlaybackActive) != 0)
             return;
-        SafePlay(_clickPlayer);
+        if (Interlocked.CompareExchange(ref _clickPlaybackQueued, 1, 0) != 0)
+            return;
+        int generation = Volatile.Read(ref _soundGeneration);
+
+        // Native PlaySound can take time on the first click/audio-device setup.
+        // Never make the WPF button handler wait for the Windows audio driver.
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    if (_disposed || generation != Volatile.Read(ref _soundGeneration) ||
+                        _wiringFaultAlarmActive ||
+                        Volatile.Read(ref _discardContactPlaybackActive) != 0 ||
+                        Volatile.Read(ref _startupPlaybackActive) != 0 ||
+                        Volatile.Read(ref _productStartPlaybackActive) != 0 ||
+                        Volatile.Read(ref _testOkPlaybackActive) != 0)
+                        return;
+                    long startedAt = Stopwatch.GetTimestamp();
+                    SafePlay(_clickPlayer);
+                    double elapsedMs = Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
+                    if (elapsedMs > 16)
+                        AsyncFileLogService.Current.Performance($"CLICK_SOUND native_ms={elapsedMs:0.###} thread=worker");
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _clickPlaybackQueued, 0);
+            }
+        });
+    }
+
+    /// <summary>Phát COMPUTER.wav một lần khi chu kỳ nhận kết nối sản phẩm đầu tiên.</summary>
+    public void PlayProductStart()
+    {
+        EnsureInitialized();
+
+        if (Interlocked.CompareExchange(ref _productStartPlaybackActive, 1, 0) != 0)
+            return;
+
+        SoundPlayer? player;
+        lock (_gate)
+        {
+            if (_disposed || _wiringFaultAlarmActive ||
+                Volatile.Read(ref _testOkPlaybackActive) != 0)
+            {
+                Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+                return;
+            }
+
+            SafeStop(_clickPlayer);
+            player = _productStartPlayer;
+        }
+
+        if (player is null)
+        {
+            Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+            AsyncFileLogService.Current.Error("PRODUCT_START_SOUND resource COMPUTER.wav is unavailable");
+            return;
+        }
+
+        // SoundPlayer.Play() trả về ngay. PlaySync giữ tài nguyên PlaySound suốt
+        // file COMPUTER.wav (~2,8 s), khiến Stop/Play của đầu dò, lỗi hoặc PASS
+        // có thể chặn Dispatcher đúng lúc cần phản hồi nhanh nhất.
+        lock (_gate)
+        {
+            if (!_disposed && !_wiringFaultAlarmActive)
+            {
+                AsyncFileLogService.Current.Application("PRODUCT_START_SOUND PLAY_ASYNC");
+                SafePlay(player);
+            }
+            Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+        }
     }
 
     public void PlayTestOk()
     {
+        PlayTestOk(resistancePassed: false);
+    }
+
+    public void PlayTestOk(bool resistancePassed) => _ = PlayTestOkAsync(resistancePassed);
+
+    public Task PlayTestOkAsync(bool resistancePassed)
+    {
         EnsureInitialized();
-        SafePlay(_testOkPlayer);
+
+        // DINGDONG phải tiếp tục phát xuyên suốt các cập nhật UI
+        // PASS -> THÁO SẢN PHẨM -> SẴN SÀNG. SoundPlayer dùng chung
+        // PlaySound của Windows, vì vậy Stop() trên player Probe/fault khác
+        // cũng có thể cắt âm PASS nếu không có khoảng bảo vệ này.
+        lock (_gate)
+        {
+            if (_disposed)
+                return Task.FromCanceled(new CancellationToken(true));
+            if (_electricalFaultAlarmHeld || _wiringFaultAlarmActive)
+                return Task.CompletedTask;
+            if (Volatile.Read(ref _testOkPlaybackActive) != 0)
+                return _testOkPlaybackTask;
+            Interlocked.Exchange(ref _testOkPlaybackActive, 1);
+
+            _wiringFaultAlarmActive = false;
+            _testPointContactSoundActive = false;
+            SafeStop(_clickPlayer);
+            SafeStop(_productStartPlayer);
+            SafeStop(_startupPlayer);
+            SafeStop(_testPointContactPlayer);
+            SafeStop(_wiringFaultPlayer);
+            SoundPlayer? player = _testOkPlayer;
+            SoundPlayer? stagePlayer = resistancePassed ? _stageOkPlayer : null;
+            int generation = Volatile.Read(ref _soundGeneration);
+
+            if (player is null)
+            {
+                Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+                AsyncFileLogService.Current.Error("PASS_SOUND resource DINGDONG.wav is unavailable");
+                return Task.FromCanceled(new CancellationToken(true));
+            }
+
+            _testOkPlaybackTask = Task.Run(async () =>
+            {
+                try
+                {
+                    if (generation != Volatile.Read(ref _soundGeneration))
+                        throw new OperationCanceledException("PASS playback interrupted.");
+                    if (resistancePassed)
+                    {
+                        if (stagePlayer is null)
+                        {
+                            AsyncFileLogService.Current.Error("RESISTANCE_PASS_SOUND resource STAGEOK.wav is unavailable");
+                            throw new OperationCanceledException("STAGEOK resource unavailable.");
+                        }
+                        AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_BEGIN");
+                        await PlayPassSoundAsync(stagePlayer, GetWaveDurationMs(_stageOkStream), generation).ConfigureAwait(false);
+                        AsyncFileLogService.Current.Application("RESISTANCE_PASS_SOUND PLAY_END");
+                    }
+                    if (generation != Volatile.Read(ref _soundGeneration))
+                        throw new OperationCanceledException("PASS playback interrupted.");
+                    AsyncFileLogService.Current.Application("PASS_SOUND PLAY_BEGIN");
+                    await PlayPassSoundAsync(player, GetWaveDurationMs(_testOkStream), generation).ConfigureAwait(false);
+                    if (generation != Volatile.Read(ref _soundGeneration))
+                        throw new OperationCanceledException("PASS playback interrupted.");
+                    AsyncFileLogService.Current.Application("PASS_SOUND PLAY_END");
+                }
+                finally { CompleteTestOkPlayback(generation); }
+            });
+            return _testOkPlaybackTask;
+        }
     }
 
     /// <summary>Phát TESTPOINT.wav một lần khi đầu dò firmware chuyển sang ON.</summary>
@@ -161,9 +369,56 @@ public sealed class AppSoundService : IDisposable
         EnsureInitialized();
         lock (_gate)
         {
-            if (_disposed || _wiringFaultAlarmActive)
+            if (_disposed || _wiringFaultAlarmActive ||
+                Volatile.Read(ref _testOkPlaybackActive) != 0)
                 return;
             SafePlay(_testPointContactPlayer);
+        }
+    }
+
+    /// <summary>Phát DRIP.wav một lần khi tiếp điểm _Interlock chuyển sang THÔNG.</summary>
+    public void PlayDiscardContact()
+    {
+        EnsureInitialized();
+        lock (_gate)
+        {
+            if (_disposed || _wiringFaultAlarmActive || Volatile.Read(ref _discardContactPlaybackActive) != 0 ||
+                Volatile.Read(ref _testOkPlaybackActive) != 0)
+                return;
+            if (_discardContactPlayer is null)
+            {
+                AsyncFileLogService.Current.Error("DISCARD_SOUND resource DRIP.wav is unavailable");
+                return;
+            }
+            int generation = Volatile.Read(ref _soundGeneration);
+            Interlocked.Exchange(ref _discardContactPlaybackActive, 1);
+            Interlocked.Increment(ref _discardContactPlaybackCount);
+            double durationMs = GetWaveDurationMs(_discardContactStream);
+            AsyncFileLogService.Current.Application("DISCARD_SOUND DRIP.wav PLAY_BEGIN");
+            SafePlay(_discardContactPlayer);
+            _discardContactPlaybackTask = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, durationMs))).ConfigureAwait(false);
+                lock (_gate)
+                {
+                    if (_disposed || generation != Volatile.Read(ref _soundGeneration)) return;
+                    Interlocked.Exchange(ref _discardContactPlaybackActive, 0);
+                    AsyncFileLogService.Current.Application("DISCARD_SOUND DRIP.wav PLAY_END");
+                }
+            });
+        }
+    }
+
+    /// <summary>Phát âm cảnh báo riêng khi một lượt test Leak FAIL.</summary>
+    public void PlayLeakFail()
+    {
+        EnsureInitialized();
+        lock (_gate)
+        {
+            if (_disposed || _wiringFaultAlarmActive)
+                return;
+
+            SafePlay(_leakFailPlayer);
         }
     }
 
@@ -180,6 +435,22 @@ public sealed class AppSoundService : IDisposable
             if (_disposed)
                 return;
 
+            if (Volatile.Read(ref _testOkPlaybackActive) != 0)
+            {
+                // Ghi nhớ trạng thái mới nhất nhưng không gọi Play/Stop vì mọi
+                // thao tác PlaySound lúc này đều có thể cắt DINGDONG.
+                _testPointContactSoundActive = active;
+                return;
+            }
+
+            if (active && _wiringFaultAlarmActive)
+            {
+                // Wiring fault is the safety-priority loop. Remember the probe
+                // state, but do not replace the active alarm sound.
+                _testPointContactSoundActive = true;
+                return;
+            }
+
             // RELEASE luôn cưỡng bức Stop, kể cả cờ trạng thái đã về false
             // từ một callback trước đó. Điều này tránh WAV looping bị sót khi
             // frame/UI release đến gần nhau.
@@ -191,7 +462,9 @@ public sealed class AppSoundService : IDisposable
             {
                 if (active)
                     _testPointContactPlayer?.PlayLooping();
-                else if (Volatile.Read(ref _startupPlaybackActive) == 0)
+                else if (Volatile.Read(ref _startupPlaybackActive) == 0 &&
+                         Volatile.Read(ref _discardContactPlaybackActive) == 0 &&
+                         !_wiringFaultAlarmActive)
                     _testPointContactPlayer?.Stop();
             }
             catch (Exception ex)
@@ -211,8 +484,26 @@ public sealed class AppSoundService : IDisposable
 
         lock (_gate)
         {
-            if (_disposed || _wiringFaultAlarmActive == active)
+            if (_disposed)
             {
+                return;
+            }
+
+            if (!active && _electricalFaultAlarmHeld)
+                return;
+
+            if (Volatile.Read(ref _testOkPlaybackActive) != 0)
+            {
+                // Nếu fault vẫn còn sau DINGDONG thì bật lại alarm ở
+                // CompleteTestOkPlayback; nếu đã hết thì trạng thái false thắng.
+                _wiringFaultAlarmActive = active;
+                return;
+            }
+
+            if (_wiringFaultAlarmActive == active)
+            {
+                // UI cập nhật theo từng frame: không khởi động lại TESTPOINT
+                // khi cảnh báo đang phát, vì Stop/Play tạo khoảng ngắt rõ rệt.
                 return;
             }
 
@@ -222,11 +513,17 @@ public sealed class AppSoundService : IDisposable
             {
                 if (active)
                 {
+                    // Always start from a known native-player state. This is
+                    // required after START/CLICK/Probe used the shared Windows
+                    // WAV channel during a previous product cycle.
+                    _wiringFaultPlayer?.Stop();
                     _wiringFaultPlayer?.PlayLooping();
+                    AsyncFileLogService.Current.Application("WIRING_FAULT_SOUND START");
                 }
                 else
                 {
                     _wiringFaultPlayer?.Stop();
+                    AsyncFileLogService.Current.Application("WIRING_FAULT_SOUND STOP");
                 }
             }
             catch (Exception ex)
@@ -236,7 +533,7 @@ public sealed class AppSoundService : IDisposable
         }
     }
 
-    public void StopAll()
+    public void StopAll(bool force = false)
     {
         lock (_gate)
         {
@@ -245,14 +542,28 @@ public sealed class AppSoundService : IDisposable
                 return;
             }
 
+            if ((_electricalFaultAlarmHeld || Volatile.Read(ref _discardContactPlaybackActive) != 0) && !force)
+                return;
+            Interlocked.Increment(ref _soundGeneration);
+            _electricalFaultAlarmHeld = false;
+
             _wiringFaultAlarmActive = false;
             _testPointContactSoundActive = false;
 
             SafeStop(_clickPlayer);
+            SafeStop(_productStartPlayer);
             SafeStop(_testOkPlayer);
+            SafeStop(_stageOkPlayer);
             SafeStop(_startupPlayer);
             SafeStop(_testPointContactPlayer);
             SafeStop(_wiringFaultPlayer);
+            SafeStop(_discardContactPlayer);
+            SafeStop(_leakFailPlayer);
+            Interlocked.Exchange(ref _startupPlaybackActive, 0);
+            Interlocked.Exchange(ref _productStartPlaybackActive, 0);
+            Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+            Interlocked.Exchange(ref _discardContactPlaybackActive, 0);
+            _testOkPlaybackTask = Task.CompletedTask;
         }
     }
 
@@ -262,6 +573,44 @@ public sealed class AppSoundService : IDisposable
         {
             PlayClick();
         }
+    }
+
+    private static double GetWaveDurationMs(MemoryStream? stream)
+    {
+        if (stream is null)
+            return 0;
+
+        using var buffer = new MemoryStream(stream.ToArray(), writable: false);
+        using var reader = new BinaryReader(buffer);
+        if (buffer.Length < 12 || reader.ReadUInt32() != 0x46464952)
+            throw new InvalidDataException("START.wav has no RIFF header.");
+        reader.ReadUInt32();
+        if (reader.ReadUInt32() != 0x45564157)
+            throw new InvalidDataException("START.wav has no WAVE header.");
+
+        uint bytesPerSecond = 0;
+        uint dataBytes = 0;
+        while (buffer.Position + 8 <= buffer.Length)
+        {
+            uint chunk = reader.ReadUInt32();
+            uint length = reader.ReadUInt32();
+            long next = buffer.Position + length + (length & 1);
+            if (buffer.Position + length > buffer.Length)
+                throw new InvalidDataException("START.wav contains a truncated chunk.");
+            if (chunk == 0x20746D66 && length >= 16) // fmt
+            {
+                reader.ReadUInt16();
+                reader.ReadUInt16();
+                reader.ReadUInt32();
+                bytesPerSecond = reader.ReadUInt32();
+            }
+            else if (chunk == 0x61746164) // data
+                dataBytes = length;
+            buffer.Position = next;
+        }
+        if (bytesPerSecond == 0 || dataBytes == 0)
+            throw new InvalidDataException("START.wav has no valid format/data chunks.");
+        return dataBytes * 1000.0 / bytesPerSecond;
     }
 
     private void EnsureInitialized()
@@ -350,7 +699,52 @@ public sealed class AppSoundService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"Không thể phát hết âm thanh: {ex}");
-            AsyncFileLogService.Current.Error($"STARTUP_SOUND PLAY_FAILED: {ex.Message}");
+            AsyncFileLogService.Current.Error($"SYNC_SOUND PLAY_FAILED: {ex.Message}");
+        }
+    }
+
+    private async Task PlayPassSoundAsync(SoundPlayer player, double durationMs, int generation)
+    {
+        try
+        {
+            lock (_gate)
+            {
+                if (_disposed || _electricalFaultAlarmHeld || generation != Volatile.Read(ref _soundGeneration))
+                    throw new OperationCanceledException("PASS playback interrupted by electrical fault or shutdown.");
+                player.Play();
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(durationMs)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"PASS_SOUND PLAY_FAILED: {ex.Message}");
+            throw new IOException("Không thể phát hết âm thanh PASS.", ex);
+        }
+    }
+
+    private void CompleteTestOkPlayback(int generation)
+    {
+        lock (_gate)
+        {
+            if (generation != Volatile.Read(ref _soundGeneration)) return;
+            Interlocked.Exchange(ref _testOkPlaybackActive, 0);
+            if (_disposed)
+                return;
+
+            try
+            {
+                // Wiring fault có độ ưu tiên cao hơn âm tiếp xúc Probe. Chỉ
+                // resume yêu cầu vẫn còn hiệu lực ở đúng thời điểm PASS kết thúc.
+                if (_wiringFaultAlarmActive)
+                    _wiringFaultPlayer?.PlayLooping();
+                else if (_testPointContactSoundActive)
+                    _testPointContactPlayer?.PlayLooping();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Không thể khôi phục âm sau PASS: {ex}");
+            }
         }
     }
 
@@ -383,19 +777,27 @@ public sealed class AppSoundService : IDisposable
                 return;
             }
 
-            StopAll();
+            StopAll(force: true);
 
             _clickPlayer?.Dispose();
+            _productStartPlayer?.Dispose();
             _testOkPlayer?.Dispose();
+            _stageOkPlayer?.Dispose();
             _startupPlayer?.Dispose();
             _testPointContactPlayer?.Dispose();
             _wiringFaultPlayer?.Dispose();
+            _discardContactPlayer?.Dispose();
+            _leakFailPlayer?.Dispose();
 
             _clickStream?.Dispose();
+            _productStartStream?.Dispose();
             _testOkStream?.Dispose();
+            _stageOkStream?.Dispose();
             _startupStream?.Dispose();
             _testPointContactStream?.Dispose();
             _wiringFaultStream?.Dispose();
+            _discardContactStream?.Dispose();
+            _leakFailStream?.Dispose();
 
             _disposed = true;
         }

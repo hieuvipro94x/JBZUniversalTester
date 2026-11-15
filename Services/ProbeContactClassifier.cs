@@ -12,7 +12,74 @@ namespace JBZUniversalTester.Services;
 /// </summary>
 public static class ProbeContactClassifier
 {
-    public sealed record Detection(int Io, int Score, string Signature);
+    /// <summary>
+    /// Tracks the Htdrv-style body/table contact signature: one visible target IO
+    /// while the apparent source set changes between complete scans. A real wire
+    /// keeps the same physical edge and therefore never confirms through this path.
+    /// </summary>
+    public sealed class ChangingFanInTracker
+    {
+        private long _generation;
+        private int _targetIo;
+        private string _sourceSignature = string.Empty;
+        private bool _confirmed;
+
+        public int Observe(
+            ScanFrame frame,
+            ProductModel? model,
+            BoardCapacity boardCapacity)
+        {
+            if (!TryBuildChangingFanInObservation(
+                    frame,
+                    model,
+                    boardCapacity,
+                    out int targetIo,
+                    out string sourceSignature))
+            {
+                Reset();
+                return 0;
+            }
+
+            bool newContact = targetIo != _targetIo ||
+                              (frame.ScanGeneration != 0 &&
+                               _generation != 0 &&
+                               frame.ScanGeneration != _generation);
+            if (newContact)
+            {
+                _generation = frame.ScanGeneration;
+                _targetIo = targetIo;
+                _sourceSignature = sourceSignature;
+                _confirmed = false;
+                return 0;
+            }
+
+            _generation = frame.ScanGeneration;
+            if (!_confirmed &&
+                !string.Equals(_sourceSignature, sourceSignature, StringComparison.Ordinal))
+            {
+                _confirmed = true;
+            }
+
+            _sourceSignature = sourceSignature;
+            return _confirmed ? targetIo : 0;
+        }
+
+        public void Reset()
+        {
+            _generation = 0;
+            _targetIo = 0;
+            _sourceSignature = string.Empty;
+            _confirmed = false;
+        }
+    }
+
+    public sealed record Detection(
+        int Io,
+        int Score,
+        string Signature,
+        int Hits = 0,
+        int FanIn = 0,
+        bool IsMapped = false);
 
     private sealed record Candidate(
         int Io,
@@ -49,18 +116,22 @@ public static class ProbeContactClassifier
         int maxContacts = 2,
         BoardCapacity? boardCapacity = null)
     {
+        // Chỉ classifier trên snapshot Production hoàn chỉnh và sạch.
+        // Partial/target-only data rất dễ bị nhiễu điện dung (ví dụ tay người chạm IO)
+        // và không đủ bằng chứng để kết luận đầu dò thật.
         if (maxContacts <= 0 ||
-            frame.Mode != BoardScanMode.Production)
+            frame.Mode != BoardScanMode.Production ||
+            !frame.Complete ||
+            frame.UnknownBytes != 0 ||
+            !frame.TerminatorKnown)
         {
             return Array.Empty<Detection>();
         }
 
         int sourceCount = frame.Connections.Count;
-        int capacityIo = boardCapacity?.TotalIoCapacity ?? Math.Max(
-            BoardIoDecoder.IoPerExpansionCard,
-            frame.CardNumber * BoardIoDecoder.IoPerScanCard);
-
         var fanInByTarget = new Dictionary<int, int>();
+        var unexpectedFanInByTarget = new Dictionary<int, int>();
+        HashSet<long>? expectedEdges = null;
         int edgeCount = 0;
 
         foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
@@ -68,6 +139,12 @@ public static class ProbeContactClassifier
             foreach (int target in pair.Value)
             {
                 fanInByTarget[target] = fanInByTarget.GetValueOrDefault(target) + 1;
+                expectedEdges ??= BuildExpectedEdges(model);
+                if (!expectedEdges.Contains(EdgeKey(pair.Key, target)))
+                {
+                    unexpectedFanInByTarget[target] =
+                        unexpectedFanInByTarget.GetValueOrDefault(target) + 1;
+                }
                 edgeCount++;
             }
         }
@@ -75,7 +152,7 @@ public static class ProbeContactClassifier
         if (fanInByTarget.Count == 0 && frame.TargetHits.Count == 0)
             return Array.Empty<Detection>();
 
-        int repeatedThreshold = Math.Clamp(sourceCount / 8, 6, 24);
+        int repeatedThreshold = GetRepeatedTargetThreshold(sourceCount);
 
         Candidate[] candidates = fanInByTarget.Keys
             .Concat(frame.TargetHits.Keys)
@@ -86,43 +163,31 @@ public static class ProbeContactClassifier
             {
                 int hits = frame.TargetHits.GetValueOrDefault(io);
                 int fanIn = fanInByTarget.GetValueOrDefault(io);
+                int unexpectedFanIn = unexpectedFanInByTarget.GetValueOrDefault(io);
                 bool mapped = IsMapped(model, io);
                 bool sourceWordMissing = !frame.Connections.ContainsKey(io);
 
                 int score =
                     hits * 5 +
-                    fanIn * 6 +
+                    unexpectedFanIn * 6 +
                     (mapped ? 16 : 0) +
                     (sourceWordMissing ? 8 : 0);
 
-                bool targetOnlyProbeTouch =
-                    sourceCount == 0 &&
-                    hits > 0 &&
-                    frame.TargetHits.Count <= Math.Max(1, maxContacts);
-
+                // Trace Htdrv cho thấy TP thường là một IO rỗng, không nằm trong
+                // topology THT. Vì vậy mapping chỉ dùng xếp hạng, không phải gate.
+                // Một TARGET lẻ vẫn bị loại: phải có fan-in/hit lặp qua nhiều SOURCE.
                 bool repeatedTarget =
-                    hits >= repeatedThreshold ||
-                    fanIn >= repeatedThreshold;
-
-                bool diagnosticSweep =
-                    sourceCount >= Math.Max(16, (capacityIo * 3) / 5) &&
-                    fanInByTarget.Count <= 6 &&
-                    edgeCount >= Math.Max(6, sourceCount / 5) &&
-                    (fanIn >= 6 || hits >= 6);
-
-                bool dominantTarget =
-                    edgeCount >= 8 &&
-                    fanIn >= 6 &&
-                    fanIn * 100 >= edgeCount * 28;
+                    unexpectedFanIn >= repeatedThreshold ||
+                    (fanIn == 0 && sourceWordMissing && hits >= repeatedThreshold);
 
                 return new Candidate(
                     io,
                     hits,
-                    fanIn,
+                    unexpectedFanIn,
                     mapped,
                     sourceWordMissing,
                     score,
-                    targetOnlyProbeTouch || repeatedTarget || diagnosticSweep || dominantTarget);
+                    repeatedTarget);
             })
             .Where(candidate => candidate.IsProbeLike)
             .OrderByDescending(candidate => candidate.Score)
@@ -158,11 +223,236 @@ public static class ProbeContactClassifier
                 $"TARGET IO{candidate.Io}: hits={candidate.Hits}, fan-in={candidate.FanIn}, " +
                 $"sources={sourceCount}, edges={edgeCount}";
 
-            result.Add(new Detection(candidate.Io, candidate.Score, signature));
+            result.Add(new Detection(
+                candidate.Io,
+                candidate.Score,
+                signature,
+                candidate.Hits,
+                candidate.FanIn,
+                candidate.Mapped));
         }
 
         return result;
     }
+
+    public static int GetRepeatedTargetThreshold(int sourceCount) =>
+        // Trace bo thật có các contact hợp lệ khoảng 12 fan-in trên sweep 256 IO.
+        // Giữ sàn 6 để một/vài cạnh thường không thành Probe và trần 12 để không
+        // bỏ lọt phần đầu/phần đuôi của thao tác chạm đang chuyển tiếp.
+        Math.Clamp((sourceCount + 15) / 16, 6, 12);
+
+    private static bool TryBuildChangingFanInObservation(
+        ScanFrame frame,
+        ProductModel? model,
+        BoardCapacity boardCapacity,
+        out int targetIo,
+        out string sourceSignature)
+    {
+        targetIo = 0;
+        sourceSignature = string.Empty;
+        if (frame.Mode != BoardScanMode.Production ||
+            !frame.Complete ||
+            frame.UnknownBytes != 0 ||
+            !frame.TerminatorKnown ||
+            frame.ActiveIo.Count != 1)
+        {
+            return false;
+        }
+
+        int activeTarget = frame.ActiveIo.First();
+        if (!boardCapacity.ContainsGlobalIo(activeTarget))
+            return false;
+
+        HashSet<long> expectedEdges = BuildExpectedEdges(model);
+        var sources = new HashSet<int>();
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target <= 0 || pair.Key <= 0 || target == pair.Key)
+                    continue;
+
+                // Mixed targets or any real expected topology are product wiring,
+                // not the single-target capacitive signature seen in the trace.
+                if (target != activeTarget || expectedEdges.Contains(EdgeKey(pair.Key, target)))
+                    return false;
+
+                sources.Add(pair.Key);
+            }
+        }
+
+        if (sources.Count == 0)
+            return false;
+
+        targetIo = activeTarget;
+        sourceSignature = string.Join(",", sources.OrderBy(value => value));
+        return true;
+    }
+
+    /// <summary>
+    /// Htdrv trace phân biệt cạnh điện thật (mỗi target chỉ có một/vài source)
+    /// với đầu dò (một target có fan-in lớn). Dùng dấu hiệu này để không giữ
+    /// cạnh dây thật trong quarantine RELEASE của Probe.
+    /// </summary>
+    public static bool HasDirectConnectionEvidence(ScanFrame frame)
+    {
+        if (frame.Mode != BoardScanMode.Production ||
+            !frame.Complete ||
+            frame.UnknownBytes != 0 ||
+            !frame.TerminatorKnown)
+        {
+            return false;
+        }
+
+        var fanInByTarget = new Dictionary<int, int>();
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+                fanInByTarget[target] = fanInByTarget.GetValueOrDefault(target) + 1;
+        }
+
+        return fanInByTarget.Any(pair => pair.Value is > 0 and <= 2);
+    }
+
+    /// <summary>
+    /// Trả về true khi snapshot có ít nhất một cạnh điện low-fan-in không thuộc
+    /// topology mong đợi. Cạnh vật lý này phải được TestEngine/LiveTopology xử lý
+    /// trước preview Probe; nếu không một nối tắt hai chân ngoài model có thể bị
+    /// quarantine thành PROBE_ONLY và mất cảnh báo CHẬP MẠCH.
+    /// </summary>
+    public static bool HasUnexpectedDirectConnectionEvidence(
+        ScanFrame frame,
+        ProductModel? model)
+    {
+        if (frame.Mode != BoardScanMode.Production ||
+            !frame.Complete ||
+            frame.UnknownBytes != 0 ||
+            !frame.TerminatorKnown)
+        {
+            return false;
+        }
+
+        var fanInByTarget = new Dictionary<int, int>();
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target > 0 && target != pair.Key)
+                    fanInByTarget[target] = fanInByTarget.GetValueOrDefault(target) + 1;
+            }
+        }
+
+        if (fanInByTarget.Count == 0)
+            return false;
+
+        HashSet<long> expectedEdges = BuildExpectedEdges(model);
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target <= 0 || target == pair.Key)
+                    continue;
+
+                int fanIn = fanInByTarget.GetValueOrDefault(target);
+                if (fanIn is > 0 and <= 2 &&
+                    !expectedEdges.Contains(EdgeKey(pair.Key, target)))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Distinguishes a matching probe edge from independent or reciprocal physical
+    /// wiring that must still reach the production fault engine.
+    /// </summary>
+    public static bool HasAuthoritativeDirectConnectionBeyondProbe(
+        ScanFrame frame,
+        ProductModel? model,
+        IReadOnlyCollection<int> probeIos)
+    {
+        if (probeIos.Count == 0)
+            return HasUnexpectedDirectConnectionEvidence(frame, model);
+
+        HashSet<int> probeSet = probeIos.Where(io => io > 0).ToHashSet();
+        HashSet<long> expectedEdges = BuildExpectedEdges(model);
+        var fanInByTarget = new Dictionary<int, int>();
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target > 0 && target != pair.Key)
+                    fanInByTarget[target] = fanInByTarget.GetValueOrDefault(target) + 1;
+            }
+        }
+
+        foreach (KeyValuePair<int, IReadOnlySet<int>> pair in frame.Connections)
+        {
+            foreach (int target in pair.Value)
+            {
+                if (target <= 0 || target == pair.Key ||
+                    expectedEdges.Contains(EdgeKey(pair.Key, target)) ||
+                    fanInByTarget.GetValueOrDefault(target) is not (> 0 and <= 2))
+                {
+                    continue;
+                }
+
+                bool outsideProbe = !probeSet.Contains(pair.Key) && !probeSet.Contains(target);
+                bool reciprocal = frame.Connections.TryGetValue(target, out IReadOnlySet<int>? reverseTargets) &&
+                                  reverseTargets.Contains(pair.Key);
+                if (outsideProbe || reciprocal)
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static HashSet<long> BuildExpectedEdges(ProductModel? model)
+    {
+        var result = new HashSet<long>();
+        if (model is null)
+            return result;
+
+        foreach (WireNet net in model.Nets)
+        {
+            int[] ios = net.IoNumbers.Where(io => io > 0).Distinct().ToArray();
+            for (int left = 0; left < ios.Length; left++)
+            {
+                for (int right = left + 1; right < ios.Length; right++)
+                {
+                    result.Add(EdgeKey(ios[left], ios[right]));
+                    result.Add(EdgeKey(ios[right], ios[left]));
+                }
+            }
+        }
+
+        if (model.Clip is not null)
+        {
+            int[] clipIos = model.Clip.Branches
+                .Select(branch => branch.TargetIo)
+                .Append(model.Clip.CommonIo)
+                .Where(io => io > 0)
+                .Distinct()
+                .ToArray();
+            for (int left = 0; left < clipIos.Length; left++)
+            {
+                for (int right = left + 1; right < clipIos.Length; right++)
+                {
+                    result.Add(EdgeKey(clipIos[left], clipIos[right]));
+                    result.Add(EdgeKey(clipIos[right], clipIos[left]));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static long EdgeKey(int source, int target) =>
+        ((long)source << 32) | (uint)target;
 
     private static bool IsMapped(ProductModel? model, int io)
     {

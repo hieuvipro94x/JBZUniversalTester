@@ -10,31 +10,39 @@ public sealed class AsyncRelayCommand : ICommand
 {
     private readonly Func<Task> _run;
     private readonly Func<bool>? _can;
+    private readonly Action<Exception>? _onError;
+    private readonly bool _disableWhileRunning;
     private bool _busy;
 
     public AsyncRelayCommand(
         Func<Task> run,
-        Func<bool>? can = null)
+        Func<bool>? can = null,
+        Action<Exception>? onError = null,
+        bool disableWhileRunning = true)
     {
         _run = run;
         _can = can;
+        _onError = onError;
+        _disableWhileRunning = disableWhileRunning;
     }
 
     public bool CanExecute(object? parameter)
     {
-        return !_busy &&
+        return (!_disableWhileRunning || !_busy) &&
                (_can?.Invoke() ?? true);
     }
 
     public async void Execute(object? parameter)
     {
-        if (!CanExecute(parameter))
+        // Execution is always serialized, even when a caller keeps the button's
+        // visual state stable during a pending operation.
+        if (_busy || !CanExecute(parameter))
         {
             return;
         }
 
         _busy = true;
-        RaiseCanExecuteChanged();
+        if (_disableWhileRunning) RaiseCanExecuteChanged();
 
         try
         {
@@ -50,18 +58,24 @@ public sealed class AsyncRelayCommand : ICommand
             // thoát khỏi đây WPF Dispatcher có thể kết thúc toàn bộ ứng dụng.
             // Chặn tại biên command, ghi log và báo rõ để app tiếp tục chạy.
             AsyncFileLogService.Current.Error($"COMMAND ERROR: {ex}");
+            if (_onError is not null)
+            {
+                _onError(ex);
+                return;
+            }
             MessageBox.Show(
                 string.IsNullOrWhiteSpace(ex.Message)
                     ? "Thao tác không thực hiện được. Hãy kiểm tra kết nối thiết bị và thử lại."
                     : ex.Message,
-                "Không thể thực hiện thao tác",
+                ex.Message == TesterConnectionNotice.Message
+                    ? TesterConnectionNotice.Message : "Không thể thực hiện thao tác",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
         finally
         {
             _busy = false;
-            RaiseCanExecuteChanged();
+            if (_disableWhileRunning) RaiseCanExecuteChanged();
         }
     }
 

@@ -8,34 +8,39 @@ namespace JBZUniversalTester.Services;
 /// QUAN TRỌNG: cùng byte 80/A0 có ý nghĩa khác nhau theo chế độ.
 ///
 /// Production continuity:
-///   80/81 nn = SOURCE đang được kích/quét
-///   A0/A1 nn = TARGET đang thông với SOURCE gần nhất
-///   C0 00    = kết thúc vòng quét
+///   80..8F nn = SOURCE đang được kích/quét
+///   A0..AF nn = TARGET đang thông với SOURCE gần nhất
+///   C0 00/01 = kết thúc vòng quét (đã xác nhận bằng trace nhỏ/lớn)
 ///
 /// TestPin / đầu dò GND (xác nhận bằng trace 2026-08-07 14:55):
-///   80/81 nn = chính I/O nn đang NORMAL
-///   A0/A1 nn = chính I/O nn đang bị que GND chạm
+///   80..8F nn = chính I/O nn đang NORMAL
+///   A0..AF nn = chính I/O nn đang bị que GND chạm
 ///   C0 00    = kết thúc snapshot theo BoardCapacity (trace gốc: 256 I/O)
 /// Ví dụ: 80 00, A0 01, 80 02 ... => chỉ IO(2) đang chạm.
 /// </summary>
 public sealed class BoardIoDecoder
 {
-    // V12.9: các hằng số compatibility trỏ về BoardCapacity để toàn project
-    // dùng cùng một nguồn sự thật. 1 physical card = 32 I/O; 1 expansion
-    // module hiện cấu hình 2 physical card = 64 I/O.
-    public const int IoPerCard = BoardCapacity.IoPerPhysicalCard;
+    private static readonly IReadOnlySet<int> EmptyTargets =
+        System.Collections.Frozen.FrozenSet<int>.Empty;
+    private static readonly IReadOnlyDictionary<int, int> EmptyTargetHits =
+        System.Collections.Frozen.FrozenDictionary<int, int>.Empty;
+
+    // Card shown in Production Settings is one firmware scan-unit = 64 I/O.
+    // The two internal 32-I/O physical boards remain an implementation detail.
+    public const int IoPerCard = BoardCapacity.IoPerExpansionCard;
     public const int ScanCardsPerExpansionCard = 1;
-    public const int IoPerScanCard = BoardCapacity.IoPerExpansionModule;
-    public const int IoPerExpansionCard = BoardCapacity.IoPerExpansionModule;
-    public const int MaxExpansionCardCount = BoardCapacity.MaxExpansionModuleCount;
-    public const int MaxScanCardCount = BoardCapacity.MaxExpansionModuleCount;
-    public const int MaxCardCount = BoardCapacity.MaxPhysicalCardCount;
+    public const int IoPerScanCard = BoardCapacity.IoPerExpansionCard;
+    public const int IoPerExpansionCard = BoardCapacity.IoPerExpansionCard;
+    public const int MaxExpansionCardCount = BoardCapacity.MaxExpansionCardCount;
+    public const int MaxScanCardCount = BoardCapacity.MaxExpansionCardCount;
+    public const int MaxCardCount = BoardCapacity.MaxExpansionCardCount;
     public const int IoPerBank = BoardAddressMapper.IoPerProtocolBank;
     public const int MaxIoCount = BoardCapacity.MaxGlobalIo;
 
     public const byte SourceBase = 0x80;
     public const byte TargetBase = 0xA0;
     public const byte WordEnd1 = 0xC0;
+    // Compatibility constant. Decoder không còn hard-code duy nhất C0 00.
     public const byte WordEnd2 = 0x00;
 
     readonly List<byte> _buffer = [];
@@ -47,18 +52,18 @@ public sealed class BoardIoDecoder
     readonly Dictionary<int, int> _targetHitCounts = [];
     readonly HashSet<int> _probeActive = [];
     readonly List<byte> _frameRaw = [];
+    readonly List<ProductionProbePreview> _productionProbePreviews = [];
+    int[] _lastProductionProbePreviewIo = [];
+    // Presentation-only continuity preview: remember the last finalized TARGET set
+    // for each SOURCE across complete scan cycles. We only emit a preview when a
+    // SOURCE relation actually changes, so unchanged 256/640-I/O scans stay silent.
+    readonly Dictionary<int, IReadOnlySet<int>> _lastProductionSourceTargets = [];
 
     int? _currentSource;
     long _sequence;
     int _unknownBytes;
     BoardCapacity _capacity = BoardCapacity.Create(1);
-    readonly BoardAddressMapper _addressMapper;
     BoardScanMode _mode = BoardScanMode.Production;
-
-    public BoardIoDecoder()
-    {
-        _addressMapper = new BoardAddressMapper(_capacity);
-    }
 
     public BoardCapacity Capacity => _capacity;
     public int ExpectedIoCount => _capacity.TotalIoCapacity;
@@ -75,7 +80,7 @@ public sealed class BoardIoDecoder
         NormalizeScanCardCount(scanCardCount);
 
     public static int RequiredExpansionCardCountForIo(int maxIo) =>
-        BoardCapacity.RequiredExpansionModulesForIo(maxIo);
+        BoardCapacity.RequiredScanUnitsForIo(maxIo);
 
     public static int RequiredCardCountForIo(int maxIo) =>
         RequiredExpansionCardCountForIo(maxIo);
@@ -90,15 +95,7 @@ public sealed class BoardIoDecoder
     {
         ArgumentNullException.ThrowIfNull(capacity);
         _capacity = capacity;
-        _addressMapper.Configure(capacity);
         Reset();
-    }
-
-    public void ConfigureStartCardNumber(int startCardNumber)
-    {
-        ConfigureCapacity(BoardCapacity.Create(
-            _capacity.ExpansionModuleCount,
-            startCardNumber));
     }
 
     public void ConfigureMode(BoardScanMode mode)
@@ -113,7 +110,7 @@ public sealed class BoardIoDecoder
     public void ConfigureCardCount(int cardCount)
     {
         int scanCardCount = NormalizeScanCardCount(cardCount);
-        ConfigureCapacity(BoardCapacity.Create(scanCardCount, _capacity.StartCardNumber));
+        ConfigureCapacity(BoardCapacity.Create(scanCardCount));
     }
 
     public void ConfigureIoCount(int ioCount)
@@ -122,13 +119,16 @@ public sealed class BoardIoDecoder
             (int)Math.Ceiling(Math.Max(1, ioCount) / (double)IoPerExpansionCard),
             1,
             MaxExpansionCardCount);
-        ConfigureCapacity(BoardCapacity.Create(expansion, _capacity.StartCardNumber));
+        ConfigureCapacity(BoardCapacity.Create(expansion));
     }
 
     public void Reset()
     {
         _buffer.Clear();
         _bufferOffset = 0;
+        _productionProbePreviews.Clear();
+        _lastProductionSourceTargets.Clear();
+        _probeActive.Clear();
         ResetFrameState(resetSequence: true);
     }
 
@@ -138,8 +138,8 @@ public sealed class BoardIoDecoder
         _connections.Clear();
         _activeTargets.Clear();
         _targetHitCounts.Clear();
-        _probeActive.Clear();
         _frameRaw.Clear();
+        _lastProductionProbePreviewIo = [];
         _currentSource = null;
         _unknownBytes = 0;
 
@@ -155,31 +155,47 @@ public sealed class BoardIoDecoder
     IReadOnlyList<ScanFrame> FeedProduction(ReadOnlySpan<byte> data)
     {
         AppendInput(data);
-        var frames = new List<ScanFrame>();
+        List<ScanFrame>? frames = null;
 
         while (_buffer.Count - _bufferOffset >= 2)
         {
             byte first = _buffer[_bufferOffset];
             byte second = _buffer[_bufferOffset + 1];
 
-            if (TryDecodeSource(first, second, out int sourceIo))
+            if (TryDecodeProtocolSource(first, second, out int physicalSourceIo))
             {
-                _currentSource = sourceIo;
-                _sourcesSeen.Add(sourceIo);
-                _connections.TryAdd(sourceIo, []);
+                // A SOURCE is complete as soon as the next SOURCE word arrives:
+                // every TARGET belonging to it has already been received. Publish
+                // only a changed relation, never one event per protocol word.
+                if (_currentSource is int completedSource)
+                    QueueProductionContinuityPreviewIfChanged(ref frames, completedSource, emit: true);
+
                 AppendRaw(first, second);
                 _bufferOffset += 2;
+
+                if (_capacity.TryMapPhysicalToLogical(physicalSourceIo, out int sourceIo))
+                {
+                    _currentSource = sourceIo;
+                    _sourcesSeen.Add(sourceIo);
+                    _connections.TryAdd(sourceIo, []);
+                }
+                else
+                {
+                    // Consume data beyond active capacity without exposing it to runtime.
+                    _currentSource = null;
+                }
                 continue;
             }
 
-            if (TryDecodeTarget(first, second, out int targetIo))
+            if (TryDecodeProtocolTarget(first, second, out int physicalTargetIo))
             {
-                _activeTargets.Add(targetIo);
-                _targetHitCounts[targetIo] =
-                    _targetHitCounts.GetValueOrDefault(targetIo) + 1;
-
-                if (_currentSource is int source)
+                if (_capacity.TryMapPhysicalToLogical(physicalTargetIo, out int targetIo) &&
+                    _currentSource is int source)
                 {
+                    _activeTargets.Add(targetIo);
+                    int targetHits = _targetHitCounts.GetValueOrDefault(targetIo) + 1;
+                    _targetHitCounts[targetIo] = targetHits;
+
                     if (!_connections.TryGetValue(source, out HashSet<int>? targets))
                     {
                         targets = [];
@@ -187,6 +203,7 @@ public sealed class BoardIoDecoder
                     }
 
                     targets.Add(targetIo);
+                    QueueProductionProbePreviewIfReady(targetIo, targetHits);
                 }
 
                 AppendRaw(first, second);
@@ -194,30 +211,54 @@ public sealed class BoardIoDecoder
                 continue;
             }
 
-            if (first == WordEnd1 && second == WordEnd2)
+            if (TryDecodeFrameTerminator(first, second, out FrameTerminator terminator))
             {
+                bool hasActiveFrameData = _sourcesSeen.Count > 0 ||
+                                          _activeTargets.Count > 0 ||
+                                          _unknownBytes > 0;
                 AppendRaw(first, second);
                 _bufferOffset += 2;
+
+                // Không biến C0 xx trôi nổi giữa garbage/biên purge thành một
+                // frame. Production chỉ kết thúc khi decoder thực sự đã nhận data.
+                if (!hasActiveFrameData)
+                {
+                    ResetFrameState();
+                    continue;
+                }
+
+                // The last SOURCE has no following SOURCE boundary. Synchronize
+                // its comparison cache here, but do not emit a redundant preview
+                // immediately before the authoritative C0 frame.
+                if (_currentSource is int finalSource && terminator.IsKnown && _unknownBytes == 0)
+                    QueueProductionContinuityPreviewIfChanged(ref frames, finalSource, emit: false);
+
                 _sequence++;
 
-                // Transport PURGE RX/TX ngay trước START_SCAN, nên vòng đầu tiên
-                // sau lệnh START đã ở biên sạch. Chấp nhận ngay frame đầu để không
-                // mất thêm gần một chu kỳ quét khi cần báo đấu sai/PASS tức thời.
-                bool complete = _sourcesSeen.Count > 0;
+                // Firmware có hai dạng snapshot đã thấy trên bo thật: target A0/A1
+                // có thể được chèn thêm sau source, hoặc thay chính word source của
+                // I/O đang active. Vì vậy coverage đầy đủ là SOURCE hợp TARGET,
+                // không chỉ riêng số SOURCE. Vẫn từ chối frame thiếu bất kỳ I/O nào.
+                bool complete = terminator.IsKnown && HasCompleteProductionCoverage();
 
-                frames.Add(new ScanFrame(
+                (frames ??= []).Add(new ScanFrame(
                     DateTime.Now,
                     CardCount,
-                    _activeTargets.ToHashSet(),
+                    _activeTargets.Count == 0 ? EmptyTargets : _activeTargets.ToHashSet(),
                     _frameRaw.ToArray(),
                     complete,
                     _unknownBytes,
                     _sequence,
-                    _connections.ToDictionary(
-                        pair => pair.Key,
-                        pair => (IReadOnlySet<int>)pair.Value.ToHashSet()),
-                    _targetHitCounts.ToDictionary(pair => pair.Key, pair => pair.Value),
-                    BoardScanMode.Production));
+                    SnapshotConnections(),
+                    _targetHitCounts.Count == 0
+                        ? EmptyTargetHits
+                        : _targetHitCounts.ToDictionary(pair => pair.Key, pair => pair.Value),
+                    BoardScanMode.Production,
+                    ExpectedIoCount,
+                    _sourcesSeen.Count,
+                    terminator.RawCode,
+                    CardCount,
+                    terminator.IsKnown));
 
                 ResetFrameState();
                 continue;
@@ -229,34 +270,167 @@ public sealed class BoardIoDecoder
         }
 
         CompactBuffer();
-        return frames;
+        return frames is null ? Array.Empty<ScanFrame>() : frames;
+    }
+
+    /// <summary>
+    /// Lấy các candidate đầu dò đã đạt ngưỡng ngay trong frame Production đang
+    /// thu. Caller phải gọi cùng critical section với Feed để giữ đúng thứ tự.
+    /// </summary>
+    public IReadOnlyList<ProductionProbePreview> DrainProductionProbePreviews()
+    {
+        if (_productionProbePreviews.Count == 0)
+            return Array.Empty<ProductionProbePreview>();
+
+        ProductionProbePreview[] result = _productionProbePreviews.ToArray();
+        _productionProbePreviews.Clear();
+        return result;
+    }
+
+    private void QueueProductionProbePreviewIfReady(int targetIo, int targetHits)
+    {
+        // Htdrv phản hồi ngay trong vòng quét, nhưng một TARGET đơn lẻ cũng có
+        // thể là continuity/GND nhiễu. Chỉ preview khi fan-in đã đạt đúng ngưỡng
+        // repeated-target mà classifier frame hoàn chỉnh đang sử dụng.
+        int requiredHits = ProbeContactClassifier.GetRepeatedTargetThreshold(ExpectedIoCount);
+        // Hot path: chỉ làm việc khi một target vừa CHẠM ngưỡng, không LINQ/sort
+        // lại toàn bộ dictionary cho hàng trăm target word trong mỗi frame.
+        if (targetHits != requiredHits ||
+            _lastProductionProbePreviewIo.Length >= 2 ||
+            _lastProductionProbePreviewIo.Contains(targetIo))
+            return;
+
+        int[] candidates = _lastProductionProbePreviewIo
+            .Append(targetIo)
+            .OrderBy(io => io)
+            .ToArray();
+        _lastProductionProbePreviewIo = candidates;
+        _productionProbePreviews.Add(new ProductionProbePreview(
+            DateTime.Now,
+            candidates,
+            requiredHits,
+            targetHits,
+            _sequence + 1));
+    }
+
+    private void QueueProductionContinuityPreviewIfChanged(
+        ref List<ScanFrame>? frames,
+        int sourceIo,
+        bool emit)
+    {
+        if (_unknownBytes != 0 || sourceIo <= 0)
+            return;
+
+        HashSet<int> currentTargets = _connections.TryGetValue(sourceIo, out HashSet<int>? targets)
+            ? targets
+            : [];
+
+        bool hadPrevious = _lastProductionSourceTargets.TryGetValue(
+            sourceIo,
+            out IReadOnlySet<int>? previousTargets);
+        bool changed = hadPrevious
+            ? !previousTargets!.SetEquals(currentTargets)
+            : currentTargets.Count > 0;
+
+        // Keep the comparison cache synchronized even for empty/unchanged sources.
+        _lastProductionSourceTargets[sourceIo] = currentTargets.Count == 0
+            ? EmptyTargets
+            : currentTargets.ToHashSet();
+
+        if (!emit || !changed)
+            return;
+
+        IReadOnlySet<int> targetSnapshot = currentTargets.Count == 0
+            ? EmptyTargets
+            : currentTargets.ToHashSet();
+        var connectionSnapshot = new Dictionary<int, IReadOnlySet<int>>(1)
+        {
+            [sourceIo] = targetSnapshot
+        };
+
+        // Sentinel for TestViewModel/D2xx transport:
+        // Production + Complete=false + SourceCount=1 + no C0 marker.
+        // This is presentation data only; it must never enter TestEngine.ProcessFrame.
+        (frames ??= []).Add(new ScanFrame(
+            DateTime.Now,
+            CardCount,
+            targetSnapshot,
+            Array.Empty<byte>(),
+            false,
+            0,
+            _sequence + 1,
+            connectionSnapshot,
+            targetSnapshot.Count == 0
+                ? EmptyTargetHits
+                : targetSnapshot.ToDictionary(value => value, _ => 1),
+            BoardScanMode.Production,
+            ExpectedIoCount,
+            1,
+            null,
+            CardCount,
+            false));
+    }
+
+    private bool HasCompleteProductionCoverage()
+    {
+        if (_sourcesSeen.Count == ExpectedIoCount)
+            return true;
+
+        if (_sourcesSeen.Count + _activeTargets.Count < ExpectedIoCount)
+            return false;
+
+        for (int io = _capacity.FirstGlobalIo; io <= _capacity.LastGlobalIo; io++)
+        {
+            if (!_sourcesSeen.Contains(io) && !_activeTargets.Contains(io))
+                return false;
+        }
+
+        return true;
+    }
+
+    private IReadOnlyDictionary<int, IReadOnlySet<int>> SnapshotConnections()
+    {
+        var snapshot = new Dictionary<int, IReadOnlySet<int>>(_connections.Count);
+        foreach ((int source, HashSet<int> targets) in _connections)
+        {
+            // A complete 10-card frame normally has hundreds of sources with
+            // no target. One immutable empty set can safely represent all of
+            // them instead of allocating one HashSet per source and per frame.
+            snapshot[source] = targets.Count == 0
+                ? EmptyTargets
+                : targets.ToHashSet();
+        }
+
+        return snapshot;
     }
 
     IReadOnlyList<ScanFrame> FeedProbe(ReadOnlySpan<byte> data)
     {
         AppendInput(data);
-        var frames = new List<ScanFrame>();
+        List<ScanFrame>? frames = null;
 
         while (_buffer.Count - _bufferOffset >= 2)
         {
             byte first = _buffer[_bufferOffset];
             byte second = _buffer[_bufferOffset + 1];
 
-            if (TryDecodeProbeState(first, second, out int io, out bool active))
+            if (TryDecodeProtocolProbeState(first, second, out int physicalIo, out bool active))
             {
                 AppendRaw(first, second);
                 _bufferOffset += 2;
 
+                if (!_capacity.TryMapPhysicalToLogical(physicalIo, out int io))
+                    continue;
+
                 // V12.9.2: protocol Probe được xử lý như event-based state.
                 // TARGET = TOUCH/ON, SOURCE = RELEASE/OFF. Cả hai đều cập nhật
                 // tập hiện tại và phát frame ngay; không chờ C0/TTL/timer để UI đổi.
-                if (active)
-                    _probeActive.Add(io);
-                else
-                    _probeActive.Remove(io);
+                bool changed = active ? _probeActive.Add(io) : _probeActive.Remove(io);
+                if (!changed)
+                    continue;
 
                 HashSet<int> instantIo = _probeActive.ToHashSet();
-                frames.Add(new ScanFrame(
+                (frames ??= []).Add(new ScanFrame(
                     DateTime.Now,
                     CardCount,
                     instantIo,
@@ -271,18 +445,18 @@ public sealed class BoardIoDecoder
                 continue;
             }
 
-            if (first == WordEnd1 && second == WordEnd2)
+            if (TryDecodeFrameTerminator(first, second, out FrameTerminator terminator) &&
+                terminator.IsKnown)
             {
                 AppendRaw(first, second);
                 _bufferOffset += 2;
                 _sequence++;
 
-                // C0 kết thúc snapshot: luôn phát trạng thái đầy đủ. Nếu một chân
-                // đã nhả thì nó không còn trong tập này; nhả hết => tập rỗng.
-                // Nhờ vậy release từng IO được xử lý độc lập và không reset UI
-                // Production/configuration.
+                // C0 closes the scan, not the contact lifetime. Keep each IO
+                // until its own SOURCE/OFF word; the beginning of the next
+                // 640-IO scan cannot manufacture an empty/released snapshot.
                 HashSet<int> snapshot = _probeActive.ToHashSet();
-                frames.Add(new ScanFrame(
+                (frames ??= []).Add(new ScanFrame(
                     DateTime.Now,
                     CardCount,
                     snapshot,
@@ -292,7 +466,12 @@ public sealed class BoardIoDecoder
                     _sequence,
                     new Dictionary<int, IReadOnlySet<int>>(),
                     snapshot.ToDictionary(value => value, _ => 1),
-                    BoardScanMode.Probe));
+                    BoardScanMode.Probe,
+                    ExpectedIoCount,
+                    _sourcesSeen.Count,
+                    terminator.RawCode,
+                    CardCount,
+                    true));
 
                 ResetFrameState();
                 continue;
@@ -303,7 +482,7 @@ public sealed class BoardIoDecoder
         }
 
         CompactBuffer();
-        return frames;
+        return frames is null ? Array.Empty<ScanFrame>() : frames;
     }
 
     public IReadOnlyList<ScanFrame> Decode(byte[] raw)
@@ -321,23 +500,45 @@ public sealed class BoardIoDecoder
             _buffer.Add(value);
     }
 
-    bool TryDecodeSource(byte first, byte second, out int io) =>
-        _addressMapper.TryDecode(first, SourceBase, second, out io);
+    static bool TryDecodeProtocolSource(byte first, byte second, out int io) =>
+        BoardAddressMapper.TryDecodeProtocolAddress(first, SourceBase, second, out io);
 
-    bool TryDecodeTarget(byte first, byte second, out int io) =>
-        _addressMapper.TryDecode(first, TargetBase, second, out io);
+    static bool TryDecodeProtocolTarget(byte first, byte second, out int io) =>
+        BoardAddressMapper.TryDecodeProtocolAddress(first, TargetBase, second, out io);
 
-    bool TryDecodeProbeState(byte first, byte second, out int io, out bool active)
+    /// <summary>
+    /// Terminator protocol đã có bằng chứng cho code 00 và 01. C0 với code khác
+    /// vẫn được nhận diện là terminator candidate để phát diagnostic incomplete,
+    /// nhưng tuyệt đối không được đánh dấu complete.
+    /// </summary>
+    public static bool TryDecodeFrameTerminator(
+        byte first,
+        byte second,
+        out FrameTerminator terminator)
+    {
+        if (first != WordEnd1)
+        {
+            terminator = default;
+            return false;
+        }
+
+        terminator = new FrameTerminator(
+            second,
+            second is 0x00 or 0x01);
+        return true;
+    }
+
+    static bool TryDecodeProtocolProbeState(byte first, byte second, out int io, out bool active)
     {
         active = false;
 
-        if (_addressMapper.TryDecode(first, SourceBase, second, out io))
+        if (TryDecodeProtocolSource(first, second, out io))
         {
             active = false;
             return true;
         }
 
-        if (_addressMapper.TryDecode(first, TargetBase, second, out io))
+        if (TryDecodeProtocolTarget(first, second, out io))
         {
             active = true;
             return true;
@@ -372,3 +573,5 @@ public sealed class BoardIoDecoder
         }
     }
 }
+
+public readonly record struct FrameTerminator(byte RawCode, bool IsKnown);

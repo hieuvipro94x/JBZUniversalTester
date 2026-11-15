@@ -38,15 +38,18 @@ public static class EplLabelService
         bool includeAlcLotSuffix = true)
     {
         string date = data.TestedAt.ToString("yyMMdd");
-        string lot = FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix);
+        string displayLot = FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix: false);
+        string barcodeLot = FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix);
         return new LabelIdentity(
-            $"{date}{lot}WH",
-            $"{data.PartNumber}{date}{lot}");
+            $"{date}{displayLot}WH",
+            $"{data.PartNumber}{date}{barcodeLot}");
     }
 
     internal static string FormatLotNo(long lotNo, string? alc, bool includeAlcLotSuffix)
     {
-        string lot = lotNo.ToString(CultureInfo.InvariantCulture);
+        // TEM_TO/TEM_BE dùng LOT tối thiểu bốn chữ số. D4 không cắt các LOT
+        // lớn hơn 9999 và hậu tố ALC vẫn được ghép riêng sau bốn số LOT.
+        string lot = lotNo.ToString("D4", CultureInfo.InvariantCulture);
         if (!includeAlcLotSuffix || string.IsNullOrWhiteSpace(alc))
             return lot;
 

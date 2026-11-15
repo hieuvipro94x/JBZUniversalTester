@@ -23,11 +23,20 @@ public interface IBoardTransport : IAsyncDisposable
     bool IsConnected { get; }
     bool IsScanning { get; }
     BoardScanMode CurrentScanMode { get; }
+    BoardCapacity InstalledCapacity { get; }
     BoardCapacity Capacity { get; }
+    BoardCapacity? AppliedScanCapacity { get; }
+    BoardScanCapacity ScanCapacity { get; }
     DateTime LastFrameTimestampUtc { get; }
     long LastFrameSequence { get; }
+    long LastCompleteFrameSequence { get; }
     long FramesReceived { get; }
+    long CompleteFramesReceived { get; }
+    int LastFrameSourceCount { get; }
+    byte? LastFrameEndMarkerCode { get; }
+    int LastFrameUnknownBytes { get; }
     event EventHandler<ScanFrame>? FrameReceived;
+    event EventHandler<ProductionProbePreview>? ProductionProbePreviewReceived;
     event EventHandler<string>? Log;
     Task<BoardConnectionInfo> ConnectAsync(CancellationToken ct = default);
     Task DisconnectAsync();
@@ -38,7 +47,7 @@ public interface IBoardTransport : IAsyncDisposable
     /// Cấu hình dải I/O cần quét theo Settings + model hiện tại. Toàn bộ
     /// Transport/Decoder/TestView lấy cùng BoardCapacity, không tự tính card.
     /// </summary>
-    void ConfigureScanRange(int maxIo);
+    void ConfigureActiveScanRange(int maxIo);
 
     Task StartScanAsync(BoardScanMode mode = BoardScanMode.Production, CancellationToken ct = default);
     Task StopScanAsync(CancellationToken ct = default);
@@ -47,4 +56,17 @@ public interface IBoardTransport : IAsyncDisposable
     Task ReleaseResistanceRouteAsync(CancellationToken ct = default);
     Task SetRelayAsync(int relay, CancellationToken ct = default);
     Task AllRelaysOffAsync(CancellationToken ct = default);
+}
+
+/// <summary>
+/// Internal timing surface for the D2XX PASS-relay path. Timestamps are captured
+/// immediately after the successful FT_Write and use the Stopwatch clock.
+/// </summary>
+internal interface IBoardCommandTimingDiagnostics
+{
+    long LastStopScanTxTimestamp { get; }
+    long LastResetClearTxTimestamp { get; }
+    long LastStartScanTxTimestamp { get; }
+    Task<long> SetRelayWithTxTimestampAsync(int relay, CancellationToken ct = default);
+    Task<long> AllRelaysOffWithTxTimestampAsync(CancellationToken ct = default);
 }

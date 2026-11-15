@@ -45,7 +45,9 @@ public static class LabelVariableResolver
         string templateType = LabelProfileResolver.NormalizeTemplateType(settings.TemplateType);
         bool isSmallLabel = templateType == LabelSettings.SmallTemplate;
         bool isSmallQrLabel = templateType == LabelSettings.SmallQrTemplate;
-        bool usesFourDigitLot = isSmallLabel || isSmallQrLabel;
+        bool isLargeSqdzLabel = templateType == LabelSettings.LargeSqdzTemplate;
+        bool usesSqdzDateCode = isSmallLabel || isLargeSqdzLabel;
+        bool usesFourDigitLot = usesSqdzDateCode || isSmallQrLabel;
         long labelLotNo = isSmallQrLabel
             ? ResolveSmallQrSequence(data.LotNo)
             : data.LotNo;
@@ -54,6 +56,9 @@ public static class LabelVariableResolver
             includeAlcLotSuffix: !usesFourDigitLot);
         string lot = usesFourDigitLot
             ? labelLotNo.ToString("D4", CultureInfo.InvariantCulture)
+            : EplLabelService.FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix: false);
+        string barcodeLot = usesFourDigitLot
+            ? lot
             : EplLabelService.FormatLotNo(data.LotNo, data.Alc, includeAlcLotSuffix: true);
         string barcode = string.IsNullOrWhiteSpace(data.Barcode)
             ? identity.BarcodeValue
@@ -62,18 +67,21 @@ public static class LabelVariableResolver
             ? barcode
             : data.BarcodePrint;
 
-        if (isSmallLabel)
+        if (usesSqdzDateCode)
         {
             string yearCode = ResolveSmallLabelYearCode(data.TestedAt.Year);
             string monthCode = ResolveSmallLabelMonthCode(data.TestedAt.Month);
             string dayCode = ResolveSmallLabelDayCode(data.TestedAt.Day);
             string smallLabelBarcode =
                 $"{data.PartNumber},{SmallLabelCustomerPrefix}{yearCode}{monthCode}{dayCode}{lot}";
+            string sqdzSerial = $"{SmallLabelCustomerPrefix}{yearCode}{monthCode}{dayCode}{lot}";
 
             values["YEAR_CODE"] = yearCode;
             values["MONTH_CODE"] = monthCode;
             values["DAY_CODE"] = dayCode;
             values["SMALL_LABEL_BARCODE"] = smallLabelBarcode;
+            values["SQDZ_LABEL_BARCODE"] = smallLabelBarcode;
+            values["SQDZ_SERIAL"] = sqdzSerial;
             values["PART_NUMBER"] = data.PartNumber;
             barcode = smallLabelBarcode;
             barcodePrint = smallLabelBarcode;
@@ -91,6 +99,7 @@ public static class LabelVariableResolver
         // Highest priority: immutable data captured for the completed cycle.
         values["LOT"] = lot;
         values["LOT_NO"] = lot;
+        values["LOT_NO_BARCODE"] = barcodeLot;
         values["LOT_NO_3"] = labelLotNo.ToString("D3", CultureInfo.InvariantCulture);
         values["SEQUENCE"] = lot;
         values["MODEL_FILE_NAME"] = Path.GetFileName(model.SourcePath ?? string.Empty);

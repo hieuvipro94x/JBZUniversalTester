@@ -14,6 +14,9 @@ public static class ProductionTimingPolicy
     public const int StartupInit1ToInit2Ms = 350;
     public const int D2xxControlWaitSleepMs = 1;
     public const int D2xxIdlePollSleepMs = 2;
+    public const int PassStopScanToResetClearMs = 280;
+    public const int PassResetClearToFirstRelayMs = 170;
+    public const int PassFinalRelayOffToStartScanMs = 120;
 
     public static void Normalize(ProductionSettings settings)
     {
@@ -27,6 +30,6 @@ public static class ProductionTimingPolicy
         settings.WrongConnectionConfirmMs = DefaultWrongConnectionConfirmMs;
         settings.ProductSettleTimeMs = DefaultProductSettleTimeMs;
         settings.JigContactUnstableWindowMs = DefaultJigContactUnstableWindowMs;
-        settings.ProbeReplacementThreshold = Math.Clamp(settings.ProbeReplacementThreshold, 1_000, 100_000_000);
+        settings.ProbeReplacementThreshold = Math.Max(1, settings.ProbeReplacementThreshold);
     }
 }

@@ -6,6 +6,7 @@ namespace JBZUniversalTester.Services;
 public sealed class LotSequenceService
 {
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _asyncPersistenceGate = new(1, 1);
     private readonly ProductionSettings _settings;
     private readonly Action<ProductionSettings> _persist;
     private readonly Func<DateTime> _now;
@@ -65,6 +66,31 @@ public sealed class LotSequenceService
         }
     }
 
+    public long StartLot
+    {
+        get
+        {
+            lock (_gate)
+            {
+                EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
+                return ActiveLotLocked().DailyLotStartsAtZero ? 0 : Math.Max(0, ActiveLotLocked().StartLotNo);
+            }
+        }
+    }
+
+    public string HistoryBatchKey
+    {
+        get
+        {
+            lock (_gate)
+            {
+                EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
+                ProductLotSettings lot = ActiveLotLocked();
+                return $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}";
+            }
+        }
+    }
+
     public long ReserveForCycle(string cycleId)
     {
         if (string.IsNullOrWhiteSpace(cycleId))
@@ -82,18 +108,18 @@ public sealed class LotSequenceService
                 .Select(item => item.LotNo)
                 .Distinct()
                 .Count();
-            long reserved = checked(lot.LotNo + pendingForProduct);
+            long reserved = checked(lot.LotNo + pendingForProduct + 1L);
             _reservations[cycleId] = new LotReservation(_activeProductKey, reserved);
             return reserved;
         }
     }
 
-    public bool TryCommitSuccessfulPrint(string cycleId, long printedLot, out string error)
+    public bool TryCommitSuccessfulPass(string cycleId, long completedLot, out string error)
     {
         lock (_gate)
         {
             if (!_reservations.TryGetValue(cycleId, out LotReservation reservation) ||
-                reservation.LotNo != printedLot)
+                reservation.LotNo != completedLot)
             {
                 error = $"LOT reservation mismatch for cycle {cycleId}.";
                 return false;
@@ -102,19 +128,28 @@ public sealed class LotSequenceService
             ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
                 _settings, reservation.ProductKey, migrateCurrentLot: false);
             long current = Math.Max(0, lot.LotNo);
-            if (printedLot != current)
+            if (completedLot <= current)
             {
-                error = $"Cannot commit LOT {printedLot}; next persisted LOT is {current}.";
-                return false;
+                // SQLite/CycleId may already contain this durable PASS. Treat the
+                // in-memory reservation as stale and never move LOT backwards.
+                RemoveCommittedReservationsLocked(reservation.ProductKey, current);
+                error = string.Empty;
+                return true;
             }
 
             try
             {
-                lot.LotNo = checked(printedLot + 1);
+                // The completed PASS is already durable in SQLite before this method
+                // is called. Advance to that exact LOT even if an older failed-label
+                // reservation was left in memory by a previous cycle. A printer
+                // failure must never freeze every later PASS at the old LOTNO.
+                lot.LotNo = completedLot;
                 if (IsActiveProduct(reservation.ProductKey))
                     SyncCompatibilityFieldsLocked(lot);
                 _persist(_settings);
-                _reservations.Remove(cycleId);
+
+                RemoveCommittedReservationsLocked(reservation.ProductKey, completedLot);
+
                 EnsureCurrentProductionDateLocked(reservation.ProductKey, persist: false);
                 error = string.Empty;
                 return true;
@@ -124,11 +159,155 @@ public sealed class LotSequenceService
                 lot.LotNo = current;
                 if (IsActiveProduct(reservation.ProductKey))
                     SyncCompatibilityFieldsLocked(lot);
-                error = $"Cannot persist next LOT: {ex.Message}";
+                error = $"Cannot persist completed LOT: {ex.Message}";
                 return false;
             }
         }
     }
+
+    public bool TryReconcileCommittedLot(
+        long committedLot, out string error, string? productionBatchKey = null,
+        bool restoreSelectedDate = false, bool resetUntestedDay = false)
+    {
+        lock (_gate)
+        {
+            EnsureCurrentProductionDateLocked(_activeProductKey, persist: false);
+            ProductLotSettings lot = ActiveLotLocked();
+            if (productionBatchKey is not null &&
+                !string.Equals(productionBatchKey,
+                    $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}", StringComparison.Ordinal))
+            {
+                // An asynchronous query from the previous date/reset cannot
+                // restore its LOT into the newly selected counter period.
+                error = string.Empty;
+                return true;
+            }
+            long current = Math.Max(0, lot.LotNo);
+            long authoritative = Math.Max(0, committedLot);
+            if (resetUntestedDay && _reservations.Values.Any(item => IsActiveProduct(item.ProductKey)))
+            {
+                error = "Cannot reset LOT while a product reservation is active.";
+                return false;
+            }
+            bool previousZeroStart = lot.DailyLotStartsAtZero;
+            if ((authoritative == current && (!resetUntestedDay || previousZeroStart)) || (!restoreSelectedDate && authoritative < current))
+            {
+                error = string.Empty;
+                return true;
+            }
+
+            try
+            {
+                lot.LotNo = authoritative;
+                if (resetUntestedDay) lot.DailyLotStartsAtZero = true;
+                SyncCompatibilityFieldsLocked(lot);
+                _persist(_settings);
+
+                RemoveCommittedReservationsLocked(_activeProductKey, authoritative);
+
+                error = string.Empty;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                lot.LotNo = current;
+                lot.DailyLotStartsAtZero = previousZeroStart;
+                SyncCompatibilityFieldsLocked(lot);
+                error = $"Cannot reconcile committed LOT {authoritative}: {ex.Message}";
+                return false;
+            }
+        }
+    }
+
+    public bool TryCommitSuccessfulPrint(string cycleId, long printedLot, out string error) =>
+        TryCommitSuccessfulPass(cycleId, printedLot, out error);
+
+    public Task<(bool Success, string Error)> CommitSuccessfulPassAsync(string cycleId, long completedLot) =>
+        PersistDetachedAsync(cycleId, worker =>
+        {
+            bool success = worker.TryCommitSuccessfulPass(cycleId, completedLot, out string error);
+            return (success, error);
+        });
+
+    public Task<(bool Success, string Error)> ReconcileCommittedLotAsync(
+        long committedLot, string? batchKey = null, bool restoreSelectedDate = false, bool resetUntestedDay = false) =>
+        PersistDetachedAsync(null, worker =>
+        {
+            bool success = worker.TryReconcileCommittedLot(committedLot, out string error, batchKey, restoreSelectedDate, resetUntestedDay);
+            return (success, error);
+        });
+
+    private async Task<(bool Success, string Error)> PersistDetachedAsync(
+        string? cycleId, Func<LotSequenceService, (bool Success, string Error)> operation)
+    {
+        await _asyncPersistenceGate.WaitAsync();
+        try
+        {
+            string activeKey, productKey, revision;
+            long previous;
+            ProductionSettings snapshot;
+            KeyValuePair<string, LotReservation>[] reservations;
+            lock (_gate)
+            {
+                activeKey = _activeProductKey;
+                productKey = cycleId is not null && _reservations.TryGetValue(cycleId, out LotReservation reserved)
+                    ? reserved.ProductKey : activeKey;
+                ProductLotSettings current = GetLotLocked(productKey, false);
+                previous = current.LotNo;
+                revision = Revision(current);
+                snapshot = new ProductionSettings();
+                ProductionConfigService.CopyInto(snapshot, _settings);
+                // Freeze the small mutable counter records now. The VM's CFG
+                // owner prevents other settings edits until this job drains;
+                // expensive serializer metadata/deep-copy work belongs to the worker.
+                snapshot.LotSettingsByProduct = _settings.LotSettingsByProduct.ToDictionary(
+                    item => item.Key, item => new ProductLotSettings
+                    {
+                        DailyLotStartsAtZero = item.Value.DailyLotStartsAtZero,
+                        UseConfiguredStartLot = item.Value.UseConfiguredStartLot,
+                        StartLotNo = item.Value.StartLotNo, LotNo = item.Value.LotNo,
+                        LotNoDate = item.Value.LotNoDate, BulkPrintLotNo = item.Value.BulkPrintLotNo,
+                        HistoryBatchId = item.Value.HistoryBatchId, LastStartChangedDate = item.Value.LastStartChangedDate
+                    }, StringComparer.OrdinalIgnoreCase);
+                reservations = _reservations.ToArray();
+            }
+
+            // The worker owns a detached DTO and its own counter lock. Slow
+            // Flush(true) never holds the live lock used by clock/input reads.
+            var outcome = await Task.Run(() =>
+            {
+                ProductionSettings detached = System.Text.Json.JsonSerializer.Deserialize<ProductionSettings>(
+                    System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot))!;
+                var worker = new LotSequenceService(detached, _persist, _now);
+                worker.SelectProduct(activeKey, false);
+                foreach (var item in reservations) worker._reservations[item.Key] = item.Value;
+                var result = operation(worker);
+                return (Result: result, Lot: detached.LotSettingsByProduct[productKey]);
+            });
+            if (!outcome.Result.Success) return outcome.Result;
+            lock (_gate)
+            {
+                ProductLotSettings live = GetLotLocked(productKey, false);
+                if (live.LotNo == previous && Revision(live) == revision)
+                {
+                    live.DailyLotStartsAtZero = outcome.Lot.DailyLotStartsAtZero;
+                    live.LotNo = outcome.Lot.LotNo;
+                    live.LotNoDate = outcome.Lot.LotNoDate;
+                    if (IsActiveProduct(productKey)) SyncCompatibilityFieldsLocked(live);
+                    RemoveCommittedReservationsLocked(productKey, live.LotNo);
+                }
+                if (cycleId is not null) _reservations.Remove(cycleId);
+            }
+            return outcome.Result;
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Cannot persist LOT snapshot: {ex.Message}");
+        }
+        finally { _asyncPersistenceGate.Release(); }
+    }
+
+    private static string Revision(ProductLotSettings lot) => $"{lot.LotNoDate}:{lot.StartLotNo}:{lot.HistoryBatchId}:{lot.DailyLotStartsAtZero}:{lot.UseConfiguredStartLot}";
 
     public bool IsCommitCandidate(string cycleId, long lotNo)
     {
@@ -141,7 +320,7 @@ public sealed class LotSequenceService
             }
             ProductLotSettings current = ProductionConfigService.GetOrCreateProductLot(
                 _settings, reservation.ProductKey, migrateCurrentLot: false);
-            return current.LotNo == lotNo;
+            return lotNo == checked(current.LotNo + 1L);
         }
     }
 
@@ -156,7 +335,7 @@ public sealed class LotSequenceService
                 return existing.LotNo == lotNo && IsActiveProduct(existing.ProductKey);
 
             ProductLotSettings current = ActiveLotLocked();
-            if (lotNo < current.LotNo || _reservations.Values.Any(item =>
+            if (lotNo <= current.LotNo || _reservations.Values.Any(item =>
                     IsActiveProduct(item.ProductKey) && item.LotNo == lotNo))
             {
                 return false;
@@ -178,6 +357,14 @@ public sealed class LotSequenceService
         }
     }
 
+    public void ReleaseReservation(string cycleId)
+    {
+        if (string.IsNullOrWhiteSpace(cycleId))
+            return;
+        lock (_gate)
+            _reservations.Remove(cycleId);
+    }
+
     private bool EnsureCurrentProductionDateLocked(string productKey, bool persist)
     {
         if (_reservations.Values.Any(item =>
@@ -186,8 +373,7 @@ public sealed class LotSequenceService
             return false;
         }
 
-        ProductLotSettings lot = ProductionConfigService.GetOrCreateProductLot(
-            _settings, productKey, migrateCurrentLot: false);
+        ProductLotSettings lot = GetLotLocked(productKey, false);
         string today = _now().Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string storedDate = (lot.LotNoDate ?? string.Empty).Trim();
         if (string.Equals(storedDate, today, StringComparison.Ordinal))
@@ -198,12 +384,18 @@ public sealed class LotSequenceService
         }
 
         long previousLot = lot.LotNo;
+        bool previousZeroStart = lot.DailyLotStartsAtZero;
         string previousDate = lot.LotNoDate ?? string.Empty;
         if (DateOnly.TryParseExact(
                 storedDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out _))
         {
-            lot.LotNo = 0;
+            // A new date starts at zero unless the operator explicitly saved a base.
+            // SQLite restores that date's committed PASS progress afterwards.
+            lot.LotNo = lot.UseConfiguredStartLot ? Math.Max(0, lot.StartLotNo) : 0;
+            lot.DailyLotStartsAtZero = !lot.UseConfiguredStartLot;
+            // Keep the configured batch identity so returning to a date can
+            // recover that date's committed production counters and LOT.
         }
         lot.LotNoDate = today;
         if (IsActiveProduct(productKey))
@@ -214,7 +406,7 @@ public sealed class LotSequenceService
             if (previousLot != lot.LotNo)
             {
                 AsyncFileLogService.Current.Test(
-                    $"LOTNO DAILY RESET product={productKey} date={today} previous={previousLot} next=0");
+                    $"LOTNO DAILY RESET product={productKey} date={today} previous={previousLot} next={lot.LotNo}");
             }
             return true;
         }
@@ -227,6 +419,7 @@ public sealed class LotSequenceService
         catch (Exception ex)
         {
             lot.LotNo = previousLot;
+            lot.DailyLotStartsAtZero = previousZeroStart;
             lot.LotNoDate = previousDate;
             if (IsActiveProduct(productKey))
                 SyncCompatibilityFieldsLocked(lot);
@@ -236,22 +429,11 @@ public sealed class LotSequenceService
         }
     }
 
-    private void TryPersistNewProductLocked(string productKey)
-    {
-        try
-        {
-            _persist(_settings);
-        }
-        catch (Exception ex)
-        {
-            AsyncFileLogService.Current.Error(
-                $"Không thể lưu LOTNO ban đầu cho {productKey}: {ex.Message}");
-        }
-    }
+    private ProductLotSettings ActiveLotLocked() => GetLotLocked(_activeProductKey, true);
 
-    private ProductLotSettings ActiveLotLocked() =>
-        ProductionConfigService.GetOrCreateProductLot(
-            _settings, _activeProductKey, migrateCurrentLot: true);
+    private ProductLotSettings GetLotLocked(string key, bool migrateCurrentLot) =>
+        _settings.LotSettingsByProduct.TryGetValue(key, out ProductLotSettings? lot)
+            ? lot : ProductionConfigService.GetOrCreateProductLot(_settings, key, migrateCurrentLot);
 
     private void SyncCompatibilityFieldsLocked(ProductLotSettings lot)
     {
@@ -262,6 +444,22 @@ public sealed class LotSequenceService
 
     private bool IsActiveProduct(string productKey) =>
         string.Equals(productKey, _activeProductKey, StringComparison.OrdinalIgnoreCase);
+
+    private void RemoveCommittedReservationsLocked(string productKey, long throughLot)
+    {
+        foreach (string staleCycle in _reservations
+                     .Where(pair =>
+                         string.Equals(
+                             pair.Value.ProductKey,
+                             productKey,
+                             StringComparison.OrdinalIgnoreCase) &&
+                         pair.Value.LotNo <= throughLot)
+                     .Select(pair => pair.Key)
+                     .ToArray())
+        {
+            _reservations.Remove(staleCycle);
+        }
+    }
 
     private static string NormalizeProductKey(string? productKey) =>
         string.IsNullOrWhiteSpace(productKey) ? "DEFAULT" : productKey.Trim();

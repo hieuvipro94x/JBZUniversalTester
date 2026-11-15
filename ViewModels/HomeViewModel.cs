@@ -1,22 +1,26 @@
 using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Interop;
 using JBZUniversalTester.Core;
+using JBZUniversalTester.Services;
 using JBZUniversalTester.Views;
-using Microsoft.Win32;
+using WinForms = System.Windows.Forms;
 
 namespace JBZUniversalTester.ViewModels;
 
 public sealed class HomeViewModel : ObservableObject
 {
     private const string ProductFileFilter =
-        "JBZ THT (*.tht)|*.tht|Mã hàng legacy (*.model)|*.model";
+        "The Files (*.tht)|*.tht|All Files (*.*)|*.*";
+    private const string OriginalItemDirectory = @"C:\Item";
     private readonly MainViewModel _main;
 
     // Cho HomeView mở màn hình kiểm tra chân pin và cài đặt.
     public MainViewModel Main => _main;
 
     public AsyncRelayCommand LoadModelCommand { get; }
+    public AsyncRelayCommand BrowseModelCommand { get; }
     public RelayCommand StartCommand { get; }
 
     public string ModelName =>
@@ -34,11 +38,23 @@ public sealed class HomeViewModel : ObservableObject
     public string SourcePath =>
         _main.Model?.SourcePath ?? string.Empty;
 
+    public bool IsLabelPrintingEnabled => _main.Model is not null &&
+        ProductionConfigService.IsProductLabelPrintingEnabled(
+            _main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model));
+
+    public string LabelTemplateType => _main.Model is null
+        ? "CHƯA NẠP MÃ HÀNG"
+        : !ProductionConfigService.IsProductLabelPrintingEnabled(_main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model))
+        ? "KHÔNG IN TEM"
+        : ProductionConfigService.GetProductLabelTemplate(_main.ProductionSettings, ProductionConfigService.GetLotProductKey(_main.Model));
+    public string LabelTemplateDisplayName => LabelTemplateType.Replace('_', ' ');
+
     public HomeViewModel(MainViewModel main)
     {
         _main = main;
 
-        LoadModelCommand = new AsyncRelayCommand(LoadModelAsync);
+        LoadModelCommand = new AsyncRelayCommand(() => LoadModelAsync());
+        BrowseModelCommand = new AsyncRelayCommand(() => LoadModelAsync(browseOnly: true));
 
         StartCommand = new RelayCommand(
             () => _main.CurrentPage = _main.Test,
@@ -46,89 +62,134 @@ public sealed class HomeViewModel : ObservableObject
         );
     }
 
-    private async Task LoadModelAsync()
+    private async Task LoadModelAsync(bool browseOnly = false)
     {
-        var dialog = new OpenFileDialog
+        if (_loadingProduct) return;
+        using var dialog = new WinForms.OpenFileDialog
         {
-            Title = "Chọn mã hàng",
+            DefaultExt = ".tht",
             Filter = ProductFileFilter,
-            CheckFileExists = true,
-            CheckPathExists = true,
             Multiselect = false,
-            ValidateNames = true
+            AutoUpgradeEnabled = false,
+            RestoreDirectory = true
         };
 
-        string? initialDirectory = Path.GetDirectoryName(_main.Model?.SourcePath);
-        if (!string.IsNullOrWhiteSpace(initialDirectory) && Directory.Exists(initialDirectory))
-            dialog.InitialDirectory = initialDirectory;
+        dialog.InitialDirectory = CatalogDirectory;
 
-        Window? owner = Application.Current?.MainWindow;
-        bool? accepted;
-        if (owner is not null)
+        Window? owner = Application.Current?.Windows
+            .OfType<Window>()
+            .FirstOrDefault(window => window.IsActive)
+            ?? Application.Current?.MainWindow;
+        var picker = browseOnly ? null : new ProductPickerWindow(dialog.InitialDirectory);
+        if (owner is not null && picker is not null) picker.Owner = owner;
+        string selectedFilePath;
+        if (picker?.ShowDialog() == true && picker.SelectedFilePath is string catalogPath)
         {
-            using var positionGuard = new StandardFileDialogPositionGuard(owner);
-            accepted = dialog.ShowDialog(owner);
+            selectedFilePath = catalogPath;
         }
         else
         {
-            accepted = dialog.ShowDialog();
-        }
-
-        if (accepted == true)
-        {
-            string selectedFilePath = dialog.FileName;
-            if (!IsSupportedProductFile(selectedFilePath))
+            if (!browseOnly && picker?.BrowseFileRequested != true) return;
+            WinForms.DialogResult accepted;
+            if (owner is not null)
             {
-                MessageBox.Show(
-                    owner ?? Application.Current?.MainWindow,
-                    "Chỉ có thể chọn file mã hàng .tht hoặc .model legacy.",
-                    "File không được hỗ trợ",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                using var resizeLock = new FixedPositionOpenFileDialogGuard(owner, resizeLockOnly: true);
+                accepted = dialog.ShowDialog(new NativeDialogOwner(owner));
+            }
+            else
+            {
+                accepted = dialog.ShowDialog();
+            }
+
+            if (accepted != WinForms.DialogResult.OK)
                 return;
-            }
 
-            try
-            {
-                await _main.LoadModelAsync(selectedFilePath);
-            }
-            catch (InvalidDataException ex)
-            {
-                MessageBox.Show(
-                    $"Không thể đọc file mã hàng JBZ (.model/.tht).\n\n" +
-                    $"File: {selectedFilePath}\n\n" +
-                    $"{ex.Message}\n\n" +
-                    "Hãy kiểm tra đúng file mã hàng gốc. Nếu file đang được phần mềm khác ghi/copy, " +
-                    "đợi hoàn tất rồi chọn lại.",
-                    "File model không hợp lệ",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
-            catch (IOException ex)
-            {
-                MessageBox.Show(
-                    $"Không thể mở file mã hàng vì file đang bận hoặc lỗi I/O.\n\n" +
-                    $"File: {selectedFilePath}\n\n{ex.Message}",
-                    "Không mở được file model",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Không thể nạp mã hàng.\n\n{ex.Message}",
-                    "Lỗi nạp model",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
-            }
+            selectedFilePath = dialog.FileName;
         }
+        await LoadProductFileAsync(selectedFilePath);
+    }
+
+    public string CatalogDirectory => Directory.Exists(OriginalItemDirectory)
+        ? OriginalItemDirectory
+        : Directory.Exists(Path.GetDirectoryName(_main.Model?.SourcePath ?? _main.ProductionSettings.LastThtPath))
+            ? Path.GetDirectoryName(_main.Model?.SourcePath ?? _main.ProductionSettings.LastThtPath)!
+            : AppContext.BaseDirectory;
+
+    private bool _loadingProduct;
+    public async Task LoadProductFileAsync(string selectedFilePath)
+    {
+        if (_loadingProduct) return;
+        _loadingProduct = true;
+        try { await LoadProductFileCoreAsync(selectedFilePath); }
+        finally { _loadingProduct = false; }
+    }
+
+    private async Task LoadProductFileCoreAsync(string selectedFilePath)
+    {
+        Window? owner = Application.Current?.MainWindow;
+        if (!IsSupportedProductFile(selectedFilePath))
+        {
+            MessageBox.Show(
+                owner ?? Application.Current?.MainWindow,
+                "Chỉ có thể chọn file mã hàng .tht.",
+                "File không được hỗ trợ",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            await _main.LoadModelAsync(selectedFilePath);
+        }
+        catch (InvalidDataException ex)
+        {
+            AsyncFileLogService.Current.Error(
+                $"MODEL_LOAD_INVALID path={selectedFilePath}: {ex}");
+            MessageBox.Show(
+                $"Không đọc được mã hàng {Path.GetFileName(selectedFilePath)}. " +
+                "Vui lòng kiểm tra đúng file mã hàng và thử lại.",
+                "KHÔNG ĐỌC ĐƯỢC MÃ HÀNG",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch (IOException ex)
+        {
+            AsyncFileLogService.Current.Error(
+                $"MODEL_LOAD_IO path={selectedFilePath}: {ex}");
+            MessageBox.Show(
+                $"Chưa mở được mã hàng {Path.GetFileName(selectedFilePath)}. " +
+                "Vui lòng chờ file sao chép xong rồi thử lại.",
+                "CHƯA MỞ ĐƯỢC MÃ HÀNG",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error(
+                $"MODEL_LOAD_UNEXPECTED path={selectedFilePath}: {ex}");
+            MessageBox.Show(
+                "Chưa nạp được mã hàng. Vui lòng chọn lại file và thử lại.",
+                "CHƯA NẠP ĐƯỢC MÃ HÀNG",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private sealed class NativeDialogOwner : WinForms.IWin32Window
+    {
+        public NativeDialogOwner(Window owner)
+        {
+            Handle = new WindowInteropHelper(owner).Handle;
+        }
+
+        public IntPtr Handle { get; }
     }
 
     private static bool IsSupportedProductFile(string path)
     {
         string extension = Path.GetExtension(path);
-        return extension.Equals(".tht", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".model", StringComparison.OrdinalIgnoreCase);
+        return extension.Equals(".tht", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Refresh()
@@ -138,6 +199,9 @@ public sealed class HomeViewModel : ObservableObject
         Raise(nameof(ProductName));
         Raise(nameof(VehicleType));
         Raise(nameof(SourcePath));
+        Raise(nameof(LabelTemplateType));
+        Raise(nameof(LabelTemplateDisplayName));
+        Raise(nameof(IsLabelPrintingEnabled));
 
         StartCommand.RaiseCanExecuteChanged();
     }
