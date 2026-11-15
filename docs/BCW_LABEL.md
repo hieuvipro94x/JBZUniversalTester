@@ -44,10 +44,10 @@ R0,0
 ON
 D4
 S2
-b245,16,Q,h4,"2628709L00001"
-A110,5,0,3,2,2,N,"LH"
-A85,56,0,2,1,1,N,"OE366-33050"
-A80,80,0,2,1,1,N,"2628709L00001"
+b210,16,Q,h4,"2628709L00001"
+A110,7,0,3,2,2,N,"LH"
+A70,58,0,1,1,1,N,"OE366-33050"
+A70,74,0,1,1,1,N,"2628709L00001"
 ZB
 P1
 ```
@@ -64,7 +64,7 @@ Chọn BCW → CHỈNH TEM để mở trình chỉnh EPL có sẵn. Có thể đ
 
 Bấm ÁP DỤNG rồi LƯU CÀI ĐẶT. Mẫu riêng của BCW lưu trong `LabelTemplateBCWBase64`, không ghi đè mẫu TEM_TO/TEM_BE. KHÔI PHỤC MẶC ĐỊNH bỏ phần tùy chỉnh BCW. Xem trước, in thử, in hàng loạt và tem PASS production đều dùng bản BCW đang áp dụng khi chụp yêu cầu.
 
-Yêu cầu đã chụp giữ nguyên mẫu trước đó dù sau này sửa/khôi phục Cài đặt. Khi cấp serial lúc gửi, chỉ điền lại ngày/QR/serial vào đúng mẫu đã chụp. In lại tiếp tục dùng nguyên payload đã lưu, không chuyển sang bố cục mới. Khôi phục tem chưa gửi cũng đọc được QR ở tọa độ đã chỉnh, không còn cố định b245,16.
+Yêu cầu đã chụp giữ nguyên mẫu trước đó dù sau này sửa/khôi phục Cài đặt. Khi cấp serial lúc gửi, chỉ điền lại ngày/QR/serial vào đúng mẫu đã chụp. In lại tiếp tục dùng nguyên payload đã lưu, không chuyển sang bố cục mới. Khôi phục tem chưa gửi cũng đọc được QR ở tọa độ đã chỉnh, không còn cố định b210,16.
 
 ## Lưu serial và lỗi in
 
@@ -116,3 +116,13 @@ Không chỉnh dữ liệu sản xuất thật khi phát triển. Integrity trê
 Chưa có Zebra thật để xác minh: hỗ trợ EPL QR `Q,h4`, khả năng đọc QR sau in, vị trí in/độ rộng giấy/DPI, tốc độ/độ đậm, COM/RAW thực tế, rút cáp khi đang gửi và kiểm tra tem đã nhận trước in lại. Không tuyên bố kiểm thử file RAW là xác nhận in vật lý.
 
 Từ V2026.09.449, QR mặc định dùng `h4` theo mẫu nguồn BCW.txt; giữ nguyên tọa độ tích hợp. Mẫu tùy chỉnh và payload in lại đã lưu không bị ghi đè.
+
+## V2026.09.450: chọn dữ liệu THT và QR theo ECO
+
+Trong TEM, chọn file ở Mã hàng in thử rồi chọn đúng dòng tại Dữ liệu trong THT. Bộ chọn hiển thị mã sản phẩm, ECO và ALC; xem trước, in thử và in hàng loạt dùng cùng dòng đã chọn. In hàng loạt chụp dữ liệu/mẫu một lần, không đọc lại cài đặt đang thay đổi giữa các tem; đọc THT trên worker, không chặn Dispatcher. Nếu dữ liệu THT đổi sau khi chọn dòng, yêu cầu quét/chọn lại.
+
+Nếu THT có ECO và không khai báo BCW_VEHICLE_CODE riêng, QR mới là YYDDD + nguyên ECO + serial 5 số. Không nối thêm R/L vào QR; ALC phải RH/LH và chỉ dùng cho chữ vị trí trên tem. Ví dụ 15/11/2026: ECO D9PL, ALC LH tạo 26319D9PL00001; ECO D9P, ALC RH tạo 26319D9P00001. ECO phải 1–20 ký tự ASCII chữ/số. THT cũ có BCW_VEHICLE_CODE hoặc chưa có ECO giữ quy tắc mã xe 2 ký tự + R/L và cấu hình dự phòng cũ.
+
+Serial mới dùng chung theo ECO/ngày, không tách theo ALC hoặc mã sản phẩm vì chúng không có trong QR. ECO ba ký tự tương đương tiền tố cũ (ví dụ 09L) dùng chung scope cũ 09/LH để tránh cấp trùng QR. Không sửa hoặc đặt lại serial đã lưu, không đổi schema History. RequestJson bổ sung cờ BcwUsesThtEco tùy chọn; bản ghi cũ thiếu cờ giữ cách tạo QR cũ. In lại và khôi phục lệnh chưa gửi giữ nguyên payload, QR, serial và h4/h5 đã chụp trước đó.
+
+Mẫu mặc định V450 lấy bố cục từ `90 15 자베스 JBZ3 (BCW).txt`: QR tại 210,16; LH/RH tại 110,7 font 3 phóng 2x2; mã sản phẩm tại 70,58 font 1; chữ QR tại 70,74 font 1. Dùng h4 theo xác nhận riêng của người vận hành (file mẫu ghi h5). Giữ Q120,24 / D4 / S2 / ZB / P1; thay biến V00/V01/V02 bằng đúng dữ liệu đã chụp, không gửi phần định nghĩa/xóa form hoặc ghi chú sau P1. Mẫu người dùng tự chỉnh và yêu cầu in lại cũ vẫn giữ nguyên.

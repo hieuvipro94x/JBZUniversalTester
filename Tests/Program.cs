@@ -659,6 +659,13 @@ internal static partial class Program
             Console.WriteLine("PASS: Main catalog scrolling, search, exact-path selection and read-only history");
             return 0;
         }
+        if (args is ["--test-bcw-tht-data"])
+        {
+            TestBcwThtEcoIdentityAndSerials(); TestManualLabelPartSelection();
+            TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwThtAutomaticPassLabel();
+            Console.WriteLine("PASS: THT row selection, full ECO/ALC, serial continuity and legacy BCW restore");
+            return 0;
+        }
         if (args is ["--test-bcw"])
         {
             TestBcwJulianAndPayload(); TestBcwPersistentSerialAndTransport(); TestBcwHistorySnapshotPreservesRows(); TestBcwThtAutomaticPassLabel(); TestBcwEditableTemplate();
@@ -725,6 +732,8 @@ internal static partial class Program
             ("Compact settings preserve required profiles and read legacy files", TestCompactPrintConfig),
             ("BCW reads the active THT and uses the automatic PASS print pipeline", TestBcwThtAutomaticPassLabel),
             ("BCW Julian date, original EPL positions and safe template", TestBcwJulianAndPayload),
+            ("BCW full THT ECO preserves QR identity, serial scope and legacy jobs", TestBcwThtEcoIdentityAndSerials),
+            ("Manual label previews and batches select the exact THT product row", TestManualLabelPartSelection),
             ("BCW persistent sequence, failed send, concurrency and reprint", TestBcwPersistentSerialAndTransport),
             ("BCW history snapshot preserves production LOT and rows", TestBcwHistorySnapshotPreservesRows),
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),

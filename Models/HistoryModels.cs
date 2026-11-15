@@ -360,7 +360,8 @@ public sealed record LabelPrintData(
     string BarcodePrint = "",
     string BcwVehicleCode = "",
     string BcwPosition = "",
-    long BcwSerial = 0);
+    long BcwSerial = 0,
+    bool BcwUsesThtEco = false);
 
 public enum LabelPrintStatus
 {
@@ -413,7 +414,8 @@ public sealed record LabelPrintRequest(
             var bcwData = new LabelPrintData(model.ProductName, model.PartNumber, model.Eco, model.Nco, model.Alc,
                 history.LotNo, history.Finished, model.VehicleType, model.CustomerCode, history.CycleId,
                 BcwVehicleCode: JBZUniversalTester.Services.BcwLabelService.Vehicle(model, settings),
-                BcwPosition: JBZUniversalTester.Services.BcwLabelService.Position(model, settings));
+                BcwPosition: JBZUniversalTester.Services.BcwLabelService.Position(model, settings),
+                BcwUsesThtEco: JBZUniversalTester.Services.BcwLabelService.UsesThtEco(model));
             var bcw = new LabelPrintRequest(history.CycleId, bcwData, string.Empty,
                 JBZUniversalTester.Services.LabelProfileResolver.Resolve(model, settings), model.ModelName, model.SourcePath,
                 settings.PrinterName, settings.PrinterCom, 60, 15, "JBZBCW", settings.BaudRate,

@@ -26,11 +26,29 @@ public static class BcwLabelService
         { ["PART_NUMBER"] = "VALIDATE", ["BCW_POSITION"] = "LH", ["BCW_QR"] = "2628709L00001" });
     }
 
+    public static bool UsesThtEco(ProductModel model) =>
+        !model.LabelVariables.ContainsKey("BCW_VEHICLE_CODE") && !string.IsNullOrWhiteSpace(model.Eco);
+
     public static string Vehicle(ProductModel model, LabelSettings settings) =>
-        model.LabelVariables.TryGetValue("BCW_VEHICLE_CODE", out string? value) ? value.Trim() : settings.BcwVehicleCode.Trim();
+        model.LabelVariables.TryGetValue("BCW_VEHICLE_CODE", out string? value) ? value.Trim() :
+        UsesThtEco(model) ? model.Eco.Trim() : settings.BcwVehicleCode.Trim();
 
     public static string Position(ProductModel model, LabelSettings settings) =>
-        (model.LabelVariables.TryGetValue("BCW_POSITION", out string? value) ? value : settings.BcwPosition).Trim().ToUpperInvariant();
+        (model.LabelVariables.TryGetValue("BCW_POSITION", out string? value) ? value :
+         UsesThtEco(model) ? model.Alc : settings.BcwPosition).Trim().ToUpperInvariant();
+
+    public static string Qr(DateTime date, LabelPrintData data, long sequence)
+    {
+        if (!data.BcwUsesThtEco) return Qr(date, data.BcwVehicleCode, data.BcwPosition, sequence);
+        if (!Regex.IsMatch(data.BcwVehicleCode, "^[A-Za-z0-9]{1,20}$", RegexOptions.CultureInvariant))
+            throw new InvalidDataException("BCW: ECO trong THT phải có 1–20 ký tự chữ/số ASCII, không có khoảng trắng.");
+        if (data.BcwPosition is not ("RH" or "LH"))
+            throw new InvalidDataException("BCW: ALC trong dòng THT đã chọn phải là RH hoặc LH.");
+        if (sequence is < 1 or > 99999)
+            throw new InvalidDataException("BCW: số thứ tự phải từ 00001 đến 99999.");
+        return date.ToString("yy", CultureInfo.InvariantCulture) + date.DayOfYear.ToString("D3", CultureInfo.InvariantCulture) +
+            data.BcwVehicleCode + sequence.ToString("D5", CultureInfo.InvariantCulture);
+    }
 
     public static string Qr(DateTime date, string vehicle, string position, long sequence)
     {
@@ -48,7 +66,7 @@ public static class BcwLabelService
 
     public static LabelPrintRequest Bind(LabelPrintRequest request, DateTime localDate, long sequence)
     {
-        string qr = Qr(localDate, request.Data.BcwVehicleCode, request.Data.BcwPosition, sequence);
+        string qr = Qr(localDate, request.Data, sequence);
         if (string.IsNullOrWhiteSpace(request.Data.PartNumber) || request.Data.PartNumber.Length > 15 ||
             request.Data.PartNumber.Any(c => c < 32 || c > 126 || c is '"' or '{' or '}'))
             throw new InvalidDataException("BCW: Part Number phải là ASCII, tối đa 15 ký tự, không chứa dấu nháy/ngoặc.");
@@ -68,18 +86,35 @@ public static class BcwLabelService
 
     public static LabelPrintRequest RestoreUnsent(TestHistoryRecord history, LabelSettings transport)
     {
-        Match qr = Regex.Match(history.LabelPayload, "(?m)^b-?[0-9]+,-?[0-9]+,Q,[^\r\n]*,\"(?<qr>[0-9]{5}[A-Za-z0-9]{2}[RL][0-9]{5})\"\\r?$", RegexOptions.CultureInvariant);
+        Match qr = Regex.Match(history.LabelPayload, "(?m)^b-?[0-9]+,-?[0-9]+,Q,[^\\r\\n]*,\"(?<qr>[0-9]{5}[A-Za-z0-9]{1,20}[0-9]{5})\"\\r?$", RegexOptions.CultureInvariant);
         if (!qr.Success) throw new InvalidDataException("BCW: không đọc được snapshot cũ để khôi phục tem chưa gửi.");
         string value = qr.Groups["qr"].Value;
+        string prefix = value[5..^5];
+        bool thtEco = string.Equals(prefix, history.Eco.Trim(), StringComparison.Ordinal);
+        string position = history.Alc.Trim().ToUpperInvariant();
+        if (!thtEco && prefix.Length == 3 && prefix[^1] is 'R' or 'L')
+            position = prefix[^1] == 'R' ? "RH" : "LH";
+        else
+        {
+            thtEco = true;
+            if (position is not ("RH" or "LH"))
+            {
+                Match printedPosition = Regex.Match(history.LabelPayload, "(?m)^A[0-9,NR-]+,\"(?<pos>RH|LH)\"\\r?$", RegexOptions.CultureInvariant);
+                position = printedPosition.Groups["pos"].Value;
+            }
+        }
         var identity = new LabelSettings { TemplateType = LabelSettings.BcwTemplate,
-            BcwVehicleCode = value.Substring(5,2), BcwPosition = value[7] == 'R' ? "RH" : "LH",
+            BcwVehicleCode = thtEco ? prefix : prefix[..2], BcwPosition = position,
             PrinterCom = transport.PrinterCom, PrinterName = transport.PrinterName, RawDestination = transport.RawDestination,
             BaudRate = transport.BaudRate, WriteTimeoutMs = transport.WriteTimeoutMs, EncodingName = transport.EncodingName };
         var captured = LabelPrintRequest.Capture(history, new ProductModel { PartNumber = history.PartNumber,
-            ProductName = history.PartName, SourcePath = history.ModelFile, ModelName = history.ModelName }, identity);
+            ProductName = history.PartName, SourcePath = history.ModelFile, ModelName = history.ModelName,
+            Eco = thtEco ? prefix : "", Alc = thtEco ? position : "" }, identity);
         string template = history.LabelPayload.Replace(value, "{BCW_QR}", StringComparison.Ordinal)
             .Replace("\"" + history.PartNumber + "\"", "\"{PART_NUMBER}\"", StringComparison.Ordinal)
             .Replace("\"" + identity.BcwPosition + "\"", "\"{BCW_POSITION}\"", StringComparison.Ordinal);
-        return captured with { Payload = history.LabelPayload, Profile = captured.Profile with { InlineTemplate = template } };
+        return captured with { Payload = history.LabelPayload, Profile = captured.Profile with { InlineTemplate = template },
+            Data = captured.Data with { Barcode = value, BarcodePrint = value,
+                BcwSerial = long.Parse(value[^5..], CultureInfo.InvariantCulture) } };
     }
 }

@@ -80,12 +80,32 @@ public sealed class BcwSerialStore
     private static string Scope(DateTime localDate, string vehicle, string position) =>
         localDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "|" + vehicle + "|" + position;
 
-    public long Peek(DateTime localDate, string vehicle, string position)
+    private static string Scope(DateTime localDate, LabelPrintData data)
+    {
+        if (!data.BcwUsesThtEco) return Scope(localDate, data.BcwVehicleCode, data.BcwPosition);
+        string eco = data.BcwVehicleCode;
+        // An ECO such as 09L produces the same QR prefix as legacy vehicle 09/LH.
+        // Share that existing scope instead of allocating duplicate old QR values.
+        if (eco.Length == 3 && eco[^1] is 'R' or 'L')
+            return Scope(localDate, eco[..2], eco[^1] == 'R' ? "RH" : "LH");
+        return localDate.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "|ECO|" + eco;
+    }
+
+    public long Peek(DateTime localDate, string vehicle, string position) =>
+        PeekScope(Scope(localDate, vehicle, position));
+
+    public long Peek(DateTime localDate, LabelPrintData data)
+    {
+        _ = BcwLabelService.Qr(localDate, data, 1); // Validate before opening or querying the journal.
+        return PeekScope(Scope(localDate, data));
+    }
+
+    private long PeekScope(string scope)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT COALESCE(MAX(Serial),0)+1 FROM BcwPrints WHERE Scope=$Scope AND (State='Sent' OR ProductionCapture=1);";
-        command.Parameters.AddWithValue("$Scope", Scope(localDate, vehicle, position));
+        command.Parameters.AddWithValue("$Scope", scope);
         return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
     }
 
@@ -114,7 +134,7 @@ public sealed class BcwSerialStore
                 return (restored, state == "Sent" && !explicitReprint);
             }
         }
-        string scope = Scope(localNow, request.Data.BcwVehicleCode, request.Data.BcwPosition);
+        string scope = Scope(localNow, request.Data);
         command.CommandText = "SELECT CycleId FROM BcwPrints WHERE Scope=$Scope AND State<>'Sent' AND ProductionCapture=0 LIMIT 1;";
         command.Parameters.AddWithValue("$Scope", scope);
         if (command.ExecuteScalar() is not null && !productionCapture)

@@ -1,4 +1,4 @@
-﻿using JBZUniversalTester.Models;
+using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using Microsoft.Data.Sqlite;
 using JBZUniversalTester.ViewModels;
@@ -16,8 +16,8 @@ internal static partial class Program
         {
             string original = BuiltInLabelTemplateStore.Load(BuiltInLabelTemplateStore.ReferenceFor("BCW"));
             string edited = original.Replace(",Q,h4,", ",Q,h5,", StringComparison.Ordinal)
-                .Replace("b245,16", "b220,20", StringComparison.Ordinal)
-                .Replace("A110,5,0,3,2,2", "A95,8,0,3,1,2", StringComparison.Ordinal);
+                .Replace("b210,16", "b220,20", StringComparison.Ordinal)
+                .Replace("A110,7,0,3,2,2", "A95,8,0,3,1,2", StringComparison.Ordinal);
             var settings = new LabelSettings { TemplateType="BCW", BcwVehicleCode="09", BcwPosition="LH",
                 RawDestination=Path.Combine(root,"printer.epl") };
             BuiltInLabelTemplateStore.SaveOverride(settings,LabelSettings.LargeTemplate,"OLD-TEMPLATE-UNCHANGED");
@@ -40,7 +40,7 @@ internal static partial class Program
             Assert(BuiltInLabelTemplateStore.LoadOverride(restored.Label,"BCW")==string.Empty,
                 "BCW default reset clears only its dedicated override");
             var defaultRequest=LabelPrintRequest.Capture(history,model,restored.Label);
-            Assert(defaultRequest.Payload.Contains("b245,16,Q,h4,",StringComparison.Ordinal),"New captures use default BCW again after reset");
+            Assert(defaultRequest.Payload.Contains("b210,16,Q,h4,",StringComparison.Ordinal),"New captures use default BCW again after reset");
             var printer=new LabelPrintService(new BcwSerialStore(Path.Combine(root,"bcw.db")),()=>history.Finished);
             try
             {
@@ -147,10 +147,10 @@ internal static partial class Program
             Assert(rejected, "BCW rejects serial overflow/zero without truncation");
         }
         var request = BcwRequest("BCW-vector");
-        Assert(request.Payload.Contains("b245,16,Q,h4,\"2628709L00001\"", StringComparison.Ordinal) &&
-               request.Payload.Contains("A80,80,0,2,1,1,N,\"2628709L00001\"", StringComparison.Ordinal), "BCW QR and printed text identical");
-        Assert(request.Payload.Contains("A110,5,0,3,2,2,N,\"LH\"", StringComparison.Ordinal) &&
-               request.Payload.Contains("A85,56,0,2,1,1,N,\"OE366-33050\"", StringComparison.Ordinal), "BCW preserves original positions and fonts");
+        Assert(request.Payload.Contains("b210,16,Q,h4,\"2628709L00001\"", StringComparison.Ordinal) &&
+               request.Payload.Contains("A70,74,0,1,1,1,N,\"2628709L00001\"", StringComparison.Ordinal), "BCW QR and printed text identical");
+        Assert(request.Payload.Contains("A110,7,0,3,2,2,N,\"LH\"", StringComparison.Ordinal) &&
+               request.Payload.Contains("A70,58,0,1,1,1,N,\"OE366-33050\"", StringComparison.Ordinal), "BCW preserves original positions and fonts");
         Assert(!request.Payload.Contains("FK", StringComparison.Ordinal) && !request.Payload.Contains("FS", StringComparison.Ordinal) &&
                !request.Payload.Contains("V03", StringComparison.Ordinal) && request.Payload.EndsWith("P1\r\n", StringComparison.Ordinal), "BCW direct EPL never deletes/rewrites flash forms or supplies fake fourth field");
         Assert(request.Profile.Id == "BCW" && !request.Payload.Contains("OLD MODEL", StringComparison.Ordinal), "Explicit BCW selection overrides old THT label payload only for BCW");

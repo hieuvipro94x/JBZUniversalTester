@@ -42,6 +42,7 @@ public partial class ProductionSettingsPage : UserControl
     private string? _labelPrintModelPath;
     private int _labelModelLoadGeneration;
     private int _bcwSummaryGeneration;
+    internal Action<string, string, MessageBoxImage>? MessagePresenter { get; set; }
     private bool _printerPortSelectionInitialized;
     private bool _suppressPrinterPortSelection;
     private System.Windows.Threading.DispatcherTimer? _savedConfirmationTimer;
@@ -1331,6 +1332,7 @@ public partial class ProductionSettingsPage : UserControl
             LabelPrintModelComboBox.SelectedItem is not ProductFileEntry file) return;
         _labelPrintModelPath = file.FullPath;
         LabelPrintModelComboBox.ToolTip = file.FullPath;
+        _labelPartsLoadTask = LoadLabelPrintPartsAsync(file.FullPath);
         UpdateBcwPanel();
     }
 
@@ -1343,7 +1345,7 @@ public partial class ProductionSettingsPage : UserControl
         bool bcw = _vm.Settings.Label.TemplateType == LabelSettings.BcwTemplate;
         BcwSettingsPanel.Visibility = bcw ? Visibility.Visible : Visibility.Collapsed;
         SingleLotPanel.Visibility = BatchLotPanel.Visibility = bcw ? Visibility.Collapsed : Visibility.Visible;
-        if (bcw) _ = UpdateBcwInfoAsync();
+        if (bcw) _bcwSummaryTask = UpdateBcwInfoAsync();
     }
 
     private void BcwInput_Changed(object sender, TextChangedEventArgs e) =>
@@ -1354,21 +1356,26 @@ public partial class ProductionSettingsPage : UserControl
     private async Task UpdateBcwInfoAsync()
     {
         int generation = ++_bcwSummaryGeneration;
-        string path = ResolveLabelPrintModelPath();
-        var settings = new LabelSettings { BcwVehicleCode = _vm.Settings.Label.BcwVehicleCode, BcwPosition = _vm.Settings.Label.BcwPosition };
         try
         {
+            await _labelPartsLoadTask;
+            if (IsReleased || generation != _bcwSummaryGeneration) return;
+            string path = ResolveLabelPrintModelPath();
+            var choice = LabelPrintPartComboBox.SelectedItem as LabelPartChoice;
+            var settings = new LabelSettings { TemplateType = LabelSettings.BcwTemplate,
+                BcwVehicleCode = _vm.Settings.Label.BcwVehicleCode, BcwPosition = _vm.Settings.Label.BcwPosition };
             string summary = await Task.Run(() =>
             {
-                ProductModel model = new ThtModelParser().Load(path);
+                ProductModel model = LoadSelectedLabelModel(path, choice);
                 DateTime now = DateTime.Now;
-                string vehicle = BcwLabelService.Vehicle(model, settings), position = BcwLabelService.Position(model, settings);
-                long serial = new BcwSerialStore().Peek(now, vehicle, position);
-                string qr = BcwLabelService.Qr(now, vehicle, position, serial);
-                return $"Part: {model.PartNumber} | {now:yyyy-MM-dd} | Julian: {now:yy}{now.DayOfYear:D3}\nSerial: {serial:D5} | QR: {qr}";
-            });
+                var request = LabelPrintRequest.Capture(new TestHistoryRecord { Finished = now }, model, settings);
+                long serial = new BcwSerialStore().Peek(now, request.Data);
+                string qr = BcwLabelService.Qr(now, request.Data, serial);
+                return $"Part: {model.PartNumber} | ECO: {model.Eco} | ALC: {model.Alc}\nSerial: {serial:D5} | QR: {qr}";
+            }, _pageLifetime.Token);
             if (!IsReleased && generation == _bcwSummaryGeneration) BcwInfoText.Text = summary;
         }
+        catch (OperationCanceledException) when (_pageLifetime.IsCancellationRequested) { }
         catch (Exception ex)
         {
             if (!IsReleased && generation == _bcwSummaryGeneration) BcwInfoText.Text = ex.Message;
@@ -1533,7 +1540,11 @@ public partial class ProductionSettingsPage : UserControl
             LabelPrintModelButton.IsEnabled = false;
             BatchPrintLabelButton.IsEnabled = false;
             BatchStopPrintButton.IsEnabled = true;
-            ProductModel model = await Task.Run(() => new ThtModelParser().Load(thtPath), batchCts.Token);
+            await _labelPartsLoadTask;
+            var partChoice = LabelPrintPartComboBox.SelectedItem as LabelPartChoice;
+            LabelPrintPartComboBox.IsEnabled = false;
+            LabelSettings batchLabelSettings = JsonSerializer.Deserialize<LabelSettings>(JsonSerializer.Serialize(_vm.Settings.Label))!;
+            ProductModel model = await Task.Run(() => LoadSelectedLabelModel(thtPath, partChoice), batchCts.Token);
             batchCts.Token.ThrowIfCancellationRequested();
 
             for (int index = 0; index < quantity; index++)
@@ -1546,7 +1557,7 @@ public partial class ProductionSettingsPage : UserControl
                 LabelPrintRequest request = await BuildSettingsLabelRequestAsync(
                     "BATCH-PRINT",
                     lot,
-                    model, batchCts.Token);
+                    model, batchCts.Token, batchLabelSettings);
                 batchCts.Token.ThrowIfCancellationRequested();
                 lastResult = await _main.Test.PrintSettingsLabelAsync(request, batchCts.Token);
                 if (!lastResult.Printed)
@@ -1606,6 +1617,8 @@ public partial class ProductionSettingsPage : UserControl
             batchCts?.Dispose();
             if (LabelPrintModelComboBox is not null)
                 LabelPrintModelComboBox.IsEnabled = true;
+            if (LabelPrintPartComboBox is not null)
+                LabelPrintPartComboBox.IsEnabled = true;
             if (LabelPrintModelButton is not null)
                 LabelPrintModelButton.IsEnabled = true;
             if (BatchPrintLabelButton is not null)
@@ -1630,19 +1643,22 @@ public partial class ProductionSettingsPage : UserControl
         _batchPrintCts?.Cancel();
     }
 
-    private Task<LabelPrintRequest> BuildSettingsLabelRequestAsync(
+    private async Task<LabelPrintRequest> BuildSettingsLabelRequestAsync(
         string purpose, long? lotNo = null, ProductModel? loadedModel = null,
-        CancellationToken? cancellationToken = null)
+        CancellationToken? cancellationToken = null, LabelSettings? frozenLabelSettings = null)
     {
+        await _labelPartsLoadTask;
+        var partChoice = LabelPrintPartComboBox.SelectedItem as LabelPartChoice;
         // Snapshot editor values before leaving Dispatcher; workers never read live controls/settings.
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
         string thtPath = ResolveLabelPrintModelPath();
         long lot = Math.Max(0, lotNo ?? _vm.Settings.LotNo);
         LabelSettings labelSettings = JsonSerializer.Deserialize<LabelSettings>(
-            JsonSerializer.Serialize(_vm.Settings.Label))!;
+            JsonSerializer.Serialize(frozenLabelSettings ?? _vm.Settings.Label))!;
         labelSettings.PreferSelectedTemplate = true;
         CancellationToken token = cancellationToken ?? _pageLifetime.Token;
-        return Task.Run(() => BuildSettingsLabelRequest(purpose, lot, loadedModel, thtPath, labelSettings), token);
+        return await Task.Run(() => BuildSettingsLabelRequest(purpose, lot,
+            loadedModel ?? LoadSelectedLabelModel(thtPath, partChoice), thtPath, labelSettings), token);
     }
 
     private LabelPrintRequest BuildSettingsLabelRequest(
@@ -1655,7 +1671,7 @@ public partial class ProductionSettingsPage : UserControl
         if (string.IsNullOrWhiteSpace(thtPath) || !File.Exists(thtPath))
             throw new FileNotFoundException("Chưa có file THT hiện tại để dựng dữ liệu tem.", thtPath);
 
-        ProductModel model = loadedModel ?? new ThtModelParser().Load(thtPath);
+        ProductModel model = loadedModel ?? LoadSelectedLabelModel(thtPath, null);
         DateTime now = DateTime.Now;
         var history = new TestHistoryRecord
         {
@@ -1674,7 +1690,7 @@ public partial class ProductionSettingsPage : UserControl
         LabelPrintRequest request = LabelPrintRequest.Capture(history, model, labelSettings);
         if (request.Profile.Id == LabelSettings.BcwTemplate)
         {
-            long sequence = new BcwSerialStore().Peek(now, request.Data.BcwVehicleCode, request.Data.BcwPosition);
+            long sequence = new BcwSerialStore().Peek(now, request.Data);
             request = BcwLabelService.Bind(request, now, sequence);
         }
         return request;
@@ -2459,6 +2475,11 @@ public partial class ProductionSettingsPage : UserControl
     {
         if (IsReleased)
             return;
+        if (MessagePresenter is not null)
+        {
+            MessagePresenter(message, title, image);
+            return;
+        }
 
         Window? owner = HostWindow;
         if (owner is not null)
