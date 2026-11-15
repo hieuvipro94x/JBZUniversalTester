@@ -388,23 +388,23 @@
                                                 <RowDefinition Height="26"/>
                                             </Grid.RowDefinitions>
                                             <TextBlock Text="Chu kỳ thay PIN" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Margin="0" Grid.Column="1" Text="{Binding ProbeReplacementThresholdText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Số chu kỳ kiểm tra trước khi thay PIN. Mặc định 200.000; áp dụng cho các mã hàng, giữ nguyên số chu kỳ đã chạy."/>
+                                            <TextBox Height="24" Margin="0,1" Grid.Column="1" Text="{Binding ProbeReplacementThresholdText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Số chu kỳ kiểm tra trước khi thay PIN. Mặc định 200.000; áp dụng cho các mã hàng, giữ nguyên số chu kỳ đã chạy."/>
                                             <TextBlock Grid.Row="1" Text="R1 Delay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Margin="0" Grid.Row="1" Grid.Column="1" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
+                                            <TextBox Height="24" Margin="0,1" Grid.Row="1" Grid.Column="1" Text="{Binding Settings.Relay1JigPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
                                             <TextBlock Grid.Row="2" Text="R2 Delay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Margin="0" Grid.Row="2" Grid.Column="1" Text="{Binding Settings.Relay2MarkingPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
+                                            <TextBox Height="24" Margin="0,1" Grid.Row="2" Grid.Column="1" Text="{Binding Settings.Relay2MarkingPulseMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: đặt 120 ms để TX Relay ON → OFF thực tế khoảng 140 ms."/>
                                             <TextBlock Grid.Row="3" Text="PASS MARK - JIG" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Margin="0" Grid.Row="3" Grid.Column="1" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: Relay thứ nhất OFF → Relay thứ hai ON khoảng 430 ms."/>
+                                            <TextBox Height="24" Margin="0,1" Grid.Row="3" Grid.Column="1" Text="{Binding Settings.PassMarkingToJigDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Trace gốc: Relay thứ nhất OFF → Relay thứ hai ON khoảng 430 ms."/>
                                             <TextBlock Grid.Row="4" Text="Bật mở JIG" Style="{StaticResource FieldLabelStyle}"/>
-                                            <CheckBox Margin="0" Grid.Row="4" Grid.Column="1" IsChecked="{Binding Settings.JigEjectRelayEnabled, Mode=TwoWay}"/>
+                                            <CheckBox Height="24" Margin="0,1" Grid.Row="4" Grid.Column="1" IsChecked="{Binding Settings.JigEjectRelayEnabled, Mode=TwoWay}"/>
                                             <TextBlock Grid.Row="5" Text="MARKING PASS" Style="{StaticResource FieldLabelStyle}"/>
-                                            <CheckBox Margin="0" Grid.Row="5" Grid.Column="1" IsChecked="{Binding Settings.PassMarkingRelayEnabled, Mode=TwoWay}"/>
+                                            <CheckBox Height="24" Margin="0,1" Grid.Row="5" Grid.Column="1" IsChecked="{Binding Settings.PassMarkingRelayEnabled, Mode=TwoWay}"/>
                                             <TextBlock Grid.Row="6" Text="Kiểu đấu Relay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <ComboBox Margin="0" x:Name="RelayWiringModeComboBox" Grid.Row="6" Grid.Column="1" DisplayMemberPath="Display" SelectedValuePath="Mode" SelectedValue="{Binding Settings.RelayWiringMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Thử tay Relay 1/2 rồi chọn đúng chức năng thực tế. PASS luôn MARKING trước mở JIG; xác nhận FAIL chỉ mở JIG."/>
+                                            <ComboBox Height="24" Margin="0,1" x:Name="RelayWiringModeComboBox" Grid.Row="6" Grid.Column="1" DisplayMemberPath="Display" SelectedValuePath="Mode" SelectedValue="{Binding Settings.RelayWiringMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ToolTip="Thử tay Relay 1/2 rồi chọn đúng chức năng thực tế. PASS luôn MARKING trước mở JIG; xác nhận FAIL chỉ mở JIG."/>
                                             <TextBlock Grid.Row="7" Text="Resistance delay" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Margin="0" Grid.Row="7" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBox Height="24" Margin="0,1" Grid.Row="7" Grid.Column="1" Text="{Binding Settings.ResistanceDelayMs, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             <TextBlock Grid.Row="8" Text="Scroll delay (ms)" Style="{StaticResource FieldLabelStyle}"/>
-                                            <TextBox Margin="0" Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBox Height="24" Margin="0,1" Grid.Row="8" Grid.Column="1" Text="{Binding Settings.ScrollDelay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                         </Grid>
                                     </StackPanel>
                                 </Border>
@@ -764,7 +764,7 @@
                                 <ItemsControl Grid.Row="2" ItemsSource="{Binding ResistanceChannels}" HorizontalAlignment="Stretch">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid Margin="0">
+                                            <Grid Height="26" Margin="0">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="38"/>
                                                     <ColumnDefinition Width="42"/>
@@ -773,10 +773,10 @@
                                                     <ColumnDefinition Width="80"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="{Binding Label}" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"/>
-                                                <CheckBox Grid.Column="1" Margin="0" HorizontalAlignment="Center" IsChecked="{Binding Enabled, Mode=TwoWay}"/>
-                                                <ComboBox Grid.Column="2" Margin="0,0,7,0" ItemsSource="{Binding DataContext.ChannelOptions, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding ChannelSelection, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                                <TextBox Grid.Column="3" Margin="0,0,7,0" Text="{Binding MinOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                                <TextBox Grid.Column="4" Margin="0" Text="{Binding MaxOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <CheckBox Height="24" Grid.Column="1" Margin="0,1" HorizontalAlignment="Center" IsChecked="{Binding Enabled, Mode=TwoWay}"/>
+                                                <ComboBox Height="24" Grid.Column="2" Margin="0,1,7,1" ItemsSource="{Binding DataContext.ChannelOptions, RelativeSource={RelativeSource AncestorType=UserControl}}" DisplayMemberPath="Display" SelectedValuePath="Value" SelectedValue="{Binding ChannelSelection, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <TextBox Height="24" Grid.Column="3" Margin="0,1,7,1" Text="{Binding MinOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                                <TextBox Height="24" Grid.Column="4" Margin="0,1" Text="{Binding MaxOhm, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                             </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
