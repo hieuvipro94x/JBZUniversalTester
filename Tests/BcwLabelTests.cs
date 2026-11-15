@@ -1,4 +1,4 @@
-using JBZUniversalTester.Models;
+﻿using JBZUniversalTester.Models;
 using JBZUniversalTester.Services;
 using Microsoft.Data.Sqlite;
 using JBZUniversalTester.ViewModels;
@@ -15,7 +15,8 @@ internal static partial class Program
         try
         {
             string original = BuiltInLabelTemplateStore.Load(BuiltInLabelTemplateStore.ReferenceFor("BCW"));
-            string edited = original.Replace("b245,16", "b220,20", StringComparison.Ordinal)
+            string edited = original.Replace(",Q,h4,", ",Q,h5,", StringComparison.Ordinal)
+                .Replace("b245,16", "b220,20", StringComparison.Ordinal)
                 .Replace("A110,5,0,3,2,2", "A95,8,0,3,1,2", StringComparison.Ordinal);
             var settings = new LabelSettings { TemplateType="BCW", BcwVehicleCode="09", BcwPosition="LH",
                 RawDestination=Path.Combine(root,"printer.epl") };
@@ -39,7 +40,7 @@ internal static partial class Program
             Assert(BuiltInLabelTemplateStore.LoadOverride(restored.Label,"BCW")==string.Empty,
                 "BCW default reset clears only its dedicated override");
             var defaultRequest=LabelPrintRequest.Capture(history,model,restored.Label);
-            Assert(defaultRequest.Payload.Contains("b245,16",StringComparison.Ordinal),"New captures use default BCW again after reset");
+            Assert(defaultRequest.Payload.Contains("b245,16,Q,h4,",StringComparison.Ordinal),"New captures use default BCW again after reset");
             var printer=new LabelPrintService(new BcwSerialStore(Path.Combine(root,"bcw.db")),()=>history.Finished);
             try
             {
@@ -146,7 +147,7 @@ internal static partial class Program
             Assert(rejected, "BCW rejects serial overflow/zero without truncation");
         }
         var request = BcwRequest("BCW-vector");
-        Assert(request.Payload.Contains("b245,16,Q,h5,\"2628709L00001\"", StringComparison.Ordinal) &&
+        Assert(request.Payload.Contains("b245,16,Q,h4,\"2628709L00001\"", StringComparison.Ordinal) &&
                request.Payload.Contains("A80,80,0,2,1,1,N,\"2628709L00001\"", StringComparison.Ordinal), "BCW QR and printed text identical");
         Assert(request.Payload.Contains("A110,5,0,3,2,2,N,\"LH\"", StringComparison.Ordinal) &&
                request.Payload.Contains("A85,56,0,2,1,1,N,\"OE366-33050\"", StringComparison.Ordinal), "BCW preserves original positions and fonts");

@@ -44,7 +44,7 @@ R0,0
 ON
 D4
 S2
-b245,16,Q,h5,"2628709L00001"
+b245,16,Q,h4,"2628709L00001"
 A110,5,0,3,2,2,N,"LH"
 A85,56,0,2,1,1,N,"OE366-33050"
 A80,80,0,2,1,1,N,"2628709L00001"
@@ -113,4 +113,6 @@ Kiểm thử BCW đạt: vector Julian/năm nhuận/ngày cuối năm/RH/LH, QR 
 
 Không chỉnh dữ liệu sản xuất thật khi phát triển. Integrity trên DB fixture History và nhật ký BCW đều `ok`, số dòng History giữ nguyên qua cập nhật snapshot.
 
-Chưa có Zebra thật để xác minh: hỗ trợ EPL QR `Q,h5`, khả năng đọc QR sau in, vị trí in/độ rộng giấy/DPI, tốc độ/độ đậm, COM/RAW thực tế, rút cáp khi đang gửi và kiểm tra tem đã nhận trước in lại. Không tuyên bố kiểm thử file RAW là xác nhận in vật lý.
+Chưa có Zebra thật để xác minh: hỗ trợ EPL QR `Q,h4`, khả năng đọc QR sau in, vị trí in/độ rộng giấy/DPI, tốc độ/độ đậm, COM/RAW thực tế, rút cáp khi đang gửi và kiểm tra tem đã nhận trước in lại. Không tuyên bố kiểm thử file RAW là xác nhận in vật lý.
+
+Từ V2026.09.449, QR mặc định dùng `h4` theo mẫu nguồn BCW.txt; giữ nguyên tọa độ tích hợp. Mẫu tùy chỉnh và payload in lại đã lưu không bị ghi đè.
