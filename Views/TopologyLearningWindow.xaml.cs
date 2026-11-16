@@ -119,18 +119,8 @@ public partial class TopologyLearningWindow : Window
         {
             _displayedSignature = snapshot.Signature;
             Rows.Clear();
-            foreach ((LearnedTopologyNetwork network, int networkIndex) in
-                     snapshot.Networks.Select((network, index) => (network, index)))
-            {
-                string topologyType = network.Ios.Count == 2 ? "Đơn" : "Nối chung";
-                foreach (int io in network.Ios.OrderBy(value => value))
-                {
-                    Rows.Add(new TopologyLearningDisplayRow(
-                        networkIndex + 1,
-                        topologyType,
-                        $"IO ({io})"));
-                }
-            }
+            foreach (TopologyLearningDisplayRow row in BuildDisplayRows(snapshot))
+                Rows.Add(row);
         }
 
         if (!_diagnosing)
@@ -166,6 +156,24 @@ public partial class TopologyLearningWindow : Window
         DiagnoseButton.Content = "CHẨN ĐOÁN LẠI";
         SaveButton.IsEnabled = true;
         LearningStatusText.Text = $"ĐÃ QUÉT XONG • {snapshot.Networks.Count} MẠNG • {_stableFrames}/{_requiredStableFrames} FRAME ỔN ĐỊNH";
+    }
+
+    public static IReadOnlyList<TopologyLearningDisplayRow> BuildDisplayRows(LearnedTopologySnapshot snapshot)
+    {
+        var rows = new List<TopologyLearningDisplayRow>();
+        for (int index = 0; index < snapshot.Networks.Count; index++)
+        {
+            LearnedTopologyNetwork network = snapshot.Networks[index];
+            bool first = true;
+            foreach (int io in network.Ios.OrderBy(value => value))
+            {
+                rows.Add(new TopologyLearningDisplayRow(index + 1,
+                    network.Ios.Count == 2 ? "Đơn" : "Nối chung",
+                    $"IO ({io})", index > 0 && first));
+                first = false;
+            }
+        }
+        return rows;
     }
 
     private void UpdateActiveIoDiagnostics(ScanFrame frame, LearnedTopologySnapshot snapshot)
@@ -303,7 +311,8 @@ public partial class TopologyLearningWindow : Window
 public sealed record TopologyLearningDisplayRow(
     int Number,
     string TopologyType,
-    string IoText);
+    string IoText,
+    bool IsGroupStart = false);
 
 public sealed class ActiveIoDiagnosticRow : INotifyPropertyChanged
 {

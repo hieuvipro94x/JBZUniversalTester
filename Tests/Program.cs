@@ -10805,6 +10805,17 @@ internal static partial class Program
                snapshot.Rows[0].Connection == "IO(1) ↔ IO(18) ↔ IO(35)",
             "Learning canonicalizes bidirectional edges into stable connected components");
 
+        var displayRows = TopologyLearningWindow.BuildDisplayRows(snapshot);
+        Assert(displayRows.Select(row => row.IoText).SequenceEqual(
+                   new[] { "IO (1)", "IO (18)", "IO (35)", "IO (2)", "IO (19)" }) &&
+               displayRows.Select(row => row.IsGroupStart).SequenceEqual(
+                   new[] { false, false, false, true, false }) &&
+               displayRows.Take(3).All(row => row.TopologyType == "Nối chung" && row.Number == 1) &&
+               displayRows.Skip(3).All(row => row.TopologyType == "Đơn" && row.Number == 2),
+            "Learning display keeps interleaved IO in separate splice/pair groups with one separator per boundary");
+        Assert(TopologyLearningWindow.BuildDisplayRows(new LearnedTopologySnapshot(string.Empty, [], [])).Count == 0,
+            "Empty learning scan clears all display groups and separators");
+
         string root = Path.Combine(Path.GetTempPath(), "JBZLearnedTopologyTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
