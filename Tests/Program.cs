@@ -10808,11 +10808,18 @@ internal static partial class Program
         var displayRows = TopologyLearningWindow.BuildDisplayRows(snapshot);
         Assert(displayRows.Select(row => row.IoText).SequenceEqual(
                    new[] { "IO (1)", "IO (18)", "IO (35)", "IO (2)", "IO (19)" }) &&
-               displayRows.Select(row => row.IsGroupStart).SequenceEqual(
-                   new[] { false, false, false, true, false }) &&
-               displayRows.Take(3).All(row => row.TopologyType == "Nối chung" && row.Number == 1) &&
-               displayRows.Skip(3).All(row => row.TopologyType == "Đơn" && row.Number == 2),
-            "Learning display keeps interleaved IO in separate splice/pair groups with one separator per boundary");
+               displayRows.Select(row => row.IsGroupEnd).SequenceEqual(
+                   new[] { false, false, true, false, true }) &&
+               displayRows.Take(3).All(row => row.TopologyType == "Nối chung") &&
+               displayRows.Skip(3).All(row => row.TopologyType == "Đơn"),
+            "Learning display separates splice/pair groups including the last group");
+        Assert(displayRows.Select(row => row.Number).SequenceEqual(new[] { 1, 2, 3, 4, 5 }),
+            "Learning row ordinals are consecutive across all groups");
+        var singleGroup = TopologyLearningWindow.BuildDisplayRows(
+            snapshot with { Networks = snapshot.Networks.Take(1).ToList() });
+        Assert(singleGroup.Count == 3 && singleGroup[^1].IsGroupEnd &&
+               singleGroup.Take(2).All(row => !row.IsGroupEnd),
+            "A single splice group still has a trailing separator");
         Assert(TopologyLearningWindow.BuildDisplayRows(new LearnedTopologySnapshot(string.Empty, [], [])).Count == 0,
             "Empty learning scan clears all display groups and separators");
 

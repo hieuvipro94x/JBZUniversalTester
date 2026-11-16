@@ -170,7 +170,7 @@
                         <Style TargetType="DataGridRow">
                             <Setter Property="Height" Value="36"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsGroupStart}" Value="True">
+                                <DataTrigger Binding="{Binding IsGroupEnd}" Value="True">
                                     <Setter Property="Height" Value="44"/>
                                 </DataTrigger>
                             </Style.Triggers>
@@ -180,15 +180,15 @@
                         <Style TargetType="DataGridCell">
                             <Setter Property="BorderThickness" Value="0"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding IsGroupStart}" Value="True">
-                                    <Setter Property="BorderThickness" Value="0,8,0,0"/>
+                                <DataTrigger Binding="{Binding IsGroupEnd}" Value="True">
+                                    <Setter Property="BorderThickness" Value="0,0,0,8"/>
                                     <Setter Property="BorderBrush" Value="{StaticResource AccentTintBorder}"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </DataGrid.CellStyle>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="60"
+                        <DataGridTextColumn Header="STT" Binding="{Binding Number}" Width="60"
                                             ElementStyle="{StaticResource IoCellTextStyle}"/>
                         <DataGridTextColumn Header="LOẠI" Binding="{Binding TopologyType}" Width="140"
                                             ElementStyle="{StaticResource IoCellTextStyle}"/>

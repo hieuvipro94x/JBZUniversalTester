@@ -164,13 +164,12 @@ public partial class TopologyLearningWindow : Window
         for (int index = 0; index < snapshot.Networks.Count; index++)
         {
             LearnedTopologyNetwork network = snapshot.Networks[index];
-            bool first = true;
-            foreach (int io in network.Ios.OrderBy(value => value))
+            int[] ios = network.Ios.OrderBy(value => value).ToArray();
+            foreach (int io in ios)
             {
-                rows.Add(new TopologyLearningDisplayRow(index + 1,
+                rows.Add(new TopologyLearningDisplayRow(rows.Count + 1,
                     network.Ios.Count == 2 ? "Đơn" : "Nối chung",
-                    $"IO ({io})", index > 0 && first));
-                first = false;
+                    $"IO ({io})", io == ios[^1]));
             }
         }
         return rows;
@@ -312,7 +311,7 @@ public sealed record TopologyLearningDisplayRow(
     int Number,
     string TopologyType,
     string IoText,
-    bool IsGroupStart = false);
+    bool IsGroupEnd = false);
 
 public sealed class ActiveIoDiagnosticRow : INotifyPropertyChanged
 {
