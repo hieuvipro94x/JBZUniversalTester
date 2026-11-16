@@ -166,8 +166,7 @@
             <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
                 <StackPanel Width="780" MaxWidth="780">
                     <Border Width="452" Height="137" Background="{StaticResource PanelBackground}"
-                            HorizontalAlignment="Center" BorderBrush="{StaticResource BorderColor}"
-                            BorderThickness="1" CornerRadius="8">
+                            HorizontalAlignment="Center" BorderThickness="0">
                         <Image Source="/Assets/jabez-vina-logo.png" Stretch="Uniform"
                                SnapsToDevicePixels="True" Margin="6"/>
                     </Border>
