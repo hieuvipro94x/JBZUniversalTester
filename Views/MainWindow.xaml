@@ -7,7 +7,7 @@
         WindowStyle="None"
         ResizeMode="NoResize"
         WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource PageBackground}"
+        Background="{DynamicResource PanelBackground}"
         Foreground="{DynamicResource TextPrimary}"
         FontFamily="Segoe UI"
         UseLayoutRounding="True"
@@ -121,7 +121,7 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Grid Background="{StaticResource PageBackground}">
+    <Grid Background="{StaticResource PanelBackground}">
 
         <Grid.RowDefinitions>
             <RowDefinition Height="64"/>
