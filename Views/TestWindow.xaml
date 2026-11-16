@@ -439,7 +439,7 @@
                         <Setter Property="FontWeight" Value="Normal"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsNetworkStart}" Value="True">
-                                <Setter Property="BorderBrush" Value="{StaticResource AccentTintBorder}"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource TestNetworkDivider}"/>
                                 <Setter Property="BorderThickness" Value="0,10,0,0"/>
                                 <Setter Property="MinHeight" Value="44"/>
                             </DataTrigger>
