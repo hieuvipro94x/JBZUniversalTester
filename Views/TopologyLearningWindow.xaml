@@ -171,7 +171,7 @@
                             <Setter Property="Height" Value="36"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsGroupEnd}" Value="True">
-                                    <Setter Property="Height" Value="44"/>
+                                    <Setter Property="Height" Value="38"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
@@ -181,8 +181,8 @@
                             <Setter Property="BorderThickness" Value="0"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsGroupEnd}" Value="True">
-                                    <Setter Property="BorderThickness" Value="0,0,0,8"/>
-                                    <Setter Property="BorderBrush" Value="{StaticResource AccentTintBorder}"/>
+                                    <Setter Property="BorderThickness" Value="0,0,0,2"/>
+                                    <Setter Property="BorderBrush" Value="{StaticResource InkBlack}"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
