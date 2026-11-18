@@ -328,6 +328,7 @@ set "LOCAL_VERSION_DIR=%ROOT%PublishSingle\V%NEW_VERSION%"
 set "LAN_RELEASE_ROOT=\\192.168.10.150\public\NAM"
 set "LAN_VERSION_DIR=%LAN_RELEASE_ROOT%\V%NEW_VERSION%"
 set "LAN_COPY_STATUS=BO QUA"
+set "LAN_COPY_FAILED=0"
 
 echo ============================================================
 echo BUOC 2B - SAO CHEP TOAN BO V%NEW_VERSION% LEN LAN
@@ -348,17 +349,12 @@ if errorlevel 1 (
     goto :GIT_RELEASE
 )
 
-rem /E: copy tat ca file, thu muc con va ca thu muc rong.
-rem /COPY:DAT va /DCOPY:DAT: giu nguyen du lieu, thuoc tinh, thoi gian.
-rem /XJ: khong lan theo junction, tranh sao chep vong lap.
-rem /R:0 /W:0: khong thu lai khi mang LAN co loi; tiep tuc Git.
-rem KHONG dung /MIR: tranh xoa nham du lieu san co tren LAN.
-robocopy "%LOCAL_VERSION_DIR%" "%LAN_VERSION_DIR%" /E /COPY:DAT /DCOPY:DAT /XJ /R:0 /W:0 /NP
-set "LAN_COPY_EXIT=%ERRORLEVEL%"
-
-rem Robocopy: exit code 0..7 la thanh cong; 8 tro len la loi.
-if %LAN_COPY_EXIT% GEQ 8 (
-    echo [LOI LAN] Robocopy that bai, ma loi: %LAN_COPY_EXIT%.
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
+  -File "%ROOT%Scripts\Copy-VerifiedRelease.ps1" -Source "%LOCAL_VERSION_DIR%" -Destination "%LAN_VERSION_DIR%"
+if errorlevel 1 (
+    set "LAN_COPY_FAILED=1"
+    set "LAN_COPY_STATUS=THAT BAI"
+    echo [LOI LAN] Sao chep hoac xac minh SHA256 that bai.
     echo [LAN] Ban build tren may van giu nguyen tai: %LOCAL_VERSION_DIR%
     goto :GIT_RELEASE
 )
@@ -367,6 +363,8 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
   -File "%ROOT%Scripts\Test-LanReleasePath.ps1" -Path "%LAN_VERSION_DIR%\JBZUniversalTester.exe" -PathType Leaf -TimeoutSeconds 5
 if errorlevel 1 (
     echo [LOI LAN] Khong tim thay JBZUniversalTester.exe tai thu muc LAN.
+    set "LAN_COPY_FAILED=1"
+    set "LAN_COPY_STATUS=THAT BAI"
     goto :GIT_RELEASE
 )
 
@@ -461,6 +459,10 @@ if errorlevel 1 (
 goto :SUCCESS
 
 :SUCCESS
+if "%LAN_COPY_FAILED%"=="1" (
+    echo [LOI GIAO HANG] Git da push nhung sao chep LAN that bai. Chua hoan tat giao hang.
+    goto :FAIL
+)
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
   -File "%SIGN_VERIFY_SCRIPT%" ^
   -ExePath "%EXPECTED_EXE%"

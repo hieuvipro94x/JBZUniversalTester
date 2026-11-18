@@ -95,6 +95,8 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.12" />
+    <!-- Patch the native SQLite engine without changing the managed provider/API. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.14" />
     <PackageReference Include="System.IO.Ports" Version="10.0.10" />
   </ItemGroup>
 

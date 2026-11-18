@@ -264,8 +264,28 @@ public static class HistoryExportService
         return new string(chars.ToArray());
     }
 
-    private static string Xml(string? value) =>
-        (SecurityElement.Escape(value ?? string.Empty) ?? string.Empty).Replace("\r", "&#13;", StringComparison.Ordinal);
+    private static string Xml(string? value)
+    {
+        string text = value ?? string.Empty;
+        var encoded = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            // SpreadsheetML escapes preserve control bytes in printer payloads
+            // without putting forbidden characters into XML. Escape literal
+            // _xHHHH_ strings too, so Excel does not reinterpret user text.
+            if (c == '_' && i + 6 < text.Length && text[i + 1] == 'x' && text[i + 6] == '_' &&
+                text.AsSpan(i + 2, 4).IndexOfAnyExcept("0123456789ABCDEFabcdef") < 0)
+                encoded.Append("_x005F_");
+            else if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+                encoded.Append(c).Append(text[++i]);
+            else if (!System.Xml.XmlConvert.IsXmlChar(c))
+                encoded.Append("_x").Append(((int)c).ToString("X4", CultureInfo.InvariantCulture)).Append('_');
+            else
+                encoded.Append(c);
+        }
+        return (SecurityElement.Escape(encoded.ToString()) ?? string.Empty).Replace("\r", "&#13;", StringComparison.Ordinal);
+    }
 
     private static string ContentTypesXml() => """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>

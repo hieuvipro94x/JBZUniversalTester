@@ -36,7 +36,7 @@ public static class ProductionConfigService
             {
                 string json = File.ReadAllText(JsonPath, Encoding.UTF8);
                 settings = JsonSerializer.Deserialize<ProductionSettings>(json, JsonOptions)
-                           ?? new ProductionSettings();
+                           ?? throw new InvalidDataException("File JSON cấu hình không chứa dữ liệu.");
 
                 // Migration cũ: Lot chuỗi -> LotNo.
                 if (!json.Contains("\"LotNo\"", StringComparison.OrdinalIgnoreCase) &&
@@ -71,12 +71,12 @@ public static class ProductionConfigService
         {
             BackupInvalidConfig(JsonPath);
             AsyncFileLogService.Current.Error($"production.settings.json invalid: {ex.Message}");
-            settings = new ProductionSettings();
+            throw new InvalidDataException("Cấu hình JSON không hợp lệ. Giữ nguyên file cấu hình; chưa thể vận hành bằng cấu hình mặc định.", ex);
         }
         catch (Exception ex)
         {
             AsyncFileLogService.Current.Error($"Load production settings failed: {ex.Message}");
-            settings = new ProductionSettings();
+            throw new InvalidDataException("Không đọc được cấu hình sản xuất. Giữ nguyên file cấu hình; kiểm tra file và quyền truy cập trước khi vận hành.", ex);
         }
 
         Normalize(settings);
@@ -519,11 +519,14 @@ public static class ProductionConfigService
     {
         try
         {
-            if (!File.Exists(ConfigPath) || File.ReadLines(ConfigPath, Encoding.UTF8)
-                    .Select(ParseCfgLine)
-                    .Any(item => IsInternalOnlyConfigKey(item.Key)))
+            lock (AtomicWriteGate)
             {
-                Save(settings);
+                if (!File.Exists(ConfigPath) || File.ReadLines(ConfigPath, Encoding.UTF8)
+                        .Select(ParseCfgLine)
+                        .Any(item => IsInternalOnlyConfigKey(item.Key)))
+                {
+                    Save(settings);
+                }
             }
         }
         catch (Exception ex)
@@ -542,6 +545,8 @@ public static class ProductionConfigService
             .Select(ParseCfgLine)
             .Where(x => x.Key.Length > 0)
             .ToDictionary(x => x.Key, x => x.Value, StringComparer.OrdinalIgnoreCase);
+        if (map.Count == 0)
+            throw new InvalidDataException("File cấu hình hiện hữu rỗng hoặc không có khóa cấu hình hợp lệ.");
         if (requireSavedFields && (!map.ContainsKey("ExpansionCardCount") ||
             !map.ContainsKey("StartCardNumber") || !map.ContainsKey("IoConfirm1") || !map.ContainsKey("IoConfirmN")))
             throw new InvalidDataException("File cấu hình vừa lưu chưa đầy đủ; giữ nguyên cấu hình đang chạy.");
@@ -1127,7 +1132,12 @@ public static class ProductionConfigService
 
     internal static string[] ReadCfgLines(string path)
     {
-        byte[] bytes = File.ReadAllBytes(path);
+        // A production LOT/settings save can replace this same file on a worker.
+        // Serialize the file snapshot with our atomic writer; genuine external
+        // sharing/access errors must still propagate rather than use defaults.
+        byte[] bytes;
+        lock (AtomicWriteGate)
+            bytes = File.ReadAllBytes(path);
         string text;
         try
         {

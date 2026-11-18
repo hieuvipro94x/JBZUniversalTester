@@ -2272,7 +2272,65 @@ public sealed class TestHistoryStore
                   (criteria.BeforeHistoryAt is null ? $" OFFSET {offset}" : string.Empty)
                 : string.Empty);
         string labelPayloadColumn = includeLabelPayload ? "t.LabelPayload" : "''";
+        string where = clauses.Count == 0 ? "" : "WHERE " + string.Join(" AND ", clauses);
+        // Sparse text/fault/LOT filters can leave very large gaps between page
+        // rows. Keep the single-pass rank for those searches rather than count
+        // the same gap repeatedly. Date/type-only pages are contiguous per batch.
+        bool paged = !exportAll && applyLimit && criteria.LotNo is null && criteria.Io is null &&
+            string.IsNullOrWhiteSpace(criteria.PartKeyword) && string.IsNullOrWhiteSpace(criteria.FaultType) &&
+            string.IsNullOrWhiteSpace(criteria.WireName) && string.IsNullOrWhiteSpace(criteria.CycleId) &&
+            string.IsNullOrWhiteSpace(criteria.AppVersion) &&
+            (string.IsNullOrWhiteSpace(criteria.Result) || criteria.Result.Equals("ALL", StringComparison.OrdinalIgnoreCase));
+        // Rank the small selected page, then count the unfiltered prefix once
+        // per product/batch. Counts between its first row and each current row
+        // preserve gaps from FAIL/date filters without ranking the whole DB.
+        // Separate timestamp and Id ranges keep duplicate-time lookups indexed.
+        string prefix = paged ? $"""
+            WITH HistoryPage AS MATERIALIZED (
+                SELECT t.Id,t.PartId,t.ProductionBatchKey,t.InspectionType,
+                    {historyAtSql} AS HistoryAt
+                FROM Tests t JOIN Parts p ON p.Id=t.PartId JOIN Models m ON m.Id=t.ModelId
+                {where} {order}
+            ), HistoryRankedPage AS (
+                SELECT *,ROW_NUMBER() OVER(PARTITION BY PartId,ProductionBatchKey ORDER BY HistoryAt,Id) AS PageRank
+                FROM HistoryPage WHERE InspectionType='PRODUCT'
+            ), HistoryAnchors AS MATERIALIZED (
+                SELECT r.*,
+                    (SELECT COUNT(*) FROM Tests b WHERE b.InspectionType='PRODUCT'
+                        AND b.PartId=r.PartId AND b.ProductionBatchKey=r.ProductionBatchKey
+                        AND COALESCE(b.TestStartedAt,b.StartedAt)<r.HistoryAt) +
+                    (SELECT COUNT(*) FROM Tests b WHERE b.InspectionType='PRODUCT'
+                        AND b.PartId=r.PartId AND b.ProductionBatchKey=r.ProductionBatchKey
+                        AND COALESCE(b.TestStartedAt,b.StartedAt)=r.HistoryAt AND b.Id<r.Id) AS PriorCount
+                FROM HistoryRankedPage r WHERE PageRank=1
+            )
+            """ : "";
+        const string batchFilter = "b.InspectionType='PRODUCT' AND b.PartId=t.PartId AND b.ProductionBatchKey=t.ProductionBatchKey";
+        string ordinal = paged ? $"""
+            CASE WHEN t.InspectionType='PRODUCT' THEN a.PriorCount +
+                CASE WHEN {historyAtSql}=a.HistoryAt THEN
+                    (SELECT COUNT(*) FROM Tests b WHERE {batchFilter}
+                        AND COALESCE(b.TestStartedAt,b.StartedAt)=a.HistoryAt AND b.Id BETWEEN a.Id AND t.Id)
+                ELSE
+                    (SELECT COUNT(*) FROM Tests b WHERE {batchFilter}
+                        AND COALESCE(b.TestStartedAt,b.StartedAt)=a.HistoryAt AND b.Id>=a.Id) +
+                    (SELECT COUNT(*) FROM Tests b WHERE {batchFilter}
+                        AND COALESCE(b.TestStartedAt,b.StartedAt)>a.HistoryAt AND COALESCE(b.TestStartedAt,b.StartedAt)<{historyAtSql}) +
+                    (SELECT COUNT(*) FROM Tests b WHERE {batchFilter}
+                        AND COALESCE(b.TestStartedAt,b.StartedAt)={historyAtSql} AND b.Id<=t.Id)
+                END END
+            """ : "ordinal.HistoryOrdinal";
+        string ordinalJoin = paged
+            ? "LEFT JOIN HistoryAnchors a ON a.PartId=t.PartId AND a.ProductionBatchKey=t.ProductionBatchKey"
+            : """
+                LEFT JOIN (
+                    SELECT Id,ROW_NUMBER() OVER (PARTITION BY PartId,ProductionBatchKey
+                        ORDER BY COALESCE(TestStartedAt,StartedAt),Id) AS HistoryOrdinal
+                    FROM Tests WHERE InspectionType='PRODUCT'
+                ) ordinal ON ordinal.Id=t.Id
+                """;
         command.CommandText = $"""
+            {prefix}
             SELECT
                 t.Id,t.StartedAt,t.FinishedAt,p.PartName,p.PartNumber,p.VehicleType,p.Eco,p.Nco,p.Alc,
                 t.Lot,t.ProductionCounter,t.Result,t.Passed,m.ModelName,m.FilePath,t.HtdrvName,
@@ -2285,23 +2343,18 @@ public sealed class TestHistoryStore
                 t.CycleId,t.LabelSerial,t.Barcode,t.LabelProfile,t.PrintStatus,t.PrintTimestamp,
                 t.Printer,t.LabelCopies,t.ReprintCount,t.PrintMessage,t.LabelTemplateType,{labelPayloadColumn},
                 t.InstallStartedAt,t.TestStartedAt,t.ResultAt,t.RemovalStartedAt,t.RemovedAt,
-                t.InspectionType,t.LotText,t.InspectionTrace,t.ProductionBatchKey,ordinal.HistoryOrdinal
-            FROM Tests t
+                t.InspectionType,t.LotText,t.InspectionTrace,t.ProductionBatchKey,{ordinal}
+            FROM {(paged ? "HistoryPage selected JOIN Tests t ON t.Id=selected.Id" : "Tests t")}
             JOIN Parts p ON p.Id=t.PartId
             JOIN Models m ON m.Id=t.ModelId
-            LEFT JOIN (
-                SELECT Id,ROW_NUMBER() OVER (
-                    PARTITION BY PartId,ProductionBatchKey
-                    ORDER BY COALESCE(TestStartedAt,StartedAt),Id) AS HistoryOrdinal
-                FROM Tests WHERE InspectionType='PRODUCT'
-            ) ordinal ON ordinal.Id=t.Id
+            {ordinalJoin}
             LEFT JOIN TestFaults f ON f.Id=(
                 SELECT firstFault.Id FROM TestFaults firstFault
                 WHERE firstFault.TestId=t.Id
                 ORDER BY firstFault.FaultOrder,firstFault.Id
                 LIMIT 1)
-            {(clauses.Count == 0 ? "" : "WHERE " + string.Join(" AND ", clauses))}
-            {order};
+            {(paged ? "" : where)}
+            {(paged ? $"ORDER BY {historyAtSql} ASC,t.Id ASC" : order)};
             """;
         using SqliteDataReader reader = command.ExecuteReader();
         int rows = 0;

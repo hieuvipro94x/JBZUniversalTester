@@ -28,16 +28,18 @@ public enum AppLogLevel
 public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
 {
     private const int MaxWriteBatch = 256;
+    private const int QueueCapacity = 4096;
     private static readonly TimeSpan BatchWindow = TimeSpan.FromMilliseconds(25);
 
     public static AsyncFileLogService Current { get; } = new();
 
     private readonly Channel<(AppLogCategory Category, DateTime Timestamp, string Message)> _channel =
-        Channel.CreateUnbounded<(AppLogCategory, DateTime, string)>(new UnboundedChannelOptions
+        Channel.CreateBounded<(AppLogCategory, DateTime, string)>(new BoundedChannelOptions(QueueCapacity)
         {
             SingleReader = true,
             SingleWriter = false,
-            AllowSynchronousContinuations = false
+            AllowSynchronousContinuations = false,
+            FullMode = BoundedChannelFullMode.Wait
         });
 
     private readonly CancellationTokenSource _cts = new();
@@ -45,6 +47,11 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
     private int _started;
     private int _disposed;
     private int _fileLoggingEnabled;
+    private long _droppedLogCount;
+    private string _lastWriteError = string.Empty;
+
+    public long DroppedLogCount => Interlocked.Read(ref _droppedLogCount);
+    public string LastWriteError => Volatile.Read(ref _lastWriteError);
 
     public string LogFilePath { get; private set; } = RuntimePaths.LogFile;
 
@@ -76,6 +83,7 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
 
     public void Initialize(string? rootDirectory = null)
     {
+        if (Volatile.Read(ref _disposed) != 0) return;
         if (!string.IsNullOrWhiteSpace(rootDirectory) && Volatile.Read(ref _started) == 0)
         {
             string root = Path.IsPathRooted(rootDirectory)
@@ -103,6 +111,7 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
         {
             Interlocked.Exchange(ref _started, 0);
             Volatile.Write(ref _fileLoggingEnabled, 0);
+            Volatile.Write(ref _lastWriteError, ex.Message);
             Debug.WriteLine($"AsyncFileLogService initialization failed: {ex}");
         }
     }
@@ -116,7 +125,9 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
             return;
 
         string safe = string.IsNullOrWhiteSpace(message) ? "(empty)" : message.Trim();
-        _channel.Writer.TryWrite((category, DateTime.Now, $"[{level}] {safe}"));
+        // Never block scan/UI when storage is unavailable or the queue is full.
+        if (!_channel.Writer.TryWrite((category, DateTime.Now, $"[{level}] {safe}")))
+            Interlocked.Increment(ref _droppedLogCount);
     }
 
     public void Application(string message, AppLogLevel level = AppLogLevel.Normal) => Write(AppLogCategory.Application, message, level);
@@ -131,6 +142,7 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
         {
             var batch = new List<(AppLogCategory Category, DateTime Timestamp, string Message)>(MaxWriteBatch);
             var buffer = new StringBuilder();
+            long reportedDropped = 0;
 
             while (await _channel.Reader.WaitToReadAsync(_cts.Token))
             {
@@ -146,6 +158,9 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
                 }
 
                 buffer.Clear();
+                long dropped = DroppedLogCount;
+                if (dropped > reportedDropped)
+                    buffer.AppendLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [Error] LOG_QUEUE_FULL dropped={dropped - reportedDropped} total={dropped}");
                 foreach (var item in batch)
                 {
                     buffer.Append('[')
@@ -157,11 +172,24 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
                         .AppendLine();
                 }
 
-                await File.AppendAllTextAsync(
-                    LogFilePath,
-                    buffer.ToString(),
-                    new UTF8Encoding(false),
-                    _cts.Token);
+                // Retain this batch while retrying. The bounded queue limits
+                // memory even if storage stays unavailable for the whole shift.
+                while (true)
+                {
+                    try
+                    {
+                        await File.AppendAllTextAsync(LogFilePath, buffer.ToString(), new UTF8Encoding(false), _cts.Token);
+                        Volatile.Write(ref _lastWriteError, string.Empty);
+                        reportedDropped = dropped;
+                        break;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Volatile.Write(ref _lastWriteError, ex.Message);
+                        Debug.WriteLine($"AsyncFileLogService write retry: {ex}");
+                        await Task.Delay(TimeSpan.FromSeconds(1), _cts.Token);
+                    }
+                }
             }
 
             void DrainAvailableEntries(List<(AppLogCategory Category, DateTime Timestamp, string Message)> destination)
@@ -176,6 +204,8 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
         catch (Exception ex)
         {
             // Logging tuyệt đối không được làm process crash.
+            Volatile.Write(ref _lastWriteError, ex.Message);
+            Volatile.Write(ref _fileLoggingEnabled, 0);
             Debug.WriteLine($"AsyncFileLogService writer stopped: {ex}");
         }
     }
@@ -201,7 +231,11 @@ public sealed class AsyncFileLogService : IDisposable, IAsyncDisposable
         }
         finally
         {
-            _cts.Dispose();
+            if (_writerTask is null || _writerTask.IsCompleted)
+                _cts.Dispose();
+            else
+                _ = _writerTask.ContinueWith(_ => _cts.Dispose(), CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
     }
 }

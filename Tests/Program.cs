@@ -22,6 +22,20 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-production-hardening"])
+        {
+            TestInvalidProductionConfigBlocksDefaults();
+            TestLogStorageFailureRecovery();
+            TestXlsxControlCharacterEncoding();
+            TestPatchedNativeSqliteVersion();
+            TestHistoryPageOrdinalPrefixes();
+            return 0;
+        }
+        if (args is ["--benchmark-history-million"])
+        {
+            BenchmarkHistoryPagePrefixes();
+            return 0;
+        }
         if (args is ["--test-bcw-shared-db"])
         {
             TestBcwPersistentSerialAndTransport();
@@ -746,6 +760,11 @@ internal static partial class Program
             ("Manual Leak remains available with automatic Leak OFF", TestManualLeakWithAutomaticDisabled),
             ("Settings save keeps Dispatcher responsive and config snapshots isolated", TestSettingsAsyncSave),
             ("Application shutdown drains logs without blocking Dispatcher", TestApplicationAsyncLogShutdown),
+            ("Invalid existing production CFG blocks unsafe defaults", TestInvalidProductionConfigBlocksDefaults),
+            ("Log storage failures bound memory and recover automatically", TestLogStorageFailureRecovery),
+            ("XLSX preserves control payloads using valid SpreadsheetML", TestXlsxControlCharacterEncoding),
+            ("Native SQLite engine includes aggregate overflow security fix", TestPatchedNativeSqliteVersion),
+            ("History page prefixes preserve complete filtered ordering and batch ordinals", TestHistoryPageOrdinalPrefixes),
             ("Application close skips confirmation, guards products and waits for cleanup", TestSafeApplicationExit),
             ("Board fault checkpoints preserve history and replay exactly once", TestBoardFaultRecoveryStorage),
             ("Board USB loss exits and restores the exact THT on restart", TestBoardDisconnectExitsAndRestores),
