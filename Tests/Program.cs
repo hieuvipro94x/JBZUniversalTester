@@ -607,6 +607,7 @@ internal static partial class Program
         if (args is ["--test-master-rejected-removal"])
         {
             TestRejectedMasterResistanceRemoval();
+            TestMasterCommittedRelayBlockedRemoval();
             return 0;
         }
         if (args is ["--test-wire-color-layout"])
@@ -905,6 +906,7 @@ internal static partial class Program
             ("Fault popup shows short notices without physical wire details", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
+            ("Committed Master blocked relay resumes removal scan without eject or approval", TestMasterCommittedRelayBlockedRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
             ("All NG Masters keep wire rows and open Master requires an exact complete pattern", TestAllMasterWireRowsAndOpenPattern),
             ("Master three-IO short groups and automatic configured open counts", TestMasterShortGroupAndConfiguredOpen),
@@ -2501,12 +2503,12 @@ internal static partial class Program
             "TestView renders full-cell wire colors with outlined readable codes and no #1..#4 columns");
         Assert(xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"Open\">", StringComparison.Ordinal) &&
                xaml.Contains("<DataTrigger Binding=\"{Binding KindName}\" Value=\"MissingConnection\">", StringComparison.Ordinal) &&
-               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"{StaticResource AccentTintBorder}\"/>", StringComparison.Ordinal) &&
-               xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,10,0,0\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"{StaticResource TestNetworkDivider}\"/>", StringComparison.Ordinal) &&
+               xaml.Contains("<Setter Property=\"BorderThickness\" Value=\"0,3,0,0\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Setter Property=\"BorderBrush\" Value=\"{StaticResource FailRed}\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"WrongWiring\"/>", StringComparison.Ordinal) &&
                xaml.Contains("<Condition Binding=\"{Binding KindName}\" Value=\"Short\"/>", StringComparison.Ordinal),
-            "TestView uses 10px blue separators for normal networks and red separators for confirmed wiring fault groups");
+            "TestView uses 3px themed separators for normal networks and red separators for confirmed wiring fault groups");
         int operatorWireStyleStart = xaml.IndexOf("x:Key=\"OperatorWireTextStyle\"", StringComparison.Ordinal);
         int operatorConnectorStyleStart = xaml.IndexOf("x:Key=\"OperatorConnectorTextStyle\"", StringComparison.Ordinal);
         string operatorWireStyle = operatorWireStyleStart >= 0 && operatorConnectorStyleStart > operatorWireStyleStart
@@ -11017,6 +11019,7 @@ internal static partial class Program
             IsConnected = connected;
         public CancellationToken? LastStartScanToken { get; private set; }
         public Action<FakeBoard>? StartScanCallback { get; set; }
+        public Action<FakeBoard>? StopScanCallback { get; set; }
         public Func<Task>? ResistanceRecoveryWork { get; set; }
         private event EventHandler<ScanFrame>? FrameReceivedCore;
         public event EventHandler<ScanFrame>? FrameReceived { add { FrameReceivedCore += value; } remove { FrameReceivedCore -= value; } }
@@ -11078,7 +11081,7 @@ internal static partial class Program
             StartScanCallback?.Invoke(this);
             return Task.CompletedTask;
         }
-        public Task StopScanAsync(CancellationToken ct = default) { IsScanning = false; Commands.Add("STOP"); return Task.CompletedTask; }
+        public Task StopScanAsync(CancellationToken ct = default) { IsScanning = false; Commands.Add("STOP"); StopScanCallback?.Invoke(this); return Task.CompletedTask; }
         public Task EnterIdleAsync(CancellationToken ct = default) => Task.CompletedTask;
         public Task SelectResistanceRouteAsync(ResistanceStep step, CancellationToken ct = default)
         {

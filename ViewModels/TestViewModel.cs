@@ -9037,8 +9037,18 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             {
                 State = "LỖI THỰC THI RELAY MASTER";
                 MasterStatus = "MASTER ĐÃ LƯU PASS NHƯNG KHÔNG THỂ MỞ JIG";
-                AddLog("MASTER GOOD: kết quả đã commit nhưng CompletePassAsync trả false; không ghi đè History.");
+                AddLog($"MASTER GOOD RELAY BLOCKED: continuity={_engine.ContinuityPassed}, " +
+                    $"resistanceCount={Resistance.Count}, resistancePassed={Resistance.All(result => result.Passed)}, " +
+                    $"connected={_board.IsConnected}, scanning={_board.IsScanning}; " +
+                    "PASS đã commit; không ghi đè History, giữ Master LOCKED và chờ tháo mẫu.");
                 await _board.AllRelaysOffAsync(CancellationToken.None);
+                // STOP above suspended the watchdog. A rejected relay sequence must
+                // resume real IO frames too, otherwise removal can never release
+                // this sample and the UI appears frozen indefinitely.
+                MarkMasterRemovalStarted();
+                _engine.SetFrameProcessingEnabled(true);
+                await StartProductionScanAndVerifyFrameAsync(ct, "MASTER_GOOD_RELAY_BLOCKED_REMOVAL",
+                    allowTransportReopen: false);
                 return;
             }
 
