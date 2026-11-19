@@ -9330,6 +9330,10 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
                     masterValidation: true,
                     masterLabel: masterLabel,
                     runProfile: runProfile);
+                // Device-error dialogs can yield while the sample is removed.
+                // A stale completion must not change the new sample or arm retry.
+                ct.ThrowIfCancellationRequested();
+                if (!CurrentSample()) return false;
                 if (passed)
                 {
                     AddLog($"[{masterLabel}-LEAK] PASS attempt={attempt}; tiếp tục xác nhận MASTER.");
@@ -9343,20 +9347,29 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
                     return false;
                 }
 
-                string[] retryConnectorIds = Enumerable.Range(1, 3)
-                    .Where(channel => (runProfile ?? _waterProofProfile).IsChannelEnabled(channel) &&
-                        _lastWaterProofMeasurements.Any(item => item.Channel == channel && item.Enabled && !item.Passed))
-                    .Select(channel => (runProfile ?? _waterProofProfile).ConnectorForChannel(channel).Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                if (retryConnectorIds.Length == 0) retryConnectorIds = connectorIds;
+                string[] retryConnectorIds = connectorIds;
                 State = $"{masterLabel} - THÁO CONNECTOR LEAK {string.Join(", ", retryConnectorIds)}";
                 MasterStatus = State;
-                AddLog($"[{masterLabel}-LEAK] FAIL attempt={attempt}; chờ tháo/lắp đúng connector Leak, không yêu cầu tháo toàn bộ mẫu.");
+                AddLog($"[{masterLabel}-LEAK] FAIL attempt={attempt}; tháo/lắp bất kỳ connector Leak đã cấu hình để đo lại toàn bộ kênh.");
                 await StartProductionScanAndVerifyFrameAsync(ct, $"{masterLabel.Replace(' ', '_')}_LEAK_RETRY");
+                if (!CurrentSample()) return false;
 
                 while (CurrentSample() &&
-                       !retryConnectorIds.All(IsWaterProofConnectorTriggerDisconnected))
+                       !retryConnectorIds.Any(IsWaterProofConnectorTriggerDisconnected))
                 {
+                    // No retry edge was requested: a fully fitted sample is a
+                    // final Master rejection, never a production counter/relay.
+                    if (_engine.LastFrameValid && _engine.ContinuityPassed && !_engine.HasWiringFault)
+                    {
+                        if (Interlocked.CompareExchange(ref _masterPostStarted, 1, 0) == 0)
+                        {
+                            RecordMasterHistory(HistoryInspectionType.MasterGood, passed: false, CaptureFaultDetails());
+                            MarkMasterRemovalStarted();
+                        }
+                        State = MasterStatus = $"{masterLabel} - FAIL LEAK - THÁO MẪU";
+                        AddLog($"[{masterLabel}-LEAK] Đã chốt FAIL Leak khi thông mạch đầy đủ; giữ khóa production, chờ tháo mẫu.");
+                        return false;
+                    }
                     await Task.Delay(50, ct);
                 }
 
@@ -9700,7 +9713,8 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             InspectionTrace = $"{resultAt:HH:mm:ss} 회로검사:{(
                 inspectionType == HistoryInspectionType.MasterBad
                     ? (passed ? "FAIL" : "PASS")
-                    : (passed ? "PASS" : "FAIL"))}",
+                    : (passed || (_engine.ContinuityPassed &&
+                        faultSnapshot.Any(fault => fault.Type == ProductFaultType.WaterProofLeak)) ? "PASS" : "FAIL"))}",
             OpenCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.OpenCircuit),
             WrongCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.WrongWiring),
             ShortCount = faultSnapshot.Count(fault => fault.Type == ProductFaultType.ShortCircuit),
@@ -10074,8 +10088,10 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
         if (!_cycleActive || CurrentProductionPhase != ProductionPhase.WaterProof ||
             !IsProductionFaultContext(generation) || IsDeviceFault || IsPersistenceFault ||
             _pendingLeakFailureMeasurements is null || SelectedOperationTabIndex != 2 ||
-            Volatile.Read(ref _waterProofRunning) != 0 || !_engine.LastFrameValid ||
-            !_engine.ContinuityPassed || _engine.HasWiringFault || _model is not ProductModel model)
+            Volatile.Read(ref _waterProofRunning) != 0 ||
+            (WaterProofRetestConnectorState)Volatile.Read(ref _waterProofRetestConnectorState) is
+                WaterProofRetestConnectorState.AwaitingConnectorReconnect or WaterProofRetestConnectorState.Running ||
+            !_engine.LastFrameValid || !_engine.ContinuityPassed || _engine.HasWiringFault || _model is not ProductModel model)
             return;
         // End-of-cycle NG is a product result. Before full continuity, a failed
         // channel may still retry; after this point only full removal rearms.
@@ -10734,7 +10750,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
 
     private void ArmWaterProofRetestConnectorCycle()
     {
-        string[] connectorIds = ConfiguredWaterProofConnectorIds(_waterProofCurrentRunProfile);
+        string[] connectorIds = ConfiguredWaterProofConnectorIds();
         bool preContinuityRetry =
             CurrentProductionPhase == ProductionPhase.WaterProof &&
             Volatile.Read(ref _preContinuityWaterProofPassed) == 0;
@@ -10755,15 +10771,15 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
         // second unplug/replug after RESULT; the COM run still finishes first.
         int removedDuringRun = Volatile.Read(ref _waterProofRemovedDuringRunMask);
         bool alreadyRemoved = Enumerable.Range(1, 3)
-            .Where(_waterProofCurrentRunProfile.IsChannelEnabled)
-            .All(channel => (removedDuringRun & (1 << (channel - 1))) != 0 ||
-                IsWaterProofConnectorTriggerDisconnected(_waterProofCurrentRunProfile.ConnectorForChannel(channel)));
+            .Where(_waterProofProfile.IsChannelEnabled)
+            .Any(channel => (removedDuringRun & (1 << (channel - 1))) != 0 ||
+                IsWaterProofConnectorTriggerDisconnected(_waterProofProfile.ConnectorForChannel(channel)));
         Interlocked.Exchange(ref _waterProofRetestConnectorState,
             (int)(alreadyRemoved ? WaterProofRetestConnectorState.AwaitingConnectorReconnect
                 : WaterProofRetestConnectorState.AwaitingConnectorRemoval));
         State = WaterProofConnectorWaitingState();
         AddLog(
-            $"[WATERPROOF-RETEST] Đã ARM; tháo rồi lắp lại connector " +
+            $"[WATERPROOF-RETEST] Đã ARM; tháo rồi lắp lại bất kỳ connector Leak " +
             $"{string.Join(", ", connectorIds)} để đo lại toàn bộ kênh Leak trên cùng sản phẩm.");
     }
 
@@ -10782,7 +10798,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             return;
         }
 
-        string[] connectorIds = ConfiguredWaterProofConnectorIds(_waterProofCurrentRunProfile);
+        string[] connectorIds = ConfiguredWaterProofConnectorIds();
         if (connectorIds.Length == 0)
             return;
 
@@ -10790,8 +10806,8 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             ref _waterProofRetestConnectorState);
         if (current == WaterProofRetestConnectorState.AwaitingConnectorRemoval)
         {
-            bool allDisconnected = connectorIds.All(IsWaterProofConnectorTriggerDisconnected);
-            if (!allDisconnected)
+            bool anyDisconnected = connectorIds.Any(IsWaterProofConnectorTriggerDisconnected);
+            if (!anyDisconnected)
                 return;
 
             if (Interlocked.CompareExchange(
@@ -10802,7 +10818,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             {
                 State = WaterProofConnectorWaitingState();
                 AddLog(
-                    $"[WATERPROOF-RETEST] Đã xác nhận mất kết nối kích Leak tại connector {string.Join(", ", connectorIds)}; " +
+                    $"[WATERPROOF-RETEST] Đã xác nhận mất kết nối kích Leak tại connector {string.Join(", ", connectorIds.Where(IsWaterProofConnectorTriggerDisconnected))}; " +
                     "các connector khác giữ nguyên, chờ lắp lại connector Leak.");
             }
             return;
@@ -10867,8 +10883,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
                 return;
             }
 
-            // The failed-channel profile identifies which connector must be refitted;
-            // measurements always repeat every enabled channel in one COM run.
+            // Any configured Leak connector can request a full-group retry.
             WaterProofModelSettings runProfile = _waterProofProfile.Clone();
             if (!TryValidateWaterProofConnectorGate(cycleModel, out string connectorGateError, runProfile))
                 throw new InvalidOperationException(connectorGateError);
@@ -10922,9 +10937,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             }
             else
             {
-                _waterProofCurrentRunProfile = WaterProofProfileForChannels(channel =>
-                    run.Channels.Any(item => item.Channel == channel && item.Enabled &&
-                        (!item.Passed || (Volatile.Read(ref _waterProofRemovedDuringRunMask) & (1 << (channel - 1))) != 0)));
+                _waterProofCurrentRunProfile = _waterProofProfile.Clone();
                 State = WaterProofConnectorWaitingState();
                 armAnotherRetry = true;
                 restartProductionScan = true;
@@ -11145,13 +11158,11 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             }
             else
             {
-                _waterProofCurrentRunProfile = WaterProofProfileForChannels(channel =>
-                    run.Channels.Any(item => item.Channel == channel && item.Enabled &&
-                        (!item.Passed || (Volatile.Read(ref _waterProofRemovedDuringRunMask) & (1 << (channel - 1))) != 0)));
+                _waterProofCurrentRunProfile = _waterProofProfile.Clone();
                 ArmWaterProofRetestConnectorCycle();
                 AddLog(run.Passed
                     ? "[WATERPROOF] PASS đo, nhưng connector đã mất kết nối trong lúc đo; chạy lại sau khi lắp lại connector."
-                    : $"[WATERPROOF] FAIL kênh {string.Join(",", run.Channels.Where(x => x.Enabled && !x.Passed).Select(x => x.Channel))}; chỉ chờ tháo/lắp lại connector tương ứng.");
+                    : $"[WATERPROOF] FAIL kênh {string.Join(",", run.Channels.Where(x => x.Enabled && !x.Passed).Select(x => x.Channel))}; tháo/lắp bất kỳ connector Leak đã cấu hình để đo lại toàn bộ kênh.");
             }
 
             State = CurrentProductionPhase == ProductionPhase.Continuity

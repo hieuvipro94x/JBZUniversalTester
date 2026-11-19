@@ -42,10 +42,8 @@ internal static partial class Program
             new WaterProofChannelMeasurement(2, true, 80, 70, 10, false)], false, "FAIL");
         ((Task)Call("ApplyWaterProofFinalResultAsync", run, true)!).GetAwaiter().GetResult();
         Call("RecordPassedWaterProofChannels", run);
-        // Match the real failed-channel profile used by the production retry path.
-        var failedProfile = (WaterProofModelSettings)Call("WaterProofProfileForChannels",
-            new Func<int, bool>(channel => run.Channels.Any(item => item.Channel == channel && !item.Passed)))!;
-        Set("_waterProofCurrentRunProfile", failedProfile);
+        // The retry gate observes every configured Leak connector, not only NG.
+        Set("_waterProofCurrentRunProfile", profile.Clone());
         engine.ProcessFrame(FrameSeq(99, (40, new[] { 41 }), (42, new[] { 43 })), false);
         Set("_runtimeMode", 1);
         Call("ArmWaterProofRetestConnectorCycle");
@@ -66,16 +64,16 @@ internal static partial class Program
         Call("UpdatePendingWaterProofFailurePresentation");
         Assert(ReferenceEquals(firstRow, vm.FinalWaterProofRows[0]) && !vm.IsCenterResultVisible,
             "Repeated scan frames retain the same result rows without flicker or a center overlay");
-        engine.ProcessFrame(FrameSeq(102, (40, new[] { 41 }), (44, new[] { 45 })), false);
+        engine.ProcessFrame(FrameSeq(102, (42, new[] { 43 }), (44, new[] { 45 })), false);
         Call("ProcessEngineChangedOnUi", generation, null);
         Assert(vm.SelectedOperationTabIndex == 0 && Get("_waterProofRetestConnectorState") == 2 &&
-               failedProfile.IsChannelEnabled(2) && !failedProfile.IsChannelEnabled(1) &&
+               profile.IsChannelEnabled(2) && profile.IsChannelEnabled(1) &&
                Get("_waterProofPassedChannelsMask") == 0,
-            "Removing only failed CH2 hides the summary and arms CH2 reconnect while the entire group must be remeasured");
+            "Removing passed CH1 after CH2 failed hides the summary and arms full-group retry");
         Set("_runtimeMode", 0);
         engine.ProcessFrame(FrameSeq(103, (40, new[] { 41 }), (42, new[] { 43 }), (44, new[] { 45 })), false);
-        Assert(engine.TryGetLeakConnectorTriggerState("LEAK-2", out bool reconnected, out _) && reconnected,
-            "Refitting only CH2 supplies the retry trigger without removing the rest of the product");
+        Assert(engine.TryGetLeakConnectorTriggerState("LEAK-1", out bool reconnected, out _) && reconnected,
+            "Refitting passed CH1 supplies the retry trigger without removing failed CH2 or the rest of the product");
         var retryPass = new WaterProofRunResult([new WaterProofChannelMeasurement(1, true, 81, 80, 1, true), new WaterProofChannelMeasurement(2, true, 81, 80, 1, true)], true, "PASS");
         ((Task)Call("ApplyWaterProofFinalResultAsync", retryPass, true)!).GetAwaiter().GetResult();
         Call("RecordPassedWaterProofChannels", retryPass);

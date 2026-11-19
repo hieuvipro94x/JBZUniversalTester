@@ -17,8 +17,9 @@ internal static partial class Program
             Directory.CreateDirectory(root);
             try
             {
-                foreach (bool initialFailure in new[] { false, true })
+                foreach (int scenario in new[] { 0, 1, 2, 3 })
                 {
+                    bool initialFailure = scenario is 1 or 2;
                     var requests = new List<(WaterProofModelSettings Profile, TaskCompletionSource<WaterProofRunResult> Reply)>();
                     var settings = new ProductionSettings { MasterFaultRequiredCount = 1 };
                     var vm = CreateTestViewModel(settings, out FakeBoard board, waterProofRun: (profile, ct) =>
@@ -40,7 +41,7 @@ internal static partial class Program
                     void Set(string name, object value) => typeof(TestViewModel).GetField(name, flags)!.SetValue(vm, value);
                     int Get(string name) => (int)typeof(TestViewModel).GetField(name, flags)!.GetValue(vm)!;
                     object? Call(string name, params object?[] args) => typeof(TestViewModel).GetMethod(name, flags)!.Invoke(vm, args);
-                    var store = new TestHistoryStore(Path.Combine(root, initialFailure ? "retry.db" : "early.db"));
+                    var store = new TestHistoryStore(Path.Combine(root, $"master-{scenario}.db"));
                     await using var persistence = new ProductionPersistenceService(store, settings, "SELFTEST");
                     await persistence.Initialization;
                     Set("_historyStore", store);
@@ -99,18 +100,40 @@ internal static partial class Program
                     Feed((40, [41, 42]), (43, [44]));
                     Assert(requests.Count == 1, "Repeated fitted frames cannot overlap the active grouped COM run");
                     Reply(0, !initialFailure);
+                    if (scenario == 2)
+                    {
+                        await Until(() => vm.MasterStatus.Contains("THÁO CONNECTOR LEAK"));
+                        // No Leak connector was unplugged. Completing ordinary
+                        // wiring must reject this sample and save one Master NG.
+                        Feed((40, [41, 42]), (43, [44]), (50, [51]));
+                        await Until(() => Get("_masterWaterProofSequenceActive") == 0 && Get("_masterPostStarted") == 1);
+                        await (Task)typeof(TestViewModel).GetField("_masterPersistenceTask", flags)!.GetValue(vm)!;
+                        var saved = store.Search(new HistorySearchCriteria(null, null, null, "", "ALL")).Single();
+                        Assert(!saved.Passed && saved.InspectionType == HistoryInspectionType.MasterGood &&
+                            System.Text.Json.JsonSerializer.Deserialize<FaultDetail[]>(saved.FaultDetailsJson)!
+                                .Any(fault => fault.Type == ProductFaultType.WaterProofLeak) &&
+                            saved.InspectionTrace.Contains("회로검사:PASS", StringComparison.Ordinal) &&
+                            !vm.MasterApproved && vm.Total == total && vm.Fail == fail &&
+                            !board.Commands.Any(command => command.StartsWith("SET:", StringComparison.Ordinal)),
+                            "Fully fitted Master with Leak FAIL saves one rejected Master without production counts or relays");
+                        Feed((40, [41]), (43, [44]), (50, [51]));
+                        Feed((40, [41, 42]), (43, [44]), (50, [51]));
+                        Assert(requests.Count == 1 && store.Search(new HistorySearchCriteria(null, null, null, "", "ALL")).Count == 1,
+                            "Finalized Master NG cannot retry or duplicate History before full sample removal");
+                        continue;
+                    }
                     if (initialFailure)
                     {
                         await Until(() => vm.MasterStatus.Contains("THÁO CONNECTOR LEAK"));
                         Assert(vm.ResultStatusText == "SẢN PHẨM KHÔNG ĐẠT\nTHÁO CONNECTOR LEAK" &&
                             vm.StateBackground == "#C62828" && vm.StateForeground == "#FFFFFF",
                             "A failed Master Leak channel reports product rejection and the specific connector-removal action in red");
-                        Feed((42, [41]), (43, [44]));
+                        Feed((40, [41]), (43, [44]));
                         await Until(() => vm.MasterStatus.Contains("LẮP LẠI CONNECTOR LEAK"));
                         Feed((40, [41, 42]), (43, [44]));
                         await Until(() => requests.Count == 2);
                         Assert(requests[1].Profile.Channel1Enabled && requests[1].Profile.Channel2Enabled,
-                            "Refitting failed CH1 repeats both CH1 and CH2 without full sample removal");
+                            "Refitting passed CH2 after CH1 failed repeats both channels without full sample removal");
                         Reply(1, true);
                     }
                     int secondChannel = initialFailure ? 1 : 0; // Last grouped attempt, not a channel-specific run.
@@ -148,7 +171,7 @@ internal static partial class Program
                     Set("_lastWaterProofMeasurements", Array.Empty<WaterProofChannelMeasurement>());
                     Set("_masterWaterProofPassedChannelsMask", 0);
                     Set("_masterWaterProofSequenceActive", 1);
-                    Reply(reconnect, true);
+                    Reply(reconnect, scenario != 3);
                     await Until(() => Get("_waterProofRunning") == 0);
                     await Task.Delay(20);
                     Assert(Get("_masterWaterProofPassedChannelsMask") == 0 && Get("_masterWaterProofSequenceActive") == 1 &&

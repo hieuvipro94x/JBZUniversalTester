@@ -80,8 +80,14 @@ internal static partial class Program
                     Reply(0, false); await Until(() => Get("_waterProofRunning") == 0 && Get("_waterProofRetestConnectorState") == 1);
                     Assert(Get("_waterProofPassedChannelsMask") == 0 && Get("_preContinuityWaterProofPassed") == 0,
                         "CH1 FAIL invalidates group qualification even when CH2/CH3 measured PASS");
-                    Feed(all.Skip(1).ToArray()); Call("ObserveWaterProofRetestConnectorCycle", generation);
-                    Assert(Get("_waterProofRetestConnectorState") == 2, "Only the failed CH1 connector needs removal");
+                    // CH1 failed, but any configured Leak connector may request retry.
+                    // Removing a non-Leak connector must leave the retry unarmed.
+                    Feed(all); Call("ObserveWaterProofRetestConnectorCycle", generation);
+                    Assert(Get("_waterProofRetestConnectorState") == 1 && requests.Count == 1,
+                        "Missing unrelated LAST connector cannot request a Leak retry");
+                    Feed(all.Take(all.Length - 1).ToArray()); Call("ObserveWaterProofRetestConnectorCycle", generation);
+                    Assert(Get("_waterProofRetestConnectorState") == 2,
+                        "Removing a previously passed Leak connector requests a full-group retry even while failed CH1 stays fitted");
                     Feed((40, [41])); Call("ObserveWaterProofRetestConnectorCycle", generation);
                     Assert(requests.Count == 1 && Get("_waterProofRetestConnectorState") == 2,
                         "Refitted CH1 cannot retry while another required connector is absent");
