@@ -34,7 +34,8 @@ public partial class ProductPickerWindow : Window
         };
         _searchTimer.Tick += SearchTimer_Tick;
         _root = root;
-        RootText.Text = $"Thư mục: {root} (bao gồm tất cả thư mục con)";
+        RootText.Text = "Tìm nhanh theo tên file THT • Nhấp đúp để mở";
+        RootText.ToolTip = root;
         Loaded += async (_, _) => { SearchBox.Focus(); await LoadFilesAsync(); };
         Closed += (_, _) =>
         {

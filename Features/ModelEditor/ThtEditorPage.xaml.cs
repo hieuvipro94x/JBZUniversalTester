@@ -26,6 +26,7 @@ public partial class ThtEditorPage : UserControl
     private string? _hash;
     private Task _diskWork = Task.CompletedTask;
     public HashSet<string> SavedPaths { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool HasCatalogChanges { get; private set; }
     public event Func<Task>? RequestClose;
     public bool IsBusy => _busy;
     public string? ProtectedModelPath { get; set; }
@@ -231,7 +232,8 @@ public partial class ThtEditorPage : UserControl
                 _document = saved.Doc;
                 ThtFileService.SelectPart(_document, selectedPart);
                 _hash = saved.Hash; _changes.MarkSaved(_document); RefreshParts();
-                SavedPaths.Add(Path.GetFullPath(target)); PathText.Text = target; ShowPage(_page);
+                SavedPaths.Add(Path.GetFullPath(target)); HasCatalogChanges = true;
+                PathText.Text = target; ShowPage(_page);
             }
             StatusText.Text = "ĐÃ LƯU THT — ThtBackups sẽ tự xóa khi thoát phần mềm.";
             SaveButton.Tag = "Saved";
@@ -312,6 +314,7 @@ public partial class ThtEditorPage : UserControl
             var deleting = Task.Run(() => IntegratedThtStore.Archive(path, hash));
             _diskWork = deleting; await deleting;
             SavedPaths.Remove(path);
+            HasCatalogChanges = true;
             _document = new() { SourceFormat = "tht", Base = new() };
             _hash = null; _rebuild = false; _changes.Reset(_document); RefreshParts(); ShowPage(0); PathText.Text = "THT mới";
             StatusText.Text = "Đã chuyển file vào ThtBackups.";

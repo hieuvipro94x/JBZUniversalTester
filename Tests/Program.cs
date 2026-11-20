@@ -682,6 +682,13 @@ internal static partial class Program
             TestProductPickerDebouncedSearch();
             return 0;
         }
+        if (args is ["--test-editor-catalog-refresh"])
+        {
+            TestEditorCatalogRefresh();
+            TestCatalogRefreshWhileLoading();
+            Console.WriteLine("PASS: saved THT appears after editor close; pending refreshes are not lost");
+            return 0;
+        }
         if (args is ["--test-main-catalog"])
         {
             TestMainProductCatalog();
@@ -932,6 +939,8 @@ internal static partial class Program
             ("Discard configuration notices and persistent MainWindow status", TestDiscardConfigurationStatus),
             ("Fault popup shows short notices without physical wire details", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
+            ("Editor saves update the MainWindow product catalog", TestEditorCatalogRefresh),
+            ("Catalog refresh during enumeration retains newly saved files", TestCatalogRefreshWhileLoading),
             ("Windows USB RAW print transport and production payloads", TestWindowsUsbPrintTransport),
             ("Windows USB first-print transactions preserve PASS history and suppress duplicates", TestWindowsUsbProductionHistory),
             ("Windows USB/COM selector, discovery and CFG persistence", TestWindowsUsbSettings),

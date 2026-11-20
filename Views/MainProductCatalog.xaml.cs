@@ -12,6 +12,7 @@ namespace JBZUniversalTester.Views;
 public partial class MainProductCatalog : UserControl, IDisposable
 {
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly Func<string, CancellationToken, ProductFileCatalogResult> _readCatalog;
     private readonly DispatcherTimer _searchTimer;
     private ICollectionView? _files;
     private string _root = string.Empty, _selectedPath = string.Empty, _search = string.Empty;
@@ -20,16 +21,47 @@ public partial class MainProductCatalog : UserControl, IDisposable
     public event Action<string>? ProductRequested;
     public event Action? BrowseRequested;
 
-    public MainProductCatalog()
+    public MainProductCatalog() : this(ProductFileCatalog.Read) { }
+
+    public MainProductCatalog(Func<string, CancellationToken, ProductFileCatalogResult> readCatalog)
     {
+        _readCatalog = readCatalog ?? throw new ArgumentNullException(nameof(readCatalog));
         InitializeComponent();
         _searchTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
         _searchTimer.Tick += ApplySearch;
     }
 
-    public async Task LoadAsync(string root, string selectedPath, string? databasePath = null)
+    private bool _refreshLoopActive;
+    private Task _refreshTask = Task.CompletedTask;
+    private (string Root, string SelectedPath, string? DatabasePath)? _pendingRefresh;
+
+    public Task LoadAsync(string root, string selectedPath, string? databasePath = null)
     {
-        if (_loading || _disposed) return;
+        if (_disposed) return Task.CompletedTask;
+        _pendingRefresh = (root, selectedPath, databasePath);
+        if (!_refreshLoopActive) _refreshTask = ProcessRefreshesAsync();
+        return _refreshTask;
+    }
+
+    private async Task ProcessRefreshesAsync()
+    {
+        _refreshLoopActive = true;
+        try
+        {
+            // A save during an existing scan must schedule another read rather
+            // than silently dropping the refresh and leaving a stale list.
+            while (!_disposed && _pendingRefresh is { } request)
+            {
+                _pendingRefresh = null;
+                await LoadCoreAsync(request.Root, request.SelectedPath, request.DatabasePath);
+            }
+        }
+        finally { _refreshLoopActive = false; }
+    }
+
+    private async Task LoadCoreAsync(string root, string selectedPath, string? databasePath)
+    {
+        if (_disposed) return;
         _root = root;
         _selectedPath = selectedPath;
         _loading = true;
@@ -40,7 +72,7 @@ public partial class MainProductCatalog : UserControl, IDisposable
         try
         {
             var ct = _lifetime.Token;
-            var result = await Task.Run(() => ProductFileCatalog.Read(root, ct), ct);
+            var result = await Task.Run(() => _readCatalog(root, ct), ct);
             var ordered = result.Files;
             _notice = result.Errors.Count > 0 ? $"Có {result.Errors.Count} thư mục chưa đọc được. " : string.Empty;
             foreach (string error in result.Errors) AsyncFileLogService.Current.Error($"MAIN_CATALOG: {error}");
@@ -100,7 +132,8 @@ public partial class MainProductCatalog : UserControl, IDisposable
         _files.Refresh();
         StatusText.Text = _notice + (ProductList.Items.Count == 0
             ? "Không có mã hàng phù hợp. Bấm Chọn file khác… để duyệt file."
-            : $"{ProductList.Items.Count:N0} mã hàng • {_root}");
+            : $"{ProductList.Items.Count:N0} mã hàng");
+        StatusText.ToolTip = _root;
         UpdateSelection();
     }
 
@@ -131,6 +164,7 @@ public partial class MainProductCatalog : UserControl, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _pendingRefresh = null;
         _searchTimer.Stop();
         _searchTimer.Tick -= ApplySearch;
         _lifetime.Cancel();

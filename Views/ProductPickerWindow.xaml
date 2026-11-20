@@ -1,7 +1,7 @@
 <Window x:Class="JBZUniversalTester.Views.ProductPickerWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Chọn mã hàng" Width="850" Height="770" ResizeMode="NoResize"
+        Title="Chọn mã hàng" Width="760" Height="770" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" ShowInTaskbar="False"
         Background="{DynamicResource PageBackground}" Foreground="{DynamicResource TextPrimary}" FontFamily="Segoe UI" FontSize="14">
     <Window.Resources>
@@ -129,7 +129,7 @@
                     </Style>
                 </DataGrid.CellStyle>
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="MÃ HÀNG" Binding="{Binding Name}" Width="4*" MinWidth="240">
+                    <DataGridTextColumn Header="MÃ HÀNG" Binding="{Binding Name}" Width="*" MinWidth="240">
                         <DataGridTextColumn.ElementStyle>
                             <Style TargetType="TextBlock" BasedOn="{StaticResource PickerCellText}">
                                 <Setter Property="FontWeight" Value="SemiBold"/>
@@ -140,8 +140,6 @@
                             </Style>
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
-                    <DataGridTextColumn Header="THƯ MỤC" Binding="{Binding Folder}" Width="*" MinWidth="90"
-                                        ElementStyle="{StaticResource PickerCellText}"/>
                 </DataGrid.Columns>
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
@@ -184,7 +182,6 @@
                             <DataTemplate>
                                 <StackPanel>
                                     <TextBlock Text="{Binding File.Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                    <TextBlock Text="{Binding File.Folder}" FontSize="11" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,3,0,0"/>
                                     <TextBlock Text="{Binding TestedAtText}" FontSize="11" Foreground="{StaticResource TextMuted}" Margin="0,3,0,0"/>
                                 </StackPanel>
                             </DataTemplate>

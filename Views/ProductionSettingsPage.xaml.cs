@@ -2370,6 +2370,8 @@ public partial class ProductionSettingsPage : UserControl
     }
 
     public bool IsThtEditorOpen => _modelEditor is not null;
+    private bool _thtCatalogChanged;
+    public bool HasThtCatalogChanges => _thtCatalogChanged || _modelEditor?.HasCatalogChanges == true;
 
     private async void EditTht_Click(object sender, RoutedEventArgs e) => await OpenThtEditorAsync();
 
@@ -2427,6 +2429,7 @@ public partial class ProductionSettingsPage : UserControl
                 return;
             }
         }
+        _thtCatalogChanged |= editor.HasCatalogChanges;
         editor.RequestClose -= CloseModelEditorAsync;
         _modelEditor = null; ModelEditorHost.Content = null; ModelEditorHost.Visibility = Visibility.Collapsed;
         RequestClose?.Invoke(this, EventArgs.Empty);

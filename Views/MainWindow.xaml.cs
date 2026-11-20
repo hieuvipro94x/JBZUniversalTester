@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Threading.Tasks;
@@ -610,6 +610,7 @@ public partial class MainWindow : Window
     {
         Interlocked.Increment(ref _internalPageGeneration);
 
+        bool refreshCatalog = false;
         ProductionSettingsPage? settingsPage = _settingsPage;
         if (settingsPage is not null)
         {
@@ -621,6 +622,7 @@ public partial class MainWindow : Window
                 settingsPage.RequestClose -= InternalPage_RequestClose;
                 settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
                 long releaseStarted = Stopwatch.GetTimestamp();
+                refreshCatalog = settingsPage.HasThtCatalogChanges;
                 settingsPage.ReleasePageResources();
                 AsyncFileLogService.Current.Performance(
                     $"SETTINGS_PERF phase=RELEASE_BINDINGS elapsed_ms={Stopwatch.GetElapsedTime(releaseStarted).TotalMilliseconds:0.###}");
@@ -640,6 +642,7 @@ public partial class MainWindow : Window
         InternalPageHost.Visibility = Visibility.Collapsed;
         MainActionBar.IsEnabled = !_shutdownStarted;
         if (!_shutdownStarted) UpdateProductRemovalGate();
+        if (refreshCatalog && !_shutdownStarted) await RefreshCatalogAsync();
     }
 
     private static void LogMemory(string marker)
