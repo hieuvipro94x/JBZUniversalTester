@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Diagnostics;
 using System.Collections.Specialized;
 using System.Buffers.Binary;
@@ -22,6 +22,8 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-configuration-target"])
+        { TestSettingsConfigurationTarget(); TestCatalogDeleteConfirmation(); return 0; }
         if (args is ["--test-production-hardening"])
         {
             TestInvalidProductionConfigBlocksDefaults();
@@ -940,6 +942,8 @@ internal static partial class Program
             ("Fault popup shows short notices without physical wire details", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Editor saves update the MainWindow product catalog", TestEditorCatalogRefresh),
+            ("Settings target selection preserves runtime and per-file profiles", TestSettingsConfigurationTarget),
+            ("Catalog deletion requires confirmation and preserves active THT", TestCatalogDeleteConfirmation),
             ("Catalog refresh during enumeration retains newly saved files", TestCatalogRefreshWhileLoading),
             ("Windows USB RAW print transport and production payloads", TestWindowsUsbPrintTransport),
             ("Windows USB first-print transactions preserve PASS history and suppress duplicates", TestWindowsUsbProductionHistory),
@@ -2753,7 +2757,7 @@ internal static partial class Program
                 .Descendants()
                 .Where(element => element.Name.LocalName == "Button")
                 .ToArray();
-        Assert(settingsButtons.Length == 22 &&
+        Assert(settingsButtons.Length == 23 &&
                settingsButtons.All(button =>
                    button.Attribute("Style")?.Value.Contains("StaticResource", StringComparison.Ordinal) == true) &&
                settingsXaml.Contains("SettingsPrimaryButtonStyle", StringComparison.Ordinal) &&

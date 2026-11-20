@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='UTF-8'?>
+﻿<?xml version='1.0' encoding='UTF-8'?>
 <UserControl xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"  x:Class="JBZUniversalTester.Views.ProductionSettingsPage" PreviewMouseDown="Settings_PreviewMouseDown" PreviewKeyDown="Settings_PreviewKeyDown" PreviewTextInput="Settings_PreviewTextInput" Background="{DynamicResource PageBackground}" FontFamily="Segoe UI" UseLayoutRounding="True" SnapsToDevicePixels="True" FontSize="16" Foreground="{DynamicResource TextPrimary}">
     <UserControl.Resources>
         <ResourceDictionary>
@@ -226,10 +226,13 @@
         <!-- HEADER -->
         <Border Grid.Row="0" Background="{StaticResource BrandBlue}" BorderBrush="{StaticResource AccentBlue}" BorderThickness="0,0,0,3">
             <Grid Margin="20,0">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <Rectangle Width="4" Height="24" Fill="{StaticResource AccentBlue}" RadiusX="2" RadiusY="2" Margin="0,0,12,0"/>
-                    <TextBlock Text="CÀI ĐẶT PRODUCTION" FontSize="20" FontWeight="Bold" Foreground="{StaticResource PanelBackground}"/>
-                </StackPanel>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <TextBlock Text="CÀI ĐẶT" FontSize="20" FontWeight="Bold" Foreground="{StaticResource PanelBackground}" Margin="0,0,16,0"/>
+                <TextBlock x:Name="ConfigurationModelText" Grid.Column="1" Text="{Binding DiscardModelDisplay}" ToolTip="{Binding DiscardModelPath}"
+                           Foreground="{StaticResource PanelBackground}" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <Button x:Name="SelectConfigurationModelButton" Grid.Column="2" Content="CHỌN MÃ CÀI ĐẶT" Height="30" Width="170"
+                        FontSize="13" Padding="8,0" Margin="12,0,0,0" Style="{StaticResource SettingsInfoButtonStyle}" Click="SelectConfigurationModel_Click"
+                        ToolTip="Chọn file THT để sửa cấu hình; không đổi mã đang test"/>
             </Grid>
         </Border>
 

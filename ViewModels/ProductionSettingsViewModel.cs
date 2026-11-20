@@ -56,7 +56,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         Raise(nameof(CanEditMasterOpenCount));
     }
     private int _masterOpenFaultRequiredCount = 1;
-    public int MasterExpectedConnectionCount => _test?.MasterExpectedConnectionCount ?? 0;
+    public int MasterExpectedConnectionCount => IsEditingRuntimeModel ? _test?.MasterExpectedConnectionCount ?? 0 : 0;
     public int MasterOpenFaultRequiredCount
     {
         get => _masterOpenFaultRequiredCount;
@@ -71,6 +71,18 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     private readonly Action<ProductionSettings> _saveSettings;
     private long _openedLotStart;
     private readonly int _legacyRelayWiringMode;
+    private readonly ProductModel? _configurationModel;
+    private ProductionSettings _configurationBaseline;
+    private static ProductionSettings CloneSettings(ProductionSettings settings) =>
+        JsonSerializer.Deserialize<ProductionSettings>(JsonSerializer.SerializeToUtf8Bytes(settings))!;
+    public bool IsEditingRuntimeModel => _configurationModel is null ||
+        (!string.IsNullOrWhiteSpace(_test?.CurrentModelPath) &&
+         string.Equals(Path.GetFullPath(_modelPath), Path.GetFullPath(_test.CurrentModelPath), StringComparison.OrdinalIgnoreCase));
+    public ProductionSettingsViewModel CreateForConfigurationModel(string path)
+    {
+        ProductModel model = new ThtModelParser().Load(path);
+        return new ProductionSettingsViewModel(_test, _saveSettings, CloneSettings(_configurationBaseline), model);
+    }
     private SettingsAccessSession _accessSession = SettingsAccessSession.Administrator;
     private string _deniedSettingsSnapshot = string.Empty;
     private string _deniedEditorsSnapshot = string.Empty;
@@ -265,12 +277,14 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     public AsyncRelayCommand ManualWaterProofTestCommand { get; }
 
     public ProductionSettingsViewModel(TestViewModel? test = null, Action<ProductionSettings>? saveSettings = null,
-        ProductionSettings? initialSettings = null)
+        ProductionSettings? initialSettings = null, ProductModel? configurationModel = null)
     {
         _test = test;
         _saveSettings = saveSettings ?? ProductionConfigService.Save;
         Settings = initialSettings ?? ProductionConfigService.Load();
-        _modelPath = test?.CurrentModelPath ?? Settings.LastThtPath;
+        _configurationModel = configurationModel;
+        _configurationBaseline = CloneSettings(Settings);
+        _modelPath = configurationModel?.SourcePath ?? test?.CurrentModelPath ?? Settings.LastThtPath;
         _legacyRelayWiringMode = Settings.RelayWiringMode;
         Settings.RelayWiringMode = ProductionConfigService.GetRelayWiringModeForPath(Settings, _modelPath);
         _lotProductKey = ProductionConfigService.GetLotProductKey(
@@ -280,7 +294,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         ProductLotSettings productLot = ProductionConfigService.GetOrCreateProductLot(
             Settings,
             _lotProductKey,
-            migrateCurrentLot: true);
+            migrateCurrentLot: configurationModel is null);
         // Trường trên màn Cài đặt là LOTNO bắt đầu, không phải LOT kế tiếp đã
         // tăng trong quá trình sản xuất.
         Settings.LotNo = productLot.DailyLotStartsAtZero && !productLot.UseConfiguredStartLot
@@ -289,7 +303,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         Settings.LotNoDate = productLot.LotNoDate;
         ProductionConfigService.ApplyProductLabelTemplate(Settings, _lotProductKey);
         _printLabelForCurrentProduct = ProductionConfigService.IsProductLabelPrintingEnabled(Settings, _lotProductKey);
-        if (!string.IsNullOrWhiteSpace(_modelPath))
+        if (configurationModel is null && !string.IsNullOrWhiteSpace(_modelPath))
             Settings.LastThtPath = _modelPath;
         Settings.ManualModeEnabled = false;
         _manualRuntimeActive = test?.IsManualModeActive == true;
@@ -314,7 +328,10 @@ public sealed class ProductionSettingsViewModel : ObservableObject
             AsyncFileLogService.Current.Error($"Settings Leak profile unavailable; other groups remain editable: model={_modelPath}; {ex}");
         }
         ResetManualWaterProofResults(WaterProof);
-        WaterProofConnectorOptions = LoadWaterProofConnectorOptions(test, _modelPath);
+        WaterProofConnectorOptions = configurationModel is null
+            ? LoadWaterProofConnectorOptions(test, _modelPath)
+            : configurationModel.Connectors.Select(connector => connector.ConnectorId)
+                .Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         _masterFaultRequiredCount = ProductionConfigService.GetMasterFaultRequiredCountForPath(
             Settings, _modelPath);
         _masterSelectedFaultSamples = ProductionConfigService.GetMasterSelectedFaultSamplesForPath(Settings, _modelPath);
@@ -412,7 +429,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
     }
 
     private bool CanUseManualControls() =>
-        !_manualControlsClosing &&
+        IsEditingRuntimeModel && !_manualControlsClosing &&
         _test is not null &&
         !_test.IsDeviceFault &&
         (_manualOperationRunning || _test.IsManualModeActive || _test.CanEnterManualMode);
@@ -436,7 +453,7 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         // Saving must not repaint every manual button as disabled/enabled.
         // Guard execution here as well as the page input guard; do not queue a
         // stale hardware request to run automatically after settings are saved.
-        if (_settingsSaveInProgress || _manualOperationRunning || _manualControlsClosing) return;
+        if (!IsEditingRuntimeModel || _settingsSaveInProgress || _manualOperationRunning || _manualControlsClosing) return;
         _manualOperationRunning = true;
         using var cancellation = new CancellationTokenSource();
         _manualOperationCts = cancellation;
@@ -910,7 +927,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         SaveDiscardEdit(discard);
         ProductionSettings snapshot = CaptureSettingsForSave();
         _saveSettings(snapshot);
-        ProductionConfigService.CopyInto(Settings, snapshot);
+        _configurationBaseline = CloneSettings(snapshot);
+        ProductionConfigService.CopyInto(Settings, CloneSettings(snapshot));
+        if (_configurationModel is not null) ProductionConfigService.ApplyProductLabelTemplate(Settings, _lotProductKey);
         Settings.RelayWiringMode = ProductionConfigService.GetRelayWiringModeForPath(Settings, _modelPath);
         RestoreLotEditorInput();
         Task applying = AcceptDiscardEditAsync(discard);
@@ -926,7 +945,9 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         // No WPF binding or shared runtime settings are accessed by that worker.
         ProductionSettings snapshot = CaptureSettingsForSave();
         await Task.Run(() => { SaveDiscardEdit(discard); _saveSettings(snapshot); });
-        ProductionConfigService.CopyInto(Settings, snapshot);
+        _configurationBaseline = CloneSettings(snapshot);
+        ProductionConfigService.CopyInto(Settings, CloneSettings(snapshot));
+        if (_configurationModel is not null) ProductionConfigService.ApplyProductLabelTemplate(Settings, _lotProductKey);
         Settings.RelayWiringMode = ProductionConfigService.GetRelayWiringModeForPath(Settings, _modelPath);
         RestoreLotEditorInput();
         await AcceptDiscardEditAsync(discard);
@@ -939,6 +960,19 @@ public sealed class ProductionSettingsViewModel : ObservableObject
         // Retain the legacy default for THTs not configured yet. Saving A must
         // never change the fallback wiring of B or any older station config.
         snapshot.RelayWiringMode = _legacyRelayWiringMode;
+        if (_configurationModel is not null)
+        {
+            // Editing B must not change station startup A or legacy fallback
+            // resistance/LOT/template fields used by unconfigured runtime models.
+            snapshot.LastThtPath = _configurationBaseline.LastThtPath;
+            snapshot.ResistanceChannels = CloneSettings(_configurationBaseline).ResistanceChannels;
+            snapshot.LotNo = _configurationBaseline.LotNo;
+            snapshot.LotNoDate = _configurationBaseline.LotNoDate;
+            snapshot.Label.TemplateType = _configurationBaseline.Label.TemplateType;
+            snapshot.Label.WidthMm = _configurationBaseline.Label.WidthMm;
+            snapshot.Label.HeightMm = _configurationBaseline.Label.HeightMm;
+            snapshot.Label.FormatName = _configurationBaseline.Label.FormatName;
+        }
         return snapshot;
     }
 

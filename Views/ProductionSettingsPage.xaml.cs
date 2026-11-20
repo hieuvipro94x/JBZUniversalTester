@@ -118,7 +118,7 @@ public partial class ProductionSettingsPage : UserControl
             SaveSettingsButton.IsEnabled = false;
         }
         SinglePrintLotTextBox.Text = _vm.Settings.LotNo.ToString(CultureInfo.InvariantCulture);
-        _labelPrintModelPath = _vm.Settings.LastThtPath;
+        _labelPrintModelPath = _vm.DiscardModelPath;
         if (!string.IsNullOrWhiteSpace(_labelPrintModelPath))
         {
             var current = new ProductFileEntry(System.IO.Path.GetFileNameWithoutExtension(_labelPrintModelPath),
@@ -240,6 +240,7 @@ public partial class ProductionSettingsPage : UserControl
         ModelEditorHost.Content = null;
         _modelEditor = null;
         DataContext = null;
+        ConfigurationModelRequested = null;
         SettingsSaved = null;
         RequestClose = null;
     }
@@ -1347,7 +1348,7 @@ public partial class ProductionSettingsPage : UserControl
     }
 
     private string ResolveLabelPrintModelPath() =>
-        _labelPrintModelPath?.Trim() ?? _vm.Settings.LastThtPath?.Trim() ?? string.Empty;
+        _labelPrintModelPath?.Trim() ?? _vm.DiscardModelPath?.Trim() ?? string.Empty;
 
     private void UpdateBcwPanel()
     {

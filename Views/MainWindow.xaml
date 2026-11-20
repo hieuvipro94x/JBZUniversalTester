@@ -157,10 +157,10 @@
         <!-- ====================================================== -->
         <!-- MÀN HÌNH KHỞI ĐỘNG / CHỌN MÃ HÀNG                     -->
         <!-- ====================================================== -->
-        <Grid Grid.Row="1" Margin="18,10">
+        <Grid Grid.Row="1" Margin="18,10" MaxWidth="1320">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.7*"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="0.55*" MaxWidth="436"/>
             </Grid.ColumnDefinitions>
             <local:MainProductCatalog x:Name="ProductCatalog" Grid.Column="1" MaxWidth="420" HorizontalAlignment="Right" Margin="16,0,0,0"/>
             <Viewbox Stretch="Uniform" StretchDirection="DownOnly">

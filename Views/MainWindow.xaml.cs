@@ -491,6 +491,7 @@ public partial class MainWindow : Window
             _settingsPage = preparedPage;
             _settingsPage.RequestClose += InternalPage_RequestClose;
             _settingsPage.SettingsSaved += SettingsPage_SettingsSaved;
+            _settingsPage.ConfigurationModelRequested += SettingsPage_ConfigurationModelRequested;
             InternalPageHost.Content = _settingsPage;
             InternalPageHost.Visibility = Visibility.Visible;
             MainActionBar.IsEnabled = false;
@@ -505,6 +506,40 @@ public partial class MainWindow : Window
             // settings or leave background page callbacks alive after that.
             if (!attached) preparedPage.ReleasePageResources();
         }
+    }
+
+    private async Task SettingsPage_ConfigurationModelRequested(ProductionSettingsPage source, string path)
+    {
+        if (_shutdownStarted || !ReferenceEquals(_settingsPage, source)) return;
+        long generation = Volatile.Read(ref _internalPageGeneration);
+        await _viewModel.Test.WaitForLotConfigurationWritesAsync();
+        var editor = await source.PrepareConfigurationModelAsync(path);
+        if (_shutdownStarted || generation != Volatile.Read(ref _internalPageGeneration) || !ReferenceEquals(_settingsPage, source)) return;
+        var next = new ProductionSettingsPage(_viewModel, editor, deferInitialLayout: true);
+        next.SetAccessSession(source.AccessSession);
+        bool attached = false;
+        try
+        {
+            next.Measure(new Size(Math.Max(540, ActualWidth), Math.Max(1, ActualHeight)));
+            next.Arrange(new Rect(new Size(Math.Max(540, ActualWidth), Math.Max(1, ActualHeight))));
+            await next.PrepareForDisplayAsync();
+            if (_shutdownStarted || !ReferenceEquals(_settingsPage, source)) return;
+            await source.ReleaseManualOutputsAsync();
+            if (_shutdownStarted || !ReferenceEquals(_settingsPage, source)) return;
+            bool refreshCatalog = source.HasThtCatalogChanges;
+            source.RequestClose -= InternalPage_RequestClose;
+            source.SettingsSaved -= SettingsPage_SettingsSaved;
+            source.ConfigurationModelRequested -= SettingsPage_ConfigurationModelRequested;
+            _settingsPage = next;
+            next.RequestClose += InternalPage_RequestClose;
+            next.SettingsSaved += SettingsPage_SettingsSaved;
+            next.ConfigurationModelRequested += SettingsPage_ConfigurationModelRequested;
+            InternalPageHost.Content = next;
+            source.ReleasePageResources();
+            attached = true;
+            if (refreshCatalog) await RefreshCatalogAsync();
+        }
+        finally { if (!attached) next.ReleasePageResources(); }
     }
 
     private async Task SettingsPage_SettingsSaved(object? sender, EventArgs e)
@@ -621,6 +656,7 @@ public partial class MainWindow : Window
             {
                 settingsPage.RequestClose -= InternalPage_RequestClose;
                 settingsPage.SettingsSaved -= SettingsPage_SettingsSaved;
+                settingsPage.ConfigurationModelRequested -= SettingsPage_ConfigurationModelRequested;
                 long releaseStarted = Stopwatch.GetTimestamp();
                 refreshCatalog = settingsPage.HasThtCatalogChanges;
                 settingsPage.ReleasePageResources();
