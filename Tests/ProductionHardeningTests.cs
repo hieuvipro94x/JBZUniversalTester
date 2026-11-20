@@ -14,9 +14,13 @@ internal static partial class Program
     {
         string root = Path.Combine(Path.GetTempPath(), "JBZ-invalid-cfg-" + Guid.NewGuid().ToString("N"));
         object? previous = AppContext.GetData("JBZUniversalTester.SelfTest.DatabaseFile");
+        object? previousBaseDirectory = AppContext.GetData("APP_CONTEXT_BASE_DIRECTORY");
         Directory.CreateDirectory(root);
         try
         {
+            // A fresh-station fixture must not inherit legacy JSON/CFG files
+            // left in the build output by other tests or a local application run.
+            AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", root + Path.DirectorySeparatorChar);
             AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(root, "history.db"));
             foreach (string invalid in new[] { "", "unreadable syntax", "[DeviceName]KEEP\n[devicename]DUPLICATE\n[PassMarkingRelayEnabled]False\n" })
             {
@@ -55,6 +59,7 @@ internal static partial class Program
         finally
         {
             AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", previous);
+            AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", previousBaseDirectory);
             Directory.Delete(root, true);
         }
     }

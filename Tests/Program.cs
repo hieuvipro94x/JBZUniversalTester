@@ -81,6 +81,14 @@ internal static partial class Program
             Console.WriteLine("PASS: safe Alt+F4/Close confirmation, product gates and single async cleanup");
             return 0;
         }
+        if (args is ["--test-windows-usb-printing"])
+        {
+            TestWindowsUsbPrintTransport();
+            TestWindowsUsbProductionHistory();
+            TestWindowsUsbSettings();
+            Console.WriteLine("PASS: Windows USB RAW printing, frozen payloads, BCW duplicate guard, errors and settings persistence");
+            return 0;
+        }
         if (args is ["--test-model-relay"])
         { TestModelRelayWiring(); Console.WriteLine("PASS: per-THT relay configuration, PASS/FAIL/Master mapping and history snapshots"); return 0; }
         if (args is ["--test-history-ui-safety"])
@@ -924,6 +932,9 @@ internal static partial class Program
             ("Discard configuration notices and persistent MainWindow status", TestDiscardConfigurationStatus),
             ("Fault popup shows short notices without physical wire details", TestDiagnosticUiAudit),
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
+            ("Windows USB RAW print transport and production payloads", TestWindowsUsbPrintTransport),
+            ("Windows USB first-print transactions preserve PASS history and suppress duplicates", TestWindowsUsbProductionHistory),
+            ("Windows USB/COM selector, discovery and CFG persistence", TestWindowsUsbSettings),
             ("Rejected Master resumes scan and clears resistance after full removal", TestRejectedMasterResistanceRemoval),
             ("Committed Master blocked relay resumes removal scan without eject or approval", TestMasterCommittedRelayBlockedRemoval),
             ("Wrong Master keeps live installation rows after detecting a fault", TestWrongMasterLiveWireTable),
@@ -2789,9 +2800,9 @@ internal static partial class Program
                    StringComparison.Ordinal) &&
                testViewModelSource.Contains("RequestLeakReconnect(_productionSettings.WaterProofMachine)", StringComparison.Ordinal) &&
                labelPrintServiceSource.Contains(
-                   "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.",
+                   "Không mở được máy in. Kiểm tra cáp, driver, hàng đợi Windows hoặc cổng COM đã chọn.",
                    StringComparison.Ordinal),
-            "Leak failures schedule automatic reconnect after USB return; printer failures retain their COM guidance");
+            "Leak failures reconnect after USB return; printer errors guide both Windows and COM users");
         Assert(!appSource.Contains("$\"Chi tiết: {e.Exception.Message}\"", StringComparison.Ordinal) &&
                !mainWindowSource.Contains("ex.ToString()", StringComparison.Ordinal) &&
                !settingsSource.Contains("ShowMessage(ex.Message", StringComparison.Ordinal) &&
@@ -9175,8 +9186,8 @@ internal static partial class Program
             .GetAwaiter()
             .GetResult();
         Assert(!unconfiguredConnection.Connected &&
-               unconfiguredConnection.Message.Contains("Chưa chọn cổng COM", StringComparison.Ordinal),
-            "Printer connect requires an explicitly configured saved COM port");
+               unconfiguredConnection.Message.Contains("COM hoặc Windows USB", StringComparison.Ordinal),
+            "Printer connect requires an explicitly configured COM or Windows printer");
         unconfiguredPrinter.DisposeAsync().AsTask().GetAwaiter().GetResult();
 
         DateTime testedAt = new(2026, 8, 22, 10, 15, 30, DateTimeKind.Local);

@@ -99,11 +99,13 @@ public partial class ProductionSettingsPage : UserControl
     public ProductionSettingsPage(
         MainViewModel? main,
         ProductionSettingsViewModel viewModel,
-        bool deferInitialLayout = false)
+        bool deferInitialLayout = false,
+        Func<string[]>? installedPrinters = null)
     {
         _main = main;
         _vm = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         _deferInitialLayout = deferInitialLayout;
+        _installedPrinters = installedPrinters ?? (() => System.Drawing.Printing.PrinterSettings.InstalledPrinters.Cast<string>().ToArray());
         long bamlStarted = Stopwatch.GetTimestamp();
         InitializeComponent();
         WaterProofConfigurationBody.IsEnabled = !_vm.HasWaterProofConfigurationError;
@@ -127,6 +129,7 @@ public partial class ProductionSettingsPage : UserControl
         BatchPrintStartLotTextBox.Text = "1";
         BatchPrintEndLotTextBox.Text = "1";
         DataContext = _vm;
+        InitializePrinterTransport();
         InitializeComboBoxItems();
         ApplyLabelTemplatePhysicalSize(_vm.Settings.Label.TemplateType);
         SyncCompatibilityFields();
@@ -382,11 +385,18 @@ public partial class ProductionSettingsPage : UserControl
         CancellationToken selectionToken = _printerSelectionCts.Token;
         try
         {
-            PrinterComComboBox
-                .GetBindingExpression(System.Windows.Controls.Primitives.Selector.SelectedValueProperty)
-                ?.UpdateSource();
-
-            string portName = _vm.Settings.Label.PrinterCom?.Trim() ?? string.Empty;
+            string portName = PrinterComComboBox.SelectedValue as string ?? string.Empty;
+            if (_useWindowsLabelPrinter)
+            {
+                _vm.Settings.Label.PrinterName = _lastWindowsPrinter = portName;
+                _vm.Settings.Label.PrinterCom = string.Empty;
+            }
+            else
+            {
+                _vm.Settings.Label.PrinterCom = _lastPrinterCom = portName;
+                _vm.Settings.Label.PrinterName = string.Empty;
+            }
+            _vm.Settings.Label.RawDestination = string.Empty;
             // Kết nối thử là side effect tức thời; file cấu hình chỉ được
             // ghi qua pipeline chung khi người dùng rời trang Cài đặt.
 
@@ -1725,8 +1735,20 @@ public partial class ProductionSettingsPage : UserControl
             if (IsReleased || generation != Volatile.Read(ref _portRefreshGeneration))
                 return;
 
-            string savedPort = _vm.Settings.Label.PrinterCom?.Trim() ?? string.Empty;
-            List<ComPortOption> options = ports
+            string savedPort = (_useWindowsLabelPrinter ? _vm.Settings.Label.PrinterName : _vm.Settings.Label.PrinterCom)?.Trim() ?? string.Empty;
+            string[] printerTargets = ports;
+            if (_useWindowsLabelPrinter)
+            {
+                try { printerTargets = (await Task.Run(_installedPrinters)).Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray(); }
+                catch (Exception ex)
+                {
+                    printerTargets = [];
+                    AsyncFileLogService.Current.Error($"Windows printer enumeration failed: {ex}");
+                }
+                if (IsReleased || generation != Volatile.Read(ref _portRefreshGeneration)) return;
+            }
+            List<ComPortOption> options = printerTargets
                 .Select(x => new ComPortOption(x, x))
                 .ToList();
             if (!string.IsNullOrWhiteSpace(savedPort) &&
@@ -1737,12 +1759,13 @@ public partial class ProductionSettingsPage : UserControl
             try
             {
                 PrinterComComboBox.ItemsSource = options;
-                PrinterComComboBox.SelectedValue = savedPort;
+                PrinterComComboBox.SelectedItem = options.FirstOrDefault(option =>
+                    string.Equals(option.PortName, savedPort, StringComparison.OrdinalIgnoreCase));
                 // A missing port must not silently erase the saved configuration.
-                _vm.Settings.Label.PrinterCom = savedPort;
                 PrinterComComboBox.ToolTip = !string.IsNullOrWhiteSpace(savedPort) &&
-                    !ports.Contains(savedPort, StringComparer.OrdinalIgnoreCase)
-                    ? $"Cổng {savedPort} đã lưu hiện chưa được phát hiện. Hãy kết nối máy in rồi bấm QUÉT."
+                    !printerTargets.Contains(savedPort, StringComparer.OrdinalIgnoreCase)
+                    ? $"Máy in/cổng {savedPort} đã lưu hiện chưa được phát hiện. Kiểm tra kết nối/driver rồi bấm QUÉT."
+                    : _useWindowsLabelPrinter ? "Máy in Windows USB: chọn đúng tên hàng đợi đã cài trong Windows. Máy phải nhận EPL/ESim tương ứng mẫu tem."
                     : "Chọn cổng COM của máy in tem.";
             }
             finally
@@ -1762,12 +1785,11 @@ public partial class ProductionSettingsPage : UserControl
             _suppressPrinterPortSelection = true;
             try
             {
-                string savedPort = _vm.Settings.Label.PrinterCom ?? string.Empty;
+                string savedPort = (_useWindowsLabelPrinter ? _vm.Settings.Label.PrinterName : _vm.Settings.Label.PrinterCom) ?? string.Empty;
                 PrinterComComboBox.ItemsSource = string.IsNullOrWhiteSpace(savedPort)
                     ? Array.Empty<ComPortOption>() : new[] { new ComPortOption(savedPort, savedPort) };
                 PrinterComComboBox.SelectedValue = savedPort;
-                _vm.Settings.Label.PrinterCom = savedPort;
-                PrinterComComboBox.ToolTip = "Chưa quét được cổng COM. Hãy bấm QUÉT để thử lại.";
+                PrinterComComboBox.ToolTip = "Chưa quét được máy in/cổng COM. Hãy bấm QUÉT để thử lại.";
             }
             finally
             {

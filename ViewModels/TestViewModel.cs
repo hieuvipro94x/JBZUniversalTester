@@ -499,6 +499,10 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
     public string HomePrinterStatusText => _model is null ? "CHƯA CHỌN MÃ HÀNG" :
         !ProductionConfigService.IsProductLabelPrintingEnabled(_productionSettings,
             ProductionConfigService.GetLotProductKey(_model)) ? "KHÔNG SỬ DỤNG" :
+        string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterCom) &&
+            !string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterName)
+            ? (IsLabelPrinterConnected ? $"WINDOWS USB • {LabelPrinterConnectedPort}" :
+                LabelStatusText.StartsWith("TEM: ", StringComparison.Ordinal) ? LabelStatusText[5..] : LabelStatusText) :
         string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterCom) ? "CHƯA CẤU HÌNH COM" :
         IsLabelPrinterConnected ? $"ĐÃ KẾT NỐI • {LabelPrinterConnectedPort}" :
         LabelStatusText.StartsWith("TEM: ", StringComparison.Ordinal) ? LabelStatusText[5..] : LabelStatusText;
@@ -7120,7 +7124,8 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
 
     public async Task AutoConnectLabelPrinterAsync()
     {
-        if (string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterCom))
+        if (string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterCom) &&
+            string.IsNullOrWhiteSpace(_productionSettings.Label.PrinterName))
         {
             InvokeUi(() => LabelStatusText = "TEM: CHƯA CHỌN CỔNG IN");
             return;
@@ -7140,11 +7145,11 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
         await _labelPrintService.DisconnectAsync(ct);
         InvokeUi(() =>
         {
-            LabelStatusText = "TEM: ĐÃ NGẮT KẾT NỐI COM";
+            LabelStatusText = "TEM: ĐÃ NGẮT KẾT NỐI MÁY IN";
             Raise(nameof(IsLabelPrinterConnected));
             Raise(nameof(LabelPrinterConnectedPort));
         });
-        AddLog("LABEL PRINTER: đã đóng kết nối COM máy in.");
+        AddLog("LABEL PRINTER: đã đóng kết nối máy in.");
     }
 
     public Task<LabelPrintTransportResult> PrintSettingsLabelAsync(
@@ -13533,7 +13538,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
                 InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context.Request.Data.LotNo}");
                 ShowLabelWarning(
                     $"Chưa in lại được tem LOT {context.Request.Data.LotNo}. " +
-                    "Hãy rút/cắm lại cáp và chọn lại cổng COM.");
+                    "Kiểm tra cáp, cổng COM hoặc hàng đợi máy in Windows.");
                 return;
             }
 
@@ -13551,7 +13556,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             AddLog($"LABEL REPRINT ERROR: {ex}");
             InvokeUi(() => LabelStatusText = $"LỖI IN LẠI TEM - LOT {context?.Request.Data.LotNo}");
             ShowLabelWarning(
-                $"Chưa in lại được tem LOT {context?.Request.Data.LotNo}. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
+                $"Chưa in lại được tem LOT {context?.Request.Data.LotNo}. Kiểm tra cáp, cổng COM hoặc hàng đợi máy in Windows.");
         }
     }
 

@@ -16,17 +16,23 @@ public sealed class LabelPrintService : IAsyncDisposable
     private readonly BcwSerialStore _bcwSerials;
     private readonly Func<DateTime> _localClock;
     private readonly Action<SerialPort> _closePort;
+    private readonly Action<string, byte[]> _sendWindows;
+    private readonly Action<string> _validateWindows;
+    private string _connectedWindowsPrinter = string.Empty;
     public LabelPrintService(BcwSerialStore? bcwSerials = null, Func<DateTime>? localClock = null,
-        Action<SerialPort>? closePort = null)
+        Action<SerialPort>? closePort = null, Action<string, byte[]>? sendWindows = null,
+        Action<string>? validateWindows = null)
     {
         _bcwSerials = bcwSerials ?? new BcwSerialStore();
         _localClock = localClock ?? (() => DateTime.Now);
         _closePort = closePort ?? CloseAndDisposePort;
+        _sendWindows = sendWindows ?? RawPrinter.Send;
+        _validateWindows = validateWindows ?? RawPrinter.Validate;
     }
 
-    public bool IsConnected => _printerPort?.IsOpen == true;
+    public bool IsConnected => _printerPort?.IsOpen == true || !string.IsNullOrEmpty(_connectedWindowsPrinter);
 
-    public string ConnectedPort => IsConnected ? _connectedPort : string.Empty;
+    public string ConnectedPort => _printerPort?.IsOpen == true ? _connectedPort : _connectedWindowsPrinter;
 
     public async Task<LabelPrinterConnectionResult> ConnectAsync(
         LabelSettings settings,
@@ -36,12 +42,22 @@ public sealed class LabelPrintService : IAsyncDisposable
         string portName = settings.PrinterCom?.Trim() ?? string.Empty;
         int baudRate = settings.BaudRate, writeTimeoutMs = settings.WriteTimeoutMs;
         string encodingName = settings.EncodingName;
-        if (string.IsNullOrWhiteSpace(portName))
-            return new LabelPrinterConnectionResult(false, "Chưa chọn cổng COM máy in.");
+        string windowsPrinter = settings.PrinterName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(portName) && string.IsNullOrWhiteSpace(windowsPrinter))
+            return new LabelPrinterConnectionResult(false, "Chưa chọn máy in COM hoặc Windows USB.");
 
         await _printGate.WaitAsync(ct);
         try
         {
+            if (string.IsNullOrWhiteSpace(portName))
+            {
+                await ClosePrinterPortAsync();
+                await Task.Run(() => _validateWindows(windowsPrinter), ct);
+                ct.ThrowIfCancellationRequested();
+                _connectedWindowsPrinter = windowsPrinter;
+                return new LabelPrinterConnectionResult(true,
+                    $"WINDOWS USB: {windowsPrinter} • Hàng đợi sẵn sàng; chưa xác nhận tem vật lý");
+            }
             await EnsureComConnectedAsync(
                 portName,
                 baudRate,
@@ -59,7 +75,7 @@ public sealed class LabelPrintService : IAsyncDisposable
                 $"Label printer connection failed on {portName}: {ex}");
             return new LabelPrinterConnectionResult(
                 false,
-                "Không kết nối được máy in. Hãy rút/cắm lại cáp và chọn lại cổng COM.");
+                "Không mở được máy in. Kiểm tra cáp, driver, hàng đợi Windows hoặc cổng COM đã chọn.");
         }
         finally
         {
@@ -135,19 +151,21 @@ public sealed class LabelPrintService : IAsyncDisposable
     private async Task<LabelPrintTransportResult> PrintSerializedAsync(
         LabelPrintRequest request,
         CancellationToken ct,
-        bool productionComOnly = false)
+        bool productionPrinterOnly = false)
     {
-        if (productionComOnly && string.IsNullOrWhiteSpace(request.PrinterCom))
-            return new LabelPrintTransportResult(false, "Production payload saved; printer COM is not selected.");
-        string transport = ResolveTransportName(request);
+        if (productionPrinterOnly && string.IsNullOrWhiteSpace(request.PrinterCom) &&
+            string.IsNullOrWhiteSpace(request.PrinterName))
+            return new LabelPrintTransportResult(false, "Production payload saved; COM or Windows printer is not selected.");
+        string transport = ResolveTransportName(request, productionPrinterOnly);
         AsyncFileLogService.Current.Application(
             $"[LABEL] Product={request.Data.PartNumber} Profile={request.Profile.Id} " +
-            $"Template={TemplateSource(request)} Transport={transport} COM={request.PrinterCom} " +
+            $"Template={TemplateSource(request)} Transport={transport} COM={request.PrinterCom} Windows={request.PrinterName} " +
             $"Copies={request.Copies} CycleId={request.CycleId}");
         Encoding encoding = ResolveEncoding(request.Profile.EncodingName);
         byte[] payload = EncodeStrict(request.Payload, encoding);
 
-        if (!productionComOnly && request.Profile.Mode == LabelPrintMode.ExternalHelper)
+        if (!productionPrinterOnly && request.Profile.Mode == LabelPrintMode.ExternalHelper &&
+            (string.IsNullOrWhiteSpace(request.PrinterName) || !string.IsNullOrWhiteSpace(request.PrinterCom)))
             return await PrintWithExternalHelperAsync(request, payload, ct);
 
         if (!string.IsNullOrWhiteSpace(request.PrinterCom))
@@ -167,14 +185,16 @@ public sealed class LabelPrintService : IAsyncDisposable
 
         if (!string.IsNullOrWhiteSpace(request.PrinterName))
         {
+            await ClosePrinterPortAsync();
             await Task.Run(() =>
             {
                 for (int i = 0; i < request.Copies; i++)
                 {
                     ct.ThrowIfCancellationRequested();
-                    RawPrinter.Send(request.PrinterName.Trim(), payload);
+                    _sendWindows(request.PrinterName.Trim(), payload);
                 }
             }, ct);
+            _connectedWindowsPrinter = request.PrinterName.Trim();
             return new LabelPrintTransportResult(
                 true,
                 $"Sent {request.Copies} label job(s) via Windows printer '{request.PrinterName}'; no physical print ACK is available.");
@@ -262,6 +282,7 @@ public sealed class LabelPrintService : IAsyncDisposable
 
     private async Task ClosePrinterPortAsync()
     {
+        _connectedWindowsPrinter = string.Empty;
         SerialPort? port = _printerPort;
         string oldPortName = _connectedPort;
         int oldBaudRate = _connectedBaudRate;
@@ -374,8 +395,9 @@ public sealed class LabelPrintService : IAsyncDisposable
         return new LabelPrintTransportResult(true, $"External helper accepted the label job; no physical print ACK is available. Print file: {printFile}");
     }
 
-    private static string ResolveTransportName(LabelPrintRequest request) =>
-        request.Profile.Mode == LabelPrintMode.ExternalHelper ? "ExternalHelper" :
+    private static string ResolveTransportName(LabelPrintRequest request, bool productionPrinterOnly) =>
+        !productionPrinterOnly && request.Profile.Mode == LabelPrintMode.ExternalHelper &&
+            (string.IsNullOrWhiteSpace(request.PrinterName) || !string.IsNullOrWhiteSpace(request.PrinterCom)) ? "ExternalHelper" :
         !string.IsNullOrWhiteSpace(request.PrinterCom) ? "COM" :
         !string.IsNullOrWhiteSpace(request.PrinterName) ? "WindowsRAW" :
         !string.IsNullOrWhiteSpace(request.RawDestination) ? "RawDestination" :
@@ -446,45 +468,50 @@ public sealed class LabelPrintService : IAsyncDisposable
         [DllImport("winspool.drv", SetLastError = true)]
         private static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
 
+        [DllImport("winspool.drv", SetLastError = true)]
+        private static extern bool AbortPrinter(IntPtr hPrinter);
+
+        public static void Validate(string printerName)
+        {
+            if (!OpenPrinter(printerName, out IntPtr printer, IntPtr.Zero))
+                throw new InvalidOperationException($"Không mở được máy in Windows '{printerName}'. Win32={Marshal.GetLastWin32Error()}");
+            ClosePrinter(printer);
+        }
+
         public static void Send(string printerName, byte[] bytes)
         {
             if (!OpenPrinter(printerName, out IntPtr printer, IntPtr.Zero))
                 throw new InvalidOperationException($"Cannot open Windows printer '{printerName}'. Win32={Marshal.GetLastWin32Error()}");
 
             IntPtr unmanaged = IntPtr.Zero;
+            bool documentStarted = false;
             try
             {
-                var info = new DocInfo1();
-                if (StartDocPrinter(printer, 1, info) == 0)
+                if (StartDocPrinter(printer, 1, new DocInfo1()) == 0)
                     throw new InvalidOperationException($"StartDocPrinter failed. Win32={Marshal.GetLastWin32Error()}");
-
-                try
-                {
-                    if (!StartPagePrinter(printer))
-                        throw new InvalidOperationException($"StartPagePrinter failed. Win32={Marshal.GetLastWin32Error()}");
-
-                    try
-                    {
-                        unmanaged = Marshal.AllocCoTaskMem(bytes.Length);
-                        Marshal.Copy(bytes, 0, unmanaged, bytes.Length);
-
-                        if (!WritePrinter(printer, unmanaged, bytes.Length, out int written) || written != bytes.Length)
-                            throw new InvalidOperationException($"WritePrinter failed. Win32={Marshal.GetLastWin32Error()}");
-                    }
-                    finally
-                    {
-                        EndPagePrinter(printer);
-                    }
-                }
-                finally
-                {
-                    EndDocPrinter(printer);
-                }
+                documentStarted = true;
+                if (!StartPagePrinter(printer))
+                    throw new InvalidOperationException($"StartPagePrinter failed. Win32={Marshal.GetLastWin32Error()}");
+                unmanaged = Marshal.AllocCoTaskMem(bytes.Length);
+                Marshal.Copy(bytes, 0, unmanaged, bytes.Length);
+                if (!WritePrinter(printer, unmanaged, bytes.Length, out int written) || written != bytes.Length)
+                    throw new InvalidOperationException($"WritePrinter failed. Win32={Marshal.GetLastWin32Error()}");
+                if (!EndPagePrinter(printer))
+                    throw new InvalidOperationException($"EndPagePrinter failed. Win32={Marshal.GetLastWin32Error()}");
+                if (!EndDocPrinter(printer))
+                    throw new InvalidOperationException($"EndDocPrinter failed. Win32={Marshal.GetLastWin32Error()}");
+                documentStarted = false;
+            }
+            catch
+            {
+                // Do not finish a partial EPL job after a driver/write error.
+                if (documentStarted && !AbortPrinter(printer))
+                    AsyncFileLogService.Current.Error($"AbortPrinter failed. Win32={Marshal.GetLastWin32Error()}");
+                throw;
             }
             finally
             {
-                if (unmanaged != IntPtr.Zero)
-                    Marshal.FreeCoTaskMem(unmanaged);
+                if (unmanaged != IntPtr.Zero) Marshal.FreeCoTaskMem(unmanaged);
                 ClosePrinter(printer);
             }
         }
