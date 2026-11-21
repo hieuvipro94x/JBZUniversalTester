@@ -162,7 +162,7 @@
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="0.55*" MaxWidth="436"/>
             </Grid.ColumnDefinitions>
-            <local:MainProductCatalog x:Name="ProductCatalog" Grid.Column="1" MaxWidth="420" HorizontalAlignment="Right" Margin="16,0,0,0"/>
+            <local:MainProductCatalog x:Name="ProductCatalog" Grid.Column="1" MaxWidth="420" HorizontalAlignment="Stretch" Margin="16,0,0,0"/>
             <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
                 <StackPanel Width="780" MaxWidth="780">
                     <Border Width="452" Height="137" Background="{StaticResource PanelBackground}"

@@ -694,6 +694,7 @@ internal static partial class Program
         if (args is ["--test-main-catalog"])
         {
             TestMainProductCatalog();
+            TestCatalogStableGeometry();
             Console.WriteLine("PASS: Main catalog scrolling, search, exact-path selection and read-only history");
             return 0;
         }
@@ -943,6 +944,7 @@ internal static partial class Program
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Editor saves update the MainWindow product catalog", TestEditorCatalogRefresh),
             ("Settings target selection preserves runtime and per-file profiles", TestSettingsConfigurationTarget),
+            ("Catalog geometry remains fixed during recycling and filtering", TestCatalogStableGeometry),
             ("Catalog deletion requires confirmation and preserves active THT", TestCatalogDeleteConfirmation),
             ("Catalog refresh during enumeration retains newly saved files", TestCatalogRefreshWhileLoading),
             ("Windows USB RAW print transport and production payloads", TestWindowsUsbPrintTransport),
