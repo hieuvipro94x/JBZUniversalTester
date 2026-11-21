@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.IO.Ports;
 using System.Text.RegularExpressions;
 using System.Text;
@@ -1949,6 +1949,7 @@ public partial class ProductionSettingsPage : UserControl
     {
         _savedConfirmationTimer?.Stop();
         SettingsSavedStatusText.Text = text;
+        SettingsSavedStatusText.ToolTip = text;
         SettingsSavedStatusText.Foreground = (Brush)FindResource(error ? "FailText" : "PassText");
         SettingsSavedStatusText.Visibility = Visibility.Visible;
     }
@@ -2051,6 +2052,13 @@ public partial class ProductionSettingsPage : UserControl
         {
             saveHadError = true;
             SetSaveStatus("Bạn chưa được cấp quyền để lưu thay đổi này.", error: true);
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AsyncFileLogService.Current.Error($"Save production settings rejected: model={_vm.DiscardModelPath}; {ex}");
+            saveHadError = true;
+            SetSaveStatus(ex.Message, error: true);
             return false;
         }
         catch (Exception ex)

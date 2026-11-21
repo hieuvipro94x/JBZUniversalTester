@@ -883,7 +883,13 @@ public sealed class ProductionSettingsViewModel : ObservableObject
                 throw new InvalidOperationException("Chân IO thùng lỗi phải là số nguyên; nhập đủ hai IO hoặc để trống cả hai.");
             }
             int first = ParseDiscardIo(DiscardContactIo1Text), second = ParseDiscardIo(DiscardContactIo2Text);
-            ThtModelParser.ValidateDiscardContacts(first, second, BoardCapacity.FromSettings(Settings).TotalIoCapacity);
+            // A separately selected THT may belong to a different test bench.
+            // Its native IO range is independent of the active station's scan
+            // cards; the runtime editor must retain its actual capacity guard.
+            int discardCapacity = IsEditingRuntimeModel
+                ? BoardCapacity.FromSettings(Settings).TotalIoCapacity
+                : BoardCapacity.MaxGlobalIo;
+            ThtModelParser.ValidateDiscardContacts(first, second, discardCapacity);
         }
         if (_accessSession.Allows(SettingsPermission.Resistance))
         {

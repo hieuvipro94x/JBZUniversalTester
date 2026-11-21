@@ -10,3 +10,7 @@
 - Xóa THT không xóa lịch sử SQLite, CFG hoặc dữ liệu tem. Các cấu hình theo khóa tên file được giữ lại.
 
 Kiểm thử dùng file và DB tạm, delegate giả lập recycle để kiểm tra xác nhận/hủy/lỗi/chặn lặp và cô lập runtime. Chưa kiểm thử thao tác cảm biến, bo thật hay in vật lý.
+
+## Lưu cấu hình mã khác — V2026.09.470
+
+Khi dùng CHỌN MÃ CÀI ĐẶT để sửa THT khác mã runtime, IO thùng lỗi được kiểm tra trong phạm vi THT/phần cứng hỗ trợ (1–640), không dựa vào số card của bàn đang chạy. Cặp IO phải đủ hai số khác nhau. Sửa loại tem không ghi lại THT nếu IO không thay đổi. Không tự tăng số card hoặc đổi mã runtime. Với mã runtime, bước lưu tiếp tục kiểm tra theo đúng số card hiện tại. Lỗi xác thực khi lưu được hiển thị cụ thể và có tooltip đầy đủ.

@@ -22,6 +22,8 @@ internal static partial class Program
     {
         AppContext.SetData("JBZUniversalTester.SelfTest.DatabaseFile", Path.Combine(Path.GetTempPath(),
             "JBZ-SelfTests-" + Guid.NewGuid().ToString("N"), "Data", "JBZUniversalTester.db"));
+        if (args is ["--test-offline-discard"])
+        { TestOfflineSettingsDiscardCapacity(); return 0; }
         if (args is ["--test-configuration-target"])
         { TestSettingsConfigurationTarget(); TestCatalogDeleteConfirmation(); return 0; }
         if (args is ["--test-production-hardening"])
@@ -944,6 +946,7 @@ internal static partial class Program
             ("Good Master resistance clears only after confirmed sample removal", TestMasterResistanceRemovalTransition),
             ("Editor saves update the MainWindow product catalog", TestEditorCatalogRefresh),
             ("Settings target selection preserves runtime and per-file profiles", TestSettingsConfigurationTarget),
+            ("Offline selected-model saves preserve large discard IO and runtime safety", TestOfflineSettingsDiscardCapacity),
             ("Catalog geometry remains fixed during recycling and filtering", TestCatalogStableGeometry),
             ("Catalog deletion requires confirmation and preserves active THT", TestCatalogDeleteConfirmation),
             ("Catalog refresh during enumeration retains newly saved files", TestCatalogRefreshWhileLoading),

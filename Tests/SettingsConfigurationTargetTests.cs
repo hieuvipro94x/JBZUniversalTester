@@ -52,6 +52,52 @@ internal static partial class Program
         });
     }
 
+    private static void TestOfflineSettingsDiscardCapacity()
+    {
+        OnSettingsDispatcher(async () =>
+        {
+            string root = Path.Combine(Path.GetTempPath(), "JBZ-OfflineDiscard-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            ProductionSettingsPage? page = null;
+            try
+            {
+                string a = CreateDiscardSettingsTht(root, "ACTIVE"), b = CreateDiscardSettingsTht(root, "WH320853-V_BMS&U ART(BC3개제외)_190610");
+                var parser = new ThtModelParser(); parser.SaveDiscardContacts(b, 609, 610);
+                byte[] originalB = File.ReadAllBytes(b), originalA = File.ReadAllBytes(a);
+                string cfg = Path.Combine(root, "settings.cfg"); int writes = 0;
+                var initial = new ProductionSettingsViewModel(initialSettings: new ProductionSettings { LastThtPath = a, MasterFaultRequiredCount = 0, ExpansionCardCount = 2 },
+                    saveSettings: snapshot => { ProductionConfigService.SaveLegacyCfg(snapshot, cfg); writes++; });
+                var vm = initial.CreateForConfigurationModel(b);
+                page = new ProductionSettingsPage(null, vm, deferInitialLayout: true);
+                page.SetAccessSession(new SettingsAccessSession(false, SettingsPermission.All));
+                vm.PrintLabelForCurrentProduct = true; vm.Settings.Label.TemplateType = LabelSettings.SmallQrTemplate;
+                async Task<bool> Save() => await (Task<bool>)typeof(ProductionSettingsPage).GetMethod("PersistSettingsAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(page, null)!;
+                Assert(await Save() && writes == 1,
+                    "Operator can save the selected offline THT label while its unchanged 609/610 pair exceeds the active station's 128 IO");
+                Assert(File.ReadAllBytes(b).SequenceEqual(originalB) && File.ReadAllBytes(a).SequenceEqual(originalA),
+                    "Saving a label keeps both native THT files byte-for-byte intact");
+                var saved = ProductionConfigService.LoadSavedSettings(cfg);
+                Assert(saved.LastThtPath == a && vm.CreateForConfigurationModel(b).Settings.Label.TemplateType == LabelSettings.SmallQrTemplate &&
+                       saved.ExpansionCardCount == 2 && parser.Load(b).DiscardContactIo.SequenceEqual([609,610]),
+                    "Saving B preserves A startup and board capacity and restores B's exact label and discard pair");
+                vm.DiscardContactIo1Text = "611"; vm.DiscardContactIo2Text = "612";
+                Assert(await Save() && writes == 2 && parser.Load(b).DiscardContactIo.SequenceEqual([611,612]),
+                    "Explicit offline IO edits use supported THT capacity rather than the unrelated active card count");
+                byte[] beforeInvalid = File.ReadAllBytes(b);
+                vm.DiscardContactIo1Text = "641";
+                Assert(!await Save() && writes == 2 && File.ReadAllBytes(b).SequenceEqual(beforeInvalid),
+                    "Offline IO outside hardware maximum still blocks all writes");
+                var status = (System.Windows.Controls.TextBlock)page.FindName("SettingsSavedStatusText");
+                Assert(status.Text.Contains("640") && Equals(status.ToolTip, status.Text),
+                    "A rejected save shows the actual IO limit and exposes the complete reason as a tooltip");
+                var active = new ProductionSettingsViewModel(initialSettings: new ProductionSettings { LastThtPath = b, ExpansionCardCount = 2 }, saveSettings: _ => throw new Exception("No active invalid save"));
+                bool blocked = false; try { await active.SaveAsync(); } catch (InvalidOperationException ex) { blocked = ex.Message.Contains("128"); }
+                Assert(blocked, "The normal runtime editor still enforces the active station's 128-IO capacity");
+            }
+            finally { page?.ReleasePageResources(); Directory.Delete(root, recursive: true); }
+        });
+    }
+
     private static void TestSettingsConfigurationTarget()
     {
         OnSettingsDispatcher(async () =>
