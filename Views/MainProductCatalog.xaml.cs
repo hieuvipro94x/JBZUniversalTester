@@ -151,6 +151,15 @@ public partial class MainProductCatalog : UserControl, IDisposable
         BrowseButton.IsEnabled = !_deleting && !_disposed;
         RefreshButton.IsEnabled = !_loading && !_deleting && !_disposed;
         ProductList.IsEnabled = SearchBox.IsEnabled = !_deleting;
+        var selected = ProductList.SelectedItem as ProductFileEntry;
+        SelectionNameText.Text = selected is null ? "Chưa chọn mã hàng" : "ĐANG CHỌN: " + selected.Name;
+        SelectionNameText.ToolTip = selected?.FullPath;
+        SelectionFolderText.Text = selected is null ? "Chọn một dòng trong danh sách" : "Thư mục: " + Path.GetDirectoryName(selected.FullPath);
+        SelectionFolderText.ToolTip = selected?.FullPath;
+        SelectionStateText.Text = selected is null ? string.Empty :
+            string.Equals(selected.FullPath, _selectedPath, StringComparison.OrdinalIgnoreCase)
+                ? "Mã này đang được mở trên máy test"
+                : "Chưa áp dụng • Bấm MỞ MÃ HÀNG để đổi mã";
         OpenButton.IsEnabled = ready;
         DeleteButton.IsEnabled = ready && ProductList.SelectedItem is ProductFileEntry file &&
             !string.Equals(file.FullPath, _selectedPath, StringComparison.OrdinalIgnoreCase);

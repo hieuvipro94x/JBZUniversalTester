@@ -157,21 +157,22 @@
         <!-- ====================================================== -->
         <!-- MÀN HÌNH KHỞI ĐỘNG / CHỌN MÃ HÀNG                     -->
         <!-- ====================================================== -->
-        <Grid Grid.Row="1" Margin="18,10" MaxWidth="1320">
+        <Grid Grid.Row="1" Margin="18,24,18,16" MaxWidth="1320">
+            <Grid.RowDefinitions><RowDefinition Height="*" MaxHeight="800"/></Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="0.55*" MaxWidth="436"/>
             </Grid.ColumnDefinitions>
             <local:MainProductCatalog x:Name="ProductCatalog" Grid.Column="1" MaxWidth="420" HorizontalAlignment="Stretch" Margin="16,0,0,0"/>
-            <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
+            <Viewbox Stretch="Uniform" StretchDirection="DownOnly" VerticalAlignment="Top">
                 <StackPanel Width="780" MaxWidth="780">
-                    <Border Width="452" Height="137" Background="{StaticResource PanelBackground}"
+                    <Border Width="370" Height="110" Background="{StaticResource PanelBackground}"
                             HorizontalAlignment="Center" BorderThickness="0">
                         <Image Source="/Assets/jabez-vina-logo.png" Stretch="Uniform"
                                SnapsToDevicePixels="True" Margin="6"/>
                     </Border>
 
-                    <Border x:Name="ModelSummaryCard" Margin="0,22,0,0" Background="{StaticResource PanelBackground}"
+                    <Border x:Name="ModelSummaryCard" Margin="0,18,0,0" Background="{StaticResource PanelBackground}"
                             BorderBrush="{StaticResource BorderColor}"
                             BorderThickness="1" CornerRadius="8" Padding="22,18">
                         <Grid>
@@ -186,7 +187,7 @@
                                     <ColumnDefinition Width="200"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="MÃ HÀNG ĐANG CHỌN" Style="{StaticResource CardCaption}"/>
+                                    <TextBlock Text="MÃ HÀNG ĐÃ MỞ" Style="{StaticResource CardCaption}"/>
                                     <TextBlock Text="{Binding Home.ModelName}" Margin="0,5,8,0"
                                                FontSize="21" FontWeight="Bold" Foreground="{StaticResource BrandBlue}"
                                                TextTrimming="CharacterEllipsis" ToolTip="{Binding Home.ModelName}"/>

@@ -8,7 +8,7 @@
     <ResourceDictionary Source="/JBZUniversalTester;component/Themes/Theme.xaml"/>
    </ResourceDictionary.MergedDictionaries>
    <Style x:Key="CatalogButton" TargetType="Button">
-    <Setter Property="Padding" Value="14,9"/><Setter Property="FontSize" Value="14"/>
+    <Setter Property="Padding" Value="12,6"/><Setter Property="FontSize" Value="14"/>
     <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Cursor" Value="Hand"/>
     <Setter Property="Background" Value="{StaticResource PanelBackground}"/>
     <Setter Property="Foreground" Value="{StaticResource TextSecondary}"/>
@@ -46,10 +46,11 @@
     <RowDefinition Height="*"/><RowDefinition Height="Auto"/>
    </Grid.RowDefinitions>
    <StackPanel Margin="0,0,0,10">
-    <StackPanel><TextBlock Text="Chọn mã hàng" FontSize="23" FontWeight="SemiBold" Foreground="{StaticResource BrandBlue}"/>
-     <TextBlock Text="Ưu tiên mã vừa test · Nhấp đúp để mở nhanh" FontSize="12" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,4,8,0"/>
-    </StackPanel>
-    <WrapPanel Margin="0,10,0,0">
+    <DockPanel Height="30">
+     <TextBlock x:Name="StatusText" DockPanel.Dock="Right" Text="Đang nạp..." Width="92" Height="24" MaxHeight="24" TextAlignment="Right" VerticalAlignment="Center" FontSize="12" Foreground="{StaticResource TextMuted}" TextTrimming="CharacterEllipsis"/>
+     <TextBlock Text="Chọn mã hàng" FontSize="21" FontWeight="SemiBold" Foreground="{StaticResource BrandBlue}" ToolTip="Chọn mã rồi bấm MỞ MÃ HÀNG để áp dụng"/>
+    </DockPanel>
+    <WrapPanel Margin="0,8,0,0">
      <Button x:Name="BrowseButton" Content="Chọn file khác…" Style="{StaticResource CatalogButton}" Click="Browse_Click" Margin="0,0,8,0"/>
      <Button x:Name="RefreshButton" Content="Làm mới" Style="{StaticResource CatalogButton}" Click="Refresh_Click" Margin="0,0,8,0"/>
      <Button x:Name="DeleteButton" Content="Xóa mã" Style="{StaticResource CatalogButton}" Foreground="{StaticResource FailRed}" Click="Delete_Click" IsEnabled="False" ToolTip="Xóa file THT đang chọn sau khi xác nhận"/>
@@ -57,7 +58,7 @@
    </StackPanel>
    <StackPanel Grid.Row="1" Margin="0,0,0,10">
     <TextBlock Text="Tìm tên file THT" FontSize="12" Margin="0,0,0,4"/>
-    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource AccentTintBorder}" BorderThickness="1" CornerRadius="7" Padding="12,8">
+    <Border Background="{StaticResource PanelBackground}" BorderBrush="{StaticResource AccentTintBorder}" BorderThickness="1" CornerRadius="7" Padding="12,5">
      <Grid>
       <Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
       <Path Data="M 10,1 A 9,9 0 1 1 9.99,1 M 16,17 L 23,24" Stroke="{StaticResource TextMuted}" StrokeThickness="1.8"
@@ -114,7 +115,13 @@
     </DataTemplate></ListBox.ItemTemplate>
    </ListBox>
    <StackPanel Grid.Row="3" Margin="0,10,0,0">
-    <TextBlock x:Name="StatusText" Height="34" MaxHeight="34" TextTrimming="CharacterEllipsis" Text="Đang nạp danh sách mã hàng..." FontSize="12" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+    <Border Height="58" Padding="8,3" Margin="0,0,0,8" CornerRadius="5" Background="{StaticResource SurfaceAlt}">
+     <StackPanel>
+      <TextBlock x:Name="SelectionNameText" Text="Chưa chọn mã hàng" Height="19" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource BrandBlue}" TextTrimming="CharacterEllipsis"/>
+      <TextBlock x:Name="SelectionFolderText" Text="Chọn một dòng trong danh sách" Height="16" FontSize="11" Foreground="{StaticResource TextMuted}" TextTrimming="CharacterEllipsis"/>
+      <TextBlock x:Name="SelectionStateText" Height="16" FontSize="11" Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis"/>
+     </StackPanel>
+    </Border>
     <Button x:Name="OpenButton" Content="MỞ MÃ HÀNG ĐÃ CHỌN" FontSize="16" Padding="10,10"
             Style="{StaticResource CatalogPrimaryButton}" IsEnabled="False" Click="Open_Click"/>
    </StackPanel>

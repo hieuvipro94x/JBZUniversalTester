@@ -47,6 +47,14 @@ internal static partial class Program
                 panel.IsEnabled = true;
                 Assert(list.Items.Count == 1001 && ((ProductFileEntry)list.SelectedItem).FullPath == duplicate && requested is null,
                     "Startup exposes the complete catalog and marks the active path without loading a model");
+                var selectionFolder = (TextBlock)panel.FindName("SelectionFolderText");
+                var selectionState = (TextBlock)panel.FindName("SelectionStateText");
+                Assert(selectionFolder.Text.Contains("SECOND") && selectionState.Text.Contains("đang được mở"),
+                    "Selected duplicate filename exposes its folder and active model state");
+                list.SelectedItem = list.Items.Cast<ProductFileEntry>().First(file => file.FullPath != duplicate);
+                Assert(selectionState.Text.Contains("Chưa áp dụng") && requested is null,
+                    "Highlighting a different model explicitly remains unapplied until Open");
+                list.SelectedItem = list.Items.Cast<ProductFileEntry>().Single(file => file.FullPath == duplicate);
                 ScrollViewer? scroll = FindCatalogScroll(list);
                 Assert(scroll is not null && scroll.ScrollableHeight > 0,
                     "Main catalog has an independently scrollable viewport for every row");
