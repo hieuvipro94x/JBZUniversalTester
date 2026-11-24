@@ -9,6 +9,50 @@ namespace JBZUniversalTester.SelfTests;
 
 internal static partial class Program
 {
+    private static void TestCatalogAsyncSearch()
+    {
+        OnSettingsDispatcher(async () =>
+        {
+            var files = Enumerable.Range(0, 30000).Select(i => new ProductFileEntry(
+                $"MODEL{i:00000}", i % 2 == 0 ? "EVEN" : "ODD", Path.Combine(Path.GetTempPath(), $"MODEL{i:00000}.tht"))).ToArray();
+            using var panel = new MainProductCatalog((_, _) => new ProductFileCatalogResult(files, []));
+            await panel.LoadAsync(Path.GetTempPath(), files[0].FullPath, Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".absent.db"));
+            var list = (ListBox)panel.FindName("ProductList");
+            var search = (TextBox)panel.FindName("SearchBox");
+            var open = (Button)panel.FindName("OpenButton");
+            string? requested = null;
+            panel.ProductRequested += path => requested = path;
+            var apply = typeof(MainProductCatalog).GetMethod("ApplySearchAsync",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            Task Filter() => (Task)apply.Invoke(panel, [null])!;
+
+            search.Text = "EVEN";
+            Task oldSearch = Filter();
+            search.Text = "MODEL29999";
+            Assert(!open.IsEnabled, "A newer query immediately blocks opening the previous model");
+            // Direct routed events/Enter must obey the same pending-search guard.
+            open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(requested is null, "Pending search cannot open a stale selection");
+            Task latestSearch = Filter();
+            await Task.WhenAll(oldSearch, latestSearch);
+            Assert(list.Items.Count == 1 && ReferenceEquals(list.Items[0], files[^1]),
+                "Only the newest query is displayed with the original file identity");
+            list.SelectedIndex = 0;
+            open.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Assert(requested == files[^1].FullPath, "Completed asynchronous search opens the exact selected model");
+
+            search.Text = "EVEN";
+            await Filter();
+            Assert(list.Items.Count == 15000 && ReferenceEquals(list.Items[0], files[0]) &&
+                ReferenceEquals(list.Items[^1], files[^2]), "Background filtering preserves folder matching and catalog order");
+            search.Text = "NO-MATCH";
+            Task closingSearch = Filter();
+            panel.Dispose();
+            await closingSearch;
+            Assert(list.Items.Count == 15000, "A search finishing after disposal cannot replace the visible result");
+        });
+    }
+
     private static void TestMainProductCatalog()
     {
         OnSettingsDispatcher(async () =>

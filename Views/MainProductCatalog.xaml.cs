@@ -1,9 +1,7 @@
 ﻿using System.IO;
 using Microsoft.VisualBasic.FileIO;
-using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -16,8 +14,10 @@ public partial class MainProductCatalog : UserControl, IDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Func<string, CancellationToken, ProductFileCatalogResult> _readCatalog;
     private readonly DispatcherTimer _searchTimer;
-    private ICollectionView? _files;
-    private string _root = string.Empty, _selectedPath = string.Empty, _search = string.Empty;
+    private IReadOnlyList<ProductFileEntry> _files = Array.Empty<ProductFileEntry>();
+    private string _root = string.Empty, _selectedPath = string.Empty;
+    private int _searchGeneration;
+    private bool _searchPending;
     private bool _loading, _disposed, _deleting;
     private string? _databasePath;
     private readonly Action<string> _recycleFile;
@@ -71,6 +71,8 @@ public partial class MainProductCatalog : UserControl, IDisposable
         _databasePath = databasePath;
         _selectedPath = selectedPath;
         _loading = true;
+        ++_searchGeneration;
+        _searchPending = true;
         RefreshButton.IsEnabled = false;
         DeleteButton.IsEnabled = false;
         OpenButton.IsEnabled = false;
@@ -85,10 +87,13 @@ public partial class MainProductCatalog : UserControl, IDisposable
             foreach (string error in result.Errors) AsyncFileLogService.Current.Error($"MAIN_CATALOG: {error}");
             try
             {
-                var recent = await Task.Run(() => RecentTestedProductService.Read(databasePath ?? RuntimePaths.DatabaseFile, result.Files, ct), ct);
-                var ranks = recent.Select((item, index) => (item.File.FullPath, index))
-                    .ToDictionary(item => item.FullPath, item => item.index, StringComparer.OrdinalIgnoreCase);
-                ordered = result.Files.OrderBy(file => ranks.GetValueOrDefault(file.FullPath, int.MaxValue)).ToArray();
+                ordered = await Task.Run(() =>
+                {
+                    var recent = RecentTestedProductService.Read(databasePath ?? RuntimePaths.DatabaseFile, result.Files, ct);
+                    var ranks = recent.Select((item, index) => (item.File.FullPath, index))
+                        .ToDictionary(item => item.FullPath, item => item.index, StringComparer.OrdinalIgnoreCase);
+                    return result.Files.OrderBy(file => ranks.GetValueOrDefault(file.FullPath, int.MaxValue)).ToArray();
+                }, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -96,14 +101,11 @@ public partial class MainProductCatalog : UserControl, IDisposable
                 _notice += "Chưa đọc được mã vừa test. ";
             }
             if (_disposed) return;
-            _files = new ListCollectionView(ordered.ToList());
-            _files.Filter = item => item is ProductFileEntry file &&
-                (ProductFileCatalog.Matches(file, _search) || file.Folder.Contains(_search, StringComparison.OrdinalIgnoreCase));
-            ProductList.ItemsSource = _files;
-            _loading = false;
-            ApplySearch(null, EventArgs.Empty);
-            ProductList.SelectedItem = ordered.FirstOrDefault(file => string.Equals(file.FullPath, selectedPath, StringComparison.OrdinalIgnoreCase));
-            if (ProductList.SelectedItem is not null) ProductList.ScrollIntoView(ProductList.SelectedItem);
+            _files = ordered;
+            // Typing while the initial filter is running invalidates that result.
+            // Finish the newest query before releasing the catalog loading gate.
+            do { await ApplySearchAsync(selectedPath); }
+            while (!_disposed && _searchPending);
         }
         catch (OperationCanceledException) when (_disposed) { }
         catch (Exception ex)
@@ -111,7 +113,8 @@ public partial class MainProductCatalog : UserControl, IDisposable
             AsyncFileLogService.Current.Error($"MAIN_CATALOG_LOAD root={root}: {ex}");
             if (!_disposed)
             {
-                _files = null;
+                _files = Array.Empty<ProductFileEntry>();
+                _searchPending = false;
                 ProductList.ItemsSource = null;
                 StatusText.Text = "Chưa đọc được danh mục. Bấm Làm mới hoặc Chọn file khác… để duyệt file.";
             }
@@ -126,28 +129,81 @@ public partial class MainProductCatalog : UserControl, IDisposable
     private void Search_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_searchTimer is null || _disposed) return;
+        ++_searchGeneration;
+        _searchPending = true;
         OpenButton.IsEnabled = false;
         DeleteButton.IsEnabled = false;
         _searchTimer.Stop();
         _searchTimer.Start();
     }
 
-    private void ApplySearch(object? sender, EventArgs e)
+    private async void ApplySearch(object? sender, EventArgs e)
     {
         _searchTimer.Stop();
-        if (_disposed || _files is null) return;
-        _search = SearchBox.Text.Trim();
-        _files.Refresh();
-        StatusText.Text = _notice + (ProductList.Items.Count == 0
-            ? "Không có mã hàng phù hợp. Bấm Chọn file khác… để duyệt file."
-            : $"{ProductList.Items.Count:N0} mã hàng");
-        StatusText.ToolTip = _root;
+        if (_disposed || _loading) return;
+        await ApplySearchAsync((ProductList.SelectedItem as ProductFileEntry)?.FullPath);
+    }
+
+    private async Task ApplySearchAsync(string? selectedPath = null)
+    {
+        _searchTimer.Stop();
+        if (_disposed) return;
+        int generation = ++_searchGeneration;
+        _searchPending = true;
         UpdateSelection();
+        string search = SearchBox.Text.Trim();
+        var files = _files;
+        var ct = _lifetime.Token;
+        try
+        {
+            // Only immutable file entries cross threads. WPF receives one completed
+            // result instead of filtering the entire catalog on its Dispatcher.
+            var matches = await Task.Run(() =>
+            {
+                var rows = new List<ProductFileEntry>();
+                ProductFileEntry? selected = null;
+                foreach (var file in files)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (!ProductFileCatalog.Matches(file, search) &&
+                        !file.Folder.Contains(search, StringComparison.OrdinalIgnoreCase)) continue;
+                    rows.Add(file);
+                    if (string.Equals(file.FullPath, selectedPath, StringComparison.OrdinalIgnoreCase)) selected = file;
+                }
+                return (Rows: rows, Selected: selected);
+            }, ct);
+            if (_disposed || generation != _searchGeneration) return;
+            ProductList.ItemsSource = matches.Rows;
+            ProductList.SelectedItem = matches.Selected;
+            if (matches.Selected is not null) ProductList.ScrollIntoView(matches.Selected);
+            StatusText.Text = _notice + (matches.Rows.Count == 0
+                ? "Không có mã hàng phù hợp. Bấm Chọn file khác… để duyệt file."
+                : $"{matches.Rows.Count:N0} mã hàng");
+            StatusText.ToolTip = _root;
+        }
+        catch (OperationCanceledException) when (_disposed) { }
+        catch (Exception ex)
+        {
+            AsyncFileLogService.Current.Error($"MAIN_CATALOG_FILTER: {ex}");
+            if (!_disposed && generation == _searchGeneration)
+            {
+                ProductList.ItemsSource = null;
+                StatusText.Text = "Chưa tìm được mã hàng. Bấm Làm mới để thử lại.";
+            }
+        }
+        finally
+        {
+            if (!_disposed && generation == _searchGeneration)
+            {
+                _searchPending = false;
+                UpdateSelection();
+            }
+        }
     }
 
     private void UpdateSelection()
     {
-        bool ready = !_loading && !_deleting && !_disposed && !(_searchTimer?.IsEnabled ?? false) && ProductList.SelectedItem is ProductFileEntry;
+        bool ready = !_loading && !_deleting && !_disposed && !_searchPending && !(_searchTimer?.IsEnabled ?? false) && ProductList.SelectedItem is ProductFileEntry;
         BrowseButton.IsEnabled = !_deleting && !_disposed;
         RefreshButton.IsEnabled = !_loading && !_deleting && !_disposed;
         ProductList.IsEnabled = SearchBox.IsEnabled = !_deleting;
@@ -167,7 +223,7 @@ public partial class MainProductCatalog : UserControl, IDisposable
 
     public async Task<bool> DeleteSelectedAsync(Func<ProductFileEntry, bool> confirm)
     {
-        if (_disposed || _loading || _deleting || (_searchTimer?.IsEnabled ?? false) ||
+        if (_disposed || _loading || _deleting || _searchPending || (_searchTimer?.IsEnabled ?? false) ||
             ProductList.SelectedItem is not ProductFileEntry file ||
             string.Equals(file.FullPath, _selectedPath, StringComparison.OrdinalIgnoreCase)) return false;
         _deleting = true;
@@ -208,8 +264,7 @@ public partial class MainProductCatalog : UserControl, IDisposable
     { if (!_deleting && !_disposed) await LoadAsync(_root, _selectedPath, _databasePath); }
     private void Open_Click(object sender, RoutedEventArgs e)
     {
-        if (_loading || _deleting || _disposed) return;
-        ApplySearch(null, EventArgs.Empty);
+        if (_loading || _deleting || _disposed || _searchPending || _searchTimer.IsEnabled) return;
         if (ProductList.SelectedItem is ProductFileEntry file) ProductRequested?.Invoke(file.FullPath);
     }
     private void Product_DoubleClick(object sender, MouseButtonEventArgs e)
@@ -226,6 +281,7 @@ public partial class MainProductCatalog : UserControl, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        ++_searchGeneration;
         _pendingRefresh = null;
         _searchTimer.Stop();
         _searchTimer.Tick -= ApplySearch;

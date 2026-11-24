@@ -697,6 +697,7 @@ internal static partial class Program
         {
             TestMainProductCatalog();
             TestCatalogStableGeometry();
+            TestCatalogAsyncSearch();
             Console.WriteLine("PASS: Main catalog scrolling, search, exact-path selection and read-only history");
             return 0;
         }
@@ -950,6 +951,7 @@ internal static partial class Program
             ("Catalog geometry remains fixed during recycling and filtering", TestCatalogStableGeometry),
             ("Catalog deletion requires confirmation and preserves active THT", TestCatalogDeleteConfirmation),
             ("Catalog refresh during enumeration retains newly saved files", TestCatalogRefreshWhileLoading),
+            ("Large catalog background search rejects stale selections and disposed results", TestCatalogAsyncSearch),
             ("Windows USB RAW print transport and production payloads", TestWindowsUsbPrintTransport),
             ("Windows USB first-print transactions preserve PASS history and suppress duplicates", TestWindowsUsbProductionHistory),
             ("Windows USB/COM selector, discovery and CFG persistence", TestWindowsUsbSettings),
