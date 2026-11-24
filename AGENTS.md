@@ -255,7 +255,7 @@ The user works through Codex mobile and explicitly requests automatic delivery
 after every completed source-code change. Once the required build and applicable
 tests pass, run `BUILD_ONE_FILE.cmd`, complete its build/commit/push confirmations,
 and copy the entire resulting version folder from `PublishSingle` to
-`\\192.168.10.150\public\NAM\<version-folder>`. No repeated user confirmation is
+`\\192.168.10.150\public\NAM\JBZUniversalTesterTeahung\<version-folder>`. No repeated user confirmation is
 needed for these steps. Verify the pushed branch/commit and SHA256 hashes of all
 copied files, and report the version, branch/commit and destination.
 

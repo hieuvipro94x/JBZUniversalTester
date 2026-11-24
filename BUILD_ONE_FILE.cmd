@@ -325,7 +325,8 @@ rem Chi thuc hien sau khi build thanh cong va xac minh chu ky EXE.
 rem Copy truoc buoc GitHub: van copy neu nguoi dung huy commit/push.
 rem ============================================================
 set "LOCAL_VERSION_DIR=%ROOT%PublishSingle\V%NEW_VERSION%"
-set "LAN_RELEASE_ROOT=\\192.168.10.150\public\NAM"
+set "LAN_BASE_ROOT=\\192.168.10.150\public\NAM"
+set "LAN_RELEASE_ROOT=%LAN_BASE_ROOT%\JBZUniversalTesterTeahung"
 set "LAN_VERSION_DIR=%LAN_RELEASE_ROOT%\V%NEW_VERSION%"
 set "LAN_COPY_STATUS=BO QUA"
 set "LAN_COPY_FAILED=0"
@@ -343,7 +344,7 @@ if not exist "%LOCAL_VERSION_DIR%\" (
 )
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass ^
-  -File "%ROOT%Scripts\Test-LanReleasePath.ps1" -Path "%LAN_RELEASE_ROOT%" -TimeoutSeconds 5
+  -File "%ROOT%Scripts\Test-LanReleasePath.ps1" -Path "%LAN_BASE_ROOT%" -TimeoutSeconds 5
 if errorlevel 1 (
     echo [CANH BAO LAN] Khong truy cap duoc LAN trong 5 giay. Bo qua sao chep, tiep tuc Git.
     goto :GIT_RELEASE
