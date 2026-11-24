@@ -10,10 +10,10 @@ public partial class BasePage : System.Windows.Controls.UserControl
     private readonly (TextBox Box, TextBlock Hint)[] _hintFields;
     private readonly HashSet<TextBox> _suppressedHints = [];
     private bool _loading, _showHints;
+    private int _useCustomer;
     public BasePage()
     {
         InitializeComponent();
-        ModeBox.ItemsSource = new[] { "Sử dụng mã hàng nội bộ", "Sử dụng mã hàng khách hàng", "Mã khách hàng theo định dạng mã nội bộ", "Mã nội bộ theo định dạng mã khách hàng" };
         _hintFields = [(ModelBox, ModelHint), (NumberBox, NumberHint), (NameBox, NameHint),
             (KindBox, KindHint), (EoBox, EoHint), (CustomerBox, CustomerHint)];
         foreach (var (box, hint) in _hintFields)
@@ -33,7 +33,6 @@ public partial class BasePage : System.Windows.Controls.UserControl
                 Changed?.Invoke(this, EventArgs.Empty);
             };
         }
-        ModeBox.SelectionChanged += (_, __) => { if (!_loading) Changed?.Invoke(this, EventArgs.Empty); };
     }
     private void UpdateHint(TextBox box, TextBlock hint) => hint.Visibility =
         _showHints && box.Text.Length == 0 && !_suppressedHints.Contains(box) ? Visibility.Visible : Visibility.Collapsed;
@@ -45,7 +44,7 @@ public partial class BasePage : System.Windows.Controls.UserControl
         {
             ModelBox.Text = d.Model; NumberBox.Text = d.Number; NameBox.Text = d.Name;
             KindBox.Text = d.Kind; EoBox.Text = d.EoNo; CustomerBox.Text = d.Customer;
-            ModeBox.SelectedIndex = Math.Clamp(d.UseCustomer, 0, 3);
+            _useCustomer = d.UseCustomer;
         }
         finally
         {
@@ -53,5 +52,5 @@ public partial class BasePage : System.Windows.Controls.UserControl
             foreach (var (box, hint) in _hintFields) UpdateHint(box, hint);
         }
     }
-    public BaseInfo ReadData() => new() { Model = ModelBox.Text.Trim(), Number = NumberBox.Text.Trim(), Name = NameBox.Text.Trim(), Kind = KindBox.Text.Trim(), EoNo = EoBox.Text.Trim(), Customer = CustomerBox.Text.Trim(), UseCustomer = Math.Max(0, ModeBox.SelectedIndex) };
+    public BaseInfo ReadData() => new() { Model = ModelBox.Text.Trim(), Number = NumberBox.Text.Trim(), Name = NameBox.Text.Trim(), Kind = KindBox.Text.Trim(), EoNo = EoBox.Text.Trim(), Customer = CustomerBox.Text.Trim(), UseCustomer = _useCustomer };
 }

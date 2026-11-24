@@ -49,7 +49,7 @@
     <Grid.ColumnDefinitions><ColumnDefinition Width="170"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
     <Grid.RowDefinitions>
      <RowDefinition Height="54"/><RowDefinition Height="54"/><RowDefinition Height="54"/><RowDefinition Height="54"/>
-     <RowDefinition Height="54"/><RowDefinition Height="54"/><RowDefinition Height="54"/>
+     <RowDefinition Height="54"/><RowDefinition Height="54"/>
     </Grid.RowDefinitions>
     <TextBlock Grid.Row="0" Text="TÊN MODEL" Style="{StaticResource FormLabel}"/>
     <Grid Grid.Row="0" Grid.Column="1" Height="44"><TextBox x:Name="ModelBox" Style="{StaticResource FormInput}"/><TextBlock x:Name="ModelHint" Text="K32000-22401R-260224" Style="{StaticResource InputHint}"/></Grid>
@@ -63,13 +63,9 @@
     <Grid Grid.Row="4" Grid.Column="1" Height="44"><TextBox x:Name="EoBox" Style="{StaticResource FormInput}"/><TextBlock x:Name="EoHint" Text="Không bắt buộc / 선택 입력" FontSize="16" Style="{StaticResource InputHint}"/></Grid>
     <TextBlock Grid.Row="5" Text="ALC" Style="{StaticResource FormLabel}"/>
     <Grid Grid.Row="5" Grid.Column="1" Height="44"><TextBox x:Name="CustomerBox" Style="{StaticResource FormInput}"/><TextBlock x:Name="CustomerHint" Text="HE EV" Style="{StaticResource InputHint}"/></Grid>
-    <TextBlock Grid.Row="6" Text="CHẾ ĐỘ M/H" Style="{StaticResource FormLabel}"/>
-    <ComboBox x:Name="ModeBox" Grid.Row="6" Grid.Column="1" FontFamily="Segoe UI" FontSize="18"
-              Height="44" MinHeight="44" Width="Auto" HorizontalAlignment="Stretch" VerticalAlignment="Center" VerticalContentAlignment="Center"
-              Background="{StaticResource PanelBackground}" Foreground="{StaticResource TextPrimary}" BorderBrush="{StaticResource BorderColor}" BorderThickness="1" Padding="12,0"/>
    </Grid>
   </Border>
-  <Border x:Name="BasicInfoExampleGuide" Margin="40,438,22,16" Padding="14,10"
+  <Border x:Name="BasicInfoExampleGuide" Margin="40,384,22,16" Padding="14,10"
           VerticalAlignment="Top" Background="{StaticResource PageBackground}" BorderBrush="{StaticResource BorderColor}" BorderThickness="1" CornerRadius="6">
    <StackPanel>
     <TextBlock Text="VÍ DỤ THEO PHẦN MỀM GỐC / 원본 프로그램 기준 입력 예시"
@@ -88,7 +84,7 @@
       </Grid.ColumnDefinitions>
       <Grid.RowDefinitions>
        <RowDefinition Height="27"/><RowDefinition Height="28"/><RowDefinition Height="28"/>
-       <RowDefinition Height="28"/><RowDefinition Height="28"/><RowDefinition Height="28"/>
+       <RowDefinition Height="28"/><RowDefinition Height="28"/>
        <RowDefinition Height="28"/><RowDefinition Height="28"/>
       </Grid.RowDefinitions>
       <TextBlock Text="Ô NHẬP / 입력 항목" FontWeight="Bold"/>
@@ -112,9 +108,6 @@
       <TextBlock Grid.Row="6" Text="ALC / ALC 코드"/>
       <TextBlock Grid.Row="6" Grid.Column="1" Text="ALC"/>
       <TextBlock Grid.Row="6" Grid.Column="2" Text="HE EV"/>
-      <TextBlock Grid.Row="7" Text="CHẾ ĐỘ M/H / 품번 모드"/>
-      <TextBlock Grid.Row="7" Grid.Column="1" Text="—"/>
-      <TextBlock Grid.Row="7" Grid.Column="2" Text="Mã hàng nội bộ / 내부 품번 사용"/>
      </Grid>
     </Border>
     <TextBlock Text="TÊN MODEL khác MÃ HÀNG. Ví dụ chỉ để tham khảo, không tự điền.&#10;모델명과 파트번호는 다릅니다. 예시는 참고용이며 자동 입력되지 않습니다."
