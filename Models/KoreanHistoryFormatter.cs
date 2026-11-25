@@ -44,9 +44,7 @@ public static class KoreanHistoryFormatter
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        IReadOnlyList<FaultDetail> faults = FaultDisplayFormatter.DeserializeFaults(record.FaultDetailsJson);
-        if (faults.Count == 0)
-            faults = [CreateFallback(record)];
+        IReadOnlyList<FaultDetail> faults = GetExportFaults(record, includeLegacyFallback: true);
 
         string[] details = faults
             .Where(fault => fault.Type != ProductFaultType.None)
@@ -62,6 +60,12 @@ public static class KoreanHistoryFormatter
         int remaining = Math.Max(0, faults.Count - details.Length);
         string result = string.Join("; ", details);
         return remaining > 0 ? $"{result}; 외 {remaining}건" : result;
+    }
+
+    public static IReadOnlyList<FaultDetail> GetExportFaults(TestHistoryRecord record, bool includeLegacyFallback)
+    {
+        IReadOnlyList<FaultDetail> faults = FaultDisplayFormatter.DeserializeFaults(record.FaultDetailsJson);
+        return faults.Count == 0 && includeLegacyFallback ? [CreateFallback(record)] : faults;
     }
 
     public static string FormatFault(FaultDetail fault)

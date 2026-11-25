@@ -45,6 +45,7 @@ public sealed class TestHistoryRecord
     public int? ActualSourceIo { get; set; }
     public int? ActualTargetIo { get; set; }
     public string FaultDetailsJson { get; set; } = string.Empty;
+    internal IReadOnlyList<FaultDetail>? ExcelFaultDetails { get; set; }
     public string FaultSummary { get; set; } = string.Empty;
     public double? MeasuredResistance { get; set; }
     public double? ResistanceMin { get; set; }

@@ -2204,10 +2204,10 @@ public sealed partial class TestHistoryStore
     public IReadOnlyList<TestHistoryRecord> SearchForExport(HistorySearchCriteria criteria) =>
         SearchCore(criteria, exportAll: true, includeLabelPayload: true);
 
-    public IEnumerable<TestHistoryRecord> EnumerateForExport(HistorySearchCriteria criteria)
+    public IEnumerable<TestHistoryRecord> EnumerateForExport(HistorySearchCriteria criteria, bool includeFaultDetails = false)
     {
         ArgumentNullException.ThrowIfNull(criteria);
-        return EnumerateCore(criteria, exportAll: true, includeLabelPayload: true);
+        return EnumerateCore(criteria, exportAll: true, includeLabelPayload: true, includeFaultDetails: includeFaultDetails);
     }
 
     public HistorySummary GetHistorySummary(HistorySearchCriteria criteria)
@@ -2277,7 +2277,8 @@ public sealed partial class TestHistoryStore
         HistorySearchCriteria criteria,
         bool exportAll,
         bool includeLabelPayload,
-        bool applyLimit = true)
+        bool applyLimit = true,
+        bool includeFaultDetails = false)
     {
         ArgumentNullException.ThrowIfNull(criteria);
         long started = Stopwatch.GetTimestamp();
@@ -2298,6 +2299,7 @@ public sealed partial class TestHistoryStore
                   (criteria.BeforeHistoryAt is null ? $" OFFSET {offset}" : string.Empty)
                 : string.Empty);
         string labelPayloadColumn = includeLabelPayload ? "t.LabelPayload" : "''";
+        string faultExistsColumn = includeFaultDetails ? ",f.Id" : "";
         string where = clauses.Count == 0 ? "" : "WHERE " + string.Join(" AND ", clauses);
         // Sparse text/fault/LOT filters can leave very large gaps between page
         // rows. Keep the single-pass rank for those searches rather than count
@@ -2369,7 +2371,7 @@ public sealed partial class TestHistoryStore
                 t.CycleId,t.LabelSerial,t.Barcode,t.LabelProfile,t.PrintStatus,t.PrintTimestamp,
                 t.Printer,t.LabelCopies,t.ReprintCount,t.PrintMessage,t.LabelTemplateType,{labelPayloadColumn},
                 t.InstallStartedAt,t.TestStartedAt,t.ResultAt,t.RemovalStartedAt,t.RemovedAt,
-                t.InspectionType,t.LotText,t.InspectionTrace,t.ProductionBatchKey,{ordinal}
+                t.InspectionType,t.LotText,t.InspectionTrace,t.ProductionBatchKey,{ordinal}{faultExistsColumn}
             FROM {(paged ? "HistoryPage selected JOIN Tests t ON t.Id=selected.Id" : "Tests t")}
             JOIN Parts p ON p.Id=t.PartId
             JOIN Models m ON m.Id=t.ModelId
@@ -2383,14 +2385,76 @@ public sealed partial class TestHistoryStore
             {(paged ? $"ORDER BY {historyAtSql} ASC,t.Id ASC" : order)};
             """;
         using SqliteDataReader reader = command.ExecuteReader();
+        using SqliteCommand? faultCommand = includeFaultDetails ? CreateExcelFaultCommand(connection) : null;
         int rows = 0;
         while (reader.Read())
         {
             rows++;
-            yield return ReadRecord(reader);
+            TestHistoryRecord record = ReadRecord(reader);
+            if (faultCommand is not null && !reader.IsDBNull(reader.FieldCount - 1))
+            {
+                IReadOnlyList<FaultDetail> stored = FaultDisplayFormatter.DeserializeFaults(record.FaultDetailsJson);
+                IReadOnlyList<FaultDetail> children = ReadExcelFaults(faultCommand, record.Id);
+                record.ExcelFaultDetails = children.Count > stored.Count ? children : stored;
+            }
+            yield return record;
         }
         AsyncFileLogService.Current.Performance(
             $"HISTORY_QUERY rows={rows} duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.###}");
+    }
+
+    private static SqliteCommand CreateExcelFaultCommand(SqliteConnection connection)
+    {
+        SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT FaultType,Message,ExpectedSourceIo,ExpectedTargetIo,ActualSourceIo,ActualTargetIo,
+                   ConnectorFrom,PinFrom,ConnectorTo,PinTo,ActualConnectorFrom,ActualPinFrom,
+                   ActualConnectorTo,ActualPinTo,WireName,WireColor,RelatedIosJson,
+                   MeasuredResistance,ResistanceMin,ResistanceMax
+            FROM TestFaults WHERE TestId=$Id ORDER BY FaultOrder,Id
+            """;
+        command.Parameters.Add("$Id", SqliteType.Integer);
+        return command;
+    }
+
+    private static List<FaultDetail> ReadExcelFaults(SqliteCommand command, long testId)
+    {
+        command.Parameters["$Id"].Value = testId;
+        using SqliteDataReader reader = command.ExecuteReader();
+        var faults = new List<FaultDetail>();
+        while (reader.Read())
+        {
+            string type = reader.GetString(0);
+            string relatedIos = reader.GetString(16);
+            faults.Add(new FaultDetail
+            {
+                Type = Enum.TryParse(type, ignoreCase: true, out ProductFaultType parsed) ? parsed : ProductFaultType.None,
+                Message = reader.GetString(1),
+                ExpectedSourceIo = GetNullableInt(reader, 2), ExpectedTargetIo = GetNullableInt(reader, 3),
+                ActualSourceIo = GetNullableInt(reader, 4), ActualTargetIo = GetNullableInt(reader, 5),
+                ConnectorFrom = reader.GetString(6), PinFrom = reader.GetString(7),
+                ConnectorTo = reader.GetString(8), PinTo = reader.GetString(9),
+                ActualConnectorFrom = reader.GetString(10), ActualPinFrom = reader.GetString(11),
+                ActualConnectorTo = reader.GetString(12), ActualPinTo = reader.GetString(13),
+                WireName = reader.GetString(14), WireColor = reader.GetString(15),
+                RelatedIos = ReadExcelRelatedIos(relatedIos, testId),
+                MeasuredResistance = GetNullableDouble(reader, 17),
+                ResistanceMin = GetNullableDouble(reader, 18), ResistanceMax = GetNullableDouble(reader, 19)
+            });
+        }
+        return faults;
+    }
+
+    private static int[] ReadExcelRelatedIos(string json, long testId)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return [];
+        try { return JsonSerializer.Deserialize<int[]>(json) ?? []; }
+        catch (JsonException ex)
+        {
+            AsyncFileLogService.Current.Error($"History export: invalid related IO data for TestId={testId}: {ex.Message}");
+            return [];
+        }
     }
 
     private static List<string> ConfigureHistoryFilter(

@@ -8672,8 +8672,8 @@ internal static partial class Program
                    string.Concat(System.Xml.Linq.XDocument.Parse(sheet).Descendants()
                        .Single(element => element.Name.LocalName == "c" && (string?)element.Attribute("r") == "N2")
                        .Descendants().Where(element => element.Name.LocalName == "t").Select(element => element.Value)) == record.LabelPayload &&
-                   sheet.Contains("autoFilter ref=\"A1:R2\"", StringComparison.Ordinal),
-                "XLSX preserves Korean headers, exact printer command and original 18-column filter");
+                   sheet.Contains("autoFilter ref=\"A1:T2\"", StringComparison.Ordinal),
+                "XLSX preserves the exact printer command and includes the new columns in its filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
                    styles.Contains("wrapText=\"0\"", StringComparison.Ordinal) &&

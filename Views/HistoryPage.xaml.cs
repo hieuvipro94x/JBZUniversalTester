@@ -329,7 +329,7 @@ public partial class HistoryPage : UserControl
             SummaryText.Text = "Đang xuất toàn bộ lịch sử theo bộ lọc...";
             int exportedCount = await Task.Run(() =>
             {
-                IEnumerable<TestHistoryRecord> rows = GetStore().EnumerateForExport(criteria);
+                IEnumerable<TestHistoryRecord> rows = GetStore().EnumerateForExport(criteria, includeFaultDetails: excel);
                 return excel ? HistoryExportService.ExportXlsx(dialog.FileName, rows)
                     : HistoryExportService.ExportCsv(dialog.FileName, rows);
             });

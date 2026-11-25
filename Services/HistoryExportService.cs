@@ -25,7 +25,7 @@ public static class HistoryExportService
         Func<TestHistoryRecord, object?> GetValue,
         bool DetailText = false);
 
-    // Original 18-column order. Date/filter/order semantics remain test-start;
+    // Original CSV contract. Date/filter/order semantics remain test-start;
     // Lot is presentation-only blank, while 합격 shows the saved production LOT.
     // The software column shows the running exporter, preserving the stored producer identity.
     private static readonly HistoryColumn[] Columns =
@@ -52,6 +52,18 @@ public static class HistoryExportService
         new("내용", 40, HistoryCellType.Text, r => r.ExportContentText),
         new("메모", 24, HistoryCellType.Text, _ => string.Empty)
     ];
+
+    private static readonly HistoryColumn[] ExcelColumns =
+    [
+        Columns[0] with { Header = "검사 시작 시간" },
+        ..Columns[1..7],
+        Columns[7] with { Type = HistoryCellType.Number, GetValue = r => r.ExportAcceptedLotNo },
+        ..Columns[8..],
+        new("검사 구분", 20, HistoryCellType.Text, r => r.IsMasterRecord ? "마스터"
+            : r.IsProductionRecord ? "생산" : HistoryInspectionType.KoreanName(r.InspectionType))
+    ];
+
+    private static readonly string[] DetailHeaders = ["기록 번호", "오류 번호", "오류 상세", "원본 메시지"];
 
     public static int ExportCsv(string path, IEnumerable<TestHistoryRecord> records) =>
         ExportSafely(path, records, WriteCsv);
@@ -116,7 +128,18 @@ public static class HistoryExportService
         WriteEntry(archive, "xl/workbook.xml", WorkbookXml());
         WriteEntry(archive, "xl/_rels/workbook.xml.rels", WorkbookRelsXml());
         WriteEntry(archive, "xl/styles.xml", StylesXml());
-        return WriteSheetEntry(archive, records);
+        // ZIP entries are written one at a time; spool the detail sheet while
+        // streaming the same export rows so the two sheets share one snapshot.
+        string detailPath = path + ".details";
+        using var detail = new FileStream(detailPath, FileMode.CreateNew, FileAccess.ReadWrite,
+            FileShare.None, 4096, FileOptions.DeleteOnClose);
+        int count;
+        using (var detailWriter = new StreamWriter(detail, new UTF8Encoding(false), 4096, leaveOpen: true))
+            count = WriteSheetEntry(archive, records, detailWriter);
+        detail.Position = 0;
+        using Stream entry = archive.CreateEntry("xl/worksheets/sheet2.xml", CompressionLevel.Optimal).Open();
+        detail.CopyTo(entry);
+        return count;
     }
 
     private static string ToCsvValue(HistoryColumn column, TestHistoryRecord record)
@@ -153,7 +176,8 @@ public static class HistoryExportService
 
     private static int WriteSheetEntry(
         ZipArchive archive,
-        IEnumerable<TestHistoryRecord> records)
+        IEnumerable<TestHistoryRecord> records,
+        TextWriter detailWriter)
     {
         ZipArchiveEntry entry = archive.CreateEntry(
             "xl/worksheets/sheet1.xml",
@@ -161,20 +185,26 @@ public static class HistoryExportService
         using Stream stream = entry.Open();
         using var writer = new StreamWriter(stream, new UTF8Encoding(false));
         var sb = new StringBuilder(32_768);
-        sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
-        sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
-        sb.Append("<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>");
-        sb.Append("<sheetFormatPr defaultRowHeight=\"20\"/>");
+        AppendSheetStart(sb);
         sb.Append("<cols>");
-        for (int i = 0; i < Columns.Length; i++)
-            sb.Append($"<col min=\"{i + 1}\" max=\"{i + 1}\" width=\"{Columns[i].Width.ToString(CultureInfo.InvariantCulture)}\" customWidth=\"1\"/>");
+        for (int i = 0; i < ExcelColumns.Length; i++)
+            sb.Append($"<col min=\"{i + 1}\" max=\"{i + 1}\" width=\"{ExcelColumns[i].Width.ToString(CultureInfo.InvariantCulture)}\" customWidth=\"1\"/>");
+        int referenceColumn = ExcelColumns.Length + 1;
+        sb.Append($"<col min=\"{referenceColumn}\" max=\"{referenceColumn}\" width=\"16\" customWidth=\"1\"/>");
         sb.Append("</cols>");
         sb.Append("<sheetData>");
-        AppendHeaderRow(sb);
+        AppendHeaderRow(sb, ExcelColumns.Select(c => c.Header).Append(DetailHeaders[0]));
         writer.Write(sb);
         sb.Clear();
 
+        AppendSheetStart(sb);
+        sb.Append("<cols><col min=\"1\" max=\"2\" width=\"16\" customWidth=\"1\"/><col min=\"3\" max=\"4\" width=\"100\" customWidth=\"1\"/></cols><sheetData>");
+        AppendHeaderRow(sb, DetailHeaders);
+        detailWriter.Write(sb);
+        sb.Clear();
+
         int count = 0;
+        int detailCount = 0;
         var passOrdinalsByProduct = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (TestHistoryRecord record in records)
         {
@@ -183,26 +213,52 @@ public static class HistoryExportService
             writer.Write(sb);
             sb.Clear();
             count++;
+            int faultNumber = 0;
+            foreach (FaultDetail fault in record.ExcelFaultDetails ?? KoreanHistoryFormatter.GetExportFaults(record,
+                         includeLegacyFallback: !record.Passed || record.InspectionType == HistoryInspectionType.MasterBad))
+            {
+                if (fault.Type == ProductFaultType.None && record.ExcelFaultDetails is null &&
+                    record.Passed && string.IsNullOrWhiteSpace(fault.Message))
+                    continue;
+                string description = KoreanHistoryFormatter.FormatFault(fault);
+                detailCount++;
+                faultNumber++;
+                sb.Append($"<row r=\"{detailCount + 1}\"><c r=\"A{detailCount + 1}\"><v>{count}</v></c><c r=\"B{detailCount + 1}\"><v>{faultNumber}</v></c>");
+                sb.Append($"<c r=\"C{detailCount + 1}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{Xml(description)}</t></is></c>");
+                sb.Append($"<c r=\"D{detailCount + 1}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{Xml(fault.Message)}</t></is></c></row>");
+                detailWriter.Write(sb);
+                sb.Clear();
+            }
         }
 
         sb.Append("</sheetData>");
         if (count >= 1)
         {
-            string lastColumn = ColumnName(Columns.Length);
+            string lastColumn = ColumnName(referenceColumn);
             sb.Append($"<autoFilter ref=\"A1:{lastColumn}{count + 1}\"/>");
         }
         sb.Append("</worksheet>");
         writer.Write(sb);
+        detailWriter.Write($"</sheetData><autoFilter ref=\"A1:{ColumnName(DetailHeaders.Length)}{detailCount + 1}\"/></worksheet>");
         return count;
     }
 
-    private static void AppendHeaderRow(StringBuilder sb)
+    private static void AppendSheetStart(StringBuilder sb)
+    {
+        sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        sb.Append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
+        sb.Append("<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>");
+        sb.Append("<sheetFormatPr defaultRowHeight=\"20\"/>");
+    }
+
+    private static void AppendHeaderRow(StringBuilder sb, IEnumerable<string> headers)
     {
         sb.Append("<row r=\"1\" ht=\"27\" customHeight=\"1\">");
-        for (int i = 0; i < Columns.Length; i++)
+        int index = 0;
+        foreach (string header in headers)
         {
-            string cell = $"{ColumnName(i + 1)}1";
-            sb.Append($"<c r=\"{cell}\" t=\"inlineStr\" s=\"1\"><is><t xml:space=\"preserve\">{Xml(Columns[i].Header)}</t></is></c>");
+            string cell = $"{ColumnName(++index)}1";
+            sb.Append($"<c r=\"{cell}\" t=\"inlineStr\" s=\"1\"><is><t xml:space=\"preserve\">{Xml(header)}</t></is></c>");
         }
         sb.Append("</row>");
     }
@@ -210,9 +266,9 @@ public static class HistoryExportService
     private static void AppendDataRow(StringBuilder sb, int rowNumber, TestHistoryRecord record)
     {
         sb.Append($"<row r=\"{rowNumber}\" ht=\"20\" customHeight=\"1\">");
-        for (int i = 0; i < Columns.Length; i++)
+        for (int i = 0; i < ExcelColumns.Length; i++)
         {
-            HistoryColumn column = Columns[i];
+            HistoryColumn column = ExcelColumns[i];
             string cell = $"{ColumnName(i + 1)}{rowNumber}";
             object? value = column.GetValue(record);
 
@@ -249,7 +305,7 @@ public static class HistoryExportService
                 sb.Append($"<c r=\"{cell}\" t=\"inlineStr\"{style}><is><t xml:space=\"preserve\">{Xml(text)}</t></is></c>");
             }
         }
-        sb.Append("</row>");
+        sb.Append($"<c r=\"{ColumnName(ExcelColumns.Length + 1)}{rowNumber}\"><v>{rowNumber - 1}</v></c></row>");
     }
 
     private static string ColumnName(int index)
@@ -294,6 +350,7 @@ public static class HistoryExportService
           <Default Extension="xml" ContentType="application/xml"/>
           <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
           <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+          <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
           <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
         </Types>
         """;
@@ -308,7 +365,7 @@ public static class HistoryExportService
     private static string WorkbookXml() => """
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-          <sheets><sheet name="검사" sheetId="1" r:id="rId1"/></sheets>
+          <sheets><sheet name="검사" sheetId="1" r:id="rId1"/><sheet name="오류 상세" sheetId="2" r:id="rId3"/></sheets>
         </workbook>
         """;
 
@@ -317,6 +374,7 @@ public static class HistoryExportService
         <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
           <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
           <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+          <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
         </Relationships>
         """;
 
