@@ -42,7 +42,16 @@ public static class ProductionDataUpgradeService
 
     /// <summary>Copy the station CFG beside its DB once; retain every legacy source.</summary>
     public static IReadOnlyList<string> MigrateStationConfiguration(
-        string destinationPath, string applicationDirectory, Func<IEnumerable<string>> previousDirectories)
+        string destinationPath, string applicationDirectory, Func<IEnumerable<string>> previousDirectories) =>
+        MigrateStationFile(destinationPath, applicationDirectory, previousDirectories, "JBZUniversalTester.cfg");
+
+    public static IReadOnlyList<string> MigrateStationPartCounter(
+        string destinationPath, string applicationDirectory, Func<IEnumerable<string>> previousDirectories, bool includePreviousVersions = true) =>
+        MigrateStationFile(destinationPath, applicationDirectory,
+            includePreviousVersions ? previousDirectories : () => [], "PartCnt.txt");
+
+    private static IReadOnlyList<string> MigrateStationFile(
+        string destinationPath, string applicationDirectory, Func<IEnumerable<string>> previousDirectories, string fileName)
     {
         string destination = Path.GetFullPath(destinationPath);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
@@ -50,18 +59,18 @@ public static class ProductionDataUpgradeService
             FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
         if (File.Exists(destination)) return [];
 
-        string adjacent = Path.Combine(Path.GetFullPath(applicationDirectory), "JBZUniversalTester.cfg");
+        string adjacent = Path.Combine(Path.GetFullPath(applicationDirectory), fileName);
         string? source = File.Exists(adjacent) ? adjacent : null;
         if (source is null)
         {
             string[] candidates = previousDirectories()
-                .Select(path => Path.Combine(Path.GetFullPath(path), "JBZUniversalTester.cfg"))
+                .Select(path => Path.Combine(Path.GetFullPath(path), fileName))
                 .Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             if (candidates.Length > 0)
             {
                 byte[] expected = File.ReadAllBytes(candidates[0]);
                 if (candidates.Skip(1).Any(path => !File.ReadAllBytes(path).SequenceEqual(expected)))
-                    throw new IOException("Tìm thấy nhiều CFG khác nhau. Hãy đặt CFG của máy đang vận hành cạnh EXE rồi mở lại. Giữ nguyên tất cả CFG: " + string.Join("; ", candidates));
+                    throw new IOException($"Tìm thấy nhiều {fileName} khác nhau. Hãy đặt file của máy đang vận hành cạnh EXE rồi mở lại. Giữ nguyên tất cả nguồn: " + string.Join("; ", candidates));
                 source = candidates[0];
             }
         }
@@ -70,11 +79,9 @@ public static class ProductionDataUpgradeService
         return [destination];
     }
 
-    public static IReadOnlyList<string> MigrateDeferredProductionDataForCurrentVersion()
-    {
-        return MigrateCurrentVersionFiles(ProductionFiles.Except(FastConfigurationFiles, StringComparer.OrdinalIgnoreCase)
-            .Where(path => !path.Equals(Path.Combine("Data", "JBZUniversalTester.db"), StringComparison.OrdinalIgnoreCase)));
-    }
+    public static IReadOnlyList<string> MigrateDeferredProductionDataForCurrentVersion(bool includePreviousCounters = true) =>
+        MigrateStationPartCounter(RuntimePaths.PartCounterFile, RuntimePaths.AppDirectory,
+            () => FindPreviousVersionDirectories(RuntimePaths.AppDirectory), includePreviousCounters);
 
     private static IReadOnlyList<string> MigrateCurrentVersionFiles(IEnumerable<string> relativePaths)
     {

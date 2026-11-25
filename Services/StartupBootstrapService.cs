@@ -40,9 +40,6 @@ public static class StartupBootstrapService
         try
         {
             StationDatabaseMigrationService.EnsureForCurrentInstallation(_allowNewDatabase);
-            IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateDeferredProductionDataForCurrentVersion();
-            if (migrated.Count > 0)
-                log.Application($"Deferred production data inherited: {string.Join(", ", migrated)}");
 
             ProductionSettings production = ProductionConfigService.Load();
             ProductionConfigService.EnsureSavedOnStartup(production);
@@ -51,6 +48,15 @@ public static class StartupBootstrapService
             var repository = new TestHistoryStore(RuntimePaths.DatabaseFile);
             BcwDatabaseMigrationService.EnsureForCurrentInstallation();
             log.Application($"database ready: {RuntimePaths.DatabaseFile}");
+
+            // Once the SQLite import is acknowledged, old release mirrors are
+            // obsolete. Rebuild from SQLite instead of choosing an old counter
+            // file by its size/count (which could undo a legitimate PIN reset).
+            IReadOnlyList<string> migrated = ProductionDataUpgradeService.MigrateDeferredProductionDataForCurrentVersion(
+                includePreviousCounters: !repository.HasImportedPartCounters());
+            if (migrated.Count > 0)
+                log.Application($"Part counter file inherited: {string.Join(", ", migrated)}");
+            log.Application($"part counter ready: {RuntimePaths.PartCounterFile}");
 
             var partCounter = new PartCounterStore(RuntimePaths.PartCounterFile);
             IReadOnlyList<PartCounterEntry> legacyCounters = partCounter.ReadAll();

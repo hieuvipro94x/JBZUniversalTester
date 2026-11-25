@@ -1849,6 +1849,13 @@ public sealed partial class TestHistoryStore
         return rows;
     }
 
+    public bool HasImportedPartCounters()
+    {
+        using var connection = Open(); using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM RuntimeMigrationState WHERE MigrationKey='PARTCNT_INITIAL_IMPORT_V1' LIMIT 1;";
+        return command.ExecuteScalar() is not null;
+    }
+
     public int ImportPartCountersOnce(IReadOnlyList<PartCounterEntry> entries, string sourcePath)
     {
         ArgumentNullException.ThrowIfNull(entries);

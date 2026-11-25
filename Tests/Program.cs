@@ -366,6 +366,8 @@ internal static partial class Program
             Console.WriteLine("PASS: Barcode-only History, offline immutable snapshots and PASS-driven LOT sequence");
             return 0;
         }
+        if (args is ["--test-part-counter-relocation"])
+        { TestPartCounterRelocation(); TestPartCounterStore(); Console.WriteLine("PASS: shared PartCnt path, no-overwrite migration and SQLite precedence"); return 0; }
         if (args is ["--test-tht-rename"])
         { TestThtRenameStatistics(); TestThtRenameLegacyMigration(); TestMainDailyQuantityByProduct(); TestThtFileStatisticsMigration(); Console.WriteLine("PASS: THT rename 100 to 101, aliases/restart, separate copies, ambiguity and v9 migration integrity"); return 0; }
         if (args is ["--test-main-daily-quantity"])
@@ -983,6 +985,7 @@ internal static partial class Program
             ("Incomplete product full release resets normal and CLIP cycle", TestIncompleteProductFullReleaseResetsClipCycle),
             ("Master full removal clears CLIP and requires fresh installation", TestMasterClipReinstallation),
             ("Original PartCnt per-part counter compatibility", TestPartCounterStore),
+            ("PartCnt relocation preserves legacy data and SQLite authority", TestPartCounterRelocation),
             ("Original PHT20 PASS/ERR history compatibility", TestLegacyPhtHistory),
             ("Per-model production/probe maintenance counters", TestProductionCounters)
         ];
@@ -7170,9 +7173,9 @@ internal static partial class Program
         Assert(
             string.Equals(
                 new PartCounterStore().StoragePath,
-                Path.Combine(AppContext.BaseDirectory, "PartCnt.txt"),
+                Path.Combine(Path.GetDirectoryName(RuntimePaths.DatabaseFile)!, "PartCnt.txt"),
                 StringComparison.OrdinalIgnoreCase),
-            "Default PartCnt path is only the file beside the running EXE");
+            "Default PartCnt path shares the version-independent database directory");
 
         string root = Path.Combine(Path.GetTempPath(), "JBZSelfTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
