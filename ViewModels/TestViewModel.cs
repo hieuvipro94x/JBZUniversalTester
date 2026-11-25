@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
@@ -12579,7 +12579,7 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
             bool useDailyPassOffset = productLot is not null && !string.IsNullOrEmpty(productLot.HistoryBatchId);
             Task<ProductionStatisticsSnapshot> statisticsTask =
                 ProductionPersistence.GetFileStatisticsAsync(
-                    TestHistoryStore.ThtStatisticsFileName(model.SourcePath, model.ModelName), statisticsNow, _lifetimeToken);
+                    ModelIdentitySnapshot.Capture(model), part, statisticsNow, _lifetimeToken);
             Task<ProbeCounterSnapshot> probeTask = ProductionPersistence.GetProbeCounterAsync(
                 part,
                 _productionSettings.ProbeReplacementThreshold,

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
@@ -170,7 +170,7 @@ internal static partial class Program
         var b = migrated.GetFileStatistics("0005.THT", now);
         Assert(a.DailyTotal == 1 && a.DailyPass == 1 && b.DailyTotal == 1 && b.DailyFail == 1,
             "Schema upgrade backfills filename counts without using the shared part number");
-        Assert(File.Exists(path + ".pre-schema-v9.backup") && ScalarInt(path, "SELECT COUNT(*) FROM Tests") == 2 &&
+        Assert(File.Exists(path + $".pre-schema-v{TestHistoryStore.CurrentSchemaVersion}.backup") && ScalarInt(path, "SELECT COUNT(*) FROM Tests") == 2 &&
                ScalarInt(path, "SELECT COUNT(*) FROM Tests WHERE ThtFileName<>''") == 2,
             "Upgrade backs up the old database and preserves every original history row");
         using var check = new SqliteConnection("Data Source=" + path); check.Open();

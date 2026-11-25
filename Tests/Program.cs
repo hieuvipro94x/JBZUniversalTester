@@ -366,6 +366,8 @@ internal static partial class Program
             Console.WriteLine("PASS: Barcode-only History, offline immutable snapshots and PASS-driven LOT sequence");
             return 0;
         }
+        if (args is ["--test-tht-rename"])
+        { TestThtRenameStatistics(); TestThtRenameLegacyMigration(); TestMainDailyQuantityByProduct(); TestThtFileStatisticsMigration(); Console.WriteLine("PASS: THT rename 100 to 101, aliases/restart, separate copies, ambiguity and v9 migration integrity"); return 0; }
         if (args is ["--test-main-daily-quantity"])
         {
             TestMainDailyQuantityByProduct();
@@ -768,6 +770,8 @@ internal static partial class Program
             ("History displays encoded barcodes with PASS-only LOT progression, including offline printers", TestHistoryBarcodeOnlyAndPassLot),
             ("MainWindow quantity follows selected product and day instead of lifetime totals", TestMainDailyQuantityByProduct),
             ("THT filename statistics migrate without losing history", TestThtFileStatisticsMigration),
+            ("THT rename continues quantities while copies stay independent", TestThtRenameStatistics),
+            ("Legacy renamed THT restores counters without rewriting history", TestThtRenameLegacyMigration),
             ("Wire table keeps headers and color boundaries stable as rows arrive and recycle", TestWireColorCellFillsBounds),
             ("BCW editor overrides persist, print, reset and reprint independently", TestBcwEditableTemplate),
             ("Every PASS retains its printer command offline with clean History", TestAlwaysPrintHistory),

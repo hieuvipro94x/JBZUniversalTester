@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -11,9 +11,9 @@ namespace JBZUniversalTester.Services;
 /// SQLite production repository. The old TestHistory table is retained as a
 /// read-only migration source; all new reads/writes use the relational schema.
 /// </summary>
-public sealed class TestHistoryStore
+public sealed partial class TestHistoryStore
 {
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
     private const int LegacyMigrationBatchSize = 500;
     private static readonly object SchemaGate = new();
     private readonly string _path;
@@ -434,6 +434,18 @@ public sealed class TestHistoryStore
                 CompletedAt TEXT NOT NULL,
                 Details TEXT NOT NULL DEFAULT ''
             );
+
+            CREATE TABLE IF NOT EXISTS ThtFileIdentities
+            (
+                FileName TEXT PRIMARY KEY,
+                CanonicalFileName TEXT NOT NULL,
+                LastPath TEXT NOT NULL,
+                FileHash TEXT NOT NULL,
+                PartNumber TEXT NOT NULL,
+                ModelName TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_ThtFileIdentities_Hash ON ThtFileIdentities(FileHash,PartNumber);
+            CREATE INDEX IF NOT EXISTS IX_ThtFileIdentities_Canonical ON ThtFileIdentities(CanonicalFileName);
 
             CREATE TABLE IF NOT EXISTS ThtFileCounters
             (
@@ -988,6 +1000,7 @@ public sealed class TestHistoryStore
         long? legacyHistoryId)
     {
         DateTime usedAt = request.History.ResultAt ?? request.History.Finished;
+        RegisterThtFileIdentity(connection, transaction, request.Model, request.Part);
         long partId = UpsertPart(connection, transaction, request.Part, usedAt);
         long modelId = UpsertModel(connection, transaction, partId, request.Model, usedAt);
         long configId = UpsertConfig(connection, transaction, request.Config);
@@ -1562,8 +1575,8 @@ public sealed class TestHistoryStore
         return new(testId, duplicate, statistics, probe, QueryFileStatistics(connection, transaction, name, history.ResultAt ?? history.Finished));
     }
 
-    // File name is the operator's product identity, independent of part number,
-    // file content hashes and the directory where the THT is selected.
+    // Filenames remain immutable history keys. Verified rename aliases are
+    // resolved at query time, without rewriting any original test rows.
     public static string ThtStatisticsFileName(string? path, string? modelName = null)
     {
         string name = Path.GetFileName((path ?? string.Empty).Replace('\\', '/')).Trim();
@@ -1620,22 +1633,28 @@ public sealed class TestHistoryStore
     {
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = """
+            WITH Root AS (
+                SELECT COALESCE((SELECT CanonicalFileName FROM ThtFileIdentities WHERE FileName=$File),$File) AS Name
+            ), Files AS (
+                SELECT Name AS FileName FROM Root
+                UNION SELECT i.FileName FROM ThtFileIdentities i JOIN Root r ON i.CanonicalFileName=r.Name
+            )
             SELECT
-                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName IN (SELECT FileName FROM Files) AND InspectionType='PRODUCT'
                     AND ResultAt >= $Day AND ResultAt < $NextDay),
-                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT' AND Passed=1
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName IN (SELECT FileName FROM Files) AND InspectionType='PRODUCT' AND Passed=1
                     AND ResultAt >= $Day AND ResultAt < $NextDay),
-                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT' AND Passed=0
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName IN (SELECT FileName FROM Files) AND InspectionType='PRODUCT' AND Passed=0
                     AND ResultAt >= $Day AND ResultAt < $NextDay),
-                (SELECT COUNT(*) FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                (SELECT COUNT(*) FROM Tests WHERE ThtFileName IN (SELECT FileName FROM Files) AND InspectionType='PRODUCT'
                     AND ResultAt >= $Month AND ResultAt < $NextMonth),
-                TotalTests,TotalPass,TotalFail,
-                COALESCE((SELECT Lot FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                COALESCE(SUM(TotalTests),0),COALESCE(SUM(TotalPass),0),COALESCE(SUM(TotalFail),0),
+                COALESCE((SELECT Lot FROM Tests WHERE ThtFileName IN (SELECT FileName FROM Files) AND InspectionType='PRODUCT'
                     AND Passed=1 AND ResultAt >= $Day AND ResultAt < $NextDay
                     ORDER BY ResultAt DESC,Id DESC LIMIT 1),0),
-                COALESCE((SELECT Result FROM Tests WHERE ThtFileName=$File AND InspectionType='PRODUCT'
+                COALESCE((SELECT Result FROM Tests WHERE ThtFileName IN (SELECT FileName FROM Files) AND InspectionType='PRODUCT'
                     ORDER BY ResultAt DESC,Id DESC LIMIT 1),'')
-            FROM ThtFileCounters WHERE FileName=$File;
+            FROM ThtFileCounters WHERE FileName IN (SELECT FileName FROM Files);
             """;
         command.Parameters.AddWithValue("$File", fileName);
         command.Parameters.AddWithValue("$Day", now.Date.ToString("O", CultureInfo.InvariantCulture));

@@ -1,4 +1,4 @@
-using System.Threading.Channels;
+﻿using System.Threading.Channels;
 using JBZUniversalTester.Models;
 using Microsoft.Data.Sqlite;
 
@@ -92,6 +92,10 @@ public sealed class ProductionPersistenceService : IAsyncDisposable
     public Task<ProductionStatisticsSnapshot> GetFileStatisticsAsync(
         string fileName, DateTime now, CancellationToken cancellationToken = default) =>
         EnqueueAsync(() => _repository.GetFileStatistics(fileName, now), cancellationToken);
+
+    public Task<ProductionStatisticsSnapshot> GetFileStatisticsAsync(
+        ModelIdentitySnapshot model, PartIdentitySnapshot part, DateTime now, CancellationToken cancellationToken = default) =>
+        EnqueueAsync(() => _repository.GetFileStatistics(model, part, now), cancellationToken);
 
     public Task<ProbeCounterSnapshot> GetProbeCounterAsync(
         PartIdentitySnapshot part,
