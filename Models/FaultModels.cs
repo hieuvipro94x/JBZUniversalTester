@@ -65,6 +65,9 @@ public sealed class FaultDetail
     public string ActualConnectorTo { get; set; } = string.Empty;
     public string ActualPinTo { get; set; } = string.Empty;
     public string WireName { get; set; } = string.Empty;
+    public string ExpectedTargetWireName { get; set; } = string.Empty;
+    public string ActualSourceWireName { get; set; } = string.Empty;
+    public string ActualTargetWireName { get; set; } = string.Empty;
     public string WireColor { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
     public double? MeasuredResistance { get; set; }

@@ -58,7 +58,8 @@ public static class HistoryExportService
         Columns[0] with { Header = "검사 시작 시간" },
         ..Columns[1..7],
         Columns[7] with { Type = HistoryCellType.Number, GetValue = r => r.ExportAcceptedLotNo },
-        ..Columns[8..],
+        ..Columns[8..10],
+        ..Columns[11..],
         new("검사 구분", 20, HistoryCellType.Text, r => r.IsMasterRecord ? "마스터"
             : r.IsProductionRecord ? "생산" : HistoryInspectionType.KoreanName(r.InspectionType))
     ];
@@ -209,23 +210,30 @@ public static class HistoryExportService
         foreach (TestHistoryRecord record in records)
         {
             HistoryPresentation.AssignProductOrdinals([record], passOrdinalsByProduct);
-            AppendDataRow(sb, count + 2, record);
+            bool includeLegacyFallback = !record.Passed || record.InspectionType == HistoryInspectionType.MasterBad;
+            IReadOnlyList<FaultDetail> faults = record.ExcelFaultDetails ??
+                KoreanHistoryFormatter.GetExportFaults(record, includeLegacyFallback);
+            IReadOnlyDictionary<int, string> wireNames = KoreanHistoryFormatter.CollectExcelWireNames(faults);
+            string faultSummary = includeLegacyFallback
+                ? KoreanHistoryFormatter.FormatExcelFaultSummary(record, faults, wireNames) : string.Empty;
+            AppendDataRow(sb, count + 2, record, faultSummary);
             writer.Write(sb);
             sb.Clear();
             count++;
             int faultNumber = 0;
-            foreach (FaultDetail fault in record.ExcelFaultDetails ?? KoreanHistoryFormatter.GetExportFaults(record,
-                         includeLegacyFallback: !record.Passed || record.InspectionType == HistoryInspectionType.MasterBad))
+            foreach (FaultDetail fault in faults)
             {
                 if (fault.Type == ProductFaultType.None && record.ExcelFaultDetails is null &&
                     record.Passed && string.IsNullOrWhiteSpace(fault.Message))
                     continue;
-                string description = KoreanHistoryFormatter.FormatFault(fault);
+                string description = KoreanHistoryFormatter.FormatExcelFault(fault, wireNames);
+                // The original wiring message may expose the raw board IOs.
+                string? message = fault.Type == ProductFaultType.WrongWiring ? null : fault.Message;
                 detailCount++;
                 faultNumber++;
                 sb.Append($"<row r=\"{detailCount + 1}\"><c r=\"A{detailCount + 1}\"><v>{count}</v></c><c r=\"B{detailCount + 1}\"><v>{faultNumber}</v></c>");
                 sb.Append($"<c r=\"C{detailCount + 1}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{Xml(description)}</t></is></c>");
-                sb.Append($"<c r=\"D{detailCount + 1}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{Xml(fault.Message)}</t></is></c></row>");
+                sb.Append($"<c r=\"D{detailCount + 1}\" t=\"inlineStr\"><is><t xml:space=\"preserve\">{Xml(message)}</t></is></c></row>");
                 detailWriter.Write(sb);
                 sb.Clear();
             }
@@ -263,14 +271,19 @@ public static class HistoryExportService
         sb.Append("</row>");
     }
 
-    private static void AppendDataRow(StringBuilder sb, int rowNumber, TestHistoryRecord record)
+    private static void AppendDataRow(StringBuilder sb, int rowNumber, TestHistoryRecord record, string faultSummary)
     {
         sb.Append($"<row r=\"{rowNumber}\" ht=\"20\" customHeight=\"1\">");
         for (int i = 0; i < ExcelColumns.Length; i++)
         {
             HistoryColumn column = ExcelColumns[i];
             string cell = $"{ColumnName(i + 1)}{rowNumber}";
-            object? value = column.GetValue(record);
+            object? value = column.Header switch
+            {
+                "검사기록" => record.BuildExcelTestLog(faultSummary),
+                "내용" => record.BuildExcelContent(faultSummary),
+                _ => column.GetValue(record)
+            };
 
             if (value is null)
             {

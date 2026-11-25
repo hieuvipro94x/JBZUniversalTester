@@ -62,6 +62,68 @@ public static class KoreanHistoryFormatter
         return remaining > 0 ? $"{result}; 외 {remaining}건" : result;
     }
 
+    internal static string FormatExcelFaultSummary(TestHistoryRecord record, IReadOnlyList<FaultDetail> faults,
+        IReadOnlyDictionary<int, string> knownWireNames)
+    {
+        string[] details = faults
+            .Where(fault => fault.Type != ProductFaultType.None)
+            .OrderBy(fault => FaultTypeCatalog.Priority(fault.Type))
+            .Take(MaximumExportedFaults)
+            .Select(fault => FormatExcelFault(fault, knownWireNames)).ToArray();
+        if (details.Length == 0)
+            return KoreanFaultType(record.FaultCode, record.FaultType);
+        int remaining = faults.Count - details.Length;
+        string summary = string.Join("; ", details);
+        return remaining > 0 ? $"{summary}; 외 {remaining}건" : summary;
+    }
+
+    internal static string FormatExcelFault(FaultDetail fault, IReadOnlyDictionary<int, string> knownWireNames)
+    {
+        if (fault.Type != ProductFaultType.WrongWiring)
+            return FormatFault(fault);
+
+        string Resolve(string saved, int? io)
+        {
+            string wire = Clean(saved);
+            return wire.Length == 0 && io is int key && knownWireNames.TryGetValue(key, out string? known)
+                ? known : wire;
+        }
+
+        string expectedSource = Resolve(fault.WireName, fault.ExpectedSourceIo);
+        string expectedTarget = Resolve(fault.ExpectedTargetWireName, fault.ExpectedTargetIo);
+        string actualSource = Resolve(fault.ActualSourceWireName, fault.ActualSourceIo);
+        string actualTarget = Resolve(fault.ActualTargetWireName, fault.ActualTargetIo);
+
+        const string unrecorded = "미기록";
+        string expected = expectedSource.Length == 0 ? unrecorded : expectedSource;
+        if (expectedTarget.Length > 0 && !string.Equals(expectedSource, expectedTarget, StringComparison.OrdinalIgnoreCase))
+            expected += $" ↔ {expectedTarget}";
+        string actual = $"{(actualSource.Length == 0 ? unrecorded : actualSource)} ↔ {(actualTarget.Length == 0 ? unrecorded : actualTarget)}";
+        return $"오배선 | 정상: {expected} | 실제: {actual}";
+    }
+
+    internal static Dictionary<int, string> CollectExcelWireNames(IReadOnlyList<FaultDetail> faults)
+    {
+        var names = new Dictionary<int, string>();
+        void Add(int? io, string value)
+        {
+            string wire = Clean(value);
+            if (io is not int key || wire.Length == 0)
+                return;
+            if (!names.TryAdd(key, wire) && !string.Equals(names[key], wire, StringComparison.OrdinalIgnoreCase))
+                names[key] = string.Empty;
+        }
+
+        foreach (FaultDetail fault in faults.Where(fault => fault.Type == ProductFaultType.WrongWiring))
+        {
+            Add(fault.ExpectedSourceIo, fault.WireName);
+            Add(fault.ExpectedTargetIo, fault.ExpectedTargetWireName);
+            Add(fault.ActualSourceIo, fault.ActualSourceWireName);
+            Add(fault.ActualTargetIo, fault.ActualTargetWireName);
+        }
+        return names;
+    }
+
     public static IReadOnlyList<FaultDetail> GetExportFaults(TestHistoryRecord record, bool includeLegacyFallback)
     {
         IReadOnlyList<FaultDetail> faults = FaultDisplayFormatter.DeserializeFaults(record.FaultDetailsJson);

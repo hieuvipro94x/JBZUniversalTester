@@ -48,13 +48,15 @@ internal static partial class Program
             var doc = XDocument.Parse(reader.ReadToEnd());
             string Cell(string address) => string.Concat(doc.Descendants().Single(e => e.Name.LocalName == "c" &&
                 (string?)e.Attribute("r") == address).Descendants().Where(e => e.Name.LocalName == "t").Select(e => e.Value));
-            Assert(Cell("N2") == originals[0] && Cell("N3") == originals[1],
+            Assert(Cell("M2") == originals[0] && Cell("M3") == originals[1],
                 "Excel preserves the entire FR KS91 / barcode / LOT / P1 block, including CRLF, quotes and blank lines");
-            Assert(Cell("N4") == "" && Cell("N5") == "" && Cell("N6") == "" && Cell("N7") == "",
+            Assert(Cell("M4") == "" && Cell("M5") == "" && Cell("M6") == "" && Cell("M7") == "",
                 "Missing payload, product FAIL, Master and interrupted rows never get invented printer commands or barcode-only fallback");
-            Assert(Cell("N8") == originals[6] && Cell("N9") == originals[7],
+            Assert(Cell("M8") == originals[6] && Cell("M9") == originals[7],
                 "Export preserves saved attempted commands independently of printer delivery status");
-            Assert(Cell("K2") == "7003" && Cell("K3") == "7004" && records.Select(r => r.LabelPayload).SequenceEqual(originals),
+            string LotCell(string address) => doc.Descendants().Single(e => e.Name.LocalName == "c" &&
+                (string?)e.Attribute("r") == address).Elements().Single(e => e.Name.LocalName == "v").Value;
+            Assert(LotCell("H2") == "7003" && LotCell("H3") == "7004" && records.Select(r => r.LabelPayload).SequenceEqual(originals),
                 "Export neither renumbers LOT nor mutates saved printer commands");
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             string text = File.ReadAllText(csv, Encoding.GetEncoding(949));

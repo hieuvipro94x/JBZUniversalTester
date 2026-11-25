@@ -97,7 +97,7 @@ internal static partial class Program
                 {
                     XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
                     XDocument xml = XDocument.Parse(reader.ReadToEnd());
-                    string cell = string.Concat(xml.Descendants(ns + "c").Single(c => (string?)c.Attribute("r") == "N2")
+                    string cell = string.Concat(xml.Descendants(ns + "c").Single(c => (string?)c.Attribute("r") == "M2")
                         .Descendants(ns + "t").Select(t => t.Value));
                     Assert(cell == "\r\nN\r\nFR\"KS91\"\r\n?\r\nPART-0\r\nP1\r\n",
                         "Original barcode-output column preserves the entire command including CRLF");

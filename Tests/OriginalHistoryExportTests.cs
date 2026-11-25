@@ -121,29 +121,56 @@ internal static partial class Program
                 string Cell(int row, string address) => Text(rows[row - 1].Elements(ns + "c").Single(c => (string?)c.Attribute("r") == address));
                 string? Value(XDocument doc, string address) => doc.Descendants(ns + "c")
                     .Single(c => (string?)c.Attribute("r") == address).Element(ns + "v")?.Value;
-                string[] excelHeaders = ["검사 시작 시간", ..expected[1..], "검사 구분", "기록 번호"];
+                string[] excelHeaders = ["검사 시작 시간", ..expected[1..10], ..expected[11..], "검사 구분", "기록 번호"];
                 Assert(rows.Length == 5 && rows[0].Elements(ns + "c").Select(Text).SequenceEqual(excelHeaders) &&
                        Cell(2, "E2") == model.Eco && Cell(2, "F2") == model.Nco && Cell(2, "G2") == model.Alc &&
-                       Value(sheet, "H2") == "2001" && Cell(2, "I2") == "PASS" && Cell(2, "K2") == "2001" &&
+                       Value(sheet, "H2") == "2001" && Cell(2, "I2") == "PASS" &&
                        Value(sheet, "H3") is null && Value(sheet, "H4") is null && Value(sheet, "H5") is null &&
-                       Cell(3, "I3") == "NG" && Cell(3, "K3") == "" &&
-                       Cell(2, "S2") == "생산" && Cell(3, "S3") == "생산" &&
-                       Cell(4, "S4") == "마스터" && Cell(5, "S5") == "기밀 검사 시작" &&
-                       Cell(2, "N2") == "RAW-PRINT-PAYLOAD" &&
+                       Cell(3, "I3") == "NG" &&
+                       Cell(2, "R2") == "생산" && Cell(3, "R3") == "생산" &&
+                       Cell(4, "R4") == "마스터" && Cell(5, "R5") == "기밀 검사 시작" &&
+                       Cell(2, "M2") == "RAW-PRINT-PAYLOAD" &&
                        DateTime.FromOADate(double.Parse(rows[1].Elements(ns + "c").First().Element(ns + "v")!.Value,
                            CultureInfo.InvariantCulture)) == at,
-                    "Actual XLSX cells retain THT fields, legacy test-start timestamp, PASS count and barcode semantics");
-                Assert(Enumerable.Range(2, 4).All(row => Cell(row, $"P{row}") == exportVersion),
+                    "Actual XLSX cells retain THT fields, legacy test-start timestamp, LOT and barcode semantics");
+                Assert(Enumerable.Range(2, 4).All(row => Cell(row, $"O{row}") == exportVersion),
                     "Every XLSX row, including existing history, displays the running software version under JBZUniversalTester");
                 using var detailReader = new StreamReader(archive.GetEntry("xl/worksheets/sheet2.xml")!.Open());
                 XDocument detailSheet = XDocument.Parse(detailReader.ReadToEnd());
-                string? recordNumber = Value(sheet, "T3");
+                string? recordNumber = Value(sheet, "S3");
                 Assert(recordNumber is not null && detailSheet.Descendants(ns + "row").Count() == 6 &&
                        Enumerable.Range(2, 5).All(row => Value(detailSheet, $"A{row}") == recordNumber &&
                            Value(detailSheet, $"B{row}") == (row - 1).ToString(CultureInfo.InvariantCulture)) &&
                        Enumerable.Range(1, 5).All(number => detailSheet.Descendants(ns + "t")
-                           .Count(t => t.Value.Contains($"WIRE-{number}", StringComparison.Ordinal)) == 1),
+                           .Count(t => t.Value.Contains($"정상: WIRE-{number}", StringComparison.Ordinal)) == 1) &&
+                       detailSheet.ToString().Contains("미기록", StringComparison.Ordinal) &&
+                       !detailSheet.ToString().Contains("IO", StringComparison.Ordinal),
                     "XLSX exports all five stored faults once and links them to the matching History record");
+            }
+
+            loaded[1].FaultDetailsJson = JsonSerializer.Serialize(new[]
+            {
+                new FaultDetail
+                {
+                    Type = ProductFaultType.WrongWiring, WireName = "EXPECTED-WIRE",
+                    ExpectedTargetWireName = "EXPECTED-WIRE",
+                    ActualSourceWireName = "EXPECTED-WIRE", ActualTargetWireName = "OTHER-WIRE",
+                    ExpectedSourceIo = 1, ExpectedTargetIo = 2, ActualSourceIo = 1, ActualTargetIo = 3,
+                    Message = "IO 1 connected to IO 3"
+                }
+            });
+            string namedXlsx = Path.Combine(root, "named-fault.xlsx");
+            HistoryExportService.ExportXlsx(namedXlsx, [loaded[1]]);
+            using (ZipArchive named = ZipFile.OpenRead(namedXlsx))
+            {
+                foreach (string entry in new[] { "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml" })
+                {
+                    using var sheetReader = new StreamReader(named.GetEntry(entry)!.Open());
+                    string xml = sheetReader.ReadToEnd();
+                    Assert(xml.Contains("정상: EXPECTED-WIRE | 실제: EXPECTED-WIRE ↔ OTHER-WIRE", StringComparison.Ordinal) &&
+                           !xml.Contains("IO 1", StringComparison.Ordinal) && !xml.Contains("IO3", StringComparison.Ordinal),
+                        "Excel uses both saved wire codes for wrong wiring and hides board IOs");
+                }
             }
 
             Assert(HistoryDataSnapshot(db) == before,

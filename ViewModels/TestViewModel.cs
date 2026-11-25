@@ -8155,6 +8155,12 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
                     detail.ActualConnectorTo = actualToPin.Connector;
                     detail.ActualPinTo = actualToPin.PinNumber;
                 }
+                if (detail.Type == ProductFaultType.WrongWiring)
+                {
+                    detail.ExpectedTargetWireName = pair.ExpectedTargetIo.HasValue ? toPin?.WireName ?? string.Empty : string.Empty;
+                    detail.ActualSourceWireName = actualFromPin?.WireName ?? string.Empty;
+                    detail.ActualTargetWireName = actualToPin?.WireName ?? string.Empty;
+                }
                 return detail;
             })
             .ToList();
@@ -8248,6 +8254,16 @@ public sealed partial class TestViewModel : ObservableObject, IProductionPresent
                 detail.ActualConnectorTo = actualToPin.Connector;
                 detail.ActualPinTo = actualToPin.PinNumber;
             }
+        }
+
+        if (detail.Type == ProductFaultType.WrongWiring)
+        {
+            detail.ExpectedTargetWireName = detail.ExpectedTargetIo is int expectedWireIo
+                ? FindPinByIo(expectedWireIo)?.WireName ?? string.Empty : string.Empty;
+            detail.ActualSourceWireName = detail.ActualSourceIo is int actualFromWireIo
+                ? FindPinByIo(actualFromWireIo)?.WireName ?? string.Empty : string.Empty;
+            detail.ActualTargetWireName = detail.ActualTargetIo is int actualToWireIo
+                ? FindPinByIo(actualToWireIo)?.WireName ?? string.Empty : string.Empty;
         }
 
         return detail;

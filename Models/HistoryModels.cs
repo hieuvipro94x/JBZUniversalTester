@@ -143,82 +143,85 @@ public sealed class TestHistoryRecord
     public string InstallDurationText => FormatDuration(InstallDurationSeconds);
     public string TestDurationText => FormatDuration(TestDurationSeconds);
     public string RemovalDurationText => FormatDuration(RemovalDurationSeconds);
-    public string ExportTestLogText
+    public string ExportTestLogText => BuildExportTestLog(KoreanHistoryFormatter.FormatFaults);
+
+    internal string BuildExcelTestLog(string faultSummary) => SingleLineLog(BuildExportTestLog(_ => faultSummary));
+
+    private string BuildExportTestLog(Func<TestHistoryRecord, string> formatFaults)
     {
-        get
+        var text = new System.Text.StringBuilder();
+        if (InstallAndTestDurationSeconds is double installAndTestSeconds)
         {
-            var text = new System.Text.StringBuilder();
-            if (InstallAndTestDurationSeconds is double installAndTestSeconds)
-            {
-                text.Append("장착/검사 ")
-                    .Append(EffectiveInstallStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append('~')
-                    .Append(EffectiveResultAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append('(')
-                    .Append(installAndTestSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append("초) ");
-            }
-
-            string trace = (InspectionTrace?.Trim() ?? string.Empty)
-                .Replace("LEAK RETEST", "기밀 검사 시작", StringComparison.OrdinalIgnoreCase);
-            if (IsMasterRecord && trace.Length > 0)
-                trace = KoreanHistoryFormatter.FormatMasterTrace(trace);
-            if (trace.Length == 0)
-            {
-                bool continuityPassed = Passed ||
-                    FaultCode?.Contains("RESISTANCE", StringComparison.OrdinalIgnoreCase) == true ||
-                    FaultCode?.Contains("WATERPROOF", StringComparison.OrdinalIgnoreCase) == true ||
-                    FaultType?.Contains("ĐIỆN TRỞ", StringComparison.OrdinalIgnoreCase) == true ||
-                    FaultType?.Contains("KÍN NƯỚC", StringComparison.OrdinalIgnoreCase) == true;
-                trace = $"{EffectiveResultAt:HH:mm:ss} 회로검사:{(continuityPassed ? "PASS" : "FAIL")}";
-            }
-            if (IsMasterRecord)
-                text.Append(MasterHistoryPresentation.ExportTiming(this));
-            text.Append(trace);
-
-            if (!Passed || InspectionType == HistoryInspectionType.MasterBad)
-            {
-                string fault = KoreanHistoryFormatter.FormatFaults(this);
-                if (!string.IsNullOrWhiteSpace(fault))
-                    text.Append(" [").Append(fault).Append(']');
-            }
-
-            if (RemovalStartedAt is DateTime removalStarted)
-            {
-                text.Append(" 탈거 ")
-                    .Append(removalStarted.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append('~')
-                    .Append(RemovedAt is DateTime removed
-                        ? removed.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)
-                        : "미확인");
-                if (RemovalDurationSeconds is double removalSeconds)
-                {
-                    text.Append('(')
-                        .Append(removalSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
-                        .Append("초)");
-                }
-            }
-
-            return text.ToString();
+            text.Append("장착/검사 ")
+                .Append(EffectiveInstallStartedAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                .Append('~')
+                .Append(EffectiveResultAt.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                .Append('(')
+                .Append(installAndTestSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
+                .Append("초) ");
         }
+
+        string trace = (InspectionTrace?.Trim() ?? string.Empty)
+            .Replace("LEAK RETEST", "기밀 검사 시작", StringComparison.OrdinalIgnoreCase);
+        if (IsMasterRecord && trace.Length > 0)
+            trace = KoreanHistoryFormatter.FormatMasterTrace(trace);
+        if (trace.Length == 0)
+        {
+            bool continuityPassed = Passed ||
+                FaultCode?.Contains("RESISTANCE", StringComparison.OrdinalIgnoreCase) == true ||
+                FaultCode?.Contains("WATERPROOF", StringComparison.OrdinalIgnoreCase) == true ||
+                FaultType?.Contains("ĐIỆN TRỞ", StringComparison.OrdinalIgnoreCase) == true ||
+                FaultType?.Contains("KÍN NƯỚC", StringComparison.OrdinalIgnoreCase) == true;
+            trace = $"{EffectiveResultAt:HH:mm:ss} 회로검사:{(continuityPassed ? "PASS" : "FAIL")}";
+        }
+        if (IsMasterRecord)
+            text.Append(MasterHistoryPresentation.ExportTiming(this));
+        text.Append(trace);
+
+        if (!Passed || InspectionType == HistoryInspectionType.MasterBad)
+        {
+            string fault = formatFaults(this);
+            if (!string.IsNullOrWhiteSpace(fault))
+                text.Append(" [").Append(fault).Append(']');
+        }
+
+        if (RemovalStartedAt is DateTime removalStarted)
+        {
+            text.Append(" 탈거 ")
+                .Append(removalStarted.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture))
+                .Append('~')
+                .Append(RemovedAt is DateTime removed
+                    ? removed.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)
+                    : "미확인");
+            if (RemovalDurationSeconds is double removalSeconds)
+            {
+                text.Append('(')
+                    .Append(removalSeconds.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append("초)");
+            }
+        }
+
+        return text.ToString();
     }
-    public string ExportContentText
+
+    public string ExportContentText => BuildExportContent(KoreanHistoryFormatter.FormatFaults);
+
+    internal string BuildExcelContent(string faultSummary) => BuildExportContent(_ => faultSummary);
+
+    private string BuildExportContent(Func<TestHistoryRecord, string> formatFaults)
     {
-        get
+        var parts = new List<string>();
+        if (!Passed || InspectionType == HistoryInspectionType.MasterBad)
         {
-            var parts = new List<string>();
-            if (!Passed || InspectionType == HistoryInspectionType.MasterBad)
-            {
-                string fault = KoreanHistoryFormatter.FormatFaults(this);
-                if (!string.IsNullOrWhiteSpace(fault))
-                    parts.Add(fault);
-            }
-            if (!string.IsNullOrWhiteSpace(LabelTypeText))
-                parts.Add($"[라벨]{LabelTypeText.Trim()}");
-            if (!string.IsNullOrWhiteSpace(DeviceName))
-                parts.Add($"[검사기]{DeviceName.Trim()}");
-            return string.Join(' ', parts);
+            string fault = formatFaults(this);
+            if (!string.IsNullOrWhiteSpace(fault))
+                parts.Add(fault);
         }
+        if (!string.IsNullOrWhiteSpace(LabelTypeText))
+            parts.Add($"[라벨]{LabelTypeText.Trim()}");
+        if (!string.IsNullOrWhiteSpace(DeviceName))
+            parts.Add($"[검사기]{DeviceName.Trim()}");
+        return string.Join(' ', parts);
     }
     public string ExpectedConnectionText => ExpectedSourceIo is int source && ExpectedTargetIo is int target
         ? $"IO {source} → IO {target}"

@@ -71,7 +71,7 @@ internal static partial class Program
                 foreach (string invalid in new[] { "abc", "-1", "9223372036854775808", "1.5" })
                 {
                     lot.Text = invalid;
-                    Assert(Rejects(create), "Invalid PASS filters never silently broaden a history search/export");
+                    Assert(Rejects(create), "Invalid LOT filters never silently broaden a history search/export");
                 }
                 lot.Text = "2001";
                 from.SelectedDate = new DateTime(2026, 11, 14);
@@ -81,7 +81,7 @@ internal static partial class Program
                 var criteria = (HistorySearchCriteria)create.Invoke(page, null)!;
                 typeof(HistoryPage).GetField("_activeCriteria", flags)!.SetValue(page, criteria);
                 setButtons.Invoke(page, null);
-                Assert(csv.IsEnabled && Equals(capture.Invoke(page, null), criteria),
+                Assert(criteria.LotNo == 2001 && csv.IsEnabled && Equals(capture.Invoke(page, null), criteria),
                     "Export uses the exact successfully applied filter");
                 lot.Text = "2002";
                 Assert(Rejects(capture), "Changing a pending filter requires Search before export");
@@ -95,6 +95,14 @@ internal static partial class Program
                     Started = DateTime.Today.AddSeconds(i), ModelFile = "WH322444.tht", PartNumber = "1200020430",
                     Passed = i != 3, Result = i != 3 ? "PASS" : "FAIL", PartName = "BMS EXT", LotNo = 2001 + i
                 });
+                var grid = (DataGrid)page.FindName("HistoryGrid");
+                var lotColumn = grid.Columns.OfType<DataGridTextColumn>().Single(column => Equals(column.Header, "LOT"));
+                Assert(lotColumn.Binding is System.Windows.Data.Binding lotBinding &&
+                       lotBinding.Path.Path == nameof(TestHistoryRecord.ExportAcceptedLotNo) &&
+                       lotBinding.Mode == System.Windows.Data.BindingMode.OneWay &&
+                       grid.Columns.All(column => !Equals(column.Header, "Số đếm PASS")) &&
+                       records[0].ExportAcceptedLotNo == 2001 && records[3].ExportAcceptedLotNo is null,
+                    "History shows saved LOT for accepted production rows without a duplicate PASS count column");
                 page.Measure(new Size(1366, 768));
                 page.Arrange(new Rect(0, 0, 1366, 768));
                 page.UpdateLayout();

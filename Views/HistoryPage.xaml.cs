@@ -274,7 +274,7 @@ public partial class HistoryPage : UserControl
         {
             if (!long.TryParse(lotText, System.Globalization.NumberStyles.None,
                     System.Globalization.CultureInfo.InvariantCulture, out long n))
-                throw new ArgumentException("Số đếm PASS phải là số nguyên từ 0 trở lên.");
+                throw new ArgumentException("LOT phải là số nguyên từ 0 trở lên.");
             lot = n;
         }
         string result = (ResultComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "ALL";

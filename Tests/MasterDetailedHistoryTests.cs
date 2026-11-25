@@ -39,7 +39,7 @@ internal static partial class Program
                 InspectionType = HistoryInspectionType.Product, Passed = true, Result = "PASS", CycleId = "legacy-product" });
             var settings = new ProductionSettings { MasterFaultRequiredCount = 1 };
             TestViewModel vm = CreateTestViewModel(settings);
-            var model = Model(("MASTER-WIRE", new[] { 1, 2 }));
+            var model = Model(("MASTER-WIRE", new[] { 1, 2 }), ("OTHER-WIRE", new[] { 3, 4 }));
             model.PartNumber = "MASTER-HISTORY-" + Guid.NewGuid().ToString("N");
             LoadReadyModel(vm, model);
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -71,6 +71,8 @@ internal static partial class Program
                         Type = MasterSampleCatalog.FaultType(sample.Value), WireName = "MASTER-WIRE",
                         ExpectedSourceIo = 1, ExpectedTargetIo = 2, ActualSourceIo = 1, ActualTargetIo = 3
                     }];
+                    if (sample == MasterSampleType.WrongWiring)
+                        Call("EnrichFaultDetail", faults[0]);
                     var keys = (HashSet<MasterFaultKey>)typeof(TestViewModel).GetField("_masterDetectedFaultKeys", flags)!.GetValue(vm)!;
                     keys.Clear();
                     foreach (FaultDetail fault in faults) keys.Add(MasterFaultKey.From(fault));
@@ -156,11 +158,16 @@ internal static partial class Program
                 XNamespace ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
                 XElement[] exportedRows = sheet.Descendants(ns + "row").Skip(1).ToArray();
                 string[] logs = exportedRows.Select(row => row.Elements(ns + "c")
-                    .Single(cell => ((string?)cell.Attribute("r"))!.StartsWith("L", StringComparison.Ordinal))
+                    .Single(cell => ((string?)cell.Attribute("r"))!.StartsWith("K", StringComparison.Ordinal))
                     .Descendants(ns + "t").Single().Value).ToArray();
+                string[] expectedLogs = rows.Select(row => row.ExportTestLogSingleLineText).ToArray();
+                const string wrongWireText = "오배선 | 정상: MASTER-WIRE | 실제: MASTER-WIRE ↔ OTHER-WIRE";
+                expectedLogs[2] = expectedLogs[2].Replace(KoreanHistoryFormatter.FormatFaults(rows[2]),
+                    wrongWireText, StringComparison.Ordinal);
                 Assert(exportedRows.All(row => (string?)row.Attribute("ht") == "20" &&
                            (string?)row.Attribute("customHeight") == "1") &&
-                       logs.SequenceEqual(rows.Select(row => row.ExportTestLogSingleLineText)) &&
+                       logs.SequenceEqual(expectedLogs) &&
+                       logs[2].Contains(wrongWireText, StringComparison.Ordinal) &&
                        !styles.Descendants(ns + "alignment").Any(alignment => (string?)alignment.Attribute("wrapText") == "1"),
                     "Excel rows have equal single-line heights and no wrapping while the complete log stays in every editable cell");
             }

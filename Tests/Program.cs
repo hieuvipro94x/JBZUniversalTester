@@ -8664,15 +8664,15 @@ internal static partial class Program
             Assert(sheet.Contains("<c r=\"A2\" s=\"2\"><v>", StringComparison.Ordinal) &&
                    styles.Contains("formatCode=\"yyyy/mm/dd hh:mm:ss\"", StringComparison.Ordinal),
                 "XLSX uses one native numeric datetime cell for test-start time");
-            Assert(sheet.Contains("<c r=\"K2\" t=\"inlineStr\"><is><t xml:space=\"preserve\">2001</t>", StringComparison.Ordinal) &&
-                   sheet.Contains("<c r=\"L2\" t=\"inlineStr\" s=\"3\">", StringComparison.Ordinal) &&
+            Assert(sheet.Contains("<c r=\"H2\"><v>2001</v>", StringComparison.Ordinal) &&
+                   sheet.Contains("<c r=\"K2\" t=\"inlineStr\" s=\"3\">", StringComparison.Ordinal) &&
                    !sheet.Contains("순 번", StringComparison.Ordinal),
-                "XLSX puts saved LOT in the PASS count immediately before the test log");
+                "XLSX puts saved LOT in the Lot column and keeps the test log formatting");
             Assert(sheet.Contains("바코드", StringComparison.Ordinal) &&
                    string.Concat(System.Xml.Linq.XDocument.Parse(sheet).Descendants()
-                       .Single(element => element.Name.LocalName == "c" && (string?)element.Attribute("r") == "N2")
+                       .Single(element => element.Name.LocalName == "c" && (string?)element.Attribute("r") == "M2")
                        .Descendants().Where(element => element.Name.LocalName == "t").Select(element => element.Value)) == record.LabelPayload &&
-                   sheet.Contains("autoFilter ref=\"A1:T2\"", StringComparison.Ordinal),
+                   sheet.Contains("autoFilter ref=\"A1:S2\"", StringComparison.Ordinal),
                 "XLSX preserves the exact printer command and includes the new columns in its filter");
             Assert(styles.Contains("numFmtId=\"164\"", StringComparison.Ordinal) &&
                    styles.Contains("numFmtId=\"165\"", StringComparison.Ordinal) &&
@@ -8685,7 +8685,7 @@ internal static partial class Program
             string[] sampleHeaders =
             [
                 "Ngày", "Thời gian", "Mã hàng", "Kết quả", "File", "Loại kiểm tra", "Tên sản phẩm", "Eco", "Nco", "Alc", "LOT",
-                "KẾT QUẢ", "Số đếm PASS", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
+                "KẾT QUẢ", "Lịch sử kiểm tra", "Mã vạch đầu vào", "Mã vạch đầu ra",
                 "Đo lường", "Chương trình", "Nội dung", "Ghi chú"
             ];
             int previousHeader = -1;
@@ -8697,6 +8697,10 @@ internal static partial class Program
             }
             Assert(!historyXaml.Contains("Header=\"Số thứ tự\"", StringComparison.Ordinal),
                 "History UI omits the ordinal column requested by operators");
+            Assert(!historyXaml.Contains("Số đếm PASS", StringComparison.Ordinal) &&
+                   historyXaml.Contains("Header=\"LOT\" Binding=\"{Binding ExportAcceptedLotNo, Mode=OneWay}\"", StringComparison.Ordinal) &&
+                   historyXaml.Contains("<TextBlock Text=\"LOT\" Style=\"{StaticResource FilterLabel}\"/>", StringComparison.Ordinal),
+                "History UI uses the saved production LOT in the grid and filter labels without a duplicate PASS count column");
             Assert(historyXaml.Contains("CanUserResizeColumns=\"False\"", StringComparison.Ordinal) &&
                    historyXaml.Contains("<Setter Property=\"HorizontalContentAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
                    historyXaml.Contains("<Setter Property=\"HorizontalAlignment\" Value=\"Center\"/>", StringComparison.Ordinal) &&
